@@ -10,13 +10,7 @@ Environment Variables:
 
 from __future__ import annotations
 
-import shutil
-import sys
-from enum import StrEnum
-from pathlib import Path
-from typing import Literal
-
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Re-export from sub-modules for backwards compatibility
@@ -41,23 +35,6 @@ DEFAULT_WORKSPACE_CPU_LIMIT = 2.0
 """CPU ceiling for one workspace container, in cores."""
 
 
-class IsolationBackend(StrEnum):
-    """Available isolation backends for agent workspaces."""
-
-    FIRECRACKER = "firecracker"
-    KATA = "kata"
-    GVISOR = "gvisor"
-    DOCKER_HARDENED = "docker_hardened"
-    CLOUD = "cloud"
-
-
-class CloudProvider(StrEnum):
-    """Cloud sandbox providers for overflow capacity."""
-
-    E2B = "e2b"
-    MODAL = "modal"
-
-
 class WorkspaceSettings(BaseSettings):
     """Workspace isolation backend configuration.
 
@@ -69,34 +46,6 @@ class WorkspaceSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
-    )
-
-    isolation_backend: IsolationBackend = Field(
-        default_factory=lambda: get_default_isolation_backend(),
-        description="Isolation backend to use.",
-    )
-
-    @field_validator("isolation_backend", mode="before")
-    @classmethod
-    def _empty_str_to_default(cls, v: object) -> object:
-        """Treat empty-string env vars as 'use the default'."""
-        if v == "":
-            return get_default_isolation_backend()
-        return v
-
-    cloud_provider: CloudProvider = Field(
-        default=CloudProvider.E2B,
-        description="Cloud provider for overflow: e2b or modal.",
-    )
-
-    cloud_api_key: SecretStr | None = Field(
-        default=None,
-        description="API key for cloud sandbox provider.",
-    )
-
-    cloud_template: str = Field(
-        default="syn-workspace",
-        description="Cloud sandbox template/environment name.",
     )
 
     docker_image: str = Field(
@@ -146,35 +95,3 @@ class WorkspaceSettings(BaseSettings):
         gt=0,
         description="CPU limit applied to each workspace container, in cores.",
     )
-
-    docker_runtime: Literal["runsc", "runc"] = Field(
-        default="runsc",
-        description="Docker runtime to use (runsc = gVisor, runc = native).",
-    )
-
-    docker_network: str = Field(
-        default="none",
-        description="Docker network for containers.",
-    )
-
-
-def get_default_isolation_backend() -> IsolationBackend:
-    """Select the best available isolation backend for the current platform."""
-    if sys.platform == "linux" and Path("/dev/kvm").exists():
-        if shutil.which("firecracker"):
-            return IsolationBackend.FIRECRACKER
-        if shutil.which("kata-runtime"):
-            return IsolationBackend.KATA
-
-    if _is_gvisor_available():
-        return IsolationBackend.GVISOR
-
-    if shutil.which("docker"):
-        return IsolationBackend.DOCKER_HARDENED
-
-    return IsolationBackend.GVISOR
-
-
-def _is_gvisor_available() -> bool:
-    """Check if gVisor (runsc) runtime is available in Docker."""
-    return shutil.which("docker") is not None
