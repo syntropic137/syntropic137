@@ -1,4 +1,4 @@
-"""NonceLedger: replay rejection for signed submissions (ADR-076).
+"""NonceLedger: replay rejection for signed submissions (ADR-076-feedback-ticketing).
 
 Feedback's own port, not github's ``DedupPort``: rejecting a replayed request
 and deduplicating a GitHub event change for different reasons. The signature

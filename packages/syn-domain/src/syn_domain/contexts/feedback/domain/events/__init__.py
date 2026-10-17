@@ -1,4 +1,4 @@
-"""Feedback events (ADR-076)."""
+"""Feedback events (ADR-076-feedback-ticketing)."""
 
 from syn_domain.contexts.feedback.domain.events.TicketOpenedEvent import TicketOpenedEvent
 from syn_domain.contexts.feedback.domain.events.TicketReportAddedEvent import TicketReportAddedEvent

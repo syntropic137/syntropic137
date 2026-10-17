@@ -1,4 +1,4 @@
-"""LinkTicketToExecution command (ADR-076)."""
+"""LinkTicketToExecution command (ADR-076-feedback-ticketing)."""
 
 from __future__ import annotations
 

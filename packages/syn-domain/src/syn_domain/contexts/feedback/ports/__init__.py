@@ -1,4 +1,4 @@
-"""Feedback ports (ADR-076). Adapters land with Intake (PR 3) and the Screener (PR 6, 7)."""
+"""Feedback ports (ADR-076-feedback-ticketing). Adapters land with Intake (PR 3) and the Screener (PR 6, 7)."""
 
 from syn_domain.contexts.feedback.ports.ForgeReads import (
     ForgeReads,

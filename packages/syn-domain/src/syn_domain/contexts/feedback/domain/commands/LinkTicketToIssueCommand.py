@@ -1,4 +1,4 @@
-"""LinkTicketToIssue command (ADR-076)."""
+"""LinkTicketToIssue command (ADR-076-feedback-ticketing)."""
 
 from __future__ import annotations
 

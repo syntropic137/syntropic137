@@ -1,4 +1,4 @@
-"""ReopenTicket command (ADR-076)."""
+"""ReopenTicket command (ADR-076-feedback-ticketing)."""
 
 from __future__ import annotations
 

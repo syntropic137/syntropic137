@@ -1,4 +1,4 @@
-"""RateBuckets: token buckets Intake spends before doing any expensive work (ADR-076)."""
+"""RateBuckets: token buckets Intake spends before doing any expensive work (ADR-076-feedback-ticketing)."""
 
 from __future__ import annotations
 

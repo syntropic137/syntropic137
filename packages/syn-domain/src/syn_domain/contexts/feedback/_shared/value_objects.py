@@ -1,4 +1,4 @@
-"""Value objects of the feedback context (ADR-076).
+"""Value objects of the feedback context (ADR-076-feedback-ticketing).
 
 Every word here is defined in docs/architecture/feedback-ubiquitous-language.md.
 None of them carries reporter text: the event store holds ids and hashes only.

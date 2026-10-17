@@ -1,4 +1,4 @@
-"""TicketLinkedToIssue event (ADR-076). Ids and hashes only: never reporter text."""
+"""TicketLinkedToIssue event (ADR-076-feedback-ticketing). Ids and hashes only: never reporter text."""
 
 from __future__ import annotations
 

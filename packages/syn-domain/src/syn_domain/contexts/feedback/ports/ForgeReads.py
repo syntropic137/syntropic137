@@ -1,4 +1,4 @@
-"""ForgeReads: what feedback reads from the forge to resolve a ticket (ADR-076, #1628)."""
+"""ForgeReads: what feedback reads from the forge to resolve a ticket (ADR-076-feedback-ticketing, #1628)."""
 
 from __future__ import annotations
 

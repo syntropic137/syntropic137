@@ -1,4 +1,4 @@
-"""Feedback bounded context - tickets built from screened user feedback (ADR-076).
+"""Feedback bounded context - tickets built from screened user feedback (ADR-076-feedback-ticketing).
 
 Public API for cross-context consumers (ADR-062). Reporter text never enters
 this context's events: they carry submission ids and content hashes only.

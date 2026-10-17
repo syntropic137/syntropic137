@@ -1,4 +1,4 @@
-"""When a ticket is resolved (ADR-076; plan decision D7, proposed default).
+"""When a ticket is resolved (ADR-076-feedback-ticketing; plan decision D7, proposed default).
 
 Pure. The Ticket aggregate asks it after every fact that could change the answer
 and emits ``TicketResolved`` in the same command when it first says yes.

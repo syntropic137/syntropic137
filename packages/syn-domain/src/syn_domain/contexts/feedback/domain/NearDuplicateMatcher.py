@@ -1,4 +1,4 @@
-"""Near Duplicate matching over Screened Text (ADR-076).
+"""Near Duplicate matching over Screened Text (ADR-076-feedback-ticketing).
 
 Pure. Word-shingle Jaccard similarity, compared only within a match bucket: the
 same route, or the same type when there is no route. A near duplicate becomes a

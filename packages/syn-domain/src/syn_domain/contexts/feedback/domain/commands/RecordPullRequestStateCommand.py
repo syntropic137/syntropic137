@@ -1,4 +1,4 @@
-"""RecordPullRequestState command (ADR-076)."""
+"""RecordPullRequestState command (ADR-076-feedback-ticketing)."""
 
 from __future__ import annotations
 

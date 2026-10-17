@@ -1,4 +1,4 @@
-"""Ticket aggregate root: one problem, reported by one or more submissions (ADR-076).
+"""Ticket aggregate root: one problem, reported by one or more submissions (ADR-076-feedback-ticketing).
 
 Holds ids and hashes only. Reporter text lives in the purgeable intake log and
 never reaches the event store, so it can be erased and an injection string can

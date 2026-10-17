@@ -1,4 +1,4 @@
-"""Screening Policy: what a Screening Verdict means for one submission (ADR-076).
+"""Screening Policy: what a Screening Verdict means for one submission (ADR-076-feedback-ticketing).
 
 Pure. The classifier says what it thinks; this decides what the context does
 about it, so a change of classifier never changes the rule.

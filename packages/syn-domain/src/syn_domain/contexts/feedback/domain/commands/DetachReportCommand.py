@@ -1,4 +1,4 @@
-"""DetachReport command (ADR-076)."""
+"""DetachReport command (ADR-076-feedback-ticketing)."""
 
 from __future__ import annotations
 

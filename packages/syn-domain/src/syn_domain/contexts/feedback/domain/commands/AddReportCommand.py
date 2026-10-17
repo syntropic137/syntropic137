@@ -1,4 +1,4 @@
-"""AddReport command (ADR-076)."""
+"""AddReport command (ADR-076-feedback-ticketing)."""
 
 from __future__ import annotations
 

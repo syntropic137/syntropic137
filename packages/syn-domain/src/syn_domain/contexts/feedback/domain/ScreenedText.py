@@ -1,4 +1,4 @@
-"""Screened Text: the only form of reporter text an agent may read (ADR-076).
+"""Screened Text: the only form of reporter text an agent may read (ADR-076-feedback-ticketing).
 
 Deterministic, so two submissions with the same words hash the same. The
 secret-shape redaction is defence in depth and is NOT a PII control; the
