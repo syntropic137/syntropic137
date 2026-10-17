@@ -2,6 +2,11 @@
 
 Status: PROPOSED, gated on E2 reaching "proceed". Not approved, nothing dispatched.
 
+The gate is weak by design. An E2 "proceed" (n=8 per arm) only means no
+evidence of a large quality drop on implementation, not equivalence. This
+experiment's production guards (reverify block rate, escaped defects over
+14 days) are the actual safety net.
+
 ## Question
 
 With Opus 5.5 implementing and gpt-6.1-sol verifying, does moving fix and

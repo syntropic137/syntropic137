@@ -106,6 +106,32 @@ Re-dispatching would fail the same way, so the orchestrator decided:
   metrics E2 measures, and pushes a quarantine ref per run to origin, which
   later runs could fetch (#2022).
 
+## Protocol deviation 2 (decided 2026-10-17T19:39:23Z): exclude exec-status-lost
+
+The case `exec-status-lost` cannot be passed without guessing names, so it
+measures a guess (#2023). Its hidden test monkeypatches
+`exec_status_lost.container_state` and `setup_phase._SETUP_RETRY_BACKOFF_SECONDS`.
+Neither name is in the task's interface paragraph, and neither exists at the
+pin. A static audit of all 5 cases found no other case with unstated names.
+
+- Decided before any Opus (control) result on that case existed. The only
+  run on it was Sonnet v2 rep 1: `exec-1f09efd59354`, scored by
+  `exec-e5703ace9a87`, FAIL (`AttributeError: no attribute
+  'container_state'`). It is reported as excluded data.
+- Counted set: 4 cases x 2 reps x 2 arms = 16 runs, 8 per arm.
+- The thresholds stay as preregistered in absolute terms (proceed if Sonnet
+  >= Opus - 1, stop if Sonnet <= Opus - 3). **Stated plainly: out of 8 per arm
+  instead of 10, the same absolute margins are looser.** A 1-run gap is
+  12.5% at n=8 but 10% at n=10.
+- Approved by the orchestrator.
+
+## What a "proceed" means (added with deviation 2)
+
+At n=8 per arm, "proceed" means **no evidence of a large quality drop**. It
+does not mean Sonnet is equivalent to Opus. E3's go/no-go is phrased that
+way. E3's production guards (reverify block rate and escaped defects over
+14 days) are the real safety net, not this screen.
+
 ## Procedure
 
 1. Launch the implement run for each case, one per arm, alternating arm order.
