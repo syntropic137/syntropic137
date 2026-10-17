@@ -61,6 +61,7 @@ def completed_prefix(
     execution_id: str,
     phase_owners: Mapping[str, str],
     skipped_phase_ids: frozenset[str] | set[str] = frozenset(),
+    artifact_owners: Mapping[str, str] | None = None,
 ) -> tuple[list[InheritedPhase], str | None]:
     """The phases a resume inherits, and the phase it resumes at.
 
@@ -89,6 +90,12 @@ def completed_prefix(
     would never run (PC-63), so the prefix passes over it without inheriting it
     and a resume does not run a repair round the parent already made
     unnecessary (#1681).
+
+    An artifact in ``artifact_owners`` is held by the execution named there
+    rather than by its phase's owner: a report a resume filed when it settled
+    the phase's inherited evidence gate (plan §A.7). Each phase carries the
+    ones that differ from its owner, so a resume of a resume asks for every
+    report where it was filed.
     """
     inherited: list[InheritedPhase] = []
     for phase in phase_definitions:
@@ -96,14 +103,28 @@ def completed_prefix(
             continue
         if phase.phase_id not in completed_phase_ids:
             return inherited, phase.phase_id
+        artifact_ids = list(phase_artifact_ids.get(phase.phase_id, []))
+        owner = phase_owners.get(phase.phase_id, execution_id)
         inherited.append(
             InheritedPhase(
                 phase_id=phase.phase_id,
-                artifact_ids=list(phase_artifact_ids.get(phase.phase_id, [])),
-                origin_execution_id=phase_owners.get(phase.phase_id, execution_id),
+                artifact_ids=artifact_ids,
+                origin_execution_id=owner,
+                artifact_owners=_held_elsewhere(artifact_ids, owner, artifact_owners or {}),
             )
         )
     return inherited, None
+
+
+def _held_elsewhere(
+    artifact_ids: Sequence[str], owner: str, artifact_owners: Mapping[str, str]
+) -> dict[str, str]:
+    """The ``artifact_ids`` held by an execution other than their phase's ``owner``."""
+    return {
+        a: artifact_owners[a]
+        for a in artifact_ids
+        if artifact_owners.get(a) and artifact_owners[a] != owner
+    }
 
 
 def skipped_before(
@@ -247,6 +268,7 @@ def decide_resume(
     repair_point: str | None = None,
     skipped_phase_ids: frozenset[str] | set[str] = frozenset(),
     open_gate: InheritedEvidenceGate | None = None,
+    artifact_owners: Mapping[str, str] | None = None,
 ) -> ResumeDecision:
     """Every rule above, applied in order.
 
@@ -296,6 +318,7 @@ def decide_resume(
         execution_id=execution_id or "",
         phase_owners=phase_owners,
         skipped_phase_ids=skipped_phase_ids,
+        artifact_owners=artifact_owners,
     )
     # Started means an agent may have acted. Nothing on this stream can show
     # that it did not: branch observations cover git refs only, and the evidence

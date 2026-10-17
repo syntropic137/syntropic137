@@ -858,6 +858,22 @@ class InheritedPhase(BaseModel):
     None on every event written before #1462. Read it through
     `ResumeOrigin.owner_of`, never directly: absent means the parent the event
     names, which is what it meant when those events were written."""
+    artifact_owners: dict[str, str] = Field(default_factory=dict)
+    """The execution holding each of ``artifact_ids`` that the phase's owner
+    does not: the reports and manifest a resume filed when it settled the
+    phase's inherited evidence gate (plan §A.7). By artifact id; an id absent
+    here is held by the phase's owner.
+
+    Written only when there is one, so every phase without settled-elsewhere
+    evidence reads exactly as a release before PR 5c wrote it."""
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_artifact_owners(self, handler: SerializerFunctionWrapHandler) -> object:
+        """Leave ``artifact_owners`` off the payload when empty."""
+        payload = handler(self)
+        if isinstance(payload, dict) and not payload.get("artifact_owners"):
+            payload.pop("artifact_owners", None)
+        return payload
 
 
 #: The key under which a resume's events carry the execution that ran each
@@ -1225,6 +1241,19 @@ class ResumeOrigin(BaseModel):
     def owners(self) -> dict[str, str]:
         """Every inherited phase's owner, by phase id."""
         return {p.phase_id: self.owner_of(p) for p in self.inherited_phases}
+
+    def artifacts_by_owner(self, phase: InheritedPhase) -> dict[str, list[str]]:
+        """``phase``'s artifact ids grouped by the execution holding each, in collection order.
+
+        Usually one group, the phase's owner. A phase whose evidence gate a
+        resume settled also has the reports that resume filed, held by it
+        (plan §A.7): asking the phase's owner for those finds nothing.
+        """
+        grouped: dict[str, list[str]] = {}
+        for artifact_id in phase.artifact_ids:
+            owner = phase.artifact_owners.get(artifact_id) or self.owner_of(phase)
+            grouped.setdefault(owner, []).append(artifact_id)
+        return grouped
 
 
 # Re-exported for `WorkflowExecutionStarted` (#1513): a domain event imports its

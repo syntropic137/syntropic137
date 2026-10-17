@@ -302,6 +302,9 @@ class WorkflowExecutionAggregate(
         #: and a parent may be resumed only once.
         self._completed_phase_ids: set[str] = set()
         self._phase_artifact_ids: dict[str, list[str]] = {}
+        #: Who holds each artifact its phase's owner does not: the evidence
+        #: reports a resume filed for a phase it inherited (plan §A.7).
+        self._artifact_owners: dict[str, str] = {}
         #: Whether this execution has admitted a resume. THIS is the
         #: "resumed at most once" rule, deliberately separate from the child's
         #: id below, which under ADR-023 can replay as None and would make the
@@ -839,6 +842,7 @@ class WorkflowExecutionAggregate(
             repair_point=self._reviews.repair_point(self._phase_definitions),
             skipped_phase_ids=self._reviews.skipped,
             open_gate=None if (gate := self._gates.open_gate()) is None else gate.inherited(),
+            artifact_owners=self._artifact_owners,
         )
         if isinstance(decision, ResumeRefused):
             raise ValueError(decision.reason)
@@ -873,6 +877,7 @@ class WorkflowExecutionAggregate(
         for phase in origin.inherited_phases:
             self._completed_phase_ids.add(phase.phase_id)
             self._phase_artifact_ids[phase.phase_id] = list(phase.artifact_ids)
+            self._artifact_owners.update(phase.artifact_owners)
         self._completed_phases = len(origin.inherited_phases)
         if origin.inherited_evidence_gate is not None:
             self._gates.inherit(origin.inherited_evidence_gate)
