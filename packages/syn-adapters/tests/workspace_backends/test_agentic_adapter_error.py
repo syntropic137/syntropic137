@@ -89,6 +89,7 @@ async def test_provision_success_does_not_raise() -> None:
 
     mock_provider = MagicMock()
     mock_provider.create = AsyncMock(return_value=mock_workspace)
+    mock_provider.execute = AsyncMock(return_value=MagicMock(success=True))
 
     config = IsolationConfig(
         execution_id="exec-abc",

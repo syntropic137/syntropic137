@@ -64,6 +64,7 @@ async def _render_docker_run(isolation_config: IsolationConfig) -> list[str]:
     workspace.metadata = {"workspace_dir": "/tmp/ws-1"}
     provider = MagicMock()
     provider.create = AsyncMock(return_value=workspace)
+    provider.execute = AsyncMock(return_value=MagicMock(success=True))
 
     adapter = AgenticIsolationAdapter()
 

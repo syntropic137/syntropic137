@@ -120,9 +120,10 @@ def _with_executable_tmpdir(environment: Mapping[str, str]) -> dict[str, str]:
     """Point TMPDIR and the tool caches somewhere with room, unless told otherwise.
 
     A caller-supplied value always wins: these are defaults for the common
-    case, not policy. Nothing is created here - `just`, `mktemp`, `uv` and
-    `npm` all create their own directories, and doing it here would mean a
-    filesystem side effect in a function whose job is to build a dict.
+    case, not policy. Nothing is created here - this function only builds a
+    dict. `uv` and `npm` create their own cache directories; TMPDIR is
+    different, and `AgenticIsolationAdapter._ensure_tmpdir` creates it before
+    the workspace is handed out.
     """
     resolved = dict(environment)
     for key, value in ({"TMPDIR": _EXECUTABLE_TMPDIR} | _WORKSPACE_CACHE_ENV).items():
@@ -349,6 +350,8 @@ class AgenticIsolationAdapter:
                 f"Workspace provisioning failed for execution {config.execution_id}: {exc}"
             ) from exc
 
+        await self._ensure_tmpdir(workspace_obj, environment.get("TMPDIR"), config)
+
         # Store for later operations
         self._workspaces[workspace_obj.id] = workspace_obj  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
 
@@ -364,6 +367,59 @@ class AgenticIsolationAdapter:
             proxy_url=None,
             workspace_path="/workspace",
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
+        )
+
+    async def _ensure_tmpdir(
+        self, workspace_obj: object, tmpdir: str | None, config: IsolationConfig
+    ) -> None:
+        """Create the workspace's TMPDIR, or destroy the workspace and refuse it.
+
+        WHY. Codex's linux-sandbox canonicalizes TMPDIR and PANICS when it is
+        missing, and the codex sandbox probe then refuses the workspace:
+
+            thread 'main' panicked at linux-sandbox/src/linux_run_main.rs:1353:17:
+            failed to resolve synthetic mount registry temp directory
+            /workspace/.tmp: No such file or directory (os error 2)
+
+        Whether it existed used to depend on what ran first - SDLC phases
+        happened to create it, the eval verifier (no skills) never did. So it
+        is created here, before anyone else can run anything. A workspace whose
+        TMPDIR could not be created is not handed out: half a workspace fails
+        later and further from the cause.
+        """
+        if not tmpdir:
+            return
+        failure: str | None = None
+        try:
+            result = await self._provider.execute(
+                workspace_obj,  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+                shlex.join(["mkdir", "-p", tmpdir]),
+            )
+        except Exception as exc:
+            failure = str(exc) or type(exc).__name__
+        else:
+            if not result.success:
+                failure = f"exit {result.exit_code}: {(result.stderr or '').strip()}"
+        if failure is None:
+            return
+
+        logger.error(
+            "Could not create TMPDIR %s in workspace %s (execution=%s): %s",
+            tmpdir,
+            getattr(workspace_obj, "id", "?"),
+            config.execution_id,
+            failure,
+        )
+        try:
+            await self._provider.destroy(workspace_obj)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        except Exception:
+            logger.exception(
+                "Destroying workspace %s after the TMPDIR failure also failed",
+                getattr(workspace_obj, "id", "?"),
+            )
+        raise WorkspaceProvisionError(
+            f"Workspace provisioning failed for execution {config.execution_id}: "
+            f"could not create TMPDIR {tmpdir}: {failure}"
         )
 
     async def destroy(self, handle: IsolationHandle) -> WorkspaceUsage | None:
