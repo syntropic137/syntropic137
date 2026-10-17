@@ -197,6 +197,34 @@ never run at once. The setup script is not retried, because a clone killed
 mid-transfer would be skipped by the re-run. Resuming provisions a fresh
 workspace instead. Each deadline is a Setting.
 
+## Workspace Credential Policy
+
+Whether a workspace may hold the host's credentials (`WorkspaceCredentialPolicy`,
+#1914). It is a port the orchestration context owns, fixed per backend by its
+[Backend Kit](#backend-kit) and never chosen per run, because a workflow cannot
+say "this phase needs no credential": a Scripted Agent runs under the same
+`claude` or `codex` provider as a real agent. Every credential source asks the
+policy. Those sources are the sidecar and token injection at `create_workspace`,
+the platform grant, the setup secrets (GitHub App tokens, Claude and Codex auth),
+the Claude credential in the agent env, and the session-store write token.
+There are two policies:
+
+- **HostCredentials**: every configured host credential is supplied. This is
+  the behaviour from before the policy existed.
+- **NoCredentials**: nothing from the host reaches the workspace. A phase with
+  repositories is refused before a workspace exists, because a repository
+  always means a GitHub credential (`clone_repos: false` still credentials it).
+
+## Backend Kit
+
+The one composition point for a workspace backend (`BackendKit`, #1914). Built
+once at wiring, it owns every decision that differs between backends: which
+image may run and how it is verified, whether sessions are captured, the
+[Workspace Credential Policy](#workspace-credential-policy), and the isolation
+type reported on the handle. Only the Docker kit exists. A NoCredentials kit
+starts only with an image approved for credential-free runs, and no such image
+is pinned yet, so today none can start.
+
 ## Fallback Agent
 
 The agent (provider and model) a Phase declares under `fallback_agent`, to be
