@@ -178,7 +178,7 @@ def _vendor_parsing_clients(root: Path) -> list[Violation]:
     found: list[Violation] = []
     for path in _client_files(root):
         # Comments are prose, not parsing (#1631): blank them, keeping line numbers.
-        code = blank_ts_comments(path.read_text(encoding="utf-8"))
+        code = blank_ts_comments(path.read_text(encoding="utf-8"), jsx=path.suffix == ".tsx")
         for lineno, line in enumerate(code.splitlines(), 1):
             for match in _TS_LITERAL.finditer(line):
                 if match.group(2) in VENDOR_FORMAT_MARKERS:
@@ -342,6 +342,7 @@ _RESOLVER = f"{_SERVICES}/session_relationship_resolver.py"
 _REPLICATION_WORKER = f"{_INVENTORY_ADAPTERS}/replication_worker.py"
 _INVENTORY_ROUTE = f"{_API}/routes/executions/inventory.py"
 _CLIENT_FILE = "apps/syn-cli-node/src/commands/execution-sessions.ts"
+_TSX_CLIENT_FILE = "apps/syn-dashboard-ui/src/App.tsx"
 
 
 def _copy_tree(root: Path, dest: Path) -> None:
@@ -386,6 +387,16 @@ _MUTATIONS: dict[str, tuple[str, str, str]] = {
         "\nconst plantedUrl = 'https://x'; const plantedKey = \"agentId\"\n",
         "vendor-parsing",
     ),
+    "vendor-parsing-client-after-condition-regex": (
+        _CLIENT_FILE,
+        '\nif (plantedOk) /[//]/.test(plantedX); const plantedKey = "agentId"\n',
+        "vendor-parsing",
+    ),
+    "vendor-parsing-client-after-jsx-url": (
+        _TSX_CLIENT_FILE,
+        '\nconst plantedNode = <a>https://x</a>; const plantedKey = "agentId"\n',
+        "vendor-parsing",
+    ),
     "harness-import-api": (
         _INVENTORY_ROUTE,
         "\n\nfrom agentic_isolation.harnesses.claude.evidence import ClaudeNativeEvidenceReader\n",
@@ -426,23 +437,28 @@ def test_planted_violation_is_caught(name: str, tmp_path: Path) -> None:
 
 #: A marker in prose is not parsing (#1631). Each snippet is one the raw-line
 #: scan flagged, so a pass here is the comment stripping and nothing else.
-_COMMENTS: dict[str, str] = {
-    "line-comment": "\n// reads the `sessionId` from the row\n",
-    "block-comment": "\n/* the 'agentId' field\n   and \"isSidechain\" */\n",
+_COMMENTS: dict[str, tuple[str, str]] = {
+    "line-comment": (_CLIENT_FILE, "\n// reads the `sessionId` from the row\n"),
+    "block-comment": (_CLIENT_FILE, "\n/* the 'agentId' field\n   and \"isSidechain\" */\n"),
+    "after-postfix-division": (_CLIENT_FILE, "\nlet plantedX = plantedN++ / 2; // `sessionId`\n"),
+    "after-jsx-apostrophe": (
+        _TSX_CLIENT_FILE,
+        "\nconst plantedNode = <p>Don't</p>; // `sessionId`\n",
+    ),
 }
 
 
 @pytest.mark.architecture
 @pytest.mark.parametrize("name", sorted(_COMMENTS))
 def test_marker_in_a_comment_is_not_a_violation(name: str, tmp_path: Path) -> None:
-    snippet = _COMMENTS[name]
+    rel, snippet = _COMMENTS[name]
     assert any(m.group(2) in VENDOR_FORMAT_MARKERS for m in _TS_LITERAL.finditer(snippet)), (
         "snippet carries no quoted marker; the test would be vacuous"
     )
     root = repo_root()
     _copy_tree(root, tmp_path)
     budgets = _budgets(root)
-    _plant(tmp_path / _CLIENT_FILE, snippet)
+    _plant(tmp_path / rel, snippet)
     assert evaluate(tmp_path, budgets) == []
 
 

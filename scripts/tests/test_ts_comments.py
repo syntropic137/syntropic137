@@ -18,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ts_comments import blank_ts_comments
 
 
-def blanked(source: str) -> str:
-    out = blank_ts_comments(source)
+def blanked(source: str, *, jsx: bool = False) -> str:
+    out = blank_ts_comments(source, jsx=jsx)
     assert len(out) == len(source)
     assert [i for i, c in enumerate(out) if c == "\n"] == [
         i for i, c in enumerate(source) if c == "\n"
@@ -73,6 +73,9 @@ def test_comments_are_blanked(source: str, comment: str) -> None:
         "const re = /[/*]'agentId'/",
         "if (x) return /'sessionId'/.test(y)",
         "const half = a / b / c",
+        "if (ok) /[//]/.test(x); const k = 'agentId'",
+        "while (ok) /[/*]/.exec(x)",
+        "const t = `x ${(() => { if (ok) /[//]/.test(x); return 'agentId' })()}`",
     ],
     ids=[
         "url-in-string",
@@ -85,6 +88,9 @@ def test_comments_are_blanked(source: str, comment: str) -> None:
         "regex-class",
         "regex-after-return",
         "division",
+        "regex-after-if-condition",
+        "regex-after-while-condition",
+        "regex-after-condition-in-template-expression",
     ],
 )
 def test_literals_and_operators_are_code(source: str) -> None:
@@ -115,3 +121,55 @@ def test_division_after_an_operand_does_not_start_a_regex() -> None:
 def test_an_unterminated_string_stops_at_the_newline() -> None:
     source = "<p>Don't</p>\n// `sessionId`"
     assert blanked(source) == spaced(source, "// `sessionId`")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    ["let x = n++ / 2 // `sessionId`", "let x = n-- / 2 // `sessionId`", "f(a) / 2 // `sessionId`"],
+    ids=["postfix-increment", "postfix-decrement", "call"],
+)
+def test_division_after_a_postfix_operator_or_call_does_not_start_a_regex(source: str) -> None:
+    # Only the ``)`` of an if/for/while/with condition is followed by a regex.
+    assert blanked(source) == spaced(source, "// `sessionId`")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const n = <a href='/x'>https://x</a>; const k = 'agentId'",
+        "const n = <><b>Don't</b> a /* b</>; const k = 'agentId'",
+        "const n = <A.B x={`y`} />; const k = 'agentId'",
+    ],
+    ids=["url-text", "fragment-apostrophe-and-block-opener", "self-closing"],
+)
+def test_jsx_text_is_prose_and_the_code_after_it_is_kept(source: str) -> None:
+    assert blanked(source, jsx=True) == source
+
+
+@pytest.mark.unit
+def test_comments_in_jsx_expressions_and_after_elements_are_blanked() -> None:
+    source = "const n = <p>Don't {/* `agentId` */}</p>; // `sessionId`"
+    expected = spaced(spaced(source, "/* `agentId` */"), "// `sessionId`")
+    assert blanked(source, jsx=True) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const f = <T,>(x: T) => x // `sessionId`",
+        "const f = <T extends U>(x: T) => x // `sessionId`",
+    ],
+    ids=["trailing-comma", "extends"],
+)
+def test_a_generic_in_tsx_is_not_jsx(source: str) -> None:
+    assert blanked(source, jsx=True) == spaced(source, "// `sessionId`")
+
+
+@pytest.mark.unit
+def test_angle_brackets_in_ts_are_not_jsx() -> None:
+    # In a ``.ts`` file ``<a>`` is a type assertion, so ``//`` after it is a comment.
+    source = "const n = <a>https://x // `sessionId`"
+    assert blanked(source) == spaced(source, "//x // `sessionId`")
