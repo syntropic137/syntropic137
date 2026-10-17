@@ -29,6 +29,8 @@ from syn_domain.contexts.feedback.domain.ScreeningPolicy import (
 from syn_shared.settings.constants import ANTHROPIC_MESSAGES_URL
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from pydantic import JsonValue
 
 pytestmark = pytest.mark.unit
@@ -206,6 +208,26 @@ async def test_a_transport_failure_raises_with_its_cause() -> None:
             await screener.screen(ScreenedText.screen("the export button crashes"))
 
     assert isinstance(raised.value.__cause__, httpx.ConnectError)
+
+
+class _CorruptGzipStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b"this is not a gzip stream"
+
+
+async def test_a_body_that_fails_decoding_raises_with_its_cause() -> None:
+    # Streamed, so httpx's own Content-Encoding decoder runs on the way in.
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(
+            200, headers={"content-encoding": "gzip"}, stream=_CorruptGzipStream()
+        )
+    )
+    async with httpx.AsyncClient(base_url="https://anthropic.test", transport=transport) as client:
+        screener = AnthropicScreener(client, api_key=_FAKE_KEY, model=AnthropicModelId.HAIKU_5_5)
+        with pytest.raises(ScreeningUnavailableError) as raised:
+            await screener.screen(ScreenedText.screen("the export button crashes"))
+
+    assert isinstance(raised.value.__cause__, httpx.DecodingError)
 
 
 def test_model_ids_are_explicit_never_aliases() -> None:

@@ -8,8 +8,8 @@ range or not a JSON number, a body that is not JSON - becomes a QUARANTINE
 verdict. It is never read as ``clean`` and never raised: the
 port says an unparseable reply is a verdict, so a caller cannot swallow it.
 
-Failing to get a reply at all is different. A transport error or a non-2xx
-status raises ``ScreeningUnavailableError`` so the Screener retries with
+Failing to get a reply at all is different. A transport error, a body httpx
+cannot decode (a corrupt gzip stream, say) or a non-2xx status raises ``ScreeningUnavailableError`` so the Screener retries with
 backoff and, after ``max_attempts``, quarantines the row itself (plan §2.4).
 """
 
@@ -193,7 +193,9 @@ class AnthropicScreener:
                     "content-type": "application/json",
                 },
             )
-        except httpx.TransportError as exc:
+        # RequestError, not TransportError: a body that fails Content-Encoding
+        # decoding is a DecodingError, which is no reply either.
+        except httpx.RequestError as exc:
             raise ScreeningUnavailableError(
                 f"Anthropic screening request for model {self._model} failed: {exc!r}"
             ) from exc
