@@ -244,4 +244,69 @@ way. E3's production guards (reverify block rate and escaped defects over
 
 ## Results
 
-(not yet run)
+INTERIM (2026-10-17, 17 of 20 counted runs scored). No verdict yet: the
+decision rule is applied only when all 20 are scored.
+
+Counted runs: reps v2-1 and v2-2; the pause case only for runs launched after
+the v3 freeze (2026-10-17T20:46:54Z); the v1-text exec-status-lost run
+(`exec-1f09efd59354`) excluded. Generated from the results ledger by a query,
+not by hand.
+
+| Case | Opus 5.5 (control) | Sonnet 5.5 (treatment) |
+|---|---|---|
+| resolve-full-execution-id | 2/2 | 2/2 |
+| pause-not-blocked-by-queue (v3) | 1/1 | 1/1 |
+| codex-sandbox-tmpdir | 1/1 | 1/2 |
+| exec-status-lost | 0/2 | 0/2 |
+| token-mint-retry-5xx | 0/2 | 0/2 |
+| **Total** | **4/8** | **4/9** |
+
+Per run (implement exec / scorer exec / verdict):
+
+| Arm | Case | Rep | Implement | Scorer | Verdict |
+|---|---|---|---|---|---|
+| Opus | codex-sandbox-tmpdir | v2-1 | exec-a63d442dd8ef | exec-be7555d5eb0f | PASS |
+| Opus | exec-status-lost | v2-1 | exec-769d7f163b6a | exec-edff12cf4758 | FAIL |
+| Opus | exec-status-lost | v2-2 | exec-9a6f228bbb54 | exec-51e42c2d7085 | FAIL |
+| Opus | pause-not-blocked-by-queue | v2-1 | exec-64816866c28f | exec-8950aab7d45a | PASS |
+| Opus | resolve-full-execution-id | v2-1 | exec-6c2384186af5 | exec-2dcb04b123f8 | PASS |
+| Opus | resolve-full-execution-id | v2-2 | exec-86845696a663 | exec-a1a8778df1a3 | PASS |
+| Opus | token-mint-retry-5xx | v2-1 | exec-d82694c7cca5 | exec-e737f87a900a | FAIL |
+| Opus | token-mint-retry-5xx | v2-2 | exec-f42990ce0507 | exec-e0db41948861 | FAIL |
+| Sonnet | codex-sandbox-tmpdir | v2-1 | exec-01123a2ee555 | exec-57d80af0e6ad | PASS |
+| Sonnet | codex-sandbox-tmpdir | v2-2 | exec-5986906be65d | exec-94481775e45a | FAIL |
+| Sonnet | exec-status-lost | v2-1 | exec-eb69c3bab56c | exec-bd82f35e683e | FAIL |
+| Sonnet | exec-status-lost | v2-2 | exec-92c14ba7d405 | exec-0348f2822b19 | FAIL |
+| Sonnet | pause-not-blocked-by-queue | v2-1 | exec-b7130ffb9463 | exec-1537051d2f57 | PASS |
+| Sonnet | resolve-full-execution-id | v2-1 | exec-54b25138e6f4 | exec-d163ed103e20 | PASS |
+| Sonnet | resolve-full-execution-id | v2-2 | exec-94f54073597b | exec-f516239e76e0 | PASS |
+| Sonnet | token-mint-retry-5xx | v2-1 | exec-767066cdf832 | exec-00724ea43631 | FAIL |
+| Sonnet | token-mint-retry-5xx | v2-2 | exec-192ddf47e5d5 | exec-b72bb6c44cc0 | FAIL |
+
+Pending: Opus codex-sandbox-tmpdir v2-2 (`exec-46764613a7dd`, done, score
+queued), Sonnet pause v2-2 (`exec-606db3b2e091`, done, score queued), Opus
+pause v2-2 (not launched). All held for the API recreate.
+
+Mechanism check: every counted implement run, and both pending ones, report
+the arm's model in `phases[0].model` (claude-opus-5-5 or claude-sonnet-5-5).
+None was quarantined.
+
+Implement cost, including the 2 pending runs (execution `total_cost_usd`):
+Opus $16.25 over 9 runs (mean $1.81); Sonnet $4.65 over 10 runs (mean
+$0.46), about 1/4 of Opus. Mean implement duration: Opus 27.6 min, Sonnet
+4.1 min. Most Sonnet runs took 77-178 s; checked against the phase
+timestamps and the launch ledger (no queue wait), so these are real
+durations, not a reporting fault. The longest Sonnet run is pause v2-2 at
+19.6 min.
+
+Positive control: the reference fix of resolve-full-execution-id through
+scorer v2 PASSed (`exec-a12312e843d1`), so a FAIL is the patch's, not the
+harness's.
+
+Both arms fail exec-status-lost and token-mint-retry-5xx every time. Before
+the verdict, those 8 FAILs get a read of the failing tests: a case that no arm
+can pass measures the case, not the model (reported as-is; the suite is
+frozen).
+
+Excluded (reported, not counted), all FAIL: the 2 v1 pilots, the v1-text
+exec-status-lost Sonnet run, and the 2 pre-v3 pause runs.
