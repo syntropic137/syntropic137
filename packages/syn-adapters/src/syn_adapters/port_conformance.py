@@ -207,9 +207,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
         ArtifactContentStoragePort as ArtifactsArtifactContentStoragePort,
     )
+    from syn_domain.contexts.feedback.ports import NonceLedger
     from syn_domain.contexts.github.ports.ChecksApiPort import GitHubChecksAPIPort
     from syn_domain.contexts.github.ports.EventsApiPort import GitHubEventsAPIPort
-    from syn_domain.contexts.feedback.ports import NonceLedger
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import (
         PendingSHAStore,
