@@ -20,9 +20,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
-from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
-    WorkspaceCredentialPolicy,
-)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     SourceCommit,
@@ -79,6 +76,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.resolved_skill import ResolvedSkill
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
+    )
+    from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+        WorkspaceCredentialPolicy,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,

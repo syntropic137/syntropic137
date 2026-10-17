@@ -16,11 +16,11 @@ import pytest
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.artifacts import UNREPORTED_AGENT
-from syn_domain.contexts.orchestration._shared.workspace_credential_policy import HOST_CREDENTIALS
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
     TodoAction,
     TodoItem,
 )
+from syn_domain.contexts.orchestration._shared.workspace_credential_policy import HOST_CREDENTIALS
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,

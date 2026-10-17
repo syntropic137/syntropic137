@@ -24,6 +24,7 @@ from syn_domain.contexts.orchestration._shared.workspace_credential_policy impor
 )
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
+
 class CredentialFreeImageError(WorkspaceProvisionError):
     """A credential-free kit was asked to run an image not approved for it."""
 

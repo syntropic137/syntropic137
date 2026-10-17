@@ -23,11 +23,11 @@ from typing import TYPE_CHECKING, Final, Protocol
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
 from syn_adapters.workspace_backends.service.setup_script_header import setup_script_header
-from syn_shared.upstream_failure import UpstreamFailureError
 from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
     HOST_CREDENTIALS,
     WorkspaceCredentialPolicy,
 )
+from syn_shared.upstream_failure import UpstreamFailureError
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence

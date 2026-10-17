@@ -16,8 +16,10 @@ chosen per run. See docs/research/2026-10-08-remote-executor-e2b.md, decision 5.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Final, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 class CredentialFreePhaseRefusedError(Exception):
