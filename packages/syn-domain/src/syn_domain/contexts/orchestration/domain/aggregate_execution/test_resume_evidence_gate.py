@@ -106,7 +106,7 @@ class _Stream:
         return fresh
 
 
-def _parent_inside_a_gate(*, completed: bool) -> tuple[_Stream, str]:
+def _parent_inside_a_gate(*, completed: bool, adopted: bool = True) -> tuple[_Stream, str]:
     """implement collected under a two-step gate; step 0 settled, step 1 dispatched and adopted.
 
     ``completed`` False is the window the plan does not name: the run stopped
@@ -205,9 +205,10 @@ def _parent_inside_a_gate(*, completed: bool) -> tuple[_Stream, str]:
     parent.start_evidence_attempt(
         StartEvidenceAttemptCommand(PARENT, gate_id, 1, "d-1", NOW, NOW + timedelta(hours=1))
     )
-    parent.record_evidence_run_adopted(
-        RecordEvidenceRunAdoptedCommand(PARENT, gate_id, 1, 1, 77, "https://run/77")
-    )
+    if adopted:
+        parent.record_evidence_run_adopted(
+            RecordEvidenceRunAdoptedCommand(PARENT, gate_id, 1, 1, 77, "https://run/77")
+        )
     parent.interrupt_execution(InterruptExecutionCommand(execution_id=PARENT, phase_id="implement"))
     stream.save(parent)
     return stream, gate_id
