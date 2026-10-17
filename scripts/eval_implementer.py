@@ -50,8 +50,10 @@ leakage the platform does not yet prevent.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -79,6 +81,7 @@ _RECORDER_SOURCE = '''\
 """Loaded by scripts/eval_implementer.py from outside the tree: how each hidden test ended."""
 import json
 import os
+import re
 
 _ended = {}
 
@@ -203,6 +206,69 @@ def check_commits(loaded: ImplementerSuite, repo: Path) -> list[str]:
         for path in case.hidden_tests:
             if _git(repo, "cat-file", "-e", f"{case.fix_commit}:{path}").returncode != 0:
                 problems.append(f"{case.id}: hidden test {path} is not in fix_commit")
+        problems.extend(unstated_contract_problems(case, repo))
+    return problems
+
+
+def asserted_contracts(source: str) -> tuple[frozenset[str], frozenset[str]]:
+    """What a hidden test relies on by exact spelling: (names, string literals).
+
+    Names: attributes it monkeypatches by string and names it imports from a
+    `syn_*` package. Literals: `assert "<text>" in ...` and `raises(match=...)`.
+    A correct fix that spells any of them differently fails, so each must be
+    visible to the agent (#2023).
+    """
+    tree = ast.parse(source)
+    names: set[str] = set()
+    literals: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("syn_"):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "setattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                names.add(node.args[1].value)
+            for keyword in node.keywords:
+                if (
+                    keyword.arg == "match"
+                    and isinstance(keyword.value, ast.Constant)
+                    and isinstance(keyword.value.value, str)
+                ):
+                    literals.add(re.sub(r"\\(.)", r"\1", keyword.value.value))
+        elif (
+            isinstance(node, ast.Compare)
+            and isinstance(node.left, ast.Constant)
+            and isinstance(node.left.value, str)
+            and any(isinstance(op, ast.In) for op in node.ops)
+        ):
+            literals.add(node.left.value)
+    return frozenset(names), frozenset(literals)
+
+
+def unstated_contract_problems(case: ImplementerCase, repo: Path) -> list[str]:
+    """Names and literals a hidden test needs that are neither in the task nor at the pin."""
+    problems: list[str] = []
+    for path in case.hidden_tests:
+        shown = _git(repo, "show", f"{case.fix_commit}:{path}")
+        if shown.returncode != 0:
+            continue
+        names, literals = asserted_contracts(shown.stdout)
+        for name in sorted(names):
+            seen = _git(repo, "grep", "-q", "-w", "-F", name, case.commit, "--", ".")
+            if name not in case.task and seen.returncode != 0:
+                problems.append(f"{case.id}: {path} needs name {name!r}, absent from task and pin")
+        for literal in sorted(literals):
+            seen = _git(repo, "grep", "-q", "-F", literal, case.commit, "--", ".")
+            if literal not in case.task and seen.returncode != 0:
+                problems.append(
+                    f"{case.id}: {path} asserts text {literal!r}, absent from task and pin"
+                )
     return problems
 
 

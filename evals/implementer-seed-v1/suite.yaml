@@ -1,6 +1,6 @@
 id: implementer-seed-v1
 eval_suite: implementer-seed
-version: 1
+version: 2
 goal: >
   Given the tree just before a real merged fix and the problem as its issue
   stated it, does the agent's change make the fix's own hidden tests pass?
@@ -10,3 +10,19 @@ workflows:
     path: workflows/evals/implement-pinned/workflow.yaml
     models:
       implement: opus
+  # E2 treatment arm (docs/experiments/2026-10-17-implementer-sonnet-vs-opus.md):
+  # the control with only the model changed, pinned by explicit id.
+  - id: eval-implement-pinned-sonnet-v1
+    path: workflows/evals/implement-pinned-sonnet/workflow.yaml
+    models:
+      implement: claude-sonnet-5-5
+  # E2 v2 arms (pilot finding: v1 leaves the tree dirty and the lost-work guard
+  # fails every run). Prompts byte-identical; only the model differs.
+  - id: eval-implement-pinned-v2
+    path: workflows/evals/implement-pinned-v2/workflow.yaml
+    models:
+      implement: claude-opus-5-5
+  - id: eval-implement-pinned-sonnet-v2
+    path: workflows/evals/implement-pinned-sonnet-v2/workflow.yaml
+    models:
+      implement: claude-sonnet-5-5

@@ -25,6 +25,7 @@ from eval_implementer import (
     ROOT,
     ImplementerCase,
     _outcome_of,
+    asserted_contracts,
     check_commits,
     fix_patch,
     load_suite,
@@ -120,6 +121,52 @@ def test_a_pin_that_is_not_the_first_parent_is_reported() -> None:
         update={"cases": (case.model_copy(update={"commit": case.fix_commit}),)}
     )
     assert any("first parent" in p for p in check_commits(wrong, ROOT))
+
+
+def test_a_hidden_test_s_exact_spellings_are_read_from_its_ast() -> None:
+    names, literals = asserted_contracts(
+        "from syn_adapters.x import status_was_lost, RetryPolicy\n"
+        "from os import path\n"
+        "def test(monkeypatch, caplog):\n"
+        "    monkeypatch.setattr(mod, 'container_state', f)\n"
+        "    with pytest.raises(E, match=r'could not create TMPDIR\\.'):\n"
+        "        pass\n"
+        "    assert 'Could not destroy workspace' in caplog.text\n"
+        "    assert 'printed nothing' not in text\n"
+        "    assert x == 'not a contract'\n"
+    )
+    assert names == {"status_was_lost", "RetryPolicy", "container_state"}
+    # `not in` is satisfied by never printing the text, so it needs no statement
+    assert literals == {"could not create TMPDIR.", "Could not destroy workspace"}
+
+
+@needs_history
+def test_a_name_the_hidden_tests_need_but_the_task_never_states_is_reported() -> None:
+    """#2023: exec-status-lost's tests monkeypatch `container_state`, which no pin defines."""
+    loaded = load_suite(DEFAULT_SUITE)
+    case = loaded.case("exec-status-lost")
+    stated = "`exec_status_lost.container_state(container_name: str) -> str`"
+    assert stated in case.task
+    unstated = loaded.model_copy(
+        update={"cases": (case.model_copy(update={"task": case.task.replace(stated, "a helper")}),)}
+    )
+    assert any("'container_state'" in p for p in check_commits(unstated, ROOT))
+
+
+@needs_history
+def test_a_message_the_hidden_tests_assert_but_the_task_never_states_is_reported() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    case = loaded.case("codex-sandbox-tmpdir")
+    unstated = loaded.model_copy(
+        update={
+            "cases": (
+                case.model_copy(
+                    update={"task": case.task.replace("Could not destroy workspace", "an error")}
+                ),
+            )
+        }
+    )
+    assert any("'Could not destroy workspace'" in p for p in check_commits(unstated, ROOT))
 
 
 @needs_history
