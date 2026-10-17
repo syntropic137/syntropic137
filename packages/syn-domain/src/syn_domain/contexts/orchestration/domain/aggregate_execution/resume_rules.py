@@ -288,8 +288,7 @@ def decide_resume(
     if status is ExecutionStatus.COMPLETED and repair_point is not None:
         ids = [p.phase_id for p in phase_definitions]
         completed_phase_ids = set(ids[: ids.index(repair_point)]) & set(completed_phase_ids)
-    if open_gate is not None:
-        completed_phase_ids = {*completed_phase_ids, open_gate.after_phase_id}
+    completed_phase_ids = {*completed_phase_ids, *_gated_phase(open_gate)}
     inherited, resume_phase_id = completed_prefix(
         phase_definitions,
         completed_phase_ids,
@@ -325,10 +324,20 @@ def decide_resume(
             resumed_at=datetime.now(UTC),
             cancellation_overridden=status is ExecutionStatus.CANCELLED,
             external_effects_acknowledged=may_repeat_effects,
-            inherited_evidence_gate=(
-                open_gate
-                if open_gate is not None and open_gate.next_phase_id == resume_phase_id
-                else None
-            ),
+            inherited_evidence_gate=_gate_held_at(open_gate, resume_phase_id),
         )
     )
+
+
+def _gated_phase(open_gate: InheritedEvidenceGate | None) -> tuple[str, ...]:
+    """The phase an open gate follows: its output was collected, so it is inherited."""
+    return () if open_gate is None else (open_gate.after_phase_id,)
+
+
+def _gate_held_at(
+    open_gate: InheritedEvidenceGate | None, resume_phase_id: str | None
+) -> InheritedEvidenceGate | None:
+    """The gate, when the resume begins at the phase it held; an earlier gap re-runs it."""
+    if open_gate is None or open_gate.next_phase_id != resume_phase_id:
+        return None
+    return open_gate
