@@ -42,9 +42,17 @@ _VOWEL = re.compile(r"[aeiouAEIOU]")
 
 _TYPE_RULES: tuple[tuple[re.Pattern[str], TicketType], ...] = (
     (re.compile(r"\b(?:slow|lag|latency|timeout|memory|cpu)\b", re.I), TicketType.PERFORMANCE),
-    (re.compile(r"\b(?:crash|error|broken|fails?|bug|exception|500)\b", re.I), TicketType.BUG),
+    (
+        re.compile(
+            r"\b(?:crash(?:es|ed)?|errors?|broken|fail(?:s|ed)?|bugs?|exception|500)\b", re.I
+        ),
+        TicketType.BUG,
+    ),
     (re.compile(r"\b(?:button|layout|colour|color|ui|dark mode|font)\b", re.I), TicketType.UI_UX),
-    (re.compile(r"\b(?:please add|would be nice|feature|support for|wish)\b", re.I), TicketType.FEATURE),
+    (
+        re.compile(r"\b(?:please add|would be nice|feature|support for|wish)\b", re.I),
+        TicketType.FEATURE,
+    ),
 )
 _URGENT = re.compile(r"\b(?:data loss|lost (?:my )?data|security|cannot log ?in|outage)\b", re.I)
 
@@ -67,7 +75,9 @@ class HeuristicScreener:
 def classify(text: str) -> ScreeningResult:
     """The rule set, synchronous so the bench and the port share one body."""
     if _INJECTION.search(text):
-        return _result(ScreeningVerdict.QUARANTINE, TicketType.OTHER, Priority.P3, _INJECTION_CONFIDENCE)
+        return _result(
+            ScreeningVerdict.QUARANTINE, TicketType.OTHER, Priority.P3, _INJECTION_CONFIDENCE
+        )
     if _is_spam(text):
         return _result(ScreeningVerdict.SPAM, TicketType.OTHER, Priority.P3, _SPAM_CONFIDENCE)
     ticket_type = next((kind for pattern, kind in _TYPE_RULES if pattern.search(text)), None)
@@ -92,4 +102,6 @@ def _is_spam(text: str) -> bool:
 def _result(
     verdict: ScreeningVerdict, ticket_type: TicketType, priority: Priority, confidence: float
 ) -> ScreeningResult:
-    return ScreeningResult(verdict=verdict, type=ticket_type, priority=priority, confidence=confidence)
+    return ScreeningResult(
+        verdict=verdict, type=ticket_type, priority=priority, confidence=confidence
+    )

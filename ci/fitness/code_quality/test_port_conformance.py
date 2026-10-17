@@ -61,10 +61,6 @@ _UNIMPLEMENTED: dict[str, str] = {
         "feedback's Intake buckets (ADR-076-feedback-ticketing). The Redis Lua "
         "adapter lands with Intake in plan PR 3 (#2010)."
     ),
-    "ScreeningPort": (
-        "feedback's classifier (ADR-076-feedback-ticketing). HeuristicScreener and "
-        "AnthropicScreener land in plan PR 6 (#2010)."
-    ),
     "GitConfigurationPort": (
         "Declared and never implemented or consumed -- no adapter provides it "
         "and no call site asks for it. Kept here rather than deleted because "

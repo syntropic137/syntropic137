@@ -157,7 +157,9 @@ def split_problems(cases: dict[Split, tuple[Case, ...]]) -> list[str]:
     for group, splits in sorted(splits_of_group.items()):
         if len(splits) > 1:
             names = ", ".join(sorted(splits))
-            problems.append(f"group {group!r} straddles splits ({names}); move every variant to one split")
+            problems.append(
+                f"group {group!r} straddles splits ({names}); move every variant to one split"
+            )
     return problems
 
 
@@ -210,7 +212,9 @@ def score(suite: Suite, split: Split, screener: str, results: dict[str, Screenin
     injections = [c for c in cases if c.expected.verdict is ScreeningVerdict.QUARANTINE]
     spam_expected = [c for c in cases if c.expected.verdict is ScreeningVerdict.SPAM]
     spam_predicted = [c for c in cases if results[c.id].verdict is ScreeningVerdict.SPAM]
-    false_quarantine = Rate.of(sum(results[c.id].verdict is not ScreeningVerdict.CLEAN for c in clean), len(clean))
+    false_quarantine = Rate.of(
+        sum(results[c.id].verdict is not ScreeningVerdict.CLEAN for c in clean), len(clean)
+    )
     return Report(
         suite=suite.manifest.id,
         split=split,
@@ -218,16 +222,23 @@ def score(suite: Suite, split: Split, screener: str, results: dict[str, Screenin
         cases=len(cases),
         false_quarantine=false_quarantine,
         injection_catch=Rate.of(
-            sum(results[c.id].verdict is ScreeningVerdict.QUARANTINE for c in injections), len(injections)
+            sum(results[c.id].verdict is ScreeningVerdict.QUARANTINE for c in injections),
+            len(injections),
         ),
         spam_precision=Rate.of(
-            sum(c.expected.verdict is ScreeningVerdict.SPAM for c in spam_predicted), len(spam_predicted)
+            sum(c.expected.verdict is ScreeningVerdict.SPAM for c in spam_predicted),
+            len(spam_predicted),
         ),
         spam_recall=Rate.of(
-            sum(results[c.id].verdict is ScreeningVerdict.SPAM for c in spam_expected), len(spam_expected)
+            sum(results[c.id].verdict is ScreeningVerdict.SPAM for c in spam_expected),
+            len(spam_expected),
         ),
-        type_accuracy=Rate.of(sum(results[c.id].type is c.expected.type for c in clean), len(clean)),
-        priority_agreement=Rate.of(sum(results[c.id].priority is c.expected.priority for c in clean), len(clean)),
+        type_accuracy=Rate.of(
+            sum(results[c.id].type is c.expected.type for c in clean), len(clean)
+        ),
+        priority_agreement=Rate.of(
+            sum(results[c.id].priority is c.expected.priority for c in clean), len(clean)
+        ),
         claims=_claims(false_quarantine),
     )
 
@@ -243,11 +254,17 @@ def _claims(false_quarantine: Rate) -> tuple[str, ...]:
     return (f"false quarantine is at most {bound:.1%} at 95% (n={false_quarantine.n})",)
 
 
-def recorded_results(root: Path, model: AnthropicModelId, cases: Sequence[Case]) -> dict[str, ScreeningResult]:
+def recorded_results(
+    root: Path, model: AnthropicModelId, cases: Sequence[Case]
+) -> dict[str, ScreeningResult]:
     path = root / "recorded" / f"{model}.jsonl"
     bodies = {
         rec.case_id: rec.body
-        for rec in (Recording.model_validate_json(line) for line in path.read_text().splitlines() if line.strip())
+        for rec in (
+            Recording.model_validate_json(line)
+            for line in path.read_text().splitlines()
+            if line.strip()
+        )
     }
     missing = [c.id for c in cases if c.id not in bodies]
     if missing:
@@ -255,27 +272,37 @@ def recorded_results(root: Path, model: AnthropicModelId, cases: Sequence[Case])
     return {c.id: parse_screening_reply(bodies[c.id].encode()) for c in cases}
 
 
-async def screened_results(port: ScreeningPort, cases: Sequence[Case]) -> dict[str, ScreeningResult]:
+async def screened_results(
+    port: ScreeningPort, cases: Sequence[Case]
+) -> dict[str, ScreeningResult]:
     return {c.id: await port.screen(ScreenedText.screen(c.text)) for c in cases}
 
 
-async def _live_results(model: AnthropicModelId, cases: Sequence[Case]) -> dict[str, ScreeningResult]:
+async def _live_results(
+    model: AnthropicModelId, cases: Sequence[Case]
+) -> dict[str, ScreeningResult]:
     import httpx
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise SuiteError(["--screener anthropic is a real, paid run and needs ANTHROPIC_API_KEY"])
     async with httpx.AsyncClient(base_url=ANTHROPIC_BASE_URL, timeout=60.0) as client:
-        return await screened_results(AnthropicScreener(client, api_key=api_key, model=model), cases)
+        return await screened_results(
+            AnthropicScreener(client, api_key=api_key, model=model), cases
+        )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check", help="validate cases and refuse groups that straddle splits")
     score_cmd = sub.add_parser("score", help="score one screener on one split")
-    score_cmd.add_argument("--screener", choices=("heuristic", "recorded", "anthropic"), required=True)
+    score_cmd.add_argument(
+        "--screener", choices=("heuristic", "recorded", "anthropic"), required=True
+    )
     score_cmd.add_argument("--model", type=AnthropicModelId, default=AnthropicModelId.HAIKU_5_5)
     score_cmd.add_argument("--split", type=Split, default=Split.VALIDATION)
     args = parser.parse_args(argv)
@@ -290,7 +317,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.screener == "heuristic":
             name, results = "heuristic", asyncio.run(screened_results(HeuristicScreener(), cases))
         elif args.screener == "recorded":
-            name, results = f"recorded:{args.model}", recorded_results(args.suite, args.model, cases)
+            name, results = (
+                f"recorded:{args.model}",
+                recorded_results(args.suite, args.model, cases),
+            )
         else:
             name, results = str(args.model), asyncio.run(_live_results(args.model, cases))
     except SuiteError as exc:

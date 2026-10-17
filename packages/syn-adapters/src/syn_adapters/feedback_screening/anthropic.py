@@ -142,7 +142,9 @@ def parse_screening_reply(body: bytes) -> ScreeningResult:
         response = _MessagesResponse.model_validate_json(body)
     except ValidationError:
         return QUARANTINE_ON_UNPARSEABLE
-    calls = [block for block in response.content if block.type == "tool_use" and block.name == TOOL_NAME]
+    calls = [
+        block for block in response.content if block.type == "tool_use" and block.name == TOOL_NAME
+    ]
     if len(calls) != 1:
         return QUARANTINE_ON_UNPARSEABLE
     try:
