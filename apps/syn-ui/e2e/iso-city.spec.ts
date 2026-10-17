@@ -21,17 +21,17 @@ test('month buttons step a calendar month, snapped to whole weeks; Now returns',
   const scroll = await openCity(page)
   const now = scroll.getByRole('button', { name: 'Now' })
   await expect(scroll.getByText(/^Latest \d+ weeks$/)).toBeVisible()
-  await expect(page.getByText(/ – Oct 9, 2026$/)).toBeVisible()
+  await expect(page.getByText(/ – Oct 9, 2026 \(UTC\)$/)).toBeVisible()
   await expect(now).toHaveAttribute('aria-pressed', 'true')
 
   await scroll.getByRole('button', { name: 'One month back' }).click()
   await expect(scroll.getByText('1 month back')).toBeVisible()
   // Sep 9 is a Wednesday: the window ends on that week's Sunday.
-  await expect(page.getByText(/ – Sep 13, 2026$/)).toBeVisible()
+  await expect(page.getByText(/ – Sep 13, 2026 \(UTC\)$/)).toBeVisible()
   await expect(now).toHaveAttribute('aria-pressed', 'false')
 
   await scroll.getByRole('button', { name: 'One month back' }).click()
-  await expect(page.getByText(/ – Aug 9, 2026$/)).toBeVisible()
+  await expect(page.getByText(/ – Aug 9, 2026 \(UTC\)$/)).toBeVisible()
   await scroll.getByRole('button', { name: 'One month forward' }).click()
   await expect(scroll.getByText('1 month back')).toBeVisible()
 
@@ -42,9 +42,9 @@ test('month buttons step a calendar month, snapped to whole weeks; Now returns',
 
 test('the week strip jumps to that week, and arrow keys scroll when the city is focused', async ({ page }) => {
   const scroll = await openCity(page)
-  await page.getByRole('button', { name: /^Week of Mar 2:/ }).click()
+  await page.getByRole('button', { name: /^Week of Mar 2 \(UTC\):/ }).click()
   await expect(scroll.getByText('7 months back')).toBeVisible()
-  await expect(page.getByText(/ – Mar 15, 2026$/)).toBeVisible()
+  await expect(page.getByText(/ – Mar 15, 2026 \(UTC\)$/)).toBeVisible()
 
   await page.getByRole('group', { name: /^Activity city/ }).focus()
   await page.keyboard.press('ArrowRight')
@@ -63,13 +63,13 @@ async function pointAtTop(page: Page, date: string) {
 test('pointing at a block shows its day in the readout, failed count included', async ({ page }) => {
   await openCity(page)
   const readout = page.getByRole('status').filter({ hasText: 'Sessions' })
-  const oct1 = page.getByRole('button', { name: 'Thu, Oct 1: 3 sessions, 2 failed' })
+  const oct1 = page.getByRole('button', { name: 'Thu, Oct 1 (UTC): 3 sessions, 2 failed' })
   await pointAtTop(page, '2026-10-01')
   await expect(oct1).toHaveAttribute('aria-pressed', 'true')
   await expect(readout).toContainText('Thu, Oct 1')
   await expect(readout).toContainText('2 failed')
 
-  const aug28 = 'Fri, Aug 28: 43 sessions'
+  const aug28 = 'Fri, Aug 28 (UTC): 43 sessions'
   // Its hit box sits partly behind a nearer block, as on the board; focus reaches it like a screen reader would.
   await page.getByRole('button', { name: aug28 }).focus()
   await expect(readout).toContainText('Fri, Aug 28')
@@ -131,7 +131,7 @@ test('reduced motion jumps instead of gliding', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const scroll = await openCity(page)
   await scroll.getByRole('button', { name: 'One month back' }).click()
-  await expect(page.getByText(/ – Sep 13, 2026$/)).toBeVisible()
+  await expect(page.getByText(/ – Sep 13, 2026 \(UTC\)$/)).toBeVisible()
   await expect(page.locator('[data-gliding]')).toHaveCount(0)
   await expect(page.locator('[data-moving]')).toHaveCount(0)
 })
