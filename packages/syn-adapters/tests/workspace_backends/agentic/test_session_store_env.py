@@ -340,6 +340,7 @@ def _mock_provider() -> MagicMock:
     workspace.metadata = {"workspace_dir": "/tmp/x"}
     provider = MagicMock()
     provider.create = AsyncMock(return_value=workspace)
+    provider.execute = AsyncMock(return_value=MagicMock(exit_code=0, stderr=""))
     return provider
 
 

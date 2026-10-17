@@ -349,6 +349,8 @@ class AgenticIsolationAdapter:
                 f"Workspace provisioning failed for execution {config.execution_id}: {exc}"
             ) from exc
 
+        await self._ensure_tmpdir(workspace_obj, environment["TMPDIR"], config)
+
         # Store for later operations
         self._workspaces[workspace_obj.id] = workspace_obj  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
 
@@ -364,6 +366,36 @@ class AgenticIsolationAdapter:
             proxy_url=None,
             workspace_path="/workspace",
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
+        )
+
+    async def _ensure_tmpdir(
+        self, workspace_obj: object, tmpdir: str, config: IsolationConfig
+    ) -> None:
+        """Create the TMPDIR directory before the workspace is handed out.
+
+        Codex's linux-sandbox canonicalizes TMPDIR and panics when it is
+        missing, so whatever runs first must find it already there. If it
+        cannot be created the workspace is destroyed and not returned.
+        """
+        failure: str | None = None
+        try:
+            result = await self._provider.execute(
+                workspace_obj,  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+                shlex.join(["mkdir", "-p", tmpdir]),
+            )
+            if result.exit_code != 0:
+                failure = f"mkdir -p {tmpdir} exited {result.exit_code}: {result.stderr}"
+        except Exception as exc:
+            logger.exception("Creating TMPDIR failed (execution=%s)", config.execution_id)
+            failure = f"mkdir -p {tmpdir} raised {exc!r}"
+        if failure is None:
+            return
+        try:
+            await self._provider.destroy(workspace_obj)  # type: ignore[arg-type,func-returns-value]  # Workspace vs AgenticWorkspace adapter boundary
+        except Exception:
+            logger.exception("Destroying workspace after TMPDIR failure failed")
+        raise WorkspaceProvisionError(
+            f"Workspace provisioning failed for execution {config.execution_id}: {failure}"
         )
 
     async def destroy(self, handle: IsolationHandle) -> WorkspaceUsage | None:

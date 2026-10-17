@@ -89,6 +89,7 @@ async def test_provision_success_does_not_raise() -> None:
 
     mock_provider = MagicMock()
     mock_provider.create = AsyncMock(return_value=mock_workspace)
+    mock_provider.execute = AsyncMock(return_value=MagicMock(exit_code=0, stderr=""))
 
     config = IsolationConfig(
         execution_id="exec-abc",
@@ -102,6 +103,43 @@ async def test_provision_success_does_not_raise() -> None:
 
     assert handle.isolation_id == "ws-123"
     assert handle.isolation_type == "docker"
+    # TMPDIR exists before the handle is returned (codex sandbox panics otherwise)
+    assert mock_provider.execute.await_args.args[1] == "mkdir -p /workspace/.tmp"
+
+
+def _tmpdir_config() -> object:
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
+    )
+
+    return IsolationConfig(
+        execution_id="exec-abc", workspace_id="ws-xyz", image="test:latest", environment={}
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["exit", "raise"])
+async def test_tmpdir_failure_destroys_workspace(failure: str) -> None:
+    adapter = AgenticIsolationAdapter()
+    ws = MagicMock()
+    ws.id = "ws-123"
+    ws.metadata = {}
+    provider = MagicMock()
+    provider.create = AsyncMock(return_value=ws)
+    provider.destroy = AsyncMock()
+    if failure == "exit":
+        provider.execute = AsyncMock(return_value=MagicMock(exit_code=1, stderr="read-only"))
+    else:
+        provider.execute = AsyncMock(side_effect=RuntimeError("boom"))
+
+    with (
+        patch.object(adapter, "_provider", provider),
+        pytest.raises(WorkspaceProvisionError),
+    ):
+        await adapter.create(_tmpdir_config())  # type: ignore[arg-type]
+
+    provider.destroy.assert_awaited_once_with(ws)
+    assert "ws-123" not in adapter._workspaces
 
 
 # --- Host-security refusals from agentic_isolation (#1398) -------------------
