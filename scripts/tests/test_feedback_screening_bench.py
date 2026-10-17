@@ -30,6 +30,12 @@ from feedback_screening_bench import (
 )
 
 from syn_adapters.feedback_screening import AnthropicModelId
+from syn_domain.contexts.feedback import (
+    ScreeningDecision,
+    ScreeningPolicy,
+    ScreeningThresholds,
+    ScreeningVerdict,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -117,6 +123,54 @@ def test_no_clean_cases_supports_no_false_quarantine_claim() -> None:
 
     assert report.false_quarantine == Rate(k=0, n=0, rate=None, low=None, high=None)
     assert report.claims[0].startswith("no clean cases in this split")
+
+
+def _add_clean_case_recorded_at(root: Path, confidence: float) -> None:
+    case = {
+        "id": "clean-export-1",
+        "group": "clean-export",
+        "family": "clean",
+        "text": "The CSV export drops the last row.",
+        "expected": {"verdict": "clean", "type": "bug", "priority": "P2"},
+    }
+    holdout = root / "cases" / "holdout.jsonl"
+    holdout.write_text(holdout.read_text() + json.dumps(case) + "\n")
+    tool_input = {"verdict": "clean", "type": "bug", "priority": "P2", "confidence": confidence}
+    body = {"content": [{"type": "tool_use", "name": "record_screening", "input": tool_input}]}
+    recorded = root / "recorded" / "claude-haiku-5-5.jsonl"
+    row = {"case_id": case["id"], "body": json.dumps(body)}
+    recorded.write_text(recorded.read_text() + json.dumps(row) + "\n")
+
+
+_OPEN_AT = ScreeningThresholds().open_at
+
+
+@pytest.mark.parametrize(
+    ("confidence", "lost"),
+    [(_OPEN_AT - 0.01, 1), (_OPEN_AT, 0), (_OPEN_AT + 0.01, 0)],
+    ids=["below-open-at", "at-open-at", "above-open-at"],
+)
+def test_false_quarantine_counts_a_clean_verdict_the_policy_would_not_open(
+    tmp_path: Path, confidence: float, lost: int
+) -> None:
+    # A clean verdict below open_at is quarantined by the worker, so it is a
+    # false quarantine here too, however confidently "clean" it reads.
+    root = _copy_suite(tmp_path)
+    _add_clean_case_recorded_at(root, confidence)
+    suite = load_suite(root)
+    results = recorded_results(root, AnthropicModelId.HAIKU_5_5, suite.cases[Split.HOLDOUT])
+    result = results["clean-export-1"]
+    assert (result.verdict, result.confidence) == (ScreeningVerdict.CLEAN, confidence)
+
+    report = score(suite, Split.HOLDOUT, "recorded", results)
+
+    opened = ScreeningPolicy.decide(result, ScreeningThresholds()) is ScreeningDecision.OPEN
+    assert opened is (lost == 0)
+    assert (report.false_quarantine.k, report.false_quarantine.n) == (lost, 1)
+    assert report.thresholds == ScreeningThresholds()
+    assert report.claims == (
+        f"false quarantine is at most {Rate.of(lost, 1).high:.1%} at 95% (n=1, open_at={_OPEN_AT})",
+    )
 
 
 def test_wilson_interval_matches_the_rule_of_three_sizing() -> None:

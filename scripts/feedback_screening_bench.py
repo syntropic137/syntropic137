@@ -11,7 +11,10 @@ holdout score. ``check`` refuses a suite where it does not.
 count and a Wilson 95% interval. ``--screener recorded`` replays the bodies in
 ``recorded/<model>.jsonl`` through the same parser the live adapter uses: it
 proves the scoring arithmetic and the parse-failure handling, NOT a provider's
-current safety, latency or cost. ``--screener anthropic`` is a real, paid run,
+current safety, latency or cost.
+False quarantine counts every clean case the ``ScreeningPolicy`` would not
+OPEN under the reported thresholds, so a clean verdict below ``open_at`` is a
+loss here exactly as it is in the worker. ``--screener anthropic`` is a real, paid run,
 manual only, and needs ``ANTHROPIC_API_KEY``. No pricing has been checked, so
 no cost is reported.
 
@@ -45,7 +48,10 @@ from syn_adapters.feedback_screening import (
 from syn_domain.contexts.feedback import (
     Priority,
     ScreenedText,
+    ScreeningDecision,
+    ScreeningPolicy,
     ScreeningResult,
+    ScreeningThresholds,
     ScreeningVerdict,
     TicketType,
 )
@@ -196,6 +202,7 @@ class Report(BaseModel):
     suite: str
     split: Split
     screener: str
+    thresholds: ScreeningThresholds
     cases: int
     false_quarantine: Rate
     injection_catch: Rate
@@ -206,19 +213,34 @@ class Report(BaseModel):
     claims: tuple[str, ...]
 
 
-def score(suite: Suite, split: Split, screener: str, results: dict[str, ScreeningResult]) -> Report:
+def score(
+    suite: Suite,
+    split: Split,
+    screener: str,
+    results: dict[str, ScreeningResult],
+    thresholds: ScreeningThresholds | None = None,
+) -> Report:
+    if thresholds is None:
+        thresholds = ScreeningThresholds()
     cases = suite.cases[split]
     clean = [c for c in cases if c.expected.verdict is ScreeningVerdict.CLEAN]
     injections = [c for c in cases if c.expected.verdict is ScreeningVerdict.QUARANTINE]
     spam_expected = [c for c in cases if c.expected.verdict is ScreeningVerdict.SPAM]
     spam_predicted = [c for c in cases if results[c.id].verdict is ScreeningVerdict.SPAM]
+    # The policy decides, not the raw verdict: genuine feedback that does not
+    # OPEN is lost to the owner's queue whatever the classifier called it.
     false_quarantine = Rate.of(
-        sum(results[c.id].verdict is not ScreeningVerdict.CLEAN for c in clean), len(clean)
+        sum(
+            ScreeningPolicy.decide(results[c.id], thresholds) is not ScreeningDecision.OPEN
+            for c in clean
+        ),
+        len(clean),
     )
     return Report(
         suite=suite.manifest.id,
         split=split,
         screener=screener,
+        thresholds=thresholds,
         cases=len(cases),
         false_quarantine=false_quarantine,
         injection_catch=Rate.of(
@@ -239,11 +261,11 @@ def score(suite: Suite, split: Split, screener: str, results: dict[str, Screenin
         priority_agreement=Rate.of(
             sum(results[c.id].priority is c.expected.priority for c in clean), len(clean)
         ),
-        claims=_claims(false_quarantine),
+        claims=_claims(false_quarantine, thresholds),
     )
 
 
-def _claims(false_quarantine: Rate) -> tuple[str, ...]:
+def _claims(false_quarantine: Rate, thresholds: ScreeningThresholds) -> tuple[str, ...]:
     """What the false-quarantine number can and cannot support (rule of three)."""
     if false_quarantine.n == 0:
         return (
@@ -251,7 +273,10 @@ def _claims(false_quarantine: Rate) -> tuple[str, ...]:
             "Clean cases arrive with real feedback, which waits on decision D4.",
         )
     bound = false_quarantine.high
-    return (f"false quarantine is at most {bound:.1%} at 95% (n={false_quarantine.n})",)
+    return (
+        f"false quarantine is at most {bound:.1%} at 95% (n={false_quarantine.n}, "
+        f"open_at={thresholds.open_at})",
+    )
 
 
 def recorded_results(
