@@ -261,17 +261,23 @@ def _time_of_day_start(text: str) -> int:
     if len(text) < 8:
         return len(text)
     if text[4] == "-":
-        if text[5] != "W":
-            return 11  # YYYY-MM-DD
-        if len(text) == 8 or text[8] != "-":
-            return 9  # YYYY-Www
-        if len(text) == 9:
-            return len(text)
-        if len(text) > 10 and _is_ascii_digit(text[10]):
-            return 9  # YYYY-Www, separator "-"
-        return 11  # YYYY-Www-D
-    if text[4] != "W":
-        return 9  # YYYYMMDD
+        return _extended_time_start(text)
+    if text[4] == "W":
+        return _basic_week_time_start(text)
+    return 9  # YYYYMMDD
+
+
+def _extended_time_start(text: str) -> int:
+    if text[5] != "W":
+        return 11  # YYYY-MM-DD
+    # YYYY-Www-D, unless a digit follows the day: then CPython reads YYYY-Www
+    # with "-" as the separator.
+    week_day = len(text) > 9 and text[8] == "-"
+    digit_after_day = len(text) > 10 and _is_ascii_digit(text[10])
+    return 11 if week_day and not digit_after_day else 9
+
+
+def _basic_week_time_start(text: str) -> int:
     end = 7
     while end < len(text) and _is_ascii_digit(text[end]):
         end += 1
