@@ -82,9 +82,7 @@ async def _forge_with_the_parents_run(script: RunScript) -> InMemoryEvidenceRunn
     return runner
 
 
-async def _run_child_step(
-    runner: InMemoryEvidenceRunner, *, adopted: bool
-) -> tuple[_Stream, str]:
+async def _run_child_step(runner: InMemoryEvidenceRunner, *, adopted: bool) -> tuple[_Stream, str]:
     parent, gate_id = _parent_inside_a_gate(completed=True, adopted=adopted)
     _resume(parent)
     child, _started = _child(parent)

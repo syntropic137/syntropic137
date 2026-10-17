@@ -15,7 +15,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     resumed_payload_for_replay,
 )
 
-
 #: Fields left off the payload when empty, so a resume without them is written as before.
 _WRITTEN_ONLY_WHEN_SET = frozenset({"inherited_skipped_phase_ids", "inherited_evidence_gate"})
 
@@ -96,9 +95,7 @@ class ExecutionResumedEvent(DomainEvent):
         from further up are written.
         """
         payload = {
-            k: v
-            for k, v in handler(self).items()
-            if not (k in _WRITTEN_ONLY_WHEN_SET and not v)
+            k: v for k, v in handler(self).items() if not (k in _WRITTEN_ONLY_WHEN_SET and not v)
         }
         owners = owners_to_carry(self.inherited_phases, self.execution_id)
         return {**payload, INHERITED_PHASE_OWNERS: owners} if owners else payload

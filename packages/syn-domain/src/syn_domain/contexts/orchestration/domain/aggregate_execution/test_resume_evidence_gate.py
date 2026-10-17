@@ -166,9 +166,7 @@ def _parent_inside_a_gate(*, completed: bool, adopted: bool = True) -> tuple[_St
             evidence_gate=EvidenceGatePolicy(repositories=(REPO,)),
         )
     )
-    (requested,) = [
-        e for e in stream.save(parent) if type(e).__name__ == "EvidenceRequestedEvent"
-    ]
+    (requested,) = [e for e in stream.save(parent) if type(e).__name__ == "EvidenceRequestedEvent"]
     gate_id: str = requested.gate_id  # pyright: ignore[reportAttributeAccessIssue]  # narrowed by name above
     if completed:
         parent = stream.load()
@@ -263,7 +261,9 @@ class TestTheParentAdmitsAGateResume:
         parent.settle_evidence_step(
             SettleEvidenceStepCommand(PARENT, gate_id, 1, StepOutcome.FAILED, head_sha_evidenced=S)
         )
-        parent.interrupt_execution(InterruptExecutionCommand(execution_id=PARENT, phase_id="review"))
+        parent.interrupt_execution(
+            InterruptExecutionCommand(execution_id=PARENT, phase_id="review")
+        )
         stream.save(parent)
 
         resumed = _resume(stream)

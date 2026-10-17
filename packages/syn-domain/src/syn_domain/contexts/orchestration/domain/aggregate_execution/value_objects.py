@@ -1421,7 +1421,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.inherited_evid
     InheritedAttempt as InheritedAttempt,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.inherited_evidence import (  # noqa: E402
-    InheritedEvidenceGate as InheritedEvidenceGate,
+    InheritedEvidenceGate as InheritedEvidenceGate,  # noqa: TC001 - ResumeOrigin's field, resolved by model_rebuild
 )
 
 ResumeOrigin.model_rebuild()
