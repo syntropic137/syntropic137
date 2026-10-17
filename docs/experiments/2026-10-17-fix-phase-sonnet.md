@@ -21,6 +21,13 @@ Real backlog tasks assigned alternately, as in the v4-precheck A/B. n = 6 per
 arm, so 12 runs in all. These are production runs, so the orchestrator assigns
 them, not me (my cap is 2 runs).
 
+## Expected cost
+
+These are production tasks that run anyway, so the experiment adds about $0.
+Per run, fix plus fix_2 is about $2.6 on Opus (production medians $1.66 +
+$0.98). The expected treatment saving is ~$1.3 per run, ~$8 across 6 runs.
+Codex use is the same in both arms (verify and reverify are unchanged).
+
 ## Metrics
 
 - Primary: escaped defects per merged PR over a 14-day window after merge.

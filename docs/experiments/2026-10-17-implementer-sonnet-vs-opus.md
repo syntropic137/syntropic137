@@ -52,6 +52,14 @@ per the suite README is also required.
 20 scored executions, or the Claude weekly quota for the VPS account below
 20%. A platform failure is re-run once.
 
+## Expected cost (API-equivalent, Claude quota only, no Codex)
+
+Estimated from the median production implement phase ($1.92, 43 min, n=25).
+- Opus arm: 10 x ~$1.9 = ~$19.
+- Sonnet arm: 10 x ~$1.0 = ~$10, assuming similar token counts at half the
+  price per token.
+- Total ~$30. With 2 runs in flight, about 4 h of wall clock.
+
 ## Dependencies and blockers
 
 - The treatment workflow does not exist yet.

@@ -1,6 +1,16 @@
 # E1: gpt-6-luna vs gpt-6.1-sol as the codex verifier (preregistered 2026-10-17)
 
-Status: PROPOSED, not approved, nothing dispatched.
+Status: PROPOSED, DEFERRED until Codex weekly quota resets (11% on
+2026-10-17; GPT verify runs are scarce). Nothing dispatched.
+
+## Expected cost
+
+29 train cases x 2 arms = 58 Codex executions.
+- Sol arm: 29 x ~$1.0-1.7 = ~$30-50 (production verify median is $1.73).
+- Luna arm: 29 x ~$0.05-0.10 = ~$2-3, at 1/20 the price per token, if token
+  counts are similar.
+- The real cost is Codex quota, not dollars. That is why this is deferred.
+  Cheaper fallback: run Sol on a stratified 10-case subset first.
 
 ## Question
 
