@@ -207,6 +207,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
         ArtifactContentStoragePort as ArtifactsArtifactContentStoragePort,
     )
+    from syn_domain.contexts.feedback.ports import NonceLedgerPort
     from syn_domain.contexts.github.ports.ChecksApiPort import GitHubChecksAPIPort
     from syn_domain.contexts.github.ports.EventsApiPort import GitHubEventsAPIPort
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
@@ -403,6 +404,8 @@ if TYPE_CHECKING:
         _memory_dedup: DedupPort = memory_dedup
         _redis_signals: SignalQueuePort = redis_signals
         _memory_signals: SignalQueuePort = memory_signals
+        # feedback's replay ledger (ADR-076-feedback-ticketing): its own port, the same adapter.
+        _nonce_ledger: NonceLedgerPort = redis_dedup
         _postgres_pending: PendingSHAStore = postgres_pending
         _memory_pending: PendingSHAStore = memory_pending
 

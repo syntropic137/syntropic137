@@ -148,6 +148,7 @@ def resume_start_command(
             parent_execution_id=parent_execution_id,
             inherited_phases=inherited,
             resume_phase_id=resume_phase_id,
+            inherited_evidence_gate=admitted.inherited_evidence_gate,
         ),
         continuation_candidates=continuation_candidates(left, resume_phase_id),
         inherited_skipped_phase_ids=list(admitted.inherited_skipped_phase_ids),
