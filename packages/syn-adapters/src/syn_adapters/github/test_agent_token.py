@@ -1,11 +1,16 @@
-"""Every agent phase holds the installation's own permissions (#1477).
+"""An agent phase holds the installation's own permissions, with `actions` capped at `read`.
 
 #1197 minted non-publishing phases a token with `pull_requests: read`, meaning
 to block `gh pr create` and believing `gh pr comment` still worked through
 `issues: write`. It did not: GitHub refused the comment through GraphQL
 `addComment` and through the REST issues endpoint alike (measured 2026-10-01),
-and there is no comment-only permission. Phases are ephemeral and open their
-own PRs, so these tests pin that NO phase token asks for a permission subset.
+and there is no comment-only permission. So these tests pin that every level
+an agent uses passes through unchanged (#1477).
+
+The one ceiling is `actions: read` (platform-dispatched evidence, A.10): the
+platform dispatches the workflows that judge an agent's change, so the agent
+must not be able to dispatch or re-run them itself once the App holds
+`actions: write`.
 
 Repository scoping (#725) is unaffected; its tests live beside this file.
 """
@@ -19,15 +24,17 @@ import httpx
 import pytest
 
 from syn_adapters.github.agent_token import mint_agent_token
+from syn_adapters.github.client import GitHubAppError
 from syn_adapters.github.client_token import TokenRequest
 
 if TYPE_CHECKING:
     from syn_adapters.github.client import GitHubAppClient, InstallationToken
 
-# What the syntropic137 App actually holds, as returned by
-# GET /app/installations/{id}. `pull_requests: write` is the one that makes
-# `gh pr create` work.
+# What the syntropic137 App holds once it dispatches evidence workflows, as
+# returned by GET /app/installations/{id}. `pull_requests: write` is the one
+# that makes `gh pr create` work; `actions: write` is the one no agent may hold.
 _GRANTED = {
+    "actions": "write",
     "contents": "write",
     "issues": "write",
     "pull_requests": "write",
@@ -45,8 +52,9 @@ class _FakeHttp:
     `last_token_request()` and gets it typed.
     """
 
-    def __init__(self, granted: dict[str, str]) -> None:
+    def __init__(self, granted: dict[str, str], *, lookup_status: int = 200) -> None:
         self._granted = granted
+        self._lookup_status = lookup_status
         self.token_request_bodies: list[dict[str, dict[str, str] | list[str]] | None] = []
         self.minted = 0
 
@@ -64,7 +72,7 @@ class _FakeHttp:
     async def get(self, path: str, headers: dict[str, str] | None = None) -> httpx.Response:
         assert path.startswith("/app/installations/")
         return httpx.Response(
-            200,
+            self._lookup_status,
             json={"id": 42, "permissions": self._granted},
             request=httpx.Request("GET", path),
         )
@@ -103,8 +111,10 @@ class _FakeHttp:
 class _FakeClient:
     """The surface `client_token`/`agent_token` actually use of GitHubAppClient."""
 
-    def __init__(self, granted: dict[str, str] | None = None) -> None:
-        self.http = _FakeHttp(granted if granted is not None else dict(_GRANTED))
+    def __init__(self, granted: dict[str, str] | None = None, *, lookup_status: int = 200) -> None:
+        self.http = _FakeHttp(
+            granted if granted is not None else dict(_GRANTED), lookup_status=lookup_status
+        )
         self._http = self.http
         self._cached_tokens: dict[str, InstallationToken] = {}
 
@@ -123,22 +133,66 @@ def _requested_permissions(fake: _FakeClient) -> dict[str, str] | None:
 
 
 @pytest.mark.unit
-async def test_a_phase_token_requests_no_permission_downgrade() -> None:
-    """The regression: no body means GitHub grants the installation's full set.
+async def test_a_phase_token_caps_actions_at_read() -> None:
+    """The App holds `actions: write`; the token an agent is handed does not."""
+    fake = _FakeClient()
 
-    A `permissions` subset here is how #1197 took `pull_requests: write` away,
-    and with it every PR comment a review phase was told to post.
-    """
+    minted = await mint_agent_token(_as_client(fake), "42", repositories=["repo-a"])
+
+    assert _requested_permissions(fake) == {**_GRANTED, "actions": "read"}
+    assert minted.permissions["actions"] == "read", (
+        "an agent holding actions: write could dispatch or re-run the workflow "
+        "that judges its own change"
+    )
+
+
+@pytest.mark.unit
+async def test_every_other_permission_passes_through_unchanged() -> None:
+    """The cap is `actions` only: #1197's `pull_requests: read` must not come back (#1477)."""
     fake = _FakeClient()
 
     await mint_agent_token(_as_client(fake), "42", repositories=["repo-a"])
 
-    requested = fake.http.last_token_request()
+    requested = _requested_permissions(fake)
     assert requested is not None
-    assert requested.permissions is None, (
-        "a phase token must not narrow the installation's permissions: "
-        "pull_requests: read refuses `gh pr comment` (#1477)"
-    )
+    assert {k: v for k, v in requested.items() if k != "actions"} == {
+        k: v for k, v in _GRANTED.items() if k != "actions"
+    }
+
+
+@pytest.mark.unit
+async def test_actions_is_never_added_when_the_installation_lacks_it() -> None:
+    """GitHub refuses a token that asks for more than the installation holds."""
+    granted = {"contents": "write", "pull_requests": "write", "metadata": "read"}
+    fake = _FakeClient(granted)
+
+    await mint_agent_token(_as_client(fake), "42", repositories=["repo-a"])
+
+    assert _requested_permissions(fake) == granted
+
+
+@pytest.mark.unit
+async def test_a_permission_the_app_gains_later_reaches_the_phase() -> None:
+    """The map is the live grant, not a list written down here."""
+    granted = {**_GRANTED, "workflows": "write"}
+    fake = _FakeClient(granted)
+
+    await mint_agent_token(_as_client(fake), "42", repositories=["repo-a"])
+
+    requested = _requested_permissions(fake)
+    assert requested is not None
+    assert requested["workflows"] == "write"
+
+
+@pytest.mark.unit
+async def test_no_token_is_minted_when_the_grant_cannot_be_read() -> None:
+    """An uncapped token handed out because the lookup failed is the defect the cap closes."""
+    fake = _FakeClient(lookup_status=500)
+
+    with pytest.raises(GitHubAppError):
+        await mint_agent_token(_as_client(fake), "42", repositories=["repo-a"])
+
+    assert fake.http.minted == 0
 
 
 @pytest.mark.unit
