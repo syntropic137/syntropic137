@@ -130,12 +130,16 @@
   const loadedFrom = $derived(coverage ? (coverage.from ?? addDays(today, 1)) : null)
 
   const active = $derived(days.filter((d) => d.sessions > 0 && d.date <= today && d.date >= hist.start).sort((a, b) => (a.date < b.date ? -1 : 1)))
+  /** Today's bucket, or an empty today: "Now" selects it even with no sessions started today (feedback 9b433949). */
+  const todayDay = $derived<SkylineDay>(days.find((d) => d.date === today) ?? { date: today, sessions: 0 })
+  const selectedIndex = $derived(selected ? active.findIndex((d) => d.date === selected) : -1)
+  /** Today is selected but is not an active day: the readout shows it, the stepper walks from it. */
+  const quietToday = $derived(selected === today && selectedIndex < 0)
   const currentIndex = $derived.by(() => {
-    if (active.length === 0) return null
-    const i = selected ? active.findIndex((d) => d.date === selected) : -1
-    return i >= 0 ? i : active.length - 1
+    if (active.length === 0 || quietToday) return null
+    return selectedIndex >= 0 ? selectedIndex : active.length - 1
   })
-  const current = $derived(currentIndex === null ? null : (active[currentIndex] ?? null))
+  const current = $derived(quietToday ? todayDay : currentIndex === null ? null : (active[currentIndex] ?? null))
   const layout = $derived(
     layoutIsoCityFloor({
       weeks: frozen?.weeks ?? weeks,
@@ -149,7 +153,7 @@
       selected: current?.date ?? null,
     }),
   )
-  const position = $derived(stepperPosition({ index: currentIndex, count: active.length }))
+  const position = $derived(quietToday ? 'No sessions started today' : stepperPosition({ index: currentIndex, count: active.length }))
   const translate = $derived(`translate(${round(glide.shift * dims.ax)}px, ${round(glide.shift * dims.ay)}px)`)
   // The hit layer is HTML over the SVG: the same translation in CSS pixels.
   const scale = $derived(chartWidth > 0 ? chartWidth / dims.vw : 1)
@@ -224,11 +228,10 @@
     offset = Math.min(maxOffset, Math.max(0, n))
   }
 
-  /** "Now": today's week AND today's day - the newest active day, which is today when today had runs (feedback 9b433949). */
+  /** "Now": today's week AND today's day, whether or not a session started today (feedback 9b433949). */
   function goNow() {
     setOffset(0)
-    const d = active.at(-1)
-    if (d) pick(d)
+    pick(todayDay)
   }
 
   function pick(d: SkylineDay) {
@@ -238,8 +241,8 @@
   }
 
   async function step(dir: 1 | -1, focus = false) {
-    if (currentIndex === null) return
-    const d = active[(currentIndex + dir + active.length) % active.length]
+    // From a quiet today, back is the newest active day and forward wraps to the oldest.
+    const d = quietToday ? (dir < 0 ? active.at(-1) : active[0]) : currentIndex === null ? undefined : active[(currentIndex + dir + active.length) % active.length]
     if (!d) return
     pick(d)
     setOffset(offsetShowing(hist, win, weekIndexOf(hist, d.date), off))
