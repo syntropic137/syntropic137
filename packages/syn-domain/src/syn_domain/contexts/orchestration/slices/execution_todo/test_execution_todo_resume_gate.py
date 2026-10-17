@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 import pytest
-from event_sourcing import DomainEvent
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration._shared.evidence_contract import StepOutcome
@@ -31,6 +31,9 @@ from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
 from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import TodoAction
+
+if TYPE_CHECKING:
+    from event_sourcing import DomainEvent
 
 pytestmark = pytest.mark.unit
 
