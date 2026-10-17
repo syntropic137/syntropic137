@@ -129,10 +129,10 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
 
     @command_handler("OpenTicketCommand")
     def open_ticket(self, command: OpenTicketCommand) -> None:
+        if self.id is not None and self._opening_submission != command.submission_id:
+            msg = f"Ticket {self.id} was opened by a different submission"
+            raise ValueError(msg)
         if self.id is not None:
-            if self._opening_submission != command.submission_id:
-                msg = f"Ticket {self.id} was opened by a different submission"
-                raise ValueError(msg)
             return  # a retry of the same open: no-op success
         self._initialize(command.aggregate_id)
         self._apply(
