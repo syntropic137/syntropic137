@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003
-
 from event_sourcing import command
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 @command("EnrollSource", "Enroll a deployment as a feedback source")
@@ -18,4 +16,4 @@ class EnrollSourceCommand(BaseModel):
     key_id: str = Field(min_length=1, max_length=64)
     verification_key: str = Field(min_length=1, max_length=256)
     daily_quota: int = Field(gt=0)
-    enrolled_at: datetime
+    enrolled_at: AwareDatetime

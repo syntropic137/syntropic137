@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003
-
 from event_sourcing import DomainEvent, event
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 
 
 @event("SourceKeyRotated", "v1")
@@ -21,4 +19,4 @@ class SourceKeyRotatedEvent(DomainEvent):
     retired_key_id: str = Field(min_length=1, max_length=64)
     key_id: str = Field(min_length=1, max_length=64)
     verification_key: str = Field(min_length=1, max_length=256)
-    rotated_at: datetime
+    rotated_at: AwareDatetime

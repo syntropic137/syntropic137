@@ -13,7 +13,7 @@ They are not secrets and sign nothing outside this file.
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from event_sourcing import (
@@ -23,6 +23,7 @@ from event_sourcing import (
     MemoryProjectionStore,
     ProjectionCheckpoint,
 )
+from pydantic import ValidationError
 
 from syn_domain.contexts.feedback import (
     Ed25519Signatures,
@@ -35,11 +36,13 @@ from syn_domain.contexts.feedback import (
     SignedRequest,
     SourceAggregate,
     SourceCredentials,
+    SourceKey,
     SourceStatus,
     ThrottleSourceCommand,
     Verification,
     canonical_string,
 )
+from syn_domain.contexts.feedback._shared.value_objects import rotate_keys
 
 pytestmark = pytest.mark.unit
 
@@ -282,6 +285,42 @@ class TestRotation:
     async def test_the_projection_and_the_aggregate_agree(self) -> None:
         stream = _Source().run(_enroll(), _rotate(at=T0))
         assert await stream.projected() == stream.load().credentials
+
+    @pytest.mark.parametrize("offset_hours", [-12, 5.5, 14])
+    async def test_a_non_utc_rotation_keeps_the_overlap_instant(self, offset_hours: float) -> None:
+        at = T0.astimezone(timezone(timedelta(hours=offset_hours)))
+        credentials = await _Source().run(_enroll(), _rotate(at=at)).projected()
+        inside = T0 + OVERLAP - timedelta(seconds=1)
+        after = T0 + OVERLAP
+        assert (
+            VERIFIER.verify(_signed(timestamp=int(inside.timestamp())), credentials, now=inside)
+            is Verification.VERIFIED
+        )
+        assert (
+            VERIFIER.verify(_signed(timestamp=int(after.timestamp())), credentials, now=after)
+            is Verification.KEY_RETIRED
+        )
+
+    def test_a_rotation_without_a_timezone_is_refused_at_the_command(self) -> None:
+        payload = {**_rotate().model_dump(mode="json"), "rotated_at": "2026-10-17T12:00:00"}
+        with pytest.raises(ValidationError, match="timezone"):
+            RotateSourceKeyCommand.model_validate(payload)
+
+    def test_a_stored_rotation_without_a_timezone_is_refused_at_the_event(self) -> None:
+        rotated = _Source().run(_enroll(), _rotate()).history[-1].event
+        payload = {**rotated.model_dump(mode="json"), "rotated_at": "2026-10-17T12:00:00"}
+        with pytest.raises(ValidationError, match="timezone"):
+            type(rotated).model_validate(payload)
+
+    def test_a_key_cannot_be_retired_at_a_time_without_a_timezone(self) -> None:
+        enrolled = _enrolled_credentials().keys
+        with pytest.raises(ValidationError, match="timezone"):
+            rotate_keys(
+                enrolled,
+                retired_key_id="key-a",
+                new_key=SourceKey(key_id="key-b", verification_key=PUBLIC_B),
+                rotated_at=datetime(2026, 10, 17, 12, 0),  # the naive input under test
+            )
 
 
 class _CheckpointWriteFails(MemoryCheckpointStore):

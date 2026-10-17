@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003
-
 from event_sourcing import DomainEvent, event
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 
 
 @event("SourceEnrolled", "v1")
@@ -20,4 +18,4 @@ class SourceEnrolledEvent(DomainEvent):
     key_id: str = Field(min_length=1, max_length=64)
     verification_key: str = Field(min_length=1, max_length=256)
     daily_quota: int = Field(gt=0)
-    enrolled_at: datetime
+    enrolled_at: AwareDatetime

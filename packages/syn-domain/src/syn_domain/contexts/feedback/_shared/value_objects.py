@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class TicketType(StrEnum):
@@ -159,7 +159,7 @@ class SourceKey(BaseModel):
 
     key_id: str = Field(min_length=1, max_length=64)
     verification_key: str = Field(min_length=1, max_length=256)
-    retired_at: datetime | None = None
+    retired_at: AwareDatetime | None = None
 
 
 def rotate_keys(
@@ -182,8 +182,12 @@ def rotate_keys(
     """
     if any(key.key_id == new_key.key_id for key in keys):
         return keys
+    # Built, not model_copy'd: a copy skips validation, and a naive retired_at
+    # would make the verifier raise instead of answer.
     retired = tuple(
-        key.model_copy(update={"retired_at": rotated_at}) if key.key_id == retired_key_id else key
+        SourceKey(key_id=key.key_id, verification_key=key.verification_key, retired_at=rotated_at)
+        if key.key_id == retired_key_id
+        else key
         for key in keys
     )
     return (*retired, new_key)

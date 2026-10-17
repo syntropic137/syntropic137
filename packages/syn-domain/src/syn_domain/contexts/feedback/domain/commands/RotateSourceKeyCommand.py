@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime  # noqa: TC003
-
 from event_sourcing import command
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 @command("RotateSourceKey", "Replace a source's signing key")
@@ -17,4 +15,4 @@ class RotateSourceKeyCommand(BaseModel):
     aggregate_id: str = Field(min_length=1, max_length=128)
     key_id: str = Field(min_length=1, max_length=64)
     verification_key: str = Field(min_length=1, max_length=256)
-    rotated_at: datetime
+    rotated_at: AwareDatetime
