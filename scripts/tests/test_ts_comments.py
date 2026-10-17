@@ -126,8 +126,30 @@ def test_an_unterminated_string_stops_at_the_newline() -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "source",
-    ["let x = n++ / 2 // `sessionId`", "let x = n-- / 2 // `sessionId`", "f(a) / 2 // `sessionId`"],
-    ids=["postfix-increment", "postfix-decrement", "call"],
+    [
+        "let x = n++ / 2 // `sessionId`",
+        "let x = n-- / 2 // `sessionId`",
+        "f(a) / 2 // `sessionId`",
+        "obj.if(x) / 2 // `sessionId`",
+        "obj.while(x) / 2 // `sessionId`",
+        "obj.for(x) / 2 // `sessionId`",
+        "obj.with(x) / 2 // `sessionId`",
+        "obj?.if(x) / 2 // `sessionId`",
+        "obj.\n  if(x) / 2 // `sessionId`",
+        "obj.return / 2 // `sessionId`",
+    ],
+    ids=[
+        "postfix-increment",
+        "postfix-decrement",
+        "call",
+        "method-named-if",
+        "method-named-while",
+        "method-named-for",
+        "method-named-with",
+        "optional-method-named-if",
+        "method-named-if-on-next-line",
+        "property-named-return",
+    ],
 )
 def test_division_after_a_postfix_operator_or_call_does_not_start_a_regex(source: str) -> None:
     # Only the ``)`` of an if/for/while/with condition is followed by a regex.
@@ -161,8 +183,11 @@ def test_comments_in_jsx_expressions_and_after_elements_are_blanked() -> None:
     [
         "const f = <T,>(x: T) => x // `sessionId`",
         "const f = <T extends U>(x: T) => x // `sessionId`",
+        "const f = <T extends\nunknown>(x: T) => x // `sessionId`",
+        "const f = <T = unknown>(x: T) => x // `sessionId`",
+        "const f = <T=unknown>(x: T) => x // `sessionId`",
     ],
-    ids=["trailing-comma", "extends"],
+    ids=["trailing-comma", "extends", "extends-then-newline", "default", "default-unspaced"],
 )
 def test_a_generic_in_tsx_is_not_jsx(source: str) -> None:
     assert blanked(source, jsx=True) == spaced(source, "// `sessionId`")

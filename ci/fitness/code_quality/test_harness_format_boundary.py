@@ -445,6 +445,18 @@ _COMMENTS: dict[str, tuple[str, str]] = {
         _TSX_CLIENT_FILE,
         "\nconst plantedNode = <p>Don't</p>; // `sessionId`\n",
     ),
+    "after-keyword-named-method-division": (
+        _CLIENT_FILE,
+        "\nconst plantedX = plantedObj.if(plantedY) / 2; // `sessionId`\n",
+    ),
+    "after-tsx-generic-arrow-default": (
+        _TSX_CLIENT_FILE,
+        "\nconst plantedF = <T = unknown>(x: T) => x; // `sessionId`\n",
+    ),
+    "after-tsx-generic-arrow-extends-newline": (
+        _TSX_CLIENT_FILE,
+        "\nconst plantedF = <T extends\nunknown>(x: T) => x; // `sessionId`\n",
+    ),
 }
 
 

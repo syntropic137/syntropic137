@@ -15,7 +15,9 @@ literals (multi-line, with nested ``${...}`` expressions), regex literals and
 both comment forms. Whether a ``/`` opens a regex is decided by the previous
 token: an operand (identifier, literal, ``)``, ``]``, ``}``, postfix ``++`` or
 ``--``) means division, except the ``)`` closing an ``if``/``for``/``while``/
-``with`` condition and a keyword such as ``return``. With ``jsx=True`` (a
+``with`` condition and a keyword such as ``return``. A word after ``.`` or
+``?.`` is a property name, never a keyword: ``obj.if(x) / 2`` divides. With
+``jsx=True`` (a
 ``.tsx`` file) a ``<`` where an operand is expected opens a JSX element, whose
 text is neither code nor comment: ``https://x`` or ``Don't`` there is prose.
 
@@ -25,6 +27,7 @@ code: only comment characters are ever replaced.
 
 from __future__ import annotations
 
+import re
 from typing import Final
 
 #: Keywords after which a ``/`` starts a regex rather than dividing.
@@ -50,6 +53,11 @@ _REGEX_AFTER_KEYWORDS: Final = frozenset(
 #: Keywords whose parenthesised condition is followed by a statement, so the
 #: ``)`` closing it is not an operand and a ``/`` after it opens a regex.
 _CONDITION_KEYWORDS: Final = frozenset({"if", "for", "while", "with"})
+
+#: What follows the name in ``<T`` when it is a generic type parameter list,
+#: not a JSX tag: ``<T,>``, ``<T extends U>`` or ``<T = U>``, across any
+#: whitespace including a newline.
+_GENERIC_AFTER_NAME: Final = re.compile(r"\s*(?:,|=|extends\s)")
 
 
 def _is_word_char(char: str) -> bool:
@@ -130,17 +138,21 @@ class _Scanner:
         conditions: list[bool] = []
         operand_expected = True
         word = ""
+        # Whether the previous token was ``.``, so a word now is a property name.
+        after_dot = False
         while self.i < len(source):
             char = source[self.i]
             if char.isspace() or self._comment():
                 self.i += char.isspace()
                 continue
             previous_word, word = word, ""
+            member, after_dot = after_dot, False
             if _is_word_char(char):
                 end = self.i
                 while end < len(source) and _is_word_char(source[end]):
                     end += 1
-                word = source[self.i : end]
+                # A property is an operand whatever it is called: ``obj.return``.
+                word = "" if member else source[self.i : end]
                 operand_expected = word in _REGEX_AFTER_KEYWORDS
                 self.i = end
                 continue
@@ -172,6 +184,9 @@ class _Scanner:
                 operand_expected = conditions.pop() if conditions else False
             elif char == "]":
                 operand_expected = False
+            elif char == ".":
+                after_dot = True
+                operand_expected = True
             elif char == "{":
                 depth += 1
                 operand_expected = True
@@ -211,8 +226,7 @@ class _Scanner:
             return False
         while end < len(source) and (_is_word_char(source[end]) or source[end] in ".-:"):
             end += 1
-        rest = source[end:].lstrip(" \t")
-        return not rest.startswith(",") and not rest.startswith("extends ")
+        return _GENERIC_AFTER_NAME.match(source, end) is None
 
     def _tag(self) -> bool:
         """Scan a JSX tag from just after its ``<``; whether it closed itself."""
