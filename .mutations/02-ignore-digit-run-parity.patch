@@ -1,11 +1,11 @@
 diff --git a/packages/syn-domain/src/syn_domain/pagination.py b/packages/syn-domain/src/syn_domain/pagination.py
-index d87d1876a..bbc0d5438 100644
+index 0908322c4..7c6a812d2 100644
 --- a/packages/syn-domain/src/syn_domain/pagination.py
 +++ b/packages/syn-domain/src/syn_domain/pagination.py
-@@ -272,12 +272,7 @@ def _time_of_day_start(text: str) -> int:
-         return 11  # YYYY-Www-D
-     if text[4] != "W":
-         return 9  # YYYYMMDD
+@@ -278,12 +278,7 @@ def _extended_time_start(text: str) -> int:
+ 
+ 
+ def _basic_week_time_start(text: str) -> int:
 -    end = 7
 -    while end < len(text) and _is_ascii_digit(text[end]):
 -        end += 1

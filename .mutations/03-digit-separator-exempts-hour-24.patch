@@ -1,5 +1,5 @@
 diff --git a/packages/syn-domain/src/syn_domain/pagination.py b/packages/syn-domain/src/syn_domain/pagination.py
-index d87d1876a..fbc835541 100644
+index 0908322c4..577398212 100644
 --- a/packages/syn-domain/src/syn_domain/pagination.py
 +++ b/packages/syn-domain/src/syn_domain/pagination.py
 @@ -247,7 +247,7 @@ def _names_hour_24(text: str) -> bool:
