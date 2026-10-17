@@ -260,9 +260,7 @@ def asserted_contracts(source: str) -> Contracts:
             (read if isinstance(node.ctx, ast.Load) else defined).add(node.attr)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             defined.add(node.name)
-        elif isinstance(node, ast.arg):
-            defined.add(node.arg)
-        elif isinstance(node, ast.keyword) and node.arg:
+        elif isinstance(node, ast.arg) or (isinstance(node, ast.keyword) and node.arg):
             defined.add(node.arg)
         elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             defined.add(node.id)
