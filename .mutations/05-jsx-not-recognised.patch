@@ -1,0 +1,14 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index d14386a95..00f1052d3 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -202,8 +202,7 @@ class _Scanner:
+ 
+     def _jsx_starts(self) -> bool:
+         """Whether the ``<`` at ``i`` opens a JSX element, not a generic ``<T,>``."""
+-        if not self.jsx:
+-            return False
++        return False
+         source, end = self.source, self.i + 1
+         if source.startswith(">", end):
+             return True

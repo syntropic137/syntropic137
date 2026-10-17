@@ -1,0 +1,16 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index 140c145cb..036b8f227 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -217,11 +217,6 @@ class _Scanner:
+                 operand_expected = True
+                 continue
+             previous = char
+-            if char in "'\"":
+-                self.i = _string_end(source, self.i)
+-                previous = "'"
+-                operand_expected = False
+-                continue
+             if char == "`":
+                 self._template()
+                 previous = "'"

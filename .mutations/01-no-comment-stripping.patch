@@ -1,0 +1,12 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index d14386a95..8ba378504 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -262,6 +262,7 @@ def blank_ts_comments(source: str, *, jsx: bool = False) -> str:
+ 
+     Pass ``jsx=True`` for a ``.tsx`` file, so element text is read as prose.
+     """
++    return source
+     scanner = _Scanner(source, jsx=jsx)
+     scanner.code(nested=False)
+     return "".join(scanner.out)
