@@ -68,6 +68,7 @@ The domain is organized into bounded contexts. Each context owns its aggregates 
 | `github` | Installation, TriggerRule | GitHub App integration, webhook and polling event ingestion, trigger evaluation |
 | `artifacts` | Artifact | Output storage: code files, reports, design documents |
 | `organization` | Organization, Repo, RepoClaim, System | Org hierarchy, system and repo management, cost rollup |
+| `feedback` | Ticket | Feedback tickets: reporter membership, quarantine screening, linked fixes and resolution |
 
 Aggregates are the sole decision-makers for their state. No service or engine is allowed to decide "what's next" for an aggregate: that logic lives in the aggregate itself.
 

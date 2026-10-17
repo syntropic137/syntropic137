@@ -105,7 +105,7 @@ Use `just dev-fresh` instead for a clean slate (wipes volumes and re-seeds).
 
 ## Architecture
 
-The system is organized into 5 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
+The system is organized into 6 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
 
 ![Syn137 Architecture](./docs/architecture/vsa-overview.svg)
 
@@ -119,6 +119,7 @@ The system is organized into 5 bounded contexts following Vertical Slice Archite
 | **`agent_sessions`** | AgentSession, InventoryClock, InventoryReconciliation | Agent sessions and observability metrics |
 | **`github`** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
 | **`artifacts`** | Artifact | Artifact storage and retrieval |
+| **`feedback`** | Ticket | Feedback tickets: membership, screening, fix tracking and resolution |
 
 **Infrastructure:** PostgreSQL (event store + projections) · Redis · MinIO
 
