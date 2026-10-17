@@ -53,7 +53,8 @@ session-inventory source. Its status is `active`, `throttled` or `revoked`
 - **Verification key:** the public half the event store holds. Under Ed25519 it
   is the public key; if D2 picks HMAC it is the secret's hash. The **signing
   key** never leaves the source's Relay and never enters this context.
-- **Key id:** names one key. A source never reuses a key id.
+- **Key id:** names one key. A source never reuses a key id, and a retry that
+  pairs a held key id with other key material is refused, not a no-op.
 - **Rotate** (`SourceKeyRotated`): a new current key. The replaced key is
   **retired** at the rotation time and keeps verifying for the **rotation
   overlap**, a verifier setting rather than a recorded fact.

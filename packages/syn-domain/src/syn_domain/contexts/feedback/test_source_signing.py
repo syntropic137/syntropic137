@@ -362,9 +362,32 @@ class TestSourceAggregate:
         with pytest.raises(ValueError, match="different key"):
             _Source().run(_enroll(), other)
 
+    def test_enrolling_again_with_the_same_key_id_and_other_material_raises(self) -> None:
+        other = EnrollSourceCommand.model_validate(
+            {**_enroll().model_dump(mode="json"), "verification_key": PUBLIC_B}
+        )
+        stream = _Source().run(_enroll())
+        with pytest.raises(ValueError, match="different key"):
+            stream.run(other)
+        assert len(stream.history) == 1
+
+    def test_a_retried_enrolment_after_a_rotation_is_a_no_op(self) -> None:
+        stream = _Source().run(_enroll(), _rotate(), _enroll())
+        assert len(stream.history) == 2
+
     def test_a_retried_rotation_is_a_no_op(self) -> None:
         stream = _Source().run(_enroll(), _rotate(), _rotate())
         assert len(stream.history) == 2
+
+    def test_rotating_to_the_current_key_id_with_other_material_raises(self) -> None:
+        other = RotateSourceKeyCommand.model_validate(
+            {**_rotate().model_dump(mode="json"), "verification_key": PUBLIC_C}
+        )
+        stream = _Source().run(_enroll(), _rotate())
+        with pytest.raises(ValueError, match="different key"):
+            stream.run(other)
+        assert len(stream.history) == 2
+        assert stream.load().credentials.keys[-1].verification_key == PUBLIC_B
 
     def test_a_key_id_is_never_reused(self) -> None:
         back_to_a = RotateSourceKeyCommand(

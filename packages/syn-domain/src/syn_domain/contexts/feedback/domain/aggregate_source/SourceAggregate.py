@@ -80,7 +80,11 @@ class SourceAggregate(AggregateRoot["SourceEnrolledEvent"]):
 
     @command_handler("EnrollSourceCommand")
     def enroll(self, command: EnrollSourceCommand) -> None:
-        if self.id is not None and self._keys[0].key_id != command.key_id:
+        enrolled = self._keys[0] if self._keys else None
+        if enrolled is not None and (enrolled.key_id, enrolled.verification_key) != (
+            command.key_id,
+            command.verification_key,
+        ):
             msg = f"Source {self.id} is already enrolled with a different key"
             raise ValueError(msg)
         if self.id is not None:
@@ -103,6 +107,10 @@ class SourceAggregate(AggregateRoot["SourceEnrolledEvent"]):
             msg = f"Cannot rotate the key of source {self.id}: it is revoked"
             raise ValueError(msg)
         if command.key_id == self.current_key_id:
+            if self._keys[-1].verification_key != command.verification_key:
+                # A key id names one key: the same id with other material is not a retry.
+                msg = f"Key id {command.key_id} of source {self.id} already names a different key"
+                raise ValueError(msg)
             return  # a retry of the rotation just applied
         if any(key.key_id == command.key_id for key in self._keys):
             msg = f"Key id {command.key_id} was already used by source {self.id}; key ids are never reused"
