@@ -19,6 +19,7 @@ from syn_shared.settings import (
     GitIdentityResolver,
     GitIdentitySettings,
     IsolationBackend,
+    WorkspaceRuntime,
     WorkspaceSettings,
     get_default_isolation_backend,
     reset_settings,
@@ -79,7 +80,7 @@ class TestWorkspaceSettings:
 
             # Docker settings
             assert settings.docker_image == DEFAULT_WORKSPACE_IMAGE
-            assert settings.docker_runtime == "runsc"
+            assert settings.runtime is None  # auto: agentic-workspace decides
             assert settings.docker_network == "none"
 
     def test_isolation_backend_override(self) -> None:
@@ -549,3 +550,37 @@ class TestGitIdentityResolver:
             # Falls back to env since override is incomplete
             assert result.user_name == "env-user"
             assert result.user_email == "env@example.com"
+
+
+@pytest.mark.unit
+class TestWorkspaceRuntimeSetting:
+    """SYN_WORKSPACE_RUNTIME: one typed knob, auto by default, refused when unknown."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("runc", WorkspaceRuntime.RUNC),
+            ("gvisor", WorkspaceRuntime.GVISOR),
+            ("kata", WorkspaceRuntime.KATA),
+            ("sysbox", WorkspaceRuntime.SYSBOX),
+        ],
+    )
+    def test_each_value_parses(self, raw: str, expected: WorkspaceRuntime) -> None:
+        with patch.dict(os.environ, {"SYN_WORKSPACE_RUNTIME": raw}, clear=True):
+            assert WorkspaceSettings(_env_file=None).runtime is expected
+
+    def test_empty_is_auto(self) -> None:
+        """The generated .env.example ships `SYN_WORKSPACE_RUNTIME=`; that means auto."""
+        with patch.dict(os.environ, {"SYN_WORKSPACE_RUNTIME": ""}, clear=True):
+            assert WorkspaceSettings(_env_file=None).runtime is None
+
+    @pytest.mark.parametrize("raw", ["runsc", "firecracker", "GVISOR ", "docker"])
+    def test_unknown_value_fails_at_load(self, raw: str) -> None:
+        """No fallback: `runsc` (the Docker alias, not the runtime) is the likeliest typo."""
+        from pydantic import ValidationError
+
+        with (
+            patch.dict(os.environ, {"SYN_WORKSPACE_RUNTIME": raw}, clear=True),
+            pytest.raises(ValidationError, match="runtime"),
+        ):
+            WorkspaceSettings(_env_file=None)

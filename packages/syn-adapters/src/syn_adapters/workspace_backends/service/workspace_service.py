@@ -40,6 +40,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 from syn_shared.settings.workspace import (
     DEFAULT_WORKSPACE_CPU_LIMIT,
     DEFAULT_WORKSPACE_MEMORY_LIMIT_MB,
+    WorkspaceRuntime,
 )
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
@@ -112,6 +113,8 @@ class WorkspaceServiceConfig:
     default_token_ttl: int = 300  # 5 minutes
     capabilities: tuple[CapabilityType, ...] = (CapabilityType.NETWORK,)
     environment: dict[str, str] = field(default_factory=dict)  # Non-sensitive env vars
+    #: OCI runtime to request from agentic-workspace. None = its auto mode.
+    runtime: WorkspaceRuntime | None = None
 
     @classmethod
     def from_settings(cls, settings: WorkspaceSettings) -> WorkspaceServiceConfig:
@@ -120,6 +123,7 @@ class WorkspaceServiceConfig:
             image=settings.docker_image,
             memory_limit_mb=settings.memory_limit_mb,
             cpu_limit_cores=settings.cpu_limit,
+            runtime=settings.runtime,
         )
 
 
@@ -226,6 +230,7 @@ class WorkspaceService:
             AgenticEventStreamAdapter,
             AgenticIsolationAdapter,
         )
+        from syn_adapters.workspace_backends.agentic.runtime_mapping import to_aw_runtime
         from syn_adapters.workspace_backends.docker import SharedEnvoyAdapter
         from syn_adapters.workspace_backends.tokens import (
             SidecarTokenInjectionAdapter,
@@ -247,10 +252,14 @@ class WorkspaceService:
 
         # Choose security profile based on backend type
         # LOCAL is test-only → development(); everything else (DOCKER_HARDENED, GVISOR) → production()
+        # with the operator's runtime. Whether that runtime exists on the host,
+        # and what auto picks, is agentic-workspace's resolver's to decide.
         security = (
             SecurityConfig.development()
             if cfg.backend == IsolationBackendType.LOCAL
-            else SecurityConfig.production()
+            else dataclasses.replace(
+                SecurityConfig.production(), runtime=to_aw_runtime(cfg.runtime)
+            )
         )
 
         # Create adapters using agentic_isolation
