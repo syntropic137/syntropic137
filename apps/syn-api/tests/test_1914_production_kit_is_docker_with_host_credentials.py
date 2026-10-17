@@ -12,7 +12,7 @@ import pytest
 from syn_adapters.workspace_backends.agentic import AgenticIsolationAdapter
 from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
 from syn_api._wiring import build_workspace_service
-from syn_domain.contexts.orchestration._shared.workspace_credential_policy import HostCredentials
+from syn_domain.contexts.orchestration import HostCredentials
 from syn_shared.settings.workspace import WorkspaceSettings
 
 pytestmark = pytest.mark.unit

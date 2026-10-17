@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
 from syn_adapters.workspace_backends.image_verification import verify_image_async
-from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+from syn_domain.contexts.orchestration import (
     HOST_CREDENTIALS,
     WorkspaceCredentialPolicy,
 )

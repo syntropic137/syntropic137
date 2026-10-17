@@ -20,7 +20,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
     session_store_credential_bindings,
 )
 from syn_adapters.workspace_backends.backend_kit import BackendKit, CredentialFreeImageError
-from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+from syn_domain.contexts.orchestration import (
     HOST_CREDENTIALS,
     NO_CREDENTIALS,
 )

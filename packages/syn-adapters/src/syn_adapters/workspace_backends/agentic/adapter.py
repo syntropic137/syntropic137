@@ -73,7 +73,7 @@ if TYPE_CHECKING:
     from agentic_isolation.contract import FinalizationOutcome
     from agentic_isolation.providers.base import SupportsOperations, Workspace
 
-    from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+    from syn_domain.contexts.orchestration import (
         WorkspaceCredentialPolicy,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (

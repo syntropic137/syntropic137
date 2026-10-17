@@ -32,7 +32,7 @@ from syn_adapters.workspace_backends.service.workspace_lifecycle import (
     create_workspace_aggregate,
     provision_workspace,
 )
-from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+from syn_domain.contexts.orchestration import (
     HOST_CREDENTIALS,
     WorkspaceCredentialPolicy,
 )
