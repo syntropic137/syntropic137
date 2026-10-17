@@ -51,6 +51,8 @@ if TYPE_CHECKING:
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     EvidencePlanStep,
     EvidencePreset,
+    InheritedAttempt,
+    InheritedEvidenceGate,
 )
 
 UNREADABLE: Final = "unreadable evidence request"
@@ -453,6 +455,90 @@ class EvidenceGate:
     attempts: dict[int, EvidenceAttempt] = field(default_factory=dict)
     settled: dict[int, SettledStep] = field(default_factory=dict)
     removed: PatchRemoval | None = None
+    #: A resume's record of its parent's attempts at steps the parent never
+    #: settled (§A.7 3). Never this execution's own: `attempts` is that.
+    inherited_attempts: dict[int, InheritedAttempt] = field(default_factory=dict)
+
+    @classmethod
+    def resumed(cls, gate: InheritedEvidenceGate) -> EvidenceGate:
+        """A resume's gate, seeded from its parent's open one."""
+        return cls(
+            gate_id=gate.gate_id,
+            after_phase_id=gate.after_phase_id,
+            next_phase_id=gate.next_phase_id,
+            next_phase_order=gate.next_phase_order,
+            skipped_phase_ids=gate.skipped_phase_ids,
+            plan=gate.plan,
+            settled={
+                s.index: SettledStep(
+                    index=s.index,
+                    outcome=s.outcome,
+                    reason=s.reason,
+                    run_url=s.run_url,
+                    head_sha_evidenced=s.head_sha,
+                    reused_from=s.reused_from,
+                )
+                for s in gate.settled
+            },
+            removed=gate.patch_removal,
+            inherited_attempts={a.step: a for a in gate.attempts},
+        )
+
+    def parents_run(self, index: int) -> InheritedAttempt | None:
+        """The parent's adopted run, when this execution's attempt at the step is the parent's.
+
+        A resume takes the parent's attempt over in two saves, start then adopt
+        (§A.7 3). A crash between them leaves its own attempt under the parent's
+        nonce with no run, and the parent's run is still the one that nonce
+        named. A retry has a fresh nonce, so a new attempt never gets it.
+        """
+        own = self.attempts.get(index)
+        parent = self.inherited_attempts.get(index)
+        if own is None or parent is None or own.run_id is not None:
+            return None
+        if parent.dispatch_id != own.dispatch_id or parent.run_id is None:
+            return None
+        return parent if parent.run_url is not None else None
+
+    def inherited(self) -> InheritedEvidenceGate:
+        """This gate as a resume inherits it: what it settled, and its last attempt at the rest.
+
+        The parent's own attempt wins over one it inherited, because it is later,
+        but keeps the run the inherited one named when it is the same attempt.
+        """
+        kinds = {s.index: s.kind for s in self.plan}
+        attempts = dict(self.inherited_attempts)
+        for index, own in self.attempts.items():
+            run = self.parents_run(index) or own
+            attempts[index] = InheritedAttempt(
+                step=index,
+                dispatch_id=own.dispatch_id,
+                started_at=own.started_at,
+                run_id=run.run_id,
+                run_url=run.run_url,
+            )
+        return InheritedEvidenceGate(
+            gate_id=self.gate_id,
+            after_phase_id=self.after_phase_id,
+            next_phase_id=self.next_phase_id,
+            next_phase_order=self.next_phase_order,
+            skipped_phase_ids=self.skipped_phase_ids,
+            plan=self.plan,
+            settled=tuple(
+                ManifestStep(
+                    index=s.index,
+                    kind=kinds[s.index],
+                    outcome=s.outcome,
+                    reason=s.reason,
+                    run_url=s.run_url,
+                    head_sha=s.head_sha_evidenced,
+                    reused_from=s.reused_from,
+                )
+                for s in sorted(self.settled.values(), key=lambda s: s.index)
+            ),
+            patch_removal=self.removed,
+            attempts=tuple(a for i, a in sorted(attempts.items()) if i not in self.settled),
+        )
 
     @property
     def current(self) -> EvidencePlanStep | None:
@@ -494,6 +580,10 @@ class EvidenceGateRecord:
 
     def request(self, gate: EvidenceGate) -> None:
         self._gates[gate.gate_id] = gate
+
+    def inherit(self, gate: InheritedEvidenceGate) -> None:
+        """A resume takes over its parent's open gate (§A.7)."""
+        self.request(EvidenceGate.resumed(gate))
 
     def get(self, gate_id: str) -> EvidenceGate | None:
         return self._gates.get(gate_id)
