@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/pagination.py b/packages/syn-domain/src/syn_domain/pagination.py
+index b9f33c711..73572e6c4 100644
+--- a/packages/syn-domain/src/syn_domain/pagination.py
++++ b/packages/syn-domain/src/syn_domain/pagination.py
+@@ -222,8 +222,6 @@ def coerce_datetime(value: object) -> datetime | None:
+     datetime left and nothing downstream has to know which kind it was given.
+     """
+     if isinstance(value, str):
+-        if _HOUR_24.match(value):
+-            return None
+         try:
+             value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+         except ValueError:
