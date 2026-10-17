@@ -16,6 +16,7 @@ import pytest
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.artifacts import UNREPORTED_AGENT
+from syn_domain.contexts.orchestration._shared.workspace_credential_policy import HOST_CREDENTIALS
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
     TodoAction,
     TodoItem,
@@ -772,7 +773,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1")
+        env = await _build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
         assert env["CLAUDE_SESSION_ID"] == "sess-1"
         assert env["ANTHROPIC_BASE_URL"] == "http://envoy:10000"
         assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
@@ -800,7 +801,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1")
+        env = await _build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
         assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-real-token"
         assert "ANTHROPIC_API_KEY" not in env
 
@@ -826,7 +827,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1")
+        env = await _build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
         assert env["ANTHROPIC_API_KEY"] == "sk-ant-api03-real-key"
         assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
 
@@ -855,7 +856,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1")
+        env = await _build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
         assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-pref"
         assert "ANTHROPIC_API_KEY" not in env
 
@@ -867,7 +868,7 @@ class TestBuildAgentEnv:
         workspace = MagicMock()
         workspace.proxy_url = None  # sidecar not running
         with pytest.raises(RuntimeError, match="proxy not available"):
-            await _build_agent_env(workspace, "sess-1")
+            await _build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
 
 
 def _imports(context: str) -> list[str]:

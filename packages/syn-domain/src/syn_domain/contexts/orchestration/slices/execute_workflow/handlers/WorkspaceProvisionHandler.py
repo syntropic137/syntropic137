@@ -20,6 +20,9 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
+from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+    WorkspaceCredentialPolicy,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     SourceCommit,
@@ -233,8 +236,13 @@ _DEADLINE_NOTICE = (
 )
 
 
-async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
+async def _build_agent_env(
+    workspace: ManagedWorkspace, session_id: str, credential_policy: WorkspaceCredentialPolicy
+) -> dict[str, str]:
     """Build agent environment for workspace execution.
+
+    Under ``NoCredentials`` (#1914) the agent gets its session id and nothing
+    else: no Claude credential and no proxy, since none was provisioned.
 
     Injects Claude credentials directly into agent env. ANTHROPIC_BASE_URL
     routes SDK traffic through the Envoy sidecar for observability, but auth
@@ -243,6 +251,8 @@ async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict
     See ADR-024 (2026-05-01 update) for why the original "proxy-managed"
     placeholder approach was abandoned and this direct injection was adopted.
     """
+    if not credential_policy.supplies_credentials:
+        return {ENV_CLAUDE_SESSION_ID: session_id}
     proxy_url = workspace.proxy_url
     if not proxy_url:
         msg = (
@@ -451,12 +461,17 @@ class WorkspaceProvisionHandler:
 
         outputs = phase_outputs if phase_outputs is not None else PhaseOutputCache()
         effective_repos = repos or []
+        # The backend's policy, not the phase, decides whether credentials
+        # reach the workspace (#1914). A phase it cannot run is refused here,
+        # before any workspace or token exists.
+        policy = self._workspace_service.credential_policy
+        policy.admit(phase_name=phase.name, repositories=effective_repos)
         workspace_cm = self._workspace_service.create_workspace(
             execution_id=todo.execution_id,
             workflow_id=workflow_id,
             phase_id=todo.phase_id,
-            with_sidecar=True,
-            inject_tokens=True,
+            with_sidecar=policy.supplies_credentials,
+            inject_tokens=policy.supplies_credentials,
             capture_session_id=session_id,
         )
 
@@ -556,6 +571,7 @@ class WorkspaceProvisionHandler:
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
             ledger=workspace.issuance_ledger,
+            credential_policy=self._workspace_service.credential_policy,
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
@@ -801,7 +817,11 @@ class WorkspaceProvisionHandler:
         _, needs_claude_env = _auth_staging_for(
             phase.agent_config.provider, phase.agent_config.allow_delegation
         )
-        agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
+        agent_env = (
+            await _build_agent_env(workspace, session_id, self._workspace_service.credential_policy)
+            if needs_claude_env
+            else {}
+        )
         # OUTSIDE the branch above, deliberately. A codex phase gets an empty
         # agent env by design - it authenticates from ~/.codex/auth.json and
         # must not see claude credentials - so `_build_agent_env` is the one
