@@ -138,3 +138,45 @@ def derive_status(
     if PullRequestState.MERGED in pull_requests:
         return TicketStatus.FIX_MERGED
     return TicketStatus.OPEN
+
+
+class SourceStatus(StrEnum):
+    """Where a Source stands. ``revoked`` is terminal."""
+
+    ACTIVE = "active"
+    THROTTLED = "throttled"
+    REVOKED = "revoked"
+
+
+class SourceKey(BaseModel):
+    """One verification key of a Source. ``retired_at`` is set when a rotation replaced it.
+
+    ``verification_key`` is public material (base64 Ed25519 public key, or a
+    secret's hash under HMAC). A signing key never reaches the domain.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    key_id: str = Field(min_length=1, max_length=64)
+    verification_key: str = Field(min_length=1, max_length=256)
+    retired_at: datetime | None = None
+
+
+def rotate_keys(
+    keys: tuple[SourceKey, ...],
+    *,
+    retired_key_id: str,
+    new_key: SourceKey,
+    rotated_at: datetime,
+) -> tuple[SourceKey, ...]:
+    """A Source's keys after a rotation: the replaced key retired at ``rotated_at``, the new one last.
+
+    The one definition of what a rotation does to a key set, shared by the
+    aggregate and the feedback_sources projection so the two cannot disagree
+    about which key still verifies.
+    """
+    retired = tuple(
+        key.model_copy(update={"retired_at": rotated_at}) if key.key_id == retired_key_id else key
+        for key in keys
+    )
+    return (*retired, new_key)

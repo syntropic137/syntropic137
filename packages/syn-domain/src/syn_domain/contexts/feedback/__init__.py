@@ -19,15 +19,20 @@ from syn_domain.contexts.feedback._shared import (
     PullRequestState,
     ResolutionRule,
     Screening,
+    SourceKey,
+    SourceStatus,
     TicketStatus,
     TicketType,
     derive_status,
 )
+from syn_domain.contexts.feedback.domain.aggregate_source import SourceAggregate
 from syn_domain.contexts.feedback.domain.aggregate_ticket import TicketAggregate
 from syn_domain.contexts.feedback.domain.commands import (
     AddReportCommand,
     CloseTicketCommand,
     DetachReportCommand,
+    EnrollSourceCommand,
+    LiftSourceThrottleCommand,
     LinkPullRequestCommand,
     LinkTicketToExecutionCommand,
     LinkTicketToIssueCommand,
@@ -38,8 +43,16 @@ from syn_domain.contexts.feedback.domain.commands import (
     ReleaseTicketFromQuarantineCommand,
     ReopenTicketCommand,
     ReprioritiseTicketCommand,
+    RevokeSourceCommand,
+    RotateSourceKeyCommand,
+    ThrottleSourceCommand,
 )
 from syn_domain.contexts.feedback.domain.events import (
+    SourceEnrolledEvent,
+    SourceKeyRotatedEvent,
+    SourceRevokedEvent,
+    SourceThrottledEvent,
+    SourceThrottleLiftedEvent,
     TicketClosedEvent,
     TicketFixObservedEvent,
     TicketFixReleasedEvent,
@@ -61,6 +74,16 @@ from syn_domain.contexts.feedback.domain.NearDuplicateMatcher import (
     NearDuplicateMatch,
     NearDuplicateMatcher,
 )
+from syn_domain.contexts.feedback.domain.RequestSignature import (
+    SIGNATURE_WINDOW,
+    Ed25519Signatures,
+    SignatureAlgorithm,
+    SignatureVerifier,
+    SignedRequest,
+    SourceCredentials,
+    Verification,
+    canonical_string,
+)
 from syn_domain.contexts.feedback.domain.ResolutionPolicy import ResolutionPolicy
 from syn_domain.contexts.feedback.domain.ScreenedText import MAX_SCREENED_CHARS, ScreenedText
 from syn_domain.contexts.feedback.domain.ScreeningPolicy import (
@@ -81,18 +104,28 @@ from syn_domain.contexts.feedback.ports import (
     RateBucketsPort,
     ScreeningPort,
 )
+from syn_domain.contexts.feedback.slices.feedback_sources import (
+    FeedbackSource,
+    FeedbackSourcesProjection,
+)
 
 __all__ = [
     "MAX_SCREENED_CHARS",
+    "SIGNATURE_WINDOW",
     "AddReportCommand",
     "CloseReason",
     "CloseTicketCommand",
     "DetachReportCommand",
     "Disposition",
+    "Ed25519Signatures",
+    "EnrollSourceCommand",
+    "FeedbackSource",
+    "FeedbackSourcesProjection",
     "FixObservation",
     "ForgeReadsPort",
     "IntakeLogPort",
     "LeasedSubmission",
+    "LiftSourceThrottleCommand",
     "LinkPullRequestCommand",
     "LinkTicketToExecutionCommand",
     "LinkTicketToIssueCommand",
@@ -117,6 +150,8 @@ __all__ = [
     "ReprioritiseTicketCommand",
     "ResolutionPolicy",
     "ResolutionRule",
+    "RevokeSourceCommand",
+    "RotateSourceKeyCommand",
     "ScreenedText",
     "Screening",
     "ScreeningDecision",
@@ -125,6 +160,19 @@ __all__ = [
     "ScreeningResult",
     "ScreeningThresholds",
     "ScreeningVerdict",
+    "SignatureAlgorithm",
+    "SignatureVerifier",
+    "SignedRequest",
+    "SourceAggregate",
+    "SourceCredentials",
+    "SourceEnrolledEvent",
+    "SourceKey",
+    "SourceKeyRotatedEvent",
+    "SourceRevokedEvent",
+    "SourceStatus",
+    "SourceThrottleLiftedEvent",
+    "SourceThrottledEvent",
+    "ThrottleSourceCommand",
     "TicketAggregate",
     "TicketClosedEvent",
     "TicketFixObservedEvent",
@@ -142,5 +190,7 @@ __all__ = [
     "TicketResolvedEvent",
     "TicketStatus",
     "TicketType",
+    "Verification",
+    "canonical_string",
     "derive_status",
 ]

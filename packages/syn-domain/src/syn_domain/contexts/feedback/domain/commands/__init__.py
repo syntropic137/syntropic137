@@ -3,6 +3,10 @@
 from syn_domain.contexts.feedback.domain.commands.AddReportCommand import AddReportCommand
 from syn_domain.contexts.feedback.domain.commands.CloseTicketCommand import CloseTicketCommand
 from syn_domain.contexts.feedback.domain.commands.DetachReportCommand import DetachReportCommand
+from syn_domain.contexts.feedback.domain.commands.EnrollSourceCommand import EnrollSourceCommand
+from syn_domain.contexts.feedback.domain.commands.LiftSourceThrottleCommand import (
+    LiftSourceThrottleCommand,
+)
 from syn_domain.contexts.feedback.domain.commands.LinkPullRequestCommand import (
     LinkPullRequestCommand,
 )
@@ -29,11 +33,18 @@ from syn_domain.contexts.feedback.domain.commands.ReopenTicketCommand import Reo
 from syn_domain.contexts.feedback.domain.commands.ReprioritiseTicketCommand import (
     ReprioritiseTicketCommand,
 )
+from syn_domain.contexts.feedback.domain.commands.RevokeSourceCommand import RevokeSourceCommand
+from syn_domain.contexts.feedback.domain.commands.RotateSourceKeyCommand import (
+    RotateSourceKeyCommand,
+)
+from syn_domain.contexts.feedback.domain.commands.ThrottleSourceCommand import ThrottleSourceCommand
 
 __all__ = [
     "AddReportCommand",
     "CloseTicketCommand",
     "DetachReportCommand",
+    "EnrollSourceCommand",
+    "LiftSourceThrottleCommand",
     "LinkPullRequestCommand",
     "LinkTicketToExecutionCommand",
     "LinkTicketToIssueCommand",
@@ -44,4 +55,7 @@ __all__ = [
     "ReleaseTicketFromQuarantineCommand",
     "ReopenTicketCommand",
     "ReprioritiseTicketCommand",
+    "RevokeSourceCommand",
+    "RotateSourceKeyCommand",
+    "ThrottleSourceCommand",
 ]
