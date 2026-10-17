@@ -34,6 +34,26 @@ class TestScreenedText:
         raw = "save​ but‮ton\x00 broken⁦"
         assert ScreenedText.screen(raw).text == "save button broken"
 
+    # Every code point with the Unicode Bidi_Control property.
+    @pytest.mark.parametrize(
+        "control",
+        [
+            "\u061c",
+            "\u200e",
+            "\u200f",
+            *map(chr, range(0x202A, 0x202F)),
+            *map(chr, range(0x2066, 0x206A)),
+        ],
+    )
+    def test_strips_every_bidi_control(self, control: str) -> None:
+        screened = ScreenedText.screen(f"save{control}button")
+        assert screened.text == "savebutton"
+        assert screened.content_hash == ScreenedText.screen("savebutton").content_hash
+
+    def test_a_bidi_control_cannot_split_a_secret_shape(self) -> None:
+        screened = ScreenedText.screen("ghp_" + "a" * 10 + "\u061c" + "b" * 26)
+        assert screened.text == "[redacted]"
+
     def test_nfc_and_collapsed_whitespace(self) -> None:
         assert ScreenedText.screen("  café \n\t is   shut ").text == "café is shut"
 

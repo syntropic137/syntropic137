@@ -7,6 +7,7 @@ never reach a projection.
 
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003
 from typing import TYPE_CHECKING
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
@@ -75,8 +76,14 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
         self._priority: Priority | None = None
         # submission_id -> source_id (None for the anonymous lane)
         self._members: dict[str, str | None] = {}
-        self._pull_requests: dict[tuple[str, int], PullRequestObservation] = {}
+        # (repository_id, number): the id, not the name, so a rename is the same PR
+        self._pull_requests: dict[tuple[int, int], PullRequestObservation] = {}
+        # Merged PRs whose fix a reopen declared did not hold: never evidence again.
+        self._spent_fixes: set[tuple[int, int]] = set()
         self._observations: dict[str, FixObservation] = {}
+        # Survive a reopen, so evidence already consumed is a no-op retry, not new evidence.
+        self._observed_until: dict[str, datetime] = {}
+        self._release_tags: set[str] = set()
         self._released = False
         self._resolved = False
         self._resolved_version: str | None = None
@@ -254,8 +261,8 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
         if self._screening is Screening.QUARANTINED:
             msg = "A quarantined ticket cannot be linked to a pull request; release it first"
             raise ValueError(msg)
-        if (command.repository, command.number) in self._pull_requests:
-            return
+        if (command.repository_id, command.number) in self._pull_requests:
+            return  # a retry, or the same PR after its repository was renamed
         self._apply(
             TicketPullRequestLinkedEvent(
                 ticket_id=self._ticket_id,
@@ -268,7 +275,7 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
     @command_handler("RecordPullRequestStateCommand")
     def record_pull_request_state(self, command: RecordPullRequestStateCommand) -> None:
         self._require_exists()
-        current = self._pull_requests.get((command.repository, command.number))
+        current = self._pull_requests.get((command.repository_id, command.number))
         if current is None:
             msg = f"Pull request {command.repository}#{command.number} is not linked"
             raise ValueError(msg)
@@ -280,6 +287,7 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
             TicketPullRequestStateChangedEvent(
                 ticket_id=self._ticket_id,
                 repository=command.repository,
+                repository_id=command.repository_id,
                 number=command.number,
                 state=command.state,
                 merge_commit=command.merge_commit,
@@ -290,12 +298,12 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
     @command_handler("RecordFixObservationCommand")
     def record_fix_observation(self, command: RecordFixObservationCommand) -> None:
         self._require_exists()
+        previous = self._observed_until.get(command.source_id)
+        if previous is not None and command.observed_at <= previous:
+            return  # per source, the latest observation wins, across a reopen too
         if not self._has_merged_fix:
-            msg = "No linked pull request has merged, so there is no fix to observe"
+            msg = "No linked pull request has merged a fix that holds, so there is none to observe"
             raise ValueError(msg)
-        previous = self._observations.get(command.source_id)
-        if previous is not None and command.observed_at <= previous.observed_at:
-            return  # per source, the latest observation wins
         self._apply(
             TicketFixObservedEvent(
                 ticket_id=self._ticket_id,
@@ -311,11 +319,11 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
     @command_handler("RecordFixReleaseCommand")
     def record_fix_release(self, command: RecordFixReleaseCommand) -> None:
         self._require_exists()
+        if self._released or command.release_tag in self._release_tags:
+            return  # a retry, including of the release whose fix a reopen rejected
         if not self._has_merged_fix:
-            msg = "No linked pull request has merged, so there is no fix to observe"
+            msg = "No linked pull request has merged a fix that holds, so there is none to release"
             raise ValueError(msg)
-        if self._released:
-            return
         self._apply(
             TicketFixReleasedEvent(
                 ticket_id=self._ticket_id,
@@ -370,7 +378,10 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
 
     @property
     def _has_merged_fix(self) -> bool:
-        return any(pr.state is PullRequestState.MERGED for pr in self._pull_requests.values())
+        return any(
+            pr.state is PullRequestState.MERGED and key not in self._spent_fixes
+            for key, pr in self._pull_requests.items()
+        )
 
     def _latest_observed_fix_version(self) -> str | None:
         """The version from the most recent fix-containing observation by a current signed reporter."""
@@ -435,13 +446,13 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
 
     @event_sourcing_handler("TicketPullRequestLinked")
     def on_pull_request_linked(self, event: TicketPullRequestLinkedEvent) -> None:
-        self._pull_requests[(event.repository, event.number)] = PullRequestObservation(
+        self._pull_requests[(event.repository_id, event.number)] = PullRequestObservation(
             state=PullRequestState.OPEN
         )
 
     @event_sourcing_handler("TicketPullRequestStateChanged")
     def on_pull_request_state_changed(self, event: TicketPullRequestStateChangedEvent) -> None:
-        self._pull_requests[(event.repository, event.number)] = PullRequestObservation(
+        self._pull_requests[(event.repository_id, event.number)] = PullRequestObservation(
             state=event.state, observed_at=event.observed_at
         )
 
@@ -452,10 +463,12 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
             version=event.version,
             observed_at=event.observed_at,
         )
+        self._observed_until[event.source_id] = event.observed_at
 
     @event_sourcing_handler("TicketFixReleased")
-    def on_fix_released(self, _event: TicketFixReleasedEvent) -> None:
+    def on_fix_released(self, event: TicketFixReleasedEvent) -> None:
         self._released = True
+        self._release_tags.add(event.release_tag)
 
     @event_sourcing_handler("TicketResolved")
     def on_resolved(self, event: TicketResolvedEvent) -> None:
@@ -468,9 +481,17 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
 
     @event_sourcing_handler("TicketReopened")
     def on_reopened(self, _event: TicketReopenedEvent) -> None:
-        """A regression: the fix that resolved it did not hold, so its evidence goes too."""
+        """A regression: the fix that resolved it did not hold, so its evidence goes too.
+
+        The merged PRs are spent and the observations and release no longer count,
+        but the watermarks and release tags stay: replaying that same evidence must
+        not resolve the ticket again. Only a newly merged PR can.
+        """
         self._closed = False
         self._resolved = False
         self._resolved_version = None
         self._released = False
         self._observations = {}
+        self._spent_fixes |= {
+            key for key, pr in self._pull_requests.items() if pr.state is PullRequestState.MERGED
+        }

@@ -54,7 +54,8 @@ The aggregate's rules:
 - **Retries are no-ops, not errors.** A second `OpenTicket` with the same ticket id and
   submission is a no-op success. A submission that is already a member is a no-op, so
   the reporter count can never rise twice for one submission. A PR that is already
-  linked is a no-op. The Screener retries after a crash, and none of these may count
+  linked is a no-op. A PR is keyed by repository id and number, never by repository
+  name, so linking or observing it after a rename reaches the same PR. The Screener retries after a crash, and none of these may count
   twice.
 - **Quarantine is contagious in one direction only.** A quarantined submission never
   joins a clean ticket. A quarantined ticket cannot be linked to an issue, an execution
@@ -77,7 +78,11 @@ because betas create no release. A ticket with no signed reporter never resolves
 `TicketResolved` is emitted by the aggregate in the same command whose event made the
 policy true, and it names the version. Per source, the latest observation wins, so an
 older observation that arrives late cannot un-resolve a ticket. Reopening a resolved
-ticket (a regression) discards the fix evidence, because the fix did not hold.
+ticket (a regression) discards the fix evidence, because the fix did not hold: its
+merged PRs become spent fixes, and its observations and release stop counting. The
+per-source observation watermarks and the release tags survive the reopen, so a
+retry of that same evidence is a no-op and cannot resolve the regression again. Only
+a newly merged PR makes a fix observable or releasable again.
 
 **This rule is a proposal.** It is implemented as the default so the domain can be
 built and tested. If the owner chooses differently, only `ResolutionPolicy` and its
@@ -86,7 +91,8 @@ tests change.
 ### 4. Pure domain services, not aggregates
 
 - **Screened Text**: deterministic normalisation (NFC; strip C0/C1 controls,
-  zero-width and bidi code points; collapse whitespace; redact secret shapes; cap at
+  every Unicode format character (Cf), which covers zero-width characters and all
+  twelve bidi controls; collapse whitespace; redact secret shapes; cap at
   4,000 characters). It is the only text an agent may read. Redaction is defence in
   depth and **is not a PII control**.
 - **Screening Policy**: maps a classifier's verdict and confidence to open, quarantine
