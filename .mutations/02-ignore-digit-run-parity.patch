@@ -1,0 +1,18 @@
+diff --git a/packages/syn-domain/src/syn_domain/pagination.py b/packages/syn-domain/src/syn_domain/pagination.py
+index d87d1876a..bbc0d5438 100644
+--- a/packages/syn-domain/src/syn_domain/pagination.py
++++ b/packages/syn-domain/src/syn_domain/pagination.py
+@@ -272,12 +272,7 @@ def _time_of_day_start(text: str) -> int:
+         return 11  # YYYY-Www-D
+     if text[4] != "W":
+         return 9  # YYYYMMDD
+-    end = 7
+-    while end < len(text) and _is_ascii_digit(text[end]):
+-        end += 1
+-    if end < 9:
+-        return end + 1  # YYYYWww or YYYYWwwD, separator not a digit
+-    return 8 if end % 2 == 0 else 9  # a digit run: its parity names the date
++    return 9 if _is_ascii_digit(text[7]) else 8
+ 
+ 
+ def _is_ascii_digit(char: str) -> bool:
