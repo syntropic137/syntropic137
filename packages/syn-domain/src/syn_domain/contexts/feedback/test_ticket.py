@@ -109,16 +109,38 @@ def _report(
     )
 
 
-def _link(number: int) -> LinkPullRequestCommand:
+def _link(number: int, *, repository: str = REPO, repository_id: int = 1) -> LinkPullRequestCommand:
     return LinkPullRequestCommand(
-        aggregate_id=TICKET, repository=REPO, repository_id=1, number=number
+        aggregate_id=TICKET, repository=repository, repository_id=repository_id, number=number
     )
 
 
-def _pr(number: int, state: PullRequestState, at: datetime) -> RecordPullRequestStateCommand:
+def _pr(
+    number: int,
+    state: PullRequestState,
+    at: datetime,
+    *,
+    repository: str = REPO,
+    repository_id: int = 1,
+) -> RecordPullRequestStateCommand:
     return RecordPullRequestStateCommand(
-        aggregate_id=TICKET, repository=REPO, number=number, state=state, observed_at=at
+        aggregate_id=TICKET,
+        repository=repository,
+        repository_id=repository_id,
+        number=number,
+        state=state,
+        observed_at=at,
     )
+
+
+def _release(tag: str = "v0.30.0") -> RecordFixReleaseCommand:
+    return RecordFixReleaseCommand(
+        aggregate_id=TICKET, release_tag=tag, version=tag.removeprefix("v"), commit="def456"
+    )
+
+
+def _reopen() -> ReopenTicketCommand:
+    return ReopenTicketCommand(aggregate_id=TICKET, by="owner", reason="regressed")
 
 
 def _observe(
@@ -307,6 +329,28 @@ class TestPullRequestStatus:
         )
         assert ticket.load().status is TicketStatus.FIX_MERGED
 
+    def test_a_renamed_repository_is_the_same_pr(self) -> None:
+        ticket = _run(None, _open(), *_merged())
+        before = len(ticket.events)
+        _run(ticket, _link(40, repository="syntropic137/renamed"))
+        assert len(ticket.events) == before  # the relink is a retry, not a second PR
+        assert ticket.load().status is TicketStatus.FIX_MERGED
+
+    def test_a_state_observed_under_the_new_name_reaches_the_linked_pr(self) -> None:
+        ticket = _run(
+            None,
+            _open(),
+            _link(40),
+            _pr(40, PullRequestState.MERGED, T0, repository="syntropic137/renamed"),
+        )
+        assert ticket.load().status is TicketStatus.FIX_MERGED
+
+    def test_the_same_number_in_another_repository_is_another_pr(self) -> None:
+        ticket = _run(
+            None, _open(), *_merged(), _link(40, repository="other/repo", repository_id=2)
+        )
+        assert ticket.load().status is TicketStatus.IN_PROGRESS
+
     def test_state_of_an_unlinked_pr_raises(self) -> None:
         ticket = _run(None, _open())
         with pytest.raises(ValueError, match="not linked"):
@@ -417,6 +461,57 @@ class TestResolution:
         )
         assert ticket.load().status is TicketStatus.FIX_MERGED
         assert ticket.load().resolved_version is None
+        assert ticket.load().fix_observation("src-a") is None
+
+    def test_a_retried_observation_after_reopen_does_not_resolve_again(self) -> None:
+        ticket = _run(None, _open(source_id="src-a"), *_merged(), _observe("src-a", T0), _reopen())
+        before = len(ticket.events)
+        _run(ticket, _observe("src-a", T0))
+        assert len(ticket.events) == before
+        assert ticket.load().status is not TicketStatus.RESOLVED
+
+    def test_a_retried_release_after_reopen_does_not_resolve_again(self) -> None:
+        ticket = _run(None, _open(source_id=None), *_merged(), _release(), _reopen())
+        before = len(ticket.events)
+        _run(ticket, _release())
+        assert len(ticket.events) == before
+        assert ticket.load().status is not TicketStatus.RESOLVED
+
+    def test_the_spent_fix_is_not_evidence_after_reopen(self) -> None:
+        """A later poll of the deployment whose fix did not hold cannot resolve it again."""
+        ticket = _run(None, _open(source_id="src-a"), *_merged(), _observe("src-a", T0), _reopen())
+        with pytest.raises(ValueError, match="merged"):
+            _run(ticket, _observe("src-a", T0 + timedelta(hours=1)))
+        with pytest.raises(ValueError, match="merged"):
+            _run(ticket, _release("v0.31.0"))
+
+    def test_a_new_fix_resolves_the_reopened_ticket(self) -> None:
+        ticket = _run(
+            None,
+            _open(source_id="src-a"),
+            *_merged(),
+            _observe("src-a", T0),
+            _reopen(),
+            _link(41),
+            _pr(41, PullRequestState.MERGED, T0 + timedelta(hours=1)),
+            _observe("src-a", T0 + timedelta(hours=2), version="0.31.0-beta.1"),
+        )
+        assert ticket.load().status is TicketStatus.RESOLVED
+        assert [e.version for e in _resolved_events(ticket)] == ["0.30.0-beta.1", "0.31.0-beta.1"]
+
+    def test_a_new_release_resolves_the_reopened_ticket(self) -> None:
+        ticket = _run(
+            None,
+            _open(source_id=None),
+            *_merged(),
+            _release(),
+            _reopen(),
+            _link(41),
+            _pr(41, PullRequestState.MERGED, T0 + timedelta(hours=1)),
+            _release("v0.31.0"),
+        )
+        assert ticket.load().status is TicketStatus.RESOLVED
+        assert ticket.load().resolved_version == "0.31.0"
 
 
 def test_no_ticket_event_carries_reporter_text() -> None:

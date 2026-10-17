@@ -152,6 +152,11 @@ The #1628 facts.
 - **Resolved**: the **Resolution Policy** is true. Either the fix is released, or
   every *signed* reporter has observed it. A resolution names a version. The policy
   is a proposed default awaiting the owner (decision D7 in the plan, PR #2010).
+- **Spent Fix**: a merged PR on a ticket that was then reopened. The fix did not
+  hold, so neither it nor the observations and release that resolved the ticket count
+  again; replaying that evidence is a no-op. Only a newly merged PR can resolve it.
+- A linked pull request is identified by its **repository id** and number. The
+  repository name is only how it was displayed, so a rename is the same PR.
 
 ### Digest / Quarantine Alert
 

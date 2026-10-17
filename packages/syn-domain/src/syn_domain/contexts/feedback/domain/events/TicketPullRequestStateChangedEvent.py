@@ -16,6 +16,7 @@ class TicketPullRequestStateChangedEvent(DomainEvent):
 
     ticket_id: str = Field(min_length=1)
     repository: str = Field(min_length=1)
+    repository_id: int
     number: int = Field(gt=0)
     state: PullRequestState
     merge_commit: str | None = None
