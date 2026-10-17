@@ -369,3 +369,18 @@ describe('IsoCity, codex review 2 of #1856', () => {
     expect(anchorOf(container)).toBe(FIRST)
   })
 })
+
+describe('IsoCity "Now" (feedback 9b433949: current week, but not the current day)', () => {
+  it('returns to the current week AND selects today, replacing an older selection', async () => {
+    const onselect = vi.fn()
+    const { container } = render(IsoCity, { days: busy, today: TODAY, selected: '2026-07-14', onselect })
+    await back()
+    await fireEvent.click(screen.getByRole('button', { name: 'Now' }))
+    // The selection is painted once the glide home lands.
+    await fireEvent.transitionEnd(floorGroup(container), { propertyName: 'transform' })
+    expect(anchorOf(container)).toBe(FIRST)
+    expect(container.querySelector(`[data-date-block="${TODAY}"]`)?.hasAttribute('data-selected')).toBe(true)
+    expect(container.querySelector('[data-date-block="2026-07-14"]')?.hasAttribute('data-selected') ?? false).toBe(false)
+    expect(onselect).toHaveBeenLastCalledWith(expect.objectContaining({ date: TODAY }))
+  })
+})

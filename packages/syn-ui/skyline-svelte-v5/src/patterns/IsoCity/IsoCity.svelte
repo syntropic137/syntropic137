@@ -224,6 +224,13 @@
     offset = Math.min(maxOffset, Math.max(0, n))
   }
 
+  /** "Now": today's week AND today's day - the newest active day, which is today when today had runs (feedback 9b433949). */
+  function goNow() {
+    setOffset(0)
+    const d = active.at(-1)
+    if (d) pick(d)
+  }
+
   function pick(d: SkylineDay) {
     if (d.date === selected) return
     selected = d.date
@@ -505,7 +512,7 @@
     <span class="sky-iso__back" aria-live="polite">{offsetLabel(off, win)}</span>
     <button class="sky-iso__icon" type="button" aria-label="One month forward" disabled={off <= 0} onclick={() => setOffset(off - 1)}><Glyph d={GLYPH.chevronRight} weight={1.75} /></button>
     <span class="sky-iso__sep" aria-hidden="true"></span>
-    <button class="sky-iso__now-button" type="button" aria-pressed={off === 0} onclick={() => setOffset(0)}>Now</button>
+    <button class="sky-iso__now-button" type="button" aria-pressed={off === 0} onclick={goNow}>Now</button>
   </div>
 {/snippet}
 
