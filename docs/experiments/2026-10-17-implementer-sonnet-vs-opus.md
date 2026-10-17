@@ -7,7 +7,9 @@ new workflows. Nothing dispatched.
 Conditions:
 - The treatment pins the explicit id `claude-sonnet-5-5`, not the alias.
 - **Abort rule:** on the FIRST treatment execution, `phases[].model` must read
-  `claude-sonnet-5-5`. If it does not, abort the whole experiment.
+  `claude-sonnet-5-5`, and on the FIRST control execution it must read
+  `claude-opus-5-5`. The control runs the `opus` alias, installed from main
+  by the orchestrator. If either check fails, abort the whole experiment.
 - Scoring runs on the platform via `eval-implement-score-v1`
   (`workflows/evals/implement-score/`). That workflow is identical for both
   arms, pinned to `claude-opus-5-5`, and does no judging: the verdict is
