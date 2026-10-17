@@ -83,6 +83,14 @@ from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     WorkflowType,
     require_supported_execution_type,
 )
+from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+    HOST_CREDENTIALS,
+    NO_CREDENTIALS,
+    CredentialFreePhaseRefusedError,
+    HostCredentials,
+    NoCredentials,
+    WorkspaceCredentialPolicy,
+)
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
 )
@@ -356,7 +364,9 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
+    "HOST_CREDENTIALS",
     "MAX_START_ATTEMPTS",
+    "NO_CREDENTIALS",
     "ORCHESTRATION_EVENT_EPOCH",
     "OWED_STATUSES",
     "PHASE_ID_PATTERN",
@@ -403,6 +413,7 @@ __all__ = [
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
     "CreatedPullRequest",
+    "CredentialFreePhaseRefusedError",
     "CredentialRenewalFailedError",
     "DefinitionChangeKind",
     "DelegationAttempt",
@@ -447,6 +458,7 @@ __all__ = [
     "Goal",
     # Aggregates
     "HandlerResult",
+    "HostCredentials",
     "HostWorkspaceGit",
     "ImageManifest",
     "InheritanceUnavailableError",
@@ -457,6 +469,7 @@ __all__ = [
     "InvalidTagsError",
     "IsolationConfig",
     "LaunchEval",
+    "NoCredentials",
     "OrphanedWorkspace",
     "OwnerExecution",
     "Percentiles",
@@ -541,6 +554,7 @@ __all__ = [
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
+    "WorkspaceCredentialPolicy",
     "WorkspaceDeleteFallback",
     "WorkspaceDirRemover",
     "WorkspaceUsage",

@@ -394,7 +394,7 @@ async def _create(
     with (
         patch.object(adapter, "_provider", provider),
         patch(
-            "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+            "syn_adapters.workspace_backends.backend_kit.verify_image_async",
             side_effect=_passthrough_verify,
         ),
     ):
