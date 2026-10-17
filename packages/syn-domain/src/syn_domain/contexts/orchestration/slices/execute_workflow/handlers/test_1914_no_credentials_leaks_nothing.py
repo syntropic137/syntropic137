@@ -2,15 +2,19 @@
 
 Every host credential is configured with an invented value: the Claude OAuth
 token, the Anthropic API key, a GitHub App installation token, the Codex auth
-file and a platform grant. The REAL provision handler runs against the real
-(in-memory) WorkspaceService, and every byte that reaches the workspace is
-recorded: each ``execute`` (argv and env), each file written, the setup
-secrets, and the env the agent is streamed with.
+file, a platform grant and the session-store write token. The REAL provision
+handler runs against the real (in-memory) WorkspaceService, and every byte that
+reaches the workspace is recorded: each ``execute`` (argv and env), each file
+written, the setup secrets, and the env the agent is streamed with. The
+session-store token lives in the Docker adapter, so the real policy-bearing
+``AgenticIsolationAdapter`` also creates the workspace against a recording
+provider, and what its container would be given - environment, labels and
+every credential binding, resolved - is the fifth channel.
 
-The same scan under HostCredentials is the positive control: it must FIND
-every value, so a source left unpopulated cannot make the NoCredentials scan
-pass vacuously. The session-store token is a Docker-adapter source and is
-covered beside the BackendKit (test_1914_backend_kit.py).
+The same scan under HostCredentials, with the SAME repo-less phase, is the
+positive control: it must FIND every value, so a source left unpopulated
+cannot make the NoCredentials scan pass vacuously. The scan test runs it
+first, so a mutation run that selects only the scan still proves population.
 """
 
 from __future__ import annotations
@@ -21,7 +25,10 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from agentic_isolation.providers.base import ExecuteResult
 
+from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
+from syn_adapters.workspace_backends.backend_kit import BackendKit
 from syn_adapters.workspace_backends.service import (
     SetupPhaseSecrets,
     WorkspaceBackend,
@@ -29,16 +36,19 @@ from syn_adapters.workspace_backends.service import (
 )
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
-from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
-from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+from syn_domain.contexts.orchestration import (
     HOST_CREDENTIALS,
     NO_CREDENTIALS,
     CredentialFreePhaseRefusedError,
     WorkspaceCredentialPolicy,
 )
+from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+    IsolationConfig,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
     WorkspaceProvisionHandler,
@@ -62,6 +72,13 @@ _CODEX = '{"auth_mode":"chatgpt","tokens":{"access_token":"FAKE1914codex"}}'
 _CODEX_MARK = "FAKE1914codex"
 _GITHUB = "ghs_FAKE1914installation"
 _PLATFORM = "syn_pat_FAKE1914platform"
+_SESSION_STORE = "FAKE1914-session-store-write-token"
+_SESSION_STORE_URL = "https://sessions.fake1914.invalid"
+# Invented: no stub image is pinned yet (step H). Never a real digest.
+_STUB = "ghcr.io/example/scripted-stub@sha256:" + "19" * 32
+#: Stands in for a proxy only where none exists, so a bypassed agent-env
+#: builder gets past its proxy check and the scan sees what it would send.
+_INERT_PROXY = "http://inert-proxy.fake1914.invalid"
 
 #: setup_phase's codex-auth probe echoes this when the staged file is gone.
 _STAGED_PROBE = _STAGED_ABSENT = "STAGED_CREDENTIAL_ABSENT"
@@ -77,9 +94,18 @@ class _Recorder:
     files: list[str] = field(default_factory=list)
     setup_secrets: list[str] = field(default_factory=list)
     stream_envs: list[str] = field(default_factory=list)
+    container: list[str] = field(default_factory=list)
 
     def haystack(self) -> str:
-        return "\n".join([*self.executes, *self.files, *self.setup_secrets, *self.stream_envs])
+        return "\n".join(
+            [
+                *self.executes,
+                *self.files,
+                *self.setup_secrets,
+                *self.stream_envs,
+                *self.container,
+            ]
+        )
 
 
 @dataclass(frozen=True)
@@ -97,6 +123,10 @@ class _FakeGitHubClient:
 
     async def __aexit__(self, *args: object) -> None:
         return None
+
+    async def list_installations(self) -> list[dict[str, str]]:
+        # The shape a repo-less phase mints its gh credential from.
+        return [{"id": "inst-1914"}]
 
     async def get_installation_for_repo(self, full_name: str) -> str:
         del full_name
@@ -120,6 +150,8 @@ def every_host_credential(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv(ENV_CLAUDE_CODE_OAUTH_TOKEN, _OAUTH)
     monkeypatch.setenv(ENV_ANTHROPIC_API_KEY, _API_KEY)
     monkeypatch.setenv(ENV_CODEX_AUTH_JSON, _CODEX)
+    monkeypatch.setenv("SYN_SESSION_STORE_URL", _SESSION_STORE_URL)
+    monkeypatch.setenv("SYN_SESSION_STORE_AUTH_TOKEN", _SESSION_STORE)
     reset_settings()
     app = MagicMock(is_configured=True, bot_name="syn-bot", bot_email="bot@example.com")
     with (
@@ -185,11 +217,45 @@ def _service(policy: WorkspaceCredentialPolicy, recorder: _Recorder) -> Workspac
     return service
 
 
+async def _record_container(policy: WorkspaceCredentialPolicy, recorder: _Recorder) -> None:
+    """What the real Docker adapter, under ``policy``, would hand its container.
+
+    The session store is read from host settings, as production does. Every
+    credential binding is resolved, so a token delivered by reference counts.
+    """
+    kit = BackendKit(
+        default_image=_STUB, credential_policy=policy, credential_free_images=frozenset({_STUB})
+    )
+    adapter = AgenticIsolationAdapter(kit=kit)
+    workspace = MagicMock(id="ws-1914", metadata={"workspace_dir": "/workspace"})
+    provider = MagicMock(
+        create=AsyncMock(return_value=workspace),
+        execute=AsyncMock(return_value=ExecuteResult(exit_code=0, stdout="", stderr="")),
+    )
+    with (
+        patch.object(adapter, "_provider", provider),
+        patch(
+            "syn_adapters.workspace_backends.backend_kit.verify_image_async",
+            AsyncMock(return_value=_STUB),
+        ),
+    ):
+        await adapter.create(
+            IsolationConfig(
+                execution_id="exec-1914", workspace_id="ws-1914", phase_id="scripted", image=_STUB
+            )
+        )
+    (ws_config,) = provider.create.call_args.args
+    resolved = [await adapter.credentials.resolve(b.ref) for b in ws_config.credentials]
+    recorder.container.append(f"{ws_config.environment!r} {ws_config.labels!r} {resolved!r}")
+
+
 async def _provision(
     policy: WorkspaceCredentialPolicy, repos: list[str]
 ) -> tuple[_Recorder, WorkspaceService]:
     recorder = _Recorder()
+    await _record_container(policy, recorder)
     service = _service(policy, recorder)
+    real_proxy_url = ManagedWorkspace.proxy_url
     real_run_setup = ManagedWorkspace.run_setup_phase
 
     async def run_setup_phase(self: ManagedWorkspace, secrets: SetupPhaseSecrets) -> object:
@@ -205,7 +271,14 @@ async def _provision(
     todo = TodoItem(
         execution_id="exec-1914", action=TodoAction.PROVISION_WORKSPACE, phase_id="scripted"
     )
-    with patch.object(ManagedWorkspace, "run_setup_phase", run_setup_phase):
+    with (
+        patch.object(ManagedWorkspace, "run_setup_phase", run_setup_phase),
+        patch.object(
+            ManagedWorkspace,
+            "proxy_url",
+            property(lambda ws: real_proxy_url.fget(ws) or _INERT_PROXY),  # type: ignore[union-attr]
+        ),
+    ):
         result = await handler.handle(
             todo=todo,
             phase=_phase(),
@@ -235,22 +308,33 @@ _SECRETS = {
     "codex auth": _CODEX_MARK,
     "github app token": _GITHUB,
     "platform grant": _PLATFORM,
+    "session-store token": _SESSION_STORE,
 }
+
+
+def _assert_every_source_populated(recorder: _Recorder) -> None:
+    haystack = recorder.haystack()
+    assert recorder.setup_secrets, "the setup phase was never run"
+    assert recorder.stream_envs, "the agent was never streamed"
+    missing = [name for name, value in _SECRETS.items() if value not in haystack]
+    assert missing == [], f"sources never populated, so absence would prove nothing: {missing}"
+    # Renewal rewrites the gh credential file: the token must reach a file.
+    assert _GITHUB in "\n".join(recorder.files), "the GitHub token never reached a file"
 
 
 @pytest.mark.usefixtures("every_host_credential")
 class TestNoCredentialsLeaksNothing:
     async def test_host_credentials_populate_every_source(self) -> None:
-        """Positive control: under HostCredentials every invented value IS found."""
+        """Positive control with repositories: every invented value IS found."""
         recorder, _ = await _provision(HOST_CREDENTIALS, [_REPO])
 
-        haystack = recorder.haystack()
-        assert recorder.setup_secrets, "the setup phase was never run"
-        assert recorder.stream_envs, "the agent was never streamed"
-        missing = [name for name, value in _SECRETS.items() if value not in haystack]
-        assert missing == [], f"sources never populated, so absence would prove nothing: {missing}"
+        _assert_every_source_populated(recorder)
 
     async def test_no_credentials_scan_finds_none(self) -> None:
+        # Positive control first, on the same repo-less shape the scan runs.
+        host, _ = await _provision(HOST_CREDENTIALS, [])
+        _assert_every_source_populated(host)
+
         recorder, _ = await _provision(NO_CREDENTIALS, [])
 
         assert recorder.executes, "nothing was executed, so the scan saw nothing"

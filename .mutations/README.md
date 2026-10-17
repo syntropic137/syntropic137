@@ -1,6 +1,6 @@
 # Mutation evidence for #1914 (BackendKit + WorkspaceCredentialPolicy)
 
-Each patch re-introduces one bypass of a credential guard. All seven were killed locally (2026-10-17) by the node ids below.
+Each patch re-introduces one bypass of a credential guard. All eight were killed locally (2026-10-17) by the node ids below.
 Delete this directory before merge (CI `mutations-not-merged`).
 
 | Patch | Guard it removes | Test that must kill it |
@@ -12,10 +12,14 @@ Delete this directory before merge (CI `mutations-not-merged`).
 | 05-session-store-token-kept | Docker adapter keeps the session-store write token under NoCredentials | `packages/syn-adapters/tests/workspace_backends/test_1914_backend_kit.py::TestNoCredentialsDropsTheSessionStoreToken::test_no_binding_and_no_store_env` |
 | 06-platform-grant-ignores-policy | platform grant (ADR-072) issued to a NoCredentials workspace | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/test_1914_no_credentials_leaks_nothing.py::TestNoCredentialsLeaksNothing::test_no_credentials_scan_finds_none` |
 | 07-sidecar-requested-regardless | handler hard-codes `with_sidecar=True, inject_tokens=True` again | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/test_1914_no_credentials_leaks_nothing.py::TestNoCredentialsLeaksNothing::test_no_credentials_scan_finds_none` |
+| 08-renewal-ignores-policy | `ManagedWorkspace.renew_git_credential` renews (rewrites the gh credential file) under NoCredentials | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/test_1914_no_credentials_leaks_nothing.py::TestNoCredentialsLeaksNothing::test_no_credentials_scan_finds_none` |
 
-How 01 is killed: a NoCredentials workspace has no sidecar. A bypassed `_build_agent_env` therefore reaches its "Shared Envoy proxy not available"
-check and raises before the env exists. The test fails, but on that raise, not on a credential found in the scan. Other bypasses
-(03, 06) are killed by the scan assertion itself.
+How the scan kills them: the scan node first runs the same repo-less phase under HostCredentials and
+asserts every invented value (Claude OAuth, API key, Codex auth, GitHub token, platform grant, session-store
+token) is found, then scans every channel under NoCredentials. 01, 03, 05, 06 and 08 each fail on the scan
+assertion naming the leaked credential and its channel (01 in `stream_envs`: the fixture gives a workspace
+with no sidecar an inert proxy URL, so a bypassed `build_agent_env` gets past its proxy check). 07 is killed
+by the service's own refusal of a sidecar for a credential-free workspace.
 
 Run (no Docker needed):
 
