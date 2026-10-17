@@ -1,0 +1,13 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index 2bb72c126..4c85ce949 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -152,7 +152,7 @@ class _Scanner:
+                 while end < len(source) and _is_word_char(source[end]):
+                     end += 1
+                 # A property is an operand whatever it is called: ``obj.return``.
+-                word = "" if member else source[self.i : end]
++                word = source[self.i : end]
+                 operand_expected = word in _REGEX_AFTER_KEYWORDS
+                 self.i = end
+                 continue
