@@ -368,11 +368,12 @@ class TestGhReadsHostsYmlRoutedByTheRepoUnderWork:
 
         ((installation, request),) = github.token_requests
         assert installation == "inst-1"
-        # No body at all: no repository to scope to, and no permission subset
-        # (#1477), so the token carries the installation's grant everywhere.
-        assert request is None, (
-            "a repo-less credential sends no body: no repository scope, no permission subset"
-        )
+        # No repository to scope to, so the token reaches everywhere the
+        # installation does, with the installation's grant (#1477) - `actions`
+        # capped, which this grant does not hold.
+        assert request is not None
+        assert request.repositories is None, "a repo-less credential has no repository scope"
+        assert request.permissions == _GRANTED
         assert github.reaches(container.gh_token(), "org/repo-a")
         assert container.git_token("org/repo-a") is None
 
