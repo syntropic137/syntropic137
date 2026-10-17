@@ -118,7 +118,7 @@
           "prompt_file": "phases/score.md"
         }
       ],
-      "document_sha256": "7c43fabff47e7e4e140b6d5fc16a1b2ec9454e4feecffdf211e35d59c26c3d75"
+      "document_sha256": "26e86cce05cd3990e1cff5ff08e9642f663c06075d477d938c178b7bc1a8e22e"
     },
     "workflows/evals/verify-pinned/workflow.yaml": {
       "phases": [

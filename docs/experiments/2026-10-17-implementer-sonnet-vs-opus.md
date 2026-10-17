@@ -81,8 +81,13 @@ Estimated from the median production implement phase ($1.92, 43 min, n=25).
    `arm:control` or `arm:treatment`.
 2. Check the first treatment execution's `phases[].model` (the abort rule).
 3. When an implement run completes, launch `eval-implement-score-v1` with
-   `task=<case id>` and `implement_execution_id=<id>`. If the deployment has
-   no platform API access, also pass the patch text as `patch`.
+   `task=<case id>` and `implement_execution_id=<id>`. The VPS has no platform
+   API access for workspaces (SYN_PLATFORM_ACCESS_ENABLED unset, confirmed by
+   the orchestrator on 2026-10-17). So the researcher fetches `implement.patch`
+   with `syn137-api` and passes it as `patch`, with its sha256 as
+   `patch_sha256`. The scorer refuses (ERROR) a patch whose hash does not match,
+   so a transcription error is never scored. An ERROR from a mismatch is
+   re-run once.
 4. Read `score.md` line 1. Record PASS, FAIL or ERROR per execution in the
    Results table below.
 5. Read each PASS run's tool trace for leaks (`git log --all`, `git show`,
@@ -92,10 +97,10 @@ Estimated from the median production implement phase ($1.92, 43 min, n=25).
 
 - The orchestrator must register `eval-implement-pinned-sonnet-v1` and
   `eval-implement-score-v1` on the VPS after the pit stop.
-- Whether the VPS grants platform API access to workspaces is unknown. If it
-  does not, the patch is passed as an input. A patch containing a triple
-  backtick could break the prompt fence: check the scorer's reported sha256
-  against the artifact.
+- The patch reaches the scorer through the prompt, because inputs are only
+  substituted into prompt text. The agent writes it back out, and the sha256
+  check guards that copy. API inputs have no size limit; a very large patch is
+  reported to the orchestrator instead of being sent.
 
 ## Results
 

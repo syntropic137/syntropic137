@@ -10,11 +10,16 @@ or edit it. The verdict is the scorer's exit code and nothing else.
 
 Write it to `/workspace/artifacts/output/implement.patch`, byte for byte.
 
-- If the `patch` input below is not empty, use it exactly:
+- If the `patch` input is not empty, it is everything strictly between the two
+  marker lines below. Write it with the Write tool exactly as given, ending
+  with a single newline. Then check it:
+  `sha256sum /workspace/artifacts/output/implement.patch` must equal
+  `{{patch_sha256}}`. If it does not, write `RESULT: ERROR` ("patch transfer
+  mismatch") and stop. Never score a patch whose hash does not match.
 
-  ```
-  {{patch}}
-  ```
+=====BEGIN-PATCH-7f3c=====
+{{patch}}
+=====END-PATCH-7f3c=====
 
 - Otherwise fetch it over the read-only platform API. `$SYN_API_URL` and
   `$SYN_API_TOKEN` are set when this deployment grants API access:

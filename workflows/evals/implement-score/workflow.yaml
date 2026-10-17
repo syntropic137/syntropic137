@@ -20,6 +20,9 @@ inputs:
   - name: patch
     description: "Optional: the patch text itself, when this workspace has no platform API access to fetch it"
     required: false
+  - name: patch_sha256
+    description: "Required with `patch`: sha256 of the patch as fetched, so a transcription error is caught, not scored"
+    required: false
 
 # WHY THIS IS A WORKFLOW, NOT A LOCAL COMMAND. The README of
 # evals/implementer-seed-v1 says score runs in a workspace and never on a host:
