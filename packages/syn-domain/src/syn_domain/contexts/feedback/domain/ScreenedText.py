@@ -18,16 +18,10 @@ REDACTED = "[redacted]"
 
 # C0 and C1 controls other than whitespace (whitespace is collapsed below),
 # zero-width characters, and bidi embeddings, overrides and isolates.
-_INVISIBLE = re.compile(
-    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f"
-    "​-‏⁠-⁤﻿"
-    "‪-‮⁦-⁩]"
-)
+_INVISIBLE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f​-‏⁠-⁤﻿‪-‮⁦-⁩]")
 _WHITESPACE = re.compile(r"\s+")
 _SECRET_SHAPES = (
-    re.compile(
-        r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"
-    ),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"),
     re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}"),
     re.compile(r"\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{20,}"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),

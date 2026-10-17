@@ -7,12 +7,15 @@ Report on the matched ticket; the similarity is recorded on ``TicketReportAdded`
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.feedback._shared.value_objects import TicketType
-from syn_domain.contexts.feedback.domain.ScreenedText import ScreenedText
+from syn_domain.contexts.feedback._shared.value_objects import TicketType  # noqa: TC001
+from syn_domain.contexts.feedback.domain.ScreenedText import ScreenedText  # noqa: TC001
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 class MatchBucket(BaseModel):

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.feedback._shared.value_objects import PullRequestRef, PullRequestState
+from syn_domain.contexts.feedback._shared.value_objects import (  # noqa: TC001
+    PullRequestRef,
+    PullRequestState,
+)
 
 
 class PullRequestSnapshot(BaseModel):
@@ -33,4 +36,6 @@ class ForgeReads(Protocol):
         """True when ``commit`` is an ancestor of (or equal to) ``base``."""
         ...
 
-    async def releases_since(self, repository: str, *, since: datetime) -> list[PublishedRelease]: ...
+    async def releases_since(
+        self, repository: str, *, since: datetime
+    ) -> list[PublishedRelease]: ...

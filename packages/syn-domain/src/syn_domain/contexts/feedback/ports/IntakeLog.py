@@ -8,14 +8,14 @@ disposition are each written once.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
 from enum import StrEnum
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.feedback._shared.value_objects import Provenance
-from syn_domain.contexts.feedback.domain.ScreeningPolicy import ScreeningResult
+from syn_domain.contexts.feedback._shared.value_objects import Provenance  # noqa: TC001
+from syn_domain.contexts.feedback.domain.ScreeningPolicy import ScreeningResult  # noqa: TC001
 
 
 class Disposition(StrEnum):

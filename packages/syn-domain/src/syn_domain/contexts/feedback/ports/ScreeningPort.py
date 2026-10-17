@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from syn_domain.contexts.feedback.domain.ScreenedText import ScreenedText
-from syn_domain.contexts.feedback.domain.ScreeningPolicy import ScreeningResult
+if TYPE_CHECKING:
+    from syn_domain.contexts.feedback.domain.ScreenedText import ScreenedText
+    from syn_domain.contexts.feedback.domain.ScreeningPolicy import ScreeningResult
 
 
 class ScreeningPort(Protocol):

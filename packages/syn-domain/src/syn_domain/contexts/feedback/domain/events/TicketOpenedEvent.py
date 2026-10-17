@@ -5,7 +5,12 @@ from __future__ import annotations
 from event_sourcing import DomainEvent, event
 from pydantic import Field
 
-from syn_domain.contexts.feedback._shared.value_objects import Priority, Provenance, Screening, TicketType
+from syn_domain.contexts.feedback._shared.value_objects import (  # noqa: TC001
+    Priority,
+    Provenance,
+    Screening,
+    TicketType,
+)
 
 
 @event("TicketOpened", "v1")

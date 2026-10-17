@@ -88,13 +88,17 @@ class TestScreeningPolicy:
     def test_doubt_lands_in_quarantine(
         self, verdict: ScreeningVerdict, confidence: float, decision: ScreeningDecision
     ) -> None:
-        assert ScreeningPolicy.decide(_result(verdict, confidence), ScreeningThresholds()) is decision
+        assert (
+            ScreeningPolicy.decide(_result(verdict, confidence), ScreeningThresholds()) is decision
+        )
 
 
 class TestNearDuplicateMatcher:
     BUCKET = MatchBucket.of(route="/executions", ticket_type=TicketType.BUG)
 
-    def _candidate(self, ticket_id: str, text: str, bucket: MatchBucket | None = None) -> MatchCandidate:
+    def _candidate(
+        self, ticket_id: str, text: str, bucket: MatchBucket | None = None
+    ) -> MatchCandidate:
         return MatchCandidate(
             ticket_id=ticket_id, bucket=bucket or self.BUCKET, text=ScreenedText.screen(text)
         )
@@ -142,7 +146,9 @@ class TestResolutionPolicy:
     def test_every_signed_reporter_must_have_observed_the_fix(self) -> None:
         reporters = {"src-a", "src-b"}
         assert (
-            ResolutionPolicy.decide(released=False, signed_reporters=reporters, observations={"src-a": _seen()})
+            ResolutionPolicy.decide(
+                released=False, signed_reporters=reporters, observations={"src-a": _seen()}
+            )
             is None
         )
         assert (

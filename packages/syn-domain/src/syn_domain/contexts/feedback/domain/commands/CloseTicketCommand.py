@@ -5,7 +5,7 @@ from __future__ import annotations
 from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.feedback._shared.value_objects import CloseReason
+from syn_domain.contexts.feedback._shared.value_objects import CloseReason  # noqa: TC001
 
 
 @command("CloseTicket", "Close a ticket")

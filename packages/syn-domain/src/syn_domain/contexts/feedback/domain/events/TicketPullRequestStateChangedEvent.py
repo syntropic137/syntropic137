@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
 
 from event_sourcing import DomainEvent, event
 from pydantic import Field
 
-from syn_domain.contexts.feedback._shared.value_objects import PullRequestState
+from syn_domain.contexts.feedback._shared.value_objects import PullRequestState  # noqa: TC001
 
 
 @event("TicketPullRequestStateChanged", "v1")

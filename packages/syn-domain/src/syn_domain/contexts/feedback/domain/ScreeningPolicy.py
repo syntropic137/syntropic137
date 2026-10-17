@@ -10,7 +10,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.feedback._shared.value_objects import Priority, TicketType
+from syn_domain.contexts.feedback._shared.value_objects import Priority, TicketType  # noqa: TC001
 
 
 class ScreeningVerdict(StrEnum):

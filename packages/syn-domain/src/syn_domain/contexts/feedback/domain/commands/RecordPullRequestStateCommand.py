@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
 
 from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.feedback._shared.value_objects import PullRequestState
+from syn_domain.contexts.feedback._shared.value_objects import PullRequestState  # noqa: TC001
 
 
 @command("RecordPullRequestState", "Record an observed state of a linked pull request")

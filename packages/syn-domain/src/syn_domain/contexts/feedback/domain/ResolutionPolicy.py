@@ -6,9 +6,14 @@ and emits ``TicketResolved`` in the same command when it first says yes.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Set
+from typing import TYPE_CHECKING
 
-from syn_domain.contexts.feedback._shared.value_objects import FixObservation, ResolutionRule
+from syn_domain.contexts.feedback._shared.value_objects import ResolutionRule
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Set
+
+    from syn_domain.contexts.feedback._shared.value_objects import FixObservation
 
 
 class ResolutionPolicy:

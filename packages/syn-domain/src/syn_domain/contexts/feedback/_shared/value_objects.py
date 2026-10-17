@@ -6,7 +6,7 @@ None of them carries reporter text: the event store holds ids and hashes only.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field

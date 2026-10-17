@@ -5,7 +5,7 @@ from __future__ import annotations
 from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
-from syn_domain.contexts.feedback._shared.value_objects import Screening
+from syn_domain.contexts.feedback._shared.value_objects import Screening  # noqa: TC001
 
 
 @command("AddReport", "Add a submission to a ticket as a Report")

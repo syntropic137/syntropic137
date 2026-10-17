@@ -9,10 +9,9 @@ it ever sees.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import pytest
-from event_sourcing import DomainEvent, EventEnvelope
-from pydantic import BaseModel
 
 from syn_domain.contexts.feedback import (
     AddReportCommand,
@@ -36,10 +35,16 @@ from syn_domain.contexts.feedback import (
     Screening,
     TicketAggregate,
     TicketOpenedEvent,
+    TicketReportAddedEvent,
+    TicketReportDetachedEvent,
     TicketResolvedEvent,
     TicketStatus,
     TicketType,
 )
+
+if TYPE_CHECKING:
+    from event_sourcing import DomainEvent, EventEnvelope
+    from pydantic import BaseModel
 
 pytestmark = pytest.mark.unit
 
@@ -92,7 +97,9 @@ def _open(
     )
 
 
-def _report(submission_id: str, source_id: str | None = "src-b", *, quarantined: bool = False) -> AddReportCommand:
+def _report(
+    submission_id: str, source_id: str | None = "src-b", *, quarantined: bool = False
+) -> AddReportCommand:
     return AddReportCommand(
         aggregate_id=TICKET,
         submission_id=submission_id,
@@ -103,7 +110,9 @@ def _report(submission_id: str, source_id: str | None = "src-b", *, quarantined:
 
 
 def _link(number: int) -> LinkPullRequestCommand:
-    return LinkPullRequestCommand(aggregate_id=TICKET, repository=REPO, repository_id=1, number=number)
+    return LinkPullRequestCommand(
+        aggregate_id=TICKET, repository=REPO, repository_id=1, number=number
+    )
 
 
 def _pr(number: int, state: PullRequestState, at: datetime) -> RecordPullRequestStateCommand:
@@ -112,7 +121,9 @@ def _pr(number: int, state: PullRequestState, at: datetime) -> RecordPullRequest
     )
 
 
-def _observe(source_id: str, at: datetime, *, contains_fix: bool = True, version: str = "0.30.0-beta.1") -> RecordFixObservationCommand:
+def _observe(
+    source_id: str, at: datetime, *, contains_fix: bool = True, version: str = "0.30.0-beta.1"
+) -> RecordFixObservationCommand:
     return RecordFixObservationCommand(
         aggregate_id=TICKET,
         source_id=source_id,
@@ -127,6 +138,22 @@ def _merged() -> tuple[LinkPullRequestCommand, RecordPullRequestStateCommand]:
     return _link(40), _pr(40, PullRequestState.MERGED, T0)
 
 
+def _counted_reporters(stream: _Stream) -> int:
+    """The reporter count as a projection folds it: one per open or added report, less detaches.
+
+    A read model counts events; it cannot see the aggregate's member set. So a
+    duplicate ``TicketReportAdded`` that the aggregate would absorb on replay is
+    still a wrong count everywhere the count is shown.
+    """
+    count = 0
+    for event in stream.events:
+        if isinstance(event, (TicketOpenedEvent, TicketReportAddedEvent)):
+            count += 1
+        elif isinstance(event, TicketReportDetachedEvent):
+            count -= 1
+    return count
+
+
 def _resolved_events(stream: _Stream) -> list[TicketResolvedEvent]:
     return [e for e in stream.events if isinstance(e, TicketResolvedEvent)]
 
@@ -135,7 +162,12 @@ class TestQuarantine:
     def test_linking_a_quarantined_ticket_raises(self) -> None:
         ticket = _run(None, _open(screening=Screening.QUARANTINED))
         with pytest.raises(ValueError, match="quarantined"):
-            _run(ticket, LinkTicketToIssueCommand(aggregate_id=TICKET, repository=REPO, repository_id=1, number=5))
+            _run(
+                ticket,
+                LinkTicketToIssueCommand(
+                    aggregate_id=TICKET, repository=REPO, repository_id=1, number=5
+                ),
+            )
         with pytest.raises(ValueError, match="quarantined"):
             _run(ticket, LinkTicketToExecutionCommand(aggregate_id=TICKET, execution_id="exec-1"))
         with pytest.raises(ValueError, match="quarantined"):
@@ -159,6 +191,7 @@ class TestQuarantine:
 class TestMembership:
     def test_the_same_report_twice_counts_once(self) -> None:
         ticket = _run(None, _open(), _report("sub-2"), _report("sub-2"))
+        assert _counted_reporters(ticket) == 2
         assert ticket.load().reporter_count == 2
 
     def test_a_second_open_with_the_same_id_is_a_no_op(self) -> None:
@@ -178,12 +211,17 @@ class TestMembership:
             None,
             _open(),
             _report("sub-2"),
-            DetachReportCommand(aggregate_id=TICKET, submission_id="sub-2", by="owner", reason="over-merge"),
+            DetachReportCommand(
+                aggregate_id=TICKET, submission_id="sub-2", by="owner", reason="over-merge"
+            ),
         )
+        assert _counted_reporters(ticket) == 1
         assert ticket.load().reporter_count == 1
 
     def test_a_closed_ticket_refuses_reports(self) -> None:
-        ticket = _run(None, _open(), CloseTicketCommand(aggregate_id=TICKET, reason=CloseReason.INVALID))
+        ticket = _run(
+            None, _open(), CloseTicketCommand(aggregate_id=TICKET, reason=CloseReason.INVALID)
+        )
         with pytest.raises(ValueError, match="closed or resolved"):
             _run(ticket, _report("sub-2"))
 
@@ -225,7 +263,9 @@ class TestPullRequestStatus:
         assert ticket.load().status is TicketStatus.IN_PROGRESS
 
     def test_merged_is_terminal(self) -> None:
-        ticket = _run(None, _open(), *_merged(), _pr(40, PullRequestState.CLOSED, T0 + timedelta(hours=1)))
+        ticket = _run(
+            None, _open(), *_merged(), _pr(40, PullRequestState.CLOSED, T0 + timedelta(hours=1))
+        )
         assert ticket.load().status is TicketStatus.FIX_MERGED
 
     def test_state_of_an_unlinked_pr_raises(self) -> None:
@@ -272,7 +312,9 @@ class TestResolution:
             _open(source_id=None),
             _report("sub-2", "src-b"),
             *_merged(),
-            RecordFixReleaseCommand(aggregate_id=TICKET, release_tag="v0.30.0", version="0.30.0", commit="def456"),
+            RecordFixReleaseCommand(
+                aggregate_id=TICKET, release_tag="v0.30.0", version="0.30.0", commit="def456"
+            ),
         )
         assert ticket.load().status is TicketStatus.RESOLVED
         [resolved] = _resolved_events(ticket)

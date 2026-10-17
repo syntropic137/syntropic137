@@ -5,7 +5,7 @@ from __future__ import annotations
 from event_sourcing import DomainEvent, event
 from pydantic import Field
 
-from syn_domain.contexts.feedback._shared.value_objects import Priority
+from syn_domain.contexts.feedback._shared.value_objects import Priority  # noqa: TC001
 
 
 @event("TicketReprioritised", "v1")
