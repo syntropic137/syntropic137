@@ -1,10 +1,11 @@
-# Mutation evidence for PR #2013 (feedback plan PR 2, #2010, stacked on #2011)
+# Mutation evidence for PR #2013 (feedback plan PR 2, #2010)
 
 Each patch re-introduces one bug from the plan's section 3 negative controls. The
 listed node ids must fail with the patch applied. Delete this directory before merge.
 
-PR #2011's own patches (01-03) were removed on its branch before merge; this
-directory now holds only PR 2's.
+PR #2011 (plan PR 1) has merged to main. Its patches 01-03 were run by the hosted
+runner (run 39017304744, all killed) and removed in bf071e9d4 before that merge, so
+this directory holds only PR 2's patch, and the command below covers every patch here.
 
 | Patch | Bug it re-introduces | Node ids that must fail |
 |---|---|---|
