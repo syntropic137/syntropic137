@@ -194,3 +194,53 @@ async def test_no_cpu_limit_puts_no_hints_on_docker_run() -> None:
     )
 
     assert not set(_HINT_KEYS) & _env_flags(argv).keys()
+
+
+#: The six SYN_WORKSPACE_* settings #1827 deleted. Nothing ever read them, so an
+#: operator's existing .env may still carry any of them.
+_DELETED_WORKSPACE_ENV = {
+    "SYN_WORKSPACE_ISOLATION_BACKEND": "firecracker",
+    "SYN_WORKSPACE_CLOUD_PROVIDER": "modal",
+    "SYN_WORKSPACE_CLOUD_API_KEY": "stale-key",
+    "SYN_WORKSPACE_CLOUD_TEMPLATE": "stale-template",
+    "SYN_WORKSPACE_DOCKER_RUNTIME": "runc",
+    "SYN_WORKSPACE_DOCKER_NETWORK": "host",
+}
+
+
+@pytest.mark.asyncio
+async def test_production_wiring_survives_an_env_with_the_deleted_settings() -> None:
+    """The real settings and the production factory still build after #1827.
+
+    A deleted field breaks wiring, not its own tests, so this goes through the
+    same hops as `_wiring.get_execution_processor`: the root `Settings`, then
+    `WorkspaceServiceConfig.from_settings`, then `WorkspaceService.create`, and
+    on to the argv Docker would run.
+    """
+    from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
+    from syn_shared.settings.config import Settings
+
+    env = {
+        "APP_ENVIRONMENT": "test",
+        "SYN_WORKSPACE_MEMORY_LIMIT_MB": "1536",
+        **_DELETED_WORKSPACE_ENV,
+    }
+    with patch.dict(os.environ, env, clear=True):
+        ws_settings = Settings(_env_file=None).workspace  # type: ignore[call-arg]
+        ws_config = WorkspaceServiceConfig.from_settings(ws_settings)
+        service = WorkspaceService.create(config=ws_config, environment={})
+
+    assert isinstance(service, WorkspaceService)
+    isolation_config = build_isolation_config(
+        config=ws_config,
+        workspace_id="ws-1",
+        execution_id="exec-1",
+        workflow_id="wf-1",
+        phase_id=None,
+        extra_environment=None,
+    )
+    argv = await _render_docker_run(isolation_config)
+
+    assert "--memory=1536m" in argv
+    # The stale network was never applied; the network is agentic_isolation's.
+    assert "--network=host" not in argv
