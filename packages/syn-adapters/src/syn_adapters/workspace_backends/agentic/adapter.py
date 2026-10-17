@@ -350,13 +350,7 @@ class AgenticIsolationAdapter:
         )
 
         environment = self._build_environment(config)
-        from syn_adapters.session_inventory.workspace_capture import apply_workspace_capture
-
-        capture_mounts = (
-            apply_workspace_capture(config, self._kit.capture_source_instance_id, environment)
-            if self._kit.capture_source_instance_id is not None
-            else []
-        )
+        capture_mounts = self._kit.capture_mounts(config, environment)
 
         # Map Syn137 config to agentic_isolation config
         # ISS-43: Network is set on the provider (default_network in __init__),

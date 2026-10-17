@@ -15,6 +15,7 @@ and ``isolation_type="docker"``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
 from syn_adapters.workspace_backends.image_verification import verify_image_async
@@ -23,6 +24,13 @@ from syn_domain.contexts.orchestration import (
     WorkspaceCredentialPolicy,
 )
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
+
+if TYPE_CHECKING:
+    from agentic_isolation import MountConfig
+
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
+    )
 
 
 class CredentialFreeImageError(WorkspaceProvisionError):
@@ -51,6 +59,20 @@ class BackendKit:
     @property
     def captures_sessions(self) -> bool:
         return self.capture_source_instance_id is not None
+
+    def capture_mounts(
+        self, config: IsolationConfig, environment: dict[str, str]
+    ) -> list[MountConfig]:
+        """The capture strategy: mounts for this workspace, adding capture env in place.
+
+        Captures only when a capture source instance is configured - the
+        condition the Docker adapter applied before the kit, unchanged.
+        """
+        if self.capture_source_instance_id is None:
+            return []
+        from syn_adapters.session_inventory.workspace_capture import apply_workspace_capture
+
+        return apply_workspace_capture(config, self.capture_source_instance_id, environment)
 
     async def resolve_image(self, requested: str | None) -> str:
         """The verified image reference to run for a workspace.

@@ -165,3 +165,50 @@ class TestNoCredentialsDropsTheSessionStoreToken:
         scanned = f"{ws_config.environment!r} {ws_config.credentials!r} {ws_config.labels!r}"
         assert _STORE_TOKEN not in scanned
         assert _STORE_URL not in scanned
+
+
+class TestCaptureIsTheKitsStrategy:
+    async def test_the_adapter_mounts_what_the_kit_decides(self) -> None:
+        sentinel = MagicMock(name="mount")
+
+        def capture_mounts(
+            _kit: BackendKit, config: IsolationConfig, environment: dict[str, str]
+        ) -> list[MagicMock]:
+            del config
+            environment["FAKE1914_CAPTURE"] = "kit"
+            return [sentinel]
+
+        adapter = AgenticIsolationAdapter(session_store=_store())
+        provider = _mock_provider()
+        with (
+            patch.object(adapter, "_provider", provider),
+            patch.object(BackendKit, "capture_mounts", capture_mounts),
+            patch(
+                "syn_adapters.workspace_backends.backend_kit.verify_image_async",
+                side_effect=_passthrough,
+            ),
+        ):
+            await adapter.create(_config())
+
+        (ws_config,) = provider.create.call_args.args
+        assert ws_config.mounts == [sentinel]
+        assert ws_config.environment["FAKE1914_CAPTURE"] == "kit"
+
+    def test_no_capture_source_means_no_mounts_and_no_capture_env(self) -> None:
+        environment = {"KEEP": "1"}
+        config = IsolationConfig(
+            execution_id="exec-1914", workspace_id="ws-1914", capture_session_id="sess"
+        )
+
+        assert BackendKit().capture_mounts(config, environment) == []
+        assert environment == {"KEEP": "1"}
+
+    def test_a_capture_source_mounts_the_spool(self) -> None:
+        environment: dict[str, str] = {}
+        config = IsolationConfig(
+            execution_id="exec-1914", workspace_id="ws-1914", capture_session_id="sess"
+        )
+
+        (mount,) = BackendKit(capture_source_instance_id="inst").capture_mounts(config, environment)
+        assert mount.container_path == "/spool"
+        assert environment["AGENTIC_SESSION_STORE_PROVIDER"] == "local"
