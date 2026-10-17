@@ -67,6 +67,15 @@ class TestScreenedText:
             == ScreenedText.screen("Save is​ broken").content_hash
         )
 
+    @pytest.mark.parametrize(
+        ("decomposed", "composed"),
+        [("cafe\u200b\u0301", "caf\u00e9"), ("nai\u2066\u0308ve", "na\u00efve")],
+    )
+    def test_nfc_holds_after_invisibles_are_stripped(self, decomposed: str, composed: str) -> None:
+        screened = ScreenedText.screen(decomposed)
+        assert screened.text == composed
+        assert screened.content_hash == ScreenedText.screen(composed).content_hash
+
 
 def _result(verdict: ScreeningVerdict, confidence: float) -> ScreeningResult:
     return ScreeningResult(

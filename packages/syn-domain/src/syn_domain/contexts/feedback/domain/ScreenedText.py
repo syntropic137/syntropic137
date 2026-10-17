@@ -40,11 +40,13 @@ class ScreenedText(BaseModel):
 
     @classmethod
     def screen(cls, raw: str) -> ScreenedText:
-        """NFC, drop invisible code points, collapse whitespace, redact, cap.
+        """Drop invisible code points, NFC, collapse whitespace, redact, cap.
 
         Redaction runs before the cap so a cut can never leave half a secret.
         """
-        text = _INVISIBLE.sub("", unicodedata.normalize("NFC", raw))
+        # NFC after stripping: an invisible between a base and its combining
+        # mark would otherwise block composition and change the hash.
+        text = unicodedata.normalize("NFC", _INVISIBLE.sub("", raw))
         text = _WHITESPACE.sub(" ", text).strip()
         for shape in _SECRET_SHAPES:
             text = shape.sub(REDACTED, text)

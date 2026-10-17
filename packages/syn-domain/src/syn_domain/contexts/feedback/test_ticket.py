@@ -225,6 +225,45 @@ class TestMembership:
         with pytest.raises(ValueError, match="closed or resolved"):
             _run(ticket, _report("sub-2"))
 
+    @pytest.mark.parametrize(
+        "terminal",
+        [
+            CloseTicketCommand(aggregate_id=TICKET, reason=CloseReason.INVALID),
+            _observe("src-a", T0),
+        ],
+        ids=["closed", "resolved"],
+    )
+    def test_a_retried_report_after_close_or_resolution_is_a_no_op(
+        self, terminal: BaseModel
+    ) -> None:
+        ticket = _run(None, _open(source_id="src-a"), _report("sub-2", "src-a"), *_merged())
+        ticket = _run(ticket, terminal)
+        before = len(ticket.events)
+        ticket = _run(ticket, _report("sub-2", "src-a"))
+        assert len(ticket.events) == before
+        assert _counted_reporters(ticket) == 2
+
+    def test_a_retried_quarantined_report_after_release_is_a_no_op(self) -> None:
+        ticket = _run(
+            None,
+            _open(screening=Screening.QUARANTINED),
+            _report("sub-2", quarantined=True),
+            ReleaseTicketFromQuarantineCommand(aggregate_id=TICKET, by="owner", reason="benign"),
+        )
+        before = len(ticket.events)
+        ticket = _run(ticket, _report("sub-2", quarantined=True))
+        assert len(ticket.events) == before
+        assert _counted_reporters(ticket) == 2
+
+    def test_a_new_quarantined_report_after_release_still_raises(self) -> None:
+        ticket = _run(
+            None,
+            _open(screening=Screening.QUARANTINED),
+            ReleaseTicketFromQuarantineCommand(aggregate_id=TICKET, by="owner", reason="benign"),
+        )
+        with pytest.raises(ValueError, match="never joins a clean ticket"):
+            _run(ticket, _report("sub-3", quarantined=True))
+
 
 class TestPullRequestStatus:
     def test_closed_then_reopened_is_in_progress_not_fix_merged(self) -> None:
@@ -305,6 +344,44 @@ class TestResolution:
         assert ticket.load().status is TicketStatus.RESOLVED
         observation = ticket.load().fix_observation("src-a")
         assert observation is not None and observation.contains_fix
+
+    def test_detaching_the_unobserved_reporter_resolves_in_the_same_command(self) -> None:
+        ticket = _run(
+            None,
+            _open(source_id="src-a"),
+            _report("sub-2", "src-b"),
+            _report("sub-3", "src-c"),
+            *_merged(),
+            _observe("src-c", T0 + timedelta(hours=1), version="0.30.0-beta.2"),
+            _observe("src-a", T0, version="0.30.0-beta.1"),
+        )
+        before = len(ticket.events)
+        ticket = _run(
+            ticket,
+            DetachReportCommand(
+                aggregate_id=TICKET, submission_id="sub-2", by="owner", reason="over-merge"
+            ),
+        )
+        detached, resolved = ticket.events[before:]
+        assert isinstance(detached, TicketReportDetachedEvent)
+        assert isinstance(resolved, TicketResolvedEvent)
+        assert resolved.rule is ResolutionRule.ALL_REPORTERS_OBSERVED
+        assert resolved.version == "0.30.0-beta.2"  # the latest qualifying observation
+        assert ticket.load().status is TicketStatus.RESOLVED
+
+    def test_detaching_with_no_remaining_observation_does_not_resolve(self) -> None:
+        ticket = _run(
+            None,
+            _open(source_id="src-a"),
+            _report("sub-2", "src-b"),
+            *_merged(),
+            _observe("src-b", T0),
+            DetachReportCommand(
+                aggregate_id=TICKET, submission_id="sub-2", by="owner", reason="over-merge"
+            ),
+        )
+        assert _resolved_events(ticket) == []
+        assert ticket.load().status is TicketStatus.FIX_MERGED
 
     def test_anonymous_and_signed_resolve_on_release(self) -> None:
         ticket = _run(

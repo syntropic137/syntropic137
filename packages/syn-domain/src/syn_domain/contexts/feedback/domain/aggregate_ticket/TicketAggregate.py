@@ -154,14 +154,16 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
     @command_handler("AddReportCommand")
     def add_report(self, command: AddReportCommand) -> None:
         self._require_exists()
+        # Membership first: a retry of a report already accepted succeeds even
+        # after the ticket closed, resolved or was released from quarantine.
+        if command.submission_id in self._members:
+            return  # already a member: the reporter count must not rise twice
         if self._closed or self._resolved:
             msg = "Cannot add a report to a closed or resolved ticket; open a recurrence"
             raise ValueError(msg)
         if command.screening is Screening.QUARANTINED and self._screening is Screening.CLEAN:
             msg = "A quarantined submission never joins a clean ticket"
             raise ValueError(msg)
-        if command.submission_id in self._members:
-            return  # already a member: the reporter count must not rise twice
         self._apply(
             TicketReportAddedEvent(
                 ticket_id=self._ticket_id,
@@ -188,6 +190,11 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
                 reason=command.reason,
             )
         )
+        # Dropping a reporter who never observed the fix can leave every
+        # remaining signed reporter having observed it.
+        version = self._latest_observed_fix_version()
+        if version is not None:
+            self._resolve_if_due(version)
 
     @command_handler("ReleaseTicketFromQuarantineCommand")
     def release_from_quarantine(self, command: ReleaseTicketFromQuarantineCommand) -> None:
@@ -364,6 +371,18 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
     @property
     def _has_merged_fix(self) -> bool:
         return any(pr.state is PullRequestState.MERGED for pr in self._pull_requests.values())
+
+    def _latest_observed_fix_version(self) -> str | None:
+        """The version from the most recent fix-containing observation by a current signed reporter."""
+        signed = {s for s in self._members.values() if s is not None}
+        qualifying = [
+            observation
+            for source, observation in self._observations.items()
+            if source in signed and observation.contains_fix
+        ]
+        if not qualifying:
+            return None
+        return max(qualifying, key=lambda observation: observation.observed_at).version
 
     def _resolve_if_due(self, version: str) -> None:
         """Emit TicketResolved in the same command whose event made the policy true."""
