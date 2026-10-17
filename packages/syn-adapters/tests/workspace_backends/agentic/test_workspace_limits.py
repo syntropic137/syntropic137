@@ -214,8 +214,10 @@ async def test_production_wiring_survives_an_env_with_the_deleted_settings() -> 
 
     A deleted field breaks wiring, not its own tests, so this goes through the
     same hops as `_wiring.get_execution_processor`: the root `Settings`, then
-    `WorkspaceServiceConfig.from_settings`, then `WorkspaceService.create`, and
-    on to the argv Docker would run.
+    `WorkspaceServiceConfig.from_settings`, then `WorkspaceService.create`. The
+    argv is rendered from the config and provider that factory returned, not
+    from fresh ones, so a factory that drops the config or picks another network
+    fails here.
     """
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
     from syn_shared.settings.config import Settings
@@ -223,24 +225,64 @@ async def test_production_wiring_survives_an_env_with_the_deleted_settings() -> 
     env = {
         "APP_ENVIRONMENT": "test",
         "SYN_WORKSPACE_MEMORY_LIMIT_MB": "1536",
+        "SYN_AGENT_NETWORK": "wiring-test-agent-net",
         **_DELETED_WORKSPACE_ENV,
     }
     with patch.dict(os.environ, env, clear=True):
         ws_settings = Settings(_env_file=None).workspace  # type: ignore[call-arg]
-        ws_config = WorkspaceServiceConfig.from_settings(ws_settings)
-        service = WorkspaceService.create(config=ws_config, environment={})
+        service = WorkspaceService.create(
+            config=WorkspaceServiceConfig.from_settings(ws_settings), environment={}
+        )
 
-    assert isinstance(service, WorkspaceService)
-    isolation_config = build_isolation_config(
-        config=ws_config,
+    assert service._config.memory_limit_mb == 1536
+    adapter = service._isolation
+    assert isinstance(adapter, AgenticIsolationAdapter)
+    provider = adapter.operations
+    assert isinstance(provider, WorkspaceDockerProvider)
+
+    workspace = MagicMock()
+    workspace.id = "ws-1"
+    workspace.metadata = {"workspace_dir": "/tmp/ws-1"}
+
+    async def _passthrough(image_ref: str) -> str:
+        return image_ref
+
+    # Only Docker itself and the image signature check are doubled.
+    with (
+        patch.object(provider, "create", AsyncMock(return_value=workspace)) as create,
+        patch.object(
+            provider,
+            "execute",
+            AsyncMock(return_value=ExecuteResult(exit_code=0, stdout="", stderr="")),
+        ),
+        patch(
+            "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+            side_effect=_passthrough,
+        ),
+    ):
+        await adapter.create(
+            build_isolation_config(
+                config=service._config,
+                workspace_id="ws-1",
+                execution_id="exec-1",
+                workflow_id="wf-1",
+                phase_id=None,
+                extra_environment=None,
+            )
+        )
+
+    ws_config: WorkspaceConfig = create.call_args.args[0]
+    argv = provider._build_run_command(
+        container_name="c-1",
         workspace_id="ws-1",
-        execution_id="exec-1",
-        workflow_id="wf-1",
-        phase_id=None,
-        extra_environment=None,
+        workspace_dir=Path("/tmp/ws-1"),
+        image=ws_config.image,
+        config=ws_config,
+        security=SecurityConfig.production(),
     )
-    argv = await _render_docker_run(isolation_config)
 
     assert "--memory=1536m" in argv
-    # The stale network was never applied; the network is agentic_isolation's.
+    # The network is SYN_AGENT_NETWORK's; the stale SYN_WORKSPACE_DOCKER_NETWORK
+    # was never applied.
+    assert "--network=wiring-test-agent-net" in argv
     assert "--network=host" not in argv
