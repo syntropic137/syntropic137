@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
+index 9e8ada73a..af6ba0c7d 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
+@@ -465,7 +465,6 @@ class WorkspaceProvisionHandler:
+         # reach the workspace (#1914). A phase it cannot run is refused here,
+         # before any workspace or token exists.
+         policy = self._workspace_service.credential_policy
+-        policy.admit(phase_name=phase.name, repositories=effective_repos)
+         workspace_cm = self._workspace_service.create_workspace(
+             execution_id=todo.execution_id,
+             workflow_id=workflow_id,

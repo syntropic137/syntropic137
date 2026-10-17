@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
+index 9e8ada73a..2b17c6c41 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
+@@ -251,8 +251,6 @@ async def _build_agent_env(
+     See ADR-024 (2026-05-01 update) for why the original "proxy-managed"
+     placeholder approach was abandoned and this direct injection was adopted.
+     """
+-    if not credential_policy.supplies_credentials:
+-        return {ENV_CLAUDE_SESSION_ID: session_id}
+     proxy_url = workspace.proxy_url
+     if not proxy_url:
+         msg = (

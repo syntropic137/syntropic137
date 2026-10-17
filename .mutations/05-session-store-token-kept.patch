@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+index 3a39a7189..499e8f00a 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+@@ -241,7 +241,7 @@ class AgenticIsolationAdapter:
+             from syn_shared.settings import get_settings
+ 
+             session_store = get_settings().session_store
+-        if not kit.credential_policy.supplies_credentials:
++        if False:
+             # The session-store write token is a host credential, and the URL
+             # alone would point a credential-free workspace at the host's store.
+             session_store = session_store.model_copy(

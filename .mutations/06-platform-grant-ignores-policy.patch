@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+index 361061704..76085f87c 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+@@ -549,7 +549,7 @@ class WorkspaceService:
+                 types = token_types or [TokenType.ANTHROPIC]
+                 await workspace.inject_tokens(types)
+ 
+-            if self._platform_tokens is not None and self._credential_policy.supplies_credentials:
++            if self._platform_tokens is not None:
+                 workspace.platform_grant = await self._platform_tokens.grant_workspace(execution_id)
+ 
+             yield workspace
