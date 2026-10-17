@@ -16,3 +16,13 @@ workflows:
     path: workflows/evals/implement-pinned-sonnet/workflow.yaml
     models:
       implement: claude-sonnet-5-5
+  # E2 v2 arms (pilot finding: v1 leaves the tree dirty and the lost-work guard
+  # fails every run). Prompts byte-identical; only the model differs.
+  - id: eval-implement-pinned-v2
+    path: workflows/evals/implement-pinned-v2/workflow.yaml
+    models:
+      implement: claude-opus-5-5
+  - id: eval-implement-pinned-sonnet-v2
+    path: workflows/evals/implement-pinned-sonnet-v2/workflow.yaml
+    models:
+      implement: claude-sonnet-5-5

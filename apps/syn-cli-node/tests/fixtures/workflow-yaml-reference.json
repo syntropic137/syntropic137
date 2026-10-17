@@ -109,6 +109,28 @@
       ],
       "document_sha256": "906f7f2c68a184cd19824da87d0847ea83397c95c90ee35148349068ab930fe0"
     },
+    "workflows/evals/implement-pinned-sonnet-v2/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        }
+      ],
+      "document_sha256": "14e6d7f11e7ca4fc7d047d0c9c15f3119654c5b3eed9e241cbdbc8cd98259e1f"
+    },
+    "workflows/evals/implement-pinned-v2/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        }
+      ],
+      "document_sha256": "2e94d88e9c5706c5737fba40dd0e525c322d30b06c74dd4e14817e5b74b14f09"
+    },
     "workflows/evals/implement-score/workflow.yaml": {
       "phases": [
         {

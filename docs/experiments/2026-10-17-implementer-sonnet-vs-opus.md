@@ -76,6 +76,36 @@ Estimated from the median production implement phase ($1.92, 43 min, n=25).
 - Total ~$40, across 40 executions. With 2 in flight, about 6-8 h of wall
   clock.
 
+## Protocol deviation 1 (2026-10-17): pilot, then v2 arms
+
+Pair 1 ran on the v1 arms: `exec-18716bf21197` (treatment) and
+`exec-b67322b616ca` (control), case `codex-sandbox-tmpdir`.
+
+The v1 prompt (shared, from main) leaves the change uncommitted. The
+phase-end lost-work guard therefore fails the phase as a platform failure,
+collects no artifacts, and quarantines the dirty tree to
+`refs/syn/lost/<exec>/implement` on origin.
+
+Re-dispatching would fail the same way, so the orchestrator decided:
+
+- **Pair 1 is a PILOT and does not count toward the 20.** It may be scored
+  from its quarantine ref: the patch is `git diff <pin> <ref>`, the ref's
+  parent was checked to equal the pin, and the patch was checked to contain
+  no `artifacts/` path. Its score is reported as pilot only.
+- The counted runs use new ids, `eval-implement-pinned-v2` (claude-opus-5-5)
+  and `eval-implement-pinned-sonnet-v2` (claude-sonnet-5-5). Their prompts are
+  byte-identical. They add one step: after writing the patch, reset the tree
+  to the pin (`git reset --hard`, `git clean -fd`) and check that
+  `git status --porcelain` is empty. v1 is unchanged.
+- Counting restarts at 0. The abort rule applies again to the first v2
+  execution of each arm.
+- Both arms now pin an explicit model id, so the abort rule reads the same
+  for both.
+- Why not salvage every run: each one would be a "failed (platform)"
+  execution with no artifacts. That pollutes the cost, time and failure
+  metrics E2 measures, and pushes a quarantine ref per run to origin, which
+  later runs could fetch (#2022).
+
 ## Procedure
 
 1. Launch the implement run for each case, one per arm, alternating arm order.
