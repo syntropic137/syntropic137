@@ -73,6 +73,18 @@ class PhaseOutputCache:
         if files:
             self.files[phase_id] = files
 
+    def append(self, phase_id: str, files: list[PhaseOutputFile]) -> None:
+        """Add files a phase OWNS but did not write: an evidence gate's reports
+        (plan §A.6). ``record`` replaces, and the cache wins over the
+        projection, so a gate that recorded would hide the phase's own output
+        live. A file at a path already held replaces that file only. Never
+        touches ``primary``: a report must not become the phase's alias."""
+        if not files:
+            return
+        added = {f.source_path for f in files}
+        kept = [f for f in self.files.get(phase_id, []) if f.source_path not in added]
+        self.files[phase_id] = kept + files
+
 
 PromptBuilder = Callable[
     [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, Any]],
@@ -103,6 +115,38 @@ class ExecutionRepository(Protocol):
 # only re-opens the gap it closed, so this is that protocol, named for the
 # role it plays here.
 type SessionRepository = Repository[AgentSessionAggregate]
+
+
+class EvidenceStepDriver(Protocol):
+    """Drives one RUN_EVIDENCE_STEP to-do (`EvidenceStepHandler`, plan §A.5)."""
+
+    async def handle(
+        self,
+        todo: TodoItem,
+        aggregate: WorkflowExecutionAggregate,
+        save: Callable[[WorkflowExecutionAggregate], Awaitable[None]],
+        outputs: PhaseOutputCache,
+    ) -> None: ...
+
+
+@dataclass(frozen=True)
+class UnwiredEvidenceSteps:
+    """The default until the adapters are wired (A.15 PR 6): a gate cannot open
+    before then, so a RUN_EVIDENCE_STEP reaching this is a wiring fault."""
+
+    async def handle(
+        self,
+        todo: TodoItem,
+        aggregate: WorkflowExecutionAggregate,
+        save: Callable[[WorkflowExecutionAggregate], Awaitable[None]],
+        outputs: PhaseOutputCache,
+    ) -> None:
+        del aggregate, save, outputs
+        msg = f"RUN_EVIDENCE_STEP for {todo.execution_id}: no EvidenceStepHandler wired"
+        raise RuntimeError(msg)
+
+
+UNWIRED_EVIDENCE_STEPS: EvidenceStepDriver = UnwiredEvidenceSteps()
 
 
 class ArtifactRepository(Protocol):

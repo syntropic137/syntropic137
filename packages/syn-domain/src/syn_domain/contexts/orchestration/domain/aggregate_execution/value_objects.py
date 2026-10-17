@@ -23,8 +23,11 @@ from pydantic import (
 from syn_domain.contexts.agent_sessions import DelegationOutcome  # noqa: TC001
 from syn_domain.contexts.orchestration._shared.evidence_contract import (
     EvidenceRequest,  # noqa: TC001 - needed at runtime for Pydantic
+    EvidenceStepKind,  # noqa: TC001 - needed at runtime for Pydantic
     PullRequestNumber,  # noqa: TC001 - needed at runtime for Pydantic
     Reason,  # noqa: TC001 - needed at runtime for Pydantic
+    StepOutcome,  # noqa: TC001 - needed at runtime for Pydantic
+    StepRef,  # noqa: TC001 - needed at runtime for Pydantic
 )
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
@@ -1344,3 +1347,53 @@ class ObservedHead(BaseModel):
     head_sha: str | None = None
     mutation_patches_present: bool | None = None
     open_pr_number: PullRequestNumber | None = None
+
+
+# --- Evidence gate (docs/plans/20261015_platform-dispatched-evidence.md §A.3, PR 5b) ---
+#
+# What `EvidenceRequested` carries. The rules that produce them are
+# `evidence_gate`; they are here because an event may import nothing else.
+
+
+class EvidenceGatePolicy(BaseModel):
+    """What the host tells collection about gates: that they are on, and over which repositories.
+
+    Absent from a command means the gate is OFF (`SYN_EVIDENCE_GATE_ENABLED`
+    defaults false), so every caller written before PR 5b keeps today's path.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: The execution's repositories, `owner/name`: a phase cannot aim the
+    #: platform's App token anywhere else (§A.1).
+    repositories: tuple[str, ...]
+
+
+class EvidencePreset(BaseModel):
+    """A planned step that settles when reached, without dispatching anything."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    outcome: StepOutcome
+    reason: Reason | None = None
+    reused_from: StepRef | None = None
+
+
+class EvidencePlanStep(BaseModel):
+    """One step of a gate's plan.
+
+    ``head_sha`` None with ``on_cleaned_head`` True means "the head the
+    removal step produced", which does not exist when the plan is made.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    index: Annotated[int, Field(ge=0)]
+    kind: EvidenceStepKind
+    repository: str | None = None
+    branch: str | None = None
+    pr: PullRequestNumber | None = None
+    head_sha: str | None = None
+    tests: tuple[str, ...] = ()
+    on_cleaned_head: bool = False
+    preset: EvidencePreset | None = None

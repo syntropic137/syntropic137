@@ -42,6 +42,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
     EvalMembership,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_gate import (
+    EvidenceGateRecord,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_handlers import (
+    EvidenceGateHandlers,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
     EvidenceRecord,
     read_declared_evidence,
@@ -205,7 +211,9 @@ logger = logging.getLogger(__name__)
 
 
 @aggregate("WorkflowExecution")
-class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"]):
+class WorkflowExecutionAggregate(
+    AggregateRoot["WorkflowExecutionStartedEvent"], EvidenceGateHandlers
+):
     """Aggregate for tracking workflow execution lifecycle."""
 
     _aggregate_type: str
@@ -284,6 +292,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: What each phase declared it needs proven and what the forge showed
         #: at its collection (plan §A.2). Recorded only: nothing decides on it.
         self._evidence = EvidenceRecord()
+        #: Evidence gates (plan §A.3-§A.5): each holds one transition until
+        #: every planned step has settled.
+        self._gates = EvidenceGateRecord()
         #: Phases that completed, and what each one's collection stored. The
         #: inputs to a resume's inherited prefix (ADR-014 s7), which is decided
         #: here from the stream and never from the artifact projection: a
@@ -712,7 +723,10 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._phase_order_map.get(command.phase_id),
             self._reviews.of(command.phase_id),
         )
-        if decided is not None:
+        held = self._hold_for_evidence(command, decided)
+        if held is not None:
+            self._apply(held)
+        elif decided is not None:
             self._apply(
                 decided.event(
                     workflow_id=self._workflow_id or "",

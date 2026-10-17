@@ -80,6 +80,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_workspace i
     PhaseWorkspace,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    UNWIRED_EVIDENCE_STEPS,
     # Imported at RUNTIME on purpose, not annotation-only: this module re-exports
     # it, and `slices/execute_workflow/__init__.py` plus a dozen tests do
     # `from ...WorkflowExecutionProcessor import WorkflowExecutionResult`. Moving
@@ -146,6 +147,7 @@ if TYPE_CHECKING:
         AgentHandlerProtocol,
         ArtifactRepository,
         CommandBuilder,
+        EvidenceStepDriver,
         ExecutionRepository,
         PhaseOutputCache,
         PromptBuilder,
@@ -228,11 +230,16 @@ class WorkflowExecutionProcessor:
         shipped_ledger: ShippedLedger | None = None,
         execution_events: ExecutionEventStream | None = None,
         todo_projection_type: TodoProjectionType | None = None,
+        evidence_steps: EvidenceStepDriver = UNWIRED_EVIDENCE_STEPS,
     ) -> None:
         #: Where an admitted run waits for an Executor (ADR-072, #1310 1.3).
         #: None is today's path: `run` starts AND drains in this call. Set,
         #: `run` and `run_resume` only admit, and `run_claimed` drains.
         self._run_queue = run_queue
+        #: Drives RUN_EVIDENCE_STEP (plan §A.5). Unwired until the adapters are
+        #: wired (A.15 PR 6); no gate opens before then, because nothing yet
+        #: attaches an `EvidenceGatePolicy` to collection.
+        self._evidence_steps = evidence_steps
         #: What `run_claimed` folds a claimed run's own to-do list from (D8).
         self._execution_repo = execution_repository
         self._execution_events = execution_events
@@ -702,6 +709,8 @@ class WorkflowExecutionProcessor:
                 all_artifact_ids,
                 phase_outputs,
             )
+        elif todo.action == TodoAction.RUN_EVIDENCE_STEP:
+            await self._evidence_steps.handle(todo, aggregate, journal.append, phase_outputs)
         elif todo.action == TodoAction.COMPLETE_PHASE:
             await self._handle_complete_phase(
                 todo, phase, aggregate, phase_results, completed_phase_ids, journal
