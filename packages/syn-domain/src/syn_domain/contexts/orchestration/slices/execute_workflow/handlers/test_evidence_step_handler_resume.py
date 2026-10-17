@@ -8,7 +8,9 @@ was re-posted.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,6 +26,10 @@ from syn_domain.contexts.orchestration._shared.evidence_contract import (
     StepOutcome,
 )
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    InterruptExecutionCommand,
+    ResumeExecutionCommand,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.test_resume_evidence_gate import (
     CHILD,
     NOW,
@@ -50,6 +56,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.test_evi
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
 
 pytestmark = pytest.mark.unit
 
@@ -165,3 +176,73 @@ async def test_a_parent_dispatch_that_never_appeared_is_posted_once_afresh() -> 
     assert gate is not None
     assert gate.settled[1].outcome is StepOutcome.PASSED
     assert gate.attempts[1].attempt == 2
+
+
+class _Crash(Exception):
+    """The process dying after a durable save."""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovery", ["restart", "person-resume"])
+async def test_a_crash_between_taking_the_attempt_and_adopting_its_run_posts_nothing(
+    recovery: str,
+) -> None:
+    # Not findable by its nonce: only the run id the parent recorded can reach it.
+    runner = await _forge_with_the_parents_run(_integration_report(findable=False))
+    runner._scripts.append(  # pyright: ignore[reportPrivateUsage]  # a fresh POST would succeed; it must never happen
+        RunScript(Accepted(RunRef(run_id=78, run_url="https://run/78")), report=_report(head=S))
+    )
+    parent, gate_id = _parent_inside_a_gate(completed=True, adopted=True)
+    _resume(parent)
+    child, _started = _child(parent)
+    handler = EvidenceStepHandler(
+        runner=runner,
+        writer=InMemoryRemoteBranchWriter(Removed(S, "syn-app[bot]")),
+        filing=InMemoryEvidenceFiling(),
+        timings=TIMINGS,
+        clock=lambda: RESUMED_AT,
+    )
+
+    async def crash_after_saving(aggregate: WorkflowExecutionAggregate) -> None:
+        child.save(aggregate)
+        raise _Crash
+
+    async def save(aggregate: WorkflowExecutionAggregate) -> None:
+        child.save(aggregate)
+
+    todo = TodoItem(
+        execution_id=CHILD,
+        action=TodoAction.RUN_EVIDENCE_STEP,
+        phase_id="implement",
+        evidence_gate_id=gate_id,
+        evidence_step=1,
+    )
+    with pytest.raises(_Crash):
+        await handler.handle(todo, child.load(), crash_after_saving, PhaseOutputCache())
+    crashed = child.load().evidence_gate(gate_id)
+    assert crashed is not None
+    assert crashed.attempts[1].dispatch_id == "d-1"
+    assert crashed.attempts[1].run_id is None
+
+    if recovery == "person-resume":
+        # Interrupted in the window, then resumed again: the grandchild inherits the child's gate.
+        interrupted = child.load()
+        interrupted.interrupt_execution(
+            InterruptExecutionCommand(execution_id=CHILD, phase_id="review")
+        )
+        child.save(interrupted)
+        resumed = child.load()
+        resumed.resume_execution(
+            ResumeExecutionCommand(execution_id=CHILD, resume_execution_id="exec-grandchild")
+        )
+        child.save(resumed)
+        child, _started = _child(child)
+        todo = replace(todo, execution_id="exec-grandchild")
+
+    await handler.handle(todo, child.load(), save, PhaseOutputCache())
+
+    assert runner.dispatched == []
+    gate = child.load().evidence_gate(gate_id)
+    assert gate is not None
+    assert gate.attempts[1].run_id == PARENT_RUN.run_id
+    assert gate.settled[1].outcome is StepOutcome.PASSED

@@ -177,7 +177,7 @@ class _StepRun:
                 await self._settle(StepOutcome.UNAVAILABLE, "timeout")
                 return
             if attempt.run_id is None or attempt.run_url is None:
-                run = await self._find(attempt)
+                run = self._parents_run() or await self._find(attempt)
                 if run is None:
                     attempt = await self._retry("dispatch_lost")
                     continue
@@ -260,6 +260,13 @@ class _StepRun:
         if parent.run_id is not None and parent.run_url is not None:
             return await self._adopt(attempt, RunRef(run_id=parent.run_id, run_url=parent.run_url))
         return attempt
+
+    def _parents_run(self) -> RunRef | None:
+        """The parent's run, when a crash came between taking its attempt over and adopting it."""
+        parent = self.gate.parents_run(self.step.index)
+        if parent is None or parent.run_id is None or parent.run_url is None:
+            return None
+        return RunRef(run_id=parent.run_id, run_url=parent.run_url)
 
     async def _start(
         self, dispatch_id: str | None = None, started_at: datetime | None = None

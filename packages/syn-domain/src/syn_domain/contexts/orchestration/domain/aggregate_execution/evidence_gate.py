@@ -484,20 +484,38 @@ class EvidenceGate:
             inherited_attempts={a.step: a for a in gate.attempts},
         )
 
+    def parents_run(self, index: int) -> InheritedAttempt | None:
+        """The parent's adopted run, when this execution's attempt at the step is the parent's.
+
+        A resume takes the parent's attempt over in two saves, start then adopt
+        (§A.7 3). A crash between them leaves its own attempt under the parent's
+        nonce with no run, and the parent's run is still the one that nonce
+        named. A retry has a fresh nonce, so a new attempt never gets it.
+        """
+        own = self.attempts.get(index)
+        parent = self.inherited_attempts.get(index)
+        if own is None or parent is None or own.run_id is not None:
+            return None
+        if parent.dispatch_id != own.dispatch_id or parent.run_id is None:
+            return None
+        return parent if parent.run_url is not None else None
+
     def inherited(self) -> InheritedEvidenceGate:
         """This gate as a resume inherits it: what it settled, and its last attempt at the rest.
 
-        The parent's own attempt wins over one it inherited, because it is later.
+        The parent's own attempt wins over one it inherited, because it is later,
+        but keeps the run the inherited one named when it is the same attempt.
         """
         kinds = {s.index: s.kind for s in self.plan}
         attempts = dict(self.inherited_attempts)
         for index, own in self.attempts.items():
+            run = self.parents_run(index) or own
             attempts[index] = InheritedAttempt(
                 step=index,
                 dispatch_id=own.dispatch_id,
                 started_at=own.started_at,
-                run_id=own.run_id,
-                run_url=own.run_url,
+                run_id=run.run_id,
+                run_url=run.run_url,
             )
         return InheritedEvidenceGate(
             gate_id=self.gate_id,
