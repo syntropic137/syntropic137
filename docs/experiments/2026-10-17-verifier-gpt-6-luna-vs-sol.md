@@ -29,6 +29,23 @@ Recorded before any gpt-5.6-luna result existed. Approved by the orchestrator.
 - If the VPS auth is fixed, gpt-6-luna may run later as a third arm against
   the same Sol runs. That would be a separate, later amendment.
 
+## Amendment 2 (2026-10-17): E1 stopped on a VPS Codex outage, not on the cheap models
+
+The amendment 1 probe on gpt-5.6-luna (`exec-16537ad92479`) failed with the
+same 401. No codex phase on any model succeeded on the VPS after 20:49:03Z.
+The orchestrator's gpt-5.6-sol smoke run (`exec-328962e4fafb`) then failed
+the same way, while `/health` still reported the credential as valid. So all
+three "Luna" failures were a credential outage starting around 20:50Z, not
+the models being unavailable. Amendment 1's hypothesis (that the credential
+cannot route non-Sol models) is withdrawn.
+
+- E1 is stopped until the orchestrator confirms the re-auth.
+- On resume, both cheap arms (gpt-6-luna, gpt-5.6-luna) are re-probed. The
+  original treatment, gpt-6-luna, comes back if it runs, and the arm choice
+  is recorded before any treatment result is read.
+- The one valid run so far is the Sol control on `binary-artifact-minio-key`
+  (`exec-9c8b76116c6b`). It stands.
+
 ## Question
 
 Can gpt-6-luna replace gpt-6.1-sol in verify without missing more defects?
