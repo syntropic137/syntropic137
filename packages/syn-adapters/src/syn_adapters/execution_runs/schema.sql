@@ -1,4 +1,8 @@
 -- Run Queue (ADR-072 D2-D5, D9, D10). Idempotent: runs at every startup.
+-- Each `-- step:` line starts one step: it runs in its own transaction with its
+-- row in execution_run_queue_schema_steps. Never rename or reorder a step;
+-- append a new one.
+-- step: executor_hosts
 CREATE TABLE IF NOT EXISTS executor_hosts (
     host_id TEXT PRIMARY KEY,
     container_id TEXT NOT NULL,
@@ -9,19 +13,50 @@ CREATE TABLE IF NOT EXISTS executor_hosts (
     registered_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- step: execution_budget
 CREATE TABLE IF NOT EXISTS execution_budget (
     executor_id TEXT PRIMARY KEY,
-    backend TEXT NOT NULL DEFAULT 'local',
     capacity INTEGER NOT NULL,
     in_use INTEGER NOT NULL DEFAULT 0,
     heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT '-infinity',
     CHECK (in_use >= 0 AND in_use <= capacity)
 );
+-- step: execution_budget_restart_columns
 -- D3 Restart: which machine a budget belongs to, and the process that inherits
 -- its slots as they are released.
 ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS container_id TEXT;
 ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS successor_id TEXT;
 
+-- step: executor_pools
+-- D13 Executor Pools. A budget row names its pool; pool capacity is a derived sum.
+CREATE TABLE IF NOT EXISTS executor_pools (
+    pool_id TEXT PRIMARY KEY,
+    priority SMALLINT NOT NULL CHECK (priority >= 0),
+    provider TEXT NOT NULL,
+    region TEXT,
+    isolation SMALLINT NOT NULL DEFAULT 10,
+    capabilities TEXT[] NOT NULL DEFAULT '{}',
+    overflow_delay_s INTEGER NOT NULL DEFAULT 60 CHECK (overflow_delay_s >= 0),
+    defined_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO executor_pools (pool_id, priority, provider)
+    VALUES ('default', 0, 'docker') ON CONFLICT DO NOTHING;
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS pool_id TEXT NOT NULL DEFAULT 'default';
+-- Named and added once: ADD COLUMN IF NOT EXISTS ... REFERENCES re-adds the
+-- constraint on some Postgres versions even when the column exists.
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'execution_budget_pool_id_fkey'
+        AND conrelid = 'execution_budget'::regclass) THEN
+        ALTER TABLE execution_budget ADD CONSTRAINT execution_budget_pool_id_fkey
+            FOREIGN KEY (pool_id) REFERENCES executor_pools (pool_id);
+    END IF;
+END $$;
+-- step: execution_budget_drop_backend
+-- Never written or read, before or since #1931, so an older image runs against
+-- the table without it (#1965). A pool's provider replaces it (D3, D13).
+ALTER TABLE execution_budget DROP COLUMN IF EXISTS backend;
+
+-- step: execution_runs
 CREATE TABLE IF NOT EXISTS execution_runs (
     execution_id TEXT PRIMARY KEY,
     state TEXT NOT NULL CHECK (state IN (

@@ -12,6 +12,12 @@ labelled by production's label producers.
 * V7b: an unlabelled workspace container is left, with a WARN, while B's real
   heartbeat is live, and is reaped once B is SIGKILLed and its heartbeat stale.
 
+B writes its heartbeat at the start of each loop turn (ADR-072 D4). Since
+#1944 the reap of A runs in a task the turn does not wait for, so a busy B no
+longer reads as stale; "B is live" is still established by a heartbeat written
+after that reap, never by timing, and the observer's staleness is a wide
+multiple of B's 200 ms idle turn.
+
 Run: ``uv run pytest -m integration apps/syn-api/tests/integration/test_1310_v7_a_killed_executor_is_reaped_by_a_live_one.py``
 """
 
@@ -59,6 +65,8 @@ pytestmark = [
 
 _LEASE_S = 2.0
 _WAIT_S = 60
+# 25 of B's 200 ms idle turns: wide enough that a live, idle B is not read as stale.
+_OBSERVER_STALE = timedelta(seconds=5)
 
 
 async def _spawn(
@@ -70,11 +78,26 @@ async def _spawn(
     )  # fmt: skip
 
 
-async def _docker(*args: str) -> str:
+async def _turned_since_now(runs: asyncpg.Pool, host_id: str) -> None:
+    """Return once ``host_id``'s loop has started a turn, so heartbeated, after this call."""
+    async with asyncio.timeout(_WAIT_S), runs.acquire() as conn:
+        since = await conn.fetchval("SELECT clock_timestamp()")
+        while not await conn.fetchval(
+            "SELECT heartbeat_at > $2 FROM execution_budget WHERE executor_id=$1",
+            host_id,
+            since,
+        ):
+            await asyncio.sleep(0.1)
+
+
+async def _docker(*args: str, check: bool = True) -> str:
+    """Run one docker command; with ``check``, a failure raises rather than reading as empty."""
     proc = await asyncio.create_subprocess_exec(
         "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
     )
-    out, _ = await proc.communicate()
+    async with asyncio.timeout(_WAIT_S):
+        out, _ = await proc.communicate()
+    assert not check or proc.returncode == 0, f"docker {args[0]} exited {proc.returncode}"
     return out.decode().strip()
 
 
@@ -131,18 +154,23 @@ async def test_v7_and_v7b_a_killed_executor_is_reaped_by_a_live_one(
         assert a_in_use == 0
 
         # V7b: an unlabelled container is B's as far as anyone can tell while B is live.
-        await _docker("run", "-d", "--name", unlabelled, "alpine:3", "sleep", "600")
-        live = PostgresExecutionRunQueue(pool, heartbeat_stale=timedelta(seconds=1))
+        assert await _docker("run", "-d", "--name", unlabelled, "alpine:3", "sleep", "600")
+        observer = PostgresExecutionRunQueue(pool, heartbeat_stale=_OBSERVER_STALE)
+        # B's last heartbeat predates its reap of A: wait for a turn after it.
+        await _turned_since_now(pool, b_host)
         with caplog.at_level(logging.WARNING):
-            await reap_unlabelled_if_alone(live, "v7b-observer")
+            await reap_unlabelled_if_alone(observer, "v7b-observer")
         assert await _docker("ps", "-aq", "--filter", f"name={unlabelled}")
         assert any(
             "unlabelled" in r.getMessage() and r.levelno == logging.WARNING for r in caplog.records
         )
+        # The hazard itself: B genuinely dead, its heartbeat stale, the container reaped.
         b.kill()
         await b.wait()
-        await asyncio.sleep(2)
-        await reap_unlabelled_if_alone(live, "v7b-observer")
+        async with asyncio.timeout(_WAIT_S):
+            while await observer.others_live("v7b-observer"):
+                await asyncio.sleep(0.2)
+        await reap_unlabelled_if_alone(observer, "v7b-observer")
         assert not await _docker("ps", "-aq", "--filter", f"name={unlabelled}")
     finally:
         for child in children:
@@ -151,5 +179,5 @@ async def test_v7_and_v7b_a_killed_executor_is_reaped_by_a_live_one(
             await child.wait()
         for host_id in (a_host, b_host):
             for container in await _containers(host_id):
-                await _docker("rm", "-f", container)
-        await _docker("rm", "-f", unlabelled)
+                await _docker("rm", "-f", container, check=False)
+        await _docker("rm", "-f", unlabelled, check=False)

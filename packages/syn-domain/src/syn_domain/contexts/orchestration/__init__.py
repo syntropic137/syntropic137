@@ -148,6 +148,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationConfig,
     SecurityPolicy,
     SidecarConfig,
+    WorkspaceDeleteFallback,
     WorkspaceUsage,
 )
 from syn_domain.contexts.orchestration.domain.commands import (
@@ -246,14 +247,19 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
     AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.orphaned_workspace import (
+    TERMINAL_EXECUTION_STATUSES,
     HostWorkspaceGit,
     OrphanedWorkspace,
-    PatchArchive,
+    OwnerExecution,
     ReclaimableDir,
+    RemoteRefs,
+    Retained,
+    RetainedReason,
     StaleWorkspaceDir,
     WorkspaceDirRemover,
     guard_orphaned_workspace,
     guard_stale_workspace_dir,
+    judge_owner,
     remove_reclaimed_dir,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
@@ -359,6 +365,7 @@ __all__ = [
     "SHIPPED_WINDOW_DAYS",
     "SKILL_TOOL_NAME",
     "TASK_PLACEHOLDER",
+    "TERMINAL_EXECUTION_STATUSES",
     # Tag edits after creation (#967)
     "AddExecutionTagsCommand",
     "AddExecutionTagsHandler",
@@ -451,7 +458,7 @@ __all__ = [
     "IsolationConfig",
     "LaunchEval",
     "OrphanedWorkspace",
-    "PatchArchive",
+    "OwnerExecution",
     "Percentiles",
     "PhaseDefinition",
     "PhaseExecutionType",
@@ -471,6 +478,7 @@ __all__ = [
     "ReclaimableDir",
     "RecordEvalRunScoreCommand",
     "RecordEvalRunScoreHandler",
+    "RemoteRefs",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",
@@ -485,6 +493,8 @@ __all__ = [
     "ResumeStartRecord",
     "ResumeStartStatus",
     "ResumeStarter",
+    "Retained",
+    "RetainedReason",
     "ReviewVerdict",
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
@@ -531,6 +541,7 @@ __all__ = [
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
+    "WorkspaceDeleteFallback",
     "WorkspaceDirRemover",
     "WorkspaceUsage",
     "announce_as",
@@ -542,6 +553,7 @@ __all__ = [
     "inherited_outputs",
     "is_gh_pr_create",
     "is_phase_id",
+    "judge_owner",
     "launch_eval_for",
     "mint_wrapper_name",
     "open_eval",

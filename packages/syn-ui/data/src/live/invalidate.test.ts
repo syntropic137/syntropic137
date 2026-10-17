@@ -26,6 +26,8 @@ describe('invalidationsFor (real API event names)', () => {
         'listWorkflowRuns:wf',
         'getWorkflowHistory:wf',
         'getWorkflowTrend:wf',
+        // The batch key is every id it asked for, so a run stales every batch (#1872).
+        'getWorkflowTrends',
         'listExecutionCosts',
         'getCostSummary',
         'getShippedMetrics',
@@ -175,5 +177,18 @@ describe('connectExecutionInvalidation (feedback 18ec6964)', () => {
     expect(spy.mock.calls[0]![0]).toMatch(/\/sse\/executions\/ex%201$/)
     stop()
     spy.mockRestore()
+  })
+})
+
+describe('connectLiveInvalidation after a reconnect (#1924)', () => {
+  it('resyncs: frames missed while disconnected are unknowable, so cached reads go stale', () => {
+    let reconnect: (() => void) | undefined
+    const resync = vi.fn()
+    const apply = vi.fn()
+    const stop = connectLiveInvalidation({ apply, resync, subscribe: (_onFrames, onReconnect) => ((reconnect = onReconnect), () => {}) })
+    expect(resync).not.toHaveBeenCalled()
+    reconnect!()
+    expect(resync).toHaveBeenCalledOnce()
+    stop()
   })
 })

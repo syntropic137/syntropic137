@@ -10,11 +10,10 @@ const subscribers = new Set<StreamSubscriber>()
 vi.mock('@syn137/syn-ui-data/live', () => ({
   subscribeActivity: (spec: StreamSubscriber) => {
     subscribers.add(spec)
-    spec.onState?.('connecting')
     return () => subscribers.delete(spec)
   },
 }))
-const streamState = (state: 'open' | 'connecting') => subscribers.forEach((s) => s.onState?.(state))
+const reconnect = () => subscribers.forEach((s) => s.onReconnect?.())
 
 const settle = async () => {
   for (let i = 0; i < 5; i++) {
@@ -59,16 +58,13 @@ describe('resource() live catch-up (#1924)', () => {
     return { calls: () => calls, stop }
   }
 
-  it('refetches when the stream re-opens after a drop, not on the first open', async () => {
+  // The hub decides what counts as a reconnect (the first open does not, live.test.ts).
+  it('refetches when the stream reconnects', async () => {
     const r = mountLive()
     try {
       await settle()
       const loaded = r.calls()
-      streamState('open')
-      await settle()
-      expect(r.calls()).toBe(loaded)
-      streamState('connecting')
-      streamState('open')
+      reconnect()
       await settle()
       expect(r.calls()).toBe(loaded + 1)
     } finally {

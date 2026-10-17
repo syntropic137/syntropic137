@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import logging
-import struct
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 import asyncpg
 
+from syn_adapters.advisory_locks import (
+    ROLLUP_SCHEMA_LOCK_KEY,
+    ROLLUP_STARTUP_LOCK_KEY,
+    SESSION_UNLOCK_SQL,
+    STARTUP_LOCK_RETRY_SECONDS,
+    TRY_SESSION_LOCK_SQL,
+    USAGE_ROLLUP_SCHEMA_LOCK_KEY,
+    session_advisory_lock,
+)
 from syn_adapters.events.models import EXPECTED_COLUMNS
 from syn_domain.contexts.agent_sessions import (
     SUMMARY_USAGE_TABLE,
@@ -210,25 +216,13 @@ SELECT EXISTS (
 # Is the rollup still being maintained? See _rollup_is_complete().
 ROLLUP_TRIGGER_LIVE_SQL = trigger_live_sql("agent_events_day_rollup")
 
-# One stable key for the whole rollup schema step (#1371). Derived from a name
-# the way PostgresImportLedger derives its keys, rather than picked as a magic
-# number, so it cannot collide with those by accident and a row in `pg_locks`
-# can be traced back to this line.
-ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
-    ">q", hashlib.blake2b(b"agent_event_day_rollup:schema", digest_size=8).digest()
-)[0]
-
-# Session-level key that spans the day rollup transaction AND the concurrent
-# execution index build after it (#1906). See _day_rollup_startup_lock.
-ROLLUP_STARTUP_LOCK_KEY: int = struct.unpack(
-    ">q", hashlib.blake2b(b"agent_event_day_rollup:startup", digest_size=8).digest()
-)[0]
-
-ROLLUP_STARTUP_TRY_LOCK_SQL = "SELECT pg_try_advisory_lock($1)"
-ROLLUP_STARTUP_UNLOCK_SQL = "SELECT pg_advisory_unlock($1)"
+# The rollup lock keys live in syn_adapters.advisory_locks with every other
+# startup key, so none can collide with another (#1371, #1906, #1965).
+ROLLUP_STARTUP_TRY_LOCK_SQL = TRY_SESSION_LOCK_SQL
+ROLLUP_STARTUP_UNLOCK_SQL = SESSION_UNLOCK_SQL
 
 # How often a replica that lost the startup lock asks again. Startup only.
-_STARTUP_LOCK_RETRY_SECONDS = 0.1
+_STARTUP_LOCK_RETRY_SECONDS = STARTUP_LOCK_RETRY_SECONDS
 
 
 # TAKE agent_events FIRST. Re-attaching a rollup trigger means DROP TRIGGER
@@ -477,10 +471,6 @@ ON CONFLICT (singleton) DO UPDATE SET backfilled_at = EXCLUDED.backfilled_at
 USAGE_ROLLUP_MARK_INCOMPLETE_SQL = f"DELETE FROM {USAGE_ROLLUP_STATE_TABLE}"
 USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL = f"SELECT EXISTS (SELECT 1 FROM {USAGE_ROLLUP_STATE_TABLE})"
 
-USAGE_ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
-    ">q", hashlib.blake2b(b"agent_usage_rollup:schema", digest_size=8).digest()
-)[0]
-
 USAGE_ROLLUP_TRIGGER = "agent_events_usage_rollup"
 
 
@@ -518,15 +508,10 @@ async def _day_rollup_startup_lock(conn: asyncpg.Connection) -> AsyncIterator[No
     CREATE INDEX CONCURRENTLY waits for every older snapshot: the waiter would
     deadlock with the holder's build. Between attempts the waiter holds none.
     """
-    while not await conn.fetchval(ROLLUP_STARTUP_TRY_LOCK_SQL, ROLLUP_STARTUP_LOCK_KEY):
-        await asyncio.sleep(_STARTUP_LOCK_RETRY_SECONDS)
-    try:
+    async with session_advisory_lock(
+        conn, ROLLUP_STARTUP_LOCK_KEY, retry_seconds=_STARTUP_LOCK_RETRY_SECONDS
+    ):
         yield
-    finally:
-        # Session locks survive the transaction, so release promptly here.
-        # If this cannot run (cancelled mid-acquire, broken connection), the
-        # pool's reset (pg_advisory_unlock_all) or the session ending frees it.
-        await conn.execute(ROLLUP_STARTUP_UNLOCK_SQL, ROLLUP_STARTUP_LOCK_KEY)
 
 
 class SchemaValidationError(Exception):

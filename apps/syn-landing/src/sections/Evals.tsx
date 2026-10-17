@@ -1,16 +1,11 @@
 import { useRef } from "react";
 import { PillarNumber, SectionIntro } from "../components/PillarHeader";
+import ArrowRight from "../components/ArrowRight";
 import CodeWindow from "../components/CodeWindow";
 import { useElement } from "../components/useElement";
 import { EVALS_COPY } from "../data/copy";
 import { EVAL_SAMPLE } from "../data/sample/evals";
 import "./Evals.css";
-
-const ArrowRight = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M3 8h10M9 4l4 4-4 4" />
-  </svg>
-);
 
 const loadExplorer = () => import("@syn137/skyline-svelte-v5/elements/eval-explorer");
 
@@ -32,7 +27,7 @@ export default function Evals() {
             <PillarNumber num={EVALS_COPY.num} />
             <SectionIntro titleId="evals-title" eyebrow={EVALS_COPY.eyebrow} title={EVALS_COPY.title} lede={EVALS_COPY.lede} />
           </div>
-          <a className="evals__guide" href={EVALS_COPY.guide.href} target="_blank" rel="noopener noreferrer">
+          <a className="evals__guide guide-link" href={EVALS_COPY.guide.href} target="_blank" rel="noopener noreferrer">
             {EVALS_COPY.guide.label} <ArrowRight />
           </a>
         </div>

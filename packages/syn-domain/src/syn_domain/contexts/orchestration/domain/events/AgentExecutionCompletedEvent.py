@@ -6,10 +6,11 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from typing import Final
 
 from event_sourcing import DomainEvent, event
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 # Runtime import needed for the Pydantic field type (noqa: TC001)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DeclaredEvidence,  # noqa: TC001 - needed at runtime for Pydantic
     ReviewVerdict,  # noqa: TC001 - needed at runtime for Pydantic
     SideEffectStatus,  # noqa: TC001 - needed at runtime for Pydantic
 )
@@ -64,6 +65,10 @@ class AgentExecutionCompletedEvent(DomainEvent):
     #: Carried here for the same restart reason: the aggregate decides the next
     #: phase from it at collection, a later to-do item.
     reported_review_verdict: ReviewVerdict | None = None
+    #: What the phase asked the platform to prove (plan §A.2). Recorded only:
+    #: no decision reads it until the evidence gate exists. Empty on events
+    #: written before it existed, which declared nothing.
+    reported_evidence: list[DeclaredEvidence] = Field(default_factory=list)
     #: The agent that PRODUCED this result, which is not always the one the
     #: phase declared: a phase whose provider was at capacity or out of quota
     #: is re-run once on its `fallback_agent` (PC-83). None on events written

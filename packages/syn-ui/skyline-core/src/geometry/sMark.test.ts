@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import brandSvg from '../../../../../design/brand/s-mark.svg?raw'
+import brandSvg from '../../../../../design/brand/v2/logo/s-mark.svg?raw'
 import { S_GRID, sMark, type SMarkTone } from './index'
 
 /** "38.64,184 73.28,204" -> "38.6,184.0 73.3,204.0", the brand file's one-decimal format. */
@@ -30,7 +30,7 @@ describe('sMark', () => {
     expect(mark.cubes.find((c) => c.tone === 'glass')).toMatchObject({ column: 2, level: 4 })
   })
 
-  it('reproduces design/brand/s-mark.svg', () => {
+  it('reproduces design/brand/v2/logo/s-mark.svg', () => {
     expect(brandSvg).toContain('viewBox="0 0 147 308"')
     expect(mark.viewBox).toBe('0 0 147 308')
     const brand = brandCubes(brandSvg)

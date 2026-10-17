@@ -1,12 +1,14 @@
+import type { ReactElement } from 'react';
 import Link from 'next/link';
 import packageJson from '../package.json';
 import { SMark, Wordmark } from './SMark';
+import { GitHubIcon, XIcon, YouTubeIcon } from './SocialIcons';
 
 const LAST_UPDATED = 'March 2026';
 const REPO = 'https://github.com/syntropic137/syntropic137';
 
 /** Footer columns from the v4 Landing board, pointed at the docs. */
-const COLUMNS: ReadonlyArray<{ title: string; links: ReadonlyArray<{ text: string; href: string }> }> = [
+const COLUMNS: ReadonlyArray<{ title: string; links: ReadonlyArray<{ text: string; href: string; icon?: () => ReactElement }> }> = [
   {
     title: 'Product',
     links: [
@@ -28,8 +30,9 @@ const COLUMNS: ReadonlyArray<{ title: string; links: ReadonlyArray<{ text: strin
   {
     title: 'Community',
     links: [
-      { text: 'GitHub', href: REPO },
-      { text: 'X', href: 'https://x.com/syntropic137' },
+      { text: 'GitHub', href: REPO, icon: GitHubIcon },
+      { text: 'X', href: 'https://x.com/syntropic137', icon: XIcon },
+      { text: 'YouTube', href: 'https://www.youtube.com/@Syntropic137', icon: YouTubeIcon },
       { text: 'Changelog', href: `${REPO}/blob/main/CHANGELOG.md` },
       { text: 'Security', href: `${REPO}/blob/main/SECURITY.md` },
     ],
@@ -61,7 +64,15 @@ export function DocsFooter() {
                   {link.text}
                 </Link>
               ) : (
-                <a key={link.text} href={link.href} className="syn-footer__link" target="_blank" rel="noopener noreferrer">
+                <a
+                  key={link.text}
+                  href={link.href}
+                  className="syn-footer__link"
+                  data-social={link.icon ? '' : undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {link.icon && <link.icon />}
                   {link.text}
                 </a>
               ),

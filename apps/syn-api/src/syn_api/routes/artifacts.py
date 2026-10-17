@@ -336,11 +336,19 @@ async def _load_artifact_content(
     return None
 
 
+async def _find_artifact(artifact_id: str) -> DomainArtifactSummary | None:
+    """The artifact by full id, found even while its read model lags (#1570)."""
+    from syn_domain.contexts.artifacts import GetArtifactHandler
+
+    handler = GetArtifactHandler(get_projection_mgr().artifact_list, get_artifact_repo())
+    return await handler.handle(artifact_id)
+
+
 async def get_artifact_bytes(artifact_id: str) -> Result[_ArtifactBody, ArtifactError]:
     """The artifact's content as stored, for serving as-is (#990)."""
     await ensure_connected()
     try:
-        artifact = await get_projection_mgr().artifact_list.get_by_id(artifact_id)
+        artifact = await _find_artifact(artifact_id)
         if artifact is None:
             return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} not found")
         body = await _load_artifact_content(
@@ -375,14 +383,7 @@ async def get_artifact(
     """
     await ensure_connected()
     try:
-        manager = get_projection_mgr()
-        projection = manager.artifact_list
-
-        # Look up from projection. This read every artifact ever written and
-        # scanned for the id, under a limit of 10000 -- so past that row the
-        # only remaining way to reach an old artifact stopped working too
-        # (#1204). The store is keyed by id.
-        artifact = await projection.get_by_id(artifact_id)
+        artifact = await _find_artifact(artifact_id)
 
         if artifact is None:
             return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} not found")
@@ -730,10 +731,12 @@ async def get_artifact_endpoint(
     include_content: bool = Query(True, description="Include artifact content in response"),
 ) -> ArtifactResponse:
     """Get artifact details by ID (supports partial ID prefix matching)."""
-    from syn_api.prefix_resolver import resolve_or_raise
+    from syn_api.prefix_resolver import resolve_prefix_or_keep
 
     mgr = get_projection_mgr()
-    artifact_id = await resolve_or_raise(mgr.store, "artifact_summaries", artifact_id, "Artifact")
+    artifact_id = await resolve_prefix_or_keep(
+        mgr.store, "artifact_summaries", artifact_id, "Artifact"
+    )
     result = await get_artifact(artifact_id, include_content=include_content)
 
     if isinstance(result, Err):
@@ -770,10 +773,12 @@ async def get_artifact_endpoint(
 @router.get("/{artifact_id}/content", response_model=ArtifactContentResponse)
 async def get_artifact_content_endpoint(artifact_id: str) -> ArtifactContentResponse:
     """Get artifact content only (for large artifacts)."""
-    from syn_api.prefix_resolver import resolve_or_raise
+    from syn_api.prefix_resolver import resolve_prefix_or_keep
 
     mgr = get_projection_mgr()
-    artifact_id = await resolve_or_raise(mgr.store, "artifact_summaries", artifact_id, "Artifact")
+    artifact_id = await resolve_prefix_or_keep(
+        mgr.store, "artifact_summaries", artifact_id, "Artifact"
+    )
     result = await get_artifact(artifact_id, include_content=True)
 
     if isinstance(result, Err):
@@ -819,10 +824,12 @@ async def get_artifact_raw_endpoint(artifact_id: str) -> Response:
     text form for the JSON endpoints to carry (#990). Text artifacts are
     served the same way, as their UTF-8 bytes.
     """
-    from syn_api.prefix_resolver import resolve_or_raise
+    from syn_api.prefix_resolver import resolve_prefix_or_keep
 
     mgr = get_projection_mgr()
-    artifact_id = await resolve_or_raise(mgr.store, "artifact_summaries", artifact_id, "Artifact")
+    artifact_id = await resolve_prefix_or_keep(
+        mgr.store, "artifact_summaries", artifact_id, "Artifact"
+    )
     result = await get_artifact_bytes(artifact_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} content not found")

@@ -23,7 +23,12 @@ export interface WorkflowSummary {
   phase_count: number
   created_at: string | null
   runs_count: number
+  /** Every distinct skill the phases declare, first-declared first (GET /workflows since v1.0.0). */
+  skills: DeclaredSkill[]
 }
+
+/** A skill a workflow declares, aliased to the generated schema rather than restated. */
+export type DeclaredSkill = components['schemas']['DeclaredSkillResponse']
 
 export interface InputDeclaration {
   name: string

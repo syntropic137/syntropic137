@@ -9,6 +9,7 @@ export const REPO = "syntropic137/syntropic137";
 export const GITHUB_URL = `https://github.com/${REPO}`;
 export const DOCS_URL = "https://docs.syntropic137.com";
 export const X_URL = "https://x.com/syntropic137";
+export const YOUTUBE_URL = "https://www.youtube.com/@Syntropic137";
 
 export interface SiteLink {
   label: string;
@@ -35,9 +36,14 @@ export const NAV_CTA: SiteLink = { label: "Get started", href: "#start" };
 
 export const FOOTER_TAGLINE = "The agentic engineering platform. MIT licensed.";
 
+/** A footer link; social ones carry their brand mark. */
+export interface FooterLink extends SiteLink {
+  icon?: "github" | "x" | "youtube";
+}
+
 export interface FooterColumn {
   title: string;
-  links: readonly SiteLink[];
+  links: readonly FooterLink[];
 }
 
 export const FOOTER_COLUMNS: readonly FooterColumn[] = [
@@ -62,8 +68,9 @@ export const FOOTER_COLUMNS: readonly FooterColumn[] = [
   {
     title: "Community",
     links: [
-      { label: "GitHub", href: GITHUB_URL },
-      { label: "X", href: X_URL },
+      { label: "GitHub", href: GITHUB_URL, icon: "github" },
+      { label: "X", href: X_URL, icon: "x" },
+      { label: "YouTube", href: YOUTUBE_URL, icon: "youtube" },
       { label: "Changelog", href: `${GITHUB_URL}/blob/main/CHANGELOG.md` },
       { label: "Security", href: `${GITHUB_URL}/security/policy` },
     ],

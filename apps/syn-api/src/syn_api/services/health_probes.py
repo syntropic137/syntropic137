@@ -7,10 +7,13 @@ response; each probe here answers one question and never raises.
 from __future__ import annotations
 
 import logging
+import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from syn_api.services.degraded_reasons import DegradedReason
-from syn_api.types import DiskSpaceHealth
+from syn_api.services.workspace_reclaim_status import DELETE_FAILED_PASSES_TO_DEGRADE
+from syn_api.types import DiskSpaceHealth, RetainedWorkspaceDirs, WorkspaceReclaimHealth
 
 if TYPE_CHECKING:
     from syn_shared.codex_auth_status import CodexAuthStatus
@@ -32,15 +35,52 @@ def describe_disk_health() -> tuple[DiskSpaceHealth | None, list[DegradedReason]
     except Exception:
         logger.warning("disk space probe could not be built", exc_info=True)
         return None, []
+    reclaim = describe_workspace_reclaim()
     health = DiskSpaceHealth(
         path=check.path,
         state=check.state.value,
         free_percent=None if check.usage is None else round(check.usage.free_percent, 2),
         free_bytes=None if check.usage is None else check.usage.free_bytes,
-        degraded_below_percent=check.degraded_below_percent,
-        refuse_admission_below_percent=check.refuse_admission_below_percent,
+        degraded_below_bytes=check.thresholds.degraded_below_bytes,
+        refuse_admission_below_bytes=check.thresholds.refuse_admission_below_bytes,
+        degraded_below_percent=check.thresholds.degraded_below_percent,
+        refuse_admission_below_percent=check.thresholds.refuse_admission_below_percent,
+        detail=check.detail,
+        reclaim=reclaim,
     )
-    return health, [DegradedReason.DISK_SPACE] if check.is_degraded else []
+    reasons = [DegradedReason.DISK_SPACE] if check.is_degraded else []
+    if reclaim is not None and reclaim.delete_failed_passes >= DELETE_FAILED_PASSES_TO_DEGRADE:
+        reasons.append(DegradedReason.WORKSPACE_RECLAIM)
+    return health, reasons
+
+
+def describe_workspace_reclaim() -> WorkspaceReclaimHealth | None:
+    """The reclaimer's last pass, per retained reason (#1983). Never raises."""
+    try:
+        from syn_api.services.workspace_reclaim_status import reclaim_status
+
+        snapshot = reclaim_status().snapshot(time.time())
+        return WorkspaceReclaimHealth(
+            last_pass_at=(
+                None
+                if snapshot.last_pass_at is None
+                else datetime.fromtimestamp(snapshot.last_pass_at, tz=UTC)
+            ),
+            paused=snapshot.paused,
+            last_pass_skipped=snapshot.skipped,
+            reclaimed_bytes_24h=snapshot.reclaimed_bytes_24h,
+            dry_run_reclaimable=snapshot.dry_run_reclaimable,
+            deletes_in_progress=snapshot.deletes_in_progress,
+            out_of_time=snapshot.out_of_time,
+            retained=[
+                RetainedWorkspaceDirs(reason=t.reason, count=t.count, size_bytes=t.size_bytes)
+                for t in snapshot.retained
+            ],
+            delete_failed_passes=snapshot.delete_failed_passes,
+        )
+    except Exception:
+        logger.warning("workspace reclaim probe failed", exc_info=True)
+        return None
 
 
 def describe_codex_auth_health() -> CodexAuthStatus | None:
@@ -56,10 +96,14 @@ def describe_codex_auth_health() -> CodexAuthStatus | None:
     """
     try:
         from syn_shared.codex_auth_status import describe_codex_auth
-        from syn_shared.settings import get_settings
+        from syn_shared.codex_credentials import resolve_configured_codex_credential
 
-        secret = get_settings().codex_auth_json
-        return describe_codex_auth(secret.get_secret_value() if secret else None)
+        # The same precedence a codex phase gets (#1971): CODEX_AUTH_JSON, then
+        # OPENAI_API_KEY. Only a state and a detail leave this function.
+        resolved = resolve_configured_codex_credential()
+        if resolved is None:
+            return describe_codex_auth(None)
+        return describe_codex_auth(resolved.auth_json, source=resolved.source)
     except Exception:
         logger.debug("codex auth freshness probe failed", exc_info=True)
         return None

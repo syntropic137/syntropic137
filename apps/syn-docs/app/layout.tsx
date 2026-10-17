@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   },
   description:
     'Self-hosted agentic engineering platform. Run AI agents in isolated Docker workspaces with full observability. Every decision permanently captured.',
-  // The S mark, from design/brand/ (P0 assets).
+  // The S mark, from design/brand/v2/ (P0 assets).
   icons: {
     icon: [
       { url: '/favicon.svg', type: 'image/svg+xml' },

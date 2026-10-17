@@ -1,7 +1,7 @@
 /**
  * The Syntropic137 S mark as inline SVG, coloured by Skyline tokens.
  *
- * Geometry is design/brand/s-mark.svg (viewBox 147 x 308): isometric cubes in
+ * Geometry is design/brand/v2/logo/s-mark.svg (viewBox 147 x 308): isometric cubes in
  * one vertical plane, blue on top, one glass cube, dark below. Swap for
  * skyline-core's sMark() or <sky-s-mark> once the elements build lands.
  */
