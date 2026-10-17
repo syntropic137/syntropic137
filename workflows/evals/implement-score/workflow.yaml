@@ -1,0 +1,57 @@
+id: eval-implement-score-v1
+name: "Eval: score one implementer-seed patch against its hidden tests (v1)"
+description: >
+  Scores one execution of an implementer-seed arm (eval-implement-pinned-v1 or
+  eval-implement-pinned-sonnet-v1): runs scripts/eval_implementer.py score for
+  the named case on that execution's implement.patch, inside a workspace,
+  because scoring runs the agent's code. The same workflow scores both arms,
+  so it is not a variable of the experiment.
+type: custom
+classification: standard
+requires_repos: true
+
+inputs:
+  - name: task
+    description: "The implementer-seed case id, e.g. exec-status-lost"
+    required: true
+  - name: implement_execution_id
+    description: "The execution whose implement.patch is scored (recorded in the result for provenance)"
+    required: true
+  - name: patch
+    description: "Optional: the patch text itself, when this workspace has no platform API access to fetch it"
+    required: false
+
+# WHY THIS IS A WORKFLOW, NOT A LOCAL COMMAND. The README of
+# evals/implementer-seed-v1 says score runs in a workspace and never on a host:
+# it executes the agent's code. There is no mechanism yet to hand one
+# execution's output artifact to another as an input artifact, so the phase
+# fetches the patch over the read-only platform API (ADR-072) when the
+# deployment grants it, or takes it as the `patch` input when it does not.
+#
+# THE SCORER'S MODEL DOES NO JUDGING. The verdict is eval_implementer.py's exit
+# code; the agent only fetches, runs and reports it. Pinned as an explicit id so
+# no alias can resolve it to a pre-5 model.
+#
+# Run it on the repository default branch: score needs the fix commits and the
+# hidden tests at fix_commit, and makes its own worktree at the pin.
+
+phases:
+  - id: score
+    name: Score the patch against the case's hidden tests
+    order: 1
+    execution_type: sequential
+    input_artifacts: []
+    output_artifacts:
+      - score
+    timeout_seconds: 2400
+    delivers_repo_changes: false
+    allowed_tools:
+      - Read
+      - Grep
+      - Glob
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: claude-opus-5-5
+    prompt_file: phases/score.md

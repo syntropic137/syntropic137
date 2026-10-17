@@ -98,6 +98,28 @@
       ],
       "document_sha256": "6930cd72d4831a5d15bfd72b2a8a7e2a83d74468a400397a6c8af44ae218c625"
     },
+    "workflows/evals/implement-pinned-sonnet/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        }
+      ],
+      "document_sha256": "906f7f2c68a184cd19824da87d0847ea83397c95c90ee35148349068ab930fe0"
+    },
+    "workflows/evals/implement-score/workflow.yaml": {
+      "phases": [
+        {
+          "id": "score",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/score.md"
+        }
+      ],
+      "document_sha256": "7c43fabff47e7e4e140b6d5fc16a1b2ec9454e4feecffdf211e35d59c26c3d75"
+    },
     "workflows/evals/verify-pinned/workflow.yaml": {
       "phases": [
         {

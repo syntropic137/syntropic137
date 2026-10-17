@@ -1,6 +1,18 @@
 # E2: Sonnet 5.5 vs Opus 5.5 as implementer (preregistered 2026-10-17)
 
-Status: PROPOSED, not approved, nothing dispatched.
+Status: APPROVED by the orchestrator on 2026-10-17, with conditions. Wait for
+"GO" after the pit stop, which happens after the orchestrator registers both
+new workflows. Nothing dispatched.
+
+Conditions:
+- The treatment pins the explicit id `claude-sonnet-5-5`, not the alias.
+- **Abort rule:** on the FIRST treatment execution, `phases[].model` must read
+  `claude-sonnet-5-5`. If it does not, abort the whole experiment.
+- Scoring runs on the platform via `eval-implement-score-v1`
+  (`workflows/evals/implement-score/`). That workflow is identical for both
+  arms, pinned to `claude-opus-5-5`, and does no judging: the verdict is
+  `eval_implementer.py`'s exit code.
+- Scoring runs count toward the cap of 2 in flight.
 
 ## Question
 
@@ -58,14 +70,32 @@ Estimated from the median production implement phase ($1.92, 43 min, n=25).
 - Opus arm: 10 x ~$1.9 = ~$19.
 - Sonnet arm: 10 x ~$1.0 = ~$10, assuming similar token counts at half the
   price per token.
-- Total ~$30. With 2 runs in flight, about 4 h of wall clock.
+- Scoring: 20 x `eval-implement-score-v1` at roughly $0.3-0.5 each = ~$6-10.
+- Total ~$40, across 40 executions. With 2 in flight, about 6-8 h of wall
+  clock.
+
+## Procedure
+
+1. Launch the implement run for each case, one per arm, alternating arm order.
+   Tag every run `eval-research`, `experiment:e2-implementer-sonnet` and
+   `arm:control` or `arm:treatment`.
+2. Check the first treatment execution's `phases[].model` (the abort rule).
+3. When an implement run completes, launch `eval-implement-score-v1` with
+   `task=<case id>` and `implement_execution_id=<id>`. If the deployment has
+   no platform API access, also pass the patch text as `patch`.
+4. Read `score.md` line 1. Record PASS, FAIL or ERROR per execution in the
+   Results table below.
+5. Read each PASS run's tool trace for leaks (`git log --all`, `git show`,
+   `fetch`, `gh`) before counting it (suite README, "Leakage").
 
 ## Dependencies and blockers
 
-- The treatment workflow does not exist yet.
-- Scoring runs `eval_implementer.py score` inside a workspace. It cannot run
-  locally: there is no local docker under my limits. The orchestrator must
-  route scoring (for example as a workspace phase).
+- The orchestrator must register `eval-implement-pinned-sonnet-v1` and
+  `eval-implement-score-v1` on the VPS after the pit stop.
+- Whether the VPS grants platform API access to workspaces is unknown. If it
+  does not, the patch is passed as an input. A patch containing a triple
+  backtick could break the prompt fence: check the scorer's reported sha256
+  against the artifact.
 
 ## Results
 

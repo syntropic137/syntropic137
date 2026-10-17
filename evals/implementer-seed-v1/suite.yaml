@@ -10,3 +10,9 @@ workflows:
     path: workflows/evals/implement-pinned/workflow.yaml
     models:
       implement: opus
+  # E2 treatment arm (docs/experiments/2026-10-17-implementer-sonnet-vs-opus.md):
+  # the control with only the model changed, pinned by explicit id.
+  - id: eval-implement-pinned-sonnet-v1
+    path: workflows/evals/implement-pinned-sonnet/workflow.yaml
+    models:
+      implement: claude-sonnet-5-5

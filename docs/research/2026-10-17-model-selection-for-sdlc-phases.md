@@ -141,16 +141,22 @@ model is registered.
 
 ## 5. Defects found while doing this research
 
-1. The `haiku` alias resolves to `claude-haiku-4-5-20251001`
+1. (#2020) The `haiku` alias resolves to `claude-haiku-4-5-20251001`
    (`packages/syn-shared/src/syn_shared/agents.py:354`), a pre-5 model.
    claude-haiku-5-5 is not registered.
-2. The eval LLM judge is pinned to `claude-sonnet-4-6`
+2. (#2021) The eval LLM judge is pinned to `claude-sonnet-4-6`
    (`evals/verifier-seed-v1/README.md`, `scripts/eval_suite.py`), a pre-5
    model. Until it is moved, use the keyword judge only.
 3. Pinned CLI 2.1.281 may resolve `sonnet` to Sonnet 5, not 5.5
    (`agents.py:399-403`). Any Sonnet arm must check `phases[].model`.
-4. The `launches.jsonl` ledgers hold only v1/v2 runs. The v3 to v8 history
-   refers to runs that are not recorded.
+4. (finding, no issue) The `launches.jsonl` ledgers hold only v1/v2 runs. The
+   v3 to v8 history in `evals/verifier-seed-v1/suite.yaml` refers to runs that
+   are not recorded anywhere, so no v3-v8 score can be reproduced.
+5. (finding, no issue) gpt-6.1-sol was launched on verifier-seed-v1 v2 (6 runs)
+   and never scored. `eval-verify-pinned-sonnet-v1`, the three cheaper-codex
+   verifier workflows (`gpt-6-luna`, `gpt-5.6-luna`, `gpt-5.6-terra`) and
+   `eval-implement-pinned-v1` have never run. Our cross-family rule and our
+   choice of verifier model rest on n=4 (Opus v1) plus production block rates.
 
 ## 6. Unknown
 
