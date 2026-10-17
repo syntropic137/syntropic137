@@ -1,9 +1,13 @@
-// ?day= on the wire: the bounds the page computes are the bounds the API receives.
-// The page test above the client sees them before the data package rewrites
-// anything; this one reads them off the outgoing request (#1940).
+// A day's bounds on the wire: what listExecutions is asked for is what the API
+// receives. The page test (apps/syn-ui list.svelte.test.ts) pins that ?day=
+// asks listExecutions for skyline-core's dayBounds; this one reads those
+// bounds off the outgoing request, after the client has had its say (#1940).
 import { afterEach, describe, expect, it } from 'vitest'
-import { dayBounds } from '@syn137/skyline-core/screens/executions'
-import { configureClient, listExecutions, queryCache } from '@syn137/syn-ui-data'
+import { configureClient, queryCache } from '../client'
+import { listExecutions } from './executions'
+
+/** The shape skyline-core's dayBounds gives one UTC day: [00:00, last microsecond]. */
+const dayBounds = (day: string) => ({ started_after: `${day}T00:00:00.000Z`, started_before: `${day}T23:59:59.999999Z` })
 
 /** An ISO 8601 UTC instant as integer microseconds, the precision the API compares at. */
 const micros = (iso: string): bigint => {
@@ -25,16 +29,17 @@ async function sentBounds(day: string): Promise<{ after: string; before: string 
       return new Response(JSON.stringify({ executions: [], total: 0, page: 1, page_size: 10 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     },
   })
-  await listExecutions({ page: 1, page_size: 10, ...dayBounds(day)! })
+  await listExecutions({ page: 1, page_size: 10, ...dayBounds(day) })
   const after = url?.searchParams.get('started_after')
   const before = url?.searchParams.get('started_before')
   if (!after || !before) throw new Error(`no day bounds on the request: ${url}`)
   return { after, before }
 }
 
+const realFetch = globalThis.fetch
 afterEach(() => {
   queryCache.clear()
-  configureClient({ fixtures: true })
+  configureClient({ fixtures: false, baseUrl: '/api/v1', fetch: (...a) => realFetch(...a) })
 })
 
 describe('?day= bounds reach the API unrounded', () => {
