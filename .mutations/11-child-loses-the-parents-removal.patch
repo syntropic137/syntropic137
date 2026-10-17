@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_gate.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_gate.py
+index 23409b1d9..3d9ef4624 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_gate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/evidence_gate.py
+@@ -480,7 +480,7 @@ class EvidenceGate:
+                 )
+                 for s in gate.settled
+             },
+-            removed=gate.patch_removal,
++            removed=None,
+             inherited_attempts={a.step: a for a in gate.attempts},
+         )
+ 
