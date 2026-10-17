@@ -1,5 +1,12 @@
 """Feedback events (ADR-076-feedback-ticketing)."""
 
+from syn_domain.contexts.feedback.domain.events.SourceEnrolledEvent import SourceEnrolledEvent
+from syn_domain.contexts.feedback.domain.events.SourceKeyRotatedEvent import SourceKeyRotatedEvent
+from syn_domain.contexts.feedback.domain.events.SourceRevokedEvent import SourceRevokedEvent
+from syn_domain.contexts.feedback.domain.events.SourceThrottledEvent import SourceThrottledEvent
+from syn_domain.contexts.feedback.domain.events.SourceThrottleLiftedEvent import (
+    SourceThrottleLiftedEvent,
+)
 from syn_domain.contexts.feedback.domain.events.TicketClosedEvent import TicketClosedEvent
 from syn_domain.contexts.feedback.domain.events.TicketFixObservedEvent import TicketFixObservedEvent
 from syn_domain.contexts.feedback.domain.events.TicketFixReleasedEvent import TicketFixReleasedEvent
@@ -30,6 +37,11 @@ from syn_domain.contexts.feedback.domain.events.TicketReprioritisedEvent import 
 from syn_domain.contexts.feedback.domain.events.TicketResolvedEvent import TicketResolvedEvent
 
 __all__ = [
+    "SourceEnrolledEvent",
+    "SourceKeyRotatedEvent",
+    "SourceRevokedEvent",
+    "SourceThrottleLiftedEvent",
+    "SourceThrottledEvent",
     "TicketClosedEvent",
     "TicketFixObservedEvent",
     "TicketFixReleasedEvent",
