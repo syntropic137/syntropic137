@@ -17,6 +17,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution import (
     evidence_replay,
     evidence_steps,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import evt
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
 )
@@ -72,6 +73,7 @@ class EvidenceGateHandlers:
         _evidence: EvidenceRecord
         _status: ExecutionStatus
         _phase_definitions: list[PhaseDefinition]
+        _phase_artifact_ids: dict[str, list[str]]
         _workflow_id: str | None
         _reviews: ReviewRecord
 
@@ -171,5 +173,16 @@ class EvidenceGateHandlers:
 
     @event_sourcing_handler("EvidenceStepSettled")
     def on_evidence_step_settled(self, event: EvidenceStepSettledEvent) -> None:
-        """Apply EvidenceStepSettled."""
+        """Apply EvidenceStepSettled: the reports become the gated phase's artifacts (§A.6).
+
+        Owned by the phase the gate followed, so a resume that inherits that
+        phase inherits its reports and manifest with it (§A.7).
+        """
         evidence_replay.step_settled(self._gates, event)
+        gate = self._gates.get(evt(event, "gate_id"))
+        if gate is not None:
+            owned = self._phase_artifact_ids.setdefault(gate.after_phase_id, [])
+            manifest = evt(event, "manifest_artifact_id")
+            for artifact_id in [*(evt(event, "report_artifact_ids") or []), manifest]:
+                if artifact_id and artifact_id not in owned:
+                    owned.append(artifact_id)

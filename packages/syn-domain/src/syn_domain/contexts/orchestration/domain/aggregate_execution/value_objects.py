@@ -1197,6 +1197,10 @@ class ResumeOrigin(BaseModel):
     #: these; their artifacts are the ones it hands forward.
     inherited_phases: list[InheritedPhase]
     resume_phase_id: str
+    #: The parent's open evidence gate, when the parent stopped inside one
+    #: (plan §A.7). The child seeds its own gate from it and runs the gate's
+    #: first unsettled step before the held phase.
+    inherited_evidence_gate: InheritedEvidenceGate | None = None
 
     def owner_of(self, phase: InheritedPhase) -> str:
         """The execution holding ``phase``'s artifacts.
@@ -1397,3 +1401,15 @@ class EvidencePlanStep(BaseModel):
     tests: tuple[str, ...] = ()
     on_cleaned_head: bool = False
     preset: EvidencePreset | None = None
+
+
+# Re-exported for `ExecutionResumed` and `ResumeOrigin` (plan §A.7): this module
+# is past the file-size limit, and the gate's value objects need EvidencePlanStep.
+from syn_domain.contexts.orchestration.domain.aggregate_execution.inherited_evidence import (  # noqa: E402
+    InheritedAttempt as InheritedAttempt,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.inherited_evidence import (  # noqa: E402
+    InheritedEvidenceGate as InheritedEvidenceGate,
+)
+
+ResumeOrigin.model_rebuild()

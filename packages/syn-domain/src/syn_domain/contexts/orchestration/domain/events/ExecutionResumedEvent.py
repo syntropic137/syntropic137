@@ -9,10 +9,15 @@ from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, mod
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     INHERITED_PHASE_OWNERS,
+    InheritedEvidenceGate,
     InheritedPhase,
     owners_to_carry,
     resumed_payload_for_replay,
 )
+
+
+#: Fields left off the payload when empty, so a resume without them is written as before.
+_WRITTEN_ONLY_WHEN_SET = frozenset({"inherited_skipped_phase_ids", "inherited_evidence_gate"})
 
 
 @event("ExecutionResumed", "v1")
@@ -62,6 +67,12 @@ class ExecutionResumedEvent(DomainEvent):
     #: acknowledged that re-running it may repeat what it did.
     external_effects_acknowledged: bool = False
 
+    #: The parent's open evidence gate (plan §A.7): an `EvidenceRequested`
+    #: with no `NextPhaseReady` after it. `resume_phase_id` is then the phase
+    #: the gate held, and the resume runs the gate's unsettled steps first.
+    #: Written only when there is one, so every other resume's event is as it was.
+    inherited_evidence_gate: InheritedEvidenceGate | None = None
+
     @model_validator(mode="before")
     @classmethod
     def _restore_inherited_owners(cls, data: object) -> object:
@@ -87,7 +98,7 @@ class ExecutionResumedEvent(DomainEvent):
         payload = {
             k: v
             for k, v in handler(self).items()
-            if not (k == "inherited_skipped_phase_ids" and not v)
+            if not (k in _WRITTEN_ONLY_WHEN_SET and not v)
         }
         owners = owners_to_carry(self.inherited_phases, self.execution_id)
         return {**payload, INHERITED_PHASE_OWNERS: owners} if owners else payload

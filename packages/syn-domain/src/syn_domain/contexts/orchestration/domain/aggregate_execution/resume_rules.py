@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         ResumeExecutionCommand,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        InheritedEvidenceGate,
         PhaseDefinition,
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
@@ -245,6 +246,7 @@ def decide_resume(
     command: ResumeExecutionCommand,
     repair_point: str | None = None,
     skipped_phase_ids: frozenset[str] | set[str] = frozenset(),
+    open_gate: InheritedEvidenceGate | None = None,
 ) -> ResumeDecision:
     """Every rule above, applied in order.
 
@@ -259,6 +261,13 @@ def decide_resume(
     Phases a certified review skipped before the resume point are passed over
     and handed to the resume as skipped, so it neither runs them nor counts
     them as work still to do (#1681).
+
+    An ``open_gate`` held the phase after the one it follows (plan §A.7). That
+    phase's output was collected before the gate was requested, so it is
+    inherited even when the run stopped before recording it complete; the
+    resume then begins at the held phase, which never started, and needs no
+    acknowledgement. The gate rides on the event only when the resume begins
+    there: a gap earlier in the run re-runs the gap, and its gate with it.
     """
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
@@ -279,6 +288,8 @@ def decide_resume(
     if status is ExecutionStatus.COMPLETED and repair_point is not None:
         ids = [p.phase_id for p in phase_definitions]
         completed_phase_ids = set(ids[: ids.index(repair_point)]) & set(completed_phase_ids)
+    if open_gate is not None:
+        completed_phase_ids = {*completed_phase_ids, open_gate.after_phase_id}
     inherited, resume_phase_id = completed_prefix(
         phase_definitions,
         completed_phase_ids,
@@ -314,5 +325,10 @@ def decide_resume(
             resumed_at=datetime.now(UTC),
             cancellation_overridden=status is ExecutionStatus.CANCELLED,
             external_effects_acknowledged=may_repeat_effects,
+            inherited_evidence_gate=(
+                open_gate
+                if open_gate is not None and open_gate.next_phase_id == resume_phase_id
+                else None
+            ),
         )
     )

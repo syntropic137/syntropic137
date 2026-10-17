@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         EvidencePlanStep,
+        InheritedAttempt,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
@@ -171,6 +172,8 @@ class _StepRun:
     async def _run(self) -> None:
         index = self.step.index
         attempt = self.gate.attempts.get(index)
+        if attempt is None and index in self.gate.inherited_attempts:
+            attempt = await self._resume_parent_attempt(self.gate.inherited_attempts[index])
         if attempt is None:
             attempt = await self._attempt()
         while attempt is not None:
@@ -244,15 +247,30 @@ class _StepRun:
             return None
         return await self._attempt()
 
-    async def _start(self) -> EvidenceAttempt:
+    async def _resume_parent_attempt(self, parent: InheritedAttempt) -> EvidenceAttempt:
+        """Take over the parent's attempt before posting anything (§A.7 3).
+
+        Recorded under the parent's nonce and post time, so the look-up finds
+        the parent's run, but with a fresh deadline: a person-started resume is
+        a new decision. Nothing is posted here; a run the look-up cannot find
+        costs this step one attempt, then a fresh one is posted.
+        """
+        attempt = await self._start(parent.dispatch_id, parent.started_at)
+        if parent.run_id is not None and parent.run_url is not None:
+            return await self._adopt(attempt, RunRef(run_id=parent.run_id, run_url=parent.run_url))
+        return attempt
+
+    async def _start(
+        self, dispatch_id: str | None = None, started_at: datetime | None = None
+    ) -> EvidenceAttempt:
         now = self.h.clock()
         self.aggregate.start_evidence_attempt(
             StartEvidenceAttemptCommand(
                 self.execution_id,
                 self.gate.gate_id,
                 self.step.index,
-                str(uuid.uuid4()),
-                now,
+                dispatch_id or str(uuid.uuid4()),
+                started_at or now,
                 now + self.h.timings.step_deadline,
             )
         )
