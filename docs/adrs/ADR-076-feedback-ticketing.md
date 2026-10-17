@@ -96,8 +96,8 @@ tests change.
 
 ### 5. Ports owned by feedback
 
-`ScreeningPort`, `IntakeLog`, `NonceLedger`, `RateBuckets` and `ForgeReads` are defined
-in `feedback/ports/`. `NonceLedger` is feedback's own port even though github's public
+`ScreeningPort`, `IntakeLogPort`, `NonceLedgerPort`, `RateBucketsPort` and `ForgeReadsPort` are defined
+in `feedback/ports/`. The plan names four of them without the suffix (`IntakeLog`, `NonceLedger`, `RateBuckets`, `ForgeReads`); they carry `Port` here because ADR-019's naming rule is enforced by `vsa validate`. `NonceLedgerPort` is feedback's own port even though github's public
 `DedupPort` has the same shape. This is a design judgment, not an ADR-062 requirement:
 rejecting a replayed request and deduplicating a GitHub event change for different
 reasons. `RedisDedupAdapter` satisfies it structurally, and

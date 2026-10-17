@@ -49,15 +49,15 @@ _UNIMPLEMENTED: dict[str, str] = {
         "item 1.3), which reads the event store. Exercised against a test "
         "double in packages/syn-adapters/tests/test_execution_run_queue_postgres.py."
     ),
-    "ForgeReads": (
+    "ForgeReadsPort": (
         "feedback's forge reads (ADR-076-feedback-ticketing). The GitHub adapter "
         "lands with FixResolver in plan PR 12 (#2010); nothing consumes it before then."
     ),
-    "IntakeLog": (
+    "IntakeLogPort": (
         "feedback's intake log (ADR-076-feedback-ticketing). The Postgres adapter "
         "lands with Intake in plan PR 3 (#2010); nothing consumes it before then."
     ),
-    "RateBuckets": (
+    "RateBucketsPort": (
         "feedback's Intake buckets (ADR-076-feedback-ticketing). The Redis Lua "
         "adapter lands with Intake in plan PR 3 (#2010)."
     ),

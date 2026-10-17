@@ -1,4 +1,4 @@
-"""IntakeLog: the purgeable log of raw submissions the Screener works from (ADR-076-feedback-ticketing).
+"""IntakeLogPort: the purgeable log of raw submissions the Screener works from (ADR-076-feedback-ticketing).
 
 The one place reporter text lives. Everything persisted here is persisted
 BEFORE the command it leads to, so a crashed Screener resumes from the row and
@@ -45,7 +45,7 @@ class LeasedSubmission(BaseModel):
     lease_expires_at: datetime
 
 
-class IntakeLog(Protocol):
+class IntakeLogPort(Protocol):
     async def lease(self, *, limit: int, lease_seconds: int) -> list[LeasedSubmission]: ...
 
     async def record_verdict(self, submission_id: str, verdict: ScreeningResult) -> None: ...

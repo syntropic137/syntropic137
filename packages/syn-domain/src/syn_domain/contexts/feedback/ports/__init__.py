@@ -1,23 +1,27 @@
 """Feedback ports (ADR-076-feedback-ticketing). Adapters land with Intake (PR 3) and the Screener (PR 6, 7)."""
 
-from syn_domain.contexts.feedback.ports.ForgeReads import (
-    ForgeReads,
+from syn_domain.contexts.feedback.ports.ForgeReadsPort import (
+    ForgeReadsPort,
     PublishedRelease,
     PullRequestSnapshot,
 )
-from syn_domain.contexts.feedback.ports.IntakeLog import Disposition, IntakeLog, LeasedSubmission
-from syn_domain.contexts.feedback.ports.NonceLedger import NonceLedger
-from syn_domain.contexts.feedback.ports.RateBuckets import RateBuckets
+from syn_domain.contexts.feedback.ports.IntakeLogPort import (
+    Disposition,
+    IntakeLogPort,
+    LeasedSubmission,
+)
+from syn_domain.contexts.feedback.ports.NonceLedgerPort import NonceLedgerPort
+from syn_domain.contexts.feedback.ports.RateBucketsPort import RateBucketsPort
 from syn_domain.contexts.feedback.ports.ScreeningPort import ScreeningPort
 
 __all__ = [
     "Disposition",
-    "ForgeReads",
-    "IntakeLog",
+    "ForgeReadsPort",
+    "IntakeLogPort",
     "LeasedSubmission",
-    "NonceLedger",
+    "NonceLedgerPort",
     "PublishedRelease",
     "PullRequestSnapshot",
-    "RateBuckets",
+    "RateBucketsPort",
     "ScreeningPort",
 ]

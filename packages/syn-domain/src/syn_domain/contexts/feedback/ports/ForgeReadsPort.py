@@ -1,4 +1,4 @@
-"""ForgeReads: what feedback reads from the forge to resolve a ticket (ADR-076-feedback-ticketing, #1628)."""
+"""ForgeReadsPort: what feedback reads from the forge to resolve a ticket (ADR-076-feedback-ticketing, #1628)."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class PublishedRelease(BaseModel):
     commit: str = Field(min_length=1)
 
 
-class ForgeReads(Protocol):
+class ForgeReadsPort(Protocol):
     async def pull_request(self, ref: PullRequestRef) -> PullRequestSnapshot: ...
 
     async def contains_commit(self, repository: str, *, base: str, commit: str) -> bool:
