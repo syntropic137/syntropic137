@@ -22,6 +22,7 @@ precedent.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -198,7 +199,7 @@ def coerce_datetime(value: object) -> datetime | None:
 
     Accepts an ISO 8601 string or an existing datetime, and handles the
     trailing ``Z`` suffix (RFC 3339), which ``fromisoformat`` rejects before
-    Python 3.11.
+    Python 3.11. Hour ``24`` names none on every Python: see ``_HOUR_24``.
 
     A value carrying no offset is read as UTC. Every timestamp reaching this
     module is UTC already -- aggregates stamp ``datetime.now(UTC)`` -- so UTC
@@ -221,6 +222,8 @@ def coerce_datetime(value: object) -> datetime | None:
     datetime left and nothing downstream has to know which kind it was given.
     """
     if isinstance(value, str):
+        if _HOUR_24.match(value):
+            return None
         try:
             value = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
@@ -228,6 +231,15 @@ def coerce_datetime(value: object) -> datetime | None:
     if not isinstance(value, datetime):
         return None
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+#: A time of day at hour ``24``, after any date form ``fromisoformat`` reads
+#: (calendar or week, extended or basic) and any one separator character.
+#: Python 3.14 reads ``T24:00`` as midnight of the next day; 3.12 and 3.13
+#: refuse it, and so does the SQL gate in ``postgres_page_keys`` (#1637). Left
+#: to the interpreter, the same stored row is dated on one Python and undated
+#: on another, so the refusal is stated here instead of inherited.
+_HOUR_24 = re.compile(r"\d{4}-?(\d{2}-?\d{2}|W\d{2}(-?\d)?)\D24")
 
 
 class _WindowVerdict(Enum):
