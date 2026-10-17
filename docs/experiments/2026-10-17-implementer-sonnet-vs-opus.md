@@ -151,6 +151,24 @@ The other 2 cases are clean.
 - The 2 clean cases' task text is byte-identical in v1 and v2, so their runs
   count either way.
 
+## Protocol deviation 4 (2026-10-17): scorer v2 for patch transfer
+
+`exec-0a6c05a3e8f2` refused to score the 68,459 B patch of `exec-b2a635a6a0e9`.
+The copy it received was 68,358 B. Exactly the patch's 101 trailing-whitespace
+bytes were gone: blank diff context lines are a lone space, and that space was
+stripped on the way through the prompt. The sha256 guard worked as designed;
+nothing was mis-scored.
+
+`eval-implement-score-v2` takes the patch with each line's trailing whitespace
+escaped as `<~WS:...~>` (`s` = space, `t` = tab). It decodes the patch with a
+fixed script before the same sha256 check, which runs over the original
+bytes. Every patch collected so far round-trips byte-exact through the
+encoder and the prompt's decoder.
+
+The scorer is identical for both arms, so this is not an experimental
+variable. A transfer ERROR is re-scored once under v2. That re-score is the
+preregistered "re-run on ERROR", not a new sample.
+
 ## What a "proceed" means (added with deviation 2)
 
 At n=8 per arm, "proceed" means **no evidence of a large quality drop**. It
