@@ -80,10 +80,10 @@ class SourceAggregate(AggregateRoot["SourceEnrolledEvent"]):
 
     @command_handler("EnrollSourceCommand")
     def enroll(self, command: EnrollSourceCommand) -> None:
+        if self.id is not None and self._keys[0].key_id != command.key_id:
+            msg = f"Source {self.id} is already enrolled with a different key"
+            raise ValueError(msg)
         if self.id is not None:
-            if self._keys[0].key_id != command.key_id:
-                msg = f"Source {self.id} is already enrolled with a different key"
-                raise ValueError(msg)
             return  # a retry of the same enrolment: no-op success
         self._initialize(command.aggregate_id)
         self._apply(
@@ -98,7 +98,10 @@ class SourceAggregate(AggregateRoot["SourceEnrolledEvent"]):
 
     @command_handler("RotateSourceKeyCommand")
     def rotate_key(self, command: RotateSourceKeyCommand) -> None:
-        self._require_not_revoked()
+        self._require_exists()
+        if self._status is SourceStatus.REVOKED:
+            msg = f"Cannot rotate the key of source {self.id}: it is revoked"
+            raise ValueError(msg)
         if command.key_id == self.current_key_id:
             return  # a retry of the rotation just applied
         if any(key.key_id == command.key_id for key in self._keys):
@@ -116,21 +119,29 @@ class SourceAggregate(AggregateRoot["SourceEnrolledEvent"]):
 
     @command_handler("ThrottleSourceCommand")
     def throttle(self, command: ThrottleSourceCommand) -> None:
-        self._require_not_revoked()
+        self._require_exists()
+        if self._status is SourceStatus.REVOKED:
+            msg = f"Cannot throttle source {self.id}: it is revoked"
+            raise ValueError(msg)
         if self._status is SourceStatus.THROTTLED:
             return
         self._apply(SourceThrottledEvent(source_id=self._source_id, reason=command.reason))
 
     @command_handler("LiftSourceThrottleCommand")
     def lift_throttle(self, command: LiftSourceThrottleCommand) -> None:
-        self._require_not_revoked()
+        self._require_exists()
+        if self._status is SourceStatus.REVOKED:
+            msg = f"Cannot lift the throttle of source {self.id}: it is revoked"
+            raise ValueError(msg)
         if self._status is not SourceStatus.THROTTLED:
             return
         self._apply(SourceThrottleLiftedEvent(source_id=self._source_id, by=command.by))
 
     @command_handler("RevokeSourceCommand")
     def revoke(self, command: RevokeSourceCommand) -> None:
-        self._require_exists()
+        if self.id is None:
+            msg = "Cannot revoke a source that is not enrolled"
+            raise ValueError(msg)
         if self._status is SourceStatus.REVOKED:
             return
         self._apply(
@@ -149,12 +160,6 @@ class SourceAggregate(AggregateRoot["SourceEnrolledEvent"]):
     def _require_exists(self) -> None:
         if self.id is None:
             msg = "Source is not enrolled"
-            raise ValueError(msg)
-
-    def _require_not_revoked(self) -> None:
-        self._require_exists()
-        if self._status is SourceStatus.REVOKED:
-            msg = f"Source {self.id} is revoked"
             raise ValueError(msg)
 
     # =========================================================================
