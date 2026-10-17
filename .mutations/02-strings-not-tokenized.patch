@@ -1,0 +1,13 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index ea77babbe..36c06fb6d 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -146,8 +146,6 @@ def blank_ts_comments(source: str) -> str:
+             end = len(source) if end == -1 else end + 2
+             _blank(out, i, end)
+             i = end
+-        elif char in "'\"":
+-            i = _string_end(source, i)
+         elif char == "`" or (char == "}" and expressions and expressions[-1] == 0):
+             if char == "}":
+                 expressions.pop()

@@ -1,0 +1,12 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index ea77babbe..d52a10892 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -130,6 +130,7 @@ def _blank(out: list[str], start: int, end: int) -> None:
+ 
+ def blank_ts_comments(source: str) -> str:
+     """Return ``source`` with comment text replaced by spaces, newlines kept."""
++    return source
+     out = list(source)
+     # Brace depth inside each enclosing template ``${...}``; at 0 a ``}`` closes it.
+     expressions: list[int] = []

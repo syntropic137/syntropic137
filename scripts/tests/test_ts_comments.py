@@ -45,6 +45,15 @@ def spaced(source: str, comment: str) -> str:
         ("x /* never closed\n'sessionId'", "/* never closed\n'sessionId'"),
         ("{/* JSX comment */}", "/* JSX comment */"),
     ],
+    ids=[
+        "line",
+        "block",
+        "multiline-block",
+        "block-opener-in-line",
+        "line-in-block",
+        "unclosed-block",
+        "jsx",
+    ],
 )
 def test_comments_are_blanked(source: str, comment: str) -> None:
     assert blanked(source) == spaced(source, comment)
@@ -64,6 +73,18 @@ def test_comments_are_blanked(source: str, comment: str) -> None:
         "const re = /[/*]'agentId'/",
         "if (x) return /'sessionId'/.test(y)",
         "const half = a / b / c",
+    ],
+    ids=[
+        "url-in-string",
+        "block-opener-in-string",
+        "template",
+        "multiline-template",
+        "escaped-single-quote",
+        "escaped-double-quote",
+        "regex-escaped-slashes",
+        "regex-class",
+        "regex-after-return",
+        "division",
     ],
 )
 def test_literals_and_operators_are_code(source: str) -> None:
