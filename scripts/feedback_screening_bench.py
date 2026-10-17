@@ -49,6 +49,7 @@ from syn_domain.contexts.feedback import (
     ScreeningVerdict,
     TicketType,
 )
+from syn_shared.settings.constants import ENV_ANTHROPIC_API_KEY
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -57,7 +58,6 @@ if TYPE_CHECKING:
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUITE = REPO_ROOT / "evals" / "feedback-screening-v1"
-ANTHROPIC_BASE_URL = "https://api.anthropic.com"
 _Z95 = 1.959963984540054
 _EXIT_INVALID = 1
 
@@ -283,10 +283,12 @@ async def _live_results(
 ) -> dict[str, ScreeningResult]:
     import httpx
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get(ENV_ANTHROPIC_API_KEY)
     if not api_key:
-        raise SuiteError(["--screener anthropic is a real, paid run and needs ANTHROPIC_API_KEY"])
-    async with httpx.AsyncClient(base_url=ANTHROPIC_BASE_URL, timeout=60.0) as client:
+        raise SuiteError(
+            [f"--screener anthropic is a real, paid run and needs {ENV_ANTHROPIC_API_KEY}"]
+        )
+    async with httpx.AsyncClient(timeout=60.0) as client:
         return await screened_results(
             AnthropicScreener(client, api_key=api_key, model=model), cases
         )

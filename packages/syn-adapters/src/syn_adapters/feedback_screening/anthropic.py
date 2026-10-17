@@ -2,9 +2,10 @@
 
 The model is asked to call one tool whose input schema is closed
 (``additionalProperties: false``, every enum spelled out), so a well-formed
-reply has exactly one shape. Anything else - no tool call, an extra key, an
-unknown verdict, a confidence out of range, a body that is not JSON - becomes
-a QUARANTINE verdict. It is never read as ``clean`` and never raised: the
+reply has exactly one shape. Anything else - no tool call, a second tool call
+of any name, an extra key, an unknown verdict, a confidence that is out of
+range or not a JSON number, a body that is not JSON - becomes a QUARANTINE
+verdict. It is never read as ``clean`` and never raised: the
 port says an unparseable reply is a verdict, so a caller cannot swallow it.
 
 Failing to get a reply at all is different. A transport error or a non-2xx
@@ -23,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from syn_domain.contexts.feedback import Priority, ScreeningResult, ScreeningVerdict, TicketType
 from syn_shared.agents import ModelId
+from syn_shared.settings.constants import ANTHROPIC_MESSAGES_URL
 
 if TYPE_CHECKING:
     from syn_domain.contexts.feedback import ScreenedText
@@ -144,13 +146,16 @@ def parse_screening_reply(body: bytes) -> ScreeningResult:
         response = _MessagesResponse.model_validate_json(body)
     except ValidationError:
         return QUARANTINE_ON_UNPARSEABLE
-    calls = [
-        block for block in response.content if block.type == "tool_use" and block.name == TOOL_NAME
-    ]
-    if len(calls) != 1:
+    # Every tool call counts, whatever its name: one valid call beside one the
+    # model was never offered is still not the single call that was asked for.
+    calls = [block for block in response.content if block.type == "tool_use"]
+    if len(calls) != 1 or calls[0].name != TOOL_NAME:
         return QUARANTINE_ON_UNPARSEABLE
     try:
-        reply = ScreeningReply.model_validate(calls[0].input)
+        # Strict JSON validation applies the schema the model was given: a
+        # confidence of "0.99" or true is not a number there, so it must not
+        # be coerced into one here.
+        reply = ScreeningReply.model_validate_json(json.dumps(calls[0].input), strict=True)
     except ValidationError:
         return QUARANTINE_ON_UNPARSEABLE
     return ScreeningResult(
@@ -161,9 +166,10 @@ def parse_screening_reply(body: bytes) -> ScreeningResult:
 class AnthropicScreener:
     """Screens through the Anthropic Messages API with an injected HTTP client.
 
-    The client carries the base URL, the timeout and the transport, so tests
-    replay recorded bodies through ``httpx.MockTransport`` and never reach the
-    network. The API key is passed in, never read from the environment here.
+    The endpoint is the shared ``ANTHROPIC_MESSAGES_URL``; the client carries
+    the timeout and the transport, so tests replay recorded bodies through
+    ``httpx.MockTransport`` and never reach the network. The API key is passed
+    in, never read from the environment here.
     """
 
     def __init__(self, client: httpx.AsyncClient, *, api_key: str, model: AnthropicModelId) -> None:
@@ -179,7 +185,7 @@ class AnthropicScreener:
         request = build_request(self._model, text)
         try:
             response = await self._client.post(
-                "/v1/messages",
+                ANTHROPIC_MESSAGES_URL,
                 content=json.dumps(request.model_dump(mode="json")),
                 headers={
                     "x-api-key": self._api_key,

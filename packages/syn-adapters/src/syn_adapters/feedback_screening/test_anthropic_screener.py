@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
@@ -20,6 +21,15 @@ from syn_adapters.feedback_screening import (
     parse_screening_reply,
 )
 from syn_domain.contexts.feedback import ScreenedText, ScreeningVerdict, TicketType
+from syn_domain.contexts.feedback.domain.ScreeningPolicy import (
+    ScreeningDecision,
+    ScreeningPolicy,
+    ScreeningThresholds,
+)
+from syn_shared.settings.constants import ANTHROPIC_MESSAGES_URL
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 pytestmark = pytest.mark.unit
 
@@ -87,6 +97,66 @@ def test_two_tool_calls_are_quarantine_not_the_first_one() -> None:
     assert parse_screening_reply(body).verdict is ScreeningVerdict.QUARANTINE
 
 
+def _clean_call(confidence: JsonValue = 0.99, name: str = "record_screening") -> JsonValue:
+    return {
+        "type": "tool_use",
+        "name": name,
+        "input": {"verdict": "clean", "type": "bug", "priority": "P2", "confidence": confidence},
+    }
+
+
+_OTHER_CALL: JsonValue = {"type": "tool_use", "name": "unexpected_tool", "input": {}}
+
+
+async def _screen_and_decide(
+    content: list[JsonValue],
+) -> tuple[ScreeningVerdict, ScreeningDecision]:
+    body = json.dumps({"content": content}).encode()
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, content=body))
+    async with httpx.AsyncClient(transport=transport) as client:
+        screener = AnthropicScreener(client, api_key=_FAKE_KEY, model=AnthropicModelId.HAIKU_5_5)
+        result = await screener.screen(ScreenedText.screen("the export button crashes"))
+    return result.verdict, ScreeningPolicy.decide(result, ScreeningThresholds())
+
+
+@pytest.mark.parametrize("confidence", ["0.99", True, False, None, [], {}])
+async def test_a_confidence_that_is_not_a_json_number_is_quarantine(confidence: JsonValue) -> None:
+    # The schema says number. "0.99" and true would coerce to a clean 0.99 / 1.0 and open.
+    assert await _screen_and_decide([_clean_call(confidence)]) == (
+        ScreeningVerdict.QUARANTINE,
+        ScreeningDecision.QUARANTINE,
+    )
+
+
+@pytest.mark.parametrize("confidence", [0.99, 1])
+async def test_a_numeric_confidence_still_opens(confidence: float) -> None:
+    assert await _screen_and_decide([_clean_call(confidence)]) == (
+        ScreeningVerdict.CLEAN,
+        ScreeningDecision.OPEN,
+    )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [[_clean_call(), _OTHER_CALL], [_OTHER_CALL, _clean_call()]],
+    ids=["unexpected-after", "unexpected-before"],
+)
+async def test_a_second_tool_call_of_any_name_is_quarantine(
+    content: list[JsonValue],
+) -> None:
+    assert await _screen_and_decide(content) == (
+        ScreeningVerdict.QUARANTINE,
+        ScreeningDecision.QUARANTINE,
+    )
+
+
+async def test_a_well_formed_reply_under_another_tool_name_is_quarantine() -> None:
+    assert await _screen_and_decide([_clean_call(name="unexpected_tool")]) == (
+        ScreeningVerdict.QUARANTINE,
+        ScreeningDecision.QUARANTINE,
+    )
+
+
 async def test_screen_sends_the_explicit_model_and_a_closed_forced_tool() -> None:
     sent: list[httpx.Request] = []
     body, _ = _recorded()["spam-casino-1"]
@@ -104,7 +174,7 @@ async def test_screen_sends_the_explicit_model_and_a_closed_forced_tool() -> Non
     assert result.verdict is ScreeningVerdict.SPAM
     assert result.type is TicketType.OTHER
     (request,) = sent
-    assert request.url.path == "/v1/messages"
+    assert str(request.url) == ANTHROPIC_MESSAGES_URL
     assert request.headers["x-api-key"] == _FAKE_KEY
     payload = json.loads(request.content)
     assert payload["model"] == "claude-sonnet-5-5"
