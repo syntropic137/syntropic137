@@ -11,6 +11,7 @@ import json
 from datetime import timedelta
 
 import pytest
+from event_sourcing import DomainEvent
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration._shared.evidence_contract import StepOutcome
@@ -34,8 +35,9 @@ from syn_domain.contexts.orchestration.slices.execution_todo.value_objects impor
 pytestmark = pytest.mark.unit
 
 
-def _stored(event: object) -> dict[str, object]:
-    return json.loads(event.model_dump_json())  # type: ignore[attr-defined]  # a DomainEvent
+def _stored(event: DomainEvent) -> dict:  # the projection's own parameter type
+    """The event as the store hands it to the projection: its JSON payload."""
+    return json.loads(event.model_dump_json())
 
 
 @pytest.mark.anyio
