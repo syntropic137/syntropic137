@@ -599,8 +599,32 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         resume = origin.resume_phase_id
         provision = _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]
         inherited = {p.phase_id: _RANK_PHASE_DONE for p in origin.inherited_phases}
+        gate = origin.inherited_evidence_gate
         async with self._lock_for(execution_id):
             _items, progress, gates = await self._read_state(execution_id)
+            if gate is not None:
+                # The parent stopped inside a gate (plan §A.7): its unsettled
+                # steps come first, and the gate's last settle releases the
+                # held phase through `NextPhaseReady`, as on a fresh run.
+                if gate.gate_id in gates.by_gate:
+                    return  # Replayed, and the run has moved on; leave it.
+                step = gate.first_unsettled
+                gates.by_gate[gate.gate_id] = step
+                await self._save_state(
+                    execution_id,
+                    [
+                        TodoItem(
+                            execution_id=execution_id,
+                            action=TodoAction.RUN_EVIDENCE_STEP,
+                            phase_id=gate.after_phase_id,
+                            evidence_gate_id=gate.gate_id,
+                            evidence_step=step,
+                        )
+                    ],
+                    _merge_progress(progress, inherited),
+                    gates,
+                )
+                return
             if progress.get(resume, 0) >= provision:
                 return  # Replayed, and the run has moved on; leave it.
             await self._save_state(
