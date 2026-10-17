@@ -14,7 +14,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Protocol
 
@@ -144,8 +144,11 @@ class SignatureVerifier:
     ) -> Verification:
         if credentials.revoked:
             return Verification.REVOKED
-        signed_at = datetime.fromtimestamp(request.timestamp, tz=UTC)
-        if abs(now - signed_at) > self._window:
+        # Compared as numbers, never converted to a datetime: the timestamp is
+        # attacker-chosen, and a year past 9999 would raise instead of refuse.
+        earliest = (now - self._window).timestamp()
+        latest = (now + self._window).timestamp()
+        if not earliest <= request.timestamp <= latest:
             return Verification.STALE_TIMESTAMP
         key = next((k for k in credentials.keys if k.key_id == request.key_id), None)
         if key is None:

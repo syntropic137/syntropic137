@@ -21,6 +21,7 @@ from event_sourcing import (
     EventEnvelope,
     MemoryCheckpointStore,
     MemoryProjectionStore,
+    ProjectionCheckpoint,
 )
 
 from syn_domain.contexts.feedback import (
@@ -47,6 +48,7 @@ SEED_A = hashlib.sha256(b"syn-feedback-test-key-a").digest()
 SEED_B = hashlib.sha256(b"syn-feedback-test-key-b").digest()
 PUBLIC_A = "iL8HsalXLERnkvSr5oG7VavzohRuqi6wVWuYcKMykTc="
 PUBLIC_B = "pxpaJHHNS035xrimbLHj4c/65Z+5fdIhh4xPLvbQvKM="
+PUBLIC_C = "CEhiji0Bd2FU+bo2kqlvGfXw+SO14ev2GripDw4MIEU="  # from sha256(b"syn-feedback-test-key-c")
 OVERLAP = timedelta(hours=24)
 
 T0 = datetime(2026, 10, 17, 12, 0, tzinfo=UTC)
@@ -147,6 +149,12 @@ def _rotate(at: datetime = T0) -> RotateSourceKeyCommand:
     )
 
 
+def _rotate_to_c(at: datetime = T0 + timedelta(hours=1)) -> RotateSourceKeyCommand:
+    return RotateSourceKeyCommand(
+        aggregate_id=SOURCE, key_id="key-c", verification_key=PUBLIC_C, rotated_at=at
+    )
+
+
 def _revoke() -> RevokeSourceCommand:
     return RevokeSourceCommand(aggregate_id=SOURCE, by="owner", reason="decommissioned")
 
@@ -223,6 +231,16 @@ class TestTimestampWindow:
             is Verification.STALE_TIMESTAMP
         )
 
+    @pytest.mark.parametrize("timestamp", [253402300800, -62135596801, 10**30, -(10**30)])
+    def test_a_timestamp_no_datetime_can_hold_is_refused_not_raised(self, timestamp: int) -> None:
+        # Past year 9999, before year 1, and past what a float holds: the header
+        # is the sender's, so every integer must get a verdict, never an exception.
+        request = _signed(timestamp=timestamp)
+        assert (
+            VERIFIER.verify(request, _enrolled_credentials(), now=T0)
+            is Verification.STALE_TIMESTAMP
+        )
+
 
 class TestRevocation:
     async def test_a_revoked_source_fails_with_a_valid_signature(self) -> None:
@@ -264,6 +282,74 @@ class TestRotation:
     async def test_the_projection_and_the_aggregate_agree(self) -> None:
         stream = _Source().run(_enroll(), _rotate(at=T0))
         assert await stream.projected() == stream.load().credentials
+
+
+class _CheckpointWriteFails(MemoryCheckpointStore):
+    """Saves no checkpoint while ``failing``: the row is written and the checkpoint is not."""
+
+    failing = False
+
+    async def save_checkpoint(self, checkpoint: ProjectionCheckpoint) -> None:
+        if self.failing:
+            raise OSError("checkpoint write interrupted")
+        await super().save_checkpoint(checkpoint)
+
+
+class TestRedelivery:
+    """A projection is handed an event again when its checkpoint did not save; the row must not move."""
+
+    async def _projected(
+        self, stream: _Source
+    ) -> tuple[FeedbackSourcesProjection, MemoryCheckpointStore]:
+        projection = FeedbackSourcesProjection(MemoryProjectionStore())
+        checkpoints = MemoryCheckpointStore()
+        for envelope in stream.stored():
+            await projection.handle_event(envelope, checkpoints)
+        return projection, checkpoints
+
+    async def test_a_redelivered_rotation_leaves_the_row_unchanged(self) -> None:
+        stream = _Source().run(_enroll(), _rotate())
+        projection, checkpoints = await self._projected(stream)
+        before = await projection.get(SOURCE)
+        await projection.handle_event(stream.stored()[-1], checkpoints)
+        after = await projection.get(SOURCE)
+        assert after == before
+        assert after is not None
+        assert [key.key_id for key in after.keys] == ["key-a", "key-b"]
+
+    async def test_an_older_rotation_redelivered_keeps_the_later_retirement(self) -> None:
+        stream = _Source().run(_enroll(), _rotate(), _rotate_to_c())
+        projection, checkpoints = await self._projected(stream)
+        before = await projection.get(SOURCE)
+        await projection.handle_event(stream.stored()[1], checkpoints)  # A -> B, again
+        after = await projection.get(SOURCE)
+        assert after == before
+        assert after is not None
+        assert [key.key_id for key in after.keys] == ["key-a", "key-b", "key-c"]
+        assert after.keys[1].retired_at == T0 + timedelta(hours=1)
+
+    async def test_a_rotation_retried_after_its_checkpoint_failed_is_applied_once(self) -> None:
+        stream = _Source().run(_enroll(), _rotate())
+        enrolment, rotation = stream.stored()
+        projection = FeedbackSourcesProjection(MemoryProjectionStore())
+        checkpoints = _CheckpointWriteFails()
+        await projection.handle_event(enrolment, checkpoints)
+        after_enrolment = await checkpoints.get_checkpoint("feedback_sources")
+        checkpoints.failing = True
+        with pytest.raises(OSError, match="checkpoint write interrupted"):
+            await projection.handle_event(rotation, checkpoints)
+        # The row has the rotation; the checkpoint does not, so the rotation comes again.
+        assert await checkpoints.get_checkpoint("feedback_sources") == after_enrolment
+        saved = await projection.get(SOURCE)
+        assert saved is not None
+        assert [key.key_id for key in saved.keys] == ["key-a", "key-b"]
+        checkpoints.failing = False
+        await projection.handle_event(rotation, checkpoints)  # the coordinator's retry
+        retried = await projection.get(SOURCE)
+        assert retried == saved
+        assert retried is not None
+        assert [key.key_id for key in retried.keys] == ["key-a", "key-b"]
+        assert retried.credentials == stream.load().credentials
 
 
 class TestSourceAggregate:

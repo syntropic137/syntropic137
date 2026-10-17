@@ -174,7 +174,14 @@ def rotate_keys(
     The one definition of what a rotation does to a key set, shared by the
     aggregate and the feedback_sources projection so the two cannot disagree
     about which key still verifies.
+
+    Idempotent: key ids are never reused, so a ``new_key`` already in the set
+    means this rotation was applied, and the set comes back unchanged. A
+    projection that saved its row and failed to save its checkpoint is handed
+    the same rotation again.
     """
+    if any(key.key_id == new_key.key_id for key in keys):
+        return keys
     retired = tuple(
         key.model_copy(update={"retired_at": rotated_at}) if key.key_id == retired_key_id else key
         for key in keys
