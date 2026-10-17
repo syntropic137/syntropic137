@@ -1501,6 +1501,7 @@ version = "1.0.3"
 source = { editable = "packages/syn-domain" }
 dependencies = [
     { name = "agentic-events" },
+    { name = "cryptography" },
     { name = "event-sourcing-python" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -1510,6 +1511,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agentic-events", editable = "lib/agentic-workspace/lib/python/agentic_events" },
+    { name = "cryptography", specifier = ">=46.0.5" },
     { name = "event-sourcing-python", editable = "lib/event-sourcing-platform/event-sourcing/python" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pyyaml", specifier = ">=6.0.2" },
