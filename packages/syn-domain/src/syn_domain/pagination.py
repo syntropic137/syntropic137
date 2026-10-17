@@ -22,7 +22,6 @@ precedent.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -199,7 +198,7 @@ def coerce_datetime(value: object) -> datetime | None:
 
     Accepts an ISO 8601 string or an existing datetime, and handles the
     trailing ``Z`` suffix (RFC 3339), which ``fromisoformat`` rejects before
-    Python 3.11. Hour ``24`` names none on every Python: see ``_HOUR_24``.
+    Python 3.11. Hour ``24`` names none on every Python: see ``_names_hour_24``.
 
     A value carrying no offset is read as UTC. Every timestamp reaching this
     module is UTC already -- aggregates stamp ``datetime.now(UTC)`` -- so UTC
@@ -222,10 +221,11 @@ def coerce_datetime(value: object) -> datetime | None:
     datetime left and nothing downstream has to know which kind it was given.
     """
     if isinstance(value, str):
-        if _HOUR_24.match(value):
+        text = value.replace("Z", "+00:00")
+        if _names_hour_24(text):
             return None
         try:
-            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            value = datetime.fromisoformat(text)
         except ValueError:
             return None
     if not isinstance(value, datetime):
@@ -233,13 +233,55 @@ def coerce_datetime(value: object) -> datetime | None:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-#: A time of day at hour ``24``, after any date form ``fromisoformat`` reads
-#: (calendar or week, extended or basic) and any one separator character.
-#: Python 3.14 reads ``T24:00`` as midnight of the next day; 3.12 and 3.13
-#: refuse it, and so does the SQL gate in ``postgres_page_keys`` (#1637). Left
-#: to the interpreter, the same stored row is dated on one Python and undated
-#: on another, so the refusal is stated here instead of inherited.
-_HOUR_24 = re.compile(r"\d{4}-?(\d{2}-?\d{2}|W\d{2}(-?\d)?)\D24")
+def _names_hour_24(text: str) -> bool:
+    """Whether the time of day ``fromisoformat`` would read in ``text`` is hour 24.
+
+    Python 3.14 reads ``T24:00`` as midnight of the next day; 3.12 and 3.13
+    refuse it, and so does the SQL gate in ``postgres_page_keys`` (#1637). Left
+    to the interpreter, the same stored row is dated on one Python and undated
+    on another, so the refusal is stated here instead of inherited.
+
+    The hour is the first two characters of the time, so the rule is only as
+    good as where it thinks the time starts. :func:`_time_of_day_start` finds
+    it the way ``fromisoformat`` does, separator digits included, which is why
+    a valid ``2026-10-01200:00`` (separator ``2``) is still a midnight.
+    """
+    start = _time_of_day_start(text)
+    return text[start : start + 2] == "24"
+
+
+def _time_of_day_start(text: str) -> int:
+    """Where ``fromisoformat`` starts reading the time of day in ``text``.
+
+    The separator is any one character, a digit included, so its place is
+    decided by the date form in front of it. This is the split CPython makes
+    in ``_find_isoformat_datetime_separator``, the same on 3.12, 3.13 and 3.14;
+    a string it cannot split gets no time of day, and the parser refuses it.
+    """
+    if len(text) < 8:
+        return len(text)
+    if text[4] == "-":
+        if text[5] != "W":
+            return 11  # YYYY-MM-DD
+        if len(text) == 8 or text[8] != "-":
+            return 9  # YYYY-Www
+        if len(text) == 9:
+            return len(text)
+        if len(text) > 10 and _is_ascii_digit(text[10]):
+            return 9  # YYYY-Www, separator "-"
+        return 11  # YYYY-Www-D
+    if text[4] != "W":
+        return 9  # YYYYMMDD
+    end = 7
+    while end < len(text) and _is_ascii_digit(text[end]):
+        end += 1
+    if end < 9:
+        return end + 1  # YYYYWww or YYYYWwwD, separator not a digit
+    return 8 if end % 2 == 0 else 9  # a digit run: its parity names the date
+
+
+def _is_ascii_digit(char: str) -> bool:
+    return "0" <= char <= "9"
 
 
 class _WindowVerdict(Enum):
