@@ -210,17 +210,25 @@ def check_commits(loaded: ImplementerSuite, repo: Path) -> list[str]:
     return problems
 
 
-def asserted_contracts(source: str) -> tuple[frozenset[str], frozenset[str]]:
-    """What a hidden test relies on by exact spelling: (names, string literals).
+class Contracts(_Frozen):
+    """What a hidden test relies on by exact spelling. A correct fix that spells any
+    of them differently fails, so each must be visible to the agent (#2023)."""
 
-    Names: attributes it monkeypatches by string and names it imports from a
-    `syn_*` package. Literals: `assert "<text>" in ...` and `raises(match=...)`.
-    A correct fix that spells any of them differently fails, so each must be
-    visible to the agent (#2023).
-    """
+    names: frozenset[str]
+    """Names imported from a `syn_*` package, and attribute names monkeypatched by string."""
+    literals: frozenset[str]
+    """Text in `assert "<text>" in ...` and `raises(match=...)` (`not in` needs no statement)."""
+    attributes: frozenset[str]
+    """Attributes the test reads that the test itself does not define."""
+
+
+def asserted_contracts(source: str) -> Contracts:
+    """Read a hidden test's exact spellings from its AST."""
     tree = ast.parse(source)
     names: set[str] = set()
     literals: set[str] = set()
+    read: set[str] = set()
+    defined: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("syn_"):
             names.update(alias.name for alias in node.names)
@@ -248,27 +256,76 @@ def asserted_contracts(source: str) -> tuple[frozenset[str], frozenset[str]]:
             and any(isinstance(op, ast.In) for op in node.ops)
         ):
             literals.add(node.left.value)
-    return frozenset(names), frozenset(literals)
+        if isinstance(node, ast.Attribute):
+            (read if isinstance(node.ctx, ast.Load) else defined).add(node.attr)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+        elif isinstance(node, ast.arg):
+            defined.add(node.arg)
+        elif isinstance(node, ast.keyword) and node.arg:
+            defined.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            defined.add(node.id)
+    attributes = {a for a in read - defined if not a.startswith("__")}
+    return Contracts(
+        names=frozenset(names), literals=frozenset(literals), attributes=frozenset(attributes)
+    )
+
+
+def _attributes_at_pin(repo: Path, commit: str, attributes: frozenset[str]) -> frozenset[str]:
+    """Which of `attributes` code at the pin defines or reads as an attribute.
+
+    A bare word is not enough: `unsettled` existed at a pin only as an unrelated
+    local variable while the hidden test read `error.unsettled`. Submodules are
+    searched at their gitlinks; one with no local clone is not searched, and its
+    attributes count as present rather than being reported.
+    """
+    if not attributes:
+        return frozenset()
+    names = "|".join(sorted(re.escape(a) for a in attributes))
+    pattern = rf"\.(?:{names})\b|\bdef (?:{names})\b|^\s+(?:{names})\s*:\s*[A-Za-z_\[]"
+    word = re.compile(rf"(?:{names})\b")
+
+    def found_in(at: Path, sha: str) -> set[str]:
+        out = _git(at, "grep", "-h", "-o", "-P", pattern, sha, "--", "*.py").stdout
+        return {m.group(0) for m in word.finditer(out)}
+
+    seen = found_in(repo, commit)
+    modules = _git(repo, "config", "--blob", f"{commit}:.gitmodules", "--get-regexp", r"\.path$")
+    for line in modules.stdout.splitlines():
+        _, path = line.split(maxsplit=1)
+        parts = _git(repo, "ls-tree", commit, path).stdout.split()
+        if len(parts) < 3 or parts[1] != "commit":
+            continue
+        sub = repo / path
+        seen |= found_in(sub, parts[2]) if (sub / ".git").exists() else set(attributes)
+    return frozenset(seen & attributes)
 
 
 def unstated_contract_problems(case: ImplementerCase, repo: Path) -> list[str]:
-    """Names and literals a hidden test needs that are neither in the task nor at the pin."""
+    """Spellings a hidden test needs that are neither in the task nor at the pin."""
     problems: list[str] = []
     for path in case.hidden_tests:
         shown = _git(repo, "show", f"{case.fix_commit}:{path}")
         if shown.returncode != 0:
             continue
-        names, literals = asserted_contracts(shown.stdout)
-        for name in sorted(names):
+        found = asserted_contracts(shown.stdout)
+        for name in sorted(found.names):
             seen = _git(repo, "grep", "-q", "-w", "-F", name, case.commit, "--", ".")
             if name not in case.task and seen.returncode != 0:
                 problems.append(f"{case.id}: {path} needs name {name!r}, absent from task and pin")
-        for literal in sorted(literals):
+        for literal in sorted(found.literals):
             seen = _git(repo, "grep", "-q", "-F", literal, case.commit, "--", ".")
             if literal not in case.task and seen.returncode != 0:
                 problems.append(
                     f"{case.id}: {path} asserts text {literal!r}, absent from task and pin"
                 )
+        unstated = frozenset(a for a in found.attributes if a not in case.task)
+        at_pin = _attributes_at_pin(repo, case.commit, unstated)
+        for attribute in sorted(unstated - at_pin):
+            problems.append(
+                f"{case.id}: {path} reads attribute {attribute!r}, absent from task and pin"
+            )
     return problems
 
 
@@ -298,17 +355,30 @@ def _check_out_submodules(repo: Path, tree: Path) -> None:
     Never from the network: the environment has nothing to fetch, and a
     submodule commit the local clone lacks is an ERROR, not something to go
     and get.
+
+    Never through `git config` or `git submodule` either: `tree` is a worktree
+    of `repo`, so both write the config every worktree and the main checkout
+    share. That once repointed every checkout's submodule URLs at a scratch
+    worktree. Each submodule is a plain `--shared` clone at its gitlink instead,
+    which writes only inside `tree`.
     """
     paths = _git(tree, "config", "--file", ".gitmodules", "--get-regexp", r"submodule\..*\.path")
     for line in paths.stdout.splitlines():
-        key, path = line.split(maxsplit=1)
-        name = key.removeprefix("submodule.").removesuffix(".path")
-        _git(tree, "config", f"submodule.{name}.url", str((repo / path).resolve()))
-    updated = _git(
-        tree, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--quiet"
-    )
-    if updated.returncode != 0:
-        raise _EnvironmentFailure(f"submodules at the pin: {updated.stderr.strip()}")
+        _, path = line.split(maxsplit=1)
+        listed = _git(tree, "ls-tree", "HEAD", path).stdout.split()
+        if len(listed) < 3 or listed[1] != "commit":
+            continue
+        gitlink, source, target = listed[2], (repo / path).resolve(), tree / path
+        cloned = _git(
+            target.parent, "clone", "--quiet", "--shared", "--no-checkout", str(source), str(target)
+        )
+        checked = (
+            cloned.returncode == 0
+            and _git(target, "checkout", "--quiet", "--detach", gitlink).returncode == 0
+        )
+        if not checked:
+            detail = cloned.stderr.strip() or f"{gitlink} is not in {source}"
+            raise _EnvironmentFailure(f"submodule {path} at the pin: {detail}")
 
 
 class _EnvironmentFailure(Exception):

@@ -169,6 +169,31 @@ The scorer is identical for both arms, so this is not an experimental
 variable. A transfer ERROR is re-scored once under v2. That re-score is the
 preregistered "re-run on ERROR", not a new sample.
 
+## Protocol deviation 5 (decided 2026-10-17T20:23:17Z): pause case, suite v3, then FROZEN
+
+Sonnet's v2 run on `pause-not-blocked-by-queue` (`exec-2d494e06998d`, scored
+`exec-ce6dec978a4b`) failed partly on `assert raised.value.unsettled == 1`.
+The task introduces `AdmissionDrainTimeoutError` but never says it carries an
+`unsettled` count, and `unsettled` existed at the pin only as an unrelated
+local variable. `check` did not cover attribute reads.
+
+- Decided before the Opus score on that case (`exec-05965b470433`) was read.
+  Approved by the orchestrator.
+- Suite **v3** states `AdmissionDrainTimeoutError.unsettled`. `check` now also
+  covers attribute reads, matched as an attribute access, a `def` or a
+  class-level annotation at the pin, with submodules searched at their
+  gitlinks. Over all 5 cases the extended check reports nothing at v3.
+- Both pause rep 1 runs on the v2 text are excluded data, symmetric across
+  arms. Opus FAILed, Sonnet FAILed; the excluded results are reported below.
+  Both arms re-run under v3. No re-admit is needed, because `admit` does not
+  read the task text.
+- Sonnet's score also failed `test_is_refused_at_its_slot_once_the_pause_has_returned`.
+  That is reported as-is: it is a behaviour failure, not a spelling.
+
+**Suite FROZEN at v3 from 2026-10-17T20:46:54Z.** Any case defect found after this point
+is reported as-is and analysed as a secondary result. There are no more
+suite bumps during E2.
+
 ## What a "proceed" means (added with deviation 2)
 
 At n=8 per arm, "proceed" means **no evidence of a large quality drop**. It
@@ -203,6 +228,19 @@ way. E3's production guards (reverify block rate and escaped defects over
   substituted into prompt text. The agent writes it back out, and the sha256
   check guards that copy. API inputs have no size limit; a very large patch is
   reported to the orchestrator instead of being sent.
+
+## Limitations
+
+- **The case suite was being debugged during E2.** Five protocol deviations
+  were made before the freeze: the v1 to v2 workflows, three case-contract
+  fixes (suite v2, v3), and the scorer v2. Each was decided before the
+  affected counted results were read, and each applies to both arms equally.
+  Still, the instrument changed under the experiment, and the result should
+  be read with that in mind.
+- n = 10 per arm (5 cases x 2 reps) is a screen. "Proceed" means no evidence
+  of a large drop, not equivalence.
+- Leakage is not prevented by the platform (suite README). PASS runs get a
+  trace check.
 
 ## Results
 

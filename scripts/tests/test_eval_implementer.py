@@ -124,20 +124,44 @@ def test_a_pin_that_is_not_the_first_parent_is_reported() -> None:
 
 
 def test_a_hidden_test_s_exact_spellings_are_read_from_its_ast() -> None:
-    names, literals = asserted_contracts(
+    found = asserted_contracts(
         "from syn_adapters.x import status_was_lost, RetryPolicy\n"
         "from os import path\n"
+        "class _Double:\n"
+        "    def mkdir(self): ...\n"
         "def test(monkeypatch, caplog):\n"
         "    monkeypatch.setattr(mod, 'container_state', f)\n"
-        "    with pytest.raises(E, match=r'could not create TMPDIR\\.'):\n"
+        "    with pytest.raises(E, match=r'could not create TMPDIR\\.') as raised:\n"
         "        pass\n"
+        "    assert raised.value.unsettled == 1\n"
+        "    _Double().mkdir()\n"
+        "    double.calls = []\n"
+        "    assert double.calls\n"
         "    assert 'Could not destroy workspace' in caplog.text\n"
         "    assert 'printed nothing' not in text\n"
         "    assert x == 'not a contract'\n"
     )
-    assert names == {"status_was_lost", "RetryPolicy", "container_state"}
+    assert found.names == {"status_was_lost", "RetryPolicy", "container_state"}
     # `not in` is satisfied by never printing the text, so it needs no statement
-    assert literals == {"could not create TMPDIR.", "Could not destroy workspace"}
+    assert found.literals == {"could not create TMPDIR.", "Could not destroy workspace"}
+    # what the test defines itself (mkdir, calls) is not a contract on the fix
+    assert {"unsettled", "value", "text"} <= found.attributes
+    assert not {"mkdir", "calls"} & found.attributes
+
+
+@needs_history
+def test_an_attribute_the_hidden_tests_read_but_the_task_never_states_is_reported() -> None:
+    """`unsettled` existed at the pin only as an unrelated local variable, so a word match passed it."""
+    loaded = load_suite(DEFAULT_SUITE)
+    case = loaded.case("pause-not-blocked-by-queue")
+    stated = "That error has an `unsettled` attribute"
+    assert stated in case.task
+    unstated = loaded.model_copy(
+        update={"cases": (case.model_copy(update={"task": case.task.replace(stated, "It")}),)}
+    )
+    problems = check_commits(unstated, ROOT)
+    assert any("reads attribute 'unsettled'" in p for p in problems)
+    assert not any("'_run_exec'" in p for p in problems), "submodule attributes are searched"
 
 
 @needs_history
@@ -278,6 +302,45 @@ def two_hidden_files(
         hidden_tests=("tests/test_first.py", "tests/test_second.py"),
     )
     return case, repo
+
+
+def test_scoring_in_a_worktree_never_writes_the_shared_submodule_config(
+    two_hidden_files: tuple[ImplementerCase, Path], tmp_path: Path
+) -> None:
+    """Admit in a scratch worktree once repointed every checkout's submodule URLs at it."""
+    case, repo = two_hidden_files
+
+    def git(at: Path, *args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(at), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    lib = tmp_path / "lib-origin"
+    lib.mkdir()
+    git(lib, "init", "--quiet")
+    git(
+        lib,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.invalid",
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        "lib",
+    )
+    git(
+        repo, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", str(lib), "lib/dep"
+    )
+    git(repo, "commit", "--quiet", "-m", "add submodule")
+    pinned = case.model_copy(update={"commit": git(repo, "rev-parse", "HEAD")})
+    before = git(repo, "config", "--get-regexp", "submodule")
+
+    with eval_implementer._worktree(repo, pinned.commit) as tree:
+        assert git(tree / "lib/dep", "rev-parse", "HEAD") == git(lib, "rev-parse", "HEAD")
+
+    assert git(repo, "config", "--get-regexp", "submodule") == before
 
 
 def test_the_bug_left_in_place_fails_and_the_fix_passes(

@@ -33,6 +33,8 @@ by never printing the text. State a templated message with one concrete
 example (`after <n> attempt(s)`, for example `after 1 attempt(s)`), because
 the check matches literals.
 
+v3 (2026-10-17) added `AdmissionDrainTimeoutError.unsettled` to `pause-not-blocked-by-queue`, after the check was extended to attribute reads (an attribute access, a `def` or a class-level annotation at the pin, with submodules searched at their gitlinks; a bare word is not enough, because `unsettled` existed at the pin only as a local variable).
+
 v2 (2026-10-17) added the missing statements to `exec-status-lost`,
 `codex-sandbox-tmpdir` and `token-mint-retry-5xx`. A Sonnet 5.5 pilot and an
 Opus 5.5 pilot both failed the same hidden tests on a log string that existed
