@@ -33,15 +33,17 @@ from __future__ import annotations
 import ast
 import re
 import shutil
+import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from ci.fitness._imports import all_imports
 from ci.fitness.conftest import load_exceptions, repo_root
 
-if TYPE_CHECKING:
-    from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+
+from ts_comments import blank_ts_comments
 
 _AGENT_SESSIONS = "packages/syn-domain/src/syn_domain/contexts/agent_sessions"
 _SERVICES = f"{_AGENT_SESSIONS}/domain/services"
@@ -52,7 +54,7 @@ _CLIENT_ROOTS = ("apps/syn-cli-node/src", "apps/syn-dashboard-ui/src")
 
 #: Record keys and format identifiers that only a vendor transcript/stream
 #: parser needs. Matched as an EXACT string constant (Python) or an exact quoted
-#: literal (TypeScript), so prose and docstrings never match.
+#: literal in code (TypeScript), so prose, docstrings and comments never match.
 VENDOR_FORMAT_MARKERS = frozenset(
     {
         # codex rollout / exec stream
@@ -175,7 +177,9 @@ _TS_LITERAL = re.compile(r"""(['"`])([^'"`\n]{1,64})\1""")
 def _vendor_parsing_clients(root: Path) -> list[Violation]:
     found: list[Violation] = []
     for path in _client_files(root):
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        # Comments are prose, not parsing (#1631): blank them, keeping line numbers.
+        code = blank_ts_comments(path.read_text(encoding="utf-8"))
+        for lineno, line in enumerate(code.splitlines(), 1):
             for match in _TS_LITERAL.finditer(line):
                 if match.group(2) in VENDOR_FORMAT_MARKERS:
                     found.append(
@@ -372,6 +376,16 @@ _MUTATIONS: dict[str, tuple[str, str, str]] = {
         "\nconst planted = (row: { type?: string }) => row.type === 'response_item'\n",
         "vendor-parsing",
     ),
+    "vendor-parsing-client-template": (
+        _CLIENT_FILE,
+        "\nconst plantedKey = `sessionId`\n",
+        "vendor-parsing",
+    ),
+    "vendor-parsing-client-after-url": (
+        _CLIENT_FILE,
+        "\nconst plantedUrl = 'https://x'; const plantedKey = \"agentId\"\n",
+        "vendor-parsing",
+    ),
     "harness-import-api": (
         _INVENTORY_ROUTE,
         "\n\nfrom agentic_isolation.harnesses.claude.evidence import ClaudeNativeEvidenceReader\n",
@@ -408,6 +422,28 @@ def test_planted_violation_is_caught(name: str, tmp_path: Path) -> None:
     _plant(tmp_path / rel, snippet)
     failures = evaluate(tmp_path, budgets)
     assert any(f.startswith(f"[{rule}] {rel}:") for f in failures), failures
+
+
+#: A marker in prose is not parsing (#1631). Each snippet is one the raw-line
+#: scan flagged, so a pass here is the comment stripping and nothing else.
+_COMMENTS: dict[str, str] = {
+    "line-comment": "\n// reads the `sessionId` from the row\n",
+    "block-comment": "\n/* the 'agentId' field\n   and \"isSidechain\" */\n",
+}
+
+
+@pytest.mark.architecture
+@pytest.mark.parametrize("name", sorted(_COMMENTS))
+def test_marker_in_a_comment_is_not_a_violation(name: str, tmp_path: Path) -> None:
+    snippet = _COMMENTS[name]
+    assert any(m.group(2) in VENDOR_FORMAT_MARKERS for m in _TS_LITERAL.finditer(snippet)), (
+        "snippet carries no quoted marker; the test would be vacuous"
+    )
+    root = repo_root()
+    _copy_tree(root, tmp_path)
+    budgets = _budgets(root)
+    _plant(tmp_path / _CLIENT_FILE, snippet)
+    assert evaluate(tmp_path, budgets) == []
 
 
 @pytest.mark.architecture
