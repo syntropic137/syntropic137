@@ -27,6 +27,7 @@ from syn_adapters.workspace_backends.service import (
     WorkspaceBackend,
     WorkspaceService,
 )
+from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
@@ -189,12 +190,12 @@ async def _provision(
 ) -> tuple[_Recorder, WorkspaceService]:
     recorder = _Recorder()
     service = _service(policy, recorder)
-    real_create = SetupPhaseSecrets.create
+    real_run_setup = ManagedWorkspace.run_setup_phase
 
-    async def create(**kwargs: object) -> SetupPhaseSecrets:
-        secrets = await real_create(**kwargs)  # type: ignore[arg-type]
+    async def run_setup_phase(self: ManagedWorkspace, secrets: SetupPhaseSecrets) -> object:
+        # What reaches the workspace, whichever way the handler built it.
         recorder.setup_secrets.append(repr(asdict(secrets)))
-        return secrets
+        return await real_run_setup(self, secrets)
 
     handler = WorkspaceProvisionHandler(
         workspace_service=service,
@@ -204,7 +205,7 @@ async def _provision(
     todo = TodoItem(
         execution_id="exec-1914", action=TodoAction.PROVISION_WORKSPACE, phase_id="scripted"
     )
-    with patch.object(SetupPhaseSecrets, "create", create):
+    with patch.object(ManagedWorkspace, "run_setup_phase", run_setup_phase):
         result = await handler.handle(
             todo=todo,
             phase=_phase(),
@@ -242,7 +243,7 @@ class TestNoCredentialsLeaksNothing:
         recorder, _ = await _provision(HOST_CREDENTIALS, [_REPO])
 
         haystack = recorder.haystack()
-        assert recorder.setup_secrets, "SetupPhaseSecrets.create was never reached"
+        assert recorder.setup_secrets, "the setup phase was never run"
         assert recorder.stream_envs, "the agent was never streamed"
         missing = [name for name, value in _SECRETS.items() if value not in haystack]
         assert missing == [], f"sources never populated, so absence would prove nothing: {missing}"
@@ -251,7 +252,7 @@ class TestNoCredentialsLeaksNothing:
         recorder, _ = await _provision(NO_CREDENTIALS, [])
 
         assert recorder.executes, "nothing was executed, so the scan saw nothing"
-        assert recorder.setup_secrets, "SetupPhaseSecrets.create was never reached"
+        assert recorder.setup_secrets, "the setup phase was never run"
         assert recorder.stream_envs, "the agent was never streamed"
         for where, entries in asdict(recorder).items():
             text = "\n".join(entries)

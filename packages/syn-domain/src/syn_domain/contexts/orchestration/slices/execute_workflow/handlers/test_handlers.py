@@ -741,7 +741,7 @@ class TestDetectExitCode:
 
 @pytest.mark.unit
 class TestBuildAgentEnv:
-    """Tests for _build_agent_env helper.
+    """Tests for build_agent_env.
 
     Updated 2026-05-01 (ADR-024 amendment): the helper no longer injects a
     "proxy-managed" placeholder into CLAUDE_CODE_OAUTH_TOKEN. Claude Code CLI
@@ -762,8 +762,8 @@ class TestBuildAgentEnv:
         check is the right place to enforce credential presence (tracked
         separately).
         """
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            _build_agent_env,
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.agent_env import (
+            build_agent_env,
         )
         from syn_shared.settings import get_settings
 
@@ -773,7 +773,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
+        env = await build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
         assert env["CLAUDE_SESSION_ID"] == "sess-1"
         assert env["ANTHROPIC_BASE_URL"] == "http://envoy:10000"
         assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
@@ -785,8 +785,8 @@ class TestBuildAgentEnv:
         """OAuth token in settings -> injected into agent env."""
         from pydantic import SecretStr
 
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            _build_agent_env,
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.agent_env import (
+            build_agent_env,
         )
         from syn_shared.settings import get_settings
 
@@ -801,7 +801,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
+        env = await build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
         assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-real-token"
         assert "ANTHROPIC_API_KEY" not in env
 
@@ -811,8 +811,8 @@ class TestBuildAgentEnv:
         """No OAuth, but API key set -> API key injected as fallback."""
         from pydantic import SecretStr
 
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            _build_agent_env,
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.agent_env import (
+            build_agent_env,
         )
         from syn_shared.settings import get_settings
 
@@ -827,7 +827,7 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
+        env = await build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
         assert env["ANTHROPIC_API_KEY"] == "sk-ant-api03-real-key"
         assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
 
@@ -835,8 +835,8 @@ class TestBuildAgentEnv:
         """Both set -> OAuth wins; API key not injected."""
         from pydantic import SecretStr
 
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            _build_agent_env,
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.agent_env import (
+            build_agent_env,
         )
         from syn_shared.settings import get_settings
 
@@ -856,19 +856,19 @@ class TestBuildAgentEnv:
 
         workspace = MagicMock()
         workspace.proxy_url = "http://envoy:10000"
-        env = await _build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
+        env = await build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
         assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-pref"
         assert "ANTHROPIC_API_KEY" not in env
 
     async def test_raises_without_proxy(self) -> None:
-        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
-            _build_agent_env,
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.agent_env import (
+            build_agent_env,
         )
 
         workspace = MagicMock()
         workspace.proxy_url = None  # sidecar not running
         with pytest.raises(RuntimeError, match="proxy not available"):
-            await _build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
+            await build_agent_env(workspace, "sess-1", HOST_CREDENTIALS)
 
 
 def _imports(context: str) -> list[str]:

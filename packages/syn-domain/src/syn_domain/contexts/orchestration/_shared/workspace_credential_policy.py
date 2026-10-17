@@ -7,7 +7,7 @@ policy instead of deciding for itself:
 
 - ``create_workspace``'s sidecar and token injection, and the platform grant;
 - ``SetupPhaseSecrets.create`` (GitHub App tokens, Claude and Codex auth);
-- ``_build_agent_env`` (the Claude credential in the agent's env);
+- ``build_agent_env`` (the Claude credential in the agent's env);
 - the session-store write token the Docker provider binds at launch.
 
 The policy is fixed per backend at wiring (the BackendKit supplies it), never

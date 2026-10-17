@@ -23,10 +23,6 @@ from typing import TYPE_CHECKING, Final, Protocol
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
 from syn_adapters.workspace_backends.service.setup_script_header import setup_script_header
-from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
-    HOST_CREDENTIALS,
-    WorkspaceCredentialPolicy,
-)
 from syn_shared.upstream_failure import UpstreamFailureError
 
 if TYPE_CHECKING:
@@ -589,7 +585,6 @@ class SetupPhaseSecrets:
         require_github: bool = True,
         include_codex_auth: bool = False,
         ledger: IssuanceLedger,
-        credential_policy: WorkspaceCredentialPolicy = HOST_CREDENTIALS,
     ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets using GitHub App.
 
@@ -615,9 +610,6 @@ class SetupPhaseSecrets:
                 every token is recorded here the moment it is minted, so a
                 failure anywhere after that still leaves it for teardown to
                 revoke (#725). A caller with nowhere to record would strand it.
-            credential_policy: ``NoCredentials`` resolves nothing at all - no
-                GitHub App token, no Claude or Codex auth - and refuses
-                repositories, which cannot be set up without one (#1914).
 
         Returns:
             SetupPhaseSecrets with repo_tokens and repositories populated.
@@ -628,9 +620,6 @@ class SetupPhaseSecrets:
                 installation lookup (repo not added to any GitHub App installation).
         """
         repos = repositories or []
-        if not credential_policy.supplies_credentials:
-            credential_policy.admit(phase_name="setup", repositories=repos)
-            return cls(clone_repos=clone_repos)
         # Repo-less workflows resolve too: they get no git credential, but gh
         # still needs one, and hosts.yml is now the only place gh finds it.
         github = await _resolve_github_auth(repos, require_github, ledger)
