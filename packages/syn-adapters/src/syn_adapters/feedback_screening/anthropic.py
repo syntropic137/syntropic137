@@ -22,6 +22,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from syn_domain.contexts.feedback import Priority, ScreeningResult, ScreeningVerdict, TicketType
+from syn_shared.agents import ModelId
 
 if TYPE_CHECKING:
     from syn_domain.contexts.feedback import ScreenedText
@@ -44,7 +45,8 @@ class AnthropicModelId(StrEnum):
     """Explicit model ids only. An alias would let the screener change under a frozen bench."""
 
     HAIKU_5_5 = "claude-haiku-5-5"
-    SONNET_5_5 = "claude-sonnet-5-5"
+    # Registered ids come from syn_shared.agents.ModelId, never a second literal.
+    SONNET_5_5 = ModelId.CLAUDE_SONNET_5_5.value
 
 
 class ScreeningUnavailableError(Exception):
