@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class TicketType(StrEnum):
@@ -138,3 +138,56 @@ def derive_status(
     if PullRequestState.MERGED in pull_requests:
         return TicketStatus.FIX_MERGED
     return TicketStatus.OPEN
+
+
+class SourceStatus(StrEnum):
+    """Where a Source stands. ``revoked`` is terminal."""
+
+    ACTIVE = "active"
+    THROTTLED = "throttled"
+    REVOKED = "revoked"
+
+
+class SourceKey(BaseModel):
+    """One verification key of a Source. ``retired_at`` is set when a rotation replaced it.
+
+    ``verification_key`` is public material (base64 Ed25519 public key, or a
+    secret's hash under HMAC). A signing key never reaches the domain.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    key_id: str = Field(min_length=1, max_length=64)
+    verification_key: str = Field(min_length=1, max_length=256)
+    retired_at: AwareDatetime | None = None
+
+
+def rotate_keys(
+    keys: tuple[SourceKey, ...],
+    *,
+    retired_key_id: str,
+    new_key: SourceKey,
+    rotated_at: datetime,
+) -> tuple[SourceKey, ...]:
+    """A Source's keys after a rotation: the replaced key retired at ``rotated_at``, the new one last.
+
+    The one definition of what a rotation does to a key set, shared by the
+    aggregate and the feedback_sources projection so the two cannot disagree
+    about which key still verifies.
+
+    Idempotent: key ids are never reused, so a ``new_key`` already in the set
+    means this rotation was applied, and the set comes back unchanged. A
+    projection that saved its row and failed to save its checkpoint is handed
+    the same rotation again.
+    """
+    if any(key.key_id == new_key.key_id for key in keys):
+        return keys
+    # Built, not model_copy'd: a copy skips validation, and a naive retired_at
+    # would make the verifier raise instead of answer.
+    retired = tuple(
+        SourceKey(key_id=key.key_id, verification_key=key.verification_key, retired_at=rotated_at)
+        if key.key_id == retired_key_id
+        else key
+        for key in keys
+    )
+    return (*retired, new_key)

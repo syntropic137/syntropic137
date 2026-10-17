@@ -119,7 +119,7 @@ The system is organized into 6 bounded contexts following Vertical Slice Archite
 | **`agent_sessions`** | AgentSession, InventoryClock, InventoryReconciliation | Agent sessions and observability metrics |
 | **`github`** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
 | **`artifacts`** | Artifact | Artifact storage and retrieval |
-| **`feedback`** | Ticket | Feedback tickets: membership, screening, fix tracking and resolution |
+| **`feedback`** | Source, Ticket | Feedback tickets: membership, screening, fix tracking and resolution |
 
 **Infrastructure:** PostgreSQL (event store + projections) · Redis · MinIO
 
