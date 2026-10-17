@@ -1,0 +1,16 @@
+# Mutation evidence: feedback screening (plan PR 6, synthetic part)
+
+Each patch puts back the bug that the named tests exist to catch. Run with
+`docker=false`, because none of these tests needs Docker.
+
+| Patch | Bug it reintroduces | Test that must fail |
+|---|---|---|
+| `01-parse-error-defaults-to-clean.patch` | An unparseable model reply becomes `clean` (confidence 1.0) instead of quarantine | `packages/syn-adapters/src/syn_adapters/feedback_screening/test_anthropic_screener.py::test_a_clean_verdict_carrying_an_extra_key_is_still_quarantine`, `packages/syn-adapters/src/syn_adapters/feedback_screening/test_anthropic_screener.py::test_a_malformed_recorded_reply_is_quarantine`, `scripts/tests/test_feedback_screening_bench.py::test_holdout_recorded_scores_to_known_numbers` |
+| `02-allow-straddling-group.patch` | `check` accepts a group whose variants sit in more than one split | `scripts/tests/test_feedback_screening_bench.py::test_check_refuses_a_group_that_straddles_splits` |
+
+```
+just mutation-evidence 2015 "packages/syn-adapters/src/syn_adapters/feedback_screening/test_anthropic_screener.py::test_a_clean_verdict_carrying_an_extra_key_is_still_quarantine packages/syn-adapters/src/syn_adapters/feedback_screening/test_anthropic_screener.py::test_a_malformed_recorded_reply_is_quarantine scripts/tests/test_feedback_screening_bench.py::test_holdout_recorded_scores_to_known_numbers scripts/tests/test_feedback_screening_bench.py::test_check_refuses_a_group_that_straddles_splits" false
+```
+
+Delete `.mutations/` before merge (the `mutations-not-merged` CI job). Leave
+that to the orchestrator: an implementing agent must not delete it (PC-204).
