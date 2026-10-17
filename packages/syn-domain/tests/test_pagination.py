@@ -389,3 +389,19 @@ def test_a_timezone_less_bound_excludes_the_rows_outside_it() -> None:
     """
     assert within_window("2026-04-01T11:59:59+00:00", _NAIVE, None) is False
     assert within_window("2026-04-01T12:00:01+00:00", None, _NAIVE) is False
+
+
+def test_the_ui_day_bound_keeps_the_last_microsecond_of_the_day() -> None:
+    """The dashboard's `?day=` upper bound is `<day>T23:59:59.999999Z` (#1938).
+
+    Execution timestamps are `datetime.now(UTC)`, so they carry microseconds. A
+    millisecond bound (`.999Z`) drops a run stamped `23:59:59.9995`; the
+    microsecond bound keeps it and still excludes the next midnight. The bound
+    strings here are the ones `dayBounds()` in skyline-core sends.
+    """
+    after = datetime.fromisoformat("2026-10-13T00:00:00.000Z")
+    before = datetime.fromisoformat("2026-10-13T23:59:59.999999Z")
+    assert within_window("2026-10-13T23:59:59.999500+00:00", after, before) is True
+    assert within_window("2026-10-13T23:59:59.999999+00:00", after, before) is True
+    assert within_window("2026-10-14T00:00:00+00:00", after, before) is False
+    assert within_window("2026-10-13T00:00:00+00:00", after, before) is True

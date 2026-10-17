@@ -7,23 +7,29 @@
   A card with the bar under the name on a phone; one grid row from a 40rem
   container. Build `segments`, `barPercent`, `slots` and `sub` with
   runSegments(), runBarPercent(), runSlots() and runSubline().
+  With `href` the name is the row's link and stretches over the whole row, so
+  a tag with its own `href` (Resumed -> its parent, #1926) is a second link
+  beside it rather than an anchor nested inside one.
 -->
 <script lang="ts">
   import { runBarColumns } from '@syn137/skyline-core/patterns'
   import StatusBadge from '../StatusBadge/StatusBadge.svelte'
   import type { RunRowProps } from './types'
 
-  let { status, name, tag, sub, href, segments, barPercent, slots, duration, tokens, cost, when, ...rest }: RunRowProps = $props()
+  let { status, name, tags, sub, href, segments, barPercent, slots, duration, tokens, cost, when, ...rest }: RunRowProps = $props()
   const columns = $derived(runBarColumns(segments.length, slots))
+  const shown = $derived((tags ?? []).filter((t) => t != null))
 </script>
 
 <div class="sky-run-row-host">
-  <svelte:element this={href ? 'a' : 'div'} {...rest} class="sky-run-row" {href} data-interactive={href ? true : undefined}>
+  <div {...href ? {} : rest} class="sky-run-row" data-interactive={href ? true : undefined}>
     <StatusBadge {status} shape="square" />
     <span class="sky-run-row__name">
       <span class="sky-run-row__headline">
-        <span class="sky-run-row__title">{name}</span>
-        {#if tag}<span class="sky-run-row__tag" title={tag.title}>{tag.label}</span>{/if}
+        {#if href}<a {...rest} class="sky-run-row__title sky-run-row__link" {href}>{name}</a>{:else}<span class="sky-run-row__title">{name}</span>{/if}
+        {#each shown as t (t.label)}
+          {#if t.href}<a class="sky-run-row__tag" href={t.href} title={t.title}>{t.label}</a>{:else}<span class="sky-run-row__tag" title={t.title}>{t.label}</span>{/if}
+        {/each}
       </span>
       {#if sub}<span class="sky-run-row__sub">{sub}</span>{/if}
     </span>
@@ -43,7 +49,7 @@
       <span class="sky-run-row__cost">{cost ?? ''}</span>
       <span class="sky-run-row__when">{when ?? ''}</span>
     </span>
-  </svelte:element>
+  </div>
 </div>
 
 <style>
@@ -69,7 +75,24 @@
   .sky-run-row[data-interactive]:hover {
     border-color: var(--sky-color-border-hover);
   }
-  .sky-run-row:focus-visible {
+  .sky-run-row {
+    position: relative;
+  }
+  .sky-run-row__link {
+    color: inherit;
+    text-decoration: none;
+  }
+  /* The name's link covers the row, so the whole row still opens the run. */
+  .sky-run-row__link::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+  .sky-run-row__link:focus-visible {
+    outline: none;
+  }
+  .sky-run-row:has(.sky-run-row__link:focus-visible) {
     outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
     outline-offset: var(--sky-focus-ring-offset);
   }
@@ -98,6 +121,19 @@
     font-family: var(--ds-font-mono);
     font-size: var(--ds-text-xs);
     line-height: 1.125rem;
+  }
+  /* Above the name's stretched link, so it is a target of its own. */
+  a.sky-run-row__tag {
+    position: relative;
+    z-index: 1;
+    text-decoration: none;
+  }
+  a.sky-run-row__tag:hover {
+    background: var(--sky-color-accent-ring);
+  }
+  a.sky-run-row__tag:focus-visible {
+    outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+    outline-offset: var(--sky-focus-ring-offset);
   }
   .sky-run-row__title {
     font-size: var(--sky-text-body);
