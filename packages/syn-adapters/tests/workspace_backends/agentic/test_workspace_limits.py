@@ -256,7 +256,7 @@ async def test_production_wiring_survives_an_env_with_the_deleted_settings() -> 
             AsyncMock(return_value=ExecuteResult(exit_code=0, stdout="", stderr="")),
         ),
         patch(
-            "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+            "syn_adapters.workspace_backends.backend_kit.verify_image_async",
             side_effect=_passthrough,
         ),
     ):
