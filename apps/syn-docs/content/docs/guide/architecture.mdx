@@ -27,9 +27,9 @@ Syntropic137 distinguishes between two kinds of events, each optimized for its u
 
 Commands and queries are strictly separated. Commands modify state through aggregates; queries read from pre-built projections cached in Redis.
 
-**Commands (62):** `CreateWorkflow`, `StartExecution`, `CancelExecution`, `ResumeExecution`, `RegisterTrigger`, `UpdateTrigger`, `DeleteTrigger`, and more.
+**Commands (75):** `CreateWorkflow`, `StartExecution`, `CancelExecution`, `ResumeExecution`, `RegisterTrigger`, `UpdateTrigger`, `DeleteTrigger`, and more.
 
-**Events (95):** Every command produces one or more events: `WorkflowCreated`, `ExecutionStarted`, `ExecutionResumed`, `ExecutionCompleted`, `TriggerRegistered`, etc.
+**Events (109):** Every command produces one or more events: `WorkflowCreated`, `ExecutionStarted`, `ExecutionResumed`, `ExecutionCompleted`, `TriggerRegistered`, etc.
 
 **Projections (31):** Pre-computed read models subscribed to domain events, cached in Redis or PostgreSQL for sub-millisecond query response times. Includes a `repo_correlation` projection that maps repositories to workflow executions for cross-context insight queries.
 
@@ -37,7 +37,7 @@ Commands and queries are strictly separated. Commands modify state through aggre
 
 ## Domain Model
 
-Syntropic137 is organized into five bounded contexts. The diagram below is a simplified view; the generated list of every aggregate per context is in the [repository README](https://github.com/syntropic137/syntropic137#architecture).
+Syntropic137 is organized into six bounded contexts. The diagram below is a simplified view; the generated list of every aggregate per context is in the [repository README](https://github.com/syntropic137/syntropic137#architecture).
 
 <DomainModelFlow />
 
