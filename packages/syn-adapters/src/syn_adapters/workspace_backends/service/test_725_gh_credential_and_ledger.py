@@ -45,6 +45,7 @@ from syn_adapters.workspace_backends.service.credential_keeper import (
 from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger, IssuedToken
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
+from syn_domain.contexts.orchestration import HOST_CREDENTIALS
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
@@ -287,6 +288,8 @@ class _Container:
 class _Service:
     def __init__(self, container: _Container) -> None:
         self._isolation = container
+        # Renewal is refused under NoCredentials (#1914); these are host workspaces.
+        self.credential_policy = HOST_CREDENTIALS
 
 
 def _workspace(container: _Container) -> ManagedWorkspace:
