@@ -1,0 +1,15 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index d14386a95..e435c9f1d 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -144,10 +144,6 @@ class _Scanner:
+                 operand_expected = word in _REGEX_AFTER_KEYWORDS
+                 self.i = end
+                 continue
+-            if source.startswith(("++", "--"), self.i):
+-                # Postfix ends an operand, prefix still awaits one: no change.
+-                self.i += 2
+-                continue
+             if char in "'\"":
+                 self.i = _string_end(source, self.i)
+                 operand_expected = False
