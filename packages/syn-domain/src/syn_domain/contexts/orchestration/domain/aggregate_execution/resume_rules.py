@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         ResumeExecutionCommand,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        InheritedEvidenceGate,
         PhaseDefinition,
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
@@ -60,6 +61,7 @@ def completed_prefix(
     execution_id: str,
     phase_owners: Mapping[str, str],
     skipped_phase_ids: frozenset[str] | set[str] = frozenset(),
+    artifact_owners: Mapping[str, str] | None = None,
 ) -> tuple[list[InheritedPhase], str | None]:
     """The phases a resume inherits, and the phase it resumes at.
 
@@ -88,6 +90,12 @@ def completed_prefix(
     would never run (PC-63), so the prefix passes over it without inheriting it
     and a resume does not run a repair round the parent already made
     unnecessary (#1681).
+
+    An artifact in ``artifact_owners`` is held by the execution named there
+    rather than by its phase's owner: a report a resume filed when it settled
+    the phase's inherited evidence gate (plan §A.7). Each phase carries the
+    ones that differ from its owner, so a resume of a resume asks for every
+    report where it was filed.
     """
     inherited: list[InheritedPhase] = []
     for phase in phase_definitions:
@@ -95,14 +103,28 @@ def completed_prefix(
             continue
         if phase.phase_id not in completed_phase_ids:
             return inherited, phase.phase_id
+        artifact_ids = list(phase_artifact_ids.get(phase.phase_id, []))
+        owner = phase_owners.get(phase.phase_id, execution_id)
         inherited.append(
             InheritedPhase(
                 phase_id=phase.phase_id,
-                artifact_ids=list(phase_artifact_ids.get(phase.phase_id, [])),
-                origin_execution_id=phase_owners.get(phase.phase_id, execution_id),
+                artifact_ids=artifact_ids,
+                origin_execution_id=owner,
+                artifact_owners=_held_elsewhere(artifact_ids, owner, artifact_owners or {}),
             )
         )
     return inherited, None
+
+
+def _held_elsewhere(
+    artifact_ids: Sequence[str], owner: str, artifact_owners: Mapping[str, str]
+) -> dict[str, str]:
+    """The ``artifact_ids`` held by an execution other than their phase's ``owner``."""
+    return {
+        a: artifact_owners[a]
+        for a in artifact_ids
+        if artifact_owners.get(a) and artifact_owners[a] != owner
+    }
 
 
 def skipped_before(
@@ -245,6 +267,8 @@ def decide_resume(
     command: ResumeExecutionCommand,
     repair_point: str | None = None,
     skipped_phase_ids: frozenset[str] | set[str] = frozenset(),
+    open_gate: InheritedEvidenceGate | None = None,
+    artifact_owners: Mapping[str, str] | None = None,
 ) -> ResumeDecision:
     """Every rule above, applied in order.
 
@@ -259,6 +283,13 @@ def decide_resume(
     Phases a certified review skipped before the resume point are passed over
     and handed to the resume as skipped, so it neither runs them nor counts
     them as work still to do (#1681).
+
+    An ``open_gate`` held the phase after the one it follows (plan §A.7). That
+    phase's output was collected before the gate was requested, so it is
+    inherited even when the run stopped before recording it complete; the
+    resume then begins at the held phase, which never started, and needs no
+    acknowledgement. The gate rides on the event only when the resume begins
+    there: a gap earlier in the run re-runs the gap, and its gate with it.
     """
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
@@ -279,6 +310,7 @@ def decide_resume(
     if status is ExecutionStatus.COMPLETED and repair_point is not None:
         ids = [p.phase_id for p in phase_definitions]
         completed_phase_ids = set(ids[: ids.index(repair_point)]) & set(completed_phase_ids)
+    completed_phase_ids = {*completed_phase_ids, *_gated_phase(open_gate)}
     inherited, resume_phase_id = completed_prefix(
         phase_definitions,
         completed_phase_ids,
@@ -286,6 +318,7 @@ def decide_resume(
         execution_id=execution_id or "",
         phase_owners=phase_owners,
         skipped_phase_ids=skipped_phase_ids,
+        artifact_owners=artifact_owners,
     )
     # Started means an agent may have acted. Nothing on this stream can show
     # that it did not: branch observations cover git refs only, and the evidence
@@ -314,5 +347,20 @@ def decide_resume(
             resumed_at=datetime.now(UTC),
             cancellation_overridden=status is ExecutionStatus.CANCELLED,
             external_effects_acknowledged=may_repeat_effects,
+            inherited_evidence_gate=_gate_held_at(open_gate, resume_phase_id),
         )
     )
+
+
+def _gated_phase(open_gate: InheritedEvidenceGate | None) -> tuple[str, ...]:
+    """The phase an open gate follows: its output was collected, so it is inherited."""
+    return () if open_gate is None else (open_gate.after_phase_id,)
+
+
+def _gate_held_at(
+    open_gate: InheritedEvidenceGate | None, resume_phase_id: str | None
+) -> InheritedEvidenceGate | None:
+    """The gate, when the resume begins at the phase it held; an earlier gap re-runs it."""
+    if open_gate is None or open_gate.next_phase_id != resume_phase_id:
+        return None
+    return open_gate

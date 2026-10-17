@@ -427,7 +427,14 @@ records that evidence was asked for or what it found.
    acknowledgement** (`acknowledge_external_effects`): they are idempotent by
    attempt identity and compare-and-swap, so resuming in front of an unstarted
    held phase cannot repeat one. This is a deliberate exception, not an
-   oversight.
+   oversight. (Implemented 2026-10-17, plan PR 5c.) P counts as inherited
+   whenever an open gate follows it, even when the run stopped between
+   collecting P's output and recording P complete: the gate is requested in
+   the same save as the collection, so P's work is final. Without this, that
+   window would resume at P itself, demand the acknowledgement, and re-run an
+   agent over its own pushed commits, which is the path issue #1544 is about.
+   A fork that inherits an open gate begins at an unstarted phase, so it never
+   meets that path.
 5. **Two documents cross the gate, each with a schema.**
    - `evidence.json` (schema 1, `EvidenceReport`): what one evidence workflow
      run found on one head. `schema`, `kind`, `pr`, `head_sha`,
