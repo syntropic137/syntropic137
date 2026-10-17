@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/feedback_screening/anthropic.py b/packages/syn-adapters/src/syn_adapters/feedback_screening/anthropic.py
+--- a/packages/syn-adapters/src/syn_adapters/feedback_screening/anthropic.py
++++ b/packages/syn-adapters/src/syn_adapters/feedback_screening/anthropic.py
+@@ -195,7 +195,7 @@
+             )
+         # RequestError, not TransportError: a body that fails Content-Encoding
+         # decoding is a DecodingError, which is no reply either.
+-        except httpx.RequestError as exc:
++        except httpx.TransportError as exc:
+             raise ScreeningUnavailableError(
+                 f"Anthropic screening request for model {self._model} failed: {exc!r}"
+             ) from exc
