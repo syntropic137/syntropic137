@@ -487,6 +487,7 @@ class WorkspaceProvisionHandler:
                 pinned_commits=pinned_commits,
                 continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
+                credential_policy=policy,
                 inline_instructions=not all(
                     agent.expands_at_imports for agent in _agents_that_may_run(phase)
                 ),
@@ -537,6 +538,7 @@ class WorkspaceProvisionHandler:
         pinned_commits: Sequence[SourceCommit] = (),
         continued_branches: Mapping[str, str] | None = None,
         include_codex_auth: bool,
+        credential_policy: WorkspaceCredentialPolicy,
         inline_instructions: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
@@ -571,7 +573,7 @@ class WorkspaceProvisionHandler:
             require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
             ledger=workspace.issuance_ledger,
-            credential_policy=self._workspace_service.credential_policy,
+            credential_policy=credential_policy,
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
