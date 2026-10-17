@@ -294,3 +294,61 @@ class TestSingleton:
         reset_realtime_projection()
         p2 = get_realtime_projection()
         assert p1 is not p2
+
+
+@pytest.mark.unit
+class TestCancellationReachesTheActivityFeed:
+    """A cancel is the only event a cancelled run records (#1924).
+
+    It has to travel the production path - coordinator adapter, projection
+    handler, global channel - or a connected execution list keeps showing the
+    run as running until something unrelated refreshes it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_execution_cancelled_is_broadcast_on_activity_and_ends_the_run_stream(
+        self, projection: RealTimeProjection
+    ) -> None:
+        from datetime import UTC, datetime
+
+        from event_sourcing import EventEnvelope, EventMetadata, MemoryCheckpointStore
+
+        from syn_adapters.subscriptions.realtime_adapter import RealTimeProjectionAdapter
+        from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+            ExecutionCancelledEvent,
+        )
+
+        adapter = RealTimeProjectionAdapter(projection)
+        subscribed = adapter.get_subscribed_event_types()
+        assert subscribed is not None
+        assert "ExecutionCancelled" in subscribed
+
+        activity: SSEQueue = await projection.connect("_activity_")
+        run: SSEQueue = await projection.connect("exec-1")
+        event = ExecutionCancelledEvent(
+            workflow_id="wf-1",
+            execution_id="exec-1",
+            phase_id="phase-1",
+            cancelled_at=datetime.now(UTC),
+        )
+        envelope = EventEnvelope(
+            event=event,
+            metadata=EventMetadata(
+                event_type="ExecutionCancelled",
+                aggregate_id="exec-1",
+                aggregate_type="WorkflowExecution",
+                aggregate_nonce=2,
+                global_nonce=7,
+            ),
+        )
+        await adapter.handle_event(envelope, MemoryCheckpointStore())
+
+        frame = activity.get_nowait()
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.event_type == "ExecutionCancelled"
+        assert frame.data["execution_id"] == "exec-1"
+
+        terminal = run.get_nowait()
+        assert isinstance(terminal, SSEEventFrame)
+        assert terminal.type == "terminal"
+        assert run.get_nowait() is None

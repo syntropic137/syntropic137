@@ -20,6 +20,7 @@ export const ACTIVITY_EVENT_TYPES = [
   'WorkflowExecutionStarted',
   'WorkflowCompleted',
   'WorkflowFailed',
+  'ExecutionCancelled',
   'SessionStarted',
   'SessionCompleted',
   'git_commit',
@@ -41,13 +42,13 @@ export type LiveEventType = ActivityEventType | ExecutionStreamEventType
 
 export const LIVE_EVENT_TYPES: readonly LiveEventType[] = [...ACTIVITY_EVENT_TYPES, ...EXECUTION_STREAM_EVENT_TYPES]
 
-const RUN = new Set<string>(['WorkflowExecutionStarted', 'WorkflowCompleted', 'WorkflowFailed', 'PhaseStarted', 'PhaseCompleted'])
+const RUN = new Set<string>(['WorkflowExecutionStarted', 'WorkflowCompleted', 'WorkflowFailed', 'ExecutionCancelled', 'PhaseStarted', 'PhaseCompleted'])
 const SESSION = new Set<string>(['SessionStarted', 'SessionCompleted', 'OperationRecorded', 'SubagentStarted', 'SubagentStopped'])
 
 /** A workflow execution or one of its phases changed. */
 export const isRunEvent = (eventType: string): boolean => RUN.has(eventType)
 /** An execution reached a terminal state. */
-export const isRunFinished = (eventType: string): boolean => eventType === 'WorkflowCompleted' || eventType === 'WorkflowFailed'
+export const isRunFinished = (eventType: string): boolean => eventType === 'WorkflowCompleted' || eventType === 'WorkflowFailed' || eventType === 'ExecutionCancelled'
 /** An agent session (or its operations / subagents) changed. */
 export const isSessionEvent = (eventType: string): boolean => SESSION.has(eventType)
 /** An artifact was stored. */
