@@ -243,6 +243,7 @@ file speaks for:
 - [github](github-ubiquitous-language.md) - Installation, Token, Trigger Rule, Dedup Key
 - [artifacts](artifacts-ubiquitous-language.md) - Artifact, Phase Output File, Primary Deliverable
 - [organization](organization-ubiquitous-language.md) - Organization, System, Repo, Repo Claim
+- [feedback](feedback-ubiquitous-language.md) - Submission, Ticket, Report, Quarantine (feedback), Screened Text, Resolved
 
 `es-glossary.md` covers event-sourcing patterns, not domain terms. A word may
 mean different things in two contexts; one meaning per context is the rule.
