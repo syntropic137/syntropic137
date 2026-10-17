@@ -171,11 +171,7 @@ class _StepRun:
 
     async def _run(self) -> None:
         index = self.step.index
-        attempt = self.gate.attempts.get(index)
-        if attempt is None and index in self.gate.inherited_attempts:
-            attempt = await self._resume_parent_attempt(self.gate.inherited_attempts[index])
-        if attempt is None:
-            attempt = await self._attempt()
+        attempt = self.gate.attempts.get(index) or await self._first_attempt()
         while attempt is not None:
             if self.h.clock() >= attempt.not_after:
                 await self._settle(StepOutcome.UNAVAILABLE, "timeout")
@@ -246,6 +242,11 @@ class _StepRun:
             await self._settle(StepOutcome.UNAVAILABLE, why)
             return None
         return await self._attempt()
+
+    async def _first_attempt(self) -> EvidenceAttempt | None:
+        """The parent's attempt when this is a resume that inherited one, else a new one."""
+        parent = self.gate.inherited_attempts.get(self.step.index)
+        return await (self._attempt() if parent is None else self._resume_parent_attempt(parent))
 
     async def _resume_parent_attempt(self, parent: InheritedAttempt) -> EvidenceAttempt:
         """Take over the parent's attempt before posting anything (§A.7 3).
