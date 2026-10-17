@@ -25,7 +25,7 @@
  * relative to the window's first week: -pad .. window - 1 + pad.
  */
 import { round2, type Point } from './path'
-import { MONTHS, WEEKDAYS, addDays, dayMs, type SkylineDay } from './skyline'
+import { DAY_ZONE_SUFFIX, MONTHS, WEEKDAYS, addDays, dayMs, type SkylineDay } from './skyline'
 
 /** Geometry constants: the `G` object of each board script. */
 export interface IsoCityDims {
@@ -116,13 +116,13 @@ export function isoHeight(sessions: number, maxSessions: number, dims: IsoCityDi
   return Math.max(dims.hmin, Math.round(dims.hmax * Math.sqrt(Math.max(0, sessions) / maxSessions)))
 }
 
-/** "Mon, Aug 3: 5 sessions, 2 failed". */
+/** "Mon, Aug 3 (UTC): 5 sessions, 2 failed". */
 export function isoDayLabel(day: SkylineDay): string {
   const d = new Date(dayMs(day.date))
   const wd = WEEKDAYS[d.getUTCDay()]
   const s = `${day.sessions} ${day.sessions === 1 ? 'session' : 'sessions'}`
   const failed = day.failed ? `, ${day.failed} failed` : ''
-  return `${wd}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}: ${s}${failed}`
+  return `${wd}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}${DAY_ZONE_SUFFIX}: ${s}${failed}`
 }
 
 export interface IsoHitBox {
