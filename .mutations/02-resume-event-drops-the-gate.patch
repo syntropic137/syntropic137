@@ -1,15 +1,12 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_rules.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_rules.py
-index da7dc7769..17dad5bae 100644
+index 5c6e0e96e..a17c548f3 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_rules.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_rules.py
-@@ -326,9 +326,7 @@ def decide_resume(
-             cancellation_overridden=status is ExecutionStatus.CANCELLED,
-             external_effects_acknowledged=may_repeat_effects,
-             inherited_evidence_gate=(
--                open_gate
--                if open_gate is not None and open_gate.next_phase_id == resume_phase_id
--                else None
-+                None
-             ),
-         )
-     )
+@@ -338,6 +338,4 @@ def _gate_held_at(
+     open_gate: InheritedEvidenceGate | None, resume_phase_id: str | None
+ ) -> InheritedEvidenceGate | None:
+     """The gate, when the resume begins at the phase it held; an earlier gap re-runs it."""
+-    if open_gate is None or open_gate.next_phase_id != resume_phase_id:
+-        return None
+-    return open_gate
++    return None

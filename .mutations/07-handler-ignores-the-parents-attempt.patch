@@ -1,13 +1,13 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
-index c3610e316..39014fc1e 100644
+index 5dc7c8cf3..daace8a3d 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
-@@ -172,7 +172,7 @@ class _StepRun:
-     async def _run(self) -> None:
-         index = self.step.index
-         attempt = self.gate.attempts.get(index)
--        if attempt is None and index in self.gate.inherited_attempts:
-+        if False:
-             attempt = await self._resume_parent_attempt(self.gate.inherited_attempts[index])
-         if attempt is None:
-             attempt = await self._attempt()
+@@ -245,7 +245,7 @@ class _StepRun:
+ 
+     async def _first_attempt(self) -> EvidenceAttempt | None:
+         """The parent's attempt when this is a resume that inherited one, else a new one."""
+-        parent = self.gate.inherited_attempts.get(self.step.index)
++        parent = None
+         return await (self._attempt() if parent is None else self._resume_parent_attempt(parent))
+ 
+     async def _resume_parent_attempt(self, parent: InheritedAttempt) -> EvidenceAttempt:
