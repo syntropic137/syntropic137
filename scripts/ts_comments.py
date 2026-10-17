@@ -13,16 +13,20 @@ or ``/*`` inside them.
 The tokenizer is deliberately small. It knows strings (with escapes), template
 literals (multi-line, with nested ``${...}`` expressions), regex literals and
 both comment forms. Whether a ``/`` opens a regex is decided by the previous
-token: an operand (identifier, literal, ``)``, ``]``, ``}``, postfix ``++`` or
-``--``) means division, except the ``)`` closing an ``if``/``for``/``while``/
-``with`` condition and a keyword such as ``return``. A word after ``.`` or
-``?.`` is a property name, never a keyword: ``obj.if(x) / 2`` divides. With
-``jsx=True`` (a
-``.tsx`` file) a ``<`` where an operand is expected opens a JSX element, whose
-text is neither code nor comment: ``https://x`` or ``Don't`` there is prose.
+token: an operand (identifier, literal, ``)``, ``]``, the ``}`` of an object,
+postfix ``++``, ``--`` or non-null ``!``) means division, except the ``)``
+closing an ``if``/``for``/``while``/``with`` condition, the ``}`` closing a
+block or body, and a keyword such as ``return``. A word after ``.`` or ``?.`` is
+a property name, never a keyword: ``obj.if(x) / 2`` divides. With ``jsx=True``
+(a ``.tsx`` file) a ``<`` where an operand is expected opens a JSX element,
+whose text is neither code nor comment: ``https://x`` or ``Don't`` there is
+prose, unless the name is followed (across whitespace and comments) by what
+makes it a generic parameter list.
 
-Every misreading it can make errs towards keeping text, never towards blanking
-code: only comment characters are ever replaced.
+Only comment characters are ever replaced, but a misread ``/`` can still blank
+code: a regex read as division leaves its ``//`` or ``/*`` to be taken as a
+comment. Each rule above closes one such misreading on valid source; the
+tokenizer is not a parser, and syntax it does not know can still fool it.
 """
 
 from __future__ import annotations
@@ -54,14 +58,50 @@ _REGEX_AFTER_KEYWORDS: Final = frozenset(
 #: ``)`` closing it is not an operand and a ``/`` after it opens a regex.
 _CONDITION_KEYWORDS: Final = frozenset({"if", "for", "while", "with"})
 
-#: What follows the name in ``<T`` when it is a generic type parameter list,
-#: not a JSX tag: ``<T,>``, ``<T extends U>`` or ``<T = U>``, across any
-#: whitespace including a newline.
-_GENERIC_AFTER_NAME: Final = re.compile(r"\s*(?:,|=|extends\s)")
+#: Keywords after which a ``{`` opens a block, although a ``/`` after them
+#: would open a regex: every other keyword in ``_REGEX_AFTER_KEYWORDS`` is
+#: followed by an expression, where ``{`` is an object.
+_BLOCK_AFTER_KEYWORDS: Final = frozenset({"do", "else"})
+
+#: What follows the name in ``<T``, once whitespace and comments are skipped,
+#: when it is a generic type parameter list, not a JSX tag: ``<T,>`` or
+#: ``<T = U>``. ``<T extends U>`` is matched separately, since ``extends`` must
+#: be followed by trivia to be a word on its own.
+_GENERIC_AFTER_NAME: Final = re.compile(r"[,=]")
 
 
 def _is_word_char(char: str) -> bool:
     return char.isalnum() or char in "_$"
+
+
+def _opens_block(previous: str) -> bool:
+    """Whether a ``{`` after the token ``previous`` opens a block, not an object.
+
+    A block follows a statement boundary, a ``)`` (a function, method, ``if`` or
+    ``switch`` body), an ``=>``, or a declaration's name (``class X {``). An
+    object follows an operator or an expression keyword (``return {``).
+    """
+    if previous in {"", ")", ";", "{", "}", "=>"}:
+        return True
+    if _is_word_char(previous[0]):
+        return previous not in _REGEX_AFTER_KEYWORDS or previous in _BLOCK_AFTER_KEYWORDS
+    return False
+
+
+def _skip_trivia(source: str, i: int) -> int:
+    """Index of the first character at or after ``i`` that is not whitespace or comment."""
+    while i < len(source):
+        if source[i].isspace():
+            i += 1
+        elif source.startswith("//", i):
+            end = source.find("\n", i)
+            i = len(source) if end == -1 else end
+        elif source.startswith("/*", i):
+            end = source.find("*/", i + 2)
+            i = len(source) if end == -1 else end + 2
+        else:
+            break
+    return i
 
 
 def _regex_end(source: str, slash: int) -> int | None:
@@ -133,19 +173,23 @@ class _Scanner:
     def code(self, *, nested: bool) -> None:
         """Scan code to the end, or when ``nested`` past the ``}`` that closes it."""
         source = self.source
-        depth = 0
+        # Per open ``{``: whether it opens a block, whose ``}`` ends no operand.
+        blocks: list[bool] = []
         # Per open ``(``: whether it holds an if/for/while/with condition.
         conditions: list[bool] = []
         operand_expected = True
         word = ""
         # Whether the previous token was ``.``, so a word now is a property name.
         after_dot = False
+        # The previous token: a word, a punctuator, or ``'`` for any literal.
+        previous = ""
         while self.i < len(source):
             char = source[self.i]
             if char.isspace() or self._comment():
                 self.i += char.isspace()
                 continue
             previous_word, word = word, ""
+            previous_token = previous
             member, after_dot = after_dot, False
             if _is_word_char(char):
                 end = self.i
@@ -153,27 +197,44 @@ class _Scanner:
                     end += 1
                 # A property is an operand whatever it is called: ``obj.return``.
                 word = "" if member else source[self.i : end]
+                previous = source[self.i : end]
                 operand_expected = word in _REGEX_AFTER_KEYWORDS
                 self.i = end
                 continue
             if source.startswith(("++", "--"), self.i):
                 # Postfix ends an operand, prefix still awaits one: no change.
+                previous = source[self.i : self.i + 2]
                 self.i += 2
                 continue
+            if char == "!" and not operand_expected and not source.startswith("!=", self.i):
+                # A non-null assertion ``n!`` ends an operand, as postfix ``++`` does.
+                previous = char
+                self.i += 1
+                continue
+            if source.startswith("=>", self.i):
+                previous = "=>"
+                self.i += 2
+                operand_expected = True
+                continue
+            previous = char
             if char in "'\"":
                 self.i = _string_end(source, self.i)
+                previous = "'"
                 operand_expected = False
                 continue
             if char == "`":
                 self._template()
+                previous = "'"
                 operand_expected = False
                 continue
             if char == "/" and operand_expected:
                 self.i = _regex_end(source, self.i) or self.i + 1
+                previous = "'"
                 operand_expected = False
                 continue
             if char == "<" and operand_expected and self._jsx_starts():
                 self._element()
+                previous = "'"
                 operand_expected = False
                 continue
             self.i += 1
@@ -188,13 +249,13 @@ class _Scanner:
                 after_dot = True
                 operand_expected = True
             elif char == "{":
-                depth += 1
+                blocks.append(_opens_block(previous_token))
                 operand_expected = True
             elif char == "}":
-                if nested and depth == 0:
+                if nested and not blocks:
                     return
-                depth = max(depth - 1, 0)
-                operand_expected = False
+                # After a block a statement starts, so a ``/`` opens a regex.
+                operand_expected = blocks.pop() if blocks else False
             else:
                 operand_expected = True
 
@@ -226,7 +287,12 @@ class _Scanner:
             return False
         while end < len(source) and (_is_word_char(source[end]) or source[end] in ".-:"):
             end += 1
-        return _GENERIC_AFTER_NAME.match(source, end) is None
+        after = _skip_trivia(source, end)
+        if _GENERIC_AFTER_NAME.match(source, after):
+            return False
+        if not source.startswith("extends", after):
+            return True
+        return _skip_trivia(source, after + len("extends")) == after + len("extends")
 
     def _tag(self) -> bool:
         """Scan a JSX tag from just after its ``<``; whether it closed itself."""

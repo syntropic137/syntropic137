@@ -194,6 +194,91 @@ def test_a_generic_in_tsx_is_not_jsx(source: str) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("pattern", ["/[//]/", "/[/*]/"])
+@pytest.mark.parametrize(
+    "prefix",
+    ["if (ok) {} ", "if (ok) {}\n", "function f() {}\n", "class C {}\n", "do {} while (ok)\n"],
+    ids=["if-block", "if-block-newline", "function", "class", "do-while"],
+)
+def test_a_regex_after_a_block_is_code(prefix: str, pattern: str) -> None:
+    # Read as division, the regex's ``//`` or ``/*`` would blank the code after it.
+    source = f"{prefix}{pattern}.test(x); const k = 'agentId'\nconst j = 'sessionId'"
+    assert blanked(source) == source
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const r = {a: 1} / 2 // `sessionId`",
+        "const r = f({}) / 2 // `sessionId`",
+        "const r = `${x}` / 2 // `sessionId`",
+    ],
+    ids=["object-literal", "object-argument", "template-expression"],
+)
+def test_division_after_an_object_does_not_start_a_regex(source: str) -> None:
+    assert blanked(source) == spaced(source, "// `sessionId`")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const x = n! / 2; // `sessionId`",
+        "const x = a.b!.c / 2; // `sessionId`",
+        "const x = f(y)! / 2; // `sessionId`",
+    ],
+    ids=["identifier", "member", "call"],
+)
+def test_division_after_a_non_null_assertion_does_not_start_a_regex(source: str) -> None:
+    assert blanked(source) == spaced(source, "// `sessionId`")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const t = !/[//]/.test(x); const k = 'agentId'",
+        "const t = a !== /[//]/; const k = 'agentId'",
+        "const t = a != /[//]/; const k = 'agentId'",
+    ],
+    ids=["logical-not", "strict-inequality", "inequality"],
+)
+def test_a_regex_after_negation_or_inequality_is_code(source: str) -> None:
+    assert blanked(source) == source
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const f = <T /* note */,>(x: T) => x // `sessionId`",
+        "const f = <T // note\n,>(x: T) => x // `sessionId`",
+        "const f = <T /* note */ = unknown>(x: T) => x // `sessionId`",
+        "const f = <T extends/* note */unknown>(x: T) => x // `sessionId`",
+    ],
+    ids=[
+        "block-comment-before-comma",
+        "line-comment-before-comma",
+        "before-default",
+        "after-extends",
+    ],
+)
+def test_a_generic_in_tsx_is_not_jsx_across_comments(source: str) -> None:
+    comments = [c for c in ("/* note */", "// note") if c in source]
+    expected = spaced(source, "// `sessionId`")
+    for comment in comments:
+        expected = spaced(expected, comment)
+    assert blanked(source, jsx=True) == expected
+
+
+@pytest.mark.unit
+def test_a_tag_whose_name_starts_with_extends_is_jsx() -> None:
+    source = "const n = <T extendsX>https://x</T>; const k = 'agentId'"
+    assert blanked(source, jsx=True) == source
+
+
+@pytest.mark.unit
 def test_angle_brackets_in_ts_are_not_jsx() -> None:
     # In a ``.ts`` file ``<a>`` is a type assertion, so ``//`` after it is a comment.
     source = "const n = <a>https://x // `sessionId`"

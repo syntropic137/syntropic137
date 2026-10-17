@@ -397,6 +397,26 @@ _MUTATIONS: dict[str, tuple[str, str, str]] = {
         '\nconst plantedNode = <a>https://x</a>; const plantedKey = "agentId"\n',
         "vendor-parsing",
     ),
+    "vendor-parsing-client-after-block-regex": (
+        _CLIENT_FILE,
+        '\nif (plantedOk) {} /[//]/.test(plantedX); const plantedKey = "agentId"\n',
+        "vendor-parsing",
+    ),
+    "vendor-parsing-client-after-function-regex": (
+        _CLIENT_FILE,
+        '\nfunction plantedF() {}\n/[/*]/.test(plantedX); const plantedKey = "agentId"\n',
+        "vendor-parsing",
+    ),
+    "vendor-parsing-client-after-non-null-division": (
+        _CLIENT_FILE,
+        '\nconst plantedX = plantedN! / 2; const plantedKey = "agentId" // `sessionId`\n',
+        "vendor-parsing",
+    ),
+    "vendor-parsing-client-after-tsx-generic-comment": (
+        _TSX_CLIENT_FILE,
+        '\nconst plantedF = <T /* note */,>(x: T) => x; const plantedKey = "agentId"\n',
+        "vendor-parsing",
+    ),
     "harness-import-api": (
         _INVENTORY_ROUTE,
         "\n\nfrom agentic_isolation.harnesses.claude.evidence import ClaudeNativeEvidenceReader\n",
@@ -456,6 +476,11 @@ _COMMENTS: dict[str, tuple[str, str]] = {
     "after-tsx-generic-arrow-extends-newline": (
         _TSX_CLIENT_FILE,
         "\nconst plantedF = <T extends\nunknown>(x: T) => x; // `sessionId`\n",
+    ),
+    "after-non-null-division": (_CLIENT_FILE, "\nconst plantedX = plantedN! / 2; // `sessionId`\n"),
+    "after-tsx-generic-comment": (
+        _TSX_CLIENT_FILE,
+        "\nconst plantedF = <T /* note */,>(x: T) => x; // `sessionId`\n",
     ),
 }
 
