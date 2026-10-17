@@ -31,5 +31,12 @@ task: |
   `MINT_ATTEMPTS` (int, the most mint attempts) and
   `MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT` (float, the share of the setup
   phase timeout the whole mint may take), beside the existing `RetryPolicy`.
+  Each mint retry is logged at WARNING, its message containing `token mint`,
+  the attempt as `attempt <n>/<MINT_ATTEMPTS>` (for example `attempt 1/5`), and
+  for an HTTP failure the status as `status=<code>` (for example `status=500`);
+  a retry after a dropped response also says `orphan`, and no log line ever
+  contains the token. A mint that stays unavailable raises
+  `GitHubUnavailableError` whose message contains `after <n> attempt(s)`
+  (for example `after 1 attempt(s)`).
 hidden_tests:
   - packages/syn-adapters/tests/github/test_provisioning_retry.py

@@ -18,6 +18,26 @@ Where a hidden test imports a name the fix introduced, the task says so under
 by guessing a name, and the case would measure the guess. That paragraph
 states the contract, not the implementation.
 
+The same applies to every exact spelling a hidden test depends on, and
+`check` enforces it (#2023). It parses each hidden test at `fix_commit` and
+reads four kinds of spelling:
+
+- names imported from a `syn_*` package;
+- attribute names passed to `setattr` (monkeypatching);
+- literals in `assert "<text>" in ...`;
+- `raises(match=...)` patterns.
+
+Each one must appear in the task text or somewhere in the tree at the pin, or
+`check` fails. `assert "<text>" not in ...` is exempt, because a fix passes it
+by never printing the text. State a templated message with one concrete
+example (`after <n> attempt(s)`, for example `after 1 attempt(s)`), because
+the check matches literals.
+
+v2 (2026-10-17) added the missing statements to `exec-status-lost`,
+`codex-sandbox-tmpdir` and `token-mint-retry-5xx`. A Sonnet 5.5 pilot and an
+Opus 5.5 pilot both failed the same hidden tests on a log string that existed
+only in the fix.
+
 ## Admission
 
 A case is admitted only if its hidden tests discriminate:

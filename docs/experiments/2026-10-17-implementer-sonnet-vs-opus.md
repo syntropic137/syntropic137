@@ -125,6 +125,32 @@ pin. A static audit of all 5 cases found no other case with unstated names.
   12.5% at n=8 but 10% at n=10.
 - Approved by the orchestrator.
 
+## Protocol deviation 3 (decided 2026-10-17T20:05Z): fix the cases (suite v2), supersedes deviation 2
+
+The pilot control (Opus v1, `codex-sandbox-tmpdir`, scored from its
+quarantine ref as `exec-8713a31f81ce`) FAILed the same 3 hidden tests as the
+Sonnet pilot. Both failed on `assert "Could not destroy workspace" in
+caplog.text`, a string that exists only in the fix. An audit of every case
+then found unstated exact spellings (names, log text, exception text) in 3
+cases: `exec-status-lost`, `codex-sandbox-tmpdir` and `token-mint-retry-5xx`.
+The other 2 cases are clean.
+
+- Fix, don't exclude. Approved by the orchestrator.
+- implementer-seed bumps to **v2**, adding the observable contract to each
+  affected case's interface paragraph. `check` now fails on any unstated
+  spelling, so the defect cannot recur (README, #2023). The orchestrator
+  re-runs `admit` for the 3 cases on a Docker host before any counted run
+  uses them.
+- **No counted run existed on the 3 cases when this was decided.** The only
+  run on any of them was the excluded Sonnet v1-task run on
+  `exec-status-lost`, which stays excluded and reported. Its replacement runs
+  under v2.
+- `exec-status-lost` returns. The counted set is the full 5 x 2 x 2 = 20 again,
+  and the thresholds are back to /10 as originally preregistered. The
+  "looser at /8" note in deviation 2 no longer applies.
+- The 2 clean cases' task text is byte-identical in v1 and v2, so their runs
+  count either way.
+
 ## What a "proceed" means (added with deviation 2)
 
 At n=8 per arm, "proceed" means **no evidence of a large quality drop**. It
