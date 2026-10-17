@@ -214,6 +214,8 @@ async def _provision(
             repos=repos,
         )
     try:
+        # The credential keeper renews the git credential while the agent runs.
+        await result.workspace.renew_git_credential()
         # What AgentExecutionHandler does with the result: stream the agent.
         async for _ in result.workspace.stream(result.claude_cmd, environment=result.agent_env):
             pass
