@@ -73,6 +73,12 @@ def test_the_fold_table_is_casefold_one_character_at_a_time(text: str) -> None:
         ("2026-10-01 10:00", True),
         ("2026-10-01", True),
         ("2026-10-01T24:00:00Z", False),
+        ("2026-10-01T24:00", False),
+        ("2026-10-01T24:00:00.000000+00:00", False),
+        ("2026-12-31 24:00:00", False),
+        ("2026-10-01224:00", False),
+        ("2026100122400", False),
+        ("2026-10-01\n24:00", False),
         ("2026-10-01T23:59:60Z", False),
         ("2026-10-01T23:60:00", False),
         ("2026-10-01T10:00:00+24:00", False),
@@ -80,8 +86,11 @@ def test_the_fold_table_is_casefold_one_character_at_a_time(text: str) -> None:
     ],
 )
 def test_the_timestamp_gate_lets_through_only_what_python_reads(stamp: str, readable: bool) -> None:
-    # PostgreSQL reads 24:00 and :60, Python does not; the gate keeps them
-    # undated on both sides. Impossible days (02-30) are pg_input_is_valid's.
+    # PostgreSQL reads 24:00 and :60; the gate keeps them undated on both
+    # sides. Python 3.14's fromisoformat reads 24:00 too, so coerce_datetime
+    # refuses hour 24 by its own rule (#1637), pinned in syn-domain's
+    # test_pagination independently of the interpreter. Impossible days
+    # (02-30) are pg_input_is_valid's.
     assert (re.match(_ISO_TIMESTAMP, stamp) is not None) is readable
     assert (coerce_datetime(stamp) is not None) is readable
 
