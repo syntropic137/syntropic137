@@ -43,8 +43,37 @@ How a submission arrived: *signed* (from an enrolled Source), *anonymous*
 
 ### Source
 
-An enrolled deployment holding a signing key. It is an aggregate (planned, not yet
-built). It is **not** a GitHub source and **not** a session-inventory source.
+An enrolled deployment holding a signing key (`SourceAggregate`, one per
+`source_instance_id`). It is **not** a GitHub source and **not** a
+session-inventory source. Its status is `active`, `throttled` or `revoked`
+(`SourceStatus`); **revoked** is terminal and outranks everything below.
+
+- **Enrol** (`SourceEnrolled`): the source's first key and its daily quota.
+  Enrolling again with the same key is a no-op; with a different key it is refused.
+- **Verification key:** the public half the event store holds. Under Ed25519 it
+  is the public key; if D2 picks HMAC it is the secret's hash. The **signing
+  key** never leaves the source's Relay and never enters this context.
+- **Key id:** names one key. A source never reuses a key id.
+- **Rotate** (`SourceKeyRotated`): a new current key. The replaced key is
+  **retired** at the rotation time and keeps verifying for the **rotation
+  overlap**, a verifier setting rather than a recorded fact.
+- **Throttle / Lift** (`SourceThrottled`, `SourceThrottleLifted`): SourceGuard
+  throttles; the owner lifts. A throttled source still verifies; Intake rejects
+  it at the quota step.
+- **Revoke** (`SourceRevoked`): no key of the source verifies again, including a
+  retired key still inside its overlap.
+
+### Signed Request / Canonical String / Signature Window
+
+A **Signed Request** carries `X-Syn-Source`, `X-Syn-Key-Id`, `X-Syn-Timestamp`,
+`X-Syn-Nonce` and `X-Syn-Signature`. The **Canonical String** is what a source
+signs: `method \n path \n ts \n nonce \n sha256(body)`. The **Signature Window**
+is ±300 s around the verifier's clock, inclusive. A **Verification** is the
+verdict: `verified`, or one of `revoked`, `stale_timestamp`, `unknown_key`,
+`key_retired`, `bad_signature`. The **Signature Algorithm** is D2's seam
+(`SignatureAlgorithm`); Ed25519 is the one built. The `feedback_sources` read
+model holds each source's status, quota and keys, and is what Intake verifies
+against.
 
 ### Provenance
 

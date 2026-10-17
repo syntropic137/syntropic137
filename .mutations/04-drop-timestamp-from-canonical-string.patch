@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/feedback/domain/RequestSignature.py b/packages/syn-domain/src/syn_domain/contexts/feedback/domain/RequestSignature.py
+index 858f811d2..a97c8f45e 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/feedback/domain/RequestSignature.py
++++ b/packages/syn-domain/src/syn_domain/contexts/feedback/domain/RequestSignature.py
+@@ -62,7 +62,7 @@ def canonical_string(*, method: str, path: str, timestamp: int, nonce: str, body
+     captured signature can be replayed with that field changed.
+     """
+     digest = hashlib.sha256(body).hexdigest()
+-    return f"{method.upper()}\n{path}\n{timestamp}\n{nonce}\n{digest}".encode()
++    return f"{method.upper()}\n{path}\n{nonce}\n{digest}".encode()
+ 
+ 
+ class SignatureAlgorithm(Protocol):
