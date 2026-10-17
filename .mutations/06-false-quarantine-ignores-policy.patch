@@ -1,0 +1,12 @@
+diff --git a/scripts/feedback_screening_bench.py b/scripts/feedback_screening_bench.py
+--- a/scripts/feedback_screening_bench.py
++++ b/scripts/feedback_screening_bench.py
+@@ -231,7 +231,7 @@
+     # OPEN is lost to the owner's queue whatever the classifier called it.
+     false_quarantine = Rate.of(
+         sum(
+-            ScreeningPolicy.decide(results[c.id], thresholds) is not ScreeningDecision.OPEN
++            results[c.id].verdict is not ScreeningVerdict.CLEAN
+             for c in clean
+         ),
+         len(clean),

@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/feedback_screening/anthropic.py b/packages/syn-adapters/src/syn_adapters/feedback_screening/anthropic.py
+--- a/packages/syn-adapters/src/syn_adapters/feedback_screening/anthropic.py
++++ b/packages/syn-adapters/src/syn_adapters/feedback_screening/anthropic.py
+@@ -155,7 +155,7 @@
+         # Strict JSON validation applies the schema the model was given: a
+         # confidence of "0.99" or true is not a number there, so it must not
+         # be coerced into one here.
+-        reply = ScreeningReply.model_validate_json(json.dumps(calls[0].input), strict=True)
++        reply = ScreeningReply.model_validate(calls[0].input)
+     except ValidationError:
+         return QUARANTINE_ON_UNPARSEABLE
+     return ScreeningResult(
