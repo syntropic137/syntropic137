@@ -1,12 +1,17 @@
 diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
-index 2bb72c126..1253aaf67 100644
+index 140c145cb..446858aa4 100644
 --- a/scripts/ts_comments.py
 +++ b/scripts/ts_comments.py
-@@ -226,7 +226,8 @@ class _Scanner:
+@@ -287,12 +287,8 @@ class _Scanner:
              return False
          while end < len(source) and (_is_word_char(source[end]) or source[end] in ".-:"):
              end += 1
--        return _GENERIC_AFTER_NAME.match(source, end) is None
+-        after = _skip_trivia(source, end)
+-        if _GENERIC_AFTER_NAME.match(source, after):
+-            return False
+-        if not source.startswith("extends", after):
+-            return True
+-        return _skip_trivia(source, after + len("extends")) == after + len("extends")
 +        rest = source[end:].lstrip(" \t")
 +        return not rest.startswith(",") and not rest.startswith("extends ")
  

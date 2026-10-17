@@ -1,0 +1,15 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index 140c145cb..3e5286e35 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -287,7 +287,9 @@ class _Scanner:
+             return False
+         while end < len(source) and (_is_word_char(source[end]) or source[end] in ".-:"):
+             end += 1
+-        after = _skip_trivia(source, end)
++        after = end
++        while after < len(source) and source[after].isspace():
++            after += 1
+         if _GENERIC_AFTER_NAME.match(source, after):
+             return False
+         if not source.startswith("extends", after):
