@@ -1,8 +1,8 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
-index 9e8ada73a..c226e8928 100644
+index 6ac18492a..b307bfd11 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/WorkspaceProvisionHandler.py
-@@ -470,8 +470,8 @@ class WorkspaceProvisionHandler:
+@@ -404,8 +404,8 @@ class WorkspaceProvisionHandler:
              execution_id=todo.execution_id,
              workflow_id=workflow_id,
              phase_id=todo.phase_id,
