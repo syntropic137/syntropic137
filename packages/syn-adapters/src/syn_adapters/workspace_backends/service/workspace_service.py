@@ -127,6 +127,18 @@ class WorkspaceServiceConfig:
         )
 
 
+def _refuse_credentials_under(
+    policy: WorkspaceCredentialPolicy, with_sidecar: bool, inject_tokens: bool
+) -> None:
+    """A credential-free (NoCredentials) workspace takes no sidecar and no tokens (#1914)."""
+    if not policy.supplies_credentials and (with_sidecar or inject_tokens):
+        msg = (
+            "A credential-free (NoCredentials) workspace takes no sidecar and no "
+            f"injected tokens (with_sidecar={with_sidecar}, inject_tokens={inject_tokens})"
+        )
+        raise ValueError(msg)
+
+
 class WorkspaceService:
     """Orchestrates workspace lifecycle with all adapters.
 
@@ -505,12 +517,7 @@ class WorkspaceService:
         """
         import uuid
 
-        if not self._credential_policy.supplies_credentials and (with_sidecar or inject_tokens):
-            msg = (
-                "A credential-free (NoCredentials) workspace takes no sidecar and no "
-                f"injected tokens (with_sidecar={with_sidecar}, inject_tokens={inject_tokens})"
-            )
-            raise ValueError(msg)
+        _refuse_credentials_under(self._credential_policy, with_sidecar, inject_tokens)
 
         workspace_id = str(uuid.uuid4())
 
