@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/feedback/domain/aggregate_ticket/TicketAggregate.py b/packages/syn-domain/src/syn_domain/contexts/feedback/domain/aggregate_ticket/TicketAggregate.py
+index 0b00e18..9f84330 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/feedback/domain/aggregate_ticket/TicketAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/feedback/domain/aggregate_ticket/TicketAggregate.py
+@@ -156,8 +156,6 @@ class TicketAggregate(AggregateRoot["TicketOpenedEvent"]):
+         self._require_exists()
+         # Membership first: a retry of a report already accepted succeeds even
+         # after the ticket closed, resolved or was released from quarantine.
+-        if command.submission_id in self._members:
+-            return  # already a member: the reporter count must not rise twice
+         if self._closed or self._resolved:
+             msg = "Cannot add a report to a closed or resolved ticket; open a recurrence"
+             raise ValueError(msg)
