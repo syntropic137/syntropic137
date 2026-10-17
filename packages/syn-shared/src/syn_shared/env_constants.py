@@ -112,6 +112,8 @@ def phase_deadline_of(environment: Mapping[str, str] | None) -> datetime | None:
 # ---------------------------------------------------------------------------
 
 ENV_SYN_WORKSPACE_CONTAINER_DIR = "SYN_WORKSPACE_CONTAINER_DIR"
+#: The port uvicorn binds inside the API container (Dockerfile CMD).
+ENV_SYN_API_PORT = "SYN_API_PORT"
 ENV_SYN_WORKSPACE_HOST_DIR = "SYN_WORKSPACE_HOST_DIR"
 ENV_SYN_AGENT_NETWORK = "SYN_AGENT_NETWORK"
 
@@ -213,6 +215,7 @@ __all__ = [
     "ENV_OPENAI_API_KEY",
     "ENV_OTEL_EXPORTER_OTLP_ENDPOINT",
     "ENV_SYN_AGENT_NETWORK",
+    "ENV_SYN_API_PORT",
     "ENV_SYN_EXECUTION_MAX_CONCURRENT",
     "ENV_SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES",
     "ENV_SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP",

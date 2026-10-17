@@ -67,6 +67,7 @@ def agent_completed_event(
         last_agent_message=command.last_agent_message,
         reported_side_effects=command.reported_side_effects,
         reported_review_verdict=command.reported_review_verdict,
+        reported_evidence=list(command.reported_evidence),
         agent_provider=command.agent_provider,
         agent_model=command.agent_model,
     )
@@ -89,4 +90,5 @@ def artifacts_collected_event(
         first_content_preview=command.first_content_preview,
         session_id=command.session_id,
         deliverable_recovered=command.deliverable_recovered,
+        observed_heads=list(command.observed_heads),
     )

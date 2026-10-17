@@ -10429,7 +10429,8 @@
           "check_run_poller",
           "anthropic_api_key",
           "github_app",
-          "disk_space"
+          "disk_space",
+          "workspace_reclaim"
         ],
         "title": "DegradedReason",
         "description": "Reasons the API may enter degraded mode.\n\nStrEnum so values serialize directly to JSON in health responses."
@@ -10650,6 +10651,17 @@
             "type": "string",
             "title": "Detail",
             "description": "One line for an operator: free space, the floors and where they came from."
+          },
+          "reclaim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceReclaimHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace directory reclaimer's last pass (#1983); null when its state could not be read."
           }
         },
         "additionalProperties": false,
@@ -19450,6 +19462,53 @@
         "title": "ResumedFromInfo",
         "description": "The execution a resumed run continues, and the phase it picked up at (#1881)."
       },
+      "RetainedReason": {
+        "type": "string",
+        "enum": [
+          "unowned",
+          "not_terminal",
+          "mounted",
+          "unreadable",
+          "dirty",
+          "unversioned",
+          "stash",
+          "unpushed_unproven",
+          "submodule_store_unproven",
+          "unreachable_objects",
+          "capture_unknown",
+          "identity_changed",
+          "delete_failed"
+        ],
+        "title": "RetainedReason",
+        "description": "Why a stale workspace directory was kept (#1983). Kept is not failed.\n\nEach names the one proof that could not be made. /health counts them, so\nan operator sees what the disk is holding and why, not one opaque number."
+      },
+      "RetainedWorkspaceDirs": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/RetainedReason",
+            "description": "The proof that could not be made."
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Directories kept for this reason."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes",
+            "description": "Bytes those directories hold, as measured."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "count",
+          "size_bytes"
+        ],
+        "title": "RetainedWorkspaceDirs",
+        "description": "Workspace directories the reclaimer kept for one reason, at its last pass (#1983)."
+      },
       "ReviewVerdict": {
         "type": "string",
         "enum": [
@@ -24617,6 +24676,95 @@
         ],
         "title": "WorkflowTrendsResponse",
         "description": "The latest runs of several workflows as trend points, in one response (#1872).\n\nThe Workflows page reads every card on screen from this, so the page costs\none request however many workflows it shows. Each entry is what\n``GET /workflows/{id}/trend`` answers for page 1 at the same page size."
+      },
+      "WorkspaceReclaimHealth": {
+        "properties": {
+          "last_pass_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Pass At",
+            "description": "When its last pass ended, UTC; null before the first."
+          },
+          "paused": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused",
+            "description": "Why the last pass stopped before deleting anything, e.g. 'maintenance'."
+          },
+          "last_pass_skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Pass Skipped",
+            "description": "Why the last pass did not look at all (docker or a read model unreadable)."
+          },
+          "reclaimed_bytes_24h": {
+            "type": "integer",
+            "title": "Reclaimed Bytes 24H",
+            "description": "Bytes this process reclaimed in the last 24 hours (resets on restart)."
+          },
+          "dry_run_reclaimable": {
+            "type": "integer",
+            "title": "Dry Run Reclaimable",
+            "description": "Directories the last pass found reclaimable and left, in dry-run mode."
+          },
+          "deletes_in_progress": {
+            "type": "integer",
+            "title": "Deletes In Progress",
+            "description": "Proven directories whose delete ran out of the last pass's time budget; the next pass, or the first after a restart, finishes them."
+          },
+          "out_of_time": {
+            "type": "boolean",
+            "title": "Out Of Time",
+            "description": "Whether the last pass stopped at SYN_DISK_RECLAIM_PASS_BUDGET_MINUTES."
+          },
+          "retained": {
+            "items": {
+              "$ref": "#/components/schemas/RetainedWorkspaceDirs"
+            },
+            "type": "array",
+            "title": "Retained",
+            "description": "Directories kept at the last pass, per reason."
+          },
+          "delete_failed_passes": {
+            "type": "integer",
+            "title": "Delete Failed Passes",
+            "description": "Consecutive passes with a failed delete; 2 or more degrades /health."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "last_pass_at",
+          "paused",
+          "last_pass_skipped",
+          "reclaimed_bytes_24h",
+          "dry_run_reclaimable",
+          "deletes_in_progress",
+          "out_of_time",
+          "retained",
+          "delete_failed_passes"
+        ],
+        "title": "WorkspaceReclaimHealth",
+        "description": "What the workspace directory reclaimer last did (#1983)."
       },
       "syn_api__routes__costs__CostSummaryResponse": {
         "properties": {

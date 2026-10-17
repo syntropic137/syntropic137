@@ -86,10 +86,15 @@ permissions: {}
 
 cache-mode: none
 
-# Dispatch-only, so a newer run for the same PR always supersedes the older.
+# One group per dispatch (PC-197). A group per PR let a second dispatch on
+# the same PR cancel the first, so a dispatcher waiting on its own run saw it
+# `cancelled` and had no evidence. Keyed on the dispatch nonce, a run can be
+# cancelled only by its own attempt. Without a nonce, `github.run_id` keeps the
+# group unique: with a shared group, GitHub cancels a PENDING run when a newer
+# one queues even with cancel-in-progress false.
 concurrency:
-  group: mutation-evidence-pr-${{ inputs.pr }}
-  cancel-in-progress: true
+  group: mutation-evidence-pr-${{ inputs.pr }}-${{ inputs.dispatch_id || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   resolve:
@@ -213,10 +218,14 @@ jobs:
           TEST_TIMESCALEDB_PORT: "15432"
           TEST_EVENTSTORE_HOST: localhost
           TEST_EVENTSTORE_PORT: "55051"
+        # evidence.json goes in its own directory: the `evidence` artifact
+        # uploads exactly that directory and nothing else from RUNNER_TEMP.
         run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
           if [ "$MUTATION_DOCKER" = true ]; then mode=(--host); else mode=(--image "$SANDBOX_IMAGE"); fi
           python -I scripts/mutation_evidence.py run --root "$GITHUB_WORKSPACE/pr" \
-            --report "$RUNNER_TEMP/mutation-evidence.md" "${mode[@]}"
+            --report "$RUNNER_TEMP/mutation-evidence.md" \
+            --evidence "$RUNNER_TEMP/evidence/evidence.json" "${mode[@]}"
 
       - name: Job summary
         if: always()
@@ -235,6 +244,21 @@ jobs:
         with:
           name: mutation-evidence
           path: ${{ runner.temp }}/mutation-evidence.md
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # The platform's evidence gate downloads this artifact BY NAME and reads
+      # evidence.json (plan docs/plans/20261015_platform-dispatched-evidence.md
+      # §A.1). Absent when the run reached no verdict (a red sync, a bad
+      # input): the gate then reads "no evidence", never a verdict nothing
+      # backs. The `mutation-evidence` artifact above stays for the PR comment
+      # and `just mutation-evidence`.
+      - name: Upload evidence.json
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: evidence
+          path: ${{ runner.temp }}/evidence/evidence.json
           if-no-files-found: ignore
           retention-days: 30
 

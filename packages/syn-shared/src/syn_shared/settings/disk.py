@@ -111,19 +111,42 @@ class DiskSettings(BaseSettings):
         ),
     )
 
-    reclaim_grace_hours: float = Field(
-        default=6.0,
-        gt=0.0,
+    reclaim_settle_minutes: float = Field(
+        default=10.0,
+        ge=0.0,
         description=(
-            "A workspace directory with no container and no running execution is "
-            "reclaimed only once nothing in it has changed for this many hours (PC-130)."
+            "A workspace directory is reclaimed only once its owning execution has "
+            "been terminal (completed, failed or cancelled) for this many minutes, "
+            "measured from the terminal event, never from file times (#1983)."
         ),
     )
 
     reclaim_interval_minutes: float = Field(
         default=30.0,
         gt=0.0,
-        description="How often stale workspace directories are looked for (PC-130).",
+        description=(
+            "How often stale workspace directories are looked for (PC-130). Free "
+            "space falling to low or critical also starts a pass at once (#1983)."
+        ),
+    )
+
+    reclaim_pass_budget_minutes: float = Field(
+        default=5.0,
+        gt=0.0,
+        description=(
+            "Most minutes one reclaim pass may spend. A large tree of small files "
+            "takes tens of seconds to delete; a pass stops at this budget and the "
+            "next one (or the first after a restart) finishes any directory it "
+            "left half deleted, so no pass holds the backlog (#1983)."
+        ),
+    )
+
+    reclaim_dry_run: bool = Field(
+        default=False,
+        description=(
+            "Evaluate every workspace directory and log what would be reclaimed, "
+            "and why the rest is kept, without renaming or deleting anything (#1983)."
+        ),
     )
 
     page_webhook_url: str = Field(

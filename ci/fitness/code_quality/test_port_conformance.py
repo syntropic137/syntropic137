@@ -49,10 +49,33 @@ _UNIMPLEMENTED: dict[str, str] = {
         "item 1.3), which reads the event store. Exercised against a test "
         "double in packages/syn-adapters/tests/test_execution_run_queue_postgres.py."
     ),
+    "ForgeReadsPort": (
+        "feedback's forge reads (ADR-076-feedback-ticketing). The GitHub adapter "
+        "lands with FixResolver in plan PR 12 (#2010); nothing consumes it before then."
+    ),
+    "IntakeLogPort": (
+        "feedback's intake log (ADR-076-feedback-ticketing). The Postgres adapter "
+        "lands with Intake in plan PR 3 (#2010); nothing consumes it before then."
+    ),
+    "RateBucketsPort": (
+        "feedback's Intake buckets (ADR-076-feedback-ticketing). The Redis Lua "
+        "adapter lands with Intake in plan PR 3 (#2010)."
+    ),
+    "ScreeningPort": (
+        "feedback's classifier (ADR-076-feedback-ticketing). HeuristicScreener and "
+        "AnthropicScreener land in plan PR 6 (#2010)."
+    ),
     "GitConfigurationPort": (
         "Declared and never implemented or consumed -- no adapter provides it "
         "and no call site asks for it. Kept here rather than deleted because "
         "removing a published port is a separate decision from #1305."
+    ),
+    "RemoteTreePort": (
+        "The forge adapter lands in PR 6 of "
+        "docs/plans/20261015_platform-dispatched-evidence.md (A.15). Until then "
+        "it is optional and unwired, so patch presence is recorded unknown. "
+        "Exercised against a double in packages/syn-domain/src/syn_domain/"
+        "contexts/orchestration/slices/execute_workflow/test_evidence_transport.py."
     ),
 }
 

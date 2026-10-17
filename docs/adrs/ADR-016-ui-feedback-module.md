@@ -1,7 +1,7 @@
 # ADR-016: UI Feedback Module
 
 ## Status
-**Accepted** - September 2026
+**Accepted** - September 2026. **Superseded in part by [ADR-076](ADR-076-feedback-ticketing.md)** (October 2026): feedback storage, status lifecycle and CRUD routes move to the `feedback` bounded context. The capture UI described here stands.
 
 ## Context
 

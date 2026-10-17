@@ -42,6 +42,17 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
     EvalMembership,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_gate import (
+    EvidenceGateRecord,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_handlers import (
+    EvidenceGateHandlers,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
+    EvidenceRecord,
+    read_declared_evidence,
+    read_observed_heads,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.execution_tags import (
     ExecutionTags,
 )
@@ -107,6 +118,10 @@ from syn_shared.control import ControlSignalType
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.aggregate_edits import (
         AggregateEdit,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        DeclaredEvidence,
+        ObservedHead,
     )
     from syn_domain.contexts.orchestration.domain.commands.AddExecutionTagsCommand import (
         AddExecutionTagsCommand,
@@ -196,7 +211,9 @@ logger = logging.getLogger(__name__)
 
 
 @aggregate("WorkflowExecution")
-class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"]):
+class WorkflowExecutionAggregate(
+    AggregateRoot["WorkflowExecutionStartedEvent"], EvidenceGateHandlers
+):
     """Aggregate for tracking workflow execution lifecycle."""
 
     _aggregate_type: str
@@ -272,6 +289,12 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._reported_side_effects: dict[str, SideEffectStatus | None] = {}
         #: Review verdicts, which choose the next phase (PC-63).
         self._reviews = ReviewRecord()
+        #: What each phase declared it needs proven and what the forge showed
+        #: at its collection (plan §A.2). Recorded only: nothing decides on it.
+        self._evidence = EvidenceRecord()
+        #: Evidence gates (plan §A.3-§A.5): each holds one transition until
+        #: every planned step has settled.
+        self._gates = EvidenceGateRecord()
         #: Phases that completed, and what each one's collection stored. The
         #: inputs to a resume's inherited prefix (ADR-014 s7), which is decided
         #: here from the stream and never from the artifact projection: a
@@ -279,6 +302,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         #: and a parent may be resumed only once.
         self._completed_phase_ids: set[str] = set()
         self._phase_artifact_ids: dict[str, list[str]] = {}
+        #: Who holds each artifact its phase's owner does not: the evidence
+        #: reports a resume filed for a phase it inherited (plan §A.7).
+        self._artifact_owners: dict[str, str] = {}
         #: Whether this execution has admitted a resume. THIS is the
         #: "resumed at most once" rule, deliberately separate from the child's
         #: id below, which under ADR-023 can replay as None and would make the
@@ -406,6 +432,19 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     def status(self) -> ExecutionStatus:
         """Get execution status."""
         return self._status
+
+    def declared_evidence_for(self, phase_id: str) -> tuple[DeclaredEvidence, ...]:
+        """What this phase's latest agent run asked the platform to prove."""
+        return self._evidence.declared(phase_id)
+
+    def observed_heads_for(self, phase_id: str) -> tuple[ObservedHead, ...]:
+        """What the forge showed while this phase's output was collected."""
+        return self._evidence.observed(phase_id)
+
+    @property
+    def pushed_commits(self) -> tuple[PushedCommit, ...]:
+        """Every push this execution's own phases made, as `PhaseCommitPushed` recorded them."""
+        return tuple(self._pushed)
 
     @property
     def review_verdict(self) -> ReviewVerdict | None:
@@ -687,7 +726,10 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._phase_order_map.get(command.phase_id),
             self._reviews.of(command.phase_id),
         )
-        if decided is not None:
+        held = self._hold_for_evidence(command, decided)
+        if held is not None:
+            self._apply(held)
+        elif decided is not None:
             self._apply(
                 decided.event(
                     workflow_id=self._workflow_id or "",
@@ -799,6 +841,8 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             command=command,
             repair_point=self._reviews.repair_point(self._phase_definitions),
             skipped_phase_ids=self._reviews.skipped,
+            open_gate=None if (gate := self._gates.open_gate()) is None else gate.inherited(),
+            artifact_owners=self._artifact_owners,
         )
         if isinstance(decision, ResumeRefused):
             raise ValueError(decision.reason)
@@ -833,7 +877,10 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         for phase in origin.inherited_phases:
             self._completed_phase_ids.add(phase.phase_id)
             self._phase_artifact_ids[phase.phase_id] = list(phase.artifact_ids)
+            self._artifact_owners.update(phase.artifact_owners)
         self._completed_phases = len(origin.inherited_phases)
+        if origin.inherited_evidence_gate is not None:
+            self._gates.inherit(origin.inherited_evidence_gate)
 
     @event_sourcing_handler("WorkflowCompleted")
     def on_execution_completed(self, event: WorkflowCompletedEvent) -> None:
@@ -932,6 +979,9 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._reviews.report(
                 reported_for, ReviewVerdict.from_stored(evt(event, "reported_review_verdict"))
             )
+            self._evidence.report(
+                reported_for, read_declared_evidence(evt(event, "reported_evidence"))
+            )
         said = evt(event, "last_agent_message")
         if not said:
             return
@@ -960,6 +1010,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         # output is safely stored.
         self._finished_agent_runs.pop(phase_id, None)
         self._reviews.collect(phase_id)
+        self._evidence.observe(phase_id, read_observed_heads(evt(event, "observed_heads")))
 
     @event_sourcing_handler("NextPhaseReady")
     def on_next_phase_ready(self, event: NextPhaseReadyEvent) -> None:

@@ -2,6 +2,7 @@ import { DocsLayout } from 'fumadocs-ui/layouts/notebook';
 import { baseOptions } from '@/lib/layout.shared';
 import { source } from '@/lib/source';
 import { HeadingCopyLinks } from '@/components/HeadingCopyLinks';
+import { AgentDocsBanner } from '@/components/AgentDocsBanner';
 import type { ReactNode } from 'react';
 
 export default function Layout({ children }: { children: ReactNode }) {
@@ -10,6 +11,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       tree={source.pageTree}
       tabMode="navbar"
       nav={{ mode: 'top' }}
+      sidebar={{ banner: <AgentDocsBanner /> }}
       {...baseOptions()}
     >
       <HeadingCopyLinks />

@@ -127,6 +127,11 @@ DISPATCH_ONLY: Final[dict[str, str]] = {
         "GitHub runner because local Docker verifier runs are banned and agent "
         "workspaces have no Docker. Reach it with `just mutation-evidence`"
     ),
+    "integration-evidence.yml": (
+        "workflow_dispatch only; the platform's evidence gate dispatches it to run "
+        "the full integration suite on a PR head (ci.yml skips integration on PRs "
+        "into main). The same script runs locally with `just test-integration-ci`"
+    ),
 }
 
 
