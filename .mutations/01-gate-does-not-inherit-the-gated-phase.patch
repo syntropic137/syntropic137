@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_rules.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_rules.py
+index da7dc7769..1396eecb5 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_rules.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_rules.py
+@@ -289,7 +289,7 @@ def decide_resume(
+         ids = [p.phase_id for p in phase_definitions]
+         completed_phase_ids = set(ids[: ids.index(repair_point)]) & set(completed_phase_ids)
+     if open_gate is not None:
+-        completed_phase_ids = {*completed_phase_ids, open_gate.after_phase_id}
++        pass
+     inherited, resume_phase_id = completed_prefix(
+         phase_definitions,
+         completed_phase_ids,

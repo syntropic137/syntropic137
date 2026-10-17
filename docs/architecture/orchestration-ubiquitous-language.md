@@ -1441,6 +1441,25 @@ head SHA and reuse pointer, the Patch Removal provenance if there was one, and
 `complete: true`. A step with no report still appears, so a missing report
 cannot read as "all passed". `finalize_pr` trusts S -> S' only from here.
 
+## Inherited Evidence Gate
+
+An Evidence Gate a Resume takes over from the Execution it came from, because
+that Execution stopped while the gate was still holding its transition: an
+`EvidenceRequested` with no `NextPhaseReady` after it (ADR-014 section 10,
+point 4). It travels on `ExecutionResumed.inherited_evidence_gate` and on to
+the Resume's own start in `resumed_from`, carrying the plan, the steps already
+Settled, the Patch Removal if one was made, and the parent's last Evidence
+Attempt at each step it never settled.
+
+The Phase the gate followed is an Inherited Phase even if the run stopped
+before recording it complete: its output was collected before the gate was
+requested. The Resume Phase is the Phase the gate held, which never started,
+so no acknowledgement is asked. The Resume's first to-do is the gate's first
+unsettled step, and its first attempt at that step carries the parent's nonce,
+so the parent's run is adopted rather than posted again. The deadline is new:
+a person-started Resume is a new decision. Code:
+`domain/aggregate_execution/inherited_evidence.py`.
+
 ## Words we do not use
 
 - **Tier** (of executors). We say Pool Priority: an Executor Pool has a

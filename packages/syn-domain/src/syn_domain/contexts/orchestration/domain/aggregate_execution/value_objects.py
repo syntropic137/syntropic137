@@ -1202,6 +1202,18 @@ class ResumeOrigin(BaseModel):
     #: first unsettled step before the held phase.
     inherited_evidence_gate: InheritedEvidenceGate | None = None
 
+    @model_serializer(mode="wrap")
+    def _omit_absent_gate(self, handler: SerializerFunctionWrapHandler) -> object:
+        """Written only when there is one: a resume outside a gate reads as before.
+
+        Every release before PR 5c forbids extra keys here, so an absent gate
+        written as null would make a rollback unable to replay any resume.
+        """
+        payload = handler(self)
+        if isinstance(payload, dict) and payload.get("inherited_evidence_gate") is None:
+            payload.pop("inherited_evidence_gate", None)
+        return payload
+
     def owner_of(self, phase: InheritedPhase) -> str:
         """The execution holding ``phase``'s artifacts.
 

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+index c3610e316..39014fc1e 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/handlers/EvidenceStepHandler.py
+@@ -172,7 +172,7 @@ class _StepRun:
+     async def _run(self) -> None:
+         index = self.step.index
+         attempt = self.gate.attempts.get(index)
+-        if attempt is None and index in self.gate.inherited_attempts:
++        if False:
+             attempt = await self._resume_parent_attempt(self.gate.inherited_attempts[index])
+         if attempt is None:
+             attempt = await self._attempt()

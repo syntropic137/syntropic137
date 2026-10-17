@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
+index 6d36ca20c..3080bd7f0 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
+@@ -875,7 +875,7 @@ class WorkflowExecutionAggregate(
+             self._phase_artifact_ids[phase.phase_id] = list(phase.artifact_ids)
+         self._completed_phases = len(origin.inherited_phases)
+         if origin.inherited_evidence_gate is not None:
+-            self._gates.inherit(origin.inherited_evidence_gate)
++            pass
+ 
+     @event_sourcing_handler("WorkflowCompleted")
+     def on_execution_completed(self, event: WorkflowCompletedEvent) -> None:

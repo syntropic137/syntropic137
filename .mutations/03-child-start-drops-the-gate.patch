@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_start.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_start.py
+index 4b783a458..10f420a3c 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_start.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/resume_start.py
+@@ -148,7 +148,6 @@ def resume_start_command(
+             parent_execution_id=parent_execution_id,
+             inherited_phases=inherited,
+             resume_phase_id=resume_phase_id,
+-            inherited_evidence_gate=admitted.inherited_evidence_gate,
+         ),
+         continuation_candidates=continuation_candidates(left, resume_phase_id),
+         inherited_skipped_phase_ids=list(admitted.inherited_skipped_phase_ids),

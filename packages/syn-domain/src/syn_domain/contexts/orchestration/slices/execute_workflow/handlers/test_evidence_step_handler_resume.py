@@ -59,9 +59,9 @@ RESUMED_AT = NOW + timedelta(hours=6)
 TIMINGS = EvidenceTimings()
 
 
-def _integration_report() -> RunScript:
+def _integration_report(*, findable: bool = True) -> RunScript:
     report = _report(head=S).model_copy(update={"kind": EvidenceKind.INTEGRATION})
-    return RunScript(Accepted(PARENT_RUN), found=PARENT_RUN, report=report)
+    return RunScript(Accepted(PARENT_RUN), found=PARENT_RUN if findable else None, report=report)
 
 
 async def _forge_with_the_parents_run(script: RunScript) -> InMemoryEvidenceRunner:
@@ -122,7 +122,8 @@ async def _run_child_step(
 
 @pytest.mark.asyncio
 async def test_the_parents_adopted_run_settles_the_step_with_no_dispatch() -> None:
-    runner = await _forge_with_the_parents_run(_integration_report())
+    # Not findable by its nonce: only the run id the parent recorded can reach it.
+    runner = await _forge_with_the_parents_run(_integration_report(findable=False))
     child, gate_id = await _run_child_step(runner, adopted=True)
 
     assert runner.dispatched == []
