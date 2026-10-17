@@ -5,6 +5,30 @@ runs after E2's held cases are running. The Codex quota is no longer the
 blocker (weekly 99% on 2026-10-17, after the owner's plan upgrade). Nothing
 dispatched.
 
+## Amendment 1 (2026-10-17T21:02:48Z): treatment arm is gpt-5.6-luna
+
+Recorded before any gpt-5.6-luna result existed. Approved by the orchestrator.
+
+- gpt-6-luna could not run on the VPS. Both the launch `exec-e74804add4aa`
+  and its one preregistered re-dispatch `exec-d19e857406a3` failed in ~50 s
+  with `codex reported: workspace routing discovery unauthorized (401)`,
+  classified as a platform failure, at $0. The Sol arm's first run
+  (`exec-9c8b76116c6b`) completed on the same case and image 13 min earlier.
+- The orchestrator found that gpt-6-luna does answer through the owner's local
+  Codex CLI. So the 401 is specific to the VPS Codex credential (hypothesis;
+  raised with the owner). Both launches are excluded as platform failures.
+  They stay in `launches.jsonl`, and `score` ignores failed runs.
+- The treatment arm is now `eval-verify-pinned-codex-gpt-5-6-luna-v1` (codex,
+  `gpt-5.6-luna`, $0.20/$1.20 per MTok, about 1/10 of Sol). Checked on
+  2026-10-17: the server definition matches the repo, `phases/verify.md` is
+  byte-identical to the control's, and the sandbox is `workspace-write`. Its
+  first launch doubles as the availability probe and the arm's abort check.
+  If it fails on the platform, E1 stops.
+- Everything else is unchanged: design, cases, decision rule, stop rule.
+  Expected Luna-arm cost is now ~$3-6.
+- If the VPS auth is fixed, gpt-6-luna may run later as a third arm against
+  the same Sol runs. That would be a separate, later amendment.
+
 ## Question
 
 Can gpt-6-luna replace gpt-6.1-sol in verify without missing more defects?
