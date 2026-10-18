@@ -417,6 +417,16 @@ _MUTATIONS: dict[str, tuple[str, str, str]] = {
         '\nconst plantedF = <T /* note */,>(x: T) => x; const plantedKey = "agentId"\n',
         "vendor-parsing",
     ),
+    "vendor-parsing-client-after-label-block-regex": (
+        _CLIENT_FILE,
+        '\nplantedLabel: {} /[//]/.test(plantedX); const plantedKey = "agentId"\n',
+        "vendor-parsing",
+    ),
+    "vendor-parsing-client-after-case-block-regex": (
+        _CLIENT_FILE,
+        '\nswitch (plantedX) { case 1: {} /[//]/.test(plantedX); const plantedKey = "agentId" }\n',
+        "vendor-parsing",
+    ),
     "harness-import-api": (
         _INVENTORY_ROUTE,
         "\n\nfrom agentic_isolation.harnesses.claude.evidence import ClaudeNativeEvidenceReader\n",
@@ -481,6 +491,18 @@ _COMMENTS: dict[str, tuple[str, str]] = {
     "after-tsx-generic-comment": (
         _TSX_CLIENT_FILE,
         "\nconst plantedF = <T /* note */,>(x: T) => x; // `sessionId`\n",
+    ),
+    "after-function-expression-division": (
+        _CLIENT_FILE,
+        "\nconst plantedX = function () {} / 2; // `sessionId`\n",
+    ),
+    "after-class-expression-division": (
+        _CLIENT_FILE,
+        "\nconst plantedX = class {} / 2; // `sessionId`\n",
+    ),
+    "after-tsx-const-generic-arrow": (
+        _TSX_CLIENT_FILE,
+        "\nconst plantedF = <const T,>(x: T) => x; // `sessionId`\n",
     ),
 }
 

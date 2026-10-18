@@ -186,8 +186,18 @@ def test_comments_in_jsx_expressions_and_after_elements_are_blanked() -> None:
         "const f = <T extends\nunknown>(x: T) => x // `sessionId`",
         "const f = <T = unknown>(x: T) => x // `sessionId`",
         "const f = <T=unknown>(x: T) => x // `sessionId`",
+        "const f = <const T,>(x: T) => x // `sessionId`",
+        "const f = <const T extends U>(x: T) => x // `sessionId`",
     ],
-    ids=["trailing-comma", "extends", "extends-then-newline", "default", "default-unspaced"],
+    ids=[
+        "trailing-comma",
+        "extends",
+        "extends-then-newline",
+        "default",
+        "default-unspaced",
+        "const-trailing-comma",
+        "const-extends",
+    ],
 )
 def test_a_generic_in_tsx_is_not_jsx(source: str) -> None:
     assert blanked(source, jsx=True) == spaced(source, "// `sessionId`")
@@ -204,6 +214,65 @@ def test_a_regex_after_a_block_is_code(prefix: str, pattern: str) -> None:
     # Read as division, the regex's ``//`` or ``/*`` would blank the code after it.
     source = f"{prefix}{pattern}.test(x); const k = 'agentId'\nconst j = 'sessionId'"
     assert blanked(source) == source
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("pattern", ["/[//]/", "/[/*]/"])
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "label: {} ",
+        "outer: for (;;) {} ",
+        "switch (x) { case 1: {} ",
+        "switch (x) { case a ? 1 : 2: {} ",
+        "switch (x) { default: {} ",
+        "export default function () {}\n",
+        "export default class {}\n",
+    ],
+    ids=[
+        "label",
+        "labelled-loop",
+        "case",
+        "case-with-ternary",
+        "default",
+        "export-default-function",
+        "export-default-class",
+    ],
+)
+def test_a_regex_after_a_statement_block_is_code(prefix: str, pattern: str) -> None:
+    # A ``{`` after a label or case colon is a block, not an object (#2016 review).
+    source = f"{prefix}{pattern}.test(x); const k = 'agentId'\nconst j = 'sessionId'"
+    assert blanked(source) == source
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const x = function() {} / 2; // `sessionId`",
+        "const x = async function() {} / 2; // `sessionId`",
+        "const x = class {} / 2; // `sessionId`",
+        "const x = f(class extends B {}) / 2; // `sessionId`",
+        "const x = function g(a = function() {}) {} / 2; // `sessionId`",
+        "const r = a ? {} : {} / 2; // `sessionId`",
+        "const r = {default: {}} / 2; // `sessionId`",
+        "export default ok ? {} : {} / 2; // `sessionId`",
+        "function f(): void;\nconst r = {} / 2; // `sessionId`",
+    ],
+    ids=[
+        "function-expression",
+        "async-function-expression",
+        "class-expression",
+        "class-expression-argument",
+        "nested-function-expressions",
+        "ternary-object",
+        "default-property-object",
+        "ternary-after-default",
+        "object-after-overload",
+    ],
+)
+def test_division_after_an_expression_body_does_not_start_a_regex(source: str) -> None:
+    assert blanked(source) == spaced(source, "// `sessionId`")
 
 
 @pytest.mark.unit
@@ -283,3 +352,9 @@ def test_angle_brackets_in_ts_are_not_jsx() -> None:
     # In a ``.ts`` file ``<a>`` is a type assertion, so ``//`` after it is a comment.
     source = "const n = <a>https://x // `sessionId`"
     assert blanked(source) == spaced(source, "//x // `sessionId`")
+
+
+@pytest.mark.unit
+def test_a_tag_named_const_is_jsx() -> None:
+    source = "const n = <const>https://x</const>; const k = 'agentId'"
+    assert blanked(source, jsx=True) == source

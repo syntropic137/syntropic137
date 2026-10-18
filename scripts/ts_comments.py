@@ -16,12 +16,14 @@ both comment forms. Whether a ``/`` opens a regex is decided by the previous
 token: an operand (identifier, literal, ``)``, ``]``, the ``}`` of an object,
 postfix ``++``, ``--`` or non-null ``!``) means division, except the ``)``
 closing an ``if``/``for``/``while``/``with`` condition, the ``}`` closing a
-block or body, and a keyword such as ``return``. A word after ``.`` or ``?.`` is
+block or a declaration's body, and a keyword such as ``return``. A ``{`` after
+a label or ``case`` colon opens a block; the body of a ``function`` or
+``class`` expression ends an operand (``function() {} / 2`` divides). A word after ``.`` or ``?.`` is
 a property name, never a keyword: ``obj.if(x) / 2`` divides. With ``jsx=True``
 (a ``.tsx`` file) a ``<`` where an operand is expected opens a JSX element,
 whose text is neither code nor comment: ``https://x`` or ``Don't`` there is
-prose, unless the name is followed (across whitespace and comments) by what
-makes it a generic parameter list.
+prose, unless the name, after an optional ``const`` modifier, is followed
+(across whitespace and comments) by what makes it a generic parameter list.
 
 Only comment characters are ever replaced, but a misread ``/`` can still blank
 code: a regex read as division leaves its ``//`` or ``/*`` to be taken as a
@@ -32,6 +34,7 @@ tokenizer is not a parser, and syntax it does not know can still fool it.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Final
 
 #: Keywords after which a ``/`` starts a regex rather than dividing.
@@ -68,6 +71,35 @@ _BLOCK_AFTER_KEYWORDS: Final = frozenset({"do", "else"})
 #: ``<T = U>``. ``<T extends U>`` is matched separately, since ``extends`` must
 #: be followed by trivia to be a word on its own.
 _GENERIC_AFTER_NAME: Final = re.compile(r"[,=]")
+
+#: Tokens after which, when an operand is expected, a statement starts. A
+#: ``)`` or ``}`` expects an operand only when it closes a condition or a
+#: block, and ``{`` only when it opens a block (checked separately).
+_STATEMENT_AFTER: Final = frozenset({"", ";", ")", "}", "else", "do"})
+
+#: Words that can only precede a declaration, so a ``function`` or ``class``
+#: after one is declared, not an expression: ``export default function () {}``.
+_DECLARATION_MODIFIERS: Final = frozenset({"export", "default", "declare", "abstract"})
+
+#: The ``previous`` token recorded for a label or ``case`` colon: like ``;``,
+#: it ends a statement head, so a ``{`` after it opens a block.
+_STATEMENT_COLON: Final = ";"
+
+
+@dataclass
+class _Frame:
+    """What one open bracket (or the top level) holds of its colons' meaning."""
+
+    #: ``(``, ``[``, ``{`` for a block or ``o`` for an object; ``""`` at top level.
+    kind: str
+    #: Ternary ``?`` still waiting for their ``:``.
+    ternaries: int = 0
+    #: ``case`` or ``default`` still waiting for their ``:``.
+    cases: int = 0
+
+    @property
+    def holds_statements(self) -> bool:
+        return self.kind in {"", "{"}
 
 
 def _is_word_char(char: str) -> bool:
@@ -175,6 +207,13 @@ class _Scanner:
         source = self.source
         # Per open ``{``: whether it opens a block, whose ``}`` ends no operand.
         blocks: list[bool] = []
+        # Per open bracket, innermost last: how its colons read.
+        frames = [_Frame("")]
+        # Per ``function``/``class`` whose body is still ahead: the bracket
+        # depth its ``{`` will open at, and whether the body ends an operand.
+        bodies: list[tuple[int, bool]] = []
+        # Whether the previous token was a word that can be a statement label.
+        label = False
         # Per open ``(``: whether it holds an if/for/while/with condition.
         conditions: list[bool] = []
         operand_expected = True
@@ -191,12 +230,30 @@ class _Scanner:
             previous_word, word = word, ""
             previous_token = previous
             member, after_dot = after_dot, False
+            labelled, label = label, False
+            statement_starts = previous_token in _DECLARATION_MODIFIERS or (
+                operand_expected
+                and (
+                    previous_token in _STATEMENT_AFTER
+                    or (previous_token == "{" and frames[-1].kind == "{")
+                )
+            )
             if _is_word_char(char):
                 end = self.i
                 while end < len(source) and _is_word_char(source[end]):
                     end += 1
                 # A property is an operand whatever it is called: ``obj.return``.
                 word = "" if member else source[self.i : end]
+                if word == "async" and source.startswith("function", _skip_trivia(source, end)):
+                    # ``async function`` is read as ``function`` in the same position.
+                    self.i = end
+                    continue
+                if word in {"function", "class"}:
+                    # A declaration's body is a block; an expression's ends an operand.
+                    bodies.append((len(frames), not statement_starts))
+                elif word in {"case", "default"}:
+                    frames[-1].cases += 1
+                label = statement_starts and frames[-1].holds_statements
                 previous = source[self.i : end]
                 operand_expected = word in _REGEX_AFTER_KEYWORDS
                 self.i = end
@@ -240,23 +297,56 @@ class _Scanner:
             self.i += 1
             if char == "(":
                 conditions.append(previous_word in _CONDITION_KEYWORDS)
+                frames.append(_Frame("("))
                 operand_expected = True
             elif char == ")":
                 operand_expected = conditions.pop() if conditions else False
+                if len(frames) > 1:
+                    frames.pop()
+            elif char == "[":
+                frames.append(_Frame("["))
+                operand_expected = True
             elif char == "]":
                 operand_expected = False
+                if len(frames) > 1:
+                    frames.pop()
             elif char == ".":
                 after_dot = True
                 operand_expected = True
             elif char == "{":
-                blocks.append(_opens_block(previous_token))
+                if bodies and bodies[-1][0] == len(frames):
+                    block = not bodies.pop()[1]
+                else:
+                    block = _opens_block(previous_token)
+                blocks.append(block)
+                frames.append(_Frame("{" if block else "o"))
                 operand_expected = True
             elif char == "}":
                 if nested and not blocks:
                     return
                 # After a block a statement starts, so a ``/`` opens a regex.
                 operand_expected = blocks.pop() if blocks else False
+                if len(frames) > 1:
+                    frames.pop()
+            elif char == "?":
+                if source.startswith("?", self.i):
+                    self.i += 1
+                elif not source.startswith(".", self.i):
+                    frames[-1].ternaries += 1
+                operand_expected = True
+            elif char == ":":
+                frame = frames[-1]
+                if frame.ternaries:
+                    frame.ternaries -= 1
+                elif frame.holds_statements and (frame.cases or labelled):
+                    frame.cases -= 0 if labelled else 1
+                    previous = _STATEMENT_COLON
+                operand_expected = True
             else:
+                if char == ";":
+                    # A body-less overload ``function f(): void;`` has no body to wait for.
+                    while bodies and bodies[-1][0] == len(frames):
+                        bodies.pop()
                 operand_expected = True
 
     def _template(self) -> None:
@@ -288,6 +378,12 @@ class _Scanner:
         while end < len(source) and (_is_word_char(source[end]) or source[end] in ".-:"):
             end += 1
         after = _skip_trivia(source, end)
+        if source[self.i + 1 : end] == "const" and _is_word_char(source[after : after + 1] or " "):
+            # ``<const T,>``: the modifier is not the name; judge what follows it.
+            end = after
+            while end < len(source) and _is_word_char(source[end]):
+                end += 1
+            after = _skip_trivia(source, end)
         if _GENERIC_AFTER_NAME.match(source, after):
             return False
         if not source.startswith("extends", after):
