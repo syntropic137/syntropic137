@@ -94,6 +94,24 @@ The PC-212 advice ("re-run only the failing gate") is deliberately left out of
 every brief, so the arms stay comparable. It is a candidate for a later
 one-variable prompt A/B.
 
+## Amendment 5 (2026-10-18, run 06 in flight): two more controls and a stale-issue pre-check
+
+Run 05 (control, #1433, exec-785b58e5cb77) was also a correct refusal: the
+premise is false on main ddfa33d3f. The orchestrator re-scoped #1433. That
+leaves the control arm with 0 countable runs out of 3. The cause is stale
+backlog issues; implement is Opus in both arms, so the fix model is not
+involved.
+
+- Two controls are added after run 13, with traps sections byte-identical to
+  the other briefs:
+  - 14, #1961 (`debounce_seconds` never applied). Pre-checked on main.
+  - 15, #1989 (order-dependent unit failures). Not pre-checked; a refusal
+    there is a task-validity outcome.
+- Pre-check, applied to both arms: before a brief launches, a read-only check
+  of origin/main (about a minute) looks for the defect the issue names. If
+  the defect is gone, the brief is skipped and reported, not run. A skipped
+  brief is neither a run nor a pair.
+
 ## Question
 
 With Opus 5.5 implementing and gpt-6.1-sol verifying, does moving fix and
