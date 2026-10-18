@@ -368,8 +368,7 @@ def test_named_merge_subjects_count_only_when_confirmed(
     named_merges_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     merges = {
-        int(number): _sha(named_merges_repo, f":/^Merge #{number}:")
-        for number in (11, 12, 28)
+        int(number): _sha(named_merges_repo, f":/^Merge #{number}:") for number in (11, 12, 28)
     }
     # #28 is the subtree's PR, and is deliberately not confirmed.
     monkeypatch.setattr(
@@ -414,13 +413,24 @@ def test_shared_root_fork_pr_number_cannot_replace_upstream_pr(tmp_path: Path) -
     _git(upstream, "add", ".")
     _git(upstream, "commit", "-q", "-m", "root", when=T0)
     subprocess.run(["git", "clone", "-q", str(upstream), str(fork)], check=True)
-    _merge_pr(fork, 28, "fork-feature", "feat: fork-only", T0 + 2 * DAY, subject="Merge #28: fork-only")
+    _merge_pr(
+        fork, 28, "fork-feature", "feat: fork-only", T0 + 2 * DAY, subject="Merge #28: fork-only"
+    )
     _merge_pr(upstream, 28, "up-feature", "fix: real upstream PR", T0 + DAY)
     _git(upstream, "fetch", "-q", str(fork), "main:fork-import")
     _git(
-        upstream, "merge", "-q", "--no-ff", "-X", "ours", "fork-import",
-        "-m", "Merge pull request #99 from contributor/fork-import",
-        "-m", "feat: import fork work", when=T0 + 3 * DAY,
+        upstream,
+        "merge",
+        "-q",
+        "--no-ff",
+        "-X",
+        "ours",
+        "fork-import",
+        "-m",
+        "Merge pull request #99 from contributor/fork-import",
+        "-m",
+        "feat: import fork work",
+        when=T0 + 3 * DAY,
     )
     _git(upstream, "tag", "v0.1.0")
     text = build_changelog(upstream, repo_url=URL, first_version=(0, 0, 0))
@@ -441,8 +451,16 @@ def test_custom_subject_release_merge_is_not_listed(tmp_path: Path) -> None:
     _merge_pr(repo, 11, "feature", "feat: shipped", T0 + DAY, subject="Merge #11: shipped")
     _git(repo, "checkout", "-q", "release")
     _git(
-        repo, "merge", "-q", "--no-ff", "main",
-        "-m", "Merge #12: Release v0.1.0", "-m", "Release v0.1.0", when=T0 + 2 * DAY,
+        repo,
+        "merge",
+        "-q",
+        "--no-ff",
+        "main",
+        "-m",
+        "Merge #12: Release v0.1.0",
+        "-m",
+        "Release v0.1.0",
+        when=T0 + 2 * DAY,
     )
     _git(repo, "tag", "v0.1.0")
     text = build_changelog(repo, repo_url=URL, first_version=(0, 0, 0))
