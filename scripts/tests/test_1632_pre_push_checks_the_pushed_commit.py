@@ -249,3 +249,78 @@ def test_a_delete_from_an_unborn_branch_runs_no_preflight(repo: Repo) -> None:
     assert result.returncode == 0, result.stderr
     assert repo.checked() == []
     assert "doomed" not in repo.git("ls-remote", "origin")
+
+
+# Each flag with its `git ls-files -v` tag on payload.txt.
+INDEX_FLAGS = {"--assume-unchanged": "h", "--skip-worktree": "S"}
+
+
+@pytest.mark.parametrize("flag", INDEX_FLAGS)
+def test_an_index_flag_hiding_an_edit_forces_an_isolated_checkout(repo: Repo, flag: str) -> None:
+    """git status reports nothing for a flagged file, however it was edited."""
+    head = repo.commit("bad")
+    repo.fail_on.touch()
+    repo.git("update-index", flag, "payload.txt")
+    (repo.dir / "payload.txt").write_text("fixed but not committed")
+    repo.arm_hook()
+
+    result = repo.push("main")
+
+    assert result.returncode != 0
+    [(sha, where, _)] = repo.checked()
+    assert sha == head
+    assert where != str(repo.dir)
+    assert repo.git("ls-remote", "origin") == ""
+    assert repo.git("ls-files", "-v", "payload.txt") == f"{INDEX_FLAGS[flag]} payload.txt", "flag cleared"
+
+
+@pytest.mark.parametrize("flag", INDEX_FLAGS)
+def test_an_index_flag_inside_a_submodule_forces_an_isolated_checkout(
+    repo: Repo, tmp_path: Path, flag: str
+) -> None:
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "t"),
+    ):
+        subprocess.run(["git", *args], cwd=sub, check=True)
+    (sub / "payload.txt").write_text("bad")
+    subprocess.run(["git", "add", "."], cwd=sub, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "sub"], cwd=sub, check=True)
+    repo.commit("good")
+    repo.git("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "lib/example")
+    repo.git("commit", "-q", "-m", "pin a bad submodule")
+    checked_out = repo.dir / "lib/example"
+    subprocess.run(["git", "update-index", flag, "payload.txt"], cwd=checked_out, check=True)
+    (checked_out / "payload.txt").write_text("fixed but not committed")
+    global_config = tmp_path / "gitconfig"
+    global_config.write_text('[protocol "file"]\n\tallow = always\n')
+    repo.env["GIT_CONFIG_GLOBAL"] = str(global_config)
+    (tmp_path / "bin/just").write_text(JUST_STUB + "! grep -q bad lib/example/payload.txt\n")
+    repo.arm_hook()
+
+    result = repo.push("main")
+
+    assert result.returncode != 0
+    [(_, where, _)] = repo.checked()
+    assert where != str(repo.dir)
+    assert repo.git("ls-remote", "origin") == ""
+
+
+def test_a_failing_git_status_is_not_taken_as_clean(repo: Repo) -> None:
+    head = repo.commit("bad")
+    repo.fail_on.touch()
+    (repo.dir / "payload.txt").write_text("fixed but not committed")
+    # A truncated index makes `git status` exit 128 with empty stdout; the
+    # push itself never reads the index.
+    (repo.dir / ".git/index").write_bytes(b"broken index")
+    repo.arm_hook()
+
+    result = repo.push("main")
+
+    assert result.returncode != 0
+    assert all(where != str(repo.dir) for _, where, _ in repo.checked())
+    assert head not in repo.git("ls-remote", "origin")
+

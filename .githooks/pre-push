@@ -43,9 +43,16 @@ head_sha=$(git rev-parse --verify --quiet "HEAD^{commit}" || true)
 
 # Dirty means "preflight in place would see something the commit lacks". Ask
 # for everything explicitly: status.showUntrackedFiles=no and
-# submodule.<name>.ignore=all would otherwise hide exactly that.
+# submodule.<name>.ignore=all would otherwise hide exactly that. status cannot
+# see edits to files flagged assume-unchanged or skip-worktree (lowercase or
+# `S` tags in `ls-files -v`), here or in a submodule, so any such flag counts
+# as dirty. A git command that fails proves nothing, so it counts as dirty too.
 checkout_is_clean() {
-    [ -z "$(git status --porcelain --untracked-files=all --ignore-submodules=none)" ]
+    local status flags
+    status=$(git status --porcelain --untracked-files=all --ignore-submodules=none) || return 1
+    [ -z "$status" ] || return 1
+    flags=$(git ls-files -v && git submodule foreach --recursive --quiet 'git ls-files -v') || return 1
+    ! grep -q '^[a-zS]' <<<"$flags"
 }
 
 worktrees=()
