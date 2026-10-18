@@ -82,6 +82,18 @@ one-line lint fix. No reverify ran.
   compared on gate hangs separately from the model's own work. The gate time
   itself is logged as a platform papercut.
 
+## Amendment 4 (2026-10-18, before run 04's result): replacement control
+
+Run 03 (control, #1563, exec-6bd2b6ff9fbf) ended as a correct refusal: the
+issue was already fixed on main (#1611, #1709), and the orchestrator closed
+it. Its outcome is "fix phase never ran". The orchestrator added a replacement
+control, run 13, which runs after run 12: #2030, the api_shape.py bug that E1's
+Sol arm found. Its brief's traps section is identical to the other 12 briefs.
+
+The PC-212 advice ("re-run only the failing gate") is deliberately left out of
+every brief, so the arms stay comparable. It is a candidate for a later
+one-variable prompt A/B.
+
 ## Question
 
 With Opus 5.5 implementing and gpt-6.1-sol verifying, does moving fix and
