@@ -2,12 +2,71 @@
 # Pre-push hook — catches the most common CI failures locally before they waste a round-trip.
 # Runs `just preflight` - the same target CI runs. Slower than the old
 # hand-rolled list, and it catches what that list could not.
+#
+# It checks the COMMIT being pushed, not the working tree (#1632). Git names
+# what is being pushed on stdin, one `<local ref> <local sha> <remote ref>
+# <remote sha>` line per ref. A clean checkout at that commit is checked in
+# place; anything else (`git push origin <sha>:branch`, or HEAD with
+# uncommitted edits) is checked in a temporary detached worktree at that
+# commit, because the working tree is not what the remote will receive.
 set -euo pipefail
+
+# Git exports GIT_DIR and friends to hooks, and they override cwd: left set,
+# every git command run inside the temporary worktree (including preflight's
+# own) would read this checkout instead. cwd is the worktree root, so
+# discovery finds the repository without them.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
+
+zero_sha=0000000000000000000000000000000000000000
+head_sha=$(git rev-parse HEAD)
+
+shas=()
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+    [ -n "${local_sha:-}" ] || continue
+    if [ "${local_sha//0/}" = "" ]; then
+        continue  # a delete: nothing is pushed, so there is nothing to check
+    fi
+    if ! commit=$(git rev-parse --verify --quiet "${local_sha}^{commit}"); then
+        echo "▶ pre-push: ${local_ref} (${local_sha}) is not a commit; no tree to preflight"
+        continue
+    fi
+    case " ${shas[*]-} " in *" ${commit} "*) ;; *) shas+=("$commit") ;; esac
+done
+
+if [ "${#shas[@]}" -eq 0 ]; then
+    echo "✓ pre-push: nothing pushed that has a tree to check"
+    exit 0
+fi
+
+worktrees=()
+cleanup() {
+    local dir
+    for dir in "${worktrees[@]-}"; do
+        [ -n "$dir" ] || continue
+        git worktree remove --force "$dir" >/dev/null 2>&1 || rm -rf "$dir"
+    done
+    git worktree prune
+}
+trap cleanup EXIT
 
 # ONE target, shared with CI and the AGENTS.md checklist. This hook used to
 # carry its own list and ran only the THRESHOLD half of fitness, so
 # cross-context and ES invariant failures could only surface after a push.
-echo "▶ pre-push: preflight (every CI gate)..."
-just preflight
+for sha in "${shas[@]}"; do
+    if [ "$sha" = "$head_sha" ] && [ -z "$(git status --porcelain)" ]; then
+        echo "▶ pre-push: preflight (every CI gate) on ${sha}, the clean checkout..."
+        just preflight
+        continue
+    fi
+
+    dir=$(mktemp -d "${TMPDIR:-/tmp}/syn-pre-push.XXXXXX")
+    worktrees+=("$dir")
+    echo "▶ pre-push: ${sha} is not the clean checkout; preflight (every CI gate) in a worktree at ${dir}..."
+    git worktree add --quiet --detach "$dir" "$sha"
+    # preflight checks the submodules too, and a new worktree has none checked out.
+    git -C "$dir" submodule update --init --quiet
+    (cd "$dir" && just preflight)
+done
 
 echo "✓ pre-push checks passed"
