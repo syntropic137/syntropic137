@@ -11,7 +11,7 @@ where it happened to agree would prove nothing.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -120,8 +120,7 @@ async def _replayed(turns: list[tuple[str, int, int]], cost: float | None) -> Se
                 "data": {"input_tokens": inp, "output_tokens": out, "model": model},
             }
         )
-    event: dict[str, Any] = {"session_id": _SID, "data": _summary_data(cost)}
-    await projection.on_session_summary(event)
+    await projection.on_session_summary({"session_id": _SID, "data": _summary_data(cost)})
     cost_doc = await projection.get_session_cost(_SID)
     assert cost_doc is not None
     return cost_doc
