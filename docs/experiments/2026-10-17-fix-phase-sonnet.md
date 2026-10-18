@@ -1,6 +1,8 @@
 # E3: Sonnet 5.5 on fix and fix_2 in implement-v4-precheck (preregistered 2026-10-17)
 
-Status: PROPOSED, gated on E2 reaching "proceed". Not approved, nothing dispatched.
+Status: PROPOSED. The E2 gate is met (2026-10-18: Sonnet 5/10 vs Opus 6/10,
+"proceed" on the boundary; see E2 Results). Not yet approved, nothing
+dispatched. The orchestrator decides when it runs.
 
 The gate is weak by design. An E2 "proceed" (n=8 per arm) only means no
 evidence of a large quality drop on implementation, not equivalence. This

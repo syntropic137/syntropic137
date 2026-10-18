@@ -139,6 +139,14 @@ model is registered.
 | finalize_pr, report | Opus 5.5 | Sonnet 5.5 (later; 14% of spend) | Low | positioning only |
 | triage / screener | see PR #2015 bench | Haiku 5.5 / gpt-6-luna | Low | positioning only |
 
+E2 update (2026-10-18): on implementer-seed-v1 v3, Sonnet 5.5 passed 5/10
+and Opus 5.5 6/10. Sonnet cost about 1/4 as much ($0.46 vs $1.98 mean per
+implement run) and was about 7x faster (4.1 vs 27.3 min). This passes the
+preregistered "proceed" bar exactly on the boundary: no evidence of a large
+drop, not equivalence. The implement row stays Opus 5.5. Sonnet becomes a
+candidate for the fix phases (E3), whose production guards decide.
+Details: `docs/experiments/2026-10-17-implementer-sonnet-vs-opus.md`.
+
 ## 5. Defects found while doing this research
 
 1. (#2020) The `haiku` alias resolves to `claude-haiku-4-5-20251001`

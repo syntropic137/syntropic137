@@ -1,6 +1,8 @@
 # E2: Sonnet 5.5 vs Opus 5.5 as implementer (preregistered 2026-10-17)
 
-Status: APPROVED by the orchestrator on 2026-10-17, with conditions. Wait for
+Status: COMPLETE 2026-10-18. Verdict: PROCEED to E3 (Sonnet 5/10, Opus 6/10;
+no evidence of a large drop, not equivalence). See Results. Approved by the
+orchestrator on 2026-10-17, with conditions. Originally: wait for
 "GO" after the pit stop, which happens after the orchestrator registers both
 new workflows. Nothing dispatched.
 
@@ -244,8 +246,29 @@ way. E3's production guards (reverify block rate and escaped defects over
 
 ## Results
 
-INTERIM (2026-10-17, 17 of 20 counted runs scored). No verdict yet: the
-decision rule is applied only when all 20 are scored.
+FINAL (2026-10-18, all 20 counted runs scored, one at a time from 00:05Z under
+eco mode).
+
+### Verdict: PROCEED to E3 (no evidence of a large drop)
+
+Sonnet 5.5 passed 5/10 and Opus 5.5 passed 6/10. The preregistered rule is
+"Sonnet >= Opus - 1: proceed", and 5 >= 6 - 1, so the verdict is proceed. It
+sits exactly on the boundary: one more Sonnet FAIL would have made it
+INCONCLUSIVE. As stated in "What a proceed means", this is **no evidence of a
+large quality drop, not equivalence**. E3's production guards are the safety
+net.
+
+The whole difference is one run: Sonnet's codex-sandbox-tmpdir rep 2
+(`exec-5986906be65d`) failed
+`TestCancelledProvisionDoesNotLeak::test_a_second_cancellation_cannot_interrupt_the_reap`,
+which Opus passed in both reps. Every other case gave the same result in both
+arms.
+
+Secondary (reported, not the preregistered metric): without
+token-mint-retry-5xx, which no patch could pass (see below), it is Opus 6/8 and
+Sonnet 5/8. The difference is unchanged.
+
+### Scores
 
 Counted runs: reps v2-1 and v2-2; the pause case only for runs launched after
 the v3 freeze (2026-10-17T20:46:54Z); the v1-text exec-status-lost run
@@ -255,20 +278,22 @@ not by hand.
 | Case | Opus 5.5 (control) | Sonnet 5.5 (treatment) |
 |---|---|---|
 | resolve-full-execution-id | 2/2 | 2/2 |
-| pause-not-blocked-by-queue (v3) | 1/1 | 1/1 |
-| codex-sandbox-tmpdir | 1/1 | 1/2 |
+| pause-not-blocked-by-queue (v3) | 2/2 | 2/2 |
+| codex-sandbox-tmpdir | 2/2 | 1/2 |
 | exec-status-lost | 0/2 | 0/2 |
 | token-mint-retry-5xx | 0/2 | 0/2 |
-| **Total** | **4/8** | **4/9** |
+| **Total** | **6/10** | **5/10** |
 
 Per run (implement exec / scorer exec / verdict):
 
 | Arm | Case | Rep | Implement | Scorer | Verdict |
 |---|---|---|---|---|---|
 | Opus | codex-sandbox-tmpdir | v2-1 | exec-a63d442dd8ef | exec-be7555d5eb0f | PASS |
+| Opus | codex-sandbox-tmpdir | v2-2 | exec-46764613a7dd | exec-1111f5ccace6 | PASS |
 | Opus | exec-status-lost | v2-1 | exec-769d7f163b6a | exec-edff12cf4758 | FAIL |
 | Opus | exec-status-lost | v2-2 | exec-9a6f228bbb54 | exec-51e42c2d7085 | FAIL |
 | Opus | pause-not-blocked-by-queue | v2-1 | exec-64816866c28f | exec-8950aab7d45a | PASS |
+| Opus | pause-not-blocked-by-queue | v2-2 | exec-1bde7b495884 | exec-c216f29d0e48 | PASS |
 | Opus | resolve-full-execution-id | v2-1 | exec-6c2384186af5 | exec-2dcb04b123f8 | PASS |
 | Opus | resolve-full-execution-id | v2-2 | exec-86845696a663 | exec-a1a8778df1a3 | PASS |
 | Opus | token-mint-retry-5xx | v2-1 | exec-d82694c7cca5 | exec-e737f87a900a | FAIL |
@@ -278,35 +303,64 @@ Per run (implement exec / scorer exec / verdict):
 | Sonnet | exec-status-lost | v2-1 | exec-eb69c3bab56c | exec-bd82f35e683e | FAIL |
 | Sonnet | exec-status-lost | v2-2 | exec-92c14ba7d405 | exec-0348f2822b19 | FAIL |
 | Sonnet | pause-not-blocked-by-queue | v2-1 | exec-b7130ffb9463 | exec-1537051d2f57 | PASS |
+| Sonnet | pause-not-blocked-by-queue | v2-2 | exec-606db3b2e091 | exec-bf8711bebc15 | PASS |
 | Sonnet | resolve-full-execution-id | v2-1 | exec-54b25138e6f4 | exec-d163ed103e20 | PASS |
 | Sonnet | resolve-full-execution-id | v2-2 | exec-94f54073597b | exec-f516239e76e0 | PASS |
 | Sonnet | token-mint-retry-5xx | v2-1 | exec-767066cdf832 | exec-00724ea43631 | FAIL |
 | Sonnet | token-mint-retry-5xx | v2-2 | exec-192ddf47e5d5 | exec-b72bb6c44cc0 | FAIL |
 
-Pending: Opus codex-sandbox-tmpdir v2-2 (`exec-46764613a7dd`, done, score
-queued), Sonnet pause v2-2 (`exec-606db3b2e091`, done, score queued), Opus
-pause v2-2 (not launched). All held for the API recreate.
+### Mechanism check
 
-Mechanism check: every counted implement run, and both pending ones, report
-the arm's model in `phases[0].model` (claude-opus-5-5 or claude-sonnet-5-5).
-None was quarantined.
+All 10 control implement runs report `phases[0].model` = `claude-opus-5-5`,
+and all 10 treatment runs report `claude-sonnet-5-5`. None was quarantined.
+No abort.
 
-Implement cost, including the 2 pending runs (execution `total_cost_usd`):
-Opus $16.25 over 9 runs (mean $1.81); Sonnet $4.65 over 10 runs (mean
-$0.46), about 1/4 of Opus. Mean implement duration: Opus 27.6 min, Sonnet
-4.1 min. Most Sonnet runs took 77-178 s; checked against the phase
-timestamps and the launch ledger (no queue wait), so these are real
-durations, not a reporting fault. The longest Sonnet run is pause v2-2 at
-19.6 min.
+### Cost and time (execution `total_cost_usd`, `total_duration_seconds`)
 
-Positive control: the reference fix of resolve-full-execution-id through
-scorer v2 PASSed (`exec-a12312e843d1`), so a FAIL is the patch's, not the
-harness's.
+| | Opus 5.5 | Sonnet 5.5 |
+|---|---|---|
+| Implement, 10 runs | $19.80 (mean $1.98) | $4.65 (mean $0.46) |
+| Mean implement duration | 27.3 min | 4.1 min |
+| Scoring, 10 runs (always Opus) | $7.38 | $4.68 |
 
-Both arms fail exec-status-lost and token-mint-retry-5xx every time. Before
-the verdict, those 8 FAILs get a read of the failing tests: a case that no arm
-can pass measures the case, not the model (reported as-is; the suite is
-frozen).
+Sonnet's implement is about 1/4 the cost and about 1/7 the wall clock. Most
+Sonnet runs took 77-178 s. That was checked against the phase timestamps and
+the launch ledger (no queue wait), so these are real durations, not a
+reporting fault. Scoring costs more on the Opus arm because its patches are
+larger (mean 30.7 KiB vs 13.5 KiB), and the patch reaches the scorer as prompt text.
+
+Counted E2 total: $36.51, inside the ~$40 estimate. That excludes the pilots,
+the excluded runs and the positive control.
+
+### Positive control
+
+The reference fix of resolve-full-execution-id through scorer v2 PASSed
+(`exec-a12312e843d1`), so a FAIL is the patch's, not the harness's. That
+holds for the scorer only; it does not make a case passable (see
+token-mint-retry-5xx below).
+
+### Cases that both arms always fail
+
+Read of the 8 scorer reports, after the freeze, so these are reported as-is and never rescored:
+
+- **token-mint-retry-5xx is a case defect.** All 4 runs, in both arms, end
+  with the same 15 tests in ERROR at setup. Every one of them uses the
+  `clock` fixture, which does `monkeypatch.setattr(client_retry, "_now", ...)`.
+  `client_retry._now` exists only in the fix (`client_retry.py:125` at
+  `fix_commit`). It is absent from `packages/` at the pin and the task never
+  names it. No patch could pass without guessing that name. `check` missed it
+  for two reasons: it accepts a setattr name found anywhere in the tree,
+  instead of in the module being patched; and it does not resolve the
+  setattr target to a module at all. This is the #2023 class again; the fix
+  to `check` is for suite v4. So the 0/2 vs 0/2 measures the case, not the
+  models.
+- **exec-status-lost looks like a real (shared) model error.** Both arms
+  write `container ws-f98153c5: ...` using the isolation id; the test expects
+  the container name `agentic-ws-f98153c5`. The task says
+  `container <name>: <state>`, and the name is discoverable at the pin
+  (`agentic_isolation/providers/docker.py:197` at the pinned agentic-workspace
+  gitlink: `container_name = f"agentic-ws-{short_id}"`). Both arms make the
+  same mistake, so the case does not discriminate between them at n=2.
 
 Excluded (reported, not counted), all FAIL: the 2 v1 pilots, the v1-text
 exec-status-lost Sonnet run, and the 2 pre-v3 pause runs.
