@@ -18,9 +18,6 @@ set -euo pipefail
 # shellcheck disable=SC2046
 unset $(git rev-parse --local-env-vars)
 
-zero_sha=0000000000000000000000000000000000000000
-head_sha=$(git rev-parse HEAD)
-
 shas=()
 while read -r local_ref local_sha _remote_ref _remote_sha; do
     [ -n "${local_sha:-}" ] || continue
@@ -39,6 +36,18 @@ if [ "${#shas[@]}" -eq 0 ]; then
     exit 0
 fi
 
+# An unborn HEAD (fresh orphan branch) has no commit to match: every pushed
+# commit then needs its own worktree. Resolved after the delete filter above,
+# so a delete-only push never depends on HEAD.
+head_sha=$(git rev-parse --verify --quiet "HEAD^{commit}" || true)
+
+# Dirty means "preflight in place would see something the commit lacks". Ask
+# for everything explicitly: status.showUntrackedFiles=no and
+# submodule.<name>.ignore=all would otherwise hide exactly that.
+checkout_is_clean() {
+    [ -z "$(git status --porcelain --untracked-files=all --ignore-submodules=none)" ]
+}
+
 worktrees=()
 cleanup() {
     local dir
@@ -54,7 +63,7 @@ trap cleanup EXIT
 # carry its own list and ran only the THRESHOLD half of fitness, so
 # cross-context and ES invariant failures could only surface after a push.
 for sha in "${shas[@]}"; do
-    if [ "$sha" = "$head_sha" ] && [ -z "$(git status --porcelain)" ]; then
+    if [ "$sha" = "$head_sha" ] && checkout_is_clean; then
         echo "▶ pre-push: preflight (every CI gate) on ${sha}, the clean checkout..."
         just preflight
         continue

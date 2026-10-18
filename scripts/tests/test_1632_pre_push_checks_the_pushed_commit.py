@@ -191,3 +191,61 @@ def test_a_delete_runs_no_preflight(repo: Repo) -> None:
 
     assert result.returncode == 0, result.stderr
     assert repo.checked() == []
+
+
+def test_hidden_untracked_files_still_force_an_isolated_checkout(repo: Repo) -> None:
+    head = repo.commit("one")
+    repo.git("config", "status.showUntrackedFiles", "no")
+    (repo.dir / "dirty.txt").write_text("untracked")
+    repo.arm_hook()
+
+    result = repo.push("main")
+
+    assert result.returncode == 0, result.stderr
+    [(sha, where, dirty)] = repo.checked()
+    assert (sha, dirty) == (head, "clean")
+    assert where != str(repo.dir)
+
+
+def test_an_ignored_dirty_submodule_forces_an_isolated_checkout(repo: Repo, tmp_path: Path) -> None:
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "t"),
+    ):
+        subprocess.run(["git", *args], cwd=sub, check=True)
+    (sub / "payload.txt").write_text("good")
+    subprocess.run(["git", "add", "."], cwd=sub, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "sub"], cwd=sub, check=True)
+    repo.git("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "lib/example")
+    repo.git("commit", "-q", "-m", "add submodule")
+    repo.git("config", "submodule.lib/example.ignore", "all")
+    (repo.dir / "lib/example/payload.txt").write_text("bad")
+    # The hook clears GIT_CONFIG_COUNT and friends, so allow the local-path
+    # submodule through the global config file instead.
+    global_config = tmp_path / "gitconfig"
+    global_config.write_text('[protocol "file"]\n\tallow = always\n')
+    repo.env["GIT_CONFIG_GLOBAL"] = str(global_config)
+    repo.arm_hook()
+
+    result = repo.push("main")
+
+    assert result.returncode == 0, result.stderr
+    [(_, where, _)] = repo.checked()
+    assert where != str(repo.dir)
+
+
+def test_a_delete_from_an_unborn_branch_runs_no_preflight(repo: Repo) -> None:
+    repo.commit("one")
+    repo.push("main:refs/heads/doomed")
+    repo.git("checkout", "-q", "--orphan", "unborn")
+    repo.git("rm", "-rqf", ".")
+    repo.arm_hook()
+
+    result = repo.push(":refs/heads/doomed")
+
+    assert result.returncode == 0, result.stderr
+    assert repo.checked() == []
+    assert "doomed" not in repo.git("ls-remote", "origin")
