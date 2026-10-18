@@ -1,0 +1,13 @@
+id: feedback-screening-v1
+version: 1
+goal: >
+  Which ScreeningPort is the cheapest that keeps injected and spam feedback out
+  of an agent's view without quarantining genuine feedback? Plan §2.10 of
+  docs/plans/20261017_feedback-ticketing-server.md (#1970).
+splits:
+  - train
+  - validation
+  - holdout
+sources:
+  - synthetic-injection
+  - synthetic-spam
