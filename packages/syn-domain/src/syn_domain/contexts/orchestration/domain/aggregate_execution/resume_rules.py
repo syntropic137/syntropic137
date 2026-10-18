@@ -75,11 +75,11 @@ def completed_prefix(
     completed, or the execution recorded no phase definitions to walk.
 
     `phase_definitions` is trusted to be in phase order and to have one entry
-    per phase. `WorkflowDefinition.from_yaml` is what makes that true: it
-    rejects duplicate phase ids AND duplicate orders, so "phase order" is a
-    total order by the time an execution can start. This function would be
-    ambiguous without that, which is why the precondition is written down here
-    rather than assumed.
+    per phase. `replay.parse_phase_definitions` is what makes that true: it
+    refuses a payload that repeats a phase id or shares an order (#1455), and
+    the template and the start command refuse to write one, so "phase order" is
+    a total order here. This function would be ambiguous without that, which is
+    why the precondition is written down here rather than assumed.
 
     Every inherited phase names the execution that holds its artifacts (#1462):
     ``execution_id`` for a phase this run ran, or its owner from

@@ -18,6 +18,7 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts.orchestration._shared.phase_order import phase_order_conflict
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     LeftBranches,
     PushedCommit,
@@ -522,6 +523,9 @@ class WorkflowExecutionAggregate(
         if self.id is not None:
             msg = "Execution already started"
             raise ValueError(msg)
+        conflict = phase_order_conflict(command.phase_definitions or [])
+        if conflict is not None:
+            raise ValueError(conflict)
 
         self._initialize(command.aggregate_id)
         self._apply(started_event(command))

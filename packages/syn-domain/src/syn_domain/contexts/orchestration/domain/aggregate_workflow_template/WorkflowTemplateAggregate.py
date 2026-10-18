@@ -17,6 +17,7 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts.orchestration._shared.phase_order import phase_order_conflict
 from syn_domain.contexts.orchestration._shared.tags import TagSet
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.required_inputs import (
     required_input_declarations,
@@ -371,6 +372,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         if not command.phases:
             msg = "Workflow must have at least one phase"
             raise ValueError(msg)
+        conflict = phase_order_conflict(command.phases)
+        if conflict is not None:
+            raise ValueError(conflict)
 
         # Generate ID if not provided
         workflow_id = command.aggregate_id or str(uuid4())
@@ -572,6 +576,9 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         if not command.phases:
             msg = "Workflow must have at least one phase"
             raise ValueError(msg)
+        conflict = phase_order_conflict(command.phases)
+        if conflict is not None:
+            raise ValueError(conflict)
 
         self._guard_provenance_retained(command)
         self._guard_version_not_already_installed(command)

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
+from syn_domain.contexts.orchestration._shared.phase_order import phase_order_conflict
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     PhaseDefinition,
 )
@@ -70,16 +71,21 @@ _PHASE_DEFINITIONS = TypeAdapter(list[PhaseDefinitionPayload])
 def parse_phase_definitions(raw_defs: object) -> list[PhaseDefinition]:
     """The replayed phase definitions, sorted, or empty when unreadable.
 
-    Sorted by `order`, which `WorkflowDefinition.from_yaml` guarantees is unique
-    per phase - so this is a total order, and consumers that walk phases in
-    sequence (notably `resume_rules.completed_prefix`) may rely on it. Nothing
-    re-checks that here; #1455 tracks it.
+    Sorted by `order`, and only ever a TOTAL order: a payload that repeats a
+    phase id or shares an order between two phases is refused here (#1455),
+    because every consumer that walks phases in sequence -
+    `resume_rules.completed_prefix`, `review_rounds.next_phase` - would
+    otherwise decide by payload order, or skip a tied phase without a word.
+    The start command refuses to write such a payload, but this is the
+    boundary that reads it, and a stream can predate that check.
 
     Unreadable is EMPTY, not an exception, matching `read_pinned_phases`: a
     payload this cannot validate would otherwise make the execution unloadable,
     and an execution that cannot be loaded cannot be inspected, cancelled or
     resumed. Empty means the aggregate does not sequence, which is the documented
-    behaviour when `phase_definitions` is absent anyway.
+    behaviour when `phase_definitions` is absent anyway. A tie is unreadable in
+    exactly that sense - there is no order to sequence by - so it is refused the
+    same way rather than by raising during replay.
     """
     if not raw_defs:
         return []
@@ -87,6 +93,14 @@ def parse_phase_definitions(raw_defs: object) -> list[PhaseDefinition]:
         parsed = _PHASE_DEFINITIONS.validate_python(raw_defs)
     except ValidationError:
         logger.warning("Unreadable phase_definitions on a replayed start event; treating as absent")
+        return []
+    conflict = phase_order_conflict(parsed)
+    if conflict is not None:
+        logger.warning(
+            "phase_definitions on a replayed start event are not a total order (%s); "
+            "treating as absent (#1455)",
+            conflict,
+        )
         return []
     return sorted(
         [
