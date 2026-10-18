@@ -253,21 +253,23 @@ class SessionCostProjection:
             input_tokens + output_tokens + cache_creation + cache_read,
         )
 
-        # Resolve pricing STRICTLY: an unknown/missing model contributes
-        # zero cost, never a guessed default model's price (issue #788).
-        pricing = self._cost_calculator.resolve_pricing(model.pricing_model)
-        if pricing is None:
-            token_cost = Decimal("0")
+        # Priced by the entry point the SQL read path uses, so the two agree
+        # on every turn (#1420): an unknown/missing model contributes zero
+        # cost, never a guessed default model's price (issue #788), while a
+        # turn with no tokens is a priced zero at any rate (issue #890).
+        priced = self._cost_calculator.calculate_token_cost(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation=cache_creation,
+            cache_read=cache_read,
+            model=model.pricing_model,
+        )
+        if priced.cost is None:
             session_cost.unpriced_observation_count += 1
         else:
-            token_cost = pricing.calculate_cost(
-                input_tokens, output_tokens, cache_creation, cache_read
-            )
-        session_cost.token_cost_usd += token_cost
-        session_cost.total_cost_usd += token_cost
-
-        # Update cost by model (only for observations we could actually price)
-        if pricing is not None:
+            token_cost = priced.cost
+            session_cost.token_cost_usd += token_cost
+            session_cost.total_cost_usd += token_cost
             key = model.cost_key
             session_cost.cost_by_model[key] = (
                 session_cost.cost_by_model.get(key, Decimal("0")) + token_cost

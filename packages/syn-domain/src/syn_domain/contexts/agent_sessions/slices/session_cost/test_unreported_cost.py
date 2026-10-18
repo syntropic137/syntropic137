@@ -43,6 +43,8 @@ _UNPRICED = "gpt-5.6-mini"
 #: (model, input, output) for each turn. Two priced models plus an unpriced one.
 _TURNS = [(_OPUS, 100_000, 20_000), (_OPUS, 50_000, 10_000), (_HAIKU, 300_000, 40_000)]
 _UNPRICED_TURN = (_UNPRICED, 10_000, 1_000)
+#: A turn with no tokens on an unrated model: a priced zero on every path (#890).
+_ZERO_UNRATED_TURN = (_UNPRICED, 0, 0)
 
 _Cell = int | str | Decimal | None
 
@@ -153,8 +155,22 @@ def _cost_answer(sc: SessionCost) -> tuple[Decimal, dict[str, Decimal], int]:
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     "turns",
-    [_TURNS, [*_TURNS, _UNPRICED_TURN], [_UNPRICED_TURN], []],
-    ids=["priced-multi-model", "with-an-unpriced-turn", "only-unpriced", "no-turns"],
+    [
+        _TURNS,
+        [*_TURNS, _UNPRICED_TURN],
+        [_UNPRICED_TURN],
+        [],
+        [_ZERO_UNRATED_TURN],
+        [*_TURNS, _ZERO_UNRATED_TURN],
+    ],
+    ids=[
+        "priced-multi-model",
+        "with-an-unpriced-turn",
+        "only-unpriced",
+        "no-turns",
+        "zero-token-unrated",
+        "zero-token-unrated-beside-priced",
+    ],
 )
 async def test_replay_and_both_sql_paths_give_one_answer(
     turns: list[tuple[str, int, int]],
