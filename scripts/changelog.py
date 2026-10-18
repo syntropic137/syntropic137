@@ -14,7 +14,9 @@ in the release flow so each release PR carries it current.
 WHERE THE DATA COMES FROM. Git is the primary source, and the only one that
 decides structure: which PRs exist, which release each belongs to, its date and
 its order. A PR is a merge commit whose subject is ``Merge pull request #N from
-<owner>/<branch>`` and whose body is the PR title, which is what GitHub writes.
+<owner>/<branch>`` and whose body is the PR title, which is what GitHub writes,
+or ``Merge #N: <title>`` for the few merged with ``gh pr merge --subject``
+(#1878), which are listed by commit in ``CUSTOM_SUBJECT_MERGES``.
 Git is primary because it is the only source that knows release membership -
 a release is ``git log vPREV..vX`` - and because it works offline, in CI and in
 an agent workspace, and gives the same answer every time.
@@ -31,8 +33,16 @@ Three facts about this repository the walk depends on:
   computed tag-to-tag and the unreleased range is ``vLATEST..HEAD``; nothing
   here asks whether a tag is an ancestor of HEAD.
 - Some PRs reach main through another merge, so the walk is not
-  ``--first-parent``. Only the subject GitHub writes is matched; hand-written
+  ``--first-parent``. Only the two subjects above are matched; hand-written
   merges such as ``Merge #1595 (...)`` would otherwise list a PR twice.
+- A ``Merge #N: ...`` subject proves nothing about which repository numbered
+  it: ``apps/syn-landing`` arrived as a subtree bringing syntropic137-landing-
+  page's ``Merge #28:``, and any fork shares this repository's root commit yet
+  numbers its own PRs. Ancestry cannot tell them apart, so such a merge counts
+  only when its commit is in ``CUSTOM_SUBJECT_MERGES``, each entry checked
+  against ``gh pr view N --json mergeCommit``. This needs no ``gh`` at run time,
+  so offline output lists the same PRs. A new custom-subject merge is not
+  listed until added there; merge with GitHub's default subject instead.
 - The main -> release PR (``... from <owner>/main``) is the release itself, not
   a change, and is skipped.
 
@@ -68,7 +78,17 @@ FIRST_VERSION = (0, 33, 1)
 
 STABLE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 STABLE_VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
-MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from (\S+)$")
+GITHUB_MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from (\S+)$")
+NAMED_MERGE_SUBJECT = re.compile(r"^Merge #(\d+): (.+)$")
+# Merges made with ``gh pr merge --subject "Merge #N: ..."`` (#1878), by commit
+# sha, each confirmed with ``gh pr view N --json mergeCommit`` in this repository.
+CUSTOM_SUBJECT_MERGES: Mapping[str, int] = {
+    "a3d9cff959855f451921823caa2d3a74be22cae8": 1858,
+    "a46ab0190fa7fb855bf4889956b9fc956ca25779": 1834,
+    "4d497c4a5e5ee4a3deaa3b070b760a69c5898285": 1869,
+    "cc34c772d765a1fcdda60b80b0bc3625be7968f9": 1873,
+    "d01a9e09e9108fff09dee45997b4723b70e44f6d": 1875,
+}
 CONVENTIONAL_TYPE = re.compile(r"^(\w+)(?:\([^)]*\))?!?:\s*(.*)$")
 RELEASE_NOTES_HEADING = re.compile(r"^#{1,6}\s*release notes\s*:?\s*$", re.IGNORECASE)
 HEADING = re.compile(r"^#{1,6}\s")
@@ -283,20 +303,25 @@ def merged_pull_requests(repo: Path, rev_range: str) -> list[MergedPullRequest]:
         repo,
         "log",
         "--merges",
-        f"--format=%ct{FIELD_SEP}%s{FIELD_SEP}%b{RECORD_SEP}",
+        f"--format=%H{FIELD_SEP}%ct{FIELD_SEP}%s{FIELD_SEP}%b{RECORD_SEP}",
         rev_range,
     )
     found: dict[int, MergedPullRequest] = {}
     for record in log.split(RECORD_SEP):
         fields = record.strip("\n").split(FIELD_SEP)
-        if len(fields) != 3:
+        if len(fields) != 4:
             continue
-        stamp, subject, body = fields
-        match = MERGE_SUBJECT.match(subject.strip())
-        if match is None or match.group(2).endswith("/main"):
+        sha, stamp, subject, body = fields
+        subject = subject.strip()
+        github = GITHUB_MERGE_SUBJECT.match(subject)
+        named = NAMED_MERGE_SUBJECT.match(subject)
+        if github is not None and not github.group(2).endswith("/main"):
+            number, fallback_title = int(github.group(1)), subject
+        elif named is not None and CUSTOM_SUBJECT_MERGES.get(sha) == int(named.group(1)):
+            number, fallback_title = int(named.group(1)), named.group(2)
+        else:
             continue
-        number = int(match.group(1))
-        title = next((line for line in body.splitlines() if line.strip()), subject)
+        title = next((line for line in body.splitlines() if line.strip()), fallback_title)
         if number not in found:
             found[number] = MergedPullRequest(number, title.strip(), int(stamp))
     return sorted(found.values(), key=lambda pr: (-pr.merged_at, -pr.number))
