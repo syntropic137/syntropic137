@@ -19,6 +19,49 @@ fix-phase model lines. The mechanism check: on the first treatment run,
 `phases[]` for fix (and fix_2, if it runs) must read `claude-sonnet-5-5`, and
 every other phase must match the control. If not, abort.
 
+## Amendment 2 (2026-10-18, before any treatment run): task list and a fix-never-ran outcome
+
+The orchestrator assigned 12 backlog issues in syntropic137/syntropic137,
+alternating control/treatment, launched in this order:
+
+| # | Arm | Issue |
+|---|---|---|
+| 01 | control | #1949 |
+| 02 | treatment | #1878 |
+| 03 | control | #1563 |
+| 04 | treatment | #1632 |
+| 05 | control | #1433 |
+| 06 | treatment | #1455 |
+| 07 | control | #1420 |
+| 08 | treatment | #1144 |
+| 09 | control | #1470 |
+| 10 | treatment | #1125 |
+| 11 | control | #1055 |
+| 12 | treatment | #1182 |
+
+Before any treatment run, 5 of the first-draft tasks were swapped because a
+workspace agent could not reach a real fix round on them. 4 of those 5 were in
+the treatment arm, which would have biased the experiment against Sonnet:
+
+| Slot | Retired | Why |
+|---|---|---|
+| 04 T | #1502 | its own release and VPS gate was likely unmet |
+| 06 T | #1302 | a design call |
+| 09 C | #1267 | held for a pending experiment |
+| 10 T | #1242 | `.github/workflows` only, which the App token cannot write |
+| 12 T | #1389 | submodule changes |
+
+The orchestrator picked the replacements; the retired briefs are kept beside
+the live ones.
+
+New outcome: **fix phase never ran**. A run whose verify certifies the first
+implementation, or that ends before fix, says nothing about the fix model. It
+is reported per run, and that pair does not count toward ADOPT or REJECT, so
+the effective n per arm may be below 6. Each run's brief is the issue text
+plus the same trap list. Runs are tagged `eval-research`,
+`experiment:e3-fix-sonnet`, `arm:<arm>` and `issue:<n>`. At most 1 E3 run is
+in flight; the platform total stays at 2.
+
 ## Question
 
 With Opus 5.5 implementing and gpt-6.1-sol verifying, does moving fix and
