@@ -46,6 +46,9 @@ v4 (2026-10-18) states `client_retry._now` in `token-mint-retry-5xx`. Every
 one of its tests patches it in the `clock` fixture, and it existed only in the
 fix. At v3 all 4 E2 runs ERRORed at setup in both arms. The tree-wide grep had
 passed it, because `_now` appears at the pin in unrelated apps/syn-api tests.
+Positive control: the reference fix through `eval-implement-score-v2` PASSed
+(`exec-a25cdb4da7ba`). v4 is FROZEN at 2026-10-18T00:48:16Z; no case changes before the
+next experiment that uses this suite reports.
 
 v3 (2026-10-17) added `AdmissionDrainTimeoutError.unsettled` to `pause-not-blocked-by-queue`, after the check was extended to attribute reads (an attribute access, a `def` or a class-level annotation at the pin, with submodules searched at their gitlinks; a bare word is not enough, because `unsettled` existed at the pin only as a local variable).
 

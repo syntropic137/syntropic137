@@ -364,3 +364,9 @@ Read of the 8 scorer reports, after the freeze, so these are reported as-is and 
 
 Excluded (reported, not counted), all FAIL: the 2 v1 pilots, the v1-text
 exec-status-lost Sonnet run, and the 2 pre-v3 pause runs.
+
+After E2 (not part of its result): suite v4 states `client_retry._now` in
+token-mint-retry-5xx, and `check` now resolves monkeypatch targets to their
+module at the pin. The v4 positive control on that case PASSed
+(`exec-a25cdb4da7ba`, $0.61). v4 frozen at 2026-10-18T00:48:16Z. E2's numbers stay as
+scored at v3.
