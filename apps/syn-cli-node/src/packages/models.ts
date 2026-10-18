@@ -75,3 +75,22 @@ export interface ResolvedWorkflow {
    */
   definition: Record<string, unknown>;
 }
+
+/**
+ * A top-level YAML file a standalone package did not treat as a workflow.
+ *
+ * WHY (#1949): the standalone format is "every *.yaml at the root", which in
+ * a real repository also matches lockfiles and tool configs. Those are
+ * skipped rather than installed, and reported so the skip is never silent.
+ */
+export interface SkippedFile {
+  file: string;
+  reason: string;
+}
+
+/** What a package directory resolves to. */
+export interface ResolvedPackage {
+  manifest: PluginManifest | null;
+  workflows: ResolvedWorkflow[];
+  skipped: SkippedFile[];
+}
