@@ -46,6 +46,23 @@ cannot route non-Sol models) is withdrawn.
 - The one valid run so far is the Sol control on `binary-artifact-minio-key`
   (`exec-9c8b76116c6b`). It stands.
 
+## Amendment 3 (2026-10-18, recorded before any treatment verdict was read): treatment is gpt-6-luna again
+
+After the VPS Codex re-auth, the re-probe `exec-bce939a02c54`
+(`eval-verify-pinned-codex-gpt-6-luna-v1`, on `binary-artifact-minio-key`)
+completed, and `phases[].model` reads `gpt-6-luna`. So the original
+preregistered treatment runs, and amendment 1's switch to gpt-5.6-luna is
+reversed. gpt-5.6-luna was not probed: it would only be needed if gpt-6-luna
+failed, and it is not a third arm.
+
+- The probe is the treatment arm's first run on that case, and its abort
+  check. It passed the abort check, and it counts as that case's treatment
+  run.
+- Recorded before its report or verdict was read.
+- Everything else is as in the final preregistration: 29 train cases x 2
+  arms, decision rule on b - c, stop rule, keyword judge.
+- Concurrency: the platform cap is 2 in flight, shared with E3.
+
 ## Question
 
 Can gpt-6-luna replace gpt-6.1-sol in verify without missing more defects?
