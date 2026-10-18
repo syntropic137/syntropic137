@@ -154,6 +154,28 @@ class TestPriceGroupedSessionSummary:
         assert grouped.unpriced_observation_count == 1
 
 
+def _session_summary_row(row: _FakeRow) -> _FakeRow:
+    """The session reader's shape for the one session an execution row names."""
+    (session_id,) = row["session_ids"]  # type: ignore[misc]
+    return _FakeRow(
+        {
+            "session_id": session_id,
+            "total_input": row["total_input"],
+            "total_output": row["total_output"],
+            "cache_creation": 0,
+            "cache_read": 0,
+            "sdk_cost": None,
+            "duration_ms_val": 0,
+            "agent_model": row["model"],
+            "workspace_id": None,
+            "num_turns": 1,
+            "completed_at": None,
+            "execution_id": "exec-summary",
+            "phase_id": None,
+        }
+    )
+
+
 def _fake_pool(summary_rows: list[_FakeRow]) -> MagicMock:
     async def fetch_side_effect(query: str, *_args: object) -> list[_FakeRow]:
         # The tool-call tally is read from its own table (#1322); these tests
@@ -164,6 +186,12 @@ def _fake_pool(summary_rows: list[_FakeRow]) -> MagicMock:
         # the rollup has nothing to narrow by and the reads run unbounded.
         if "agent_event_day_rollup" in query:
             return [_FakeRow({"first_day": None, "last_day": None})]
+        # The session reader, asked what each unreported session cost (#1420):
+        # its summary, and no turns.
+        if "DISTINCT ON (session_id)" in query:
+            return [_session_summary_row(row) for row in summary_rows if row["sdk_cost"] is None]
+        if "session_id = ANY" in query:
+            return []
         # _COST_BY_PHASE_QUERY groups by phase_id; no phase data in these tests.
         if "phase_id" in query:
             return []
@@ -196,7 +224,8 @@ def _fake_pool(summary_rows: list[_FakeRow]) -> MagicMock:
 class TestTimescaleExecutionCostQueryCompletedSummaryPath:
     """Exercises the full ``calculate()`` path for completed (session_summary) executions."""
 
-    async def test_all_null_summaries_known_model_prices_correctly(self) -> None:
+    async def test_an_unreported_summary_with_no_turns_is_unpriced_not_repriced(self) -> None:
+        """#1420: its session reports no turns to price it, so it is labelled unpriced."""
         rows = [_summary_group_row(_OPUS_MODEL, "session-opus", sdk_cost=None)]
         pool = _fake_pool(rows)
         query = TimescaleExecutionCostQuery(pool)
@@ -204,8 +233,9 @@ class TestTimescaleExecutionCostQueryCompletedSummaryPath:
         result = await query.calculate("exec-summary")
 
         assert result is not None
-        assert result.total_cost_usd == _OPUS_COST_1M_1M
-        assert result.unpriced_observation_count == 0
+        assert result.total_cost_usd == Decimal("0")
+        assert result.cost_by_model == {}
+        assert result.unpriced_observation_count == 1
 
     async def test_mixed_null_and_populated_multi_model_execution(self) -> None:
         rows = [
@@ -218,12 +248,10 @@ class TestTimescaleExecutionCostQueryCompletedSummaryPath:
         result = await query.calculate("exec-summary")
 
         assert result is not None
-        assert result.total_cost_usd == _OPUS_COST_1M_1M + Decimal("3.33")
-        assert result.cost_by_model == {
-            _OPUS_MODEL: _OPUS_COST_1M_1M,
-            _HAIKU_MODEL: Decimal("3.33"),
-        }
-        assert result.unpriced_observation_count == 0
+        # The reported session's cost stands; the unreported one has no turns.
+        assert result.total_cost_usd == Decimal("3.33")
+        assert result.cost_by_model == {_HAIKU_MODEL: Decimal("3.33")}
+        assert result.unpriced_observation_count == 1
         assert result.input_tokens == 2_000_000
 
 

@@ -892,22 +892,27 @@ class TimescaleExecutionCostQuery:
                 _EXECUTION_START_QUERY, execution_id, span.lower, span.upper
             )
 
-            phase_rows = (
-                await self._query_cost_by_phase(conn, execution_id, span) if has_summary else []
-            )
             if not has_summary:
-                priced = self._price_token_usage_groups(token_rows)
-                turn_count = await self._query_turn_count(conn, execution_id, priced.data, span)
+                in_progress = self._price_token_usage_groups(token_rows)
+                return self._build_execution_cost(
+                    execution_id=execution_id,
+                    started_at=execution_started_at,
+                    data=in_progress.data,
+                    total_cost=in_progress.total_cost,
+                    duration_ms=self._calculate_duration(in_progress.data),
+                    tool_count=tool_count,
+                    turn_count=await self._query_turn_count(
+                        conn, execution_id, in_progress.data, span
+                    ),
+                    phase_costs=PhaseCosts(cost_by_phase={}, unpriced_by_phase={}),
+                    cost_by_model=in_progress.cost_by_model,
+                    unpriced_observation_count=in_progress.unpriced_observation_count,
+                )
+            phase_rows = await self._query_cost_by_phase(conn, execution_id, span)
 
         # Outside the connection above: the session reader acquires its own.
-        if has_summary:
-            unreported = await self._unreported_session_costs(token_rows)
-            priced = self._price_session_summary_groups(token_rows, unreported)
-            phase_costs = price_phase_rows(phase_rows, self._cost_calculator, unreported.fork())
-            turn_count = priced.data.total_turns
-        else:
-            phase_costs = PhaseCosts(cost_by_phase={}, unpriced_by_phase={})
-
+        unreported = await self._unreported_session_costs(token_rows)
+        priced = self._price_session_summary_groups(token_rows, unreported)
         data = priced.data
         return self._build_execution_cost(
             execution_id=execution_id,
@@ -916,8 +921,8 @@ class TimescaleExecutionCostQuery:
             total_cost=priced.total_cost,
             duration_ms=self._calculate_duration(data),
             tool_count=tool_count,
-            turn_count=turn_count,
-            phase_costs=phase_costs,
+            turn_count=data.total_turns,
+            phase_costs=price_phase_rows(phase_rows, self._cost_calculator, unreported.fork()),
             cost_by_model=priced.cost_by_model,
             unpriced_observation_count=priced.unpriced_observation_count,
         )
