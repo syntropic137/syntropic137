@@ -126,6 +126,24 @@ The other briefs from 07 to 15 passed the pre-check. 07, 10, 11, 12 and 14
 are present. 15 (#1989) is unclear, because order dependence needs a test
 run.
 
+## Amendment 7 (2026-10-18, run 06 in flight): up to 2 E3 runs at once, and attribution of post-certification defects
+
+- The orchestrator allowed run 07 to start while run 06 was still running.
+  The platform total stays at 2, including the orchestrator's independent
+  reverify. Concurrency is not the variable under test and affects both arms
+  the same way.
+- A defect that the independent reverify finds after the in-run
+  certification is attributed to the phase whose commit introduced it. To
+  find that phase, the implement head is diffed against the fix head. Only a
+  defect introduced or reintroduced by a fix-phase commit counts against the
+  fix model. A defect present since implement that the fix did not close is
+  recorded as "fix left an implement defect open", in both arms alike.
+  - Run 04 (#2032) is the first example. Independent reverify
+    exec-c4e36047a35d blocked two problems: index-flagged files, and a failed
+    `git status` read as clean. Both were already in implement 2b38a58a's
+    `[ -z "$(git status --porcelain)" ]`. The Sonnet fix 6e45b105 widened the
+    flags but closed neither, and the in-run reverify missed both.
+
 ## Question
 
 With Opus 5.5 implementing and gpt-6.1-sol verifying, does moving fix and
