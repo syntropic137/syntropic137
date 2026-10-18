@@ -31,6 +31,10 @@ task: |
   `MINT_ATTEMPTS` (int, the most mint attempts) and
   `MINT_DEADLINE_FRACTION_OF_SETUP_TIMEOUT` (float, the share of the setup
   phase timeout the whole mint may take), beside the existing `RetryPolicy`.
+  The tests fake the clock and the waits: the mint deadline reads the time
+  only through a module-level `client_retry._now() -> float` (monotonic
+  seconds), and a backoff waits only through `asyncio.sleep` as
+  `client_retry` already imports it.
   Each mint retry is logged at WARNING, its message containing `token mint`,
   the attempt as `attempt <n>/<MINT_ATTEMPTS>` (for example `attempt 1/5`), and
   for an HTTP failure the status as `status=<code>` (for example `status=500`);

@@ -33,6 +33,20 @@ by never printing the text. State a templated message with one concrete
 example (`after <n> attempt(s)`, for example `after 1 attempt(s)`), because
 the check matches literals.
 
+A monkeypatch target is checked where it lives, not anywhere in the tree.
+`monkeypatch.setattr(client_retry, "_now", ...)`, or the string form
+`setattr("syn_x.mod.Name", ...)`, is resolved to its `syn_*` module (or a class
+in one) at the pin. The attribute must be bound there (by a def, class,
+assignment or import, read from the AST) or named in the task. A fixture that
+patches a name only the fix adds errors every test that uses it, whatever the
+patch does. A target whose module is new in the fix is left to the task's
+interface paragraph.
+
+v4 (2026-10-18) states `client_retry._now` in `token-mint-retry-5xx`. Every
+one of its tests patches it in the `clock` fixture, and it existed only in the
+fix. At v3 all 4 E2 runs ERRORed at setup in both arms. The tree-wide grep had
+passed it, because `_now` appears at the pin in unrelated apps/syn-api tests.
+
 v3 (2026-10-17) added `AdmissionDrainTimeoutError.unsettled` to `pause-not-blocked-by-queue`, after the check was extended to attribute reads (an attribute access, a `def` or a class-level annotation at the pin, with submodules searched at their gitlinks; a bare word is not enough, because `unsettled` existed at the pin only as a local variable).
 
 v2 (2026-10-17) added the missing statements to `exec-status-lost`,

@@ -220,11 +220,17 @@ class Contracts(_Frozen):
     """Text in `assert "<text>" in ...` and `raises(match=...)` (`not in` needs no statement)."""
     attributes: frozenset[str]
     """Attributes the test reads that the test itself does not define."""
+    patched: frozenset[tuple[str, str]]
+    """(dotted `syn_*` target, attribute) pairs a test monkeypatches. The attribute
+    must exist on that target at the pin: a fixture that patches a name only the
+    fix adds errors every test that uses it, whatever the patch does."""
 
 
 def asserted_contracts(source: str) -> Contracts:
     """Read a hidden test's exact spellings from its AST."""
     tree = ast.parse(source)
+    imported = _syn_imports(tree)
+    patched: set[tuple[str, str]] = set()
     names: set[str] = set()
     literals: set[str] = set()
     read: set[str] = set()
@@ -242,6 +248,20 @@ def asserted_contracts(source: str) -> Contracts:
                 and isinstance(node.args[1].value, str)
             ):
                 names.add(node.args[1].value)
+                target = node.args[0]
+                if isinstance(target, ast.Name) and target.id in imported:
+                    patched.add((imported[target.id], node.args[1].value))
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "setattr"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+                and node.args[0].value.startswith("syn_")
+                and "." in node.args[0].value
+            ):
+                owner, _, attribute = node.args[0].value.rpartition(".")
+                patched.add((owner, attribute))
             for keyword in node.keywords:
                 if (
                     keyword.arg == "match"
@@ -266,8 +286,89 @@ def asserted_contracts(source: str) -> Contracts:
             defined.add(node.id)
     attributes = {a for a in read - defined if not a.startswith("__")}
     return Contracts(
-        names=frozenset(names), literals=frozenset(literals), attributes=frozenset(attributes)
+        names=frozenset(names),
+        literals=frozenset(literals),
+        attributes=frozenset(attributes),
+        patched=frozenset(patched),
     )
+
+
+def _syn_imports(tree: ast.Module) -> dict[str, str]:
+    """Local name -> dotted path, for every name the test imports from a `syn_*` package."""
+    imported: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("syn_"):
+            for alias in node.names:
+                imported[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith("syn_") and alias.asname:
+                    imported[alias.asname] = alias.name
+    return imported
+
+
+def _module_names(body: list[ast.stmt]) -> set[str]:
+    """Names a module or class body binds, through `if` and `try` blocks."""
+    bound: set[str] = set()
+    for node in body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.Assign):
+            bound.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            bound.add(node.target.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound.update((a.asname or a.name).split(".")[0] for a in node.names)
+        elif isinstance(node, ast.If):
+            bound |= _module_names(node.body) | _module_names(node.orelse)
+        elif isinstance(node, ast.Try):
+            for block in (node.body, node.orelse, node.finalbody):
+                bound |= _module_names(block)
+            for handler in node.handlers:
+                bound |= _module_names(handler.body)
+    return bound
+
+
+def _patched_absent_at_pin(
+    repo: Path, commit: str, patched: frozenset[tuple[str, str]]
+) -> frozenset[tuple[str, str]]:
+    """The monkeypatch targets whose attribute the pin does not define.
+
+    A target is a module (`client_retry`) or a class in one
+    (`syn_adapters.github.client.GitHubAppClient`). A target whose module the pin
+    does not have at all is new in the fix, so its interface is the task's to
+    state and the import check covers it; it is not reported here.
+    """
+    if not patched:
+        return frozenset()
+    files = set(_git(repo, "ls-tree", "-r", "--name-only", commit).stdout.splitlines())
+
+    def source_of(dotted: str) -> str | None:
+        rel = dotted.replace(".", "/")
+        for path in sorted(files):
+            if path.endswith((f"/src/{rel}.py", f"/src/{rel}/__init__.py")):
+                return _git(repo, "show", f"{commit}:{path}").stdout
+        return None
+
+    absent: set[tuple[str, str]] = set()
+    for target, attribute in patched:
+        module = source_of(target)
+        if module is not None:
+            body = ast.parse(module).body
+        else:
+            owner, _, cls = target.rpartition(".")
+            parent = source_of(owner) if owner else None
+            if parent is None:
+                continue
+            classes = [
+                n for n in ast.parse(parent).body if isinstance(n, ast.ClassDef) and n.name == cls
+            ]
+            if not classes:
+                continue
+            body = classes[0].body
+        if attribute not in _module_names(body):
+            absent.add((target, attribute))
+    return frozenset(absent)
 
 
 def _attributes_at_pin(repo: Path, commit: str, attributes: frozenset[str]) -> frozenset[str]:
@@ -318,6 +419,12 @@ def unstated_contract_problems(case: ImplementerCase, repo: Path) -> list[str]:
                 problems.append(
                     f"{case.id}: {path} asserts text {literal!r}, absent from task and pin"
                 )
+        unpatchable = frozenset(p for p in found.patched if p[1] not in case.task)
+        for target, attribute in sorted(_patched_absent_at_pin(repo, case.commit, unpatchable)):
+            problems.append(
+                f"{case.id}: {path} monkeypatches {target}.{attribute}, which the pin does not"
+                " define and the task never states"
+            )
         unstated = frozenset(a for a in found.attributes if a not in case.task)
         at_pin = _attributes_at_pin(repo, case.commit, unstated)
         for attribute in sorted(unstated - at_pin):

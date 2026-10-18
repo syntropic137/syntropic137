@@ -149,6 +149,46 @@ def test_a_hidden_test_s_exact_spellings_are_read_from_its_ast() -> None:
     assert not {"mkdir", "calls"} & found.attributes
 
 
+def test_a_monkeypatch_target_is_read_as_the_module_or_object_it_patches() -> None:
+    found = asserted_contracts(
+        "from syn_adapters.github import client_retry\n"
+        "from syn_adapters.github.client import GitHubAppClient as Client\n"
+        "import syn_shared.settings as settings\n"
+        "def test(monkeypatch, local):\n"
+        "    monkeypatch.setattr(client_retry, '_now', lambda: 0.0)\n"
+        "    monkeypatch.setattr(Client, '_generate_jwt', lambda _self: 'jwt')\n"
+        "    monkeypatch.setattr(settings, 'reset', lambda: None)\n"
+        "    monkeypatch.setattr('syn_adapters.github.GitHubAppClient', object)\n"
+        "    monkeypatch.setattr(local, 'helper', None)\n"
+        "    monkeypatch.setattr('os.path.join', None)\n"
+    )
+    assert found.patched == {
+        ("syn_adapters.github.client_retry", "_now"),
+        ("syn_adapters.github.client.GitHubAppClient", "_generate_jwt"),
+        ("syn_shared.settings", "reset"),
+        ("syn_adapters.github", "GitHubAppClient"),
+    }
+
+
+@needs_history
+def test_a_fixture_that_patches_a_name_only_the_fix_defines_is_reported() -> None:
+    """E2: `_now` appeared at the pin only in unrelated apps/syn-api tests, so a tree-wide
+    grep passed it while every token-mint test errored at setup in both arms."""
+    loaded = load_suite(DEFAULT_SUITE)
+    case = loaded.case("token-mint-retry-5xx")
+    stated = "`client_retry._now() -> float`"
+    assert stated in case.task
+    unstated = loaded.model_copy(
+        update={"cases": (case.model_copy(update={"task": case.task.replace(stated, "a clock")}),)}
+    )
+    problems = check_commits(unstated, ROOT)
+    assert [p for p in problems if "monkeypatches" in p] == [
+        "token-mint-retry-5xx: packages/syn-adapters/tests/github/test_provisioning_retry.py"
+        " monkeypatches syn_adapters.github.client_retry._now, which the pin does not define"
+        " and the task never states"
+    ], "patch targets that exist at the pin (_generate_jwt, delay_after, ...) are not reported"
+
+
 @needs_history
 def test_an_attribute_the_hidden_tests_read_but_the_task_never_states_is_reported() -> None:
     """`unsettled` existed at the pin only as an unrelated local variable, so a word match passed it."""
