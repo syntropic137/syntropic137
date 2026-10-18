@@ -134,7 +134,7 @@ model is registered.
 |---|---|---|---|---|
 | premise, plan | Opus 5.5 | none yet | Low | vendor guidance only |
 | implement | Opus 5.5 | Sonnet 5.5 (E2) | Medium | [5][6][7], vendor-heavy |
-| verify, reverify | gpt-6.1-sol (cross-family) | gpt-6-luna (E1) | Low-Med | indirect [11][14][18] |
+| verify, reverify | gpt-6.1-sol (cross-family) | none (gpt-6-luna rejected, E1) | Medium | indirect [11][14][18] |
 | fix, fix_2 | Opus 5.5 | Sonnet 5.5 (E3, after E2) | Low | [4][7][8][22] |
 | finalize_pr, report | Opus 5.5 | Sonnet 5.5 (later; 14% of spend) | Low | positioning only |
 | triage / screener | see PR #2015 bench | Haiku 5.5 / gpt-6-luna | Low | positioning only |
@@ -146,6 +146,14 @@ preregistered "proceed" bar exactly on the boundary: no evidence of a large
 drop, not equivalence. The implement row stays Opus 5.5. Sonnet becomes a
 candidate for the fix phases (E3), whose production guards decide.
 Details: `docs/experiments/2026-10-17-implementer-sonnet-vs-opus.md`.
+
+E1 update (2026-10-18): gpt-6-luna is REJECTED as the verifier. On
+verifier-seed-v1 train (26 defect cases), Sol caught 18 and Luna 12 (b = 9,
+c = 3), and Luna false-blocked a clean control Sol certified. On verdict
+alone Luna certified 5 known defects; Sol blocked all 26. Luna is ~19x
+cheaper per run ($0.0125 vs $0.233), which does not pay for the escapes.
+The verify row stays gpt-6.1-sol. Sol also caught a real bug in a "clean"
+control (#2030). Details: `docs/experiments/2026-10-17-verifier-gpt-6-luna-vs-sol.md`.
 
 ## 5. Defects found while doing this research
 
