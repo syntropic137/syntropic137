@@ -112,6 +112,20 @@ involved.
   the defect is gone, the brief is skipped and reported, not run. A skipped
   brief is neither a run nor a pair.
 
+## Amendment 6 (2026-10-18, run 06 in flight): two briefs swapped after the pre-check
+
+The orchestrator swapped two briefs. The replacements' traps sections are
+byte-identical to the others, and both defects are present on origin/main.
+
+| Slot | Retired | Why | Replacement | Pre-check |
+|---|---|---|---|---|
+| 08 T | #1144 | mostly fixed by de65d65ab | #2028, reverify fix phases delete `.mutations/` | no `.mutations` rule in `workflows/sdlc/reverify-pr` |
+| 09 C | #1470 | reproduces only on macOS | #2021, the eval judge is pinned to a pre-5 model | `scripts/eval_suite.py:987` |
+
+The other briefs from 07 to 15 passed the pre-check. 07, 10, 11, 12 and 14
+are present. 15 (#1989) is unclear, because order dependence needs a test
+run.
+
 ## Question
 
 With Opus 5.5 implementing and gpt-6.1-sol verifying, does moving fix and
