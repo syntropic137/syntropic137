@@ -89,13 +89,28 @@ def replay_phases(raw_defs: object) -> tuple[list[PhaseDefinition], str | None]:
     over phases that never ran. Absent or unreadable payloads carry no reason:
     they are the documented legacy "does not sequence" case.
     """
-    return parse_phase_definitions(raw_defs), phase_order_conflict(_read_payloads(raw_defs))
+    return parse_phase_definitions(raw_defs), phase_definitions_conflict(raw_defs)
 
 
-def refuse_unordered_completion(conflict: str | None) -> None:
-    """Nothing was sequenced, so "no pending phase" is not "all done"."""
+def phase_definitions_conflict(raw_defs: object) -> str | None:
+    """Why a start's raw `phase_definitions` are not a total order, or None.
+
+    The one reading of that payload for every consumer that sequences from it:
+    the aggregate's replay above, and the to-do projection, which must queue no
+    phase from a list the aggregate refuses to sequence (#1455).
+    """
+    return phase_order_conflict(_read_payloads(raw_defs))
+
+
+def refuse_unordered(conflict: str | None, verb: str) -> None:
+    """Nothing was sequenced, so no phase may start and "no pending phase" is not "all done".
+
+    Starting a phase is refused as well as completing the execution: a to-do
+    record written before the projection refused such a list can still hold a
+    pending phase, and the aggregate is what stops it running.
+    """
     if conflict is not None:
-        msg = f"Cannot complete an execution whose phases are unordered: {conflict}"
+        msg = f"Cannot {verb} an execution whose phases are unordered: {conflict}"
         raise ValueError(msg)
 
 

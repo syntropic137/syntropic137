@@ -53,6 +53,9 @@ if TYPE_CHECKING:
         ResumeOrigin,
     )
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
+    phase_definitions_conflict,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     read_resume_origin,
 )
@@ -262,6 +265,11 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         phase_defs = event_data.get("phase_definitions") or []
         if not phase_defs:
             return  # Legacy mode — no to-do list management
+        if phase_definitions_conflict(phase_defs) is not None:
+            # Not a total order (#1455): the aggregate sequences nothing from
+            # it, so nothing is queued here either. The empty list drains to a
+            # completion the aggregate refuses, and the run is failed unrun.
+            return
 
         origin = read_resume_origin(
             event_data.get("resumed_from"), event_data.get(INHERITED_PHASE_OWNERS)

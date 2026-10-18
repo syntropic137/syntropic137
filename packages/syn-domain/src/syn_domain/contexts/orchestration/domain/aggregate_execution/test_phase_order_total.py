@@ -36,6 +36,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
 from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
     NextPhaseReadyEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
+    PhaseStartedEvent,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -89,17 +92,45 @@ def _replayed(phases: list[tuple[str, int]]) -> WorkflowExecutionAggregate:
 
 
 def _start_and_collect(aggregate: WorkflowExecutionAggregate, phase_id: str, order: int) -> None:
-    aggregate.start_phase(
-        StartPhaseCommand(
-            execution_id=EXECUTION,
+    aggregate.start_phase(_start_command(phase_id, order))
+    _collect(aggregate, phase_id)
+
+
+def _recorded_start_and_collect(
+    aggregate: WorkflowExecutionAggregate, phase_id: str, order: int
+) -> None:
+    """A phase an UNORDERED stream started, then collected.
+
+    The start command is refused on such a stream now, so a started phase there
+    can only be history written before that guard: it is applied as the
+    recorded event, not issued as a command.
+    """
+    aggregate._apply(
+        PhaseStartedEvent(
             workflow_id="wf-1",
+            execution_id=EXECUTION,
             phase_id=phase_id,
             phase_name=phase_id,
             phase_order=order,
+            started_at=datetime(2026, 10, 1, tzinfo=UTC),
         )
     )
+    _collect(aggregate, phase_id)
+
+
+def _collect(aggregate: WorkflowExecutionAggregate, phase_id: str) -> None:
     aggregate.artifacts_collected(
         ArtifactsCollectedCommand(execution_id=EXECUTION, phase_id=phase_id, artifact_ids=[])
+    )
+
+
+def _start_command(phase_id: str, order: int) -> StartPhaseCommand:
+    return StartPhaseCommand(
+        execution_id=EXECUTION,
+        workflow_id="wf-1",
+        phase_id=phase_id,
+        phase_name=phase_id,
+        phase_order=order,
     )
 
 
@@ -134,7 +165,7 @@ class TestAReplayedStartThatIsNotATotalOrderIsNotSequenced:
         aggregate = _replayed(phases)
         first, order = phases[0]
 
-        _start_and_collect(aggregate, first, order)
+        _recorded_start_and_collect(aggregate, first, order)
 
         assert _emitted(aggregate, NextPhaseReadyEvent) == []
 
@@ -145,7 +176,7 @@ class TestAReplayedStartThatIsNotATotalOrderIsNotSequenced:
         """Before #1455, B-first inherited B and A-first inherited nothing - same facts."""
         aggregate = _replayed(phases)
         first, order = phases[0]
-        _start_and_collect(aggregate, first, order)
+        _recorded_start_and_collect(aggregate, first, order)
         _complete(aggregate, first)
         aggregate.fail_execution(
             FailExecutionCommand(
@@ -176,6 +207,20 @@ class TestAReplayedStartThatIsNotATotalOrderIsNotSequenced:
         _start_and_collect(aggregate, "A", 1)
 
         assert [e.next_phase_id for e in _emitted(aggregate, NextPhaseReadyEvent)] == ["B"]
+
+
+class TestAPhaseOfAnUnorderedExecutionCannotStart:
+    """A to-do written before the projection refused the list must not run (#1455)."""
+
+    @NOT_A_TOTAL_ORDER
+    def test_refused(self, phases: list[tuple[str, int]]) -> None:
+        aggregate = _replayed(phases)
+        first, order = phases[0]
+
+        with pytest.raises(ValueError, match="unordered"):
+            aggregate.start_phase(_start_command(first, order))
+
+        assert aggregate.get_uncommitted_events() == []
 
 
 class TestTheStartCommandRefusesToWriteOne:
