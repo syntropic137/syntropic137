@@ -11,7 +11,14 @@ import { printError, printSuccess, print, printDim, printWarning } from "../../o
 import { style, BOLD, CYAN, DIM, GREEN } from "../../output/ansi.js";
 import { formatTimestamp } from "../../output/format.js";
 import { Table } from "../../output/table.js";
-import type { InstalledWorkflowRef, PackageFormat, PluginManifest, ResolvedWorkflow } from "../../packages/models.js";
+import type {
+  InstalledWorkflowRef,
+  PackageFormat,
+  PluginManifest,
+  ResolvedPackage,
+  ResolvedWorkflow,
+  SkippedFile,
+} from "../../packages/models.js";
 import {
   detectFormat,
   isHomeRelative,
@@ -57,15 +64,13 @@ export function isBarePluginName(source: string): boolean {
 export async function tryMarketplaceResolution(
   source: string,
   ref: string,
-): Promise<{
+): Promise<(ResolvedPackage & {
   packagePath: string;
-  manifest: PluginManifest | null;
-  workflows: ResolvedWorkflow[];
   tmpdir: string | null;
   marketplaceSource: string | null;
   gitSha: string | null;
   effectiveRef: string;
-} | null> {
+}) | null> {
   // WHY (#726): the marketplace resolver is now artifact-agnostic; the
   // workflow-specific work (resolving the package into a list of workflows)
   // happens here, after the directory is on disk.
@@ -77,11 +82,9 @@ export async function tryMarketplaceResolution(
   );
   print(`Cloning ...@${resolved.resolvedRef} (already done)`);
 
-  const { manifest, workflows } = resolvePackage(resolved.packagePath);
   return {
+    ...resolvePackage(resolved.packagePath),
     packagePath: resolved.packagePath,
-    manifest,
-    workflows,
     tmpdir: resolved.tmpdir,
     marketplaceSource: resolved.registryName,
     gitSha: resolved.gitSha,
@@ -92,10 +95,8 @@ export async function tryMarketplaceResolution(
 export async function resolveSource(
   source: string,
   ref: string,
-): Promise<{
+): Promise<ResolvedPackage & {
   packagePath: string;
-  manifest: PluginManifest | null;
-  workflows: ResolvedWorkflow[];
   tmpdir: string | null;
   gitSha: string | null;
 }> {
@@ -103,15 +104,14 @@ export async function resolveSource(
 
   if (isRemote) {
     print(`Cloning ${style(resolved, CYAN)}@${ref}...`);
-    const { tmpdir, manifest, workflows, gitSha } = await resolveFromGit(resolved, ref);
-    return { packagePath: tmpdir, manifest, workflows, tmpdir, gitSha };
+    const fromGit = await resolveFromGit(resolved, ref);
+    return { ...fromGit, packagePath: fromGit.tmpdir };
   }
 
   // A local path has no commit to report, so it declares no digest rather
   // than an empty one. The server distinguishes the two (issue #822).
   const packagePath = path.resolve(resolved);
-  const { manifest, workflows } = resolvePackage(packagePath);
-  return { packagePath, manifest, workflows, tmpdir: null, gitSha: null };
+  return { ...resolvePackage(packagePath), packagePath, tmpdir: null, gitSha: null };
 }
 
 
@@ -260,6 +260,7 @@ export const installCommand: CommandDef = {
     let packagePath: string;
     let manifest: PluginManifest | null;
     let workflows: ResolvedWorkflow[];
+    let skipped: SkippedFile[];
     let tmpdir: string | null = null;
     let marketplaceSource: string | null = null;
     let gitSha: string | null = null;
@@ -269,12 +270,12 @@ export const installCommand: CommandDef = {
       if (isBarePluginName(source)) {
         const mktResult = await tryMarketplaceResolution(source, ref);
         if (mktResult !== null) {
-          ({ packagePath, manifest, workflows, tmpdir, marketplaceSource, gitSha, effectiveRef } = mktResult);
+          ({ packagePath, manifest, workflows, skipped, tmpdir, marketplaceSource, gitSha, effectiveRef } = mktResult);
         } else {
-          ({ packagePath, manifest, workflows, tmpdir, gitSha } = await resolveSource(source, ref));
+          ({ packagePath, manifest, workflows, skipped, tmpdir, gitSha } = await resolveSource(source, ref));
         }
       } else {
-        ({ packagePath, manifest, workflows, tmpdir, gitSha } = await resolveSource(source, ref));
+        ({ packagePath, manifest, workflows, skipped, tmpdir, gitSha } = await resolveSource(source, ref));
       }
     } catch (err) {
       printError(err instanceof Error ? err.message : String(err));
@@ -292,6 +293,7 @@ export const installCommand: CommandDef = {
       const pkgVersion = manifest?.version ?? "0.0.0";
 
       printPackagePreview(pkgName, pkgVersion, source, fmt, workflows);
+      printSkippedFiles(skipped);
 
       if (dryRun) {
         printSuccess("Dry run — package is valid, no workflows installed");
@@ -392,6 +394,13 @@ function printPackagePreview(
   print(`  Format: ${fmt}`);
   print(`  Workflows: ${workflows.length}`);
   print(`  Total phases: ${totalPhases}`);
+}
+
+/** Name every YAML file the package passed over, so a skip is never silent (#1949). */
+export function printSkippedFiles(skipped: SkippedFile[]): void {
+  for (const s of skipped) {
+    printWarning(`Skipped ${s.file}: ${s.reason}`);
+  }
 }
 
 function printWorkflowSummary(workflows: ResolvedWorkflow[]): void {
