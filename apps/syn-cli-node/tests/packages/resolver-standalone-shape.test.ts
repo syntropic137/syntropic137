@@ -108,3 +108,76 @@ describe("install --dry-run on a directory of non-workflow YAML", () => {
     expect(stderr.join("")).toMatch(/Skipped pnpm-lock\.yaml: no `phases` list/);
   });
 });
+
+describe("install on a package with a skipped file declaring claude_plugins", () => {
+  let requests: Request[];
+
+  beforeEach(() => {
+    requests = [];
+    vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    // Only the HTTP boundary is faked: resolution and both preflights are real.
+    vi.stubGlobal("fetch", async (input: Request | string, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      if (request.url.includes("/claude-plugins/")) {
+        // Already locked, so a lookup never goes on to clone or register.
+        return Response.json({ name: "locked", version: "v1" });
+      }
+      return Response.json({ id: "real", name: "Real", status: "created", warnings: [] });
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const pluginPaths = (): string[] =>
+    requests.map((r) => new URL(r.url).pathname).filter((p) => p.includes("/claude-plugins/"));
+
+  async function uploadedIds(): Promise<string[]> {
+    const uploads = requests.filter((r) => r.url.includes("/workflows/from-yaml"));
+    return Promise.all(uploads.map(async (r) => ((await r.clone().json()) as { id: string }).id));
+  }
+
+  it("installs the real workflow when the skipped file's plugin ref is invalid", async () => {
+    const root = pkg({ "real.yaml": WORKFLOW, "config.yaml": "claude_plugins:\n  - not-a-plugin-ref\n" });
+    await installCommand.handler({ positionals: [root], values: {} });
+    expect(await uploadedIds()).toEqual(["real"]);
+    expect(pluginPaths()).toEqual([]);
+  });
+
+  it("looks up no plugin that only a skipped file declares", async () => {
+    const root = pkg({ "real.yaml": WORKFLOW, "config.yaml": "claude_plugins:\n  - example/unused@v1\n" });
+    await installCommand.handler({ positionals: [root], values: {} });
+    expect(pluginPaths()).toEqual([]);
+    expect(await uploadedIds()).toEqual(["real"]);
+  });
+
+  it("still resolves the plugins a retained workflow declares, at both scopes", async () => {
+    const root = pkg({
+      "real.yaml":
+        "id: real\nname: Real\nclaude_plugins:\n  - example/top@v1\nphases:\n" +
+        "  - id: build\n    prompt_template: go\n    claude_plugins:\n      - example/phase@v2\n",
+      "config.yaml": "claude_plugins:\n  - example/unused@v1\n",
+    });
+    await installCommand.handler({ positionals: [root], values: {} });
+    expect(pluginPaths().sort()).toEqual([
+      "/api/v1/claude-plugins/phase/v2",
+      "/api/v1/claude-plugins/top/v1",
+    ]);
+    expect(await uploadedIds()).toEqual(["real"]);
+  });
+
+  it("still rejects an invalid plugin ref in a retained workflow", async () => {
+    const root = pkg({
+      "real.yaml": "id: real\nname: Real\nclaude_plugins:\n  - not-a-plugin-ref\nphases:\n  - id: build\n    prompt_template: go\n",
+    });
+    await expect(installCommand.handler({ positionals: [root], values: {} })).rejects.toThrow(
+      /not-a-plugin-ref/,
+    );
+    expect(await uploadedIds()).toEqual([]);
+  });
+});

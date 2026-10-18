@@ -304,7 +304,8 @@ export const installCommand: CommandDef = {
       // WHY (#726 Phase B): if any workflow YAML declares `claude_plugins:`,
       // resolve them BEFORE we mutate the API. This keeps install atomic
       // from the user's perspective without requiring the API to do git work.
-      await runClaudePluginPreflight(packagePath);
+      // Only the resolved workflows are read, so a skipped file cannot (#1949).
+      await runClaudePluginPreflight(workflows);
 
       // WHY here: same reasoning as the claude-plugin preflight above. A
       // workflow declaring `skills:` used to install cleanly and then fail at
