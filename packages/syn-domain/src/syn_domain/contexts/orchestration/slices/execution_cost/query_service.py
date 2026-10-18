@@ -328,7 +328,9 @@ class ExecutionCostQueryService:
         results: list[ExecutionCost] = []
         for eid, rows in summary_rows_by_execution.items():
             results.append(
-                self._build_from_summary(eid, rows, tool_counts, phase_map, unreported.fork())
+                self._build_from_summary(
+                    eid, rows, tool_counts, phase_map, unreported.another_rollup()
+                )
             )
 
         token_rows_by_execution = self._group_rows_by_execution(
@@ -396,7 +398,9 @@ class ExecutionCostQueryService:
             eid = row["execution_id"]  # type: ignore[index]
             rows_by_execution.setdefault(eid, []).append(row)
         return {
-            eid: price_phase_rows(execution_rows, self._cost_calculator, unreported.fork())
+            eid: price_phase_rows(
+                execution_rows, self._cost_calculator, unreported.another_rollup()
+            )
             for eid, execution_rows in rows_by_execution.items()
         }
 

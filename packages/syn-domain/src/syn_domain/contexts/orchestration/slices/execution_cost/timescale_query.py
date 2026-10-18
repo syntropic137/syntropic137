@@ -462,7 +462,7 @@ class UnreportedSessionCosts:
         self._sessions = dict(sessions or {})
         self._settled: set[str] = set()
 
-    def fork(self) -> UnreportedSessionCosts:
+    def another_rollup(self) -> UnreportedSessionCosts:
         """The same answers, for a separate roll-up (the phase map, the total)."""
         return UnreportedSessionCosts(self._sessions)
 
@@ -922,7 +922,9 @@ class TimescaleExecutionCostQuery:
             duration_ms=self._calculate_duration(data),
             tool_count=tool_count,
             turn_count=data.total_turns,
-            phase_costs=price_phase_rows(phase_rows, self._cost_calculator, unreported.fork()),
+            phase_costs=price_phase_rows(
+                phase_rows, self._cost_calculator, unreported.another_rollup()
+            ),
             cost_by_model=priced.cost_by_model,
             unpriced_observation_count=priced.unpriced_observation_count,
         )

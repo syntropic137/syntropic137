@@ -107,10 +107,10 @@ async def test_execution_readers_roll_up_the_session_answer(
         total += _REPORTED_COST
     unreported = UnreportedSessionCosts({_SID: session})
 
-    grouped = price_grouped_session_summary(rows, CostCalculator(), unreported.fork())  # type: ignore[arg-type]
-    phases = price_phase_rows(rows, CostCalculator(), unreported.fork())  # type: ignore[arg-type]
+    grouped = price_grouped_session_summary(rows, CostCalculator(), unreported.another_rollup())  # type: ignore[arg-type]
+    phases = price_phase_rows(rows, CostCalculator(), unreported.another_rollup())  # type: ignore[arg-type]
     listed = ExecutionCostQueryService(pool=None)._build_from_summary(  # type: ignore[arg-type]
-        _EID, rows, tool_counts={}, phase_map={}, unreported=unreported.fork()
+        _EID, rows, tool_counts={}, phase_map={}, unreported=unreported.another_rollup()
     )
 
     assert grouped.total_cost == total
