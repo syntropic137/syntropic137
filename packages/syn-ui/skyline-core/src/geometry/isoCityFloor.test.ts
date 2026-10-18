@@ -41,8 +41,8 @@ describe('tones and heights', () => {
   })
 
   it('labels a day for screen readers', () => {
-    expect(isoDayLabel({ date: '2026-08-03', sessions: 5, failed: 2 })).toBe('Mon, Aug 3: 5 sessions, 2 failed')
-    expect(isoDayLabel({ date: '2026-08-04', sessions: 1 })).toBe('Tue, Aug 4: 1 session')
+    expect(isoDayLabel({ date: '2026-08-03', sessions: 5, failed: 2 })).toBe('Mon, Aug 3 (UTC): 5 sessions, 2 failed')
+    expect(isoDayLabel({ date: '2026-08-04', sessions: 1 })).toBe('Tue, Aug 4 (UTC): 1 session')
   })
 })
 
@@ -127,7 +127,7 @@ describe('week strip', () => {
     ]
     const s = isoCityStrip(isoCityWeeks(days, hist.start, 52), 38, 14, 1)
     expect(s.bars).toHaveLength(52)
-    expect(s.bars[51]).toMatchObject({ tone: 'lit', height: 100, label: 'Week of Oct 5: 10 sessions' })
+    expect(s.bars[51]).toMatchObject({ tone: 'lit', height: 100, label: 'Week of Oct 5 (UTC): 10 sessions' })
     expect(s.bars[50]).toMatchObject({ tone: 'fail', height: 30 })
     expect(s.bars[0]).toMatchObject({ tone: 'dim', height: 12 })
     expect(s.bars[1]).toMatchObject({ height: 0 })
@@ -138,7 +138,7 @@ describe('week strip', () => {
   })
 
   it('formats the range', () => {
-    expect(isoRangeLabel('2026-07-06', '2026-10-09')).toBe('Jul 6 – Oct 9, 2026')
-    expect(isoRangeLabel('2025-12-29', '2026-03-01')).toBe('Dec 29, 2025 – Mar 1, 2026')
+    expect(isoRangeLabel('2026-07-06', '2026-10-09')).toBe('Jul 6 – Oct 9, 2026 (UTC)')
+    expect(isoRangeLabel('2025-12-29', '2026-03-01')).toBe('Dec 29, 2025 – Mar 1, 2026 (UTC)')
   })
 })
