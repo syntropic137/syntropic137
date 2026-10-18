@@ -62,6 +62,26 @@ plus the same trap list. Runs are tagged `eval-research`,
 `experiment:e3-fix-sonnet`, `arm:<arm>` and `issue:<n>`. At most 1 E3 run is
 in flight; the platform total stays at 2.
 
+## Amendment 3 (2026-10-18, after run 02, before run 03): fix timed out in gates
+
+Approved by the orchestrator. Run 02 (treatment, #1878, exec-14a4ac5ee881)
+passed the mechanism check (fix on `claude-sonnet-5-5`, every other phase
+matching the control). Sonnet pushed its fix within about 3 minutes. The
+phase then hit its 60-minute limit (exit 124) while the verification gates
+ran in series: `just preflight-agent` (~19 min) then `uv run pytest -m unit`
+(at 65% when killed). The chain had been restarted from scratch for a
+one-line lint fix. No reverify ran.
+
+- New outcome: **fix ran; phase timed out in gates; no reverify**. It counts
+  as a failed round for rounds and time to READY. It is neither an escape nor
+  "fix phase never ran".
+- #1878 is not re-dispatched (it has PR #2031). The orchestrator's
+  independent reverify of #2031 stands in as its reverify verdict.
+- Every run's outcome is tagged with whether a gate wait or timeout happened,
+  and whether the agent restarted a gate chain. This lets the arms be
+  compared on gate hangs separately from the model's own work. The gate time
+  itself is logged as a platform papercut.
+
 ## Question
 
 With Opus 5.5 implementing and gpt-6.1-sol verifying, does moving fix and
