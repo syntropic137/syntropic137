@@ -1,0 +1,13 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index 95273fe..75bc0d5 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -128,7 +128,7 @@ class _Brackets:
+         """Note a word whose meaning a later ``{`` or ``:`` depends on."""
+         if word in {"function", "class"}:
+             # A declaration's body is a block; an expression's ends an operand.
+-            self.bodies.append((len(self.frames), not statement_starts))
++            self.bodies.append((len(self.frames), False))
+         elif word in {"case", "default"}:
+             self.frames[-1].cases += 1
+ 

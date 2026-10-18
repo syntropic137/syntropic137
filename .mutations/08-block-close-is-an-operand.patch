@@ -1,15 +1,15 @@
 diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
-index 140c145cb..23c355c57 100644
+index 95273fe..d951e2d 100644
 --- a/scripts/ts_comments.py
 +++ b/scripts/ts_comments.py
-@@ -255,7 +255,9 @@ class _Scanner:
-                 if nested and not blocks:
-                     return
-                 # After a block a statement starts, so a ``/`` opens a regex.
--                operand_expected = blocks.pop() if blocks else False
-+                if blocks:
-+                    blocks.pop()
-+                operand_expected = False
-             else:
-                 operand_expected = True
+@@ -155,7 +155,9 @@ class _Brackets:
+             return self.conditions.pop() if self.conditions else False
+         if char == "}":
+             # After a block a statement starts, so a ``/`` opens a regex.
+-            return self.blocks.pop() if self.blocks else False
++            if self.blocks:
++                self.blocks.pop()
++            return False
+         return False
  
+     def colon(self, *, labelled: bool) -> bool:

@@ -1,0 +1,13 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index 95273fe..3c4d7dd 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -404,7 +404,7 @@ class _Scanner:
+         while end < len(source) and (_is_word_char(source[end]) or source[end] in ".-:"):
+             end += 1
+         after = _skip_trivia(source, end)
+-        if source[self.i + 1 : end] == "const" and _is_word_char(source[after : after + 1] or " "):
++        if False and _is_word_char(source[after : after + 1] or " "):
+             # ``<const T,>``: the modifier is not the name; judge what follows it.
+             end = after
+             while end < len(source) and _is_word_char(source[end]):

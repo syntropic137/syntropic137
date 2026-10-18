@@ -1,13 +1,13 @@
 diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
-index d14386a95..a70a5a876 100644
+index 95273fe..69df7a8 100644
 --- a/scripts/ts_comments.py
 +++ b/scripts/ts_comments.py
-@@ -166,7 +166,7 @@ class _Scanner:
-                 continue
-             self.i += 1
-             if char == "(":
--                conditions.append(previous_word in _CONDITION_KEYWORDS)
-+                conditions.append(False)
-                 operand_expected = True
-             elif char == ")":
-                 operand_expected = conditions.pop() if conditions else False
+@@ -135,7 +135,7 @@ class _Brackets:
+     def open(self, char: str, *, previous_word: str, previous: str) -> None:
+         """Open ``(``, ``[`` or ``{``, after the word and token before it."""
+         if char == "(":
+-            self.conditions.append(previous_word in _CONDITION_KEYWORDS)
++            self.conditions.append(False)
+             self.frames.append(_Frame("("))
+         elif char == "[":
+             self.frames.append(_Frame("["))

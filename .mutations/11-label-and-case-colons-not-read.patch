@@ -1,0 +1,13 @@
+diff --git a/scripts/ts_comments.py b/scripts/ts_comments.py
+index 95273fe..ffd54e8 100644
+--- a/scripts/ts_comments.py
++++ b/scripts/ts_comments.py
+@@ -166,7 +166,7 @@ class _Brackets:
+             return False
+         if frame.holds_statements and (frame.cases or labelled):
+             frame.cases -= 0 if labelled else 1
+-            return True
++            return False
+         return False
+ 
+     def statement_end(self) -> None:
