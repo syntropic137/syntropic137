@@ -34,7 +34,7 @@ tokenizer is not a parser, and syntax it does not know can still fool it.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 #: Keywords after which a ``/`` starts a regex rather than dividing.
@@ -100,6 +100,79 @@ class _Frame:
     @property
     def holds_statements(self) -> bool:
         return self.kind in {"", "{"}
+
+
+@dataclass
+class _Brackets:
+    """The open brackets around the scan position, and what each one means."""
+
+    #: Per open ``{``: whether it opens a block, whose ``}`` ends no operand.
+    blocks: list[bool] = field(default_factory=list[bool])
+    #: Per open ``(``: whether it holds an if/for/while/with condition.
+    conditions: list[bool] = field(default_factory=list[bool])
+    #: Per open bracket, innermost last: how its colons read.
+    frames: list[_Frame] = field(default_factory=lambda: [_Frame("")])
+    #: Per ``function``/``class`` whose body is still ahead: the bracket depth
+    #: its ``{`` will open at, and whether the body ends an operand.
+    bodies: list[tuple[int, bool]] = field(default_factory=list[tuple[int, bool]])
+
+    def statement_starts(self, previous: str, *, operand_expected: bool) -> bool:
+        """Whether the token after ``previous`` starts a statement or declaration."""
+        if previous in _DECLARATION_MODIFIERS:
+            return True
+        return operand_expected and (
+            previous in _STATEMENT_AFTER or (previous == "{" and self.frames[-1].kind == "{")
+        )
+
+    def word(self, word: str, *, statement_starts: bool) -> None:
+        """Note a word whose meaning a later ``{`` or ``:`` depends on."""
+        if word in {"function", "class"}:
+            # A declaration's body is a block; an expression's ends an operand.
+            self.bodies.append((len(self.frames), not statement_starts))
+        elif word in {"case", "default"}:
+            self.frames[-1].cases += 1
+
+    def open(self, char: str, *, previous_word: str, previous: str) -> None:
+        """Open ``(``, ``[`` or ``{``, after the word and token before it."""
+        if char == "(":
+            self.conditions.append(previous_word in _CONDITION_KEYWORDS)
+            self.frames.append(_Frame("("))
+        elif char == "[":
+            self.frames.append(_Frame("["))
+        else:
+            if self.bodies and self.bodies[-1][0] == len(self.frames):
+                block = not self.bodies.pop()[1]
+            else:
+                block = _opens_block(previous)
+            self.blocks.append(block)
+            self.frames.append(_Frame("{" if block else "o"))
+
+    def close(self, char: str) -> bool:
+        """Close ``)``, ``]`` or ``}``; whether an operand is expected after it."""
+        if len(self.frames) > 1:
+            self.frames.pop()
+        if char == ")":
+            return self.conditions.pop() if self.conditions else False
+        if char == "}":
+            # After a block a statement starts, so a ``/`` opens a regex.
+            return self.blocks.pop() if self.blocks else False
+        return False
+
+    def colon(self, *, labelled: bool) -> bool:
+        """Read a ``:``; whether it ends a label or ``case`` head."""
+        frame = self.frames[-1]
+        if frame.ternaries:
+            frame.ternaries -= 1
+            return False
+        if frame.holds_statements and (frame.cases or labelled):
+            frame.cases -= 0 if labelled else 1
+            return True
+        return False
+
+    def statement_end(self) -> None:
+        """Read a ``;``: a body-less overload ``function f(): void;`` has no body to wait for."""
+        while self.bodies and self.bodies[-1][0] == len(self.frames):
+            self.bodies.pop()
 
 
 def _is_word_char(char: str) -> bool:
@@ -205,17 +278,9 @@ class _Scanner:
     def code(self, *, nested: bool) -> None:
         """Scan code to the end, or when ``nested`` past the ``}`` that closes it."""
         source = self.source
-        # Per open ``{``: whether it opens a block, whose ``}`` ends no operand.
-        blocks: list[bool] = []
-        # Per open bracket, innermost last: how its colons read.
-        frames = [_Frame("")]
-        # Per ``function``/``class`` whose body is still ahead: the bracket
-        # depth its ``{`` will open at, and whether the body ends an operand.
-        bodies: list[tuple[int, bool]] = []
+        brackets = _Brackets()
         # Whether the previous token was a word that can be a statement label.
         label = False
-        # Per open ``(``: whether it holds an if/for/while/with condition.
-        conditions: list[bool] = []
         operand_expected = True
         word = ""
         # Whether the previous token was ``.``, so a word now is a property name.
@@ -231,12 +296,8 @@ class _Scanner:
             previous_token = previous
             member, after_dot = after_dot, False
             labelled, label = label, False
-            statement_starts = previous_token in _DECLARATION_MODIFIERS or (
-                operand_expected
-                and (
-                    previous_token in _STATEMENT_AFTER
-                    or (previous_token == "{" and frames[-1].kind == "{")
-                )
+            statement_starts = brackets.statement_starts(
+                previous_token, operand_expected=operand_expected
             )
             if _is_word_char(char):
                 end = self.i
@@ -248,12 +309,8 @@ class _Scanner:
                     # ``async function`` is read as ``function`` in the same position.
                     self.i = end
                     continue
-                if word in {"function", "class"}:
-                    # A declaration's body is a block; an expression's ends an operand.
-                    bodies.append((len(frames), not statement_starts))
-                elif word in {"case", "default"}:
-                    frames[-1].cases += 1
-                label = statement_starts and frames[-1].holds_statements
+                brackets.word(word, statement_starts=statement_starts)
+                label = statement_starts and brackets.frames[-1].holds_statements
                 previous = source[self.i : end]
                 operand_expected = word in _REGEX_AFTER_KEYWORDS
                 self.i = end
@@ -295,58 +352,27 @@ class _Scanner:
                 operand_expected = False
                 continue
             self.i += 1
-            if char == "(":
-                conditions.append(previous_word in _CONDITION_KEYWORDS)
-                frames.append(_Frame("("))
+            if char in "([{":
+                brackets.open(char, previous_word=previous_word, previous=previous_token)
                 operand_expected = True
-            elif char == ")":
-                operand_expected = conditions.pop() if conditions else False
-                if len(frames) > 1:
-                    frames.pop()
-            elif char == "[":
-                frames.append(_Frame("["))
-                operand_expected = True
-            elif char == "]":
-                operand_expected = False
-                if len(frames) > 1:
-                    frames.pop()
+            elif char in ")]}":
+                if char == "}" and nested and not brackets.blocks:
+                    return
+                operand_expected = brackets.close(char)
             elif char == ".":
                 after_dot = True
                 operand_expected = True
-            elif char == "{":
-                if bodies and bodies[-1][0] == len(frames):
-                    block = not bodies.pop()[1]
-                else:
-                    block = _opens_block(previous_token)
-                blocks.append(block)
-                frames.append(_Frame("{" if block else "o"))
-                operand_expected = True
-            elif char == "}":
-                if nested and not blocks:
-                    return
-                # After a block a statement starts, so a ``/`` opens a regex.
-                operand_expected = blocks.pop() if blocks else False
-                if len(frames) > 1:
-                    frames.pop()
             elif char == "?":
                 if source.startswith("?", self.i):
                     self.i += 1
                 elif not source.startswith(".", self.i):
-                    frames[-1].ternaries += 1
-                operand_expected = True
-            elif char == ":":
-                frame = frames[-1]
-                if frame.ternaries:
-                    frame.ternaries -= 1
-                elif frame.holds_statements and (frame.cases or labelled):
-                    frame.cases -= 0 if labelled else 1
-                    previous = _STATEMENT_COLON
+                    brackets.frames[-1].ternaries += 1
                 operand_expected = True
             else:
-                if char == ";":
-                    # A body-less overload ``function f(): void;`` has no body to wait for.
-                    while bodies and bodies[-1][0] == len(frames):
-                        bodies.pop()
+                if char == ":" and brackets.colon(labelled=labelled):
+                    previous = _STATEMENT_COLON
+                elif char == ";":
+                    brackets.statement_end()
                 operand_expected = True
 
     def _template(self) -> None:
