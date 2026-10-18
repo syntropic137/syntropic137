@@ -36,6 +36,10 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator impo
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
 )
+from syn_domain.contexts.agent_sessions.slices.session_cost.unreported_cost import (
+    TurnCost,
+    cost_under_unreported_summary,
+)
 from syn_domain.projection_scan import read_by_keys
 from syn_shared.observed_model import RecordedModel, split_observation_model
 from syn_shared.pricing import parse_vendor_cost
@@ -355,13 +359,24 @@ class SessionCostProjection:
         session_cost.agent_model = summary_model.observed
         session_cost.requested_model = summary_model.requested
 
-        # An absent cost leaves the running one alone, and nothing recomputes it
-        # here: it was priced per observation with that observation's own model
-        # (#788), so re-pricing the totals under the summary's single model
-        # would be wrong for any session that spanned two. Leaving it is also
-        # what keeps a killed phase agreeing with the last figure the live path
-        # reported, instead of dropping to $0.00.
-        if (reported_cost := parse_vendor_cost(data.get("total_cost_usd"))) is not None:
+        # An absent cost is settled by the rule the SQL read path applies too
+        # (#1420): the turns' own per-model pricing stands, and the summary is
+        # never re-priced under its single model. See ``unreported_cost``.
+        reported_cost = parse_vendor_cost(data.get("total_cost_usd"))
+        if reported_cost is None:
+            settled = cost_under_unreported_summary(
+                TurnCost(
+                    total=session_cost.total_cost_usd,
+                    cost_by_model=session_cost.cost_by_model,
+                    unpriced_observation_count=session_cost.unpriced_observation_count,
+                ),
+                session_tokens,
+            )
+            session_cost.total_cost_usd = settled.total
+            session_cost.token_cost_usd = settled.total
+            session_cost.cost_by_model = dict(settled.cost_by_model)
+            session_cost.unpriced_observation_count = settled.unpriced_observation_count
+        else:
             session_cost.total_cost_usd = reported_cost
             session_cost.token_cost_usd = session_cost.total_cost_usd
             # The breakdown follows the summary too, keyed as the SQL path keys

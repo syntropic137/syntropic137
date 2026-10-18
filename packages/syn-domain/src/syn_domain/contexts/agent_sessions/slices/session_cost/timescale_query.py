@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -28,6 +28,10 @@ if TYPE_CHECKING:
     from syn_shared.observed_model import RecordedModel
 from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
+from syn_domain.contexts.agent_sessions.slices.session_cost.unreported_cost import (
+    TurnCost,
+    cost_under_unreported_summary,
+)
 from syn_shared.events import (
     SESSION_STARTED,
     SESSION_SUMMARY,
@@ -222,6 +226,10 @@ class PricedSessionTotals:
     workspace_id: str | None
     execution_id: str | None
     phase_id: str | None
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens + self.cache_creation + self.cache_read
 
 
 @dataclass(frozen=True)
@@ -464,6 +472,37 @@ def price_session_rows(
     return acc.to_totals()
 
 
+def turn_cost(totals: PricedSessionTotals | None) -> TurnCost:
+    """What a session's priced ``token_usage`` groups add up to; nothing when there are none."""
+    if totals is None:
+        return TurnCost()
+    return TurnCost(
+        total=totals.total_cost,
+        cost_by_model=dict(totals.cost_by_model),
+        unpriced_observation_count=totals.unpriced_observation_count,
+    )
+
+
+def settle_unreported_summary(
+    summary: PricedSessionTotals, turns: PricedSessionTotals | None
+) -> PricedSessionTotals:
+    """A summary with no ``total_cost_usd``, costed as its turns priced (#1420).
+
+    Tokens and model attribution stay the summary's; every cost field is
+    replaced by ``cost_under_unreported_summary``, the rule the replayed
+    projection applies to the same events.
+    """
+    settled = cost_under_unreported_summary(turn_cost(turns), summary.total_tokens)
+    return replace(
+        summary,
+        total_cost=settled.total,
+        cost_by_model=dict(settled.cost_by_model),
+        unpriced_observation_count=settled.unpriced_observation_count,
+        cost_by_token_type=turns.cost_by_token_type if turns else None,
+        cost_by_token_type_basis=turns.cost_by_token_type_basis if turns else None,
+    )
+
+
 def _row_observation_count(row: asyncpg.Record) -> int:
     """How many raw ``agent_events`` rows this aggregated group stands for.
 
@@ -637,9 +676,15 @@ class TimescaleSessionCostQuery:
 
             # A summary row with a NULL total_input is not usable, so those
             # sessions fall back to token_usage - the same test the
-            # single-session path made, applied once to the whole page.
+            # single-session path made, applied once to the whole page. A
+            # summary that reports no cost needs the token_usage rows too: they
+            # are what its cost is priced from (#1420).
             fallback_ids = [
-                sid for sid in ids if sid not in summaries or summaries[sid]["total_input"] is None
+                sid
+                for sid in ids
+                if sid not in summaries
+                or summaries[sid]["total_input"] is None
+                or _row_sdk_cost(summaries[sid]) is None
             ]
             fallback: dict[str, list[asyncpg.Record]] = {}
             if fallback_ids:
@@ -671,6 +716,11 @@ class TimescaleSessionCostQuery:
         summary = page.summaries.get(session_id)
         if summary is not None and summary["total_input"] is not None:
             totals = price_session_rows([summary], self._cost_calculator, session_id)
+            if totals is not None and _row_sdk_cost(summary) is None:
+                turns = price_session_rows(
+                    page.fallback.get(session_id, []), self._cost_calculator, session_id
+                )
+                totals = settle_unreported_summary(totals, turns)
         else:
             summary = None
             totals = price_session_rows(

@@ -9,7 +9,6 @@ See #532 for why reads and writes were separated.
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -33,13 +32,18 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator impo
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
     price_session_rows,
+    turn_cost,
+)
+from syn_domain.contexts.agent_sessions.slices.session_cost.unreported_cost import (
+    TurnCost,
+    cost_under_unreported_summary,
 )
 from syn_shared.events import (
     SESSION_STARTED,
     SESSION_SUMMARY,
     TOKEN_USAGE,
 )
-from syn_shared.pricing import PricedAmount, PricingStatus, parse_vendor_cost
+from syn_shared.pricing import parse_vendor_cost
 
 # List all sessions with cost data from session_summary (authoritative).
 _LIST_ALL_FROM_SUMMARY_QUERY = f"""
@@ -101,36 +105,12 @@ GROUP BY session_id
 """
 
 
-def _observation_count(row: object) -> int:
-    """How many raw ``agent_events`` rows an aggregated row stands for.
+def _attribute_summary_model(sc: SessionCost, recorded: RecordedModel) -> None:
+    """Attribute a summary-built session's tokens the way ``price_session_rows`` would.
 
-    The token_usage list query projects ``COUNT(*) AS observation_count``. The
-    session_summary query returns one finalized row per session and has no such
-    column, so it counts as 1 - non-zero, which is all a client needs to render
-    "unpriced" rather than "$0.00".
-    """
-    try:
-        raw = row["observation_count"]  # type: ignore[index]
-    except (KeyError, IndexError):
-        return 1
-    return int(raw or 1)
-
-
-def _unpriced_count(priced: PricedAmount, row: object) -> int:
-    """Observations this row contributes to ``unpriced_observation_count``."""
-    if priced.is_priced:
-        return 0
-    return _observation_count(row)
-
-
-def _attribute_summary_model(
-    sc: SessionCost, recorded: RecordedModel, priced_cost: Decimal | None
-) -> None:
-    """Attribute a summary-built session the way ``price_session_rows`` would.
-
-    ``agent_model`` is only ever a REPORTED model and the priced cost is filed
-    under ``cost_key`` - the reported id or the unknown bucket - so the list
-    path and the single-session path agree (ADR-067).
+    ``agent_model`` is only ever a REPORTED model, so the list path and the
+    single-session path agree (ADR-067). A reported cost is filed under
+    ``cost_key`` - the reported id or the unknown bucket - by the caller.
     """
     sc.agent_model = recorded.observed
     sc.requested_model = recorded.requested
@@ -139,8 +119,6 @@ def _attribute_summary_model(
         sc.tokens_by_model = {recorded.observed: tokens}
     if recorded.requested:
         sc.tokens_by_requested_model = {recorded.requested: tokens}
-    if priced_cost is not None:
-        sc.cost_by_model = {recorded.cost_key: priced_cost}
 
 
 class SessionCostQueryService:
@@ -202,20 +180,21 @@ class SessionCostQueryService:
             tool_counts = await tool_call_counts.by_session(conn)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             started_map = await self._fetch_started_map(conn)
 
-            results: list[SessionCost] = []
-            for row in summary_rows:
-                results.append(self._build_from_summary(row, tool_counts, started_map))
-
             # token_usage rows are one per (session, model) now, so they must be
             # regrouped per session before pricing - otherwise a two-model
             # session would surface as two SessionCost records.
             rows_by_session: dict[str, list[object]] = {}
             for row in token_rows:
-                sid = row["session_id"]  # type: ignore[index]
+                rows_by_session.setdefault(row["session_id"], []).append(row)  # type: ignore[index]
+
+            results: list[SessionCost] = []
+            for row in summary_rows:
+                turn_rows = rows_by_session.get(row["session_id"], [])  # type: ignore[index]
+                results.append(self._build_from_summary(row, tool_counts, started_map, turn_rows))
+
+            for sid, session_rows in rows_by_session.items():
                 if sid in summarized_session_ids:
                     continue
-                rows_by_session.setdefault(sid, []).append(row)
-            for sid, session_rows in rows_by_session.items():
                 built = self._build_from_token_usage(sid, session_rows, tool_counts, started_map)
                 if built is not None:
                     results.append(built)
@@ -226,51 +205,28 @@ class SessionCostQueryService:
         rows = await conn.fetch(_STARTED_AT_BY_SESSION_QUERY, SESSION_STARTED)  # type: ignore[union-attr]
         return {row["session_id"]: row["started_at"] for row in rows}  # type: ignore[index]
 
-    def _resolve_cost(self, row: object, model: str | None) -> PricedAmount:
-        """Resolve cost from sdk_cost field or calculate from token counts.
-
-        ``model`` comes from the same row (``agent_model``, a single session's
-        model - a session is one agent/phase/sandbox, see #788) and is used
-        whenever the SDK-reported cost is absent and we must price from raw
-        token counts.
-
-        Returns a ``PricedAmount`` rather than a ``Decimal`` so a session whose
-        model has no rate reaches the API as "unpriced" instead of as a zero
-        that reads identically to free work (issue #890).
-        """
-        sdk_cost = parse_vendor_cost(row["sdk_cost"])  # type: ignore[index]
-        if sdk_cost is not None:
-            return PricedAmount(cost=sdk_cost, status=PricingStatus.PRICED, model=model)
-        return self._cost_calculator.calculate_token_cost(
-            input_tokens=row["total_input"] or 0,  # type: ignore[index]
-            output_tokens=row["total_output"] or 0,  # type: ignore[index]
-            cache_creation=row["cache_creation"] or 0,  # type: ignore[index]
-            cache_read=row["cache_read"] or 0,  # type: ignore[index]
-            model=model,
-            context=f"session_id={row['session_id']}",  # type: ignore[index]
-        )
-
     def _build_from_summary(
         self,
         row: object,
         tool_counts: dict[str, int],
         started_map: dict[str, object],
+        turn_rows: Sequence[object] = (),
     ) -> SessionCost:
-        """Build a SessionCost from a session_summary row."""
+        """Build a SessionCost from a session_summary row.
+
+        ``turn_rows`` are the session's model-grouped token_usage rows. They
+        price the session only when the summary reports no cost (#1420).
+        """
         sid = row["session_id"]  # type: ignore[index]
         # Classified, not read raw: a legacy summary's `model` is the REQUEST
         # (often an alias), and reporting it as the model that ran is exactly
         # what ADR-067 forbids. Priced as before, keyed by what ran.
         recorded = recorded_model_from_row(cast("asyncpg.Record", row), model_column="agent_model")
-        priced = self._resolve_cost(row, recorded.pricing_model)
-        cost = priced.cost if priced.cost is not None else Decimal("0")
         sc = SessionCost(session_id=sid)
         sc.input_tokens = row["total_input"] or 0  # type: ignore[index]
         sc.output_tokens = row["total_output"] or 0  # type: ignore[index]
         sc.cache_creation_tokens = row["cache_creation"] or 0  # type: ignore[index]
         sc.cache_read_tokens = row["cache_read"] or 0  # type: ignore[index]
-        sc.total_cost_usd = cost
-        sc.token_cost_usd = cost
         sc.tool_calls = tool_counts.get(sid, 0)
         sc.turns = row["num_turns"] or 0  # type: ignore[index]
         sc.record_measured(CostField.TURNS)
@@ -281,8 +237,20 @@ class SessionCostQueryService:
         sc.started_at = started_map.get(sid)  # type: ignore[arg-type]
         sc.completed_at = row["completed_at"]  # type: ignore[index]
         sc.is_finalized = True
-        sc.unpriced_observation_count = _unpriced_count(priced, row)
-        _attribute_summary_model(sc, recorded, cost if priced.is_priced else None)
+        _attribute_summary_model(sc, recorded)
+        sdk_cost = parse_vendor_cost(row["sdk_cost"])  # type: ignore[index]
+        if sdk_cost is not None:
+            cost = TurnCost(total=sdk_cost, cost_by_model={recorded.cost_key: sdk_cost})
+        else:
+            # The rule the projection and the single-session path apply too.
+            turns = price_session_rows(
+                cast("Sequence[asyncpg.Record]", turn_rows), self._cost_calculator, sid
+            )
+            cost = cost_under_unreported_summary(turn_cost(turns), sc.total_tokens)
+        sc.total_cost_usd = cost.total
+        sc.token_cost_usd = cost.total
+        sc.cost_by_model = dict(cost.cost_by_model)
+        sc.unpriced_observation_count = cost.unpriced_observation_count
         return sc
 
     def _build_from_token_usage(
