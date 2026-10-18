@@ -427,6 +427,24 @@ _MUTATIONS: dict[str, tuple[str, str, str]] = {
         '\nswitch (plantedX) { case 1: {} /[//]/.test(plantedX); const plantedKey = "agentId" }\n',
         "vendor-parsing",
     ),
+    "vendor-parsing-client-after-declaration-in-function-expression-regex": (
+        _CLIENT_FILE,
+        "\nconst plantedF = function () { function plantedG() {} /[//]/.test(plantedX);"
+        ' const plantedKey = "agentId" }\n',
+        "vendor-parsing",
+    ),
+    "vendor-parsing-client-after-class-in-function-expression-regex": (
+        _CLIENT_FILE,
+        "\nconst plantedF = function () { class PlantedG {} /[//]/.test(plantedX);"
+        ' const plantedKey = "agentId" }\n',
+        "vendor-parsing",
+    ),
+    "vendor-parsing-client-after-label-in-function-expression-regex": (
+        _CLIENT_FILE,
+        "\nconst plantedF = function () { plantedLabel: {} /[//]/.test(plantedX);"
+        ' const plantedKey = "agentId" }\n',
+        "vendor-parsing",
+    ),
     "harness-import-api": (
         _INVENTORY_ROUTE,
         "\n\nfrom agentic_isolation.harnesses.claude.evidence import ClaudeNativeEvidenceReader\n",

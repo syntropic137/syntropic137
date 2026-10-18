@@ -106,7 +106,8 @@ class _Frame:
 class _Brackets:
     """The open brackets around the scan position, and what each one means."""
 
-    #: Per open ``{``: whether it opens a block, whose ``}`` ends no operand.
+    #: Per open ``{``: whether its ``}`` ends no operand, as a block's or a
+    #: declaration's body's does. An expression's body still holds statements.
     blocks: list[bool] = field(default_factory=list[bool])
     #: Per open ``(``: whether it holds an if/for/while/with condition.
     conditions: list[bool] = field(default_factory=list[bool])
@@ -141,11 +142,12 @@ class _Brackets:
             self.frames.append(_Frame("["))
         else:
             if self.bodies and self.bodies[-1][0] == len(self.frames):
-                block = not self.bodies.pop()[1]
+                # A body holds statements either way; only its ``}`` differs.
+                block, holds_statements = not self.bodies.pop()[1], True
             else:
-                block = _opens_block(previous)
+                block = holds_statements = _opens_block(previous)
             self.blocks.append(block)
-            self.frames.append(_Frame("{" if block else "o"))
+            self.frames.append(_Frame("{" if holds_statements else "o"))
 
     def close(self, char: str) -> bool:
         """Close ``)``, ``]`` or ``}``; whether an operand is expected after it."""

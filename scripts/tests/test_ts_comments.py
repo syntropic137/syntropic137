@@ -276,6 +276,28 @@ def test_division_after_an_expression_body_does_not_start_a_regex(source: str) -
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("pattern", ["/[//]/", "/[/*]/"])
+@pytest.mark.parametrize(
+    "statement",
+    ["function g() {}", "class G {}", "label: {}", "if (ok) {}"],
+    ids=["function", "class", "label", "if-block"],
+)
+@pytest.mark.parametrize(
+    "body",
+    ["function() {", "class { m() {", "async function() {"],
+    ids=["function-expression", "class-expression-method", "async-function-expression"],
+)
+def test_an_expression_body_still_holds_statements(body: str, statement: str, pattern: str) -> None:
+    # Only the body's ``}`` ends an operand; its contents are statements (#2016 review).
+    close = "}" * body.count("{")
+    source = (
+        f"const k = 'sessionId'; const f = {body} {statement} {pattern}.test(x);"
+        f" const j = 'agentId'; {close} / 2; // `sessionId`"
+    )
+    assert blanked(source) == spaced(source, "// `sessionId`")
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "source",
     [
