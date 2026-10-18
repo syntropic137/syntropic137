@@ -22,7 +22,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Collection, Mapping, Sequence
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
         ResumeExecutionCommand,
@@ -51,6 +51,27 @@ if TYPE_CHECKING:
 RESUMABLE_STATUSES: Final[frozenset[ExecutionStatus]] = frozenset(
     {ExecutionStatus.FAILED, ExecutionStatus.INTERRUPTED}
 )
+
+
+def refuse_reopening(completed_phase_ids: Collection[str], phase_id: str, verb: str) -> None:
+    """A completed phase's record is closed (#1453).
+
+    Three commands could each reopen it - start, complete, collect - and
+    each corrupts it differently: a second start lets a retry drop the
+    artifacts of the attempt that did complete, a second completion inflates
+    the completed count and can append another attempt's artifact, and a
+    late collection injects artifacts into a phase that finished. A resume
+    inherits the completed prefix, so all three end up handing a child work
+    whose inputs are not what the record says (ADR-014 s7).
+
+    One guard rather than three copies: the doors are different, the rule is
+    the same, and a rule spelled once cannot be closed on two of them. The
+    caller's aggregate passes its own completed ids; the caller raises nothing
+    itself.
+    """
+    if phase_id in completed_phase_ids:
+        msg = f"Cannot {verb} phase {phase_id}: it has already completed"
+        raise ValueError(msg)
 
 
 def completed_prefix(

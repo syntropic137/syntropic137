@@ -22,6 +22,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ArtifactsCollectedCommand,
+    CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
     ResumeExecutionCommand,
@@ -196,3 +197,63 @@ class TestTheStartCommandRefusesToWriteOne:
                 )
             )
         assert aggregate.get_uncommitted_events() == []
+
+
+def _complete_execution() -> CompleteExecutionCommand:
+    return CompleteExecutionCommand(
+        execution_id=EXECUTION,
+        completed_phases=1,
+        total_phases=3,
+        total_input_tokens=0,
+        total_output_tokens=0,
+        total_cache_creation_tokens=0,
+        total_cache_read_tokens=0,
+        duration_seconds=1.0,
+        artifact_ids=[],
+    )
+
+
+class TestAnUnorderedExecutionIsNeverCompletedAsSuccess:
+    """No next phase is not "all done" when nothing was sequenced (#1455)."""
+
+    @NOT_A_TOTAL_ORDER
+    def test_completion_is_refused(self, phases: list[tuple[str, int]]) -> None:
+        aggregate = _replayed(phases)
+
+        with pytest.raises(ValueError, match="unordered"):
+            aggregate.complete_execution(_complete_execution())
+
+        assert aggregate.get_uncommitted_events() == []
+
+    @NOT_A_TOTAL_ORDER
+    def test_it_can_still_be_failed(self, phases: list[tuple[str, int]]) -> None:
+        aggregate = _replayed(phases)
+
+        aggregate.fail_execution(
+            FailExecutionCommand(
+                execution_id=EXECUTION,
+                error="phase order is not a total order",
+                error_type="InvalidPhaseOrder",
+                failed_phase_id=None,
+                completed_phases=0,
+                total_phases=3,
+                classification=FailureClassification.UNCLASSIFIED,
+            )
+        )
+
+        assert aggregate.status.value == "failed"
+
+    def test_a_total_order_still_completes(self) -> None:
+        aggregate = _replayed([("A", 1), ("B", 2), ("C", 3)])
+
+        aggregate.complete_execution(_complete_execution())
+
+        assert aggregate.status.value == "completed"
+
+    def test_a_start_without_phase_definitions_still_completes(self) -> None:
+        """The legacy "does not sequence" case is not a conflict."""
+        aggregate = _replayed([])
+
+        aggregate.complete_execution(_complete_execution())
+
+        assert aggregate.status.value == "completed"

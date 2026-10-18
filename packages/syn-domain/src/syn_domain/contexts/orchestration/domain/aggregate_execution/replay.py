@@ -68,6 +68,37 @@ class PhaseDefinitionPayload(BaseModel):
 _PHASE_DEFINITIONS = TypeAdapter(list[PhaseDefinitionPayload])
 
 
+def _read_payloads(raw_defs: object) -> list[PhaseDefinitionPayload]:
+    if not raw_defs:
+        return []
+    try:
+        return _PHASE_DEFINITIONS.validate_python(raw_defs)
+    except ValidationError:
+        logger.warning("Unreadable phase_definitions on a replayed start event; treating as absent")
+        return []
+
+
+def replay_phases(raw_defs: object) -> tuple[list[PhaseDefinition], str | None]:
+    """The sequenced phases of a replayed start, and why they are empty if they conflict.
+
+    `parse_phase_definitions` answers a conflict with an empty list so the
+    execution stays loadable, inspectable and cancellable (#1455). That empty
+    list is indistinguishable from "this start never carried phases", which the
+    processor reads as nothing left to run. The reason is kept beside it so the
+    aggregate can refuse to COMPLETE such a run instead of recording success
+    over phases that never ran. Absent or unreadable payloads carry no reason:
+    they are the documented legacy "does not sequence" case.
+    """
+    return parse_phase_definitions(raw_defs), phase_order_conflict(_read_payloads(raw_defs))
+
+
+def refuse_unordered_completion(conflict: str | None) -> None:
+    """Nothing was sequenced, so "no pending phase" is not "all done"."""
+    if conflict is not None:
+        msg = f"Cannot complete an execution whose phases are unordered: {conflict}"
+        raise ValueError(msg)
+
+
 def parse_phase_definitions(raw_defs: object) -> list[PhaseDefinition]:
     """The replayed phase definitions, sorted, or empty when unreadable.
 
@@ -87,12 +118,8 @@ def parse_phase_definitions(raw_defs: object) -> list[PhaseDefinition]:
     exactly that sense - there is no order to sequence by - so it is refused the
     same way rather than by raising during replay.
     """
-    if not raw_defs:
-        return []
-    try:
-        parsed = _PHASE_DEFINITIONS.validate_python(raw_defs)
-    except ValidationError:
-        logger.warning("Unreadable phase_definitions on a replayed start event; treating as absent")
+    parsed = _read_payloads(raw_defs)
+    if not parsed:
         return []
     conflict = phase_order_conflict(parsed)
     if conflict is not None:

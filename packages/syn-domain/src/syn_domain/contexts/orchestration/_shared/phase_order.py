@@ -48,3 +48,10 @@ def phase_order_conflict(phases: Iterable[OrderedPhase]) -> str | None:
 
 def _repeated[T: (str, int)](values: Iterable[T]) -> list[T]:
     return sorted(value for value, count in Counter(values).items() if count > 1)
+
+
+def refuse_phase_order_conflict(phases: Iterable[OrderedPhase]) -> None:
+    """Raise `ValueError` naming the conflict, for a writer that must not record a tie."""
+    conflict = phase_order_conflict(phases)
+    if conflict is not None:
+        raise ValueError(conflict)
