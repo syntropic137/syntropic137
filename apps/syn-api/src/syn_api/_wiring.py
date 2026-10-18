@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from syn_adapters.storage.skill_storage.memory import InMemorySkillStorage
     from syn_adapters.storage.skill_storage.minio import MinioSkillStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
+    from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
     from syn_api.services.claude_plugin_materializer import ClaudePluginMaterializer
     from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
     from syn_api.services.skill_materializer import SkillMaterializer
@@ -291,12 +292,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     return WorkflowExecutionProcessor(
         execution_repository=get_workflow_execution_repository(),
         session_repository=get_session_repository(),
-        workspace_service=WorkspaceService.create(
-            config=ws_config,
-            environment=_build_workspace_env(),
-            capture_source_instance_id=capture_source_id,
-            platform_tokens=get_platform_token_service(),
-        ),
+        workspace_service=build_workspace_service(ws_config, capture_source_id),
         artifact_repository=get_artifact_repository(),
         artifact_content_storage=artifact_storage,
         artifact_query=artifact_query,
@@ -324,6 +320,23 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         interrupt_budget_seconds=_settings.execution.interrupt_budget_s,
         # #1310 1.3: None (the flag off) is today's path - start and drain here.
         run_queue=await get_execution_run_queue(),
+    )
+
+
+def build_workspace_service(
+    ws_config: WorkspaceServiceConfig, capture_source_instance_id: str | None
+) -> WorkspaceService:
+    """The production workspace service: the Docker BackendKit under HostCredentials (#1914).
+
+    A function of its own so a test can build exactly what production runs.
+    No credential policy is passed, deliberately: the executor this wiring
+    serves runs real agents, which need the host's credentials.
+    """
+    return WorkspaceService.create(
+        config=ws_config,
+        environment=_build_workspace_env(),
+        capture_source_instance_id=capture_source_instance_id,
+        platform_tokens=get_platform_token_service(),
     )
 
 

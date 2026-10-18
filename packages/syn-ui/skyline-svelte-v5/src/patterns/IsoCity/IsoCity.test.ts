@@ -208,7 +208,7 @@ describe('IsoCity coverage (codex review of #1856: unloaded history is not zero)
     const from = addDays(hist.start, 26 * 7)
     const { container } = render(IsoCity, { days: busy.filter((d) => d.date >= from), today: TODAY, coverage: { from, state: 'error' }, onretry })
     const first = container.querySelector<HTMLButtonElement>('.sky-iso__bar')!
-    expect(first.getAttribute('aria-label')).toBe('Week of Oct 13: did not load')
+    expect(first.getAttribute('aria-label')).toBe('Week of Oct 13 (UTC): did not load')
     expect(first.dataset.status).toBe('error')
     await fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(onretry).toHaveBeenCalledOnce()
@@ -417,5 +417,19 @@ describe('IsoCity "Now" when no session started today (verify B1 on #2009)', () 
     render(IsoCity, { days: heatmapToSkylineDays([olderBucket]), today: TODAY, selected: OLDER, onselect })
     await fireEvent.click(screen.getByRole('button', { name: 'Now' }))
     expect(onselect).toHaveBeenLastCalledWith({ date: TODAY, sessions: 0 })
+  })
+})
+
+describe('IsoCity says its days are UTC days (#1939 interim)', () => {
+  // The rollup cuts days with utc_day(time), so a run at 23:30 in New York lands on tomorrow's block.
+  // Until the local-day decision, every place that names a day says which day it means.
+  it('labels the range, the week strip, the day blocks and the readout as UTC', () => {
+    const { container } = render(IsoCity, { days: busy, today: TODAY, selected: TODAY })
+    expect(container.querySelector('.sky-iso__range')?.textContent).toMatch(/, 2026 \(UTC\)$/)
+    const bars = [...container.querySelectorAll<HTMLButtonElement>('.sky-iso__bar')]
+    expect(bars.length).toBeGreaterThan(0)
+    expect(bars.every((b) => /^Week of \w{3} \d{1,2} \(UTC\): /.test(b.getAttribute('aria-label') ?? ''))).toBe(true)
+    expect(screen.getByRole('button', { name: /^Fri, Oct 9 \(UTC\): \d+ sessions?/ })).toBeTruthy()
+    expect(container.querySelector('.sky-readout__date')?.textContent).toBe('Fri, Oct 9, 2026 (UTC)')
   })
 })
