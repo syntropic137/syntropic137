@@ -271,7 +271,9 @@ def test_an_index_flag_hiding_an_edit_forces_an_isolated_checkout(repo: Repo, fl
     assert sha == head
     assert where != str(repo.dir)
     assert repo.git("ls-remote", "origin") == ""
-    assert repo.git("ls-files", "-v", "payload.txt") == f"{INDEX_FLAGS[flag]} payload.txt", "flag cleared"
+    assert repo.git("ls-files", "-v", "payload.txt") == f"{INDEX_FLAGS[flag]} payload.txt", (
+        "flag cleared"
+    )
 
 
 @pytest.mark.parametrize("flag", INDEX_FLAGS)
@@ -323,4 +325,3 @@ def test_a_failing_git_status_is_not_taken_as_clean(repo: Repo) -> None:
     assert result.returncode != 0
     assert all(where != str(repo.dir) for _, where, _ in repo.checked())
     assert head not in repo.git("ls-remote", "origin")
-
