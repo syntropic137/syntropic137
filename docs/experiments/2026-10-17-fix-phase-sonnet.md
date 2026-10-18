@@ -9,6 +9,16 @@ evidence of a large quality drop on implementation, not equivalence. This
 experiment's production guards (reverify block rate, escaped defects over
 14 days) are the actual safety net.
 
+## Amendment 1 (2026-10-18, before any run): explicit model id
+
+The treatment pins `claude-sonnet-5-5`, not the `sonnet` alias. The CLI may
+resolve that alias to an older Sonnet, which is the same condition E2 used.
+The workflow is `workflows/sdlc/implement-v4-precheck-sonnet-fix/`. It is a
+copy of the control: `diff` shows only id, name, description and the two
+fix-phase model lines. The mechanism check: on the first treatment run,
+`phases[]` for fix (and fix_2, if it runs) must read `claude-sonnet-5-5`, and
+every other phase must match the control. If not, abort.
+
 ## Question
 
 With Opus 5.5 implementing and gpt-6.1-sol verifying, does moving fix and
