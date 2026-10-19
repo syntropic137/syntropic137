@@ -180,6 +180,11 @@ the outcome:
   (the ids `.mutations/README.md` maps the patches to), and whether a
   `<!-- mutation-evidence -->` PR comment already reports PASS for this head
   SHA. The orchestrator removes `.mutations/` after that PASS (#2028).
+  `CI Success` is red whenever `mutations-not-merged` is, so read its failing
+  prerequisites (`gh run view <run-id> --json jobs`). When
+  `mutations-not-merged` is the only one that failed, `CI Success` is the same
+  evidence: hand both off together under that heading, never to a fix phase.
+  When any other prerequisite also failed, that failure is a blocker as usual.
 - **Skipped by design for this PR:** CI deliberately does not run the job for
   this PR's base or event. Prove it from the job's `if:` condition in
   `.github/workflows/` (read it, never edit it): for example

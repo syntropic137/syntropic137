@@ -24,13 +24,21 @@ from syn_domain.contexts.orchestration._shared.yaml_to_command import (
 
 pytestmark = pytest.mark.unit
 
-_SDLC = Path(__file__).resolve().parents[2] / "workflows" / "sdlc"
+_WORKFLOWS = Path(__file__).resolve().parents[2] / "workflows"
 
 #: The workflows whose phases push to, or certify, a PR branch.
-_PR_WORKFLOWS = ("implement", "implement-v3", "implement-v4-precheck", "reverify-pr")
+_PR_WORKFLOWS = (
+    "sdlc/implement",
+    "sdlc/implement-v3",
+    "sdlc/implement-v4-precheck",
+    "sdlc/reverify-pr",
+    "custom/bake-opus",
+    "custom/bake-haiku",
+    "custom/bake-sonnet",
+)
 
 #: The workflows whose verifiers sort open items into precheck classes.
-_PRECHECK_WORKFLOWS = ("implement-v4-precheck",)
+_PRECHECK_WORKFLOWS = ("sdlc/implement-v4-precheck",)
 
 #: Phases that push to a PR branch that may carry `.mutations/`.
 _PUSHERS = frozenset({"implement", "prepare", "fix", "fix_2"})
@@ -48,10 +56,24 @@ _ORCHESTRATOR_EVIDENCE = (
     " class too, and is never `REPAIRABLE`"
 )
 
+#: `CI Success` goes red with `mutations-not-merged`; it is the same evidence
+#: only when that is its sole failed prerequisite.
+_AGGREGATE_ONLY = (
+    "When `mutations-not-merged` is the only one that failed, `CI Success` is the"
+    " same evidence: hand both off together under that heading, never to a fix phase."
+)
+_AGGREGATE_MIXED = (
+    "When any other prerequisite also failed, that failure is a blocker as usual."
+)
+_AGGREGATE_PRECHECK = (
+    "A red `CI Success` is the same class when `mutations-not-merged` is the only"
+    " prerequisite that failed"
+)
+
 
 def _prompts(workflow: str) -> dict[str, str]:
     """Each installed phase's prompt, whitespace folded, keyed by phase id."""
-    definition = WorkflowDefinition.from_file(_SDLC / workflow / "workflow.yaml")
+    definition = WorkflowDefinition.from_file(_WORKFLOWS / workflow / "workflow.yaml")
     command = build_command_from_definition(definition)
     return {p.phase_id: re.sub(r"\s+", " ", p.prompt_template or "") for p in command.phases}
 
@@ -78,6 +100,19 @@ def test_no_verifier_makes_a_red_mutations_check_a_blocker(workflow: str) -> Non
         )
 
 
+@pytest.mark.parametrize("workflow", _PR_WORKFLOWS)
+def test_the_aggregate_check_is_evidence_only_when_it_is_the_sole_failure(
+    workflow: str,
+) -> None:
+    prompts = _prompts(workflow)
+    verifiers = [pid for pid, text in prompts.items() if _RED_BLOCKS in text]
+    assert verifiers, f"{workflow} has no verifier"
+    for phase_id in verifiers:
+        text = prompts[phase_id]
+        assert _AGGREGATE_ONLY in text, f"{workflow}/{phase_id}: evidence-only pair"
+        assert _AGGREGATE_MIXED in text, f"{workflow}/{phase_id}: mixed case"
+
+
 @pytest.mark.parametrize("workflow", _PRECHECK_WORKFLOWS)
 def test_precheck_classes_a_red_mutations_check_as_orchestrator_evidence(workflow: str) -> None:
     prompts = _prompts(workflow)
@@ -85,3 +120,4 @@ def test_precheck_classes_a_red_mutations_check_as_orchestrator_evidence(workflo
     assert verifiers, f"{workflow} has no verifier"
     for phase_id in verifiers:
         assert _ORCHESTRATOR_EVIDENCE in prompts[phase_id], f"{workflow}/{phase_id}"
+        assert _AGGREGATE_PRECHECK in prompts[phase_id], f"{workflow}/{phase_id}"
