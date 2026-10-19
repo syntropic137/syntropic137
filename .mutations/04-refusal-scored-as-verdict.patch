@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index b3c1a0089..48723045d 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1160,7 +1160,7 @@ class AnthropicMessages:
+         except httpx.HTTPError as exc:
+             raise JudgeError(f"LLM judge call to {model} failed: {exc}") from exc
+         reply = _MessagesReply.model_validate(response.json())
+-        if reply.stop_reason != "end_turn":
++        if reply.stop_reason not in ("end_turn", "refusal", "max_tokens"):
+             raise JudgeError(f"LLM judge call to {model} stopped with {reply.stop_reason!r}")
+         return reply.text
+ 

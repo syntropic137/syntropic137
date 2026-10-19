@@ -1,0 +1,12 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index b3c1a0089..139c52483 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1148,6 +1148,7 @@ class AnthropicMessages:
+                 json={
+                     "model": model,
+                     "max_tokens": 16000,
++                    "temperature": 0,
+                     "output_config": {
+                         "effort": JUDGE_EFFORT,
+                         "format": {"type": "json_schema", "schema": _JUDGE_REPLY_SCHEMA},
