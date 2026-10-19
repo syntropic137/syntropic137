@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/workflows/queries.py b/apps/syn-api/src/syn_api/routes/workflows/queries.py
+index b34efc37a..deeeabc77 100644
+--- a/apps/syn-api/src/syn_api/routes/workflows/queries.py
++++ b/apps/syn-api/src/syn_api/routes/workflows/queries.py
+@@ -329,7 +329,7 @@ async def get_workflow(
+             workflow_type=detail.workflow_type,
+             classification=detail.classification,
+             phases=_map_phases(detail.phases),
+-            input_declarations=_map_input_declarations(detail.input_declarations),
++            input_declarations=_map_input_declarations(detail.input_declarations)[:1],
+             created_at=detail.created_at,
+             runs_count=detail.runs_count,
+             repository_url=detail.repository_url,

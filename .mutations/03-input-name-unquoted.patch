@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/workflows/queries.py b/apps/syn-api/src/syn_api/routes/workflows/queries.py
+index b34efc37a..598a4f81b 100644
+--- a/apps/syn-api/src/syn_api/routes/workflows/queries.py
++++ b/apps/syn-api/src/syn_api/routes/workflows/queries.py
+@@ -491,7 +491,7 @@ def _yaml_input_lines(detail: WorkflowDetail) -> list[str]:
+         return []
+     lines: list[str] = ["", "inputs:"]
+     for decl in detail.input_declarations:
+-        lines.append(f"  - name: {_yaml_quote(decl.name)}")
++        lines.append(f"  - name: {decl.name}")
+         if decl.description:
+             lines.append(f"    description: {_yaml_quote(decl.description)}")
+         lines.append(f"    required: {str(decl.required).lower()}")

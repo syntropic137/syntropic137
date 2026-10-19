@@ -41,6 +41,7 @@ async def _create_test_workflow(
     workflow_type: str = "research",
     description: str = "Multi-phase research workflow",
     phases: list[dict[str, object]] | None = None,
+    input_declarations: list[dict[str, object]] | None = None,
 ) -> str:
     """Create a test workflow and return its ID."""
     from syn_api.routes.workflows import create_workflow
@@ -72,6 +73,7 @@ async def _create_test_workflow(
         workflow_type=workflow_type,
         description=description,
         phases=phases,
+        input_declarations=input_declarations,
     )
     assert isinstance(result, Ok)
     return result.value.workflow_id
@@ -306,10 +308,31 @@ async def test_export_omits_max_tokens_the_loader_would_reject():
         PhaseYamlDefinition(id="limited", name="Limited", max_tokens=4096)
 
 
-async def test_export_workflow_with_input_declarations():
-    """Input declarations should appear in workflow.yaml."""
-    from syn_api.routes.workflows import export_workflow
+async def test_export_workflow_with_input_declarations(tmp_path: Path):
+    """Input declarations stored at create time reinstall from the exported package (#1055).
 
+    The whole path, not the emitter alone: create -> projection -> detail ->
+    export -> `WorkflowDefinition.from_file`. A declaration dropped at any hop,
+    or a default that changes type on the way out, fails here. `draft` is the
+    production case: `default: false` emitted bare reinstalled as a bool and
+    the loader refused the package.
+    """
+    from syn_api.routes.workflows import export_workflow
+    from syn_domain.contexts.orchestration._shared.workflow_definition import (
+        WorkflowDefinition,
+    )
+
+    declared: list[dict[str, object]] = [
+        {"name": "version", "description": "Release version", "required": True},
+        {
+            "name": "draft",
+            "description": "Whether this is a draft release",
+            "required": False,
+            "default": "false",
+        },
+        {"name": "build", "required": False, "default": "123"},
+        {"name": "channel", "required": False, "default": "null"},
+    ]
     wf_id = await _create_test_workflow(
         phases=[
             {
@@ -319,10 +342,30 @@ async def test_export_workflow_with_input_declarations():
                 "prompt_template": "Execute: $ARGUMENTS",
             },
         ],
+        input_declarations=declared,
     )
-    # TODO(#400): Input declarations are passed at create time, verify they
-    # round-trip through the projection. For now, test that the export
-    # succeeds and produces valid structure.
     result = await export_workflow(wf_id, fmt="package")
     assert isinstance(result, Ok)
-    assert "workflow.yaml" in result.value.files
+
+    for rel, content in result.value.files.items():
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    loaded = WorkflowDefinition.from_file(tmp_path / "workflow.yaml")
+
+    assert [i.model_dump() for i in loaded.inputs] == [
+        {
+            "name": "version",
+            "description": "Release version",
+            "required": True,
+            "default": None,
+        },
+        {
+            "name": "draft",
+            "description": "Whether this is a draft release",
+            "required": False,
+            "default": "false",
+        },
+        {"name": "build", "description": None, "required": False, "default": "123"},
+        {"name": "channel", "description": None, "required": False, "default": "null"},
+    ]
