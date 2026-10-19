@@ -204,6 +204,15 @@ It is never `BLOCKING` and never a repair round, because a fix phase in a
 workspace cannot run it any more than you can. Code you *can* run here,
 because it needs no such service, is not this class: run it.
 
+A red `Mutation Patches Not Merged` check (`mutations-not-merged`) is in this
+class too, and is never `REPAIRABLE`: the branch still tracks `.mutations/`,
+the input to trusted mutation evidence, which runs on a Docker runner. The
+command is `just mutation-evidence <pr> "<test ids>"` (the ids
+`.mutations/README.md` maps the patches to), and the output that proves it is
+a `<!-- mutation-evidence -->` PR comment reporting PASS for this head SHA.
+Once that PASS exists, the orchestrator removes `.mutations/`. A fix phase
+never does, and you never ask it to (#2028).
+
 ### What this changes in the rules below
 
 The CI section below is the same as in sdlc-implement-v3, and two of its
@@ -211,6 +220,9 @@ rules give way to this precheck:
 
 - "**Failed on this SHA:** it IS a blocker" does not apply to a failure you
   showed above to be `FLAKE/INFRA`. That failure is a handoff.
+- Its exception for `Mutation Patches Not Merged` is this precheck's
+  `ORCHESTRATOR_EVIDENCE` row: put it in the handoff table, not under a
+  separate heading.
 - "Without either, it IS a blocker", for a job that is skipped by design but
   covers changed code, does not apply when the missing evidence needs Docker,
   a database or a real store. That is `ORCHESTRATOR_EVIDENCE`.
@@ -350,6 +362,15 @@ the outcome:
 - **Failed on this SHA:** it IS a blocker. Put it under BLOCKING with the failing
   job's link and a log excerpt from
   `gh run view --job <job-id> --log-failed | tail -n 80`.
+  The one exception is `Mutation Patches Not Merged` (`mutations-not-merged`).
+  It fails because the branch still tracks `.mutations/`, the input to trusted
+  mutation evidence, not because the change is wrong. It is NOT a blocker, and
+  never a finding for a fix phase: never ask anyone to delete `.mutations/`.
+  List it in the verdict under a heading `Orchestrator: mutation evidence`,
+  with the command that settles it, `just mutation-evidence <pr> "<test ids>"`
+  (the ids `.mutations/README.md` maps the patches to), and whether a
+  `<!-- mutation-evidence -->` PR comment already reports PASS for this head
+  SHA. The orchestrator removes `.mutations/` after that PASS (#2028).
 - **Skipped by design for this PR:** CI deliberately does not run the job for
   this PR's base or event. Prove it from the job's `if:` condition in
   `.github/workflows/` (read it, never edit it): for example

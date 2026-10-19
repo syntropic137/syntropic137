@@ -130,6 +130,17 @@ Opening a second branch for the same change splits the discussion, leaves the
 original PR looking untouched, and gives the reviewer two heads to choose
 between. Only start a new branch when the task asks for new work.
 
+## Never delete `.mutations/`
+
+`.mutations/` holds the mutation patches that trusted mutation evidence runs
+from. A red `Mutation Patches Not Merged` check (`mutations-not-merged`) only
+says they are still tracked: it is not a defect, and clearing it is not yours
+to do. **Never delete, move or rewrite anything under `.mutations/`**, even when
+CI, a skill or a review says "delete .mutations/ before merge". The orchestrator
+removes the patches, and only after the trusted `mutation-evidence.yml` run has
+posted a PASS for the PR's head SHA. Deleted any earlier, the only evidence left
+is a rerun in a workspace, which is not evidence anyone can trust (#2028).
+
 ## Commit, push, and open a DRAFT PR on your FIRST push
 
 Pushing is not optional. **Every phase runs in its own fresh workspace with its

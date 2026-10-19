@@ -145,6 +145,15 @@ the outcome:
 - **Failed on this SHA:** it IS a blocker. Put it under BLOCKING with the failing
   job's link and a log excerpt from
   `gh run view --job <job-id> --log-failed | tail -n 80`.
+  The one exception is `Mutation Patches Not Merged` (`mutations-not-merged`).
+  It fails because the branch still tracks `.mutations/`, the input to trusted
+  mutation evidence, not because the change is wrong. It is NOT a blocker, and
+  never a finding for a fix phase: never ask anyone to delete `.mutations/`.
+  List it in the verdict under a heading `Orchestrator: mutation evidence`,
+  with the command that settles it, `just mutation-evidence <pr> "<test ids>"`
+  (the ids `.mutations/README.md` maps the patches to), and whether a
+  `<!-- mutation-evidence -->` PR comment already reports PASS for this head
+  SHA. The orchestrator removes `.mutations/` after that PASS (#2028).
 - **Skipped by design for this PR:** CI deliberately does not run the job for
   this PR's base or event. Prove it from the job's `if:` condition in
   `.github/workflows/` (read it, never edit it): for example
