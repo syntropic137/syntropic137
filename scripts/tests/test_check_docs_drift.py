@@ -167,6 +167,21 @@ class TestSynCommands:
         page = "```\nsyn workflow run wf --input a\\;b --no-such-flag\n```"
         assert any("--no-such-flag" in p for p in problems(tmp_path, page))
 
+    @pytest.mark.parametrize("position", [0, 1, 2])
+    def test_every_usage_flag_is_checked_after_an_alternative(
+        self, tmp_path: Path, position: int
+    ) -> None:
+        # The shape of guide/evals.mdx: a | inside [...] is an alternative, not a pipe.
+        flags = ["[--quiet]", "[--dry-run]", "[--input K=V]..."]
+        flags[position] = "[--no-such-flag]"
+        page = f"```\nsyn workflow run <id> [--input a|b] {' '.join(flags)}\n```"
+        assert any("--no-such-flag" in p for p in problems(tmp_path, page))
+
+    def test_a_usage_alternative_is_one_command(self) -> None:
+        page = "```\nsyn workflow run <id> [--input a|b] [--quiet] | syn workflow list\n```"
+        got = [s.text for s in extract("p.mdx", page)]
+        assert got == ["syn workflow run <id> [--input a|b] [--quiet]", "syn workflow list"]
+
     @pytest.mark.parametrize(
         "cmd",
         [

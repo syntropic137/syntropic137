@@ -257,10 +257,15 @@ def _strip_comment(line: str) -> str:
 
 
 def _split_shell(line: str) -> list[str]:
-    """Split on && || ; | ` and $( outside quotes ($( also inside double quotes)."""
+    """Split on && || ; | ` and $( outside quotes ($( also inside double quotes).
+
+    A ``|`` inside usage brackets, as in ``[--status active|archived]``, names
+    alternatives rather than a pipeline, so it does not split.
+    """
     parts: list[str] = []
     buf: list[str] = []
     quote: str | None = None
+    brackets = 0
     i = 0
     while i < len(line):
         ch = line[i]
@@ -280,6 +285,11 @@ def _split_shell(line: str) -> list[str]:
             buf.append(ch)
         elif ch in "'\"":
             quote = ch
+            buf.append(ch)
+        elif ch in "[]":
+            brackets = brackets + 1 if ch == "[" else max(brackets - 1, 0)
+            buf.append(ch)
+        elif ch == "|" and brackets:
             buf.append(ch)
         elif two in ("&&", "||"):
             parts.append("".join(buf))
