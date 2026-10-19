@@ -1,0 +1,16 @@
+diff --git a/scripts/api_shape.py b/scripts/api_shape.py
+index 86cee8bf6..9fab58f07 100755
+--- a/scripts/api_shape.py
++++ b/scripts/api_shape.py
+@@ -222,11 +222,6 @@ def _fetch(url: str, timeout: float) -> Any:  # noqa: ANN401 - arbitrary JSON
+         content_type = response.headers.get("Content-Type", "")
+     try:
+         return json.loads(body)
+-    except RecursionError:
+-        # Raised by the decoder itself, before any search or walk begins, so
+-        # the RecursionError handlers in `main` never see it.
+-        print("response nests too deeply to decode", file=sys.stderr)
+-        raise SystemExit(2) from None
+     except json.JSONDecodeError:
+         # The SPA catch-all serves HTML for unknown paths and returns 200, so a
+         # decode failure here usually means the path is wrong, not the server.

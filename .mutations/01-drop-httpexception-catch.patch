@@ -1,0 +1,12 @@
+diff --git a/scripts/api_shape.py b/scripts/api_shape.py
+index 86cee8bf6..21b1b4914 100755
+--- a/scripts/api_shape.py
++++ b/scripts/api_shape.py
+@@ -258,7 +258,6 @@ def main() -> int:
+         TimeoutError,
+         OSError,
+         ValueError,
+-        http.client.HTTPException,
+     ) as exc:
+         # All transport failures are 2, not 1. Exit 1 means "looked and it is
+         # absent"; a read that never completed did not look, and collapsing
