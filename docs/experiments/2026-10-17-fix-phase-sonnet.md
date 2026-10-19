@@ -1,8 +1,8 @@
 # E3: Sonnet 5.5 on fix and fix_2 in implement-v4-precheck (preregistered 2026-10-17)
 
-Status: PROPOSED. The E2 gate is met (2026-10-18: Sonnet 5/10 vs Opus 6/10,
-"proceed" on the boundary; see E2 Results). Not yet approved, nothing
-dispatched. The orchestrator decides when it runs.
+Status: ALL RUNS DONE 2026-10-19. Interim verdict ADOPT (provisional): rounds
+and cost clauses met; escapes 0 so far, final after the windows close
+2026-11-02. Control n = 2, below the preregistered 6. See Results.
 
 The gate is weak by design. An E2 "proceed" (n=8 per arm) only means no
 evidence of a large quality drop on implementation, not equivalence. This
@@ -195,6 +195,90 @@ defect traced to a Sonnet fix.
 n = 6 per arm cannot detect small differences in escape rate. This is a
 canary, not proof.
 
-## Results
+## Results (interim, 2026-10-19; final after the escape windows close 2026-11-02)
 
-(not yet run)
+All 15 briefs ran. The interim verdict is **ADOPT, provisionally**: Sonnet 5.5 on fix
+meets the rounds and cost clauses, and no escape has been found so far. The escape
+clause cannot be settled until every merged PR's 14-day window closes. The control
+arm ended at n = 2 countable pairs, a third of the preregistered 6, so this is a
+canary at best.
+
+### What each run did
+
+| Run | Arm | Issue | PR | Fix | Rounds to READY | Fix + fix_2 cost | Run total |
+|---|---|---|---|---|---|---|---|
+| 01 | C | #1949 | #2029 | never ran (certified first verify) | - | - | - |
+| 02 | T | #1878 | #2031 | ran; timed out in gates; no reverify | failed round | $0.28 | $4.52 |
+| 03 | C | #1563 | - | never ran (correct refusal: already fixed) | - | - | - |
+| 04 | T | #1632 | #2032 | ran | 1 | $0.49 | $4.96 |
+| 05 | C | #1433 | - | never ran (correct refusal: premise false) | - | - | - |
+| 06 | T | #1455 | #2033 | ran | 1 | $1.02 | $7.61 |
+| 07 | C | #1420 | #2034 | ran | 2 | $5.53 | $18.14 |
+| 08 | T | #2028 | #2035 | ran | 1 | $0.65 | $8.04 |
+| 09 | C | #2021 | #2036 | ran | 1 | $1.16 | $9.55 |
+| 10 | T | #1125 | #2037 | ran | 1 | $0.43 | $6.10 |
+| 11 | C | #1055 | #2038 | never ran (certified first verify) | - | - | $5.48 |
+| 12 | T | #1182 | #2039 | never ran (certified first verify) | - | - | $7.73 |
+| 13 | C | #2030 | #2040 | never ran (certified first verify) | - | - | $3.84 |
+| 14 | C | #1961 | #2041 | never ran (certified first verify) | - | - | $5.90 |
+| 15 | C | #1989 | - | never ran (correct refusal: could not reproduce) | - | - | $1.61 |
+
+Countable pairs: treatment 4 (04, 06, 08, 10), control 2 (07, 09). Run 02 is a
+failed treatment round, as amendment 3 defines it.
+
+### Against the decision rule
+
+| Clause | Treatment | Control | Met? |
+|---|---|---|---|
+| Rounds to READY within control + 1 | mean 1.0 (1.2 counting 02's failed round as a round) | mean 1.5 | yes |
+| Fix cost at least 30% lower | mean $0.65 per run; $0.57 per round including 02 | mean $3.35 per run; $2.23 per round | yes, about 70 to 80% lower |
+| Escapes not above control | 0 so far | 0 so far | open until 2026-11-02 |
+
+The cost clause holds even against the cheaper control alone (09, $1.16 for one
+round). It does not depend on 07's second round.
+
+### Post-certification defects, by the phase that introduced them (amendment 7)
+
+The orchestrator's independent reverify blocked an in-run-certified head in 5 runs.
+Each code finding was traced to the commit that introduced it:
+
+| Run | Arm | Finding | Introduced by | Fix commit introduced it? |
+|---|---|---|---|---|
+| 01 | C | B1, skipped YAML still drove the plugin preflight | implement | n/a (fix never ran) |
+| 04 | T | B1 index-flagged files, B2 failed `git status` read as clean | implement 2b38a58a | no: Sonnet fix widened flags, closed neither |
+| 06 | T | F1, to-do projection queued work from an unordered start | pre-PR code, untouched by implement | no |
+| 07 | C | B1, null summary settled from overwritten session totals | implement ba0aa8ed1 | no: Opus fix and fix_2 left it open |
+| 10 | T | R1 platform recipes missing from the dump, R2 interpolations dropped | implement 569139e41 | no: Sonnet fix added only the module check |
+
+Runs 09 and 11 were blocked on evidence only (judge calibration, mutation
+evidence), not code. 02, 08, 12 and 13 passed the independent reverify clean.
+
+No defect in either arm was introduced by a fix commit. "Fix left an implement
+defect open" happened in 4 of the 6 countable pairs, in both arms (3 T, 1 C). That
+is a miss by the in-run gpt-6.1-sol reverify, which is the same in both arms, so it
+does not separate them. It is the strongest finding here and belongs in its own
+experiment: an in-run reverify that re-reads the whole diff, not only the prior
+findings.
+
+### Other findings
+
+- **The fix phase is mostly gate time.** In every fix that ran, the two workspace
+  gates took 68 to 98% of the phase (02: timed out at 60 min; 04: ~30 of 41; 06:
+  ~40 of 59; 07: ~42 of 51 and ~32 of 36; 08: ~51 of 52; 09: ~40 of 43; 10: ~48 of
+  49). The model's own work is a few minutes, so the fix model barely moves time to
+  READY. Gate time is PC-212.
+- **The fix phase rarely runs.** 8 of 15 briefs never reached fix: 3 correct
+  refusals (03, 05, 15) and 5 certified on the first verify (01, 11 to 14). With the premise check and a
+  strong implementer, the fix model governs a minority of runs, which is why the
+  control arm ran short.
+- **Platform issues found:** PC-213 (codex DNS failure, 06), PC-215 (agent 403 on
+  integration evidence), PC-216 (resume refused its own earlier push), PC-217
+  (shallow-clone mutation run void).
+
+### Still open
+
+- Escape windows: runs 01, 02, 04 and 06 to 2026-11-01; 07, 08 and 10 to 13 to
+  2026-11-02. #2036 (09) and #2041 (14) are not merged yet; #2036 waits on a live
+  judge calibration that needs the owner's API key.
+- The final verdict is written when the windows close. Any escape traced to a Sonnet
+  fix commit is an immediate REJECT (stop rule).

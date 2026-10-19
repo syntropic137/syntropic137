@@ -135,7 +135,7 @@ model is registered.
 | premise, plan | Opus 5.5 | none yet | Low | vendor guidance only |
 | implement | Opus 5.5 | Sonnet 5.5 (E2) | Medium | [5][6][7], vendor-heavy |
 | verify, reverify | gpt-6.1-sol (cross-family) | none (gpt-6-luna rejected, E1) | Medium | indirect [11][14][18] |
-| fix, fix_2 | Opus 5.5 | Sonnet 5.5 (E3, after E2) | Low | [4][7][8][22] |
+| fix, fix_2 | Opus 5.5 | Sonnet 5.5 (E3 interim ADOPT; final 2026-11-02) | Low | E3 interim, [4][7][8][22] |
 | finalize_pr, report | Opus 5.5 | Sonnet 5.5 (later; 14% of spend) | Low | positioning only |
 | triage / screener | see PR #2015 bench | Haiku 5.5 / gpt-6-luna | Low | positioning only |
 
@@ -153,7 +153,17 @@ c = 3), and Luna false-blocked a clean control Sol certified. On verdict
 alone Luna certified 5 known defects; Sol blocked all 26. Luna is ~19x
 cheaper per run ($0.0125 vs $0.233), which does not pay for the escapes.
 The verify row stays gpt-6.1-sol. Sol also caught a real bug in a "clean"
-control (#2030). Details: `docs/experiments/2026-10-17-verifier-gpt-6-luna-vs-sol.md`.
+control (#2030), now fixed on main by #2040 (an E3 run). Details: `docs/experiments/2026-10-17-verifier-gpt-6-luna-vs-sol.md`.
+
+E3 update (2026-10-19, interim): all 15 briefs ran. Sonnet 5.5 on fix met
+the rounds clause (mean 1.0, or 1.2 with a failed round, vs 1.5 for Opus) and
+the cost clause (about $0.57 vs $2.23 per fix round). No escape so far; the
+windows close 2026-11-02. Control reached only n = 2 countable pairs, because
+8 of 15 briefs never reached fix. The fix row stays Opus 5.5 until then.
+Two findings matter more than the model choice: workspace gates take 68 to
+98% of every fix phase, and in 4 of 6 pairs the in-run reverify certified a
+defect left open since implement, in both arms. Details:
+`docs/experiments/2026-10-17-fix-phase-sonnet.md`.
 
 ## 5. Defects found while doing this research
 
