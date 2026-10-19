@@ -1218,14 +1218,14 @@ check-agent-docs:
 
 # Mirrors ci.yml `mutations-not-merged`. Deliberately NOT in preflight: the
 # pre-push hook would block pushing the very patches mutation-evidence.yml
-# reads. Delete the dir before merge; the PR comment is the record. See
+# reads. The orchestrator deletes the dir after a PASS; the PR comment is the record. See
 # .claude/skills/devops/agent_mutation_evidence.md.
 # Fail if `.mutations/` is tracked (PR-scoped evidence, never main).
 check-no-mutations:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -n "$(git ls-files -- .mutations)" ]; then
-        echo "❌ delete .mutations/ before merge; evidence is in the mutation-evidence comment"
+        echo "❌ .mutations/ is tracked; the orchestrator removes it after a mutation-evidence PASS on this head (#2028)"
         git ls-files -- .mutations
         exit 1
     fi

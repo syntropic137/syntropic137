@@ -806,8 +806,9 @@ def render(evidence: Evidence, run_url: str) -> str:
         lines.append("")
     lines += [
         "A kill proves the named test catches the mutant. A survival is against the",
-        "named tests only. Patches are evidence for this PR: delete `.mutations/`",
-        "before merge (CI enforces it); this comment is the record.",
+        "named tests only. Patches are evidence for this PR: the orchestrator deletes",
+        "`.mutations/` after a PASS on this head, never a workflow phase before one",
+        "(CI enforces removal before merge); this comment is the record.",
     ]
     return "\n".join(lines) + "\n"
 
