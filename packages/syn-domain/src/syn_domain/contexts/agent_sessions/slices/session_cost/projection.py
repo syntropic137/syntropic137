@@ -15,7 +15,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -136,7 +136,11 @@ class _StoredTurnCost(BaseModel):
         )
 
 
-def _load_turn_cost(stored: object, session_cost: SessionCost) -> TurnCost:
+#: Reads the stored turn cost back, and absence as ``None``, not as an error.
+_STORED_TURN_COST = TypeAdapter(_StoredTurnCost | None)
+
+
+def _load_turn_cost(stored: _StoredTurnCost | None, session_cost: SessionCost) -> TurnCost:
     """What the session's turns priced to, kept apart from what a summary settled.
 
     A reported summary overwrites ``total_cost_usd`` and ``cost_by_model``, so
@@ -154,11 +158,10 @@ def _load_turn_cost(stored: object, session_cost: SessionCost) -> TurnCost:
             cost_by_model=dict(session_cost.cost_by_model),
             unpriced_observation_count=session_cost.unpriced_observation_count,
         )
-    loaded = _StoredTurnCost.model_validate(stored)
     return TurnCost(
-        total=loaded.total,
-        cost_by_model=dict(loaded.cost_by_model),
-        unpriced_observation_count=loaded.unpriced_observation_count,
+        total=stored.total,
+        cost_by_model=dict(stored.cost_by_model),
+        unpriced_observation_count=stored.unpriced_observation_count,
     )
 
 
@@ -270,7 +273,9 @@ class SessionCostProjection:
 
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         session_cost = _get_or_create_session_cost(existing, session_id)
-        turns = _load_turn_cost((existing or {}).get(_TURN_COST_KEY), session_cost)
+        turns = _load_turn_cost(
+            _STORED_TURN_COST.validate_python((existing or {}).get(_TURN_COST_KEY)), session_cost
+        )
         _update_linkage(session_cost, event_data)
 
         if not session_cost.started_at:
@@ -399,7 +404,9 @@ class SessionCostProjection:
 
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         session_cost = _get_or_create_session_cost(existing, session_id)
-        turns = _load_turn_cost((existing or {}).get(_TURN_COST_KEY), session_cost)
+        turns = _load_turn_cost(
+            _STORED_TURN_COST.validate_python((existing or {}).get(_TURN_COST_KEY)), session_cost
+        )
         _set_linkage(session_cost, event_data)
 
         # The payload arrives from the event store as an untyped JSON object;
@@ -476,7 +483,9 @@ class SessionCostProjection:
 
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         session_cost = _get_or_create_session_cost(existing, session_id)
-        turns = _load_turn_cost((existing or {}).get(_TURN_COST_KEY), session_cost)
+        turns = _load_turn_cost(
+            _STORED_TURN_COST.validate_python((existing or {}).get(_TURN_COST_KEY)), session_cost
+        )
         _set_linkage(session_cost, event_data)
         _apply_finalized_costs(session_cost, event_data)
         _apply_finalized_tokens(session_cost, event_data)
