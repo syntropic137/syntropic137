@@ -313,6 +313,9 @@ class _Dump(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     recipes: dict[str, _Recipe]
+    #: Recipes declared by `mod` live here, qualified and with their own
+    #: dependency scope. Not resolved, so their mere presence is rejected.
+    modules: dict[str, object] = {}
 
 
 def _just() -> str:
@@ -332,7 +335,14 @@ def _recipes(justfile: Path = _JUSTFILE) -> dict[str, _Recipe]:
         text=True,
         check=True,
     ).stdout
-    return _Dump.model_validate_json(dump).recipes
+    parsed = _Dump.model_validate_json(dump)
+    assert not parsed.modules, (
+        f"{justfile.name} declares `mod` modules {sorted(parsed.modules)}; their "
+        "recipes are not enumerated here, so a gate in one would be invisible to "
+        "this guard. Use `import` instead, or teach `_recipes` to resolve "
+        "qualified module recipes before adding a module."
+    )
+    return parsed.recipes
 
 
 def _closure(*roots: str, recipes: dict[str, _Recipe] | None = None) -> set[str]:
@@ -455,6 +465,17 @@ def test_discovery_does_not_depend_on_the_name_or_parameters(tmp_path: Path) -> 
         "check-param-canary",
         "validate-review-canary",
     ]
+
+
+def test_a_module_recipe_cannot_hide_from_the_guard(tmp_path: Path) -> None:
+    """`mod` recipes sit outside `recipes` in the dump; refuse rather than skip."""
+    (tmp_path / "justfile").write_text(
+        "mod gates\n\npreflight: lint\n\npreflight-agent: lint\n\nlint:\n    true\n"
+    )
+    (tmp_path / "gates.just").write_text("validate-review-module *ARGS:\n    false {{ARGS}}\n")
+
+    with pytest.raises(AssertionError, match="declares `mod` modules"):
+        _recipes(tmp_path / "justfile")
 
 
 def test_the_pre_push_hook_delegates_rather_than_listing_its_own_checks() -> None:
