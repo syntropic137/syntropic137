@@ -22,7 +22,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Collection, Mapping, Sequence
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
         ResumeExecutionCommand,
@@ -53,6 +53,27 @@ RESUMABLE_STATUSES: Final[frozenset[ExecutionStatus]] = frozenset(
 )
 
 
+def refuse_reopening(completed_phase_ids: Collection[str], phase_id: str, verb: str) -> None:
+    """A completed phase's record is closed (#1453).
+
+    Three commands could each reopen it - start, complete, collect - and
+    each corrupts it differently: a second start lets a retry drop the
+    artifacts of the attempt that did complete, a second completion inflates
+    the completed count and can append another attempt's artifact, and a
+    late collection injects artifacts into a phase that finished. A resume
+    inherits the completed prefix, so all three end up handing a child work
+    whose inputs are not what the record says (ADR-014 s7).
+
+    One guard rather than three copies: the doors are different, the rule is
+    the same, and a rule spelled once cannot be closed on two of them. The
+    caller's aggregate passes its own completed ids; the caller raises nothing
+    itself.
+    """
+    if phase_id in completed_phase_ids:
+        msg = f"Cannot {verb} phase {phase_id}: it has already completed"
+        raise ValueError(msg)
+
+
 def completed_prefix(
     phase_definitions: Sequence[PhaseDefinition],
     completed_phase_ids: frozenset[str] | set[str],
@@ -75,11 +96,11 @@ def completed_prefix(
     completed, or the execution recorded no phase definitions to walk.
 
     `phase_definitions` is trusted to be in phase order and to have one entry
-    per phase. `WorkflowDefinition.from_yaml` is what makes that true: it
-    rejects duplicate phase ids AND duplicate orders, so "phase order" is a
-    total order by the time an execution can start. This function would be
-    ambiguous without that, which is why the precondition is written down here
-    rather than assumed.
+    per phase. `replay.parse_phase_definitions` is what makes that true: it
+    refuses a payload that repeats a phase id or shares an order (#1455), and
+    the template and the start command refuse to write one, so "phase order" is
+    a total order here. This function would be ambiguous without that, which is
+    why the precondition is written down here rather than assumed.
 
     Every inherited phase names the execution that holds its artifacts (#1462):
     ``execution_id`` for a phase this run ran, or its owner from
