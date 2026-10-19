@@ -18,10 +18,12 @@ gate could be added and wired into nothing while this suite stayed green.
 from __future__ import annotations
 
 import functools
+import json
 import re
 import shlex
 import shutil
 import subprocess
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -305,8 +307,30 @@ class _Recipe(BaseModel):
 
     @property
     def text(self) -> str:
-        """The body's literal text; interpolations are dropped."""
-        return "\n".join("".join(f for f in line if isinstance(f, str)) for line in self.body)
+        """The body with each interpolation kept, never dropped.
+
+        Dropping them hid `{{"NAME"}}=1 cmd` from a check for NAME. A literal
+        or a concatenation of literals renders as the string `just` would emit;
+        anything else as its dumped expression, which still names what it uses.
+        """
+        return "\n".join("".join(map(_render, line)) for line in self.body)
+
+
+def _render(fragment: object) -> str:
+    """One body fragment: literal text, or a one-item list holding an interpolation."""
+    if isinstance(fragment, str):
+        return fragment
+    if isinstance(fragment, list) and len(fragment) == 1:
+        return _expression(fragment[0])
+    return json.dumps(fragment)
+
+
+def _expression(expression: object) -> str:
+    if isinstance(expression, str):
+        return expression
+    if isinstance(expression, list) and expression[:1] == ["concatenate"] and len(expression) == 3:
+        return _expression(expression[1]) + _expression(expression[2])
+    return json.dumps(expression)
 
 
 class _Dump(BaseModel):
@@ -342,7 +366,46 @@ def _recipes(justfile: Path = _JUSTFILE) -> dict[str, _Recipe]:
         "this guard. Use `import` instead, or teach `_recipes` to resolve "
         "qualified module recipes before adding a module."
     )
+    declared = _declared(justfile)
+    hidden = sorted((Counter(declared) - Counter(parsed.recipes.keys())).elements())
+    assert not hidden, (
+        f"{justfile.name} declares recipes the JSON dump does not list: {hidden}. "
+        "A platform attribute (`[windows]`, `[macos]`, ...) filters a recipe out "
+        "on every other OS, and so does a second declaration of one name, so a "
+        "gate there would be invisible to this guard on this machine. Drop the "
+        "attribute and branch inside the recipe instead (`os()`), or teach "
+        "`_recipes` to inventory every platform before adding one."
+    )
     return parsed.recipes
+
+
+#: A top-level line of `just --dump` that is not a recipe header.
+_NOT_A_RECIPE = re.compile(r"(#|\[|(set|import\??|mod\??|alias|export|unexport) |\S+ :=)")
+
+
+def _declared(justfile: Path) -> list[str]:
+    """Every recipe declared in ``justfile`` and its imports, on any platform.
+
+    The JSON dump is the ANALYSED justfile, so a recipe restricted to another
+    OS is already gone from it. `just --dump` in its own format is the parsed
+    source before that filter, normalised to one item per top-level line, so
+    the recipes are the top-level lines that are not another kind of item.
+    """
+    source = subprocess.run(
+        [_just(), "--justfile", str(justfile.resolve()), "--dump"],
+        cwd=justfile.parent,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    names: list[str] = []
+    for line in source.splitlines():
+        if not line or line[0].isspace() or _NOT_A_RECIPE.match(line):
+            if imported := re.match(r"import\?? (['\"])(.+)\1$", line):
+                names += _declared(justfile.parent / imported[2])
+            continue
+        names.append(re.split(r"[\s:]", line.removeprefix("@"), maxsplit=1)[0])
+    return names
 
 
 def _closure(*roots: str, recipes: dict[str, _Recipe] | None = None) -> set[str]:
@@ -478,6 +541,35 @@ def test_a_module_recipe_cannot_hide_from_the_guard(tmp_path: Path) -> None:
         _recipes(tmp_path / "justfile")
 
 
+def _platform_canaries(directory: Path, *, restricted: bool) -> Path:
+    """One orphan per OS, one of them imported, so any machine filters two."""
+    directory.mkdir()
+
+    def canary(os: str, name: str) -> str:
+        return (f"[{os}]\n" if restricted else "") + f"{name}:\n    false\n\n"
+
+    (directory / "justfile").write_text(
+        'import "gates.just"\n\npreflight: lint\n\npreflight-agent: lint\n\nlint:\n    true\n\n'
+        + canary("linux", "validate-linux-canary")
+        + canary("macos", "validate-macos-canary")
+    )
+    (directory / "gates.just").write_text(canary("windows", "validate-windows-canary"))
+    return directory / "justfile"
+
+
+def test_a_recipe_for_another_platform_cannot_hide_from_the_guard(tmp_path: Path) -> None:
+    """The JSON dump drops a recipe restricted to another OS; refuse, not skip."""
+    with pytest.raises(AssertionError, match="declares recipes the JSON dump does not list"):
+        _recipes(_platform_canaries(tmp_path / "restricted", restricted=True))
+
+    # Control: without the attribute the same orphans are listed as orphans.
+    assert _unaccounted(_recipes(_platform_canaries(tmp_path / "plain", restricted=False))) == [
+        "validate-linux-canary",
+        "validate-macos-canary",
+        "validate-windows-canary",
+    ]
+
+
 def test_the_pre_push_hook_delegates_rather_than_listing_its_own_checks() -> None:
     """A hook carrying its own list is how the drift started."""
     hook = _ROOT / ".githooks" / "pre-push"
@@ -567,9 +659,35 @@ def test_only_the_agent_gate_lets_a_missing_host_tool_skip() -> None:
     docker must FAIL. If the variable that turns that into a skip leaked into
     any recipe `preflight` runs, CI would go green over checks it never ran.
     """
-    setters = {name for name, recipe in _recipes().items() if AGENT_WORKSPACE_ENV in recipe.text}
+    setters = _skip_switch_setters(_recipes())
     assert setters == {"fitness-invariants-agent"}, setters
     assert not setters & _closure("preflight")
+
+
+def _skip_switch_setters(recipes: dict[str, _Recipe]) -> set[str]:
+    return {name for name, recipe in recipes.items() if AGENT_WORKSPACE_ENV in recipe.text}
+
+
+def test_an_interpolated_skip_switch_is_still_seen(tmp_path: Path) -> None:
+    """`{{"NAME"}}=1` renders NAME=1; reading only literal text lost the NAME."""
+    justfile = tmp_path / "justfile"
+    justfile.write_text(
+        "fitness-invariants-agent:\n"
+        f"    {AGENT_WORKSPACE_ENV}=1 just fitness-invariants\n\n"
+        "fitness-invariants:\n"
+        f'    {{{{"{AGENT_WORKSPACE_ENV}"}}}}=1 uv run pytest\n\n'
+        "fitness-split:\n"
+        f'    {{{{"{AGENT_WORKSPACE_ENV[:8]}" + "{AGENT_WORKSPACE_ENV[8:]}"}}}}=1 true\n\n'
+        "fitness-literal:\n"
+        f"    {AGENT_WORKSPACE_ENV}=1 true\n"
+    )
+
+    assert _skip_switch_setters(_recipes(justfile)) == {
+        "fitness-invariants-agent",
+        "fitness-invariants",
+        "fitness-split",
+        "fitness-literal",
+    }
 
 
 class _ItemNeeding:
