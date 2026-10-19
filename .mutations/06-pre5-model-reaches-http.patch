@@ -1,0 +1,12 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 15109c6a2..2db7ce3e5 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1153,7 +1153,6 @@ class AnthropicMessages:
+         return cls(key)
+ 
+     def complete(self, *, model: str, system: str, prompt: str) -> str:
+-        require_judge_model(model)
+         try:
+             response = self._http.post(
+                 ANTHROPIC_MESSAGES_URL,

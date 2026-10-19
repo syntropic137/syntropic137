@@ -3553,6 +3553,59 @@ def test_the_llm_judge_end_to_end_runs_on_the_5x_api() -> None:
     assert len(sent) == eval_suite.JUDGE_SAMPLES
 
 
+_PRE5_MODELS = (
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
+    "claude-haiku-4-5",
+    "claude-3-7-sonnet-20250219",
+    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-latest",
+)
+
+
+@pytest.mark.unit
+def test_the_pinned_judge_model_is_an_allowed_5x_model() -> None:
+    assert eval_suite.JUDGE_MODEL in eval_suite.JUDGE_MODELS
+    for model in eval_suite.JUDGE_MODELS:
+        assert re.fullmatch(r"claude-(opus|sonnet|haiku)-5-\d+", model)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model", _PRE5_MODELS)
+def test_a_pre5_model_passed_to_the_client_is_refused_before_any_request(model: str) -> None:
+    """The outgoing boundary: a direct `complete` with a pre-5 id never reaches HTTP."""
+    sent: list[httpx.Request] = []
+    client = eval_suite.AnthropicMessages(
+        SecretStr("test-key"), httpx.Client(transport=_five_x_provider(sent))
+    )
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        client.complete(model=model, system="s", prompt="p")
+    assert sent == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model", _PRE5_MODELS)
+def test_a_pre5_judge_override_is_refused_before_any_request(model: str) -> None:
+    """An explicit `LlmJudge(model=...)` cannot route the judge to a pre-5 model."""
+    sent: list[httpx.Request] = []
+    client = eval_suite.AnthropicMessages(
+        SecretStr("test-key"), httpx.Client(transport=_five_x_provider(sent))
+    )
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(client, model=model).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert sent == []
+
+
+@pytest.mark.unit
+def test_an_allowed_5x_override_still_reaches_the_api() -> None:
+    sent: list[httpx.Request] = []
+    client = eval_suite.AnthropicMessages(
+        SecretStr("test-key"), httpx.Client(transport=_five_x_provider(sent))
+    )
+    assert client.complete(model="claude-opus-5-5", system="s", prompt="p") == "ok"
+    assert [json.loads(r.content)["model"] for r in sent] == ["claude-opus-5-5"]
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("stop_reason", ["refusal", "max_tokens"])
 def test_a_reply_that_did_not_finish_is_an_error_not_a_verdict(stop_reason: str) -> None:

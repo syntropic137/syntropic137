@@ -991,6 +991,11 @@ JUDGE_MODEL = "claude-sonnet-5-5"
 The 5.x models reject a non-default temperature with HTTP 400, so the judge is not
 made repeatable by sampling settings: it asks `JUDGE_SAMPLES` times and takes the
 majority (`LlmJudge`)."""
+JUDGE_MODELS = frozenset({"claude-sonnet-5-5", "claude-opus-5-5"})
+"""The only model ids the judge may call: explicit 5.x ids, no aliases, no pre-5 model.
+
+The one policy, checked by `require_judge_model` both where a judge is built and
+before `AnthropicMessages` sends anything."""
 JUDGE_SAMPLES = 3
 """Independent answers per judgement. Odd, so two verdicts cannot tie on a two-way split."""
 JUDGE_EFFORT = "medium"
@@ -1003,6 +1008,16 @@ description no longer reads as waiving auth and malformed-stream faults when a
 deliverable exists. v4: `claude-sonnet-5-5` replaces the temperature-0 judge; the
 verdict is the strict majority of `JUDGE_SAMPLES` schema-constrained answers at
 `JUDGE_EFFORT`, `unclear` when there is none."""
+
+
+def require_judge_model(model: str) -> str:
+    """`model` if it is in `JUDGE_MODELS`; a `JudgeError` before any call otherwise."""
+    if model not in JUDGE_MODELS:
+        raise JudgeError(
+            f"the LLM judge never calls {model!r}: allowed models are {sorted(JUDGE_MODELS)}"
+        )
+    return model
+
 
 _JUDGE_SYSTEM = """You grade a code reviewer. You are given ONE known defect and the \
 reviewer's blocking findings. Answer whether any single finding identifies THIS defect: \
@@ -1057,7 +1072,7 @@ class LlmJudge:
 
     def __init__(self, client: ModelClient, model: str = JUDGE_MODEL) -> None:
         self._client = client
-        self._model = model
+        self._model = require_judge_model(model)
 
     @property
     def identity(self) -> str:
@@ -1138,6 +1153,7 @@ class AnthropicMessages:
         return cls(key)
 
     def complete(self, *, model: str, system: str, prompt: str) -> str:
+        require_judge_model(model)
         try:
             response = self._http.post(
                 ANTHROPIC_MESSAGES_URL,
