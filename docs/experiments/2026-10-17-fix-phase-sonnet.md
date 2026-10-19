@@ -277,8 +277,13 @@ findings.
 
 ### Still open
 
-- Escape windows: runs 01, 02, 04 and 06 to 2026-11-01; 07, 08 and 10 to 13 to
-  2026-11-02. #2036 (09) and #2041 (14) are not merged yet; #2036 waits on a live
-  judge calibration that needs the owner's API key.
+- Escape windows: runs 01, 02, 04 and 06 to 2026-11-01; 07, 08 and 10 to 14 to
+  2026-11-02. #2036 (09) is not merged yet; it waits on a live judge calibration
+  that needs the owner's API key. #2041 (14) merged as d76f6168e after its
+  independent reverify certified it (round 0 blocked only on workspace thread
+  exhaustion).
+- After the last run, the orchestrator reinstalled the control workflow with
+  #2035's prompt changes. Production v4-precheck no longer matches the E3 control
+  arm, so any follow-up comparison needs fresh arms.
 - The final verdict is written when the windows close. Any escape traced to a Sonnet
   fix commit is an immediate REJECT (stop rule).
