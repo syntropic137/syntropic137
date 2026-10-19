@@ -15,8 +15,6 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -35,6 +33,11 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
 )
 from syn_domain.contexts.agent_sessions.recorded_model_rows import pick_primary_model
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
+from syn_domain.contexts.agent_sessions.slices.session_cost.stored_turn_cost import (
+    STORED_TURN_COST,
+    TURN_COST_KEY,
+    StoredTurnCost,
+)
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     TimescaleSessionCostQuery,
 )
@@ -114,33 +117,7 @@ def _get_or_create_session_cost(existing: dict[str, Any] | None, session_id: str
     return SessionCost.from_dict(existing) if existing else SessionCost(session_id=session_id)
 
 
-#: Projection-document key for what the session's turns alone priced to.
-_TURN_COST_KEY = "turn_cost"
-
-
-class _StoredTurnCost(BaseModel):
-    """``TurnCost`` as the projection document stores it."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    total: Decimal
-    cost_by_model: dict[str, Decimal]
-    unpriced_observation_count: int
-
-    @classmethod
-    def of(cls, turns: TurnCost) -> _StoredTurnCost:
-        return cls(
-            total=turns.total,
-            cost_by_model=dict(turns.cost_by_model),
-            unpriced_observation_count=turns.unpriced_observation_count,
-        )
-
-
-#: Reads the stored turn cost back, and absence as ``None``, not as an error.
-_STORED_TURN_COST = TypeAdapter(_StoredTurnCost | None)
-
-
-def _load_turn_cost(stored: _StoredTurnCost | None, session_cost: SessionCost) -> TurnCost:
+def _load_turn_cost(stored: StoredTurnCost | None, session_cost: SessionCost) -> TurnCost:
     """What the session's turns priced to, kept apart from what a summary settled.
 
     A reported summary overwrites ``total_cost_usd`` and ``cost_by_model``, so
@@ -248,7 +225,7 @@ class SessionCostProjection:
     async def _save(self, session_id: str, session_cost: SessionCost, turns: TurnCost) -> None:
         """Store the session's cost together with what its turns alone priced to."""
         document = session_cost.to_dict()
-        document[_TURN_COST_KEY] = _StoredTurnCost.of(turns).model_dump(mode="json")
+        document[TURN_COST_KEY] = StoredTurnCost.of(turns).model_dump(mode="json")
         await self._store.save(self.PROJECTION_NAME, session_id, document)
 
     @property
@@ -274,7 +251,7 @@ class SessionCostProjection:
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         session_cost = _get_or_create_session_cost(existing, session_id)
         turns = _load_turn_cost(
-            _STORED_TURN_COST.validate_python((existing or {}).get(_TURN_COST_KEY)), session_cost
+            STORED_TURN_COST.validate_python((existing or {}).get(TURN_COST_KEY)), session_cost
         )
         _update_linkage(session_cost, event_data)
 
@@ -405,7 +382,7 @@ class SessionCostProjection:
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         session_cost = _get_or_create_session_cost(existing, session_id)
         turns = _load_turn_cost(
-            _STORED_TURN_COST.validate_python((existing or {}).get(_TURN_COST_KEY)), session_cost
+            STORED_TURN_COST.validate_python((existing or {}).get(TURN_COST_KEY)), session_cost
         )
         _set_linkage(session_cost, event_data)
 
@@ -484,7 +461,7 @@ class SessionCostProjection:
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         session_cost = _get_or_create_session_cost(existing, session_id)
         turns = _load_turn_cost(
-            _STORED_TURN_COST.validate_python((existing or {}).get(_TURN_COST_KEY)), session_cost
+            STORED_TURN_COST.validate_python((existing or {}).get(TURN_COST_KEY)), session_cost
         )
         _set_linkage(session_cost, event_data)
         _apply_finalized_costs(session_cost, event_data)
