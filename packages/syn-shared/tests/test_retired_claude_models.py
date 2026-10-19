@@ -44,6 +44,25 @@ RETIRED = [
     "claude-3-7-sonnet",
     "claude-sonnet-4-20250514[1m]",
     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    # claude-code lowercases an explicit --model, so case is not a way past.
+    "Claude-Sonnet-4-5-20250929",
+    "CLAUDE-SONNET-4-5-20250929",
+    "Claude-Sonnet-4-5-20250929[1M]",
+    "US.Anthropic.Claude-Sonnet-4-5-20250929-v1:0",
+    # The pre-3 families, in their first-party and Bedrock spellings.
+    "claude-2",
+    "claude-2.1",
+    "Claude-2",
+    "anthropic.claude-v2",
+    "anthropic.claude-v2:1",
+    "claude-instant-1.2",
+    "anthropic.claude-instant-v1",
+]
+
+CASE_VARIANTS = [
+    "Claude-Sonnet-4-5-20250929",
+    "CLAUDE-SONNET-4-5-20250929",
+    "Claude-Sonnet-4-5-20250929[1m]",
 ]
 
 ALLOWED = [
@@ -95,6 +114,21 @@ def test_install_and_edit_refuse_a_declared_retired_model(model: str, provider: 
         normalize_phase_model(provider, model, PhaseModelDefaults())
 
 
+@pytest.mark.parametrize(
+    "model", [*CASE_VARIANTS, "claude-2", "anthropic.claude-v2", "claude-instant-1.2"]
+)
+def test_install_and_edit_refuse_case_variants_and_pre_3_families(model: str) -> None:
+    with pytest.raises(RetiredModelError):
+        normalize_phase_model(AgentProvider.CLAUDE, model, PhaseModelDefaults())
+
+
+@pytest.mark.parametrize(
+    ("alias", "target"), [("Sonnet", "claude-sonnet-5-5"), ("OPUS", "claude-opus-5-5")]
+)
+def test_alias_in_any_case_is_translated_not_left_to_the_cli(alias: str, target: str) -> None:
+    assert resolve_claude_model(alias) == target
+
+
 def test_install_refuses_a_retired_operator_default() -> None:
     defaults = PhaseModelDefaults(claude=ModelId.CLAUDE_SONNET_4_5)
     with pytest.raises(RetiredModelError):
@@ -115,10 +149,11 @@ def test_execution_still_loads_a_past_retired_model() -> None:
     )
 
 
-def test_settings_refuse_a_retired_default(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("model", ["claude-sonnet-4-5-20250929", *CASE_VARIANTS])
+def test_settings_refuse_a_retired_default(monkeypatch: pytest.MonkeyPatch, model: str) -> None:
     from syn_shared.settings.config import Settings
 
-    monkeypatch.setenv("SYN_DEFAULT_CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+    monkeypatch.setenv("SYN_DEFAULT_CLAUDE_MODEL", model)
     with pytest.raises(ValidationError, match="retired"):
         Settings()
 

@@ -46,8 +46,8 @@ SYSTEM_PROMPT = (
 class AnthropicModelId(StrEnum):
     """Explicit model ids only. An alias would let the screener change under a frozen bench."""
 
-    HAIKU_5_5 = "claude-haiku-5-5"
     # Registered ids come from syn_shared.agents.ModelId, never a second literal.
+    HAIKU_5_5 = ModelId.CLAUDE_HAIKU_5_5.value
     SONNET_5_5 = ModelId.CLAUDE_SONNET_5_5.value
 
 

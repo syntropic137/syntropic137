@@ -496,11 +496,15 @@ class RetiredModelError(ValueError):
 
 
 _RETIRED_CLAUDE_MODEL = re.compile(
-    r"(?:^|[./])claude-(?:[0-3][-.]|(?:opus|sonnet|haiku)-[0-4](?:[-.@\[]|$))"
+    r"(?:^|[./])claude-(?:v?[0-3]|instant|(?:opus|sonnet|haiku)-[0-4])(?:[-.:@\[]|$)",
+    re.IGNORECASE,
 )
 """Every Claude model below the 5 family, in any spelling the CLI accepts:
-dated or undated, ``[1m]``-suffixed, or provider-prefixed
-(``us.anthropic.claude-sonnet-4-5-...``)."""
+dated or undated, ``[1m]``-suffixed, provider-prefixed
+(``us.anthropic.claude-sonnet-4-5-...``), the pre-3 names (``claude-2``,
+``anthropic.claude-v2``, ``claude-instant-1.2``), and in any letter case,
+because claude-code 2.1.293 lowercases an explicit ``--model`` before sending
+it (``Claude-Sonnet-4-5`` runs as ``claude-sonnet-4-5``)."""
 
 
 def is_retired_claude_model(model: str) -> bool:
@@ -520,8 +524,10 @@ def resolve_claude_model(model: str) -> str:
     passes through. Raises ``RetiredModelError`` when the result is retired,
     so this is also the last refusal before a phase launches.
     """
+    # Case-blind like the CLI, so `Sonnet` is translated rather than handed to
+    # the CLI's own catalog.
     for alias, target in CLAUDE_MODEL_ALIAS_TARGETS.items():
-        if model == alias:
+        if model.lower() == alias:
             model = str(target)
             break
     if is_retired_claude_model(model):

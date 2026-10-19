@@ -57,3 +57,16 @@ def test_retired_model_is_refused_at_launch() -> None:
     phase = _phase(ModelId.CLAUDE_SONNET_4_5)  # constructing it must still work
     with pytest.raises(RetiredModelError, match="claude-sonnet-4-5-20250929"):
         _build_claude_command(phase, "hi")
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["Claude-Sonnet-4-5-20250929", "CLAUDE-SONNET-4-5-20250929", "Claude-Sonnet-4-5-20250929[1m]"],
+)
+def test_retired_model_in_another_case_is_refused_at_launch(model: str) -> None:
+    """claude-code 2.1.293 lowercases --model, so a stored mixed-case retired id
+    would run as the retired model if it reached the CLI."""
+    from syn_api._wiring_agent_command import _build_claude_command
+
+    with pytest.raises(RetiredModelError):
+        _build_claude_command(_phase(model), "hi")
