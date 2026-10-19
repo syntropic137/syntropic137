@@ -16,6 +16,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration._shared.phase_order import phase_order_conflict
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     continuation_candidates,
     decide_continuation,
@@ -60,6 +61,8 @@ def refuse_resume_start(command: StartResumeCommand) -> str | None:
       one may read. A phase the parent's certified review skipped is not a gap
       (#1681): it was never going to run, so it is passed over here as the
       parent's prefix passed over it.
+    * a snapshot whose phases are not a total order - "before the resume
+      phase" means nothing when two phases share an order (#1455).
     """
     resume_execution_id = command.aggregate_id
     pinned_phases = command.pinned_phases
@@ -70,6 +73,9 @@ def refuse_resume_start(command: StartResumeCommand) -> str | None:
             f"{resumed_from.parent_execution_id} recorded no pinned phase config, so what "
             "the resume would run can only be read from the current workflow template (#1454)"
         )
+    conflict = phase_order_conflict(pinned_phases)
+    if conflict is not None:
+        return f"Cannot start resume {resume_execution_id}: {conflict} (#1455)"
     pinned_ids = [p.phase_id for p in sorted(pinned_phases, key=lambda p: p.order)]
     inherited_ids = [p.phase_id for p in resumed_from.inherited_phases]
     absent = [phase_id for phase_id in inherited_ids if phase_id not in pinned_ids]
