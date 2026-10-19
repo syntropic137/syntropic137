@@ -117,7 +117,10 @@ def _turn_rows(turns: list[tuple[str, int, int]]) -> list[dict[str, _Cell]]:
     return list(grouped.values())
 
 
-async def _replayed(turns: list[tuple[str, int, int]], cost: float | None) -> SessionCost:
+async def _replayed(
+    turns: list[tuple[str, int, int]], cost: float | None, *earlier_costs: float | None
+) -> SessionCost:
+    """Replay the turns, then a summary per ``earlier_costs``, then the newest at ``cost``."""
     store = MockProjectionStore()
     projection = SessionCostProjection(store)  # type: ignore[arg-type]
     for model, inp, out in turns:
@@ -128,7 +131,10 @@ async def _replayed(turns: list[tuple[str, int, int]], cost: float | None) -> Se
                 "data": {"input_tokens": inp, "output_tokens": out, "model": model},
             }
         )
-    await projection.on_session_summary({"session_id": _SID, "data": _summary_data(cost)})
+    for summary_cost in (*earlier_costs, cost):
+        await projection.on_session_summary(
+            {"session_id": _SID, "data": _summary_data(summary_cost)}
+        )
     cost_doc = await projection.get_session_cost(_SID)
     assert cost_doc is not None
     return cost_doc
@@ -225,6 +231,34 @@ async def test_a_reported_cost_still_wins_on_every_path() -> None:
     for sc in (replayed, single, listed):
         assert sc.total_cost_usd == Decimal("1.25")
         assert list(sc.cost_by_model.values()) == [Decimal("1.25")]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "turns",
+    [_TURNS, [*_TURNS, _UNPRICED_TURN], []],
+    ids=["priced-multi-model", "with-an-unpriced-turn", "no-turns"],
+)
+async def test_a_null_summary_after_a_reported_one_costs_the_turns(
+    turns: list[tuple[str, int, int]],
+) -> None:
+    """The newest summary wins, and SQL reads only it: the earlier $1.25 is gone."""
+    replayed = await _replayed(turns, None, 1.25)
+
+    assert _cost_answer(replayed) == _cost_answer(await _replayed(turns, None))
+    assert _cost_answer(_sql_single(turns, None)) == _cost_answer(replayed)
+    assert _cost_answer(_sql_list(turns, None)) == _cost_answer(replayed)
+    assert replayed.total_cost_usd != Decimal("1.25")
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_reported_summary_after_a_null_one_still_wins() -> None:
+    replayed = await _replayed(_TURNS, 1.25, None)
+
+    assert _cost_answer(replayed) == _cost_answer(_sql_single(_TURNS, 1.25))
+    assert replayed.total_cost_usd == Decimal("1.25")
 
 
 @pytest.mark.unit

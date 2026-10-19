@@ -15,6 +15,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, ConfigDict
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -112,6 +114,54 @@ def _get_or_create_session_cost(existing: dict[str, Any] | None, session_id: str
     return SessionCost.from_dict(existing) if existing else SessionCost(session_id=session_id)
 
 
+#: Projection-document key for what the session's turns alone priced to.
+_TURN_COST_KEY = "turn_cost"
+
+
+class _StoredTurnCost(BaseModel):
+    """``TurnCost`` as the projection document stores it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    total: Decimal
+    cost_by_model: dict[str, Decimal]
+    unpriced_observation_count: int
+
+    @classmethod
+    def of(cls, turns: TurnCost) -> _StoredTurnCost:
+        return cls(
+            total=turns.total,
+            cost_by_model=dict(turns.cost_by_model),
+            unpriced_observation_count=turns.unpriced_observation_count,
+        )
+
+
+def _load_turn_cost(stored: object, session_cost: SessionCost) -> TurnCost:
+    """What the session's turns priced to, kept apart from what a summary settled.
+
+    A reported summary overwrites ``total_cost_usd`` and ``cost_by_model``, so
+    once one has arrived those fields are no longer the turns' cost. A newer
+    summary with no cost must still be settled from the turns (#1420), as the
+    SQL path does by re-reading them, so replay carries them separately.
+
+    A document written before this key existed falls back to its session
+    fields, which are the turns' own unless a reported summary was applied;
+    rebuilding the projection replaces that estimate with the real figure.
+    """
+    if stored is None:
+        return TurnCost(
+            total=session_cost.total_cost_usd,
+            cost_by_model=dict(session_cost.cost_by_model),
+            unpriced_observation_count=session_cost.unpriced_observation_count,
+        )
+    loaded = _StoredTurnCost.model_validate(stored)
+    return TurnCost(
+        total=loaded.total,
+        cost_by_model=dict(loaded.cost_by_model),
+        unpriced_observation_count=loaded.unpriced_observation_count,
+    )
+
+
 def _apply_finalized_costs(session_cost: SessionCost, event_data: dict[str, Any]) -> None:
     """Apply finalized cost values from a SessionCostFinalized event.
 
@@ -192,6 +242,12 @@ class SessionCostProjection:
         self._pool = pool
         self._cost_calculator = cost_calculator or CostCalculator()
 
+    async def _save(self, session_id: str, session_cost: SessionCost, turns: TurnCost) -> None:
+        """Store the session's cost together with what its turns alone priced to."""
+        document = session_cost.to_dict()
+        document[_TURN_COST_KEY] = _StoredTurnCost.of(turns).model_dump(mode="json")
+        await self._store.save(self.PROJECTION_NAME, session_id, document)
+
     @property
     def name(self) -> str:
         """Get the projection name."""
@@ -214,6 +270,7 @@ class SessionCostProjection:
 
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         session_cost = _get_or_create_session_cost(existing, session_id)
+        turns = _load_turn_cost((existing or {}).get(_TURN_COST_KEY), session_cost)
         _update_linkage(session_cost, event_data)
 
         if not session_cost.started_at:
@@ -221,16 +278,19 @@ class SessionCostProjection:
 
         data = event_data.get("data", {})
         if event_type == ObservationType.TOKEN_USAGE.value:
-            self._handle_token_usage(session_cost, data)
+            turns = self._handle_token_usage(session_cost, turns, data)
         elif event_type == ObservationType.TOOL_EXECUTION_COMPLETED.value:
             self._handle_tool_execution(session_cost, data)
 
-        await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
+        await self._save(session_id, session_cost, turns)
 
-    def _handle_token_usage(self, session_cost: SessionCost, data: TokenUsageData) -> None:
+    def _handle_token_usage(
+        self, session_cost: SessionCost, turns: TurnCost, data: TokenUsageData
+    ) -> TurnCost:
         """Handle TOKEN_USAGE observation data.
 
         Updates token counts, calculates cost, and tracks per-model breakdown.
+        Returns ``turns`` with this turn's cost added, the same way.
         """
         input_tokens = data.get("input_tokens") or 0
         output_tokens = data.get("output_tokens") or 0
@@ -266,6 +326,11 @@ class SessionCostProjection:
         )
         if priced.cost is None:
             session_cost.unpriced_observation_count += 1
+            turns = TurnCost(
+                total=turns.total,
+                cost_by_model=turns.cost_by_model,
+                unpriced_observation_count=turns.unpriced_observation_count + 1,
+            )
         else:
             token_cost = priced.cost
             session_cost.token_cost_usd += token_cost
@@ -274,9 +339,18 @@ class SessionCostProjection:
             session_cost.cost_by_model[key] = (
                 session_cost.cost_by_model.get(key, Decimal("0")) + token_cost
             )
+            turns = TurnCost(
+                total=turns.total + token_cost,
+                cost_by_model={
+                    **turns.cost_by_model,
+                    key: turns.cost_by_model.get(key, Decimal("0")) + token_cost,
+                },
+                unpriced_observation_count=turns.unpriced_observation_count,
+            )
 
         # Increment turns (each token_usage = one turn)
         session_cost.turns += 1
+        return turns
 
     def _handle_tool_execution(self, session_cost: SessionCost, data: dict[str, Any]) -> None:
         """Handle TOOL_EXECUTION_COMPLETED observation data.
@@ -325,6 +399,7 @@ class SessionCostProjection:
 
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         session_cost = _get_or_create_session_cost(existing, session_id)
+        turns = _load_turn_cost((existing or {}).get(_TURN_COST_KEY), session_cost)
         _set_linkage(session_cost, event_data)
 
         # The payload arrives from the event store as an untyped JSON object;
@@ -364,16 +439,11 @@ class SessionCostProjection:
         # An absent cost is settled by the rule the SQL read path applies too
         # (#1420): the turns' own per-model pricing stands, and the summary is
         # never re-priced under its single model. See ``unreported_cost``.
+        # ``turns``, not the session's cost fields: an earlier reported summary
+        # has overwritten those, and the newest summary is the one that counts.
         reported_cost = parse_vendor_cost(data.get("total_cost_usd"))
         if reported_cost is None:
-            settled = cost_under_unreported_summary(
-                TurnCost(
-                    total=session_cost.total_cost_usd,
-                    cost_by_model=session_cost.cost_by_model,
-                    unpriced_observation_count=session_cost.unpriced_observation_count,
-                ),
-                session_tokens,
-            )
+            settled = cost_under_unreported_summary(turns, session_tokens)
             session_cost.total_cost_usd = settled.total
             session_cost.token_cost_usd = settled.total
             session_cost.cost_by_model = dict(settled.cost_by_model)
@@ -393,7 +463,7 @@ class SessionCostProjection:
 
         session_cost.completed_at = _parse_timestamp(event_data.get("timestamp"))
         session_cost.is_finalized = bool(data.get("totals_are_authoritative", True))
-        await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
+        await self._save(session_id, session_cost, turns)
 
     async def on_session_cost_finalized(self, event_data: dict[str, Any]) -> None:
         """Handle SessionCostFinalized event.
@@ -406,6 +476,7 @@ class SessionCostProjection:
 
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         session_cost = _get_or_create_session_cost(existing, session_id)
+        turns = _load_turn_cost((existing or {}).get(_TURN_COST_KEY), session_cost)
         _set_linkage(session_cost, event_data)
         _apply_finalized_costs(session_cost, event_data)
         _apply_finalized_tokens(session_cost, event_data)
@@ -418,7 +489,7 @@ class SessionCostProjection:
             _parse_timestamp(event_data.get("completed_at")) or session_cost.completed_at
         )
         session_cost.is_finalized = True
-        await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
+        await self._save(session_id, session_cost, turns)
 
     async def get_session_cost(self, session_id: str) -> SessionCost | None:
         """Get session cost by session ID.

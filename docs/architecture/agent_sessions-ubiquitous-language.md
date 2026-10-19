@@ -118,6 +118,9 @@ re-priced under its single model (#1420). Its tokens are still the summary's,
 so for such a Session tokens and cost come from different sources, on purpose.
 A summary with tokens and no turns at all is unpriced, never $0.00. Replay and
 every SQL read path apply this one rule (`cost_under_unreported_summary`).
+When a Session has more than one summary the newest decides, and an earlier
+reported total is not turn cost: replay keeps the turn cost apart from what a
+summary settled, so a later unreported summary still costs the turns.
 
 ## Inventory Reconciliation
 
