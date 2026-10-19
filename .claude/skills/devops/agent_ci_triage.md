@@ -27,7 +27,7 @@ release pipeline.
    - Fitness ratchet: a value went up; fix the code, never raise the budget.
    - Reusable-workflow permissions: a callee cannot widen the caller's grants; declare the union on the caller.
    - Base-image rot (2026-05-01 envoy retro): rebuild locally to confirm.
-   - `Mutation Patches Not Merged` red: not a defect. The PR still tracks `.mutations/`; delete it before merge, the evidence is in the mutation-evidence PR comment. To gather that evidence (dispatch-only, never on a PR event) read `agent_mutation_evidence.md`.
+   - `Mutation Patches Not Merged` red: not a defect, and never fixed by deleting `.mutations/` from a workflow phase or agent workspace. The PR still tracks the patches that trusted mutation evidence runs from. The orchestrator removes them, and only after the `<!-- mutation-evidence -->` PR comment reports PASS for the current head SHA (#2028). To gather that evidence (dispatch-only, never on a PR event) read `agent_mutation_evidence.md`.
    - Green in CI, red locally: CI may never collect that test. Check its marker against the job's selection (`-m unit` over testpaths; `ci/fitness -m architecture`) before calling it flaky (#1935).
 6. A red `main` blocks every PR. Fix it first, via `agent_hotfix.md` if trivial.
 7. Search `docs/retrospectives/` for the symptom. Report: workflow, job, step, excerpt, flake or defect, prior occurrences, fix.
