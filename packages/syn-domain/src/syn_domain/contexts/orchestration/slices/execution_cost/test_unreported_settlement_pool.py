@@ -36,6 +36,7 @@ from syn_domain.contexts.orchestration.slices.execution_cost.query_service impor
 )
 from syn_domain.contexts.orchestration.slices.execution_cost.test_unreported_summary_parity import (
     _EID,
+    _Cell,
     _execution_row,
 )
 
@@ -53,7 +54,7 @@ _SPAN = EventSpan(lower=datetime(2026, 1, 1, tzinfo=UTC), upper=datetime(2027, 1
 class _Conn:
     """Answers each query the readers send with the rows the store would hold."""
 
-    async def fetch(self, query: str, *_args: object) -> list[dict[str, object]]:
+    async def fetch(self, query: str, *_args: object) -> list[dict[str, _Cell]]:
         if query in (
             execution_sql._LIST_ALL_FROM_SUMMARY_QUERY,
             execution_sql._BY_IDS_FROM_SUMMARY_QUERY,
