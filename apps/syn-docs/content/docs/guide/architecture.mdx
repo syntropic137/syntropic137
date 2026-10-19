@@ -17,21 +17,21 @@ Syntropic137 distinguishes between two kinds of events, each optimized for its u
 |---|---|---|
 | **Purpose** | Business logic, state transitions | Telemetry, metrics, audit logs |
 | **Storage** | TimescaleDB (append-only, replay-safe) | TimescaleDB (hypertable, time-series optimized) |
-| **Pipeline** | Command → Aggregate → Event → Projection | Agent stdout → Collector → EventBuffer → TimescaleDB |
+| **Pipeline** | Command → Aggregate → Event → Projection | Agent stdout → API stream processor → AgentEventStore → TimescaleDB |
 | **Validation** | Aggregate invariants, can be rejected | Schema validation only, append-only |
-| **Examples** | `WorkflowCreated`, `ExecutionStarted` | `ToolExecuted`, `TokensUsed` |
+| **Examples** | `WorkflowTemplateCreated`, `WorkflowExecutionStarted` | `tool_execution_started`, `token_usage` |
 
 <TwoEventTypesFlow />
 
 ## CQRS
 
-Commands and queries are strictly separated. Commands modify state through aggregates; queries read from pre-built projections cached in Redis.
+Commands and queries are strictly separated. Commands modify state through aggregates; queries read from pre-built projections stored in PostgreSQL.
 
-**Commands (80):** `CreateWorkflow`, `StartExecution`, `CancelExecution`, `ResumeExecution`, `RegisterTrigger`, `UpdateTrigger`, `DeleteTrigger`, and more.
+**Commands:** `CreateWorkflowTemplateCommand`, `ExecuteWorkflowCommand`, `CancelExecutionCommand`, `ResumeExecutionCommand`, `RegisterTriggerCommand`, `PauseTriggerCommand`, `DeleteTriggerCommand`, and more.
 
-**Events (114):** Every command produces one or more events: `WorkflowCreated`, `ExecutionStarted`, `ExecutionResumed`, `ExecutionCompleted`, `TriggerRegistered`, etc.
+**Events:** Every command produces one or more events: `WorkflowTemplateCreated`, `WorkflowExecutionStarted`, `ExecutionResumed`, `WorkflowCompleted`, `github.TriggerRegistered`, etc.
 
-**Projections (32):** Pre-computed read models subscribed to domain events, cached in Redis or PostgreSQL for sub-millisecond query response times. Includes a `repo_correlation` projection that maps repositories to workflow executions for cross-context insight queries.
+**Projections:** Pre-computed read models subscribed to domain events and stored in PostgreSQL. Includes a `repo_correlation` projection that maps repositories to workflow executions for cross-context insight queries.
 
 <CQRSFlow />
 
@@ -51,7 +51,7 @@ GET /api/v1/sse/executions/{execution_id}
 
 Global activity across all executions streams from `GET /api/v1/sse/activity`. From the CLI, `syn watch execution <id>` and `syn watch activity` follow the same streams.
 
-Control commands (cancel, inject) are sent via standard REST API calls rather than a persistent connection.
+Control commands are sent via standard REST API calls rather than a persistent connection.
 
 ### Execution State Machine
 
@@ -73,19 +73,19 @@ Control commands (cancel, inject) are sent via standard REST API calls rather th
       <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold opacity-0">RUNNING</span>
       <span className="text-fd-muted-foreground">→ interrupt →</span>
       <span className="inline-block w-28 rounded-md bg-orange-500/20 px-3 py-1.5 text-center text-orange-400">INTERRUPTED</span>
-      <span className="text-fd-muted-foreground">→ retry →</span>
-      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary">RUNNING</span>
     </div>
-    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem+6rem+3.5rem+0.5rem)]">
-      <span className="inline-block w-28 rounded-md bg-orange-500/20 px-3 py-1.5 text-center text-orange-400 opacity-0">INTERRUPTED</span>
+    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem)]">
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold opacity-0">RUNNING</span>
       <span className="text-fd-muted-foreground">→ cancel →</span>
       <span className="inline-block w-28 rounded-md bg-zinc-500/20 px-3 py-1.5 text-center text-zinc-400">CANCELLED</span>
     </div>
   </div>
 </div>
 
-**Yield Points**: The agent can only be interrupted at safe points: before each workflow phase, after each tool execution, and after each LLM call.
+**Cancel**: The platform checks for a cancel every few lines of agent output and interrupts the agent. Inject is accepted by the API but not yet delivered to the agent.
+
+**Resume**: A `FAILED` or `INTERRUPTED` execution can be resumed, which creates a new execution. See [Resuming Failed Executions](/docs/guide/resuming-executions).
 
 ## Performance
 
-Both event pipelines are optimized for their access patterns. Domain events use append-only writes with aggregate-level consistency. Observability events use TimescaleDB hypertables with automatic partitioning for high-throughput ingestion. Read models are cached in Redis for fast dashboard and API queries.
+Both event pipelines are optimized for their access patterns. Domain events use append-only writes with aggregate-level consistency. Observability events use TimescaleDB hypertables with automatic partitioning for high-throughput ingestion. Read models are stored in PostgreSQL.

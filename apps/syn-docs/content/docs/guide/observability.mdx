@@ -121,8 +121,8 @@ curl http://localhost:8080/health
 ### Check recent events
 
 ```bash
-curl -s http://localhost:8080/events/recent | \
-  jq 'group_by(.event_type) | map({type: .[0].event_type, count: length})'
+curl -s -u "${SYN_API_USER:-admin}:$SYN_API_PASSWORD" "$SYN_API_URL/api/v1/events/recent?limit=200" | \
+  jq '.events | group_by(.event_type) | map({type: .[0].event_type, count: length})'
 ```
 
 After a workflow execution you should see both channels represented:
@@ -163,7 +163,7 @@ When a phase's workspace is torn down, what it consumed is recorded as one
 | `delete_failures` | Paths the cleanup could not delete (`[]` when it removed everything) |
 
 ```bash
-curl -s "http://localhost:8080/events/sessions/<session-id>?event_type=workspace_resource_usage" | jq '.events[].data'
+curl -s -u "${SYN_API_USER:-admin}:$SYN_API_PASSWORD" "$SYN_API_URL/api/v1/events/sessions/<session-id>?event_type=workspace_resource_usage" | jq '.events[].data'
 ```
 
 Limits:
@@ -204,4 +204,4 @@ The dashboard's session cost view aggregates these into per-session and per-exec
 
 ## Deduplication
 
-Events are identified by a deterministic SHA256 `event_id` derived from content (session ID, metric name, timestamp, index). The collector deduplicates within a sliding window, safe to retry any event submission without double-counting.
+Events are identified by a deterministic SHA256 `event_id` derived from content (session ID, metric name, timestamp, index). The collector drops repeats using an in-memory cache of the last 100,000 event ids (by default). A retry is safe while the original is in that cache; after a collector restart or eviction it can be stored twice.

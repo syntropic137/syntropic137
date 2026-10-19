@@ -1946,6 +1946,15 @@ health-json:
 docs-cli-gen:
     @echo "📄 Generating CLI reference docs..."
     @cd apps/syn-cli-node && pnpm run generate:docs
+    @echo "📄 Generating CLI command manifest (read by the docs-drift gate)..."
+    @cd apps/syn-cli-node && pnpm run generate:manifest
+
+# List every `syn` command, setup command and /api/v1 route in the public docs
+# that the software rejects, budgeted or not. The gate itself is the fitness
+# test ci/fitness/code_quality/test_docs_drift.py, run by `fitness` (so by
+# `preflight` and CI); this prints the full list behind it.
+check-docs-drift *FILES:
+    @uv run python scripts/check_docs_drift.py {{FILES}}
 
 # Start docs site dev server (regenerates CLI docs first)
 docs: docs-cli-gen
