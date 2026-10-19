@@ -1,6 +1,7 @@
 id: scripted-agent-tests-not-in-ci
 polarity: defect
 source_pr: 49
+escape_class: evidence that cannot run on CI
 # Escaped on 2026-10-13: the platform verify certified AW#49 at this head; a
 # second verifier blocked it. The pin is the first parent of the fix 948a913.
 # Evidence at the pin: lib/python/scripted_agent holds a test suite (74 tests

@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="./design/brand/banners/syntropic137.svg" alt="Syntropic137: agent work that compounds" width="100%" />
+  <img src="./design/brand/v2/readme-banners/syntropic137.svg" alt="Syntropic137: agent work that compounds" width="100%" />
 </p>
 
 # Syntropic137
@@ -105,7 +105,7 @@ Use `just dev-fresh` instead for a clean slate (wipes volumes and re-seeds).
 
 ## Architecture
 
-The system is organized into 5 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
+The system is organized into 6 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
 
 ![Syn137 Architecture](./docs/architecture/vsa-overview.svg)
 
@@ -119,6 +119,7 @@ The system is organized into 5 bounded contexts following Vertical Slice Archite
 | **`agent_sessions`** | AgentSession, InventoryClock, InventoryReconciliation | Agent sessions and observability metrics |
 | **`github`** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
 | **`artifacts`** | Artifact | Artifact storage and retrieval |
+| **`feedback`** | Source, Ticket | Feedback tickets: membership, screening, fix tracking and resolution |
 
 **Infrastructure:** PostgreSQL (event store + projections) · Redis · MinIO
 
@@ -174,9 +175,9 @@ phases:
       model: gpt-sol            # platform alias for gpt-6.1-sol, see note below
 ```
 
-Codex phases need `CODEX_AUTH_JSON` set in your `.env`. Without it, no codex
-credential is staged, so a phase with `agent.provider: codex` cannot
-authenticate and fails when codex runs.
+Codex phases need `CODEX_AUTH_JSON` (a Codex `~/.codex/auth.json`) or
+`OPENAI_API_KEY` set in your `.env`; `CODEX_AUTH_JSON` wins when both are set.
+With neither, a phase with `agent.provider: codex` cannot authenticate.
 
 A phase that names no model gets the platform default: `opus` on claude
 phases, `gpt-sol` on codex phases. `gpt-sol` is a platform alias that runs

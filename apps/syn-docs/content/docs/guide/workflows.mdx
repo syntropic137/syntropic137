@@ -297,24 +297,38 @@ when the phase in `workflow.yaml` omits `allowed_tools`; a value in
 
 ### Codex authentication
 
-Codex phases need `CODEX_AUTH_JSON` set on the deployment, holding the full
-contents of a Codex `~/.codex/auth.json`. Without it, a phase with
-`agent.provider: codex` fails to provision. Claude phases are unaffected.
+Codex phases need one of two settings on the deployment:
 
-The agent process itself never receives that environment variable. Provisioning
-stages the value to a file, relocates it to `~/.codex/auth.json` inside the
-workspace at mode 0600, and deletes the staged copy. A codex agent's
-environment carries no Claude credentials, which keeps `ANTHROPIC_API_KEY` and
-`CLAUDE_CODE_OAUTH_TOKEN` out of reach of a codex run; besides its credential
-file it gets only non-secret run variables (such as `GH_REPO`, the phase deadline
-and attempt identifiers). The exception is
+- `CODEX_AUTH_JSON`: the full contents of a Codex `~/.codex/auth.json`, usually
+  from `codex login` with a ChatGPT account. Takes priority when both are set,
+  and provisioning logs a warning naming both settings (never their values).
+- `OPENAI_API_KEY`: an OpenAI API key. Syntropic137 writes it as the same
+  `auth.json` content that `codex login --with-api-key` produces,
+  `{"auth_mode": "apikey", "OPENAI_API_KEY": "..."}`. Usage is billed to the
+  key's OpenAI account.
+
+With neither set, a phase with `agent.provider: codex` has no credential and
+cannot authenticate. Claude phases are unaffected.
+
+The agent process itself never receives either environment variable.
+Provisioning stages the `auth.json` to a file, relocates it to
+`~/.codex/auth.json` inside the workspace at mode 0600, and deletes the staged
+copy. A codex agent's environment carries no Claude credentials, which keeps
+`ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` out of reach of a codex run;
+besides its credential file it gets only non-secret run variables (such as
+`GH_REPO`, the phase deadline and attempt identifiers). The exception is
 `allow_delegation: true`, which stages both providers' credentials so the agent
 can call the other CLI. A claude `fallback_agent` gets the Claude credentials
 for its own run, and a codex `fallback_agent` on a claude phase puts
 `~/.codex/auth.json` in the workspace for the whole phase.
 
+`GET /health` reports which kind of credential is configured in its
+`codex_auth` block: an API key shows as `api_key`, with no expiry. A ChatGPT
+login shows its access token's expiry when the token carries a readable one.
+
 For a durable deployment credential that a developer running `codex login` on a
-laptop cannot revoke, use a ChatGPT Business or Enterprise access token. See
+laptop cannot revoke, use an `OPENAI_API_KEY`, or a ChatGPT Business or
+Enterprise access token. See
 [Codex access tokens: setup and validation](https://github.com/syntropic137/syntropic137/blob/main/docs/testing/codex-access-token-setup.md).
 
 ### Claude model aliases

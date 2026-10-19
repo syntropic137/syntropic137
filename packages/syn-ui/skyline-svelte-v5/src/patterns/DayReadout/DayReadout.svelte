@@ -20,7 +20,7 @@
       <div class="sky-readout__stepper">
         <button class="sky-readout__step" type="button" aria-label="Previous active day" onclick={onprev}><Glyph d={GLYPH.chevronLeft} weight={1.75} /></button>
         <div class="sky-readout__when">
-          <span class="sky-readout__date">{r.dateLabel}</span>
+          <span class="sky-readout__date">{r.dateLabel}<span class="sky-readout__zone">{r.zone}</span></span>
           {#if position}<span class="sky-readout__pos">{position}</span>{/if}
           {#if r.failed}<span class="sky-readout__failed">{r.failed}</span>{/if}
         </div>
@@ -28,7 +28,7 @@
       </div>
     {:else}
       <div class="sky-readout__head">
-        <span class="sky-readout__date">{r.dateLabel}<span class="sky-readout__year">, {r.year}</span></span>
+        <span class="sky-readout__date">{r.dateLabel}<span class="sky-readout__year">, {r.year}</span><span class="sky-readout__zone">{r.zone}</span></span>
         {#if runsHref}<a class="sky-readout__runs" href={runsHref}>Runs →</a>{/if}
       </div>
       {#if r.failed}<span class="sky-readout__failed">{r.failed}</span>{/if}
@@ -98,7 +98,8 @@
     font-weight: var(--ds-font-weight-semibold);
     letter-spacing: -0.01em;
   }
-  .sky-readout__year {
+  .sky-readout__year,
+  .sky-readout__zone {
     font-weight: var(--ds-font-weight-regular);
     color: var(--ds-color-text-subtle);
   }

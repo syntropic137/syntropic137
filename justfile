@@ -198,7 +198,7 @@ onboard-dev *flags:
         # Audit each secret: show status (in .env, missing, needs vault)
         _HAS_VALUES=""
         _MISSING=""
-        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON; do
+        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON OPENAI_API_KEY; do
             _VAL="${!_VAR:-}"
             if [ -n "$_VAL" ]; then
                 # Show redacted for secrets, full for non-secrets
@@ -230,6 +230,7 @@ onboard-dev *flags:
                     CLAUDE_CODE_OAUTH_TOKEN) echo "     $_VAR — needed if not using ANTHROPIC_API_KEY" ;;
                     CLOUDFLARE_TUNNEL_TOKEN) echo "     $_VAR — needed only for selfhost (just selfhost-up-tunnel)" ;;
                     CODEX_AUTH_JSON) echo "     $_VAR — needed for codex-runner workflow phases (just codex-auth-clip)" ;;
+                    OPENAI_API_KEY) echo "     $_VAR - codex phases fall back to it when CODEX_AUTH_JSON is not set" ;;
                 esac
             done
             echo ""
@@ -279,7 +280,7 @@ onboard-dev *flags:
                 echo ""
                 echo "# Try edit first; if item doesn't exist, create it"
                 echo -n "op item edit \"$_ITEM\" --vault \"$_VAULT\""
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON OPENAI_API_KEY; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         echo " \\"
@@ -289,7 +290,7 @@ onboard-dev *flags:
                 echo " 2>/dev/null \\"
                 echo "|| op item create --category=login --title=\"$_ITEM\" --vault=\"$_VAULT\" \\"
                 _FIRST=true
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_PUBLIC_HOSTNAME SYN_API_PASSWORD CODEX_AUTH_JSON OPENAI_API_KEY; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         if [ "$_FIRST" = true ]; then _FIRST=false; else echo " \\"; fi
@@ -303,7 +304,7 @@ onboard-dev *flags:
                 echo ""
                 echo "# --- Clean secret values from .env files (keep keys with empty values) ---"
                 echo "echo '🧹 Cleaning secret values from .env files...'"
-                echo "_ROOT_SECRETS=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CODEX_AUTH_JSON)"
+                echo "_ROOT_SECRETS=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CODEX_AUTH_JSON OPENAI_API_KEY)"
                 echo "for _KEY in \"\${_ROOT_SECRETS[@]}\"; do"
                 echo "  if grep -q \"^\${_KEY}=\" .env 2>/dev/null; then"
                 echo "    sed -i.bak \"s|^\${_KEY}=.*|# \${_KEY}= # managed by 1Password|\" .env && rm -f .env.bak"
@@ -767,6 +768,18 @@ test-integration:
     @echo "   (Uses test-stack if running, otherwise testcontainers)"
     uv run pytest -m integration --tb=short
 
+# The full integration suite as an evidence run: no -x, JUnit XML, and an
+# evidence.json saying whether every named test ran and passed. What
+# integration-evidence.yml runs (docs/plans/20261015_platform-dispatched-evidence.md):
+#   just test-integration-ci <pr> "<node ids>"
+test-integration-ci $pr $tests $out="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="${out:-$(mktemp -d)}"; mkdir -p "$out"
+    INTEGRATION_PR="$pr" INTEGRATION_TESTS="$tests" INTEGRATION_SHA="$(git rev-parse HEAD)" \
+        python3 -I scripts/integration_evidence.py run --root . \
+        --report "$out/integration-evidence.md" --evidence "$out/evidence.json"
+
 # Run integration tests with test-stack lifecycle (start → test → cleanup)
 test-integration-full: test-stack
     @echo "🧪 Running integration tests against test stack..."
@@ -1205,27 +1218,27 @@ check-agent-docs:
 
 # Mirrors ci.yml `mutations-not-merged`. Deliberately NOT in preflight: the
 # pre-push hook would block pushing the very patches mutation-evidence.yml
-# reads. Delete the dir before merge; the PR comment is the record. See
+# reads. The orchestrator deletes the dir after a PASS; the PR comment is the record. See
 # .claude/skills/devops/agent_mutation_evidence.md.
 # Fail if `.mutations/` is tracked (PR-scoped evidence, never main).
 check-no-mutations:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -n "$(git ls-files -- .mutations)" ]; then
-        echo "❌ delete .mutations/ before merge; evidence is in the mutation-evidence comment"
+        echo "❌ .mutations/ is tracked; the orchestrator removes it after a mutation-evidence PASS on this head (#2028)"
         git ls-files -- .mutations
         exit 1
     fi
     echo "✅ no .mutations/ tracked"
 
 #   just mutation-evidence 1929 "scripts/tests/test_x.py::test_y"
-#   just mutation-evidence 1929 "<ids>" true    # tests that drive Docker themselves
+#   just mutation-evidence 1929 "<ids>" false   # sandbox: no Docker, stronger isolation
 # The patches are `*.patch` files committed under mutations_dir on the PR head.
-# docker=true runs PR code on the runner host (weaker isolation; see the workflow).
+# docker=true (default) runs PR code on the runner host with Docker, like ci.yml.
 # Exits non-zero when a mutation survived, a patch failed to apply, or the
 # baseline was red. The table is printed and posted as one PR comment.
 # Dispatch mutation-evidence.yml for a PR, wait, print the verdict table.
-mutation-evidence $pr $tests $docker="false" $mutations_dir=".mutations/":
+mutation-evidence $pr $tests $docker="true" $mutations_dir=".mutations/":
     #!/usr/bin/env bash
     set -euo pipefail
     # A nonce in the run name identifies THIS dispatch, even when two run for
@@ -1979,8 +1992,8 @@ docs-sync: check-env-example check-architecture-docs
         echo "   Run 'just codegen' and commit the changes."; \
         exit 1; \
     fi
-    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts apps/syn-dashboard-ui/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
-        echo "✅ API docs, CLI types, and dashboard types are up-to-date"; \
+    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts apps/syn-dashboard-ui/src/generated/api-types.ts packages/openclaw-plugin/src/generated/api-types.ts packages/syn-ui/data/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
+        echo "✅ API docs, CLI types, dashboard, OpenClaw plugin and syn-ui data types are up-to-date"; \
     else \
         echo "❌ API artifacts need to be committed:"; \
         echo "   Run 'just codegen' and commit the changes."; \
@@ -2000,6 +2013,10 @@ codegen: docs-cli-gen
     cd apps/syn-cli-node && pnpm run generate:types
     @echo "📄 Generating Dashboard TypeScript types..."
     cd apps/syn-dashboard-ui && pnpm run generate:types
+    @echo "📄 Generating OpenClaw plugin TypeScript types..."
+    cd packages/openclaw-plugin && pnpm run generate:types
+    @echo "📄 Generating syn-ui data-layer TypeScript types..."
+    cd packages/syn-ui/data && pnpm run generate:types
     @echo "📄 Exporting plugin JSON schemas..."
     uv run python scripts/export_plugin_schemas.py
     @echo "📄 Generating .env.example and the compose settings passthrough..."
@@ -2545,6 +2562,17 @@ changelog-check *args:
 # Image build, push, retag and release-asset recipes live in just/release.just
 # (imported at the top of this file), so they can be owner-reviewed without
 # putting every other recipe behind CODEOWNERS.
+
+# Dry run by default. --apply sets maintenance and refuses unless quiescent
+# (no running execution or workspace container, the automatic reclaimer
+# paused); quiescence is re-checked before every directory.
+#   just vps-reclaim                                 (what would go, and why the rest stays)
+#   just vps-reclaim --apply --budget-minutes 10     (delete; rerun to continue)
+#   just vps-reclaim --apply --lift-maintenance      (and reopen admission after)
+# Reclaim the workspace backlog on the selfhost VPS, as root (#1983)
+[positional-arguments]
+vps-reclaim *flags:
+    uv run python infra/scripts/vps_reclaim.py "$@"
 
 # Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
 # Codifies docs/deployment/test-deploy.md (direct path). Not a release.

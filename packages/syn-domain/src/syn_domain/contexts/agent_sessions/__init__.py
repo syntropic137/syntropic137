@@ -164,6 +164,7 @@ from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     recorded_model_from_row,
     recorded_model_group_by,
     recorded_model_select,
+    zero_usage_group_by,
 )
 from syn_domain.contexts.agent_sessions.slices.backfill_session_inventory.BackfillSessionInventoryHandler import (
     BackfillResult,
@@ -423,6 +424,7 @@ __all__ = [
     "save_reapplying",
     "summary_usage_columns",
     "turn_usage_columns",
+    "zero_usage_group_by",
 ]
 
 from ._shared.concurrent_save import save_reapplying

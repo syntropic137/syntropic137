@@ -41,7 +41,7 @@ Each agent execution runs in an isolated Docker workspace with a two-phase secur
 
 **Setup Phase**: Secrets are used to write git and gh credential files and are removed from the environment before the agent starts. The GitHub installation token stays in those files, readable by the agent, for the run ([#725](https://github.com/syntropic137/syntropic137/issues/725) tracks removing it).
 
-**Agent Phase**: A claude phase runs with its Anthropic credential, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, as its only environment secret. A codex phase's credential is staged to `~/.codex/auth.json` during provisioning, and its environment carries no Claude credential unless the phase sets `allow_delegation: true`, which stages both. A claude `fallback_agent` gets the Claude credential only for its own run. `CODEX_AUTH_JSON` is a deployment variable, not something the agent sees. Git operations use cached credentials from the setup phase.
+**Agent Phase**: A claude phase runs with its Anthropic credential, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, as its only environment secret. A codex phase's credential is staged to `~/.codex/auth.json` during provisioning, and its environment carries no Claude credential unless the phase sets `allow_delegation: true`, which stages both. A claude `fallback_agent` gets the Claude credential only for its own run. `CODEX_AUTH_JSON` and `OPENAI_API_KEY` are deployment variables, not something the agent sees. Git operations use cached credentials from the setup phase.
 
 ### AppArmor hosts (Codex workspaces)
 
@@ -78,7 +78,8 @@ sudo apparmor_parser -r /etc/apparmor.d/agentic-codex-sandbox
 | `SYN_GITHUB_APP_ID` | | GitHub App ID for webhook triggers |
 | `SYN_GITHUB_APP_PRIVATE_KEY_FILE` | | Path to the GitHub App private key (PEM). The self-host stack mounts `secrets/github-app-private-key.pem` and sets this |
 | `ANTHROPIC_API_KEY` | | API key for claude phases. `CLAUDE_CODE_OAUTH_TOKEN` takes priority when both are set |
-| `CODEX_AUTH_JSON` | | Full contents of a Codex `~/.codex/auth.json`. Required for codex phases, unused by claude phases |
+| `CODEX_AUTH_JSON` | | Full contents of a Codex `~/.codex/auth.json`. Codex phases need it or `OPENAI_API_KEY`; it takes priority when both are set. Unused by claude phases |
+| `OPENAI_API_KEY` | | OpenAI API key for codex phases, used when `CODEX_AUTH_JSON` is unset. Staged as Codex's API-key `auth.json`, never in the agent environment. Unused by claude phases |
 
 ## Scaling Options
 

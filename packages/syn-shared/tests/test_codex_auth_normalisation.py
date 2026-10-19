@@ -80,3 +80,27 @@ class TestCodexAuthNormalisation:
         with pytest.raises(ValueError) as exc:
             _normalise("{broken")
         assert "codex-auth-clip" in str(exc.value)
+
+
+@pytest.mark.unit
+class TestApiKeyAuthJsonValidation:
+    """An API-key auth.json must carry a usable key, or it is rejected (#1971)."""
+
+    def test_complete_api_key_file_passes(self) -> None:
+        raw = '{"auth_mode":"apikey","OPENAI_API_KEY":"sk-proj-fake-normalisation"}'
+        assert _normalise(raw) == raw
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"auth_mode":"apikey"}',
+            '{"auth_mode":"apikey","OPENAI_API_KEY":null}',
+            '{"auth_mode":"apikey","OPENAI_API_KEY":""}',
+            '{"auth_mode":"apikey","OPENAI_API_KEY":"   "}',
+        ],
+        ids=["missing", "null", "empty", "whitespace"],
+    )
+    def test_keyless_api_key_file_is_rejected(self, raw: str) -> None:
+        with pytest.raises(ValueError, match="without a usable") as caught:
+            _normalise(raw)
+        assert "apikey" not in str(caught.value)

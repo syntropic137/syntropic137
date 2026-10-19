@@ -45,6 +45,7 @@ These are injected automatically by syn137 when creating workspaces:
 |----------|---------|
 | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | Claude credential, for claude phases. Placed directly in the agent environment; the OAuth token is used when both are configured |
 | `CODEX_AUTH_JSON` | Deployment variable, not injected into the workspace. Provisioning stages its contents to `~/.codex/auth.json` at mode 0600 and deletes the staged copy. A codex phase's agent environment carries no Claude credential unless the phase sets `allow_delegation: true` |
+| `OPENAI_API_KEY` | Deployment variable, not injected into the workspace. Used only when `CODEX_AUTH_JSON` is unset: provisioning writes it as Codex's API-key `auth.json` and stages that the same way |
 | `CLAUDE_CODE_ENABLE_TELEMETRY` | Activates OTel export (set to `1` when collector is configured) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint, auto-set to `COLLECTOR_URL` from syn-api config |
 | `GH_REPO` | The primary repo as `owner/repo`, so `gh` resolves a repository without a working tree to infer one from. Absent when the workflow configures no repo, or when the primary one does not parse. See [Workspace Hydration](/docs/workspaces/hydration). |

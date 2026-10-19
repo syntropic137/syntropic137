@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.pinned_checkout import append_pinned_checkout
+from syn_adapters.workspace_backends.service.setup_script_header import setup_script_header
 from syn_shared.upstream_failure import UpstreamFailureError
 
 if TYPE_CHECKING:
@@ -207,11 +208,13 @@ def _resolve_claude_credentials() -> tuple[str | None, str | None]:
 
 
 def _resolve_codex_credentials() -> str | None:
-    """Resolve the Codex auth file contents from settings."""
-    from syn_shared.settings import get_settings
+    """Codex auth.json: CODEX_AUTH_JSON, else one built from OPENAI_API_KEY (#1971)."""
+    from syn_shared.codex_credentials import resolve_configured_codex_credential
 
-    codex_auth_json = get_settings().codex_auth_json
-    return codex_auth_json.get_secret_value() if codex_auth_json else None
+    resolved = resolve_configured_codex_credential()
+    if resolved is not None and resolved.both_configured:
+        logger.warning("Both CODEX_AUTH_JSON and OPENAI_API_KEY are set. Using CODEX_AUTH_JSON.")
+    return resolved.auth_json if resolved is not None else None
 
 
 class GitHubAppNotConfiguredError(Exception):
@@ -505,7 +508,7 @@ class SetupPhaseSecrets:
         repositories: Full repo URLs to clone during setup phase
         claude_code_oauth_token: Claude Code OAuth token (takes priority over API key)
         anthropic_api_key: Claude API key (fallback when OAuth token not set)
-        codex_auth_json: Full contents of the Codex auth.json file
+        codex_auth_json: Full contents of the Codex auth.json file (see _resolve_codex_credentials)
         git_author_name: Git commit author name (from GitHub App bot)
         git_author_email: Git commit author email (from GitHub App bot)
     """
@@ -727,7 +730,7 @@ class SetupPhaseSecrets:
                 rather than one repo being silently skipped.
             ValueError: A pinned commit is not a full commit id (#1458).
         """
-        lines: list[str] = [DEFAULT_SETUP_SCRIPT.rstrip()]
+        lines = setup_script_header(self.git_author_name, self.git_author_email)
         self._append_codex_auth(lines)
 
         self._append_git_credentials(lines)
@@ -941,28 +944,3 @@ class SetupPhaseSecrets:
                 " submodule update --init --recursive"
                 f" || printf '%s\\n' {shlex.quote(warning)} >&2"
             )
-
-
-# Minimal setup script for credentials that require secure injection.
-#
-# NOTE: Most configuration is now handled by the container's entrypoint.sh
-# (see: agentic-workspace/workspace/entrypoint.sh)
-#
-# This script only handles:
-# 1. Git identity (in case container started without env vars)
-#
-# Credential helper and repo cloning are now handled by build_setup_script()
-# when repositories are provided (ADR-058). For executions without repos,
-# this script is used as-is (backward compat).
-#
-# The entrypoint already handles: ~/.claude/settings.json, workspace dirs, hooks
-DEFAULT_SETUP_SCRIPT = """#!/bin/bash
-set -e
-
-# Configure Git identity if not already set by entrypoint
-# (entrypoint sets from initial env vars, this ensures setup-phase vars are used)
-if [ -n "${GIT_AUTHOR_NAME}" ]; then
-    git config --global user.name "${GIT_AUTHOR_NAME}"
-    git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@agentic.local}"
-fi
-"""

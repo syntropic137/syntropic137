@@ -3,9 +3,9 @@
 /**
  * Workflow-install pre-flight for `claude_plugins:` declarations.
  *
- * Walks the resolved package directory, parses every workflow YAML it
- * contains, collects all declared claude plugin refs (workflow- and
- * phase-scope), de-duplicates by (source_url, version, name) -- matching
+ * Reads the workflows the resolver accepted, collects all declared claude
+ * plugin refs (workflow- and phase-scope) from their definitions,
+ * de-duplicates by (source_url, version, name) -- matching
  * the Python lock key, so two aliases of the same source register as two
  * distinct lock entries -- and:
  *
@@ -17,15 +17,18 @@
  * mutate state. This preserves the user-visible "atomic install" property
  * documented in the redesign plan.
  *
- * Workflows without `claude_plugins:` incur zero overhead - we only walk the
- * file tree and parse YAML, which is fast and local.
+ * WHY the resolved definitions and not the package's YAML files (#1949): the
+ * resolver decides which documents are workflows, and a file it skipped (a
+ * lockfile, a tool config) must not be able to register a plugin or abort the
+ * install. Rediscovering documents here would be a second, divergent judgment.
+ *
+ * Workflows without `claude_plugins:` incur zero overhead - nothing is read
+ * beyond the definitions already in memory.
  */
 
-import fs from "node:fs";
-import path from "node:path";
 import { CLIError } from "../framework/errors.js";
 import { api } from "../client/typed.js";
-import { parseYaml } from "./yaml.js";
+import type { ResolvedWorkflow } from "./models.js";
 import {
   parseClaudePluginRef,
   type ParsedClaudePluginRef,
@@ -42,43 +45,8 @@ export interface PreflightResult {
   readonly skipped: readonly ParsedClaudePluginRef[];
 }
 
-const SKIP_WALK_DIRS = new Set([".git", "node_modules"]);
-
-function isYamlFilename(name: string): boolean {
-  const lower = name.toLowerCase();
-  return lower.endsWith(".yaml") || lower.endsWith(".yml");
-}
-
-function isWalkableDir(dir: string): boolean {
-  // WHY: collapse the existence + directory checks so the recursive walker
-  // can early-return without nested conditionals.
-  return fs.existsSync(dir) && fs.statSync(dir).isDirectory();
-}
-
-function walkYamlDir(dir: string, out: string[]): void {
-  if (!isWalkableDir(dir)) return;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (SKIP_WALK_DIRS.has(entry.name)) continue;
-    const abs = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walkYamlDir(abs, out);
-      continue;
-    }
-    if (entry.isFile() && isYamlFilename(entry.name)) {
-      out.push(abs);
-    }
-  }
-}
-
-/** Recursively find every *.yaml/*.yml file under a directory. */
-function findYamlFiles(root: string): string[] {
-  const out: string[] = [];
-  walkYamlDir(root, out);
-  return out;
-}
-
 /**
- * Extract every `claude_plugins:` declaration from a parsed YAML doc.
+ * Extract every `claude_plugins:` declaration from a workflow definition.
  * Looks at top-level and inside any `phases[].claude_plugins`.
  */
 function extractRefItems(doc: unknown): unknown[] {
@@ -143,29 +111,17 @@ async function isInLock(name: string, version: string): Promise<boolean> {
   return false;
 }
 
-function tryParseYamlFile(file: string): unknown | null {
-  // WHY: a non-workflow YAML in the scan may be malformed or not ours; we
-  // surface a null sentinel so the orchestrator can skip without a try/catch.
-  try {
-    return parseYaml(fs.readFileSync(file, "utf-8"), file);
-  } catch {
-    return null;
-  }
-}
-
 function claudePluginLockKey(ref: ParsedClaudePluginRef): string {
   // WHY name in the key: the lock key is (source_url, version, name);
   // two aliases of the same source/version are two distinct entries.
   return `${ref.source_url}\0${ref.version}\0${ref.name}`;
 }
 
-function collectUniqueRefsFromYaml(
-  file: string,
+function collectUniqueRefsFromDefinition(
+  definition: Record<string, unknown>,
   seen: Map<string, ParsedClaudePluginRef>,
 ): void {
-  const parsed = tryParseYamlFile(file);
-  if (parsed === null) return;
-  for (const item of extractRefItems(parsed)) {
+  for (const item of extractRefItems(definition)) {
     const ref = refFromItem(item);
     if (ref === null) continue;
     const key = claudePluginLockKey(ref);
@@ -173,10 +129,12 @@ function collectUniqueRefsFromYaml(
   }
 }
 
-function collectUniqueRefsFromYamls(yamlFiles: readonly string[]): Map<string, ParsedClaudePluginRef> {
+function collectUniqueRefs(
+  workflows: readonly ResolvedWorkflow[],
+): Map<string, ParsedClaudePluginRef> {
   const seen = new Map<string, ParsedClaudePluginRef>();
-  for (const file of yamlFiles) {
-    collectUniqueRefsFromYaml(file, seen);
+  for (const workflow of workflows) {
+    collectUniqueRefsFromDefinition(workflow.definition, seen);
   }
   return seen;
 }
@@ -233,10 +191,9 @@ async function processRef(
 }
 
 export async function runClaudePluginPreflight(
-  packagePath: string,
+  workflows: readonly ResolvedWorkflow[],
 ): Promise<PreflightResult | null> {
-  const yamlFiles = findYamlFiles(packagePath);
-  const seen = collectUniqueRefsFromYamls(yamlFiles);
+  const seen = collectUniqueRefs(workflows);
 
   if (seen.size === 0) return null;
 

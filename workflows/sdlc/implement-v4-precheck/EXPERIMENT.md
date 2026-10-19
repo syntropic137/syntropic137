@@ -212,4 +212,28 @@ error and is not replaced.
 
 ## Results
 
-Not run.
+Scored 2026-10-16 from stored records (execution phases, PR timelines, mutation-evidence runs). All six slots ran between 2026-10-15 01:25Z and 2026-10-16 08:2xZ. Three runs were void and replaced on the same arm, because they stopped before verify, so they have no Precheck line: exec-5a051b7a8649 (brief contradicted itself), exec-4e671cce1d13 (scope too big) and exec-873d0b0f78fe (premise false, already fixed upstream).
+
+| Slot | Arm | Execution (replacements) | PR | fix* phases | Extra repair runs | Precheck line | Wall to READY | Defect found after certification (before merge) |
+|---|---|---|---|---|---|---|---|---|
+| 1 | T | exec-53a6bf1bdb7a | AgentParadise/agentic-workspace#76 | 0 | 1 (probes lost) | REPAIRABLE=0 FLAKE=1 EVIDENCE=1 | ~6.7h (includes a 3.5h orchestrator network outage) | none |
+| 2 | C | exec-4f4906567185 | #1968 | 2 | 2 | n/a | not READY (blocked on an AW pin), censored | yes: runc not enforced (fixed in AW#79); found by orchestrator evidence |
+| 3 | T | exec-05930ce02660 | #1975 | 2 | 1 | REPAIRABLE=1 FLAKE=1 EVIDENCE=2 | ~6.5h | yes: fencing bound did not hold on real Postgres; found by the handed-off evidence |
+| 4 | C | exec-c1c810ecad3e -> exec-bdaf2eefdc46 | #1974 | 2 | 0 | n/a | ~5.2h (one platform re-dispatch) | none |
+| 5 | T | exec-38c467ea16c7 -> exec-d6b475a9eb65 (+ exec-8fc649a67eea) | #1985 | 2 | 1 (2 rounds) | REPAIRABLE=2 FLAKE=1 EVIDENCE=2 | ~14h (account limit, disk-full outage) | none escaped; 2 REPAIRABLE findings caught before merge |
+| 6 | C | exec-77b0e3675e65 -> exec-b3324a164c2a (+ exec-e0bfad000b22) | #1981 | 2 | 1 | n/a | ~12h (account limit, disk-full outage) | yes: integration tests never collected (fixture ScopeMismatch); found by orchestrator evidence |
+
+**Mechanism check:** every treatment run's reports carried exactly one `Precheck:` line and a `## Handed to the orchestrator` section. Every handoff the orchestrator ran was the PR's own evidence gap, not a misclassified defect, so **misclassified handoffs = 0**. No `gh run rerun` was attempted by the agent (403 expected, not tested).
+
+**Primary metric (repair rounds):** treatment 4 `fix*` phases vs control 6. Including extra repair runs launched after the bound: treatment 7 rounds vs control 9.
+
+**Wall time to READY:** median treatment ~6.7h vs control ~12h (one control slot censored). Three slots were confounded by platform incidents: the outage, the account weekly limit and the disk filling up.
+
+**Guard (escaped findings):** none so far. The 14-day window closes 2026-10-30.
+
+**Cost:** not recorded per arm (the account switch split the usage windows).
+
+**Decision (provisional, by the preregistered rule):** ADOPT, pending the escape window. The treatment used fewer repair rounds, showed no more escaped findings, had 0 misclassified handoffs and a median time to READY no worse. The larger finding cuts across both arms: in 3 of 6 slots the platform verifier certified a head whose real-service tests had never run, and orchestrator-run evidence found a real defect each time. That is the case for the platform-dispatched evidence plan (docs/plans/20261015_platform-dispatched-evidence.md on #1874). Per that plan's decision 4, cut `sdlc-implement-v5` as v4 plus evidence declarations, and do not edit v4 in place.
+
+**Limits:** n=3 per arm; the tasks differ in kind; incidents add noise to wall time. Re-score once the escape window closes.
+

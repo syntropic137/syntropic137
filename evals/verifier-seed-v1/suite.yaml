@@ -18,9 +18,9 @@
 # verifiers were already shaped against them. The holdout is, within each
 # batch of added cases, the ~30% whose sha256(id) sorts lowest (7 of the first
 # 18 mined, 2 of the next 6, 2 of the 6 clean controls, none of v6's 2
-# controls, none of v7's 1 defect), fixed once, recorded in each file, and
+# controls, none of v7's 1 defect, 1 of v8's 4), fixed once, recorded in each file, and
 # never moved to train. That was 11 of 36 in v4; after v5's retirements and
-# additions it is 10 of 33, 10 of 35 in v6 and 10 of 36 in v7.
+# additions it is 10 of 33, 10 of 35 in v6, 10 of 36 in v7 and 11 of 40 in v8.
 #
 # What it measures: given a workflow, a prompt and a model, does verification
 # find the defect, and certify the change that has none? `score` prints both
@@ -76,6 +76,13 @@
 #     The day's other escapes are in agentic-workspace, a different
 #     repository, so they are their own suite: evals/verifier-seed-aw-v1.
 #     32 defects, 4 controls, 36 in all.
+# v8: four defects escaped on 2026-10-14/15 (#1921, #1929, #1968, #1975),
+#     and `escape_class` on the cases it fits. Each PR merged main between
+#     the head verification judged and the fix, so the fix's first parent is
+#     a merge no verifier saw: each pins the judged head instead, cited by
+#     its verify record in `certified_in` (README.md). The #1968 fix is on an
+#     unmerged branch: `git fetch origin pull/1968/head` before `check`.
+#     36 defects, 4 controls, 40 in all.
 #
 # EVERY VERSION KEEPS ITS SCORE. `history` records each earlier version whose
 # runs launches.jsonl still holds: the tag exactly as those runs carry it, the
@@ -86,7 +93,7 @@ id: verifier-seed-v1
 # version and verifier runs into those same evals; the run carries
 # `suite-version:<n>` and `verifier:<workflow id>`.
 eval_suite: verifier-seed
-version: 7
+version: 8
 goal: >
   Does the verifier block a change that carries a known escaped bug, naming
   the defect and the file it lives in, and certify a merged change that has

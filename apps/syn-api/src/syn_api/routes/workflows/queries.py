@@ -26,6 +26,7 @@ from syn_api.types import (
     WorkflowError,
     WorkflowSummary,
     WorkflowTrendResponse,
+    WorkflowTrendsResponse,
 )
 
 # Imported from the context's public surface, not its internals (ADR-062).
@@ -859,6 +860,26 @@ async def list_workflows_endpoint(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+# Declared before "/{workflow_id}", which would otherwise take "trends" as an id.
+@router.get("/trends", response_model=WorkflowTrendsResponse)
+async def list_workflow_trends_endpoint(
+    ids: str = Query(
+        ..., description=f"Comma-separated exact workflow ids, at most {MAX_PAGE_SIZE}"
+    ),
+    page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Latest runs per workflow"),
+) -> WorkflowTrendsResponse:
+    """Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872)."""
+    from syn_api.routes.trends import workflow_trends
+
+    wanted = list(dict.fromkeys(i.strip() for i in ids.split(",") if i.strip()))
+    if len(wanted) > MAX_PAGE_SIZE:
+        raise HTTPException(status_code=422, detail=f"At most {MAX_PAGE_SIZE} ids per request")
+    await ensure_connected()
+    return WorkflowTrendsResponse(
+        trends=await workflow_trends(get_projection_mgr(), wanted, page_size=page_size)
     )
 
 
