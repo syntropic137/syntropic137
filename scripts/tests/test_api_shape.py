@@ -17,8 +17,13 @@ is silence, so 0/1/2 have to mean found / absent / could-not-look.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from scripts.api_shape import describe, find_value
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.unit
 
@@ -284,3 +289,99 @@ class TestCouldNotLookIsNeverSpelledLikeAbsent:
         code = mod.main()
         capsys.readouterr()
         assert code == 2
+
+
+class TestARealReadThatFailsIsNotAbsent:
+    """Through the real `_fetch`. Every test above stubs it, which is how a
+    truncated body and a too-deep decode both escaped to exit 1 (#2030): the
+    failures happen inside `_fetch`, below where the stubs replace it."""
+
+    @staticmethod
+    def _serve_once(raw: bytes) -> str:
+        """Answer one connection with `raw` verbatim, then close."""
+        import socket
+        import threading
+
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+
+        def _answer() -> None:
+            with listener:
+                conn, _ = listener.accept()
+                with conn:
+                    conn.recv(65536)
+                    conn.sendall(raw)
+
+        threading.Thread(target=_answer, daemon=True).start()
+        return f"http://127.0.0.1:{port}/"
+
+    @staticmethod
+    def _run(monkeypatch: pytest.MonkeyPatch, url: str, *argv: str) -> int:
+        import scripts.api_shape as mod
+
+        monkeypatch.setattr("sys.argv", ["api_shape.py", url, *argv])
+        try:
+            return mod.main()
+        except SystemExit as exc:
+            # `_fetch` reports decode failures by raising SystemExit.
+            assert isinstance(exc.code, int)
+            return exc.code
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            pytest.param(
+                b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{"target":1}',
+                id="body-shorter-than-content-length",
+            ),
+            pytest.param(b"GARBAGE\r\n\r\n", id="malformed-status-line"),
+        ],
+    )
+    def test_a_broken_http_response_exits_two(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        raw: bytes,
+    ) -> None:
+        """The truncated body carries the key, so a crash that exited 1 would
+        be a false "absent" about a key the server actually sent."""
+        code = self._run(monkeypatch, self._serve_once(raw), "--find-exact", "target")
+        assert "request failed" in capsys.readouterr().err
+        assert code == 2
+
+    def test_a_complete_http_response_is_still_searched(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        body = b'{"target":1}'
+        raw = b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body)
+        code = self._run(monkeypatch, self._serve_once(raw), "--find-exact", "target")
+        assert "$.target  (as a key)" in capsys.readouterr().out
+        assert code == 0
+
+    def test_a_response_too_deep_to_decode_exits_two(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        """The key IS present, so exit 1 here is a false "absent"."""
+        depth = 20_000
+        path = tmp_path / "deep.json"
+        path.write_text("[" * depth + '{"target":1}' + "]" * depth)
+        code = self._run(monkeypatch, path.as_uri(), "--find-exact", "target")
+        assert "nests too deeply to decode" in capsys.readouterr().err
+        assert code == 2
+
+    def test_a_shallow_file_is_still_searched(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "ok.json"
+        path.write_text('[{"target":1}]')
+        code = self._run(monkeypatch, path.as_uri(), "--find-exact", "target")
+        assert "$[0].target  (as a key)" in capsys.readouterr().out
+        assert code == 0
