@@ -183,7 +183,7 @@ This keeps triggers declarative: all behavioral intelligence lives in the workfl
 
 ## Debounce
 
-The API accepts `config.debounce_seconds` on a trigger rule, but it has no effect today: the server evaluates triggers without a debouncer, so a rule fires on each matching event (subject to its cooldown and limits) whatever this value is. `syn triggers register` always sends `0`. Tracked in [issue #1961](https://github.com/syntropic137/syntropic137/issues/1961).
+Triggers do not debounce. Registering a trigger with a non-zero `config.debounce_seconds` is rejected with a 400, and `syn triggers register` always sends `0`. Each matching event is evaluated on its own, subject to the trigger's cooldown and limits, so use `cooldown_seconds` to space out fires for the same PR. Tracked in [issue #1961](https://github.com/syntropic137/syntropic137/issues/1961).
 
 ## API Reference
 
