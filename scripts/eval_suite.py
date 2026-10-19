@@ -54,7 +54,7 @@ eval's current score and the history stays in its events.
 
 TWO JUDGES. A blocked defect run is credited by the keyword judge (one
 blocking finding names an expected file and every keyword group) and, with
-``score --llm-judge``, by an LLM judge too (a pinned model at temperature 0,
+``score --llm-judge``, by an LLM judge too (a pinned 5.x model, majority of three answers,
 given the case's ``expected.defect`` root cause, asked whether a finding
 identifies THIS defect: match / no_match / unclear, with the finding it quotes). The headline catch rate counts a run caught when
 the keyword judge OR the LLM judge says ``match``; ``unclear`` is not caught.
