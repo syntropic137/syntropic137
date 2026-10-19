@@ -5,9 +5,11 @@ family) again. The runtime refuses one at install, edit, startup and launch
 (``syn_shared.agents.resolve_claude_model``); this keeps the shipped defaults
 from ever reaching that refusal:
 
-* every ``model:`` in a workflow YAML or phase-prompt frontmatter under
-  ``workflows/`` (aliases are allowed there and are judged by what they
-  resolve to);
+* every ``model`` value in a workflow YAML or phase-prompt frontmatter under
+  ``workflows/``, at any depth and in any YAML spelling (a phase's own
+  ``model:``, an inline ``fallback_agent: {provider: claude, model: ...}``),
+  read from the parsed document rather than its text. Aliases are allowed
+  there and are judged by what they resolve to;
 * the static claude default and the settings default;
 * every ``CLAUDE_MODEL_ALIAS_TARGETS`` target, and the env that pins the CLI's
   own alias lookups for subagents and delegate sessions.
@@ -18,10 +20,11 @@ at its own rate. Selection is what is forbidden, not knowledge.
 
 from __future__ import annotations
 
-import re
+import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from syn_shared.agents import (
     CLAUDE_MODEL_ALIAS_TARGETS,
@@ -33,14 +36,13 @@ from syn_shared.agents import (
 )
 
 _ROOT = Path(__file__).resolve().parents[3]
-_MODEL_LINE = re.compile(r"^\s*model:\s*['\"]?([^'\"#\s]+)", re.MULTILINE)
 _CODEX_MODELS = {str(m) for m in CODEX_MODEL_IDS} | {str(a) for a in CodexModelAlias}
 
 
 def _resolved(model: str) -> str:
     """The id ``model`` launches as, without the launch-time refusal."""
     for alias, target in CLAUDE_MODEL_ALIAS_TARGETS.items():
-        if model == alias:
+        if model.lower() == alias:
             return str(target)
     return model
 
@@ -54,9 +56,23 @@ def _workflow_models() -> list[tuple[str, str]]:
             text = _frontmatter(path.read_text())
         else:
             continue
-        for match in _MODEL_LINE.finditer(text):
-            found.append((str(path.relative_to(_ROOT)), match.group(1)))
+        relative = str(path.relative_to(_ROOT))
+        found.extend((relative, model) for model in _model_values(yaml.safe_load(text)))
     return found
+
+
+def _model_values(node: object) -> list[str]:
+    """Every string under a ``model`` key in a parsed YAML document, at any depth."""
+    if isinstance(node, dict):
+        return [
+            value
+            for key, child in node.items()
+            for value in ([child] if key == "model" and isinstance(child, str) else [])
+            + _model_values(child)
+        ]
+    if isinstance(node, list):
+        return [value for child in node for value in _model_values(child)]
+    return []
 
 
 def _frontmatter(text: str) -> str:
@@ -93,3 +109,40 @@ def test_defaults_and_alias_targets_are_allowed() -> None:
     }
     retired = {k: v for k, v in selected.items() if is_retired_claude_model(v)}
     assert not retired, f"a default selects a retired Claude model: {retired}"
+
+
+_INLINE_FALLBACK = """id: inline-fallback
+name: Inline fallback
+type: research
+classification: standard
+phases:
+  - id: p
+    name: P
+    order: 1
+    prompt_template: Probe
+    model: opus
+    fallback_agent: {provider: claude, model: claude-sonnet-4-5}
+"""
+
+
+@pytest.mark.architecture
+def test_scan_sees_an_inline_retired_model_after_an_allowed_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The allowed primary keeps ``assert models`` green, so a scan that read
+    only ``model:`` lines would pass this file. It is a real input shape: the
+    production parser and converter keep the inline fallback."""
+    from syn_domain.contexts.orchestration._shared.workflow_definition import (
+        WorkflowDefinition,
+    )
+
+    [phase] = WorkflowDefinition.from_yaml(_INLINE_FALLBACK).phases
+    fallback = phase.to_domain().fallback_agent
+    assert fallback is not None
+    assert fallback.model == "claude-sonnet-4-5"
+
+    (tmp_path / "workflows").mkdir()
+    (tmp_path / "workflows" / "workflow.yaml").write_text(_INLINE_FALLBACK)
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    with pytest.raises(AssertionError, match="retired"):
+        test_workflow_yaml_selects_no_retired_model()
