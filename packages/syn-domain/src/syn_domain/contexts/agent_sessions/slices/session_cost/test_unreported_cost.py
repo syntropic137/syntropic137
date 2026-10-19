@@ -15,17 +15,20 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_domain.contexts.agent_sessions import zero_usage_group_by
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
     SessionCostProjection,
 )
 from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
+    _LIST_ALL_FROM_TOKEN_USAGE_QUERY,
     SessionCostQueryService,
 )
 from syn_domain.contexts.agent_sessions.slices.session_cost.test_projection import (
     MockProjectionStore,
 )
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
+    _TOKEN_USAGE_FALLBACK_BATCH_QUERY,
     TimescaleSessionCostQuery,
     _PageRows,
 )
@@ -85,11 +88,14 @@ def _summary_row(cost: float | None) -> dict[str, _Cell]:
 
 
 def _turn_rows(turns: list[tuple[str, int, int]]) -> list[dict[str, _Cell]]:
-    """The SQL fallback's shape: one row per (session, model), summed."""
-    grouped: dict[str, dict[str, _Cell]] = {}
+    """The SQL fallback's shape: one row per (session, model, no tokens?), summed.
+
+    The last key is ``zero_usage_group_by``, which both fallback queries group on.
+    """
+    grouped: dict[tuple[str, bool], dict[str, _Cell]] = {}
     for model, inp, out in turns:
         row = grouped.setdefault(
-            model,
+            (model, inp + out == 0),
             {
                 "session_id": _SID,
                 "agent_model": model,
@@ -162,6 +168,7 @@ def _cost_answer(sc: SessionCost) -> tuple[Decimal, dict[str, Decimal], int]:
         [],
         [_ZERO_UNRATED_TURN],
         [*_TURNS, _ZERO_UNRATED_TURN],
+        [_ZERO_UNRATED_TURN, _UNPRICED_TURN],
     ],
     ids=[
         "priced-multi-model",
@@ -170,6 +177,7 @@ def _cost_answer(sc: SessionCost) -> tuple[Decimal, dict[str, Decimal], int]:
         "no-turns",
         "zero-token-unrated",
         "zero-token-unrated-beside-priced",
+        "zero-and-positive-on-one-unrated-model",
     ],
 )
 async def test_replay_and_both_sql_paths_give_one_answer(
@@ -217,3 +225,28 @@ async def test_a_reported_cost_still_wins_on_every_path() -> None:
     for sc in (replayed, single, listed):
         assert sc.total_cost_usd == Decimal("1.25")
         assert list(sc.cost_by_model.values()) == [Decimal("1.25")]
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_zero_and_positive_turns_on_one_unrated_model_price_apart() -> None:
+    """Replay prices the empty turn as a zero; summed with the other it would go unpriced."""
+    turns = [_ZERO_UNRATED_TURN, _UNPRICED_TURN]
+    expected = (Decimal("0"), {_UNPRICED: Decimal("0")}, 1)
+
+    assert _cost_answer(await _replayed(turns, None)) == expected
+    assert _cost_answer(_sql_single(turns, None)) == expected
+    assert _cost_answer(_sql_list(turns, None)) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "query",
+    [_TOKEN_USAGE_FALLBACK_BATCH_QUERY, _LIST_ALL_FROM_TOKEN_USAGE_QUERY],
+    ids=["single-and-batch", "list"],
+)
+def test_both_turn_queries_group_empty_turns_apart(query: str) -> None:
+    """``_turn_rows`` models this grouping; the queries must actually do it."""
+    group_by = query.split("GROUP BY", 1)[1]
+
+    assert zero_usage_group_by() in group_by

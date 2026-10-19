@@ -27,6 +27,7 @@ from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     recorded_model_from_row,
     recorded_model_group_by,
     recorded_model_select,
+    zero_usage_group_by,
 )
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
@@ -94,7 +95,7 @@ SELECT
     MAX(phase_id) as phase_id
 FROM agent_events
 WHERE event_type = $1
-GROUP BY session_id, {recorded_model_group_by()}
+GROUP BY session_id, {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
 _STARTED_AT_BY_SESSION_QUERY = """

@@ -15,6 +15,7 @@ from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     recorded_model_from_row,
     recorded_model_group_by,
     recorded_model_select,
+    zero_usage_group_by,
 )
 from syn_domain.storable_text import pg_safe
 from syn_shared.pricing import CostSplitBasis, TokenTypeCost, parse_vendor_cost
@@ -144,7 +145,8 @@ SELECT
 FROM agent_events
 WHERE session_id = ANY($1::text[]) AND event_type = $2
   AND time >= $3 AND time < $4
-GROUP BY session_id, execution_id, phase_id, {recorded_model_group_by()}
+GROUP BY session_id, execution_id, phase_id, {recorded_model_group_by()},
+    {zero_usage_group_by()}
 """
 
 _MIN_TIME_BATCH_QUERY = """

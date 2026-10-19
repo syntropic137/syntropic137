@@ -31,6 +31,7 @@ from syn_domain.contexts.agent_sessions import (
     recorded_model_from_row,
     recorded_model_group_by,
     recorded_model_select,
+    zero_usage_group_by,
 )
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
     UNATTRIBUTED_MODEL,
@@ -149,7 +150,7 @@ SELECT
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
   AND time >= $3 AND time < $4
-GROUP BY {recorded_model_group_by()}
+GROUP BY {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
 # The true start of an execution: the earliest event of ANY type.
