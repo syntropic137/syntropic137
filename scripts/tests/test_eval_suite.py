@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -3284,6 +3285,18 @@ class _FakeModel:
         return self.reply
 
 
+@dataclass
+class _SplitModel:
+    """A `ModelClient` whose successive answers differ: the judge's samples disagree."""
+
+    replies: list[str]
+    calls: int = 0
+
+    def complete(self, *, model: str, system: str, prompt: str) -> str:
+        self.calls += 1
+        return self.replies[(self.calls - 1) % len(self.replies)]
+
+
 def _reply(verdict: str, quote: str = "", reason: str = "r") -> str:
     return json.dumps({"verdict": verdict, "quote": quote, "reason": reason})
 
@@ -3326,9 +3339,45 @@ def test_llm_judge_credits_a_paraphrase_the_keyword_judge_misses() -> None:
     assert score.llm is not None and score.llm.verdict == "match"
     assert score.llm.quote == _PARAPHRASE_QUOTE
     assert score.passed and score.caught
-    [call] = model.calls
-    assert call["model"] == eval_suite.JUDGE_MODEL
-    assert "minio.py" in call["prompt"] and _PARAPHRASE_QUOTE in call["prompt"]
+    assert len(model.calls) == eval_suite.JUDGE_SAMPLES
+    for call in model.calls:
+        assert call["model"] == eval_suite.JUDGE_MODEL
+        assert "minio.py" in call["prompt"] and _PARAPHRASE_QUOTE in call["prompt"]
+
+
+@pytest.mark.unit
+def test_the_judges_majority_answer_is_the_verdict() -> None:
+    model = _SplitModel(
+        [_reply("match", _PARAPHRASE_QUOTE), _reply("no_match"), _reply("match", _PARAPHRASE_QUOTE)]
+    )
+    judgement = eval_suite.LlmJudge(model).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert (judgement.verdict, judgement.quote) == ("match", _PARAPHRASE_QUOTE)
+    assert "match 2/3" in judgement.reason and "no_match 1/3" in judgement.reason
+    assert model.calls == eval_suite.JUDGE_SAMPLES
+
+
+@pytest.mark.unit
+def test_a_judge_that_disagrees_with_itself_is_unclear_and_not_caught() -> None:
+    """No verdict has a majority: the score must not credit a catch on one vote in three."""
+    model = _SplitModel([_reply("match", _PARAPHRASE_QUOTE), _reply("no_match"), _reply("unclear")])
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, eval_suite.LlmJudge(model))
+    assert score.llm is not None and score.llm.verdict == "unclear"
+    assert score.llm.reason.startswith("no majority")
+    assert not score.caught and not score.passed
+
+
+@pytest.mark.unit
+def test_a_sample_quoting_no_finding_votes_unclear_not_match() -> None:
+    """The quote check runs per sample, before the vote: an invented quote cannot tip it."""
+    model = _SplitModel(
+        [
+            _reply("match", "an invented sentence"),
+            _reply("match", _PARAPHRASE_QUOTE),
+            _reply("no_match"),
+        ]
+    )
+    judgement = eval_suite.LlmJudge(model).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert judgement.verdict == "unclear"
 
 
 @pytest.mark.unit
@@ -3386,9 +3435,9 @@ def test_llm_judged_score_is_recorded_under_the_judges_identity(
     rows, _ = score_suite(loaded, server.client(), [_LAUNCHED], eval_suite.LlmJudge(model))
 
     [(_, body)] = server.scores
-    assert body["scorer_version"] == "8+llm:claude-sonnet-4-6@prompt-v3"
+    assert body["scorer_version"] == "8+llm:claude-sonnet-5-5@prompt-v4"
     assert body["verdict"] == "PASS"
-    assert "LLM judge (`llm:claude-sonnet-4-6@prompt-v3`): `match`" in str(body["evidence"])
+    assert "LLM judge (`llm:claude-sonnet-5-5@prompt-v4`): `match`" in str(body["evidence"])
     assert "keyword judge: no match" in str(body["evidence"])
     table = render(loaded, rows)
     assert "keyword OR LLM match, unclear not caught): 1/1" in table
@@ -3433,7 +3482,7 @@ def test_the_judge_uses_the_key_configured_in_settings_dotenv(
 
     def handle(request: httpx.Request) -> httpx.Response:
         sent.append(request)
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+        return httpx.Response(200, json=_ok_reply())
 
     client = eval_suite.AnthropicMessages.from_settings(Settings(_env_file=dotenv))
     client._http = httpx.Client(transport=httpx.MockTransport(handle))
@@ -3443,48 +3492,76 @@ def test_the_judge_uses_the_key_configured_in_settings_dotenv(
     assert "fake-dotenv-key" not in repr(vars(client)) + capsys.readouterr().out
 
 
-@pytest.mark.unit
-def test_anthropic_client_sends_the_pinned_model_at_temperature_zero() -> None:
-    sent: list[httpx.Request] = []
+def _ok_reply(text: str = "ok", stop_reason: str = "end_turn") -> dict[str, object]:
+    return {"content": [{"type": "text", "text": text}], "stop_reason": stop_reason}
+
+
+_SAMPLING_PARAMETERS = ("temperature", "top_p", "top_k")
+
+
+def _five_x_provider(sent: list[httpx.Request]) -> httpx.MockTransport:
+    """Plays the 5.x Messages contract: a sampling parameter or a pre-5 model is a 400."""
 
     def handle(request: httpx.Request) -> httpx.Response:
         sent.append(request)
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+        body = json.loads(request.content)
+        if any(k in body for k in _SAMPLING_PARAMETERS):
+            return httpx.Response(400, json={"error": {"message": "temperature not supported"}})
+        if not re.fullmatch(r"claude-(opus|sonnet|haiku)-5(-\d+)?", body["model"]):
+            return httpx.Response(400, json={"error": {"message": "pre-5 model"}})
+        return httpx.Response(200, json=_ok_reply())
 
+    return httpx.MockTransport(handle)
+
+
+@pytest.mark.unit
+def test_anthropic_client_sends_the_pinned_5x_model_with_no_sampling_parameter() -> None:
+    """The pinned judge is a 5.x model and the request is one the 5.x API accepts."""
+    sent: list[httpx.Request] = []
     client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(handle))
+        SecretStr("test-key"), httpx.Client(transport=_five_x_provider(sent))
     )
     assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
     [request] = sent
     assert request.headers["x-api-key"] == "test-key"
     body = json.loads(request.content)
-    assert (body["model"], body["temperature"]) == (eval_suite.JUDGE_MODEL, 0)
+    assert body["model"] == eval_suite.JUDGE_MODEL
+    assert body["output_config"]["effort"] == eval_suite.JUDGE_EFFORT
+    schema = body["output_config"]["format"]["schema"]
+    assert body["output_config"]["format"]["type"] == "json_schema"
+    assert schema["properties"]["verdict"]["enum"] == ["match", "no_match", "unclear"]
+    assert schema["additionalProperties"] is False
 
 
 @pytest.mark.unit
-def test_a_model_that_rejects_temperature_zero_is_refused_before_sending() -> None:
-    """The 4.7+/5.x models 400 on a non-default temperature: the pinned judge is not one of them.
-
-    The transport below plays the provider's contract, so a pinned model it rejects
-    fails here rather than mid-scoring against the real API.
-    """
+def test_the_llm_judge_end_to_end_runs_on_the_5x_api() -> None:
+    """Judge through client: every sample reaches a provider that refuses pre-5 requests."""
     sent: list[httpx.Request] = []
 
-    def provider(request: httpx.Request) -> httpx.Response:
-        sent.append(request)
-        body = json.loads(request.content)
-        if body["model"] not in eval_suite.TEMPERATURE_ZERO_MODELS and body["temperature"] != 1:
-            return httpx.Response(400, json={"error": {"message": "temperature not supported"}})
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+    def handle(request: httpx.Request) -> httpx.Response:
+        response = _five_x_provider(sent).handle_request(request)
+        if response.status_code != 200:
+            return response
+        return httpx.Response(200, json=_ok_reply(_reply("match", _PARAPHRASE_QUOTE)))
 
     client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(provider))
+        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(handle))
     )
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    for unsupported in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-4-7"):
-        with pytest.raises(eval_suite.JudgeError, match="does not accept temperature 0"):
-            client.complete(model=unsupported, system="s", prompt="p")
-    assert len(sent) == 1
+    judgement = eval_suite.LlmJudge(client).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert judgement.verdict == "match"
+    assert judgement.judge == "llm:claude-sonnet-5-5@prompt-v4"
+    assert len(sent) == eval_suite.JUDGE_SAMPLES
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stop_reason", ["refusal", "max_tokens"])
+def test_a_reply_that_did_not_finish_is_an_error_not_a_verdict(stop_reason: str) -> None:
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(200, json=_ok_reply(_reply("no_match"), stop_reason))
+    )
+    client = eval_suite.AnthropicMessages(SecretStr("test-key"), httpx.Client(transport=transport))
+    with pytest.raises(eval_suite.JudgeError, match=f"stopped with '{stop_reason}'"):
+        client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
 
 
 @pytest.mark.unit
@@ -3498,8 +3575,9 @@ def test_every_defect_case_gives_the_judge_its_root_cause_and_hides_it_from_the_
         assert case.expected.defect not in case.task
         model = _FakeModel(_reply("no_match"))
         eval_suite.LlmJudge(model).judge(case.expected, ["some finding"])
-        [call] = model.calls
-        assert case.expected.defect in call["prompt"], case.id
+        assert model.calls and all(
+            case.expected.defect in call["prompt"] for call in model.calls
+        ), case.id
 
 
 @pytest.mark.unit
