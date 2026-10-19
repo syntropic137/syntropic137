@@ -62,9 +62,7 @@ _AGGREGATE_ONLY = (
     "When `mutations-not-merged` is the only one that failed, `CI Success` is the"
     " same evidence: hand both off together under that heading, never to a fix phase."
 )
-_AGGREGATE_MIXED = (
-    "When any other prerequisite also failed, that failure is a blocker as usual."
-)
+_AGGREGATE_MIXED = "When any other prerequisite also failed, that failure is a blocker as usual."
 _AGGREGATE_PRECHECK = (
     "A red `CI Success` is the same class when `mutations-not-merged` is the only"
     " prerequisite that failed"
