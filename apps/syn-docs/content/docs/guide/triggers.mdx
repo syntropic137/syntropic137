@@ -177,15 +177,7 @@ This keeps triggers declarative: all behavioral intelligence lives in the workfl
 
 ## Debounce
 
-For events that arrive in bursts (e.g., multiple review comments), triggers support debouncing:
-
-```bash
-syn triggers register \
-  --event pull_request_review.submitted \
-  --debounce 60   # Wait 60s after last event before firing
-```
-
-With debouncing enabled, rapid-fire events reset a timer. When the timer expires, the trigger fires once and the workflow reads the complete picture (all comments, all reviews).
+Triggers do not debounce. Registering a trigger with a non-zero `config.debounce_seconds` is rejected with a 400, and `syn triggers register` always sends `0`. Each matching event is evaluated on its own, subject to the trigger's cooldown and limits, so use `cooldown_seconds` to space out fires for the same PR. Tracked in [issue #1961](https://github.com/syntropic137/syntropic137/issues/1961).
 
 ## API Reference
 
