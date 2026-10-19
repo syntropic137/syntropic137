@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from syn_api.types import Err, Ok
+from syn_api.types import Err, InputDeclarationResponse, Ok
 from syn_shared.agents import DEFAULT_CLAUDE_MODEL
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
@@ -41,7 +41,7 @@ async def _create_test_workflow(
     workflow_type: str = "research",
     description: str = "Multi-phase research workflow",
     phases: list[dict[str, object]] | None = None,
-    input_declarations: list[dict[str, object]] | None = None,
+    input_declarations: list[InputDeclarationResponse] | None = None,
 ) -> str:
     """Create a test workflow and return its ID."""
     from syn_api.routes.workflows import create_workflow
@@ -73,7 +73,7 @@ async def _create_test_workflow(
         workflow_type=workflow_type,
         description=description,
         phases=phases,
-        input_declarations=input_declarations,
+        input_declarations=[d.model_dump() for d in input_declarations or []],
     )
     assert isinstance(result, Ok)
     return result.value.workflow_id
@@ -322,16 +322,16 @@ async def test_export_workflow_with_input_declarations(tmp_path: Path):
         WorkflowDefinition,
     )
 
-    declared: list[dict[str, object]] = [
-        {"name": "version", "description": "Release version", "required": True},
-        {
-            "name": "draft",
-            "description": "Whether this is a draft release",
-            "required": False,
-            "default": "false",
-        },
-        {"name": "build", "required": False, "default": "123"},
-        {"name": "channel", "required": False, "default": "null"},
+    declared = [
+        InputDeclarationResponse(name="version", description="Release version"),
+        InputDeclarationResponse(
+            name="draft",
+            description="Whether this is a draft release",
+            required=False,
+            default="false",
+        ),
+        InputDeclarationResponse(name="build", required=False, default="123"),
+        InputDeclarationResponse(name="channel", required=False, default="null"),
     ]
     wf_id = await _create_test_workflow(
         phases=[
@@ -353,19 +353,6 @@ async def test_export_workflow_with_input_declarations(tmp_path: Path):
         target.write_text(content, encoding="utf-8")
     loaded = WorkflowDefinition.from_file(tmp_path / "workflow.yaml")
 
-    assert [i.model_dump() for i in loaded.inputs] == [
-        {
-            "name": "version",
-            "description": "Release version",
-            "required": True,
-            "default": None,
-        },
-        {
-            "name": "draft",
-            "description": "Whether this is a draft release",
-            "required": False,
-            "default": "false",
-        },
-        {"name": "build", "description": None, "required": False, "default": "123"},
-        {"name": "channel", "description": None, "required": False, "default": "null"},
+    assert [(i.name, i.description, i.required, i.default) for i in loaded.inputs] == [
+        (d.name, d.description, d.required, d.default) for d in declared
     ]
