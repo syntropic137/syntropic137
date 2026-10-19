@@ -23,6 +23,8 @@ from agentic_isolation import (
     SecurityConfig,
     WorkspaceDockerProvider,
 )
+from agentic_isolation.contract import OperationError
+from agentic_isolation.providers.operation_spool import OperationFailure
 
 from syn_adapters.diagnostics import capture_signal_death
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
@@ -31,9 +33,11 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_to_workspace,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
+from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     apply_session_store_env,
     deployment_identity,
+    session_store_credential_bindings,
 )
 
 # Re-exported for backward compatibility (issue #771 item 7): the canonical
@@ -42,7 +46,12 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
 from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
-from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
+from syn_adapters.workspace_backends.backend_kit import BackendKit
+from syn_adapters.workspace_backends.errors import (
+    TeardownFailure,
+    WorkspaceProvisionError,
+    WorkspaceTeardownError,
+)
 from syn_adapters.workspace_backends.exec_status_lost import (
     diagnose_lost_status,
     status_was_lost,
@@ -50,7 +59,6 @@ from syn_adapters.workspace_backends.exec_status_lost import (
 )
 from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_adapters.workspace_backends.host_security import host_security_failure
-from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_shared.env_constants import (
     ENV_SYN_AGENT_NETWORK,
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
@@ -62,7 +70,12 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentic_isolation import AgenticWorkspace
+    from agentic_isolation.contract import FinalizationOutcome
+    from agentic_isolation.providers.base import SupportsOperations, Workspace
 
+    from syn_domain.contexts.orchestration import (
+        WorkspaceCredentialPolicy,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationConfig,
@@ -115,6 +128,13 @@ _WORKSPACE_CACHE_ENV: Final[dict[str, str]] = {
     "XDG_CACHE_HOME": "/workspace/.cache",
     "UV_CACHE_DIR": "/workspace/.cache/uv",
     "npm_config_cache": "/workspace/.cache/npm",
+    # pnpm's content-addressable store, where a dependency seed (#1714) is
+    # copied. Unset, pnpm puts it under $HOME (~/.local/share/pnpm/store),
+    # which is the 128 MB tmpfs above, and this repository's store is 1.2 GB.
+    # pnpm 11+ reads only the `pnpm_config_` spelling (12.10.1 verified:
+    # `npm_config_store_dir` is ignored); older pnpm reads only `npm_config_`.
+    "pnpm_config_store_dir": "/workspace/.cache/pnpm",
+    "npm_config_store_dir": "/workspace/.cache/pnpm",
 }
 
 
@@ -176,6 +196,7 @@ class AgenticIsolationAdapter:
         workspace_host_dir: str | None = None,
         session_store: SessionStoreSettings | None = None,
         capture_source_instance_id: str | None = None,
+        kit: BackendKit | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -187,6 +208,11 @@ class AgenticIsolationAdapter:
             session_store: Central session-store settings. Defaults to
                 ``get_settings().session_store``, which is DISABLED unless
                 ``SYN_SESSION_STORE_URL`` is configured.
+            kit: The backend's composition point (#1914). When given it owns the
+                image, capture and credential policy, and ``default_image`` /
+                ``capture_source_instance_id`` must be left at their defaults.
+                Omitted, it is the Docker kit built from those two arguments
+                under ``HostCredentials`` - the behaviour before the kit existed.
 
         When running inside a container, both paths are needed:
         - container_dir: where this process writes files (/workspaces)
@@ -195,7 +221,16 @@ class AgenticIsolationAdapter:
         Uses env vars SYN_WORKSPACE_CONTAINER_DIR and SYN_WORKSPACE_HOST_DIR if not set.
         """
 
-        self._default_image = default_image
+        if kit is None:
+            kit = BackendKit(
+                default_image=default_image,
+                capture_source_instance_id=capture_source_instance_id,
+            )
+        elif default_image != DEFAULT_WORKSPACE_IMAGE or capture_source_instance_id is not None:
+            msg = "pass the image and capture source on the BackendKit, not beside it"
+            raise ValueError(msg)
+        self._kit = kit
+        default_image = kit.default_image
         self._security = security or SecurityConfig.production()
 
         # Central session store (SeshMagic). Resolved from the settings object
@@ -206,8 +241,13 @@ class AgenticIsolationAdapter:
             from syn_shared.settings import get_settings
 
             session_store = get_settings().session_store
+        if not kit.credential_policy.supplies_credentials:
+            # The session-store write token is a host credential, and the URL
+            # alone would point a credential-free workspace at the host's store.
+            session_store = session_store.model_copy(
+                update={"url": None, "auth_token": None, "read_token": None}
+            )
         self._session_store = session_store
-        self._capture_source_instance_id = capture_source_instance_id
 
         # Get paths from env or args
         container_dir = workspace_container_dir or os.environ.get(
@@ -222,14 +262,32 @@ class AgenticIsolationAdapter:
         # but cannot reach the internet directly.
         agent_network = os.environ.get(ENV_SYN_AGENT_NETWORK, "agent-net")
 
+        #: Shared with the event stream, which binds launch-scoped credentials
+        #: (the platform grant) through it.
+        self.credentials = WorkspaceCredentials(session_store)
         self._provider = WorkspaceDockerProvider(
             default_image=default_image,
             security=self._security,
             workspace_base_dir=container_dir,
             workspace_host_dir=host_dir,  # For Docker volume mounts
             default_network=agent_network,
+            credentials=self.credentials,
         )
         self._workspaces: dict[str, AgenticWorkspace] = {}
+
+    @property
+    def credential_policy(self) -> WorkspaceCredentialPolicy:
+        """The policy this adapter's kit was built with (#1914)."""
+        return self._kit.credential_policy
+
+    @property
+    def operations(self) -> SupportsOperations:
+        """The provider's operation contract, which the event stream launches through."""
+        return self._provider
+
+    def workspace(self, isolation_id: str) -> Workspace | None:
+        """The live provider workspace behind a handle, or None once destroyed."""
+        return self._workspaces.get(isolation_id)  # type: ignore[return-value]  # Workspace vs AgenticWorkspace adapter boundary
 
     @staticmethod
     def is_available() -> bool:
@@ -292,23 +350,17 @@ class AgenticIsolationAdapter:
         )
 
         environment = self._build_environment(config)
-        from syn_adapters.session_inventory.workspace_capture import apply_workspace_capture
-
-        capture_mounts = (
-            apply_workspace_capture(config, self._capture_source_instance_id, environment)
-            if self._capture_source_instance_id is not None
-            else []
-        )
+        capture_mounts = self._kit.capture_mounts(config, environment)
 
         # Map Syn137 config to agentic_isolation config
         # ISS-43: Network is set on the provider (default_network in __init__),
         # not on WorkspaceConfig. Containers join agent-net to reach the shared
         # Envoy proxy but cannot reach the internet directly.
         #
-        # NOTE: the session-store write token is in `environment` only. It must
-        # never be copied into `labels` — labels are readable by anyone who can
-        # run `docker inspect`.
-        image = config.image or self._default_image
+        # The session-store write token is NOT in `environment`: it is a
+        # credential binding the provider resolves at launch through the
+        # `WorkspaceCredentials` it was constructed with, and delivers into
+        # the workload environment only - never argv, labels or logs.
 
         # Supply-chain gate: verify the cosign signature of the exact image
         # reference we are about to run, before any container exists. Raises
@@ -320,13 +372,14 @@ class AgenticIsolationAdapter:
         # permitted local image the return value is that image's immutable
         # local image ID, so Docker cannot pull or retag something else in
         # between. See image_verification for the full policy.
-        image = await verify_image_async(image)
+        image = await self._kit.resolve_image(config.image)
 
         ws_config = WorkspaceConfig(
             provider="docker",
             image=image,
             working_dir="/workspace",
             environment=environment,
+            credentials=session_store_credential_bindings(self._session_store),
             mounts=capture_mounts,
             labels=_container_labels(config),
             security=self._security,
@@ -369,7 +422,7 @@ class AgenticIsolationAdapter:
 
         return IsolationHandle(
             isolation_id=workspace_obj.id,
-            isolation_type="docker",
+            isolation_type=self._kit.isolation_type,
             proxy_url=None,
             workspace_path="/workspace",
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
@@ -430,11 +483,23 @@ class AgenticIsolationAdapter:
             # Logged inside the task: a second cancellation can return the
             # caller before the reap finishes, and nothing would see its error.
             try:
-                await provider.destroy(workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+                report = await provider.teardown(target=workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+                failure = _teardown_failure(report.finalization)
             except Exception:
                 logger.exception(
                     "Could not destroy workspace for execution %s after a failed provision",
                     execution_id,
+                )
+                return
+            if failure is not None:
+                logger.error(
+                    "Workspace reap %s for execution %s after a failed provision "
+                    "(stage=%s, %s): %s",
+                    failure.state,
+                    execution_id,
+                    failure.stage,
+                    failure.kind,
+                    failure.message,
                 )
 
         reap = asyncio.create_task(reap_and_log())
@@ -455,19 +520,43 @@ class AgenticIsolationAdapter:
         Returns:
             What the workspace consumed, from the provider's teardown report,
             or None when the provider reported nothing.
+
+        Raises:
+            WorkspaceTeardownError: the teardown failed, was retained or
+                raised. The handle stays registered, so destroying it again
+                reaches the provider again rather than "not found".
         """
-        workspace = self._workspaces.pop(handle.isolation_id, None)
+        workspace = self._workspaces.get(handle.isolation_id)
         if workspace is None:
             logger.warning("Workspace not found: %s", handle.isolation_id)
             return None
 
         logger.info("Destroying workspace (id=%s)", handle.isolation_id)
-        # `object`: the pinned provider is annotated `-> None`, so pyright
-        # cannot check its report against `TeardownReportLike` yet; a field
-        # mismatch is logged at runtime by `usage_from_report` instead. Once
-        # agentic-workspace types `destroy` against the Protocol, drop this.
-        report: object = await self._provider.destroy(workspace)  # type: ignore[arg-type,func-returns-value]  # Workspace vs AgenticWorkspace adapter boundary
-        return usage_from_report(report)
+        try:
+            report = await self._provider.teardown(target=workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        except Exception as e:
+            failure = TeardownFailure(
+                state="error",
+                kind=e.error.kind if isinstance(e, OperationFailure) else type(e).__name__,
+                message=str(e) or type(e).__name__,
+            )
+            raise WorkspaceTeardownError(failure) from e
+        usage = usage_from_report(report.usage)
+        failure = _teardown_failure(report.finalization)
+        if failure is not None:
+            # What remains depends on the stage: a `while_running` failure
+            # leaves the container itself, `before_delete` its directory.
+            logger.error(
+                "Workspace teardown %s (id=%s, stage=%s, %s): %s",
+                failure.state,
+                handle.isolation_id,
+                failure.stage,
+                failure.kind,
+                failure.message,
+            )
+            raise WorkspaceTeardownError(failure, usage)
+        self._workspaces.pop(handle.isolation_id, None)
+        return usage
 
     async def execute(
         self,
@@ -583,3 +672,16 @@ class AgenticIsolationAdapter:
     ) -> list[tuple[str, bytes]]:
         """Copy files from workspace via mounted volume."""
         return await copy_files_from_workspace(handle, patterns, base_path)
+
+
+def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:
+    """The provider's non-completed finalization in Syntropic137's terms; None when completed."""
+    if outcome.state == "completed":
+        return None
+    error = outcome.error
+    return TeardownFailure(
+        state=outcome.state,
+        kind=error.kind if isinstance(error, OperationError) else "unknown",
+        message=error.message if isinstance(error, OperationError) else "no error reported",
+        stage=outcome.stage if isinstance(outcome.stage, str) else None,
+    )

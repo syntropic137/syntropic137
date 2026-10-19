@@ -12,6 +12,7 @@ import type {
   InstalledWorkflowRef,
   PluginManifest,
   ResolvedWorkflow,
+  SkippedFile,
 } from "../../packages/models.js";
 import {
   detectFormat,
@@ -26,6 +27,7 @@ import {
   tryMarketplaceResolution,
   resolveSource,
   installWorkflowsViaApi,
+  printSkippedFiles,
 } from "./install.js";
 import {
   findInstallation,
@@ -131,6 +133,7 @@ export const updateCommand: CommandDef = {
     let packagePath: string;
     let manifest: PluginManifest | null;
     let workflows: ResolvedWorkflow[];
+    let skipped: SkippedFile[];
     let tmpdir: string | null = null;
     let marketplaceSource: string | null = null;
     let gitSha: string | null = null;
@@ -140,13 +143,13 @@ export const updateCommand: CommandDef = {
       if (isBarePluginName(source) && record.marketplace_source) {
         const mktResult = await tryMarketplaceResolution(source, effectiveRef);
         if (mktResult !== null) {
-          ({ packagePath, manifest, workflows, tmpdir, marketplaceSource, gitSha, effectiveRef: resolvedRef } = mktResult);
+          ({ packagePath, manifest, workflows, skipped, tmpdir, marketplaceSource, gitSha, effectiveRef: resolvedRef } = mktResult);
         } else {
           printError(`Plugin '${name}' no longer found in marketplace`);
           throw new CLIError("Not found", 1);
         }
       } else {
-        ({ packagePath, manifest, workflows, tmpdir, gitSha } = await resolveSource(
+        ({ packagePath, manifest, workflows, skipped, tmpdir, gitSha } = await resolveSource(
           source,
           effectiveRef,
         ));
@@ -174,6 +177,7 @@ export const updateCommand: CommandDef = {
       print(`  Source: ${source}`);
       print(`  Format: ${fmt}`);
       print(`  Workflows: ${workflows.length}`);
+      printSkippedFiles(skipped);
 
       // WHY this order (issue #822): update used to archive every old
       // workflow and drop the registry record BEFORE creating the

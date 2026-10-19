@@ -7,7 +7,7 @@ plus Pydantic response models used across all v1 modules.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime  # noqa: TC003 — needed at runtime for Pydantic
+from datetime import date, datetime  # noqa: TC003 — needed at runtime for Pydantic
 from decimal import Decimal
 from enum import StrEnum
 from typing import TYPE_CHECKING, Generic, Literal, TypeVar
@@ -35,6 +35,7 @@ from pydantic import (
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
 from syn_adapters.subscriptions.unapplied_starts import UnappliedStart  # noqa: TC001
+from syn_api.inventory_types import AgentLaunch as AgentLaunch
 from syn_api.inventory_types import CaptureRevisionHashes as CaptureRevisionHashes
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
@@ -92,6 +93,7 @@ from syn_domain.contexts.orchestration import (
     PlannedPhase,
     QuarantinedRef,
     ReportedFailureReason,
+    RetainedReason,
     ReviewVerdict,
     SideEffectStatus,
     TagSet,
@@ -114,6 +116,7 @@ from syn_shared.pricing import (  # noqa: TC001 - pydantic resolves at runtime
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from syn_domain.contexts.orchestration import ShippedCountTile, ShippedMetrics
     from syn_domain.contexts.orchestration.slices.phase_profiles import (
         Percentiles,
         PhaseProfiles,
@@ -222,6 +225,8 @@ class GitHubError(StrEnum):
     INVALID_PAYLOAD = "invalid_payload"
     PROCESSING_FAILED = "processing_failed"
     NOT_IMPLEMENTED = "not_implemented"
+    NOT_CONFIGURED = "not_configured"
+    """No GitHub App on this server (SYN_GITHUB_APP_ID unset): a 503, never a 500."""
 
 
 # ---------------------------------------------------------------------------
@@ -713,6 +718,15 @@ class PlannedPhaseInfo(BaseModel):
         )
 
 
+class ResumedFromInfo(BaseModel):
+    """The execution a resumed run continues, and the phase it picked up at (#1881)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parent_execution_id: str
+    resume_phase_id: str
+
+
 class ExecutionSummary(BaseModel):
     """Summary of a workflow execution run."""
 
@@ -786,6 +800,10 @@ class ExecutionSummary(BaseModel):
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
     tags: list[str] = Field(default_factory=list)
     """The execution's current tags, normalised and sorted (#967)."""
+    resumed_from: ResumedFromInfo | None = None
+    """The execution this run resumed, or None for a fresh run (#1881)."""
+    resumed_as: str | None = None
+    """The execution that resumed this one, or None. At most one (#1881)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -1065,10 +1083,20 @@ class EvalBaselineRepoRequest(BaseModel):
 
 
 class CreateEvalRequest(BaseModel):
-    """A new eval (#967). The server mints its id; see `EvalCreatedResponse`."""
+    """A new eval (#967). The server mints its id unless `stable_key` names one."""
 
     model_config = ConfigDict(extra="forbid")
 
+    stable_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1000,
+        description=(
+            "Makes the create idempotent (#1920): the eval id is derived from this key, so "
+            "every create with the same key, concurrent ones included, answers with the one "
+            "eval. A create that differs from the one that made it is refused."
+        ),
+    )
     name: str = Field(min_length=1, max_length=200)
     goal: str = Field(min_length=1, description="What the eval sets out to measure.")
     starting_workflow_id: str | None = Field(
@@ -1387,6 +1415,51 @@ class WorkflowTrendResponse(TrendDefinition):
     """Every execution of the workflow, whatever the page size."""
     page: int
     page_size: int
+
+
+DurationTrendKind = Literal["none", "few", "faster", "slower", "steady"]
+
+
+class DurationTrendSummaryResponse(BaseModel):
+    """A workflow card's duration trend label, formatted here so the UI only renders it (#1872).
+
+    Fitted over the latest ``runs`` measured durations (at most 12): a change
+    under 5% is steady, fewer than 3 measured runs is too few to tell.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: DurationTrendKind
+    pct: int
+    """Signed fitted change in duration over the window, percent; 0 when not classified."""
+    runs: int
+    """Measured runs in the window."""
+    word_display: str
+    """The card's headline word: Faster, Slower, Steady, Too few runs, ..."""
+    sub_display: str
+    """The line under it, e.g. ``+44% time, last 3``."""
+    label_display: str
+    """The accessible label for the whole trend."""
+
+
+class WorkflowCardTrendResponse(WorkflowTrendResponse):
+    """A workflow's trend points plus the card's formatted duration trend (#1872)."""
+
+    duration_trend: DurationTrendSummaryResponse
+
+
+class WorkflowTrendsResponse(BaseModel):
+    """The latest runs of several workflows as trend points, in one response (#1872).
+
+    The Workflows page reads every card on screen from this, so the page costs
+    one request however many workflows it shows. Each entry is what
+    ``GET /workflows/{id}/trend`` answers for page 1 at the same page size.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    trends: list[WorkflowCardTrendResponse]
+    """One per requested workflow that exists, in the order asked. Unknown ids are left out."""
 
 
 class ExecutionEvalRunResponse(BaseModel):
@@ -2362,6 +2435,10 @@ class ExecutionDetailFull(BaseModel):
     Enough to re-dispatch the run: a caller retrying one that died on the
     platform posts these back rather than reconstructing them from its own
     notes (#1307)."""
+    resumed_from: ResumedFromInfo | None = None
+    """The execution this run resumed, or None for a fresh run (#1881)."""
+    resumed_as: str | None = None
+    """The execution that resumed this one, or None. At most one (#1881)."""
 
 
 class ControlResult(BaseModel):
@@ -2427,6 +2504,13 @@ class SessionDetail(BaseModel):
     root_session_id: str | None = None
     agent_type: str = ""
     status: str = ""
+    agent_launch: AgentLaunch = AgentLaunch.UNKNOWN
+    """Whether the agent process for this session has demonstrably started.
+
+    ``status`` is ``running`` from ``SessionStarted``, which is written before
+    the workspace is provisioned; this is ``launched`` only once
+    ``AgentLaunched`` is recorded (#1065, #1717).
+    """
     workspace_path: str | None = None
     repos: list[str] = Field(default_factory=list)
     input_tokens: int = 0
@@ -3032,6 +3116,51 @@ class SubscriptionHealth(_OmitsAbsentFields):
     )
 
 
+class RetainedWorkspaceDirs(BaseModel):
+    """Workspace directories the reclaimer kept for one reason, at its last pass (#1983)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: RetainedReason = Field(description="The proof that could not be made.")
+    count: int = Field(description="Directories kept for this reason.")
+    size_bytes: int = Field(description="Bytes those directories hold, as measured.")
+
+
+class WorkspaceReclaimHealth(BaseModel):
+    """What the workspace directory reclaimer last did (#1983)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    last_pass_at: datetime | None = Field(
+        description="When its last pass ended, UTC; null before the first."
+    )
+    paused: str | None = Field(
+        description="Why the last pass stopped before deleting anything, e.g. 'maintenance'."
+    )
+    last_pass_skipped: str | None = Field(
+        description="Why the last pass did not look at all (docker or a read model unreadable)."
+    )
+    reclaimed_bytes_24h: int = Field(
+        description="Bytes this process reclaimed in the last 24 hours (resets on restart)."
+    )
+    dry_run_reclaimable: int = Field(
+        description="Directories the last pass found reclaimable and left, in dry-run mode."
+    )
+    deletes_in_progress: int = Field(
+        description="Proven directories whose delete ran out of the last pass's time "
+        "budget; the next pass, or the first after a restart, finishes them."
+    )
+    out_of_time: bool = Field(
+        description="Whether the last pass stopped at SYN_DISK_RECLAIM_PASS_BUDGET_MINUTES."
+    )
+    retained: list[RetainedWorkspaceDirs] = Field(
+        description="Directories kept at the last pass, per reason."
+    )
+    delete_failed_passes: int = Field(
+        description="Consecutive passes with a failed delete; 2 or more degrades /health."
+    )
+
+
 class DiskSpaceHealth(BaseModel):
     """Free space on the workspace volume, as /health reports it (#1560)."""
 
@@ -3043,9 +3172,30 @@ class DiskSpaceHealth(BaseModel):
     )
     free_percent: float | None = Field(description="Percent free; null when unmeasurable.")
     free_bytes: int | None = Field(description="Bytes available; null when unmeasurable.")
-    degraded_below_percent: float = Field(description="SYN_DISK_DEGRADED_BELOW_PERCENT.")
-    refuse_admission_below_percent: float = Field(
-        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+    degraded_below_bytes: int = Field(
+        description="Degraded below this many bytes free: SYN_DISK_DEGRADED_BELOW_GIB, "
+        "or twice the admission floor when unset."
+    )
+    refuse_admission_below_bytes: int = Field(
+        description="New executions refused below this many bytes free: "
+        "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB, or SYN_DISK_RUN_RESERVE_GIB x "
+        "SYN_EXECUTION_MAX_CONCURRENT when unset."
+    )
+    degraded_below_percent: float | None = Field(
+        default=None,
+        description="SYN_DISK_DEGRADED_BELOW_PERCENT; null when unset (GiB floor only).",
+    )
+    refuse_admission_below_percent: float | None = Field(
+        default=None,
+        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT; null when unset (GiB floor only).",
+    )
+    detail: str = Field(
+        description="One line for an operator: free space, the floors and where they came from."
+    )
+    reclaim: WorkspaceReclaimHealth | None = Field(
+        default=None,
+        description="The workspace directory reclaimer's last pass (#1983); null when its "
+        "state could not be read.",
     )
 
 
@@ -3536,6 +3686,10 @@ class HeatmapDayBucketResponse(BaseModel):
     date: str
     count: float = 0.0
     breakdown: dict[str, float] = Field(default_factory=dict)
+    failed: int = 0
+    """Executions that ended failed on this UTC day (status ``failed``, by
+    ``completed_at``), from the workflow_executions read model. Also in
+    ``breakdown["failed"]`` so ``metric=failed`` colours by it."""
 
 
 class ContributionHeatmapResponse(BaseModel):
@@ -4105,15 +4259,17 @@ class TokenPercentilesResponse(BaseModel):
 
 
 class ResourcePercentilesResponse(BaseModel):
-    """p50/p95 of one measure over ``n`` measured phases; null below ten."""
+    """p50/p90/p95 of one measure over ``n`` measured phases; null below ten."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     n: int
     p50: float | None
+    p90: float | None
     p95: float | None
     p50_display: str
     """``"insufficient"`` when ``n < 10``."""
+    p90_display: str
     p95_display: str
 
     @classmethod
@@ -4123,8 +4279,10 @@ class ResourcePercentilesResponse(BaseModel):
         return cls(
             n=stat.n,
             p50=stat.p50,
+            p90=stat.p90,
             p95=stat.p95,
             p50_display=_display(stat.p50, kind),
+            p90_display=_display(stat.p90, kind),
             p95_display=_display(stat.p95, kind),
         )
 
@@ -4169,17 +4327,56 @@ class ResourceCoverageResponse(BaseModel):
     """e.g. ``"0/42 phases measured"``."""
 
 
+class OomKillsResponse(BaseModel):
+    """Every phase of this type in exactly one bucket.
+
+    ``unknown`` is a phase nothing measured: no usage row, or a row with no
+    OOM signal. It is never folded into ``not_killed``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    killed: int
+    not_killed: int
+    unknown: int
+
+
+class OomKilledPhaseResponse(BaseModel):
+    """One phase whose workspace was OOM-killed, as the provider measured it.
+
+    Set from the provider's ``oom_killed`` (cgroup ``oom_kill`` count or
+    Docker's ``State.OOMKilled``), never inferred from an exit code: an exit
+    137 is any SIGKILL.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution_id: str
+    oom_killed: Literal[True]
+    memory_peak_bytes: int | None
+    """Null when the cgroup peak could not be read."""
+    oom_kills: int | None
+    """The cgroup's kill count; null when it could not be read."""
+
+
 class PhaseResourceProfileResponse(BaseModel):
     """One phase type's workspace resource use at teardown (cgroup counters)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     phase_id: str
+    cpu_usage_seconds: ResourcePercentilesResponse
+    """Absolute CPU-seconds the workspace used over its lifetime."""
+    wall_seconds: ResourcePercentilesResponse
+    """The workspace lifetime recorded with the usage, creation to termination."""
     cpu_seconds_per_wall_second: ResourcePercentilesResponse
     """CPU-seconds over the workspace lifetime recorded with them, creation to termination."""
     cpu_throttled_seconds: ResourcePercentilesResponse
     memory_peak_bytes: ResourcePercentilesResponse
     disk_bytes_at_teardown: ResourcePercentilesResponse
+    oom: OomKillsResponse
+    oom_killed_phases: list[OomKilledPhaseResponse]
+    """Every OOM-killed phase of this type in the window, by execution id."""
     coverage: ResourceCoverageResponse
 
 
@@ -4227,6 +4424,10 @@ class PhaseProfilesResponse(BaseModel):
             resources=[
                 PhaseResourceProfileResponse(
                     phase_id=r.phase_id,
+                    cpu_usage_seconds=ResourcePercentilesResponse.of(
+                        r.cpu_usage_seconds, "seconds"
+                    ),
+                    wall_seconds=ResourcePercentilesResponse.of(r.wall_seconds, "seconds"),
                     cpu_seconds_per_wall_second=ResourcePercentilesResponse.of(
                         r.cpu_seconds_per_wall_second, "ratio"
                     ),
@@ -4237,6 +4438,18 @@ class PhaseProfilesResponse(BaseModel):
                     disk_bytes_at_teardown=ResourcePercentilesResponse.of(
                         r.disk_bytes_at_teardown, "bytes"
                     ),
+                    oom=OomKillsResponse(
+                        killed=r.oom.killed, not_killed=r.oom.not_killed, unknown=r.oom.unknown
+                    ),
+                    oom_killed_phases=[
+                        OomKilledPhaseResponse(
+                            execution_id=k.execution_id,
+                            oom_killed=True,
+                            memory_peak_bytes=k.memory_peak_bytes,
+                            oom_kills=k.oom_kills,
+                        )
+                        for k in r.oom_killed_phases
+                    ],
                     coverage=ResourceCoverageResponse(
                         phases=r.coverage.phases,
                         phases_without_usage_row=r.coverage.phases_without_usage_row,
@@ -4262,6 +4475,198 @@ class PhaseProfilesResponse(BaseModel):
 
 LatencyWindow = Literal["1h", "24h", "7d", "30d"]
 """How far back ``GET /observability/latency`` looks. 30d is the retention."""
+
+
+# ---------------------------------------------------------------------------
+# Shipped by agents (GET /metrics/shipped)
+# ---------------------------------------------------------------------------
+
+
+class ShippedDeltaUnit(StrEnum):
+    """What a tile's ``delta_display`` is expressed in."""
+
+    PERCENT = "percent"
+    POINTS = "points"
+    COUNT = "count"
+
+
+class ShippedWindowResponse(BaseModel):
+    """``days`` UTC calendar days, ``from`` and ``to`` inclusive; ``to`` is today."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    days: int
+    from_: date = Field(serialization_alias="from")
+    to: date
+
+
+class ShippedPreviousWindowResponse(BaseModel):
+    """The ``days`` UTC days immediately before the window, inclusive."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    from_: date = Field(serialization_alias="from")
+    to: date
+
+
+class ShippedCountPointResponse(BaseModel):
+    """One UTC day's count."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    date: date
+    value: int
+
+
+class ShippedRatePointResponse(BaseModel):
+    """One UTC day's rate in percent; null on a day with no denominator."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    date: date
+    value: float | None
+
+
+class ShippedCountTileResponse(BaseModel):
+    """A count over the window against the window before it.
+
+    When ``reason`` is set the count cannot be answered from persisted data:
+    every number is null and ``series`` is empty. Never a zero standing in for
+    "unknown".
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    total: int | None
+    previous_total: int | None
+    delta: int | None
+    """``total - previous_total``."""
+    delta_percent: float | None
+    """Relative change in percent; null whenever ``previous_total`` is 0 (0 to 0
+    included; ``delta_display`` then reads "0%", and "new" for 0 to N)."""
+    delta_display: str | None
+    """Server-formatted delta in ``delta_unit``: "+38%" or "+3"."""
+    delta_unit: ShippedDeltaUnit
+    total_display: str | None
+    series: list[ShippedCountPointResponse]
+    """One point per day of the window, oldest first, zero-filled."""
+    source: str
+    """The store this number is read from."""
+    reason: str | None
+
+
+class ShippedRateTileResponse(BaseModel):
+    """Merge rate: of the run PRs OPENED in the window, the percent merged by now.
+
+    A cohort conversion, 0 to 100 by construction (the merged PRs are a subset
+    of the opened ones). ``previous_total`` asks the same of the previous
+    window's cohort, as of now. ``delta`` is in percentage points. A series
+    point is that day's opened PRs merged since, null on a day none opened.
+    Null totals: no PR was opened, which is not 0%.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    total: float | None
+    previous_total: float | None
+    delta: float | None
+    delta_display: str | None
+    """Server-formatted points delta: "+5 pts"."""
+    delta_unit: ShippedDeltaUnit
+    total_display: str | None
+    series: list[ShippedRatePointResponse]
+    source: str
+    reason: str | None
+
+
+class ShippedWorkflowResponse(BaseModel):
+    """One workflow's share of what was shipped in the window."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    workflow_id: str
+    name: str
+    """The workflow's display name."""
+    commits: int
+    prs_opened: int
+    prs_merged: int
+    repos_touched: int
+
+
+class ShippedMetricsResponse(BaseModel):
+    """What agents shipped over the window, tile by tile (the Overview block)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: ShippedWindowResponse
+    previous: ShippedPreviousWindowResponse
+    workflow_id: str | None
+    """The workflow the tiles are filtered to, or null for all."""
+    commits: ShippedCountTileResponse
+    prs_opened: ShippedCountTileResponse
+    prs_merged: ShippedCountTileResponse
+    merge_rate: ShippedRateTileResponse
+    repos_touched: ShippedCountTileResponse
+    repos: list[str]
+    """Distinct repos touched in the window, ``owner/name``, sorted."""
+    by_workflow: list[ShippedWorkflowResponse]
+    """Top workflows by commits, then PRs merged; empty when filtered to one."""
+    unavailable: list[str]
+    """Names of the tiles that could not be measured (their ``reason`` says why)."""
+
+    @classmethod
+    def from_metrics(cls, m: ShippedMetrics) -> ShippedMetricsResponse:
+        w = m.window
+        return cls(
+            window=ShippedWindowResponse(days=w.days, from_=w.start, to=w.end),
+            previous=ShippedPreviousWindowResponse(from_=w.previous_start, to=w.previous_end),
+            workflow_id=m.workflow_id,
+            commits=_count_tile(m.commits),
+            prs_opened=_count_tile(m.prs_opened),
+            prs_merged=_count_tile(m.prs_merged),
+            merge_rate=ShippedRateTileResponse(
+                total=m.merge_rate.total,
+                previous_total=m.merge_rate.previous_total,
+                delta=m.merge_rate.delta,
+                delta_display=m.merge_rate.delta_display,
+                delta_unit=ShippedDeltaUnit(m.merge_rate.delta_unit.value),
+                total_display=m.merge_rate.total_display,
+                series=[
+                    ShippedRatePointResponse(date=p.day, value=p.value) for p in m.merge_rate.series
+                ],
+                source=m.merge_rate.source,
+                reason=m.merge_rate.reason,
+            ),
+            repos_touched=_count_tile(m.repos_touched),
+            repos=list(m.repos),
+            by_workflow=[
+                ShippedWorkflowResponse(
+                    workflow_id=b.workflow_id,
+                    name=b.name,
+                    commits=b.commits,
+                    prs_opened=b.prs_opened,
+                    prs_merged=b.prs_merged,
+                    repos_touched=b.repos_touched,
+                )
+                for b in m.by_workflow
+            ],
+            unavailable=list(m.unavailable),
+        )
+
+
+def _count_tile(t: ShippedCountTile) -> ShippedCountTileResponse:
+    return ShippedCountTileResponse(
+        total=t.total,
+        previous_total=t.previous_total,
+        delta=t.delta,
+        delta_percent=t.delta_percent,
+        delta_display=t.delta_display,
+        delta_unit=ShippedDeltaUnit(t.delta_unit.value),
+        total_display=t.total_display,
+        series=[ShippedCountPointResponse(date=p.day, value=p.value) for p in t.series],
+        source=t.source,
+        reason=t.reason,
+    )
 
 
 class RouteLatencyResponse(BaseModel):
@@ -4297,6 +4702,38 @@ class LatencyRecorderStatusResponse(BaseModel):
     cleanup_failures: int
     """Written batches whose connection could not be released in time (terminated)."""
     buffered: int
+
+
+class UpstreamRetryCountResponse(BaseModel):
+    """In-phase retries one provider, model and upstream kind took in the window (#1882)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: str | None
+    """The agent provider retried, e.g. ``codex``. None if the row did not say."""
+    requested_model: str | None
+    """The model the phase asked for, possibly an alias (ADR-067 D9). None when the phase left it to the provider."""
+    upstream_kind: str | None
+    """The transient kind that earned the retry: ``capacity`` or ``rate_limited``."""
+    retries: int
+
+
+class UpstreamRetriesResponse(BaseModel):
+    """In-phase upstream retries per provider and model, most first (Lane 2, #1882).
+
+    Counts retries, not failures: a phase that retried twice and then
+    succeeded counts 2 here. Quota, auth and anything unrecognised are never
+    retried, so they never appear.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: LatencyWindow
+    since: str
+    """ISO 8601 UTC start of the window."""
+    total: int
+    """Every retry in the window, summed over ``counts``."""
+    counts: list[UpstreamRetryCountResponse]
 
 
 class RequestLatencyResponse(BaseModel):

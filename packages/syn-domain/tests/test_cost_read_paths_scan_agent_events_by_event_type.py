@@ -693,6 +693,34 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
             "query_recent_by_types": _full_scan(
                 "The same feed for a set of types, and the same reasoning."
             ),
+            # #1882: GET /observability/upstream-retries. Accepted as debt, and
+            # flagged for review on the PR rather than slipped in.
+            "UPSTREAM_RETRY_COUNTS_SQL": _full_scan(
+                "Upstream retries per provider/model/kind, GROUP BY. event_type plus "
+                "time >= since: the window (at most 30 days, chosen from a fixed set) "
+                "excludes older chunks, but inside it nothing pins session_id, so every "
+                "segment in range is decompressed. A rollup or read model removes this."
+            ),
+        },
+    ),
+    # The shipped ledger's backfill (/metrics/shipped). Runs once per backfill
+    # version in the background, never on a request path: the read path reads
+    # only the shipped_daily rollup. Pins ONE session_id per statement, paged
+    # by row_page rows, so a compressed chunk discards every other session's
+    # segment; within the session it reads every segment once.
+    **_declared(
+        f"{_ADAPTERS}/events/shipped_backfill.py",
+        {
+            "_SESSION_ROWS": Declaration(
+                bound=Bound.SEGMENT_DISCARD,
+                restricted_by=(_SEGMENT_KEY, "execution_id"),
+                why=(
+                    "One session's git_commit and gh-pr-create-shaped tool rows, a page at a "
+                    "time, to replay history into the shipped ledger. Bounded per round-trip by "
+                    "the page; the whole backfill is one read of the sessions that ran executions."
+                ),
+                statements=1,
+            ),
         },
     ),
     **_declared(
@@ -798,7 +826,7 @@ def test_the_number_of_unpinned_statements_is_the_number_we_have_accepted() -> N
     the conversation.
     """
     unpinned = [scan for scan in _production_scans() if not scan.discards_segments]
-    assert len(unpinned) == 22, "\n" + "\n".join(
+    assert len(unpinned) == 23, "\n" + "\n".join(
         f"{scan.identity}: {scan.predicate}" for scan in unpinned
     )
 

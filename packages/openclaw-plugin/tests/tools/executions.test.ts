@@ -76,6 +76,21 @@ describe("synGetExecution", () => {
     expect(result.content).toContain("art-001");
   });
 
+  it("renders a run the API reports with no duration and no defaulted lists (#1182)", async () => {
+    // The generated schema makes total_duration_seconds nullable and phases /
+    // artifact_ids optional. The hand-written mirror claimed all three were
+    // always present, so the tool called .toFixed() on null and threw.
+    const { phases: _phases, artifact_ids: _artifacts, ...rest } = executionDetail;
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ...rest, total_duration_seconds: null }));
+
+    const result = await synGetExecution(client, { execution_id: "exec-abc-123" });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toContain("Issue Resolution");
+    expect(result.content).not.toContain("Duration");
+    expect(result.content).not.toContain("### Phases");
+  });
+
   it("handles 404", async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ detail: "Not found" }), { status: 404 }),

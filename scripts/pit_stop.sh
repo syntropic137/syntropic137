@@ -70,7 +70,17 @@ die() {
     exit 1
 }
 run() { if [ "$DRY" = 1 ]; then printf '   (dry-run) %s\n' "$*"; else "$@"; fi; }
-remote() { ssh -o ConnectTimeout=15 "$HOST" "$@"; }
+# A non-root SSH user runs every remote command under passwordless sudo: the
+# deployment lives in /root/.syntropic137. The tailnet SSH policy stopped
+# permitting root on 2026-10-10, so SYN_PIT_HOST=ubuntu@<vps> is the default
+# path now. The command string is quoted once for the remote login shell.
+remote() {
+    if [ "$HOST" = "${HOST#*@}" ] || [ "${HOST%%@*}" = root ]; then
+        ssh -o ConnectTimeout=15 "$HOST" "$@"
+    else
+        ssh -o ConnectTimeout=15 "$HOST" "sudo -n sh -c $(printf '%q' "$*")"
+    fi
+}
 # Every request to the API goes through here. The credential travels as a curl
 # config on stdin, never as an argument: `-u admin:<password>` sits in curl's
 # argv, readable by any user on this machine through `ps` for the whole call
@@ -189,9 +199,10 @@ if not d:
     sys.exit(0)
 free = "unmeasurable" if d.get("free_percent") is None else f"{d['free_percent']:.1f}% free"
 mark = "" if d.get("state") == "ok" else "  DEGRADED"
-print(f"   disk: {d.get('path')} {free} state={d.get('state')} "
-      f"(degraded below {d.get('degraded_below_percent')}%, "
-      f"admission refused below {d.get('refuse_admission_below_percent')}%){mark}")
+# `detail` names the GiB floors (#1947); an API from before it has only percents.
+floors = d.get("detail") or (f"degraded below {d.get('degraded_below_percent')}%, "
+                             f"admission refused below {d.get('refuse_admission_below_percent')}%")
+print(f"   disk: {d.get('path')} {free} state={d.get('state')} ({floors}){mark}")
 DISK
 }
 

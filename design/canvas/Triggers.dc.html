@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syn137 triggers</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Orbitron:wght@500;600;700&display=swap">
+<style>
+:root{--ac:#4D80FF}
+body{margin:0;background:#0A0C14}
+a{color:#E8EEFB}a:hover{color:#FFFFFF}
+.row:hover{background:#111626}
+.card:hover{border-color:#34406A}
+.ghost:hover{background:#151A2A}
+button{font-family:inherit}
+input::placeholder{color:#6F7FA3}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+</style>
+</helmet>
+<div style="--ac: {{accent}}; display: flex; flex-direction: column; min-height: 100vh; background: #0A0C14; color: #E8EEFB; font-family: 'Instrument Sans', 'Helvetica Neue', system-ui, sans-serif; font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased">
+
+<dc-import name="TopNav" active="triggers" hint-size="100%,78px"></dc-import>
+
+<nav aria-label="Breadcrumb" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 14px; font-size: 13px">
+<a href="Main.dc.html" aria-label="Overview" style="display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 10px; color: #9AA8C7"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 7.25L8 2.75l5.25 4.5V13a.5.5 0 0 1-.5.5H9.5V9.75h-3v3.75H3.25a.5.5 0 0 1-.5-.5z"></path></svg></a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<a href="Triggers.dc.html" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 9px; color: #9AA8C7; text-decoration: none; white-space: nowrap">Triggers</a>
+<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#6F7FA3" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; opacity: 0.7"><path d="M6 3.5L10.5 8 6 12.5"></path></svg>
+<span aria-current="page" style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 9px; border: 1px solid #1A2032; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); font-weight: 600; color: #E8EEFB; white-space: nowrap">check_run.completed → Self-Heal PR</span>
+</nav>
+
+<main style="display: flex; flex-direction: column; gap: 28px; box-sizing: border-box; width: 100%; max-width: 1400px; margin: 0 auto; padding: 8px 40px 64px">
+
+<section aria-label="Triggers" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 28px 48px; padding: 32px 36px; border-radius: 24px; border: 1px solid #1A2032; background: radial-gradient(50% 130% at 100% 0%, color-mix(in oklab, var(--ac) 18%, transparent), transparent 70%), #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05)">
+<div style="display: flex; align-items: center; gap: 24px; min-width: 0">
+<svg width="84" height="84" viewBox="0 0 64 64" aria-hidden="true" style="flex-shrink: 0">
+<ellipse cx="32" cy="59" rx="18" ry="3.5" style="fill: var(--ac); opacity: 0.22"></ellipse>
+<polygon points="38,10 22,36 34,36 30,58 50,28 38,28" style="fill: color-mix(in oklab, var(--ac) 50%, black)"></polygon>
+<polygon points="34,8 18,34 30,34 26,56 46,26 34,26" style="fill: color-mix(in oklab, var(--ac) 58%, white)"></polygon>
+</svg>
+<div style="display: flex; flex-direction: column; gap: 8px; min-width: 0">
+<h1 style="margin: 0; font-size: 44px; line-height: 1.05; font-weight: 600; letter-spacing: -0.035em">Triggers</h1>
+<p style="margin: 0; font-size: 15px; color: #9AA8C7">GitHub events that start a workflow on their own. 6 rules across 2 repos, all active.</p>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<label style="display: flex; align-items: center; gap: 8px; height: 38px; width: 240px; max-width: 100%; box-sizing: border-box; padding: 0 12px; border-radius: 12px; border: 1px solid #283048; background: #0A0C14; color: #6F7FA3">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25L13.5 13.5"></path></svg>
+<input type="search" aria-label="Search triggers" placeholder="Event, repo or workflow" style="flex-grow: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit; font-size: 13.5px">
+</label>
+<label style="display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border-radius: 12px; border: 1px solid #283048; background: #0A0C14; font-size: 13px; color: #6F7FA3">
+<span>Status</span>
+<select style="border: 0; outline: 0; background: transparent; color: #E8EEFB; font: inherit"><option>All</option><option>Active</option><option>Paused</option></select>
+</label>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 28px 32px">
+
+<section aria-label="Trigger rules" style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="2">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 18px 10px 10px; border-radius: 18px; border: 1px solid #1A2032; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 10px 8px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #9AA8C7">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><path d="M3.5 12.25v-9a1.5 1.5 0 0 1 1.5-1.5h7.5v9H5a1.5 1.5 0 0 0 0 3h7.5v-3"></path></svg>
+<span style="flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{g.repo}}</span>
+<span style="color: #6F7FA3">3 rules</span>
+</div>
+<sc-for list="{{g.rules}}" as="t" hint-placeholder-count="3">
+<div class="row" style="display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 14px; background: {{t.bg}}; box-shadow: {{t.sh}}">
+<span style="display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 10px; background: color-mix(in oklab, var(--ac) 16%, transparent); color: var(--ac)">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M8.75 1.75L3.5 9h4l-.75 5.25L12.5 7h-4z"></path></svg>
+</span>
+<a href="#" aria-current="{{t.current}}" style="display: flex; flex-direction: column; gap: 1px; flex-grow: 1; min-width: 0; text-decoration: none">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{t.event}}</span>
+<span style="font-size: 12.5px; color: #9AA8C7">runs Self-Heal PR · fired 0×</span>
+</a>
+<button type="button" role="switch" aria-checked="true" aria-label="{{t.switchLabel}}" style="display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; width: 38px; height: 22px; padding: 2px; border: 0; border-radius: 11px; background: color-mix(in oklab, var(--ac) 80%, black); box-shadow: inset 0 1px 0 color-mix(in oklab, var(--ac) 60%, white); cursor: pointer">
+<span style="width: 18px; height: 18px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4)"></span>
+</button>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</section>
+
+<section aria-label="Trigger detail" style="flex: 999 1 600px; min-width: 0; display: flex; flex-direction: column; border: 1px solid #1A2032; border-radius: 20px; background: #0D101A; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04)">
+
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 26px; border-bottom: 1px solid #1A2032">
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<span style="display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 12px 0 10px; border-radius: 13px; background: color-mix(in oklab, var(--ac) 18%, transparent); color: color-mix(in oklab, var(--ac) 40%, white); font-size: 13px; font-weight: 600">
+<span style="width: 6px; height: 6px; border-radius: 50%; background: currentColor"></span>
+<span>Active</span>
+</span>
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #6F7FA3">tr-5c9258ba</span>
+</div>
+<h2 style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin: 0; font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 21px; font-weight: 500">check_run.completed</span>
+<span aria-hidden="true" style="color: var(--ac)">→</span>
+<span>Self-Heal PR</span>
+</h2>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<div role="group" aria-label="View" style="display: flex; gap: 2px; padding: 3px; border-radius: 12px; border: 1px solid #222A40; background: #0A0C14; font-size: 12.5px">
+<button type="button" aria-pressed="{{readable.on}}" onClick="{{showReadable}}" style="height: 28px; padding: 0 14px; border: 0; border-radius: 9px; background: {{readable.bg}}; color: {{readable.fg}}; cursor: pointer">Readable</button>
+<button type="button" aria-pressed="{{json.on}}" onClick="{{showJson}}" style="height: 28px; padding: 0 14px; border: 0; border-radius: 9px; background: {{json.bg}}; color: {{json.fg}}; cursor: pointer">JSON</button>
+</div>
+<button class="ghost" type="button" style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border-radius: 11px; border: 1px solid #283048; background: #0F121C; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); color: #E8EEFB; font-size: 13px; font-weight: 600; cursor: pointer">
+<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M5.5 3.5v9M10.5 3.5v9"></path></svg>
+<span>Pause</span>
+</button>
+<button class="ghost" type="button" aria-label="Delete trigger" style="display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border-radius: 11px; border: 1px solid #283048; background: #0F121C; color: #FF8A7D; cursor: pointer">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 4.5h10.5M6 4.5V2.75h4V4.5M4.25 4.5l.5 8.75h6.5l.5-8.75"></path></svg>
+</button>
+</div>
+</div>
+
+<sc-if value="{{isReadable}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column">
+
+<div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px 18px; padding: 22px 26px; border-bottom: 1px solid #1A2032">
+<span style="display: flex; align-items: center; justify-content: center; width: 44px; height: 28px; border-radius: 9px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA8C7">When</span>
+<p style="margin: 0; font-size: 15.5px; line-height: 1.8">GitHub sends <code style="padding: 3px 9px; border-radius: 8px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">check_run.completed</code> on <code style="padding: 3px 9px; border-radius: 8px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">syntropic137/syntropic137</code></p>
+</div>
+
+<div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px 18px; padding: 22px 26px; border-bottom: 1px solid #1A2032">
+<span style="display: flex; align-items: center; justify-content: center; width: 44px; height: 28px; border-radius: 9px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA8C7">If</span>
+<div style="display: flex; flex-direction: column; gap: 6px; font-size: 15.5px; line-height: 1.8">
+<p style="margin: 0"><code style="padding: 3px 9px; border-radius: 8px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">check_run.conclusion</code> equals <code style="padding: 3px 9px; border-radius: 8px; background: #2A1513; color: #FFB3A8; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">failure</code></p>
+<p style="margin: 0"><span style="color: #6F7FA3">and</span> <code style="padding: 3px 9px; border-radius: 8px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">check_run.pull_requests</code> is not empty</p>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px 18px; padding: 22px 26px; border-bottom: 1px solid #1A2032">
+<span style="display: flex; align-items: center; justify-content: center; width: 44px; height: 28px; border-radius: 9px; background: color-mix(in oklab, var(--ac) 18%, transparent); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: color-mix(in oklab, var(--ac) 40%, white)">Then</span>
+<div style="display: flex; flex-direction: column; gap: 14px; min-width: 0">
+<p style="margin: 0; font-size: 15.5px; line-height: 1.8">Run <a href="Workflow.dc.html" style="font-weight: 600; text-decoration: underline; text-decoration-color: #34406A; text-underline-offset: 3px">Self-Heal PR</a> with these inputs</p>
+<div style="overflow-x: auto">
+<div style="display: flex; flex-direction: column; min-width: 480px">
+<sc-for list="{{mapping}}" as="m" hint-placeholder-count="7">
+<div style="display: grid; grid-template-columns: minmax(170px, 1fr) 20px minmax(260px, 1.6fr); column-gap: 12px; align-items: center; height: 36px; border-bottom: 1px solid #151A29; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px">
+<span>{{m.key}}</span>
+<span aria-hidden="true" style="color: #6F7FA3">←</span>
+<span style="color: #9AA8C7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{m.from}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px 18px; padding: 22px 26px; border-bottom: 1px solid #1A2032">
+<span style="display: flex; align-items: center; justify-content: center; width: 44px; height: 28px; border-radius: 9px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA8C7">Cap</span>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr)); gap: 16px 24px">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 24px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">3</span><span style="font-size: 12.5px; color: #9AA8C7">max attempts</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 24px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">20</span><span style="font-size: 12.5px; color: #9AA8C7">runs per day</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 24px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">300s</span><span style="font-size: 12.5px; color: #9AA8C7">cooldown</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 24px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums">0s</span><span style="font-size: 12.5px; color: #9AA8C7">debounce</span></div>
+</div>
+</div>
+
+</div>
+</sc-if>
+
+<sc-if value="{{isJson}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 20px; padding: 22px 26px; border-bottom: 1px solid #1A2032">
+<sc-for list="{{blocks}}" as="b" hint-placeholder-count="3">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #6F7FA3">{{b.title}}</span>
+<pre style="margin: 0; padding: 14px 16px; border-radius: 12px; background: #0A0C14; border: 1px solid #1A2032; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 1.6; color: #C3CCE2; white-space: pre-wrap; overflow-wrap: anywhere">{{b.code}}</pre>
+</div>
+</sc-for>
+</div>
+</sc-if>
+
+<div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px 18px; padding: 22px 26px">
+<span style="display: flex; align-items: center; justify-content: center; width: 44px; height: 28px; border-radius: 9px; background: #151A2A; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA8C7">Log</span>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 15.5px">Hasn't fired yet</span>
+<span style="font-size: 13px; color: #9AA8C7">Each firing will list the event, the execution it started and the outcome.</span>
+</div>
+</div>
+
+</section>
+</div>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4D80FF","options":["#4D80FF","#4CC9F0","#45E0A0","#A78BFA"]},"$preview":{"width":1440,"height":1230}}'>
+class Component extends DCLogic {
+renderVals() {
+const view = (this.state && this.state.view) || 'readable';
+const seg = (key) => {
+const on = view === key;
+return { on: on ? 'true' : 'false', bg: on ? '#1A2134' : 'transparent', fg: on ? '#E8EEFB' : '#9AA8C7' };
+};
+const events = ['check_run.completed', 'pull_request_review.submitted', 'issue_comment.created'];
+const rule = (repo, event, selected) => ({
+event,
+bg: selected ? '#151A2A' : 'transparent',
+sh: selected ? 'inset 0 1px 0 rgba(255, 255, 255, 0.06)' : 'none',
+current: selected ? 'true' : 'false',
+switchLabel: event + ' on ' + repo + ' is active'
+});
+const groups = [
+{ repo: 'syntropic137/syntropic137', rules: events.map((e, i) => rule('syntropic137/syntropic137', e, i === 0)) },
+{ repo: 'syntropic137/sandbox_syn-engineer-beta', rules: events.map((e) => rule('syntropic137/sandbox_syn-engineer-beta', e, false)) }
+];
+const conditions = [
+{ field: 'check_run.conclusion', value: 'failure', operator: 'eq' },
+{ field: 'check_run.pull_requests', operator: 'not_empty' }
+];
+const inputMapping = {
+branch: 'check_run.pull_requests[0].head.ref',
+pr_number: 'check_run.pull_requests[0].number',
+check_name: 'check_run.name',
+repository: 'repository.full_name',
+check_html_url: 'check_run.html_url',
+check_output_title: 'check_run.output.title',
+check_output_summary: 'check_run.output.summary'
+};
+const config = { max_attempts: 3, daily_limit: 20, debounce_seconds: 0, cooldown_seconds: 300 };
+return {
+accent: this.props.accent ?? '#4D80FF',
+groups,
+mapping: Object.keys(inputMapping).map((key) => ({ key, from: inputMapping[key] })),
+blocks: [
+{ title: 'Conditions', code: JSON.stringify(conditions, null, 2) },
+{ title: 'Input mapping', code: JSON.stringify(inputMapping, null, 2) },
+{ title: 'Config', code: JSON.stringify(config, null, 2) }
+],
+readable: seg('readable'),
+json: seg('json'),
+isReadable: view === 'readable',
+isJson: view === 'json',
+showReadable: () => this.setState({ view: 'readable' }),
+showJson: () => this.setState({ view: 'json' })
+};
+}
+}
+</script>
+</body>
+</html>

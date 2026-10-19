@@ -63,6 +63,13 @@ _WORKFLOW = _REPO_ROOT / "workflows" / "sdlc" / "implement-v3" / "workflow.yaml"
 _ROUND_WORKFLOWS = {
     "sdlc-implement-v3": _WORKFLOW,
     "sdlc-reverify-pr-v1": _REPO_ROOT / "workflows" / "sdlc" / "reverify-pr" / "workflow.yaml",
+    # The evidence-precheck A/B arm: v3's rounds with a precheck in each review
+    # (test_implement_v4_precheck_variant.py pins that it differs in nothing else).
+    "sdlc-implement-v4-precheck": _REPO_ROOT
+    / "workflows"
+    / "sdlc"
+    / "implement-v4-precheck"
+    / "workflow.yaml",
 }
 _FINALIZE = _WORKFLOW.parent / "phases" / "finalize_pr.md"
 

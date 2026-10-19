@@ -1,9 +1,14 @@
-"""Session inventory API models, re-exported through the shared API type surface."""
+"""Session inventory API models, re-exported through the shared API type surface.
+
+Also the one route by which agent_sessions value objects reach that surface
+(``AgentLaunch``), so ``types.py`` keeps a single foreign context (ADR-062).
+"""
 
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from syn_domain.contexts.agent_sessions import AgentLaunch as AgentLaunch
 from syn_domain.contexts.agent_sessions import (
     InventoryFilter,
     InventoryItem,

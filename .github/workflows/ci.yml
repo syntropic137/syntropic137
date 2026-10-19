@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # main only. A feature branch gets CI from its pull_request run. Pushing
+  # `feat/*` here as well ran the whole suite twice for every PR push (#1893).
   push:
-    branches: [main, feat/*]
+    branches: [main]
   pull_request:
     branches: [main, release]
   workflow_dispatch:
@@ -10,9 +12,15 @@ on:
     # Run integration tests weekly on Sunday at 2am UTC
     - cron: '0 2 * * 0'
 
+# A PR run is superseded by the next push to the same PR, so cancel it.
+# Everything else (main pushes, cron, dispatch) gets a group of its own run, so
+# it is never cancelled and never queued behind another run. Any shared group
+# (by ref or even by SHA) holds at most one pending run, and GitHub cancels the
+# older pending run when a newer one queues: back-to-back merges, or a dispatch
+# at the same SHA, would leave a main commit with no "CI Success" at all.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # ISS-259: Least-privilege default — jobs that need write access (e.g. publishing)
 # must explicitly declare it. Prevents a compromised step from pushing code or
@@ -213,8 +221,11 @@ jobs:
           TERM: dumb
           NO_COLOR: "1"
           COLUMNS: "200"
+        # -n auto: one pytest-xdist worker per vCPU (4 on ubuntu-latest).
+        # Serial, this step took 15-20 min (#1902). pytest-cov combines the
+        # workers' coverage data, so the report is the whole suite's.
         run: |
-          uv run pytest -m unit \
+          uv run pytest -m unit -n auto \
             --cov=apps/syn-api/src \
             --cov=packages/syn-domain/src \
             --cov=packages/syn-adapters/src \
@@ -257,35 +268,22 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      # TODO(#343): Enable EventStore + Collector services when containers are published
-      # eventstore:
-      #   image: ghcr.io/syntropic137/event-store:latest
-      #   ports:
-      #     - 55051:50051
-      #   options: >-
-      #     --health-cmd "grpc_health_probe -addr=:50051"
-      #     --health-interval 10s
-      #     --health-timeout 5s
-      #     --health-retries 5
+      # The event store is NOT a service: a service image must be static, and
+      # this one is resolved from the ESP gitlink by the step below (#1899).
+      # TODO(#343): Add the collector to this job.
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           submodules: true
 
-      - name: Setup uv
-        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+      # uv, Python, dependencies and the gitlink-pinned event store, shared
+      # with mutation-evidence.yml (#1904).
+      - name: Python integration environment
+        uses: ./.github/actions/python-integration-env
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: uv sync --all-extras
+          timescaledb-network: ${{ job.services.timescaledb.network }}
+          timescaledb-container: ${{ job.services.timescaledb.id }}
 
       - name: Run integration tests
         env:
@@ -299,6 +297,10 @@ jobs:
           TEST_EVENTSTORE_PORT: "55051"
         run: |
           uv run pytest -m integration -x -q
+
+      - name: Event store logs
+        if: failure()
+        run: docker logs eventstore || true
 
   #############################################################################
   # DASHBOARD UI - TypeScript checks
@@ -612,6 +614,42 @@ jobs:
       # Requires GitHub Advanced Security (free for public repos).
       - name: Dependency Review
         uses: actions/dependency-review-action@f5b971718edcbb31275a1db40004592335c0e031 # v4.9.0
+        with:
+          # #1793: apps/syn-desktop (Tauri 2) pins gtk 0.18 -> glib 0.18.5,
+          # GHSA-wrw7-89jp-8q8g (moderate). The fix (glib 0.20) is unreachable
+          # until Tauri moves. Allowed here only; the OSV scan still reports it.
+          # Remove this line when Tauri 2 releases on gtk 0.20.
+          allow-ghsas: GHSA-wrw7-89jp-8q8g
+
+  #############################################################################
+  # MUTATIONS NOT MERGED - .mutations/ is PR-scoped evidence, never main
+  #
+  # mutation-evidence.yml reads reviewed *.patch files from .mutations/ on a PR
+  # head and records the verdict in a PR comment. Kept on main, the patches rot
+  # as the code moves and stop applying, so the comment is the record and the
+  # directory is deleted before merge. Red here while the patches are on the
+  # branch is expected: it is the "not mergeable yet" signal. Not in preflight,
+  # because the pre-push hook would then block pushing the very patches the
+  # evidence workflow needs. Local mirror: `just check-no-mutations`.
+  #############################################################################
+
+  mutations-not-merged:
+    name: Mutation Patches Not Merged
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+
+      - name: Refuse .mutations/ on main
+        run: |
+          if [ -n "$(git ls-files -- .mutations)" ]; then
+            echo "::error::delete .mutations/ before merge; evidence is in the mutation-evidence comment"
+            git ls-files -- .mutations
+            exit 1
+          fi
+          echo "no .mutations/ on this head"
 
   #############################################################################
   # SUMMARY - Required status check for PRs
@@ -633,6 +671,7 @@ jobs:
       - osv-scan
       - pip-audit
       - dependency-review
+      - mutations-not-merged
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs
@@ -646,7 +685,8 @@ jobs:
              [[ "${{ needs.docs-site.result }}" == "failure" ]] || \
              [[ "${{ needs.submodule-check.result }}" == "failure" ]] || \
              [[ "${{ needs.osv-scan.result }}" == "failure" ]] || \
-             [[ "${{ needs.pip-audit.result }}" == "failure" ]]; then
+             [[ "${{ needs.pip-audit.result }}" == "failure" ]] || \
+             [[ "${{ needs.mutations-not-merged.result }}" == "failure" ]]; then
             echo "❌ CI checks failed"
             exit 1
           fi
@@ -673,6 +713,14 @@ jobs:
              [[ "${{ needs.python-integration-tests.result }}" != "success" ]]; then
             echo "❌ Release PR requires integration tests to RUN and pass"
             echo "   (result: ${{ needs.python-integration-tests.result }})"
+            exit 1
+          fi
+
+          # .mutations/ must be PROVEN absent on a PR into main: a cancelled or
+          # skipped check proves nothing (#1941).
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.base_ref }}" == "main" ]] && \
+             [[ "${{ needs.mutations-not-merged.result }}" != "success" ]]; then
+            echo "❌ Mutation Patches Not Merged did not pass (result: ${{ needs.mutations-not-merged.result }})"
             exit 1
           fi
 

@@ -52,7 +52,7 @@ documented rather than being quietly certified closed.
 
 ``bool`` returns are out. Measured: 10 broad-except handlers returning
 ``False``, of which 1 is this defect. The other nine are a function reporting
-on *its own attempt* - ``delete()``, ``interrupt_container()``,
+on *its own attempt* - ``delete()``, ``cancel_running()``,
 ``health_check()`` - where the exception genuinely is the answer: the delete
 did not land, the sidecar is not responding. Separating those from
 ``_produced_deliverable()`` needs the meaning of the predicate, not its shape,

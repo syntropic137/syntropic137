@@ -42,10 +42,12 @@ execution records the model that actually ran rather than the one declared.
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.agent_sessions import InvocationStatus
+from syn_domain.contexts.agent_sessions import InvocationStatus, ObservationType
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     observer_for,
 )
@@ -60,10 +62,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure 
 )
 from syn_shared.agents import runner_for_provider
 from syn_shared.env_constants import ENV_SYN_PHASE_DEADLINE, ENV_SYN_PHASE_TIMEOUT_SECONDS
+from syn_shared.upstream_failure import UpstreamRetryObservation
 
 from .invocation_attempt import invocation_environment, registered_attempt
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.shipped_recorder import ShippedRecorder
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         AgentConfiguration,
@@ -89,6 +93,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
         AgentHandlerProtocol,
         Runner,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
+        SessionLifecycleManager,
     )
 
 logger = logging.getLogger(__name__)
@@ -174,6 +181,7 @@ async def run_phase_agent(
     observability: ObservabilityRecorder | None,
     retry_policy: UpstreamRetryPolicy,
     on_push: PushObserver | None = None,
+    shipped: ShippedRecorder | None = None,
 ) -> AgentExecutionResult:
     """Run this phase's agent and return the result it ends on.
 
@@ -192,7 +200,10 @@ async def run_phase_agent(
     # so what a phase is configured to cost in time is what it can cost: a
     # per-attempt timeout made three attempts at a 3600-second phase into
     # three hours and three phases' money.
-    attempts = retry_policy.begin(timeout_seconds=phase.effective_timeout_seconds)
+    attempts = retry_policy.begin(
+        timeout_seconds=phase.effective_timeout_seconds,
+        already_launched=_launched_before(launch.session_manager),
+    )
     # ONE cost limit for the phase, for the same reason as the deadline above:
     # every attempt spends from it, so neither a retry nor the fallback can
     # reset what was spent (#1376). None when the phase declared no
@@ -207,6 +218,7 @@ async def run_phase_agent(
         attempts=attempts,
         cost_limit=cost_limit,
         on_push=on_push,
+        shipped=shipped,
     )
     primary = await run.until_final(
         phase.agent_config,
@@ -243,6 +255,17 @@ async def run_phase_agent(
     if not _attempt_is_settled(second.result) or second.result.exit_code != 0:
         second.result.primary_failure = _why_the_primary_failed(phase.agent_config, primary.result)
     return second.result
+
+
+def _launched_before(session_manager: SessionLifecycleManager | None) -> int:
+    """Attempts this phase's session has already registered, read from its events.
+
+    Every launch registers durable intent first (#1398), so the session's
+    invocations ARE the attempts made: deriving the retry bound from them
+    means rebuilding the runner for the same phase cannot replenish it.
+    """
+    session = session_manager.session if session_manager is not None else None
+    return len(session.invocations) if session is not None else 0
 
 
 def _why_the_primary_failed(agent: AgentConfiguration, result: AgentExecutionResult) -> str:
@@ -282,8 +305,10 @@ class _AgentRun:
         attempts: PhaseAttempts,
         cost_limit: PhaseCostLimit | None,
         on_push: PushObserver | None = None,
+        shipped: ShippedRecorder | None = None,
     ) -> None:
         self._handler = handler
+        self._shipped = shipped
         self._todo = todo
         self._launch = launch
         self._session_id = session_id
@@ -302,8 +327,18 @@ class _AgentRun:
     ) -> _Ended:
         """Run ``agent`` for as many attempts as a busy upstream earns it."""
         runner, collector = self._for(agent)
+        #: Why the attempt about to run was granted, when it is a retry.
+        retried_for: str | None = None
         while True:
             result = await self._dispatch(agent, runner, collector, claude_cmd, agent_env, grant)
+            if retried_for is not None:
+                # Recorded once the retry has RUN, never between its grant and
+                # its dispatch: the grant carries a timeout read off the clock,
+                # and an await in that gap - a slow telemetry store - spends
+                # the budget the grant still claims, so a successor could start
+                # after the phase's deadline (#1882). Here the next
+                # `wait_before_retry` reads the clock after this write.
+                await self._record_retry(agent, reason=retried_for)
             got_somewhere = _phase_got_somewhere(result, collector)
             if _attempt_is_settled(result):
                 return _Ended(result, may_have_written=collector.may_have_written)
@@ -317,12 +352,48 @@ class _AgentRun:
                 # somewhere, or the failure never qualified for a retry.
                 return _Ended(result, may_have_written=collector.may_have_written)
             grant = successor
+            retried_for = result.stream_result.error_reason
             logger.warning(
                 "Upstream was busy (phase=%s): %s - attempt %d of %d",
                 self._todo.phase_id,
                 result.stream_result.error_reason,
                 self._attempts.attempt,
                 self._attempts.max_attempts,
+            )
+
+    async def _record_retry(self, agent: AgentConfiguration, *, reason: str | None) -> None:
+        """Count this retry against its provider and model (#1882), Lane 2 only.
+
+        Best effort: the retry has already run when this is written, so a
+        telemetry store that is down costs a count, not a phase.
+        """
+        if self._observability is None:
+            return
+        kind = UPSTREAM_FAILURES.kind_of(reason)
+        # Only a transient kind is ever granted a retry, so `kind` is set here.
+        observation = UpstreamRetryObservation(
+            provider=agent.provider,
+            requested_model=agent.model,
+            upstream_kind=str(kind),
+            attempt=self._attempts.attempt,
+        )
+        try:
+            await self._observability.record_observation(
+                session_id=self._session_id,
+                observation_type=ObservationType.UPSTREAM_RETRY,
+                data=dataclasses.asdict(observation),
+                execution_id=self._todo.execution_id,
+                phase_id=self._todo.phase_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning(
+                "Failed to record the upstream retry of phase %s on %s/%s",
+                self._todo.phase_id,
+                agent.provider,
+                agent.model,
+                exc_info=True,
             )
 
     async def once(
@@ -356,6 +427,7 @@ class _AgentRun:
             phase_id=self._todo.phase_id,
             workspace_id=getattr(self._launch.workspace, "workspace_id", None),
             requested_model=agent.model,
+            shipped=self._shipped,
         )
         return runner, collector
 

@@ -51,6 +51,7 @@ syntropic137/
 │   ├── syn-cli-node/          # CLI tool ("syn") - Node.js, HTTP client for syn-api
 │   ├── syn-dashboard-ui/      # Dashboard frontend (Vite + React) - operational UI
 │   ├── syn-docs/              # Public-facing documentation site (Next.js + Fumadocs)
+│   ├── syn-landing/           # syntropic137.com marketing site (Vite + React, Vercel; see its AGENTS.md)
 ├── packages/
 │   ├── syn-domain/            # Domain events, aggregates, ports
 │   ├── syn-adapters/          # Orchestration + observability adapters
@@ -556,6 +557,21 @@ Submodules (agentic-workspace, event-sourcing-platform) have independent version
 - [Security Practices](docs/security-practices.md) - supply chain hardening, Docker runtime security, credential management
 - [GitHub App Security Model](docs/deployment/github-app-security.md) - PEM handling, token lifecycle, network isolation, token injector architecture
 
+## Design
+
+UI work starts at [design/README.md](design/README.md): the boards, the spec and the design-to-code loop. Three rules:
+
+- **Boards are a spec, not code.** Read `design/canvas/*.dc.html` for layout, copy, tokens, data and behaviour; never ship them.
+- **Code is the source of truth after a screen ships.** Its board is frozen history; small tweaks go straight to code.
+- **No Storybook.** The component reference is `/dev/components` and `/dev/patterns` in apps/syn-ui, plus Playwright screenshot tests of both.
+
+## Brand
+
+The brand kit is [design/brand/v2/BRAND.md](design/brand/v2/BRAND.md) (v2.x; index in design/brand/README.md): logo, colour, type, motion, voice, surfaces and every asset. Follow it for anything user-facing.
+
+- **Harness claims.** Say "Claude Code and Codex" or "multi-harness"; never "any harness" as a present-tense claim (more harnesses are the goal).
+- **No Claude-only install paths.** Claude Code plugins are deprecated org-wide in favour of multi-harness skills (`npx skills add syntropic137/syntropic137-skills`).
+
 ## Tooling
 
 - **uv** for Python package management (workspaces)
@@ -613,7 +629,7 @@ never to CI alone (#931).
 `just qa` remains the broader local sweep (it runs non-unit tests too), but it is
 not CI-shaped: some of its targets are deliberately more lenient than CI's.
 
-**Git hooks:** `.githooks/pre-push` runs the fast checks automatically. Wire it up once with `just setup-hooks` after cloning.
+**Git hooks:** `.githooks/pre-push` runs `just preflight` on the commit being pushed, not the working tree: a clean checkout at that commit is checked in place, anything else (`git push origin <sha>:branch`, uncommitted edits) in a temporary worktree at that commit (#1632). Wire it up once with `just setup-hooks` after cloning.
 
 **For small fixes on already-merged PRs** (formatting nits, Copilot review comments): push directly to `main` with `git push origin <branch>:main` rather than opening a new PR. Keeps the release chain unblocked.
 
@@ -638,3 +654,7 @@ uv run pytest -m unit -q
   (docker-backed) is settled by CI on the same head SHA.
 - New Python test modules need the `unit` marker (`architecture` under
   `ci/fitness/`), or the second gate collects zero tests and goes green.
+- Mutation evidence (do the new tests kill the bug?) is not a workspace gate:
+  it needs Docker. Commit `*.patch` files under `.mutations/` and ask the
+  orchestrator to run `just mutation-evidence`; see
+  [agent_mutation_evidence.md](.claude/skills/devops/agent_mutation_evidence.md).

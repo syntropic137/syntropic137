@@ -40,12 +40,54 @@ ENV VITE_API_URL=/api
 RUN pnpm build
 
 # =============================================================================
+# Build Stage — syn-ui (apps/syn-ui), the default dashboard at /
+# =============================================================================
+# syn-ui is the dashboard (docs/syn-ui-rollout.md, "Release N: default"). The
+# React build above is kept for one release as the SYN_GATEWAY_UI=legacy
+# opt-out; it is not served otherwise (its router has no basename, so it cannot
+# live under /legacy without source edits).
+FROM node:22-alpine AS skyline-builder
+
+RUN corepack enable && corepack prepare pnpm@10.24.0 --activate
+
+WORKDIR /workspace
+
+COPY pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml ./
+# Manifests first so the install layer caches across source edits. The four
+# workspace packages export source (no build step), so the app needs them all.
+COPY apps/syn-ui/package.json ./apps/syn-ui/
+COPY packages/syn-ui/themes/package.json ./packages/syn-ui/themes/
+COPY packages/syn-ui/skyline-core/package.json ./packages/syn-ui/skyline-core/
+COPY packages/syn-ui/skyline-svelte-v5/package.json ./packages/syn-ui/skyline-svelte-v5/
+COPY packages/syn-ui/data/package.json ./packages/syn-ui/data/
+
+RUN pnpm install --frozen-lockfile --filter 'syn-ui...'
+
+COPY packages/syn-ui/ ./packages/syn-ui/
+COPY apps/syn-ui/ ./apps/syn-ui/
+# The desktop bridge (zero deps) is lazy-imported by apps/syn-ui/src/main.ts.
+COPY apps/syn-desktop/bridge/ ./apps/syn-desktop/bridge/
+
+# SYN_UI_BASE sets Vite's base, so asset URLs and the router follow it. API
+# calls stay absolute (/api/v1). `build` also runs the 100 KB first-load size
+# budget. Two bundles: base / is the default; base /next/ serves the legacy
+# mode, which keeps the previous release's layout (React at /, syn-ui at /next).
+WORKDIR /workspace/apps/syn-ui
+RUN SYN_UI_BASE=/ pnpm build \
+ && SYN_UI_BASE=/next/ pnpm exec vite build --outDir dist-next --emptyOutDir --logLevel warn
+
+# =============================================================================
 # Runtime Stage
 # =============================================================================
 FROM nginx:1.28.2-alpine AS runtime
 
-# Copy built dashboard assets (served at /)
-COPY --from=dashboard-builder /workspace/apps/syn-dashboard-ui/dist /usr/share/nginx/html
+# Two document roots; docker-entrypoint.sh picks one from SYN_GATEWAY_UI.
+#   next (default): /usr/share/nginx/html   = syn-ui, base /
+#   legacy:         /usr/share/nginx/legacy = React at /, syn-ui (base /next/) at /next
+COPY --from=skyline-builder /workspace/apps/syn-ui/dist /usr/share/nginx/html
+COPY --from=dashboard-builder /workspace/apps/syn-dashboard-ui/dist /usr/share/nginx/legacy
+COPY --from=skyline-builder /workspace/apps/syn-ui/dist-next /usr/share/nginx/legacy/next
 
 # Copy nginx configuration
 COPY infra/docker/images/gateway/nginx.conf /etc/nginx/conf.d/default.conf

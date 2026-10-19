@@ -1,0 +1,35 @@
+id: replay-error-result-drops-verdict
+polarity: defect
+source_pr: 49
+# Escaped on 2026-10-13: the platform verify certified AW#49 at this head; a
+# second verifier blocked it. The pin is the first parent of the fix 55f30bc.
+# Evidence at the pin: `Recording.closing` returns
+# `({**self.result, "result": verdict},)` for claude, so a recorded result
+# with `is_error: true` keeps it. syntropic137's `_handle_result_event` reads
+# an is_error result as the harness's failure text (error_reason), never as
+# the agent's report, so the phase settles with no verdict. The fix sets
+# `is_error: False, subtype: "success"` on the closing result.
+commit: 948a913e5ed97595e965cff368de4a98232ba739
+fix_commit: 55f30bc66488b50990e12abe1bc789243965aa3a
+task: >
+  The change under review lets the scripted agent replay a recorded claude or
+  codex phase and close it with the profile's verdict, written where
+  syntropic137 reads it. Review the closing events it writes, for every kind
+  of recording it may be given, against how syntropic137 consumes them.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    For claude, Recording.closing copies the recorded result event and only
+    replaces its `result` text, so a recording whose closing result has
+    is_error=true keeps it. syntropic137's _handle_result_event routes an
+    is_error result's text to the error reason instead of the verdict
+    reader, so the profile's TASK_RESULT is never read and the replayed phase
+    has no verdict (NOT_REPORTED).
+  files:
+    - lib/python/scripted_agent/scripted_agent/recording.py
+  keywords:
+    - [is error, is_error, error result, subtype, error flag, harness error]
+    - [task result, task_result, verdict, report, result text]
+    - [error reason, error_reason, not read, never read, ignored, dropped, lost, swallow, no verdict,
+       not reported, not_reported, missing, discard, treated as, read as, routed, as an error, as failure]
+split: train

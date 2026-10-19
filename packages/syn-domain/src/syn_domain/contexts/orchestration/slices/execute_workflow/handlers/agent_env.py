@@ -1,8 +1,8 @@
-"""The environment a claude agent process runs with inside a workspace.
+"""The env a Claude agent is launched with, credential included (ADR-024, #1914).
 
-Credentials, the Envoy proxy route and the model pins every claude process in
-the workspace inherits. Only phases that may run claude receive it, so a codex
-phase never sees claude credentials (see ``WorkspaceProvisionHandler``).
+Kept apart from WorkspaceProvisionHandler because it is one of the four places
+a host credential is produced, and the WorkspaceCredentialPolicy decides here
+whether one is.
 """
 
 from __future__ import annotations
@@ -19,10 +19,18 @@ from syn_shared.env_constants import (
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+        WorkspaceCredentialPolicy,
+    )
 
 
-async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
+async def build_agent_env(
+    workspace: ManagedWorkspace, session_id: str, credential_policy: WorkspaceCredentialPolicy
+) -> dict[str, str]:
     """Build agent environment for workspace execution.
+
+    Under ``NoCredentials`` (#1914) the agent gets its session id and nothing
+    else: no Claude credential and no proxy, since none was provisioned.
 
     Injects Claude credentials directly into agent env. ANTHROPIC_BASE_URL
     routes SDK traffic through the Envoy sidecar for observability, but auth
@@ -31,6 +39,8 @@ async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict
     See ADR-024 (2026-05-01 update) for why the original "proxy-managed"
     placeholder approach was abandoned and this direct injection was adopted.
     """
+    if not credential_policy.supplies_credentials:
+        return {ENV_CLAUDE_SESSION_ID: session_id}
     proxy_url = workspace.proxy_url
     if not proxy_url:
         msg = (

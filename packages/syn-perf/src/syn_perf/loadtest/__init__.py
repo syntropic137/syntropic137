@@ -1,8 +1,9 @@
 """Token-free load test (issue #1310, capacity plan section 6).
 
-Only the contract exists so far (step 7a): what a stub agent replays and does
-in each phase. The stub image (7b) lives in agentic-workspace and reads it as
-JSON; the driver (7c) will live beside it here.
+The contract (step 7a) says what a stub agent replays and does in each phase;
+the stub image (7b) lives in agentic-workspace and reads it as JSON. The
+driver (7c, #1717) is ``python -m syn_perf.loadtest``: ``driver`` observes a
+running stack and ``pass_bar`` judges what it saw.
 """
 
 from syn_perf.loadtest.handoff import HEAD_SHA_LINE, head_sha_handed_over

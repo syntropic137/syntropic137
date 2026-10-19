@@ -53,7 +53,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: commit-tree needs an identity and the container may have none: the setup
-#: script configures user.name only when GIT_AUTHOR_NAME was supplied. Stating
+#: script configures user.name only when a GitHub App identity was supplied. Stating
 #: it here removes that dependency; it matches the setup script's own fallback.
 _IDENTITY: Final[tuple[str, ...]] = (
     "GIT_AUTHOR_NAME=syn-bot",

@@ -11,8 +11,80 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-15
+
 ### Added
 
+- feat(codex): accept OPENAI_API_KEY as a fallback to CODEX_AUTH_JSON (#1971) (#1972)
+- feat(broker): S2 spike - git and gh through the broker (#1735) (#1929)
+
+### Fixed
+
+- The Run Queue schema is now applied under a Postgres advisory lock, so the api and executor processes can start together safely. (#1967)
+- fix(ui): live stream reopens after the browser gives up, and resyncs on reconnect (#1924) (#1951)
+
+## [1.0.2] - 2026-10-15
+
+### Added
+
+- feat(ci): mutation evidence mutates harness source; Docker by default (#1962)
+- New `SYN_EXECUTOR_POOL_*` settings (id, priority, region, capabilities, overflow delay) name the Executor Pool an executor joins. They are read only when `SYN_EXECUTION_RUN_QUEUE_ENABLED` is on. **Placement does not use them yet**, and runs are still claimed oldest-first. (#1931)
+- No user-facing change. (#1921)
+- New experimental workflow `sdlc-implement-v4-precheck`, an A/B arm of `sdlc-implement-v3`. Before it spends a repair round, verification now classifies evidence a workspace cannot produce: flaky or unrelated CI failures, Docker or database checks, CI coverage that needs a workflow change, and a wrong PR base. It hands these to the orchestrator on the PR instead of sending them to a fix phase that cannot close them. While any handoff is open, the PR stays a draft. `sdlc-implement-v3` is unchanged. The new workflow is not installed by default. (#1910)
+- Workspaces can start with a warm uv and pnpm cache, built and served by the platform and keyed by lockfile hash. Set `SYN_DEPENDENCY_SEED_DIR` (on the workspace volume) to enable it, and `SYN_DEPENDENCY_SEED_MAX_BYTES` to cap it. Off by default. (#1802)
+- feat(workspaces): adopt agentic-workspace provider operation contract (#1908)
+- feat(execution-host): ExecutionHost claim loop, renewal, reconciliation (#1310 1.5) (#1894)
+- An execution that was resumed now says so and links to the run that continued it, and to the latest run in the chain. A resumed execution links back to the run it continued and names the phase it picked up at. This works in the dashboard, in `syn execution show`, and in the API (`resumed_from`, `resumed_as`, `latest_resumed_as`). (#1889)
+- No user-visible change with default settings. (#1888)
+- New setting **`SYN_EXECUTION_RUN_QUEUE_ENABLED`** (default `false`). **Leave it off.** With it off, nothing changes. (#1808)
+- Eval suites: `verifier-seed-v1` v7 adds the #1808 escape (`start-clock-read-before-settle`). (#1884)
+- **`GET /sessions/{id}` now reports `agent_launch`** (`unknown`, `launched` or `not_launched`). It says whether the session's agent process has actually started. A `running` session that still reads `unknown` may be provisioning. The field turns `launched` as soon as the agent produces its first output, not when it exits. (#1879)
+
+### Changed
+
+- Version bump to v1.0.2 (no code change). (#1963)
+- chore(brand): organise brand kit by style and purpose (2.4.0) (#1892)
+- docs: make Run Your First Workflow work on a fresh install (#1957)
+- test(1310): V7b waits for a post-reap heartbeat instead of racing B's next turn (#1945)
+- ci: mutation-evidence workflow (dispatch-only) replaces local Docker verifier runs (#1942)
+- test(fitness): run every ci/fitness module in CI; fork stays reserved (#1937)
+- Docs: the setup CLI installs agent skills for Claude Code and Codex instead of the Claude Code plugin; new Agent Skills page and `reset` docs (#1933)
+- test(pc126): hand container-made dirs back to the host before teardown (#1930)
+- Eval suite `verifier-seed-aw-v1` is now **v3**: (#1900)
+- ci: run Python unit tests in parallel with pytest-xdist (#1905)
+- ci: run the pinned event store in the integration job (#1904)
+- ci: never cancel main/release runs in smoke, Skyline, landing and e2e workflows (#1903)
+- ci(syn-ui): pull gateway base images by digest from mirror.gcr.io (#1897)
+- ci: run CI once per PR push; never cancel main runs (#1895)
+- Added the `eval-verify-pinned-codex-checks-v1` verifier workflow. It is the codex verifier with three required, evidenced checks: consumer callers, the CI job for each test, and the test that would catch a revert. (#1890)
+- docs(skills): refresh devops skill to current process; add PR backlog and DORA agents (#1876)
+- Docs: betas are test deploys (tag + pit stop), never GitHub prereleases; version-bump commits stage files by name. (#1886)
+- Internal: `scripts/rehearse_upgrade.sh` rehearses an in-place upgrade against a production backup before each release. (#1769)
+- chore: bump version to v1.0.1 (#1877)
+
+### Fixed
+
+- fix(#1947): judge disk admission on absolute GiB floors, not percent (#1958)
+- fix(ci): mutation-evidence run-name, docker mode, skip guard (#1955)
+- **Removed `SYN_SECURITY_*` settings** (`ALLOW_NETWORK`, `ALLOWED_HOSTS`, `READ_ONLY_ROOT`, `MAX_WORKSPACE_SIZE`, `MAX_PIDS`, `MAX_EXECUTION_TIME`). They were never applied. Setting them changed nothing before this release and changes nothing now, so you can delete these lines from your `.env`. (#1821)
+- fix(events): one startup lock across the day rollup and its CONCURRENTLY build (#1906) (#1934)
+- A phase that fails because the model provider is at capacity or rate limited now retries in place after about 30-60s, then 60-120s, with jitter. Before, it waited 5s then 10s. More of these blips now finish without a resume or a new execution. (#1883)
+
+## [1.0.0] - 2026-10-10
+
+### Added
+
+- feat(syn-ui): Skyline Svelte 5 UI, packages, Tauri shell (#1764)
+- feat(metrics): GET /metrics/shipped (Shipped by agents) + failed runs per heatmap day (#1857)
+- `eval_suite.py score --llm-judge` asks a pinned LLM judge (`claude-sonnet-4-6`, temperature 0) whether a blocking finding identifies the seeded defect. The judge must quote the finding it matched. (#1850)
+- `GET /workflows` now returns each workflow's declared skills (`skills`), including the phases that declare each one and whether it applies at workflow scope. (#1765)
+- feat(evals,workflows): trend data for the eval and workflow charts (#1788) (#1800)
+- **Skill use on the Execution detail page.** Each phase now shows the skills it declared, which ones the agent invoked (with counts), and any declared skill it never invoked, flagged as a warning. A summary at the top covers the whole run. (#1820)
+- A workflow phase whose agent's provider declines the request through its content filter (for example codex's "flagged for possible cybersecurity risk") now runs once on the phase's declared `fallback_agent` instead of failing, as long as the refused attempt had not started work. (#1819)
+- feat(orchestration): run-scoped to-do fold (#1310 item 1.4) (#1810)
+- The Sessions list shows 100 rows per page by default; Executions keeps 50. Both lists can switch between 50 and 100. (#1785)
+- Adds the execution run queue: a Postgres-backed table of execution runs with per-executor capacity, leases and fencing tokens (ADR-072). It is groundwork for running executions on separate executor hosts. Nothing uses it yet, so this release changes no behaviour. (#1799)
+- New: `syn metrics profiles --workflow <id> [--days N]` and `GET /metrics/phase-profiles`. They show, per phase type and model, the median and p90 of input, output, cache-write and cache-read tokens and of cost. When a phase fell back to another model, its tokens are attributed to the model that used them. (#1801)
 - Workspace and sidecar containers now carry `syn.host_id` and `syn.host_generation` labels, and sidecars also carry `syn.execution_id`. Operators can now tell which API host and build created a container. (#1736)
 - Restarting or upgrading the API no longer orphans running executions. Each running execution saves its unpushed commits to a quarantine ref and is recorded `interrupted`, so it can be resumed. (#1730)
 - New opt-in setting `SYN_PLATFORM_ACCESS_ENABLED` (default `false`). When it is on, each workspace phase receives `SYN_API_URL` and a read-only `SYN_API_TOKEN`. With them the agent can GET executions, sessions, artifacts, evals, insights and health, and nothing else. The API refuses every other workspace request. Tokens expire with the phase (capped by `SYN_PLATFORM_ACCESS_TOKEN_TTL_SECONDS`, default 4h) and are revoked when the phase ends. (#1741)
@@ -73,9 +145,23 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - You can now add or remove tags on an existing execution or workflow: `syn execution tag add <id> <tag...>`, `syn execution tag remove <id> <tag...>`, and the same under `syn workflow tag`. The API exposes the same operations as `POST`/`DELETE` on `/executions/{id}/tags` and `/workflows/{id}/tags`. (#1541)
 - Workflows and executions can carry tags: `tags:` in workflow YAML, `syn workflow run --tag <t>` (repeatable), and `syn execution list --tag <t>` (repeatable, AND-combined). (#1526)
 - feat(orchestration): provision a resume at its parent's recorded commits (#1458) (#1525)
+- feat: MIT in title, add sitemap.xml and robots.txt (#27)
+- feat: landing page launch prep (#23)
 
 ### Changed
 
+- test: make the two #1857 integration tests deterministic (#1860) (#1862)
+- **Internal / contributors:** CI and `just preflight` now reject Linux-only constructs in Python and TypeScript code and tests. These are `/proc` and `/sys` paths and Linux-only syscalls and flags such as `O_PATH`, `sched_*`, `prctl` and `inotify`. A module that only ever runs inside a Linux container can be declared in `[linux_only_constructs]` of `ci/fitness/fitness_exceptions.toml` with a reason. This keeps macOS working as a development and self-host platform. (#1832)
+- chore: enroll in Anthropic OSS Scanner (Dockerfile + threat model) (#1829)
+- chore: event-sourcing-platform v0.18.0 (#1830)
+- refactor(cli): request latency lives under syn observe, not syn insights (#1828)
+- The test suites no longer depend on your machine. The CLI tests ignore exported `SYN_API_*`/`NO_COLOR` variables, and both the CLI and Python suites ignore your global and system git config (for example `commit.gpgsign = true`) and hook-exported `GIT_*` variables. (#1822)
+- **The Repos page loads straight away.** It no longer waits on GitHub, even when you come back to it after a while. (#1818)
+- perf(evals): batch the list's run reads; add request latency telemetry (#1816)
+- Artifact collection now finds output files with a bounded, streaming directory walk instead of `Path.glob`. Listing cost stays predictable even when a workspace contains very large directories. (#1809)
+- which constraint binds first at each tier; (#1795)
+- Docs only: v0.34.0 release notes and self-host upgrade notes draft (`docs/releases/v0.34.0.md`). (#1763)
+- docs(research): model capacity across multiple AI subscriptions and accounts (#1797)
 - ci: run the dashboard test suite in CI (#1672)
 - docs(research): remote workspace executor (E2B first), research and build plan (#1796)
 - `docs/north-star.md` now has a capacity model for 20, 100 and 1,000 concurrent executions: (#1724)
@@ -116,6 +202,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - chore(lib): add syntropic137-skills as a submodule (#1533)
 - ci(security): OSV scan was scanning nothing; bump to v2.3.8 + scan nested lockfile (#1535)
 - Security: click raised to 8.3.3 in the ui-feedback API (PYSEC-2026-2132). (#1531)
+- chore(deps-dev): bump @playwright/test from 1.58.2 to 1.59.1 in the all-dependencies group (#20)
 
 ### Removed
 
@@ -123,6 +210,14 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ### Fixed
 
+- Codex phases now receive the target repository's instructions (CLAUDE.md / AGENTS.md). Before this, codex got only unexpanded `@` lines and none of the content. (#1836)
+- The workspace directory janitor now pauses while the execution list or the workspace ownership read model is rebuilding, or while their state cannot be confirmed. It no longer risks deleting a running workflow's workspace during a rebuild. (#1849)
+- fix(ui-feedback): ignore the host app's env keys in Settings (#1792)
+- A phase whose agent is refused by its provider's content filter after only reading, searching or reasoning now runs once on its declared `fallback_agent`, instead of failing the execution. The phase records the fallback's provider and model, so a verify that ran on claude shows it was not a cross-family review. (#1826)
+- Stale workspace reclamation is stricter about which repositories it reads with host git. A repository whose git data points outside its workspace, or whose config sets anything beyond a short allowlist (including a submodule's), is no longer read. Its directory is kept and logged for an operator instead of being reclaimed. (#1823)
+- Reverifying an older PR branch no longer fails as "holding work its workspace would have destroyed" when a submodule only holds release tags that origin publishes off every branch. (#1817)
+- On phones, execution and session cards show the repo list on its own line, truncated with the full list in a tooltip. It no longer becomes an unreadable narrow column or overlaps the token count. (#1664)
+- fix(artifacts): collect only regular files inside the workspace, with a size cap (#1803)
 - fix(#1515): pin event-store from the ESP gitlink version, never latest (#1573)
 - **Changed defaults:** `API_MEMORY_LIMIT` `512m` → `2g` and `EVENT_STORE_MEMORY_LIMIT` `512m` → `2g`. At 512m, the API was being OOM-killed under concurrent executions (#1552), and the event store during projection rebuilds (#1553). (#1777)
 - Workspace directories left behind by crashed, OOM-killed or failed-teardown executions are now reclaimed every 30 min (`SYN_DISK_RECLAIM_INTERVAL_MINUTES`). A directory qualifies after 6 h (`SYN_DISK_RECLAIM_GRACE_HOURS`) with no running container, no running owning execution and no changes. (#1755)
@@ -179,6 +274,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - `just preflight-agent`, the gate agents run inside workspaces, now runs the architecture fitness check (`fitness-check`, same thresholds as CI) instead of silently skipping it. The first run in a workspace installs stable Rust and builds the `aps` CLI (~10 min total cold, ~5 min warm). (#1536)
 - fix(guard): a submodule gitlink git moved is not unsaved work (#1527)
 - fix(#1528): pin ESP with ProcessManagers drained off the subscription cursor (#1532)
+- fix: remove em dashes from user-facing copy and widen linter scope (#26)
 
 ### Security
 
@@ -194,5 +290,8 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 - fix(#1519): pin the event-store INDEX digest, not a child manifest (#1522)
 
-[unreleased]: https://github.com/syntropic137/syntropic137/compare/v0.33.1...HEAD
+[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/syntropic137/syntropic137/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/syntropic137/syntropic137/compare/v1.0.0...v1.0.2
+[1.0.0]: https://github.com/syntropic137/syntropic137/compare/v0.33.1...v1.0.0
 [0.33.1]: https://github.com/syntropic137/syntropic137/compare/v0.33.0...v0.33.1

@@ -14,12 +14,58 @@ This file holds what `suite.yaml` cannot: how a case is chosen.
 
 A defect case is mined from a merged fix. The pin is the first fix commit's
 first parent, so the bug is present and nothing of the fix is; `check` refuses
-any other pin, with one exception. A defect found in a retired clean control
+any other pin, with two exceptions. Both keep a tree a verifier reviewed, and
+both require the pin to be a strict ancestor of the first fix commit.
+
+A PR that merges main between the head verification judged and the fix has a
+merge as the fix's first parent: a tree no verifier saw. Such a case pins the
+judged head and cites the verify record naming it in `certified_in` (a PR
+comment URL). The record is what makes the pin the judged head; `check` can
+only confirm it comes before the fix, so read the cited comment when you add one.
+
+A defect found in a retired clean control
 keeps that control's pin, so the tree reviewed is the one both verifiers
 blocked: the case names the control in `reclassified_from`, and `check`
 requires the pin to equal the control's commit and to be a strict ancestor of
 the first fix commit. `redis-retry-non-idempotent` is the only such case. The expected files are ones the fix changed, and a defect that
-only shows at runtime is not a case.
+only shows at runtime is not a case. `fence-bound-fails-on-real-postgres` is
+the nearest: it escaped because only a real-store run showed it, but its cause
+(an `IN (... FOR UPDATE SKIP LOCKED LIMIT n)` subquery a nested loop may
+rescan) is in the SQL a reviewer reads.
+
+`escape_class` is an optional label naming the kind of miss a case is, one of
+`EscapeClass` in `scripts/eval_suite.py`. Nothing that loads, launches or
+scores a case reads it; it is there so escapes can be counted by kind. Cases
+that fit none of the classes carry no label.
+
+## Judging a blocked defect run
+
+Two judges answer one question: does a blocking finding identify THIS defect?
+
+- **Keyword judge** (always; deterministic, offline): one blocking finding
+  names an expected file and has a word from every `expected.keywords` group.
+- **LLM judge** (`score --llm-judge`; needs the platform's `ANTHROPIC_API_KEY`
+  setting, from the environment or `.env`): a pinned model at temperature 0
+  (`claude-sonnet-4-6`; the 4.7+/5.x models reject temperature 0) is given the
+  case's root cause (`expected.defect`, required: the judge refuses a case
+  without it), the expected files and keyword concepts, and the blocking
+  findings, and
+  answers `match`, `no_match` or `unclear`, quoting the finding it matched. A
+  `match` whose quote is not in any finding is turned into `unclear`.
+
+**Headline rule:** caught = blocked AND (keyword match OR LLM `match`).
+`unclear` is not caught. Both judges' catch rates are printed beside the
+headline. Precision matters more than recall here: a judge that credits vague
+findings inflates the number every verifier decision is made on.
+
+The judge is part of the eval's identity. Keyword-only scores keep
+scorer_version `<suite version>`; LLM-judged scores are recorded as
+`<suite version>+llm:<model>@prompt-v<n>`. Change the judge's model or prompt
+and bump `JUDGE_PROMPT_VERSION` in `scripts/eval_suite.py`.
+
+Before trusting a judge change, calibrate it on runs already launched:
+`scripts/eval_judge_calibrate.py` prints keyword verdict vs LLM verdict per
+blocked run, with a column for a human's own reading.
 
 ## Clean controls
 

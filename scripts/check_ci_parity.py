@@ -95,6 +95,43 @@ RUNNABLE_BUT_EXCLUDED: Final[dict[str, str]] = {
     "ci.yml:osv-scan": "network round-trip to the OSV database; `just deps-audit-npm`",
     "ci.yml:pip-audit": "network round-trip to the PyPI advisory database; `just deps-audit-py`",
     "e2e-container.yml:docker-build": "builds a multi-gigabyte image; `just workspace-build`",
+    # Skyline (apps/syn-ui) runs only on PRs touching its paths, and is outside
+    # qa-ci while it is built out at /next. Each job has a mirror recipe.
+    "syn-ui.yml:qa": "path-filtered to Skyline; `just skyline-ci`",
+    "syn-ui.yml:e2e": "path-filtered to Skyline, needs a Playwright browser; `just skyline-e2e`",
+    "syn-ui.yml:screenshots": "path-filtered, Linux Chromium baselines only (fonts differ on macOS); `just skyline-screenshots`",
+    "syn-ui.yml:gateway": "path-filtered, builds the gateway image and smokes both SYN_GATEWAY_UI modes; `just skyline-gateway-smoke`",
+    "syn-ui.yml:desktop": "path-filtered, needs Tauri system libraries (webkit2gtk); `pnpm --dir apps/syn-desktop test`",
+    # syntropic137.com (apps/syn-landing) runs only on PRs touching its paths
+    # or packages/syn-ui. Each job has a mirror recipe in just/landing.just.
+    "syn-landing.yml:copy-lint": "path-filtered to the landing page; `just landing-copy-lint landing-colour-lint`",
+    "syn-landing.yml:build": "path-filtered to the landing page; `just landing-colour-lint landing-typecheck landing-build`",
+    "syn-landing.yml:lighthouse": "path-filtered, needs Chrome and a network fetch of @lhci/cli; `just landing-lighthouse`",
+    "syn-landing.yml:energy": "path-filtered, needs a Playwright browser and ~2 minutes; `just landing-energy`",
+    "syn-landing.yml:codeql": "path-filtered, needs the CodeQL CLI and query packs; `codeql database create` by hand",
+    "syn-landing.yml:secret-scan": 'path-filtered; `gitleaks detect --log-opts="--full-history -m -- apps/syn-landing"`',
+    "ci.yml:mutations-not-merged": (
+        "red BY DESIGN while a PR carries .mutations/ evidence patches, so it "
+        "cannot sit in preflight: the pre-push hook would block pushing them; "
+        "`just check-no-mutations`"
+    ),
+}
+
+#: Workflows that never run on a pull request at all, so the job discovery
+#: above never sees them, with why they have no local equivalent. Listed so the
+#: decision is written down; a listed file that gains a `pull_request` trigger
+#: or disappears fails the check.
+DISPATCH_ONLY: Final[dict[str, str]] = {
+    "mutation-evidence.yml": (
+        "workflow_dispatch only; runs PR-head code against mutation patches on a "
+        "GitHub runner because local Docker verifier runs are banned and agent "
+        "workspaces have no Docker. Reach it with `just mutation-evidence`"
+    ),
+    "integration-evidence.yml": (
+        "workflow_dispatch only; the platform's evidence gate dispatches it to run "
+        "the full integration suite on a PR head (ci.yml skips integration on PRs "
+        "into main). The same script runs locally with `just test-integration-ci`"
+    ),
 }
 
 
@@ -293,6 +330,40 @@ def find_problems(
     return problems, covered, len(keys)
 
 
+def workflow_triggers(path: Path) -> set[str]:
+    """The trigger names of one workflow file."""
+    document = yaml.safe_load(path.read_text())
+    if not isinstance(document, dict):
+        return set()
+    # PyYAML resolves the bare key `on` to the boolean True.
+    triggers = document.get("on", document.get(True))
+    if isinstance(triggers, (dict, list)):
+        return {str(name) for name in triggers}
+    return {str(triggers)} if triggers else set()
+
+
+def dispatch_only_problems(workflow_dir: Path, pr_triggered: set[str]) -> list[str]:
+    """DISPATCH_ONLY entries that are gone or gained any other trigger.
+
+    Exactly `workflow_dispatch`: a `push`, `schedule`, `workflow_run` or
+    `pull_request_target` added later would run the workflow in a context the
+    reason above never considered.
+    """
+    problems: list[str] = []
+    for filename in sorted(DISPATCH_ONLY):
+        path = workflow_dir / filename
+        if not path.is_file():
+            problems.append(f"DISPATCH_ONLY names {filename}, which does not exist")
+            continue
+        triggers = workflow_triggers(path)
+        if filename in pr_triggered or triggers != {"workflow_dispatch"}:
+            problems.append(
+                f"{filename} is listed as DISPATCH_ONLY but triggers on {sorted(triggers)}; "
+                f"it must be workflow_dispatch only, or map its jobs instead"
+            )
+    return problems
+
+
 def main() -> int:
     workflows = pr_triggered_workflows(WORKFLOW_DIR)
     if not workflows:
@@ -302,6 +373,7 @@ def main() -> int:
     justfile = JUSTFILE.read_text()
     problems, covered, total = find_problems(workflows, justfile)
     problems.extend(script_step_problems(workflows, justfile))
+    problems.extend(dispatch_only_problems(WORKFLOW_DIR, set(workflows)))
 
     if problems:
         print("❌ local QA has drifted from CI:")
@@ -331,6 +403,8 @@ def main() -> int:
     )
     for job, why in sorted(RUNNABLE_BUT_EXCLUDED.items()):
         print(f"    {job} -- {why}")
+    for filename, why in sorted(DISPATCH_ONLY.items()):
+        print(f"  Dispatch-only, never on a PR: {filename} -- {why}")
     return 0
 
 

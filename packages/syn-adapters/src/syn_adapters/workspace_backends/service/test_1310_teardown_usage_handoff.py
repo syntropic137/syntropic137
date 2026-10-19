@@ -8,13 +8,24 @@ each is a place the value can be dropped; these tests read it at the far end.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
+import typing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+from agentic_isolation import TeardownReport
+from agentic_isolation.contract import (
+    MISSING,
+    FinalizationOutcome,
+    OperationError,
+    WorkspaceRef,
+)
+from agentic_isolation.providers.operation_spool import OperationFailure
+from agentic_isolation.providers.teardown_report import DeleteFallback, TeardownUsage
 
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
 from syn_adapters.workspace_backends.agentic.teardown_usage import (
@@ -22,9 +33,11 @@ from syn_adapters.workspace_backends.agentic.teardown_usage import (
     TeardownReportLike,
     usage_from_report,
 )
+from syn_adapters.workspace_backends.errors import TeardownFailure, WorkspaceTeardownError
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationHandle,
+    WorkspaceDeleteFallback,
     WorkspaceUsage,
 )
 
@@ -72,49 +85,96 @@ async def test_a_failed_destroy_leaves_usage_unknown() -> None:
         pass
 
     assert workspace.teardown_usage is None
+    assert workspace.teardown_failure == TeardownFailure(
+        state="error", kind="RuntimeError", message="docker gone"
+    )
 
 
-@dataclass(frozen=True)
-class _ProviderReport:
-    """The shape agentic-workspace's `TeardownReport` is specified to have."""
+@pytest.mark.asyncio
+async def test_a_teardown_failure_is_recorded_beside_the_primary_failure_never_over_it() -> None:
+    service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
+    retained = TeardownFailure(
+        state="retained",
+        kind="internal",
+        message="directory deletion failed",
+        stage="before_delete",
+    )
 
-    cpu_usage_seconds: float | None = 4.25
-    cpu_throttled_seconds: float | None = None
-    nr_throttled: int | None = 0
-    memory_peak_bytes: int | None = 123_456_789
-    oom_kills: int | None = 0
-    disk_bytes_at_teardown: int | None = 2048
-    delete_failures: tuple[str, ...] | None = ("/ws/a", "/ws/b")
-    net_rx_bytes: int | None = 10
-    net_tx_bytes: int | None = 20
+    async def retained_destroy(handle: IsolationHandle) -> WorkspaceUsage | None:
+        raise WorkspaceTeardownError(retained, USAGE)
+
+    service._isolation.destroy = retained_destroy  # type: ignore[method-assign]
+    primary = ValueError("the agent failed")
+
+    with pytest.raises(ValueError) as caught:
+        async with service.create_workspace(execution_id="e-1") as workspace:
+            raise primary
+
+    assert caught.value is primary
+    assert workspace.teardown_failure == retained
+    assert workspace.teardown_usage == USAGE, "measured before the failure, so kept"
+
+
+@pytest.mark.asyncio
+async def test_a_completed_teardown_records_no_failure() -> None:
+    service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
+
+    async with service.create_workspace(execution_id="e-1") as workspace:
+        pass
+
+    assert workspace.teardown_failure is None
+
+
+_USAGE = TeardownUsage(
+    cpu_usage_seconds=4.25,
+    nr_throttled=0,
+    memory_peak_bytes=123_456_789,
+    oom_kills=0,
+    oom_killed=False,
+    disk_bytes_at_teardown=2048,
+    delete_failures=("/ws/a", "/ws/b"),
+    net_rx_bytes=10,
+    net_tx_bytes=20,
+)
+_COMPLETED = FinalizationOutcome(schema=MISSING, state="completed")
 
 
 class _Provider:
-    def __init__(self, report: object) -> None:
-        self._report = report
+    """agentic-workspace's staged teardown, answering with a fixed report."""
 
-    async def destroy(self, _workspace: object) -> object:
+    def __init__(self, report: TeardownReport) -> None:
+        self._report = report
+        self.targets: list[object] = []
+
+    async def teardown(self, *, target: object) -> TeardownReport:
+        self.targets.append(target)
         return self._report
 
 
-def _adapter(report: object) -> AgenticIsolationAdapter:
+def _adapter(report: TeardownReport) -> tuple[AgenticIsolationAdapter, _Provider]:
     adapter = object.__new__(AgenticIsolationAdapter)
-    adapter._workspaces = {"iso-1": object()}  # type: ignore[assignment]
-    adapter._provider = _Provider(report)  # type: ignore[assignment]
-    return adapter
+    workspace = object()
+    adapter._workspaces = {"iso-1": workspace}  # type: ignore[assignment]
+    provider = _Provider(report)
+    adapter._provider = provider  # type: ignore[assignment]
+    return adapter, provider
+
+
+_HANDLE = IsolationHandle(isolation_id="iso-1", isolation_type="docker")
 
 
 @pytest.mark.asyncio
 async def test_agentic_adapter_maps_the_provider_report() -> None:
-    usage = await _adapter(_ProviderReport()).destroy(
-        IsolationHandle(isolation_id="iso-1", isolation_type="docker")
-    )
+    adapter, provider = _adapter(TeardownReport(finalization=_COMPLETED, usage=_USAGE))
+    usage = await adapter.destroy(_HANDLE)
+    assert len(provider.targets) == 1, "torn down through teardown(target=...)"
     assert usage == WorkspaceUsage(
         cpu_usage_seconds=4.25,
         cpu_throttled_seconds=None,
         nr_throttled=0,
         memory_peak_bytes=123_456_789,
         oom_kills=0,
+        oom_killed=False,
         disk_bytes_at_teardown=2048,
         delete_failures=("/ws/a", "/ws/b"),
         net_rx_bytes=10,
@@ -123,12 +183,173 @@ async def test_agentic_adapter_maps_the_provider_report() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_provider_that_reports_nothing_maps_to_none() -> None:
-    # The pinned provider today: `destroy` returns None.
-    usage = await _adapter(None).destroy(
-        IsolationHandle(isolation_id="iso-1", isolation_type="docker")
+async def test_an_oom_kill_seen_only_by_docker_reaches_the_domain() -> None:
+    # Docker's State.OOMKilled can report a kill when the cgroup counters
+    # could not be read: the flag must arrive, and the unread count must stay
+    # unknown rather than becoming 0.
+    report = TeardownReport(
+        finalization=_COMPLETED,
+        usage=TeardownUsage(oom_killed=True, memory_peak_bytes=268_435_456),
     )
-    assert usage is None
+    adapter, _ = _adapter(report)
+    usage = await adapter.destroy(_HANDLE)
+    assert usage is not None
+    assert usage.oom_killed is True
+    assert usage.oom_kills is None
+    assert usage.memory_peak_bytes == 268_435_456
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "outcome",
+    [o for o in WorkspaceDeleteFallback if o is not WorkspaceDeleteFallback.UNRECOGNIZED],
+)
+async def test_the_fallback_delete_outcome_reaches_the_domain(
+    outcome: WorkspaceDeleteFallback,
+) -> None:
+    # #1983: the host could not delete files the container wrote under another
+    # uid. How the provider's fallback went is the one signal that the leak
+    # was closed, so it must arrive typed, not dropped or left a bare string.
+    report = TeardownReport(
+        finalization=_COMPLETED,
+        usage=dataclasses.replace(_USAGE, delete_fallback=outcome.value),
+    )
+    adapter, _ = _adapter(report)
+    usage = await adapter.destroy(_HANDLE)
+    assert usage is not None
+    assert usage.delete_fallback is outcome
+    assert type(usage.delete_fallback) is WorkspaceDeleteFallback
+
+
+@dataclass(frozen=True)
+class _UnknownFallbackReport:
+    cpu_usage_seconds: float | None = None
+    cpu_throttled_seconds: float | None = None
+    nr_throttled: int | None = None
+    memory_peak_bytes: int | None = 1
+    oom_kills: int | None = None
+    oom_killed: bool | None = None
+    disk_bytes_at_teardown: int | None = None
+    delete_failures: tuple[str, ...] | None = None
+    net_rx_bytes: int | None = None
+    net_tx_bytes: int | None = None
+    delete_fallback: object = "vaporised"
+
+
+@pytest.mark.parametrize("raw", ["vaporised", "unrecognized", "DELETED", 1])
+def test_an_unknown_fallback_outcome_is_logged_and_recorded_as_unrecognized(
+    caplog: pytest.LogCaptureFixture, raw: object
+) -> None:
+    # A contract mismatch must stay distinct from None ("not attempted / not
+    # reported") in the row, and must never fail teardown. "unrecognized" is
+    # syn's own marker, so a provider sending it is a mismatch too.
+    with caplog.at_level(logging.WARNING):
+        usage = usage_from_report(_UnknownFallbackReport(delete_fallback=raw))
+    assert usage == WorkspaceUsage(
+        memory_peak_bytes=1, delete_fallback=WorkspaceDeleteFallback.UNRECOGNIZED
+    )
+    assert any(repr(raw) in r.getMessage() for r in caplog.records)
+
+
+def test_every_fallback_outcome_the_real_provider_sends_is_known() -> None:
+    # Pinned against agentic-workspace's own `DeleteFallback`: an outcome the
+    # provider adds and syn does not know would be recorded as UNRECOGNIZED.
+    provider = set(typing.get_args(DeleteFallback))
+    known = {o.value for o in WorkspaceDeleteFallback} - {WorkspaceDeleteFallback.UNRECOGNIZED}
+    assert provider == known
+
+
+def test_no_fallback_reported_stays_none() -> None:
+    usage = usage_from_report(_UnknownFallbackReport(delete_fallback=None))
+    assert usage is not None
+    assert usage.delete_fallback is None
+
+
+_RETAINED = FinalizationOutcome(
+    schema=MISSING,
+    state="retained",
+    stage="before_delete",
+    error=OperationError(
+        schema=MISSING, kind="provider_unavailable", message="archive upload failed"
+    ),
+    retained=WorkspaceRef(schema=MISSING, provider="docker", resource_id="iso-1"),
+)
+_FAILED = FinalizationOutcome(
+    schema=MISSING,
+    state="failed",
+    stage="while_running",
+    error=OperationError(schema=MISSING, kind="internal", message="container stop failed"),
+)
+
+
+class _ThenCompletes(_Provider):
+    """Answers the first teardown with `first` (a report or an exception), then completes."""
+
+    def __init__(self, first: TeardownReport | Exception) -> None:
+        super().__init__(TeardownReport(finalization=_COMPLETED, usage=_USAGE))
+        self._first: TeardownReport | Exception | None = first
+
+    async def teardown(self, *, target: object) -> TeardownReport:
+        self.targets.append(target)
+        first, self._first = self._first, None
+        if isinstance(first, Exception):
+            raise first
+        return first if first is not None else self._report
+
+
+@pytest.mark.asyncio
+async def test_a_retained_teardown_is_raised_typed_logged_and_keeps_usage(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    adapter, _ = _adapter(TeardownReport(finalization=_RETAINED, usage=_USAGE))
+
+    with caplog.at_level(logging.ERROR), pytest.raises(WorkspaceTeardownError) as caught:
+        await adapter.destroy(_HANDLE)
+
+    assert caught.value.failure == TeardownFailure(
+        state="retained",
+        kind="provider_unavailable",
+        message="archive upload failed",
+        stage="before_delete",
+    )
+    assert caught.value.usage is not None and caught.value.usage.disk_bytes_at_teardown == 2048
+    assert "retained" in caplog.text
+    assert "archive upload failed" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("first", "state"),
+    [
+        (TeardownReport(finalization=_RETAINED, usage=_USAGE), "retained"),
+        (TeardownReport(finalization=_FAILED, usage=_USAGE), "failed"),
+        (
+            OperationFailure(
+                OperationError(schema=MISSING, kind="provider_unavailable", message="rm failed")
+            ),
+            "error",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_incomplete_teardown_keeps_the_handle_so_a_retry_reaches_the_provider(
+    first: TeardownReport | Exception, state: str
+) -> None:
+    adapter = object.__new__(AgenticIsolationAdapter)
+    workspace = object()
+    adapter._workspaces = {"iso-1": workspace}  # type: ignore[assignment]
+    provider = _ThenCompletes(first)
+    adapter._provider = provider  # type: ignore[assignment]
+
+    with pytest.raises(WorkspaceTeardownError) as caught:
+        await adapter.destroy(_HANDLE)
+    assert caught.value.failure.state == state
+
+    usage = await adapter.destroy(_HANDLE)
+
+    assert provider.targets == [workspace, workspace], "the retry reached the provider"
+    assert usage is not None and usage.disk_bytes_at_teardown == 2048
+    assert await adapter.destroy(_HANDLE) is None, "forgotten only once it completed"
+    assert len(provider.targets) == 2
 
 
 @dataclass(frozen=True)
@@ -184,8 +405,30 @@ def test_an_absent_report_is_not_a_mismatch(caplog: pytest.LogCaptureFixture) ->
 
 def test_the_protocol_names_exactly_the_usage_fields() -> None:
     # The Protocol and `WorkspaceUsage` are two hand-written lists of the same
-    # nine names; this pins them so neither can drift alone.
+    # names; this pins them so neither can drift alone.
     members = {
         name for name, value in vars(TeardownReportLike).items() if isinstance(value, property)
     }
     assert members == set(USAGE_FIELDS)
+
+
+def test_every_field_the_real_provider_reports_is_mapped() -> None:
+    # Pinned against agentic-workspace's own `TeardownUsage`, not a double:
+    # a field the provider adds and syn does not map is dropped silently by
+    # `usage_from_report`, which is how `oom_killed` was once lost.
+    provider_fields = {f.name for f in dataclasses.fields(TeardownUsage)}
+    assert provider_fields == set(USAGE_FIELDS)
+
+
+@pytest.mark.asyncio
+async def test_a_reap_that_does_not_complete_is_reported_not_raised(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    adapter, provider = _adapter(TeardownReport(finalization=_FAILED, usage=_USAGE))
+
+    with caplog.at_level(logging.ERROR):
+        await adapter._reap_unregistered(object(), "e-1")
+
+    assert len(provider.targets) == 1
+    assert "Workspace reap failed for execution e-1" in caplog.text
+    assert "container stop failed" in caplog.text

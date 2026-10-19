@@ -54,8 +54,19 @@ if TYPE_CHECKING:
 # one. Dicts exist only at that boundary: what the store holds is `_TodoRecord`.
 type _Record = dict[str, Any]
 
-_ITEM_FIELDS = frozenset({"execution_id", "action", "phase_id", "workspace_id", "session_id"})
-_RECORD_FIELDS = frozenset({"execution_id", "items", "phase_progress"})
+_ITEM_FIELDS = frozenset(
+    {
+        "execution_id",
+        "action",
+        "phase_id",
+        "workspace_id",
+        "session_id",
+        "evidence_gate_id",
+        "evidence_step",
+    }
+)
+_EVIDENCE_FIELDS = frozenset({"evidence_gate_id", "evidence_step"})
+_RECORD_FIELDS = frozenset({"execution_id", "items", "phase_progress", "evidence_progress"})
 
 
 class ExecutionEventStream(Protocol):
@@ -82,6 +93,12 @@ def _optional_str(value: object, name: str) -> str | None:
     raise ValueError(f"to-do item field {name} must be a string or null, not {value!r}")
 
 
+def _optional_int(value: object, name: str) -> int | None:
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    raise ValueError(f"to-do item field {name} must be an integer or null, not {value!r}")
+
+
 def _exact_fields(data: _Record, expected: frozenset[str], what: str) -> None:
     # A field the store does not know would be dropped on the next read, and the
     # fold would quietly disagree with the shared projection. Refuse it instead.
@@ -100,21 +117,32 @@ class _TodoRecord:
     execution_id: str
     items: tuple[TodoItem, ...]
     phase_progress: tuple[tuple[str, int], ...]
+    evidence_progress: tuple[tuple[str, int], ...] = ()
 
     @classmethod
     def from_record(cls, data: _Record) -> _TodoRecord:
-        _exact_fields(data, _RECORD_FIELDS, "to-do record")
+        # A record written before the evidence gate (PR 5b) has no gate cursors.
+        expected = (
+            _RECORD_FIELDS
+            if "evidence_progress" in data
+            else _RECORD_FIELDS - {"evidence_progress"}
+        )
+        _exact_fields(data, expected, "to-do record")
         execution_id = data["execution_id"]
         items = data["items"]
         progress = data["phase_progress"]
+        gates = data.get("evidence_progress", {})
         if not isinstance(execution_id, str):
             raise ValueError(f"to-do record execution_id must be a string, not {execution_id!r}")
         if not isinstance(items, list | tuple) or not isinstance(progress, dict):
             raise ValueError("to-do record needs a list of items and a phase_progress mapping")
+        if not isinstance(gates, dict):
+            raise ValueError("to-do record evidence_progress must be a mapping")
         return cls(
             execution_id=execution_id,
             items=tuple(cls._item(item) for item in items),  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
             phase_progress=tuple(cls._rank(p, r) for p, r in progress.items()),  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+            evidence_progress=tuple(cls._rank(g, c) for g, c in gates.items()),  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
         )
 
     @staticmethod
@@ -122,7 +150,9 @@ class _TodoRecord:
         if not isinstance(data, dict):
             raise ValueError(f"to-do item must be a mapping, not {data!r}")
         item: _Record = data  # pyright: ignore[reportUnknownVariableType]
-        _exact_fields(item, _ITEM_FIELDS, "to-do item")
+        # A record written before the evidence gate (PR 5b) has no evidence keys.
+        expected = _ITEM_FIELDS if "evidence_step" in item else _ITEM_FIELDS - _EVIDENCE_FIELDS
+        _exact_fields(item, expected, "to-do item")
         execution_id = item["execution_id"]
         if not isinstance(execution_id, str):
             raise ValueError(f"to-do item execution_id must be a string, not {execution_id!r}")
@@ -132,12 +162,14 @@ class _TodoRecord:
             phase_id=_optional_str(item["phase_id"], "phase_id"),
             workspace_id=_optional_str(item["workspace_id"], "workspace_id"),
             session_id=_optional_str(item["session_id"], "session_id"),
+            evidence_gate_id=_optional_str(item.get("evidence_gate_id"), "evidence_gate_id"),
+            evidence_step=_optional_int(item.get("evidence_step"), "evidence_step"),
         )
 
     @staticmethod
     def _rank(phase_id: object, rank: object) -> tuple[str, int]:
         if not isinstance(phase_id, str) or not isinstance(rank, int):
-            raise ValueError(f"phase_progress must map phase ids to ranks, not {phase_id!r}")
+            raise ValueError(f"progress must map ids to integer ranks, not {phase_id!r}")
         return phase_id, rank
 
     def to_record(self) -> _Record:
@@ -150,10 +182,13 @@ class _TodoRecord:
                     "phase_id": item.phase_id,
                     "workspace_id": item.workspace_id,
                     "session_id": item.session_id,
+                    "evidence_gate_id": item.evidence_gate_id,
+                    "evidence_step": item.evidence_step,
                 }
                 for item in self.items
             ],
             "phase_progress": dict(self.phase_progress),
+            "evidence_progress": dict(self.evidence_progress),
         }
 
 

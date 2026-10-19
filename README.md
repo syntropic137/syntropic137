@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="./public/assets/syn137-banner.png" alt="Syntropic137 Banner" width="100%" />
+  <img src="./design/brand/v2/readme-banners/syntropic137.svg" alt="Syntropic137: agent work that compounds" width="100%" />
 </p>
 
 # Syntropic137
@@ -34,7 +34,7 @@ Scale coding agents past what a terminal can hold. Syntropic137 is multi-harness
 | Full observability (tool calls + costs) | Yes | Manual | No | Partial |
 | Self-hostable | Yes | Yes | No | Yes |
 | Repeatable Workflows | Yes | Partial | Partial | From Scratch |
-| Scale past 10 parallel agents | Yes (100+) | Limited | Limited | Yes |
+| Scale past 10 parallel agents | Not yet (target: 20, then 100) | Limited | Limited | Yes |
 | Your data stays yours | Yes | Yes | No | Yes |
 | Open source | Yes | No | No | Yes |
 | One-command setup | Yes | Yes | No | No |
@@ -44,7 +44,7 @@ Claude Code and Codex are compared here as the bare CLIs you would drive by hand
 
 ## Self-Hosting (recommended)
 
-Get your own instance running in minutes. Prerequisites: **Node.js 18+** and **Docker**.
+Get your own instance running in minutes. Prerequisites: **Node.js 22+** (the setup CLI alone needs 20.12+; the `syn` CLI declares 22+) and **Docker**.
 
 ```bash
 npx @syntropic137/setup init
@@ -56,7 +56,7 @@ Access: http://localhost:8137
 
 > [!NOTE]
 > **Optional features** (configurable during setup or anytime after):
-> - **Cloudflare Tunnel**: remote access + webhook delivery (highly recommended, free; required for GitHub webhook triggers; without it, manual workflow runs only and dashboard on localhost only; domain costs $10-15/year if buying new)
+> - **Cloudflare Tunnel**: remote access + webhook delivery (highly recommended, free; needed for instant webhook delivery and remote access; without it, GitHub triggers still work through polling and the dashboard is on localhost only; domain costs $10-15/year if buying new)
 > - **1Password**: encrypted secrets management
 
 > [!WARNING]
@@ -73,7 +73,8 @@ Access: http://localhost:8137
 | Start | `npx @syntropic137/setup start` |
 | Update | `npx @syntropic137/setup update` |
 | Install CLI | `npx @syntropic137/setup cli` |
-| Install plugin | `npx @syntropic137/setup plugin` |
+| Install agent skills | `npx @syntropic137/setup skills` |
+| Factory reset | `npx @syntropic137/setup reset` |
 | GitHub App settings | `npx @syntropic137/setup github-app` |
 | Tunnel setup | `npx @syntropic137/setup tunnel` |
 
@@ -96,15 +97,15 @@ just dev                        # syncs deps, builds containers, seeds data, sta
 |---------|-----|
 | Dashboard | http://localhost:9137 |
 | Vite dev server (no API proxy, do not open directly) | http://localhost:5173 |
-| API | http://localhost:8137 |
-| API Docs | http://localhost:8137/docs |
+| API | http://localhost:9137 |
+| API Docs | http://localhost:9137/docs |
 | MinIO Console | http://localhost:9001 |
 
 Use `just dev-fresh` instead for a clean slate (wipes volumes and re-seeds).
 
 ## Architecture
 
-The system is organized into 5 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
+The system is organized into 6 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
 
 ![Syn137 Architecture](./docs/architecture/vsa-overview.svg)
 
@@ -118,6 +119,7 @@ The system is organized into 5 bounded contexts following Vertical Slice Archite
 | **`agent_sessions`** | AgentSession, InventoryClock, InventoryReconciliation | Agent sessions and observability metrics |
 | **`github`** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
 | **`artifacts`** | Artifact | Artifact storage and retrieval |
+| **`feedback`** | Source, Ticket | Feedback tickets: membership, screening, fix tracking and resolution |
 
 **Infrastructure:** PostgreSQL (event store + projections) · Redis · MinIO
 
@@ -137,16 +139,16 @@ npx @syntropic137/cli <command>
 syn workflow list
 syn workflow list --include-archived          # include archived templates
 syn workflow show <id>
-syn workflow create --type implementation --repo owner/repo --description "Feature X"
+syn workflow create my-feature --type implementation --repo https://github.com/owner/repo --description "Feature X"
 syn workflow delete <id>                      # archive (soft-delete) a template
 syn workflow delete <id> --force              # skip confirmation prompt
-syn workflow run <id> --task "Implement retry logic" --input key=value
+syn workflow run <id> -R owner/repo --task "Implement retry logic" --input key=value
 syn workflow status <id>
 syn workflow validate path/to/workflow.yaml
 
 # Examples
 syn workflow run research-workflow-v2 --task "$(gh issue view 211 --json body -q .body)"
-syn workflow run github-pr --task "Add error handling" -i repository=owner/repo
+syn workflow run github-pr -R owner/repo --task "Add error handling"
 ```
 
 ### Execution Control
@@ -173,8 +175,9 @@ phases:
       model: gpt-sol            # platform alias for gpt-6.1-sol, see note below
 ```
 
-Codex phases need `CODEX_AUTH_JSON` set in your `.env`. Without it, a phase
-with `agent.provider: codex` fails to provision.
+Codex phases need `CODEX_AUTH_JSON` (a Codex `~/.codex/auth.json`) or
+`OPENAI_API_KEY` set in your `.env`; `CODEX_AUTH_JSON` wins when both are set.
+With neither, a phase with `agent.provider: codex` cannot authenticate.
 
 A phase that names no model gets the platform default: `opus` on claude
 phases, `gpt-sol` on codex phases. `gpt-sol` is a platform alias that runs
@@ -189,17 +192,17 @@ setting later only affects workflows installed afterwards.
 ```bash
 syn artifacts list --workflow <workflow-id>
 syn artifacts show <artifact-id>
-syn artifacts content <artifact-id> --raw
+syn artifacts content <artifact-id>
 syn artifacts create --workflow <id> --type document --title "Design Doc" --content "# Overview ..."
 ```
 
 ### Trigger Rules
 
 ```bash
-syn triggers register --name "self-healing" --event "check_run.completed" --repository owner/repo --workflow <id>
-syn triggers list --repository owner/repo
-syn triggers enable <name> --repository owner/repo
-syn triggers pause <id> --reason "maintenance"
+syn triggers register --event check_run.completed --repo owner/repo --workflow <id>
+syn triggers list --repo owner/repo
+syn triggers enable self-healing --repo owner/repo
+syn triggers pause <trigger-id>
 ```
 
 ### GitHub
@@ -250,9 +253,10 @@ syn version
 syntropic137/
 ├── apps/
 │   ├── syn-api/                 # FastAPI HTTP server
-│   ├── syn-cli-node/             # CLI tool ("syn") — Node.js
+│   ├── syn-cli-node/             # CLI tool ("syn") - Node.js
 │   ├── syn-dashboard-ui/        # Dashboard frontend (Vite + React)
 │   ├── syn-docs/                # Public documentation site (Next.js + Fumadocs)
+│   ├── syn-landing/             # syntropic137.com marketing site (Vite + React)
 ├── packages/
 │   ├── syn-domain/              # Domain events, aggregates, ports
 │   ├── syn-adapters/            # Orchestration + observability adapters
@@ -296,7 +300,7 @@ SYN_SESSION_STORE_AUTH_TOKEN=op://syntropic137/session-store/write-token   # or 
 
 Sessions are tagged with `execution_id`, `workspace_id`, `workflow_id`, `phase_id`, and `source:syntropic137`, so any row in the store can be joined back to the execution that produced it. Tag values are percent-encoded, which is a no-op for the slug- and uuid-shaped identifiers that occur in practice but keeps an identifier containing the `,` or `:` framing delimiters recoverable rather than mangled.
 
-The six `AGENTIC_SESSION_STORE_*` variables are reserved by the workspace adapter. They are set from `SYN_SESSION_STORE_*` alone: if a caller supplies one via a phase's environment block it is dropped (with a warning naming the key, never its value), so capture cannot be switched on, redirected, or re-partitioned from workflow input.
+The seven `AGENTIC_SESSION_STORE_*` variables are reserved by the workspace adapter. They are set from `SYN_SESSION_STORE_*` alone: if a caller supplies one via a phase's environment block it is dropped (with a warning naming the key, never its value), so capture cannot be switched on, redirected, or re-partitioned from workflow input.
 
 > [!NOTE]
 > This is additive and independent of the two stores Syntropic137 already uses: conversation logs in MinIO and the event stream (tool calls, tokens, cost) in TimescaleDB. Both continue to work unchanged whether or not central capture is enabled.

@@ -1,0 +1,81 @@
+/* Why a platform. Phone first (stacked rows); 64rem up is the desktop board's two columns. */
+.why {
+  border-bottom: var(--ds-border-width) solid var(--sky-color-section-rule);
+}
+.why__inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+}
+.why__inner.page-section__inner {
+  padding-block: 48px;
+}
+.why__table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.why__table tbody,
+.why__row {
+  display: block;
+}
+.why__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 14px 0;
+  border-top: var(--ds-border-width) solid var(--sky-color-divider);
+}
+.why__q,
+.why__without,
+.why__with {
+  display: block;
+  padding: 0;
+  font-weight: inherit;
+}
+.why__q {
+  font-size: 15px;
+  font-weight: var(--ds-font-weight-semibold);
+  color: var(--ds-color-fg);
+}
+.why__without {
+  font-size: var(--ds-text-md);
+  color: var(--ds-color-text-subtle);
+  text-decoration: line-through;
+  text-decoration-color: var(--sky-color-border-hover);
+}
+.why__with {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  font-size: var(--ds-text-md);
+  color: var(--ds-color-fg);
+}
+.why__check {
+  flex-shrink: 0;
+  stroke: var(--ds-color-accent);
+}
+@media (min-width: 48rem) {
+  .why__inner.page-section__inner {
+    padding-block: 112px;
+  }
+  .why__row {
+    grid-template-columns: 1.1fr 1fr 1.2fr;
+    gap: 24px;
+    padding: 18px 0;
+  }
+}
+@media (min-width: 64rem) {
+  .why__inner {
+    flex-direction: row;
+    gap: 72px;
+  }
+  .why__head {
+    flex: 0 0 420px;
+  }
+  .why__table {
+    flex: 1 1 auto;
+    min-width: 0;
+    align-self: flex-start;
+  }
+}

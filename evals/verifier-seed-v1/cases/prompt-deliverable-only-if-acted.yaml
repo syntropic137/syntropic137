@@ -15,6 +15,13 @@ task: >
   writing the phase deliverable to artifacts/output/. A phase that declares
   output artifacts and produces none is failed by the collector.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The workspace prompt's completion rules describe writing
+    artifacts/output/deliverable.md only for work done (commits/PRs or
+    findings); nothing tells an agent that found nothing to do, or declined
+    to act, that it must still write a deliverable, so such a phase writes
+    none and the collector fails it.
   files:
     - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/workspace_prompt.py
   keywords:

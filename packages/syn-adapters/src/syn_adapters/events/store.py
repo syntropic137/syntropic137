@@ -20,6 +20,10 @@ from typing import TYPE_CHECKING, Any
 
 from syn_adapters import postgres_pool
 from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError  # noqa: F401
+from syn_adapters.events.shipped_ledger import (
+    PostgresShippedLedger,
+    ensure_shipped_ledger_schema,
+)
 from syn_adapters.events.store_helpers import (
     RESERVED_OBSERVATION_KEYS,
 )
@@ -39,9 +43,14 @@ from syn_adapters.events.store_write import (
     insert_one as _insert_one,
 )
 from syn_domain import tool_call_counts
+from syn_shared.events import UPSTREAM_RETRY
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     import asyncpg
+
+    from syn_adapters.events.queries import UpstreamRetryCount
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +88,12 @@ class AgentEventStore:
         self._schema = schema or EventStoreSchema(
             skip_auto_create=os.environ.get("SYN_SKIP_AUTO_CREATE_TABLES", "").lower() == "true"
         )
+        self._shipped_ledger = PostgresShippedLedger(lambda: self.pool)
+
+    @property
+    def shipped_ledger(self) -> PostgresShippedLedger:
+        """What runs shipped, kept beside the telemetry it comes from (ShippedLedgerProvider)."""
+        return self._shipped_ledger
 
     @property
     def skip_auto_create(self) -> bool:
@@ -123,6 +138,8 @@ class AgentEventStore:
                 conn,  # type: ignore[arg-type]  # asyncpg satisfies the protocol
                 skip_auto_create=self._schema.skip_auto_create,
             )
+            if not self._schema.skip_auto_create:
+                await ensure_shipped_ledger_schema(conn)
 
         self._initialized = True
         logger.info("AgentEventStore initialized")
@@ -281,6 +298,20 @@ class AgentEventStore:
             raise RuntimeError("AgentEventStore pool is not initialized")
 
         return await _query_recent_by_types(self.pool, event_types, limit=limit)
+
+    async def query_upstream_retry_counts(self, *, since: datetime) -> list[UpstreamRetryCount]:
+        """In-phase upstream retries since ``since``, per provider, model and kind (#1882)."""
+        from syn_adapters.events.queries import (
+            query_upstream_retry_counts as _query_upstream_retry_counts,
+        )
+
+        if not self._initialized:
+            await self.initialize()
+
+        if self.pool is None:
+            raise RuntimeError("AgentEventStore pool is not initialized")
+
+        return await _query_upstream_retry_counts(self.pool, event_type=UPSTREAM_RETRY, since=since)
 
     _RESERVED_OBSERVATION_KEYS = RESERVED_OBSERVATION_KEYS
 

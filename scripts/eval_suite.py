@@ -52,6 +52,17 @@ verdict on its eval (``POST /evals/{id}/runs/{run}/score``, scorer
 ``eval_suite.py``, scorer_version the suite version); re-scoring replaces the
 eval's current score and the history stays in its events.
 
+TWO JUDGES. A blocked defect run is credited by the keyword judge (one
+blocking finding names an expected file and every keyword group) and, with
+``score --llm-judge``, by an LLM judge too (a pinned model at temperature 0,
+given the case's ``expected.defect`` root cause, asked whether a finding
+identifies THIS defect: match / no_match / unclear, with the finding it quotes). The headline catch rate counts a run caught when
+the keyword judge OR the LLM judge says ``match``; ``unclear`` is not caught.
+Both judges' rates are printed beside it. An LLM-judged score is recorded
+under scorer_version ``<suite version>+llm:<model>@prompt-v<n>``, so it never
+silently replaces a keyword-only score's meaning; without ``--llm-judge`` the
+scorer and its scorer_version are exactly as before, and nothing calls a model.
+
 INSTALL PROVENANCE. ``launch`` installs with ``version`` = the suite version
 and the workflow's install ``revision`` (``<n>.<revision>.0``) and ``source_digest`` = sha256 of the exact YAML document it
 uploads. The server's install rules then do the rest: a byte-identical
@@ -85,7 +96,7 @@ import sys
 import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Protocol
 
 import httpx
 import yaml
@@ -94,12 +105,15 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SecretStr,
     TypeAdapter,
     ValidationError,
     field_validator,
 )
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+from syn_shared.settings.config import Settings, get_settings
+from syn_shared.settings.constants import ANTHROPIC_MESSAGES_URL, ENV_ANTHROPIC_API_KEY
 from syn_shared.settings.dev_tooling import get_dev_api_url
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -183,6 +197,9 @@ class Expected(_Frozen):
     """Repo-relative paths the bug lives in. A report must name one, by file name."""
     keywords: tuple[tuple[str, ...], ...] = Field(min_length=1)
     """Groups of alternatives. Every group must match; within a group, any one word."""
+    defect: str | None = Field(default=None, min_length=1)
+    """The seeded root cause in prose, for the LLM judge only. Never put it in `task`.
+    The LLM judge refuses a case without it: "same root cause" needs the root cause."""
 
     @field_validator("keywords")
     @classmethod
@@ -196,6 +213,22 @@ Polarity = Literal["defect", "clean"]
 """What a case holds: a known escaped bug the verifier must block, or a clean
 control it must certify. Clean controls are what make blocking cost something:
 without them a verifier that blocks everything is never wrong."""
+
+
+EscapeClass = Literal[
+    "schema gate covers shape not identity",
+    "deny path untested",
+    "evidence that cannot run on CI",
+]
+"""Why verification let a defect through: a recurring kind of escaped miss.
+
+- schema gate covers shape not identity: a gate compares an event's fields and
+  never its type or version, so a renamed or re-versioned event passes it.
+- deny path untested: the refusal branch of an access check has no test, so a
+  change that grants too much passes every test there is.
+- evidence that cannot run on CI: the tests that would show the defect skip or
+  never run where the change is verified (a real store, a pinned image, Docker).
+"""
 
 
 def _full_sha(value: str) -> str:
@@ -221,6 +254,9 @@ class _CaseBase(_Frozen):
     """Why the case left the suite, and in which version. A retired case is not part
     of the current version: it is kept so the history versions that held it still
     score their runs against it, as it was. Never re-polarise a case in place."""
+    escape_class: EscapeClass | None = None
+    """What kind of miss the case is, so escapes can be counted by kind. A label
+    only: nothing that loads, launches or scores a case reads it."""
 
     @property
     def tag(self) -> str:
@@ -240,18 +276,31 @@ class DefectCase(_CaseBase):
     """When the fix is a series of commits, the first of them; default `fix_commit`.
 
     `commit` must be this commit's first parent: the tree just before the fix,
-    so the bug is present and nothing of the fix is.
+    so the bug is present and nothing of the fix is - unless the pin is a
+    judged tree (`judged_tree`).
     """
     expected: Expected
     reclassified_from: str | None = Field(default=None, min_length=1)
     """The retired clean control this defect was found in, when the case is that
     control reclassified. Its pin is then the control's own commit, kept so the
     reviewed tree does not change: an ancestor of the fix, not its first parent."""
+    certified_in: str | None = Field(
+        default=None, pattern=r"^https://github\.com/[^/\s]+/[^/\s]+/pull/\d+#\S+$"
+    )
+    """The verify record (a PR comment URL) naming `commit` as the head verification
+    judged. The pin is then that head: on a PR that merges main before its fix,
+    the fix's first parent is the merge, a tree no verifier saw."""
 
     @property
     def fix_start(self) -> str:
-        """The first commit of the fix; `commit` must be its first parent."""
+        """The first commit of the fix; `commit` must be its first parent or a judged tree."""
         return self.first_fix_commit or self.fix_commit
+
+    @property
+    def judged_tree(self) -> bool:
+        """Whether `commit` is a tree a verifier reviewed, kept as reviewed: then it
+        need only come before the fix, not be the fix's first parent."""
+        return self.reclassified_from is not None or self.certified_in is not None
 
 
 class CleanCase(_CaseBase):
@@ -502,7 +551,7 @@ def check_commits(loaded: LoadedSuite, repo: Path) -> list[str]:
 def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
     """Every SHA is a commit here, the pin is the first parent of the fix's first
     commit (the tree just before the fix, not merely some ancestor of it) - or,
-    for a reclassified control, a strict ancestor of it - that commit leads to
+    for a judged tree, a strict ancestor of it - that commit leads to
     the fix, every expected file exists at the pin, and the fix
     changes at least one of them - so the files are where the bug lived, not a guess.
     """
@@ -510,13 +559,13 @@ def _defect_problems(case: DefectCase, repo: Path) -> list[str]:
         return [f"{case.id}: no such commit {', '.join(missing)} (try `git fetch origin`)"]
     problems: list[str] = []
     parent = _git_out(repo, "rev-parse", f"{case.fix_start}^1").strip()
-    if case.reclassified_from:
+    if case.judged_tree:
         if case.commit == case.fix_start or not _git_ok(
             repo, "merge-base", "--is-ancestor", case.commit, case.fix_start
         ):
             problems.append(
                 f"{case.id}: pins {case.commit[:12]}, which is not before the fix "
-                f"{case.fix_start[:12]}; a reclassified control's pin must precede it"
+                f"{case.fix_start[:12]}; a judged tree's pin must precede it"
             )
     elif parent != case.commit:
         problems.append(
@@ -673,6 +722,20 @@ def _clean_problems(case: CleanCase, repo: Path) -> list[str]:
 # Scoring
 # ---------------------------------------------------------------------------
 
+JudgeVerdict = Literal["match", "no_match", "unclear"]
+
+
+class Judgement(_Frozen):
+    """One judge's answer to: does a blocking finding identify THIS defect?"""
+
+    judge: str
+    """The judge's identity (`KeywordJudge.identity`, `LlmJudge.identity`): part of the score."""
+    verdict: JudgeVerdict
+    quote: str
+    """The finding text it matched, verbatim; empty unless `match`."""
+    reason: str
+
+
 Verdict = Literal["certified", "blocked"]
 RunVerdict = Literal["PASS", "FAIL", "ERROR"]
 """What `score` records on the eval: the API's verdict, not the review's."""
@@ -688,10 +751,22 @@ class Score(_Frozen):
     """The expected file the best-matching blocking finding names, by file name."""
     missing_keywords: tuple[tuple[str, ...], ...]
     """Keyword groups no word of which that same finding contains."""
+    llm: Judgement | None = None
+    """The LLM judge's answer; None when the run was scored by keywords alone."""
 
     @property
     def matched(self) -> bool:
+        """The keyword judge's answer. Unchanged by the LLM judge, so stored scores keep their meaning."""
         return self.named_file is not None and not self.missing_keywords
+
+    @property
+    def caught(self) -> bool:
+        """THE HEADLINE RULE: the keyword judge OR the LLM judge says `match`.
+
+        `unclear` and `no_match` from the LLM judge are not caught. With no LLM
+        judgement this is `matched`, exactly as before the judge existed.
+        """
+        return self.matched or (self.llm is not None and self.llm.verdict == "match")
 
     @property
     def passed(self) -> bool:
@@ -702,7 +777,7 @@ class Score(_Frozen):
         """
         if self.polarity == "clean":
             return self.verdict == "certified"
-        return self.verdict == "blocked" and self.matched
+        return self.verdict == "blocked" and self.caught
 
     @property
     def false_block(self) -> bool:
@@ -837,13 +912,18 @@ def score_report(expected: Expected, verdict: Verdict | None, report: str) -> Sc
     )
 
 
-def score_case(case: Case, verdict: Verdict | None, report: str) -> Score:
+def score_case(case: Case, verdict: Verdict | None, report: str, llm: Judge | None = None) -> Score:
     """Score one run of `case`: a defect by `score_report`, a clean control by its verdict alone.
 
     A clean control has no defect to name, so its findings are counted but never matched.
+    With `llm`, a blocked defect run is also put to the LLM judge and `Score.caught`
+    credits either judge; without it the score is the keyword judge's alone.
     """
     if isinstance(case, DefectCase):
-        return score_report(case.expected, verdict, report)
+        score = score_report(case.expected, verdict, report)
+        if llm is None or verdict != "blocked":
+            return score
+        return score.model_copy(update={"llm": llm.judge(case.expected, blocking_findings(report))})
     return Score(
         polarity="clean",
         verdict=verdict,
@@ -851,6 +931,231 @@ def score_case(case: Case, verdict: Verdict | None, report: str) -> Score:
         named_file=None,
         missing_keywords=(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Judges: does a blocking finding identify THIS defect?
+#
+# Two answer the same question. The keyword judge is deterministic and is
+# `score_report`, unchanged. The LLM judge reads the finding as a reviewer
+# would, so a correct finding in other words is credited. The judge is part
+# of the eval's identity: its model and prompt version go into the recorded
+# scorer_version, so a judge change never mixes with scores taken without it.
+# ---------------------------------------------------------------------------
+
+
+class Judge(Protocol):
+    @property
+    def identity(self) -> str:
+        """What produced the answer, exactly enough that a change to it is a new scorer."""
+        ...
+
+    def judge(self, expected: Expected, findings: list[str]) -> Judgement: ...
+
+
+class KeywordJudge:
+    """`score_report`'s file-and-keyword match, as a `Judge`. Deterministic, offline."""
+
+    identity = "keyword"
+
+    def judge(self, expected: Expected, findings: list[str]) -> Judgement:
+        report = "\n".join(["# BLOCKING", *findings])
+        score = score_report(expected, "blocked", report)
+        if score.matched:
+            return Judgement(
+                judge=self.identity, verdict="match", quote="", reason=f"names {score.named_file}"
+            )
+        missing = "; ".join("/".join(g) for g in score.missing_keywords)
+        return Judgement(
+            judge=self.identity,
+            verdict="no_match",
+            quote="",
+            reason=f"file {'named' if score.named_file else 'not named'}; keywords missing: {missing}",
+        )
+
+
+class ModelClient(Protocol):
+    """The one call the LLM judge makes. A fake answers in tests: no network there."""
+
+    def complete(self, *, model: str, system: str, prompt: str) -> str: ...
+
+
+class JudgeError(RuntimeError):
+    """The LLM judge could not answer: no credential, a failed call, or an unreadable reply."""
+
+
+JUDGE_MODEL = "claude-sonnet-4-6"
+"""Pinned explicit model id, never an alias: the judge is part of the eval's identity.
+
+It must be in `TEMPERATURE_ZERO_MODELS`: the 4.7+/5.x models reject a non-default
+temperature with HTTP 400, so they cannot be this judge."""
+TEMPERATURE_ZERO_MODELS = frozenset({"claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"})
+"""Models the Messages API accepts `temperature: 0` for. `AnthropicMessages` refuses
+any other model before sending, rather than letting the provider 400 mid-scoring."""
+JUDGE_PROMPT_VERSION = 3
+"""Bump on ANY change to `_JUDGE_SYSTEM`, `_judge_prompt` or what they are given: it is
+part of the scorer version. v2: the case's `expected.defect` is required, never inferred.
+v3: the codex-deliverable-phase-failed description no longer reads as waiving auth and
+malformed-stream faults when a deliverable exists."""
+
+_JUDGE_SYSTEM = """You grade a code reviewer. You are given ONE known defect and the \
+reviewer's blocking findings. Answer whether any single finding identifies THIS defect: \
+the same root cause, in the same file or an equivalent location. Precision matters more \
+than recall. A finding that is vague, names only the area, describes a different bug in \
+the same file, or would be true of many changes is NOT a match. Answer "unclear" only \
+when a finding plausibly describes the defect but you cannot tell.
+
+Reply with one JSON object and nothing else:
+{"verdict": "match" | "no_match" | "unclear", "quote": "<the matching finding's \
+sentence, copied verbatim; empty unless match>", "reason": "<one line>"}"""
+
+
+def _judge_prompt(expected: Expected, findings: list[str]) -> str:
+    if expected.defect is None:
+        raise JudgeError("the LLM judge needs the case's expected.defect; it never infers it")
+    keywords = "\n".join(f"- any of: {', '.join(g)}" for g in expected.keywords)
+    blocks = "\n\n".join(f"<finding {i}>\n{f}\n</finding {i}>" for i, f in enumerate(findings, 1))
+    return (
+        "<defect>\n"
+        f"{expected.defect}\n"
+        f"Files the fix changed:\n" + "\n".join(f"- {f}" for f in expected.files) + "\n"
+        f"Concepts a correct finding expresses, in some words:\n{keywords}\n"
+        "</defect>\n\n"
+        f"<findings>\n{blocks or '(none)'}\n</findings>"
+    )
+
+
+class _JudgeReply(_Frozen):
+    verdict: JudgeVerdict
+    quote: str
+    reason: str
+
+
+def _squash(text: str) -> str:
+    return " ".join(_normalise(text).split())
+
+
+class LlmJudge:
+    """Asks a pinned model, at temperature 0, whether a finding identifies the defect.
+
+    A `match` whose quote is not in any finding is answered `unclear`: the judge
+    must point at what the reviewer wrote, not at what it imagines they meant.
+    """
+
+    def __init__(self, client: ModelClient, model: str = JUDGE_MODEL) -> None:
+        self._client = client
+        self._model = model
+
+    @property
+    def identity(self) -> str:
+        return f"llm:{self._model}@prompt-v{JUDGE_PROMPT_VERSION}"
+
+    def judge(self, expected: Expected, findings: list[str]) -> Judgement:
+        if not findings:
+            return Judgement(
+                judge=self.identity, verdict="no_match", quote="", reason="no blocking findings"
+            )
+        raw = self._client.complete(
+            model=self._model, system=_JUDGE_SYSTEM, prompt=_judge_prompt(expected, findings)
+        )
+        body = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
+        try:
+            reply = _JudgeReply.model_validate_json(body)
+        except ValidationError as exc:
+            raise JudgeError(f"{self.identity} replied with no readable verdict: {raw!r}") from exc
+        verdict, reason = reply.verdict, reply.reason
+        if verdict == "match" and (
+            not reply.quote.strip() or not any(_squash(reply.quote) in _squash(f) for f in findings)
+        ):
+            verdict, reason = "unclear", f"quote not found in any finding; judge said: {reason}"
+        return Judgement(
+            judge=self.identity,
+            verdict=verdict,
+            quote=reply.quote if verdict == "match" else "",
+            reason=reason,
+        )
+
+
+def judge_problems(loaded: LoadedSuite) -> list[str]:
+    """Defect cases the LLM judge cannot score: those with no `expected.defect`."""
+    return [
+        f"{c.id}: no expected.defect"
+        for c in loaded.cases
+        if isinstance(c, DefectCase) and c.expected.defect is None
+    ]
+
+
+class AnthropicMessages:
+    """`ModelClient` over the Anthropic Messages API with httpx, already a dependency.
+
+    The key is the platform's `Settings.anthropic_api_key` (``ANTHROPIC_API_KEY``
+    from the environment or ``.env``, ADR-004) and is never written anywhere.
+    Temperature is 0, so only `TEMPERATURE_ZERO_MODELS` are sent.
+    """
+
+    def __init__(self, api_key: SecretStr, http: httpx.Client | None = None) -> None:
+        self._key = api_key
+        self._http = http or httpx.Client(timeout=120)
+
+    @classmethod
+    def from_settings(cls, settings: Settings | None = None) -> AnthropicMessages:
+        key = (settings or get_settings()).anthropic_api_key
+        if key is None or not key.get_secret_value():
+            raise JudgeError(
+                f"--llm-judge needs {ENV_ANTHROPIC_API_KEY} (environment or .env); "
+                "omit --llm-judge to score by keywords alone (offline)"
+            )
+        return cls(key)
+
+    def complete(self, *, model: str, system: str, prompt: str) -> str:
+        if model not in TEMPERATURE_ZERO_MODELS:
+            raise JudgeError(
+                f"{model} does not accept temperature 0; the judge needs one of "
+                f"{', '.join(sorted(TEMPERATURE_ZERO_MODELS))}"
+            )
+        try:
+            response = self._http.post(
+                ANTHROPIC_MESSAGES_URL,
+                headers={
+                    "x-api-key": self._key.get_secret_value(),
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": model,
+                    "max_tokens": 1024,
+                    "temperature": 0,
+                    "system": system,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise JudgeError(f"LLM judge call to {model} failed: {exc}") from exc
+        return _MessagesReply.model_validate(response.json()).text
+
+
+class _TextBlock(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    type: str
+    text: str = ""
+
+
+class _MessagesReply(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    content: tuple[_TextBlock, ...]
+
+    @property
+    def text(self) -> str:
+        return "".join(b.text for b in self.content if b.type == "text")
+
+
+def scorer_version(loaded: LoadedSuite, llm: Judge | None) -> str:
+    """The suite version, plus the LLM judge's identity when one scored.
+
+    Keyword-only scoring keeps the plain suite version it always recorded, so
+    stored scores keep their meaning; an LLM-judged score is a different scorer.
+    """
+    return str(loaded.version) if llm is None else f"{loaded.version}+{llm.identity}"
 
 
 # ---------------------------------------------------------------------------
@@ -1047,9 +1352,11 @@ def _launch_problem(
 
 
 def score_suite(
-    loaded: LoadedSuite, client: httpx.Client, launches: list[Launch]
+    loaded: LoadedSuite, client: httpx.Client, launches: list[Launch], llm: Judge | None = None
 ) -> tuple[list[ScoredRun], tuple[str, ...]]:
     """Score every run the launch ledger records for the selected version and workflow.
+
+    With `llm`, each blocked defect run is also put to the LLM judge (see `Score.caught`).
 
     Returns one row per launched run (and one per case never launched), and a
     line per run found in a tagged eval that the ledger does not record: those
@@ -1071,8 +1378,8 @@ def score_suite(
                 rows.append(_row(case.id, ev.eval_id, launch.run_id, f"rejected: {problem}"))
                 continue
             report = _report_of(client, run)
-            score = score_case(case, run.review_verdict, report)
-            _record_score(client, loaded, case, ev.eval_id, run, score)
+            score = score_case(case, run.review_verdict, report, llm)
+            _record_score(client, loaded, case, ev.eval_id, run, score, scorer_version(loaded, llm))
             rows.append(
                 ScoredRun(
                     case=case.id,
@@ -1132,9 +1439,17 @@ def _member_runs(client: httpx.Client, eval_id: str) -> list[_RunSummary]:
 
 
 def _case_evals(client: httpx.Client, loaded: LoadedSuite, case: Case) -> list[_Eval]:
-    """The case's stable eval: tagged with the suite and the case (repeated `tag` is AND)."""
+    """The case's active stable eval: tagged with the suite and the case (repeated `tag` is AND).
+
+    An archived eval is not the case's: the duplicate migration archives what it folds.
+    """
     params = httpx.QueryParams(
-        [("tag", loaded.suite.suite_tag), ("tag", case.tag), ("page_size", 200)]
+        [
+            ("tag", loaded.suite.suite_tag),
+            ("tag", case.tag),
+            ("status", "active"),
+            ("page_size", 200),
+        ]
     )
     response = client.get("/evals", params=params)
     response.raise_for_status()
@@ -1196,6 +1511,16 @@ def evidence_of(case: Case, run: _Execution, score: Score) -> str:
             f"- expected file named: {f'`{score.named_file}`' if score.named_file else 'no'}"
             f" (one of {', '.join(f'`{f}`' for f in case.expected.files)})",
             f"- keyword groups missing: {missing}",
+            f"- keyword judge: {'match' if score.matched else 'no match'}",
+            *(
+                [
+                    f"- LLM judge (`{score.llm.judge}`): `{score.llm.verdict}`: {score.llm.reason}",
+                    *([f"  - matched: {score.llm.quote!r}"] if score.llm.quote else []),
+                ]
+                if score.llm
+                else []
+            ),
+            f"- caught (keyword OR LLM `match`; `unclear` is not): {'yes' if score.caught else 'no'}",
             *tail,
         ]
     )
@@ -1208,6 +1533,7 @@ def _record_score(
     eval_id: str,
     run: _Execution,
     score: Score,
+    version: str,
 ) -> None:
     response = client.post(
         f"/evals/{eval_id}/runs/{run.workflow_execution_id}/score",
@@ -1216,7 +1542,7 @@ def _record_score(
             "score": 1.0 if score.passed else 0.0,
             "evidence": evidence_of(case, run, score),
             "scorer": SCORER,
-            "scorer_version": str(loaded.version),
+            "scorer_version": version,
         },
     )
     if response.is_error:
@@ -1244,7 +1570,22 @@ def rates(rows: list[ScoredRun]) -> str:
     caught = sum(1 for s in defects if s.passed)
     blocked = sum(1 for s in clean if s.false_block)
     has_clean = any(r.score and r.score.polarity == "clean" for r in rows)
-    return f"catch rate (defect cases blocked and named): {_ratio(caught, len(defects))}\n" + (
+    judged_by_llm = any(s.llm for s in defects)
+    by_judge = (
+        "  keyword judge alone: "
+        f"{_ratio(sum(1 for s in defects if s.verdict == 'blocked' and s.matched), len(defects))}\n"
+        "  LLM judge alone: "
+        f"{_ratio(sum(1 for s in defects if s.verdict == 'blocked' and s.llm and s.llm.verdict == 'match'), len(defects))}"
+        f" ({sum(1 for s in defects if s.llm and s.llm.verdict == 'unclear')} unclear)\n"
+        if judged_by_llm
+        else ""
+    )
+    headline = (
+        "catch rate (defect cases blocked and named; keyword OR LLM match, unclear not caught): "
+        if judged_by_llm
+        else "catch rate (defect cases blocked and named): "
+    )
+    return f"{headline}{_ratio(caught, len(defects))}\n{by_judge}" + (
         f"false-block rate (clean controls blocked): {_ratio(blocked, len(clean))}"
         if has_clean
         else "false-block rate: not measured, no clean control in this version"
@@ -1259,6 +1600,7 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
         "status",
         "verdict",
         "matched",
+        "llm",
         "pass",
         "cost",
         "duration",
@@ -1285,6 +1627,7 @@ def render(loaded: LoadedSuite, rows: list[ScoredRun], unrecorded: tuple[str, ..
                 )
                 if s
                 else "-",
+                s.llm.verdict if s and s.llm else "-",
                 r.verdict or "-",
                 f"${r.cost_usd:.2f}" if r.cost_usd is not None else "-",
                 r.duration,
@@ -1431,9 +1774,36 @@ def install_workflow(loaded: LoadedSuite, client: httpx.Client, root: Path = ROO
     )
 
 
+def stable_key(loaded: LoadedSuite, case: Case) -> str:
+    """What names the case's one eval to the server: the suite and the case tag (#1920)."""
+    return f"{loaded.suite.suite_tag}\n{case.tag}"
+
+
+def create_stable_eval(loaded: LoadedSuite, case: Case, client: httpx.Client) -> httpx.Response:
+    """POST the case's eval under its `stable_key`: idempotent, however many launches race.
+
+    The server derives the eval id from the key, so every caller writes the same
+    stream and the event store admits one create; the others get that eval back.
+    """
+    s = loaded.suite
+    return client.post(
+        "/evals",
+        json={
+            "stable_key": stable_key(loaded, case),
+            "name": f"{s.eval_suite or s.id}: {case.id}",
+            "goal": s.goal,
+            "baseline_repos": [{"repository": s.repository, "requested_ref": case.commit}],
+            "tags": [s.suite_tag, case.tag],
+        },
+    )
+
+
 def stable_eval(loaded: LoadedSuite, case: Case, client: httpx.Client) -> _Created:
     """The case's one eval: found by `suite:` + `case:` tags, created once if missing.
 
+    The tag lookup only saves a request and keeps an eval made before #1920
+    in use. It reads a projection, so two launches can both miss: that is
+    safe because the create is keyed by `stable_key`, not by this read.
     Refuses to go on when two evals carry the tags (run the duplicate
     migration first) or when the one found pins another commit.
     """
@@ -1447,15 +1817,7 @@ def stable_eval(loaded: LoadedSuite, case: Case, client: httpx.Client) -> _Creat
     if found:
         created = _Created(eval_id=found[0].eval_id, baseline_repos=found[0].baseline_repos)
     else:
-        response = client.post(
-            "/evals",
-            json={
-                "name": f"{s.eval_suite or s.id}: {case.id}",
-                "goal": s.goal,
-                "baseline_repos": [{"repository": s.repository, "requested_ref": case.commit}],
-                "tags": [s.suite_tag, case.tag],
-            },
-        )
+        response = create_stable_eval(loaded, case, client)
         response.raise_for_status()
         created = _Created.model_validate(response.json())
     pinned = [b.commit_sha for b in created.baseline_repos]
@@ -1518,7 +1880,7 @@ def describe_launch(loaded: LoadedSuite) -> list[str]:
         f"{loaded.suite.version}.0.0 with its sha256 digest, then "
         f"GET /workflows/{w.id} must match its phases, prompts and models {w.models}",
     ] + [
-        f"{c.id}: GET /evals?tag={s.suite_tag}&tag={c.tag}, else POST /evals baseline "
+        f"{c.id}: GET /evals?tag={s.suite_tag}&tag={c.tag}, else POST /evals keyed by suite+case, baseline "
         f"{s.repository}@{c.commit} with those tags; then POST /workflows/{w.id}/execute "
         f"with that eval_id and tags {loaded.run_tags}; run recorded in launches.jsonl"
         for c in loaded.cases
@@ -1557,6 +1919,15 @@ def main(argv: list[str] | None = None) -> int:
         help="launch or score only these cases (default: all); tune on train only",
     )
     parser.add_argument("--api-url", default=None, help="defaults to DEV__API_URL / localhost")
+    parser.add_argument(
+        "--llm-judge",
+        action="store_true",
+        help=(
+            f"score: also ask the LLM judge ({JUDGE_MODEL}, prompt v{JUDGE_PROMPT_VERSION}); "
+            f"needs {ENV_ANTHROPIC_API_KEY}. Recorded under a scorer_version naming the judge. "
+            "Omit to score offline by keywords alone"
+        ),
+    )
     parser.add_argument(
         "--launches",
         type=Path,
@@ -1598,6 +1969,16 @@ def main(argv: list[str] | None = None) -> int:
             print("\n".join(describe_launch(loaded)))
             return 0
 
+    llm: Judge | None = None
+    if args.llm_judge and args.command == "score":
+        if problems := [p for v in to_score for p in judge_problems(v)]:
+            print("❌ the LLM judge cannot score:\n  " + "\n  ".join(problems), file=sys.stderr)
+            return 1
+        try:
+            llm = LlmJudge(AnthropicMessages.from_settings())
+        except JudgeError as exc:
+            print(f"❌ {exc}", file=sys.stderr)
+            return 1
     ledger: Path = args.launches or launches_path(args.suite)
     with httpx.Client(
         base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
@@ -1607,7 +1988,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"recorded in {ledger}: commit it, `score` reads only the runs it names")
             return 0
         launches = read_launches(ledger)
-        tables = [(v, *score_suite(v, client, launches)) for v in to_score]
+        tables = [(v, *score_suite(v, client, launches, llm)) for v in to_score]
     print("\n\n".join(render(v, rows, unrecorded) for v, rows, unrecorded in tables))
     return (
         0

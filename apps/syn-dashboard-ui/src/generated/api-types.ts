@@ -25,6 +25,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workflow Trends Endpoint
+         * @description Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872).
+         */
+        get: operations["list_workflow_trends_endpoint_workflows_trends_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}": {
         parameters: {
             query?: never;
@@ -720,7 +740,11 @@ export interface paths {
         put?: never;
         /**
          * Create Eval Endpoint
-         * @description Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.
+         * @description Create an eval, pinning each baseline ref to a commit SHA.
+         *
+         *     The id is minted here, or derived from `stable_key`. A derived id is one
+         *     stream however many creators race for it: the store admits the first and
+         *     the rest answer with that eval (#1920).
          */
         post: operations["create_eval_endpoint_evals_post"];
         delete?: never;
@@ -1270,6 +1294,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/metrics/shipped": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Shipped Metrics Endpoint
+         * @description What agents shipped over the last ``days`` UTC days, against the ``days`` before.
+         *
+         *     Agent-attributed only, read from the shipped ledger's daily rollup: commits
+         *     runs made, PRs runs created (a successful ``gh pr create``), merges of
+         *     those PRs (``pull_request`` closed+merged events from the GitHub
+         *     pipeline), merge rate as the share of the window's opened PRs merged by
+         *     now, and the repos all of that touched.
+         */
+        get: operations["get_shipped_metrics_endpoint_metrics_shipped_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capture/status": {
         parameters: {
             query?: never;
@@ -1345,6 +1395,30 @@ export interface paths {
          *     records its own requests; ``recorder`` describes THIS process's only.
          */
         get: operations["get_request_latency_observability_latency_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/observability/upstream-retries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Upstream Retries
+         * @description How often a busy upstream made a phase retry in place, per provider and model (#1882).
+         *
+         *     Read from the ``upstream_retry`` observations (Lane 2). A store that cannot
+         *     be read is a 503, never an empty list: zero retries would tell an operator
+         *     there is no quota pressure when nobody looked.
+         */
+        get: operations["get_upstream_retries_observability_upstream_retries_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2577,6 +2651,23 @@ export interface components {
             tags: string[];
         };
         /**
+         * AgentLaunch
+         * @description What is known about whether a session's agent process ever started.
+         *
+         *     Three states rather than a boolean, because "we have no evidence either
+         *     way" and "we have evidence it did not happen" justify very different
+         *     statements to a user, and only the second one justifies telling them the
+         *     session never ran (#1047, #1065).
+         *
+         *     A boolean has no room for the first state, so every source that cannot
+         *     speak - a session whose event stream predates this field, a write that
+         *     never landed, a storage read that failed - is forced to answer "no", and
+         *     the read path cannot tell that answer apart from a real one. Absence of
+         *     evidence is not evidence of absence, and the type is what enforces it.
+         * @enum {string}
+         */
+        AgentLaunch: "unknown" | "launched" | "not_launched";
+        /**
          * AliasResolutionBasis
          * @description How confident an alias -> model id resolution is.
          * @enum {string}
@@ -3005,7 +3096,7 @@ export interface components {
          * @description Freshness of the configured codex credential.
          * @enum {string}
          */
-        CodexAuthState: "absent" | "ok" | "expiring" | "expired" | "unreadable";
+        CodexAuthState: "absent" | "ok" | "expiring" | "expired" | "unreadable" | "api_key";
         /**
          * CodexAuthStatus
          * @description A non-secret description of the configured codex credential.
@@ -3271,9 +3362,14 @@ export interface components {
         };
         /**
          * CreateEvalRequest
-         * @description A new eval (#967). The server mints its id; see `EvalCreatedResponse`.
+         * @description A new eval (#967). The server mints its id unless `stable_key` names one.
          */
         CreateEvalRequest: {
+            /**
+             * Stable Key
+             * @description Makes the create idempotent (#1920): the eval id is derived from this key, so every create with the same key, concurrent ones included, answers with the one eval. A create that differs from the one that made it is refused.
+             */
+            stable_key?: string | null;
             /** Name */
             name: string;
             /**
@@ -3499,7 +3595,7 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space" | "workspace_reclaim";
         /**
          * DelegationAttempt
          * @description One delegate the phase's agent launched, as the platform observed it.
@@ -3584,15 +3680,56 @@ export interface components {
              */
             free_bytes: number | null;
             /**
-             * Degraded Below Percent
-             * @description SYN_DISK_DEGRADED_BELOW_PERCENT.
+             * Degraded Below Bytes
+             * @description Degraded below this many bytes free: SYN_DISK_DEGRADED_BELOW_GIB, or twice the admission floor when unset.
              */
-            degraded_below_percent: number;
+            degraded_below_bytes: number;
+            /**
+             * Refuse Admission Below Bytes
+             * @description New executions refused below this many bytes free: SYN_DISK_REFUSE_ADMISSION_BELOW_GIB, or SYN_DISK_RUN_RESERVE_GIB x SYN_EXECUTION_MAX_CONCURRENT when unset.
+             */
+            refuse_admission_below_bytes: number;
+            /**
+             * Degraded Below Percent
+             * @description SYN_DISK_DEGRADED_BELOW_PERCENT; null when unset (GiB floor only).
+             */
+            degraded_below_percent?: number | null;
             /**
              * Refuse Admission Below Percent
-             * @description SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT.
+             * @description SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT; null when unset (GiB floor only).
              */
-            refuse_admission_below_percent: number;
+            refuse_admission_below_percent?: number | null;
+            /**
+             * Detail
+             * @description One line for an operator: free space, the floors and where they came from.
+             */
+            detail: string;
+            /** @description The workspace directory reclaimer's last pass (#1983); null when its state could not be read. */
+            reclaim?: components["schemas"]["WorkspaceReclaimHealth"] | null;
+        };
+        /**
+         * DurationTrendSummaryResponse
+         * @description A workflow card's duration trend label, formatted here so the UI only renders it (#1872).
+         *
+         *     Fitted over the latest ``runs`` measured durations (at most 12): a change
+         *     under 5% is steady, fewer than 3 measured runs is too few to tell.
+         */
+        DurationTrendSummaryResponse: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "none" | "few" | "faster" | "slower" | "steady";
+            /** Pct */
+            pct: number;
+            /** Runs */
+            runs: number;
+            /** Word Display */
+            word_display: string;
+            /** Sub Display */
+            sub_display: string;
+            /** Label Display */
+            label_display: string;
         };
         /**
          * EvalArchivedResponse
@@ -4353,6 +4490,15 @@ export interface components {
                 [key: string]: string;
             };
             eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
+            resumed_from?: components["schemas"]["ResumedFromInfo"] | null;
+            /** Resumed As */
+            resumed_as?: string | null;
+            /** Latest Resumed As */
+            latest_resumed_as?: string | null;
+            /** Resumed From Display */
+            resumed_from_display?: string | null;
+            /** Resumed As Display */
+            resumed_as_display?: string | null;
             resume_start?: components["schemas"]["ResumeStartInfo"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
             read_model_status?: components["schemas"]["ReadModelStatus"] | null;
@@ -4719,6 +4865,9 @@ export interface components {
             repos?: string[];
             /** Tags */
             tags?: string[];
+            resumed_from?: components["schemas"]["ResumedFromInfo"] | null;
+            /** Resumed As */
+            resumed_as?: string | null;
             /** Repos Display */
             repos_display?: string | null;
             eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
@@ -5525,6 +5674,11 @@ export interface components {
             breakdown?: {
                 [key: string]: number;
             };
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
         };
         /**
          * HeldProjectionHealth
@@ -5988,6 +6142,42 @@ export interface components {
              * @default 0
              */
             cost_usd: string;
+        };
+        /**
+         * OomKilledPhaseResponse
+         * @description One phase whose workspace was OOM-killed, as the provider measured it.
+         *
+         *     Set from the provider's ``oom_killed`` (cgroup ``oom_kill`` count or
+         *     Docker's ``State.OOMKilled``), never inferred from an exit code: an exit
+         *     137 is any SIGKILL.
+         */
+        OomKilledPhaseResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /**
+             * Oom Killed
+             * @constant
+             */
+            oom_killed: true;
+            /** Memory Peak Bytes */
+            memory_peak_bytes: number | null;
+            /** Oom Kills */
+            oom_kills: number | null;
+        };
+        /**
+         * OomKillsResponse
+         * @description Every phase of this type in exactly one bucket.
+         *
+         *     ``unknown`` is a phase nothing measured: no usage row, or a row with no
+         *     OOM signal. It is never folded into ``not_killed``.
+         */
+        OomKillsResponse: {
+            /** Killed */
+            killed: number;
+            /** Not Killed */
+            not_killed: number;
+            /** Unknown */
+            unknown: number;
         };
         /**
          * OperationInfo
@@ -6492,10 +6682,15 @@ export interface components {
         PhaseResourceProfileResponse: {
             /** Phase Id */
             phase_id: string;
+            cpu_usage_seconds: components["schemas"]["ResourcePercentilesResponse"];
+            wall_seconds: components["schemas"]["ResourcePercentilesResponse"];
             cpu_seconds_per_wall_second: components["schemas"]["ResourcePercentilesResponse"];
             cpu_throttled_seconds: components["schemas"]["ResourcePercentilesResponse"];
             memory_peak_bytes: components["schemas"]["ResourcePercentilesResponse"];
             disk_bytes_at_teardown: components["schemas"]["ResourcePercentilesResponse"];
+            oom: components["schemas"]["OomKillsResponse"];
+            /** Oom Killed Phases */
+            oom_killed_phases: components["schemas"]["OomKilledPhaseResponse"][];
             coverage: components["schemas"]["ResourceCoverageResponse"];
         };
         /**
@@ -7371,17 +7566,21 @@ export interface components {
         };
         /**
          * ResourcePercentilesResponse
-         * @description p50/p95 of one measure over ``n`` measured phases; null below ten.
+         * @description p50/p90/p95 of one measure over ``n`` measured phases; null below ten.
          */
         ResourcePercentilesResponse: {
             /** N */
             n: number;
             /** P50 */
             p50: number | null;
+            /** P90 */
+            p90: number | null;
             /** P95 */
             p95: number | null;
             /** P50 Display */
             p50_display: string;
+            /** P90 Display */
+            p90_display: string;
             /** P95 Display */
             p95_display: string;
         };
@@ -7456,6 +7655,43 @@ export interface components {
             /** Dispatched At */
             dispatched_at?: string | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
+        };
+        /**
+         * ResumedFromInfo
+         * @description The execution a resumed run continues, and the phase it picked up at (#1881).
+         */
+        ResumedFromInfo: {
+            /** Parent Execution Id */
+            parent_execution_id: string;
+            /** Resume Phase Id */
+            resume_phase_id: string;
+        };
+        /**
+         * RetainedReason
+         * @description Why a stale workspace directory was kept (#1983). Kept is not failed.
+         *
+         *     Each names the one proof that could not be made. /health counts them, so
+         *     an operator sees what the disk is holding and why, not one opaque number.
+         * @enum {string}
+         */
+        RetainedReason: "unowned" | "not_terminal" | "mounted" | "unreadable" | "dirty" | "unversioned" | "stash" | "unpushed_unproven" | "submodule_store_unproven" | "unreachable_objects" | "capture_unknown" | "identity_changed" | "delete_failed";
+        /**
+         * RetainedWorkspaceDirs
+         * @description Workspace directories the reclaimer kept for one reason, at its last pass (#1983).
+         */
+        RetainedWorkspaceDirs: {
+            /** @description The proof that could not be made. */
+            reason: components["schemas"]["RetainedReason"];
+            /**
+             * Count
+             * @description Directories kept for this reason.
+             */
+            count: number;
+            /**
+             * Size Bytes
+             * @description Bytes those directories hold, as measured.
+             */
+            size_bytes: number;
         };
         /**
          * ReviewVerdict
@@ -7969,6 +8205,8 @@ export interface components {
             repos_display?: string | null;
             /** Status */
             status: string;
+            /** @default unknown */
+            agent_launch: components["schemas"]["AgentLaunch"];
             /** Workspace Path */
             workspace_path?: string | null;
             /**
@@ -8246,6 +8484,169 @@ export interface components {
              * @default
              */
             actor: string;
+        };
+        /**
+         * ShippedCountPointResponse
+         * @description One UTC day's count.
+         */
+        ShippedCountPointResponse: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Value */
+            value: number;
+        };
+        /**
+         * ShippedCountTileResponse
+         * @description A count over the window against the window before it.
+         *
+         *     When ``reason`` is set the count cannot be answered from persisted data:
+         *     every number is null and ``series`` is empty. Never a zero standing in for
+         *     "unknown".
+         */
+        ShippedCountTileResponse: {
+            /** Total */
+            total: number | null;
+            /** Previous Total */
+            previous_total: number | null;
+            /** Delta */
+            delta: number | null;
+            /** Delta Percent */
+            delta_percent: number | null;
+            /** Delta Display */
+            delta_display: string | null;
+            delta_unit: components["schemas"]["ShippedDeltaUnit"];
+            /** Total Display */
+            total_display: string | null;
+            /** Series */
+            series: components["schemas"]["ShippedCountPointResponse"][];
+            /** Source */
+            source: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * ShippedDeltaUnit
+         * @description What a tile's ``delta_display`` is expressed in.
+         * @enum {string}
+         */
+        ShippedDeltaUnit: "percent" | "points" | "count";
+        /**
+         * ShippedMetricsResponse
+         * @description What agents shipped over the window, tile by tile (the Overview block).
+         */
+        ShippedMetricsResponse: {
+            window: components["schemas"]["ShippedWindowResponse"];
+            previous: components["schemas"]["ShippedPreviousWindowResponse"];
+            /** Workflow Id */
+            workflow_id: string | null;
+            commits: components["schemas"]["ShippedCountTileResponse"];
+            prs_opened: components["schemas"]["ShippedCountTileResponse"];
+            prs_merged: components["schemas"]["ShippedCountTileResponse"];
+            merge_rate: components["schemas"]["ShippedRateTileResponse"];
+            repos_touched: components["schemas"]["ShippedCountTileResponse"];
+            /** Repos */
+            repos: string[];
+            /** By Workflow */
+            by_workflow: components["schemas"]["ShippedWorkflowResponse"][];
+            /** Unavailable */
+            unavailable: string[];
+        };
+        /**
+         * ShippedPreviousWindowResponse
+         * @description The ``days`` UTC days immediately before the window, inclusive.
+         */
+        ShippedPreviousWindowResponse: {
+            /**
+             * From
+             * Format: date
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             */
+            to: string;
+        };
+        /**
+         * ShippedRatePointResponse
+         * @description One UTC day's rate in percent; null on a day with no denominator.
+         */
+        ShippedRatePointResponse: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Value */
+            value: number | null;
+        };
+        /**
+         * ShippedRateTileResponse
+         * @description Merge rate: of the run PRs OPENED in the window, the percent merged by now.
+         *
+         *     A cohort conversion, 0 to 100 by construction (the merged PRs are a subset
+         *     of the opened ones). ``previous_total`` asks the same of the previous
+         *     window's cohort, as of now. ``delta`` is in percentage points. A series
+         *     point is that day's opened PRs merged since, null on a day none opened.
+         *     Null totals: no PR was opened, which is not 0%.
+         */
+        ShippedRateTileResponse: {
+            /** Total */
+            total: number | null;
+            /** Previous Total */
+            previous_total: number | null;
+            /** Delta */
+            delta: number | null;
+            /** Delta Display */
+            delta_display: string | null;
+            delta_unit: components["schemas"]["ShippedDeltaUnit"];
+            /** Total Display */
+            total_display: string | null;
+            /** Series */
+            series: components["schemas"]["ShippedRatePointResponse"][];
+            /** Source */
+            source: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * ShippedWindowResponse
+         * @description ``days`` UTC calendar days, ``from`` and ``to`` inclusive; ``to`` is today.
+         */
+        ShippedWindowResponse: {
+            /** Days */
+            days: number;
+            /**
+             * From
+             * Format: date
+             */
+            from: string;
+            /**
+             * To
+             * Format: date
+             */
+            to: string;
+        };
+        /**
+         * ShippedWorkflowResponse
+         * @description One workflow's share of what was shipped in the window.
+         */
+        ShippedWorkflowResponse: {
+            /** Workflow Id */
+            workflow_id: string;
+            /** Name */
+            name: string;
+            /** Commits */
+            commits: number;
+            /** Prs Opened */
+            prs_opened: number;
+            /** Prs Merged */
+            prs_merged: number;
+            /** Repos Touched */
+            repos_touched: number;
         };
         /**
          * SideEffectStatus
@@ -9494,6 +9895,41 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * UpstreamRetriesResponse
+         * @description In-phase upstream retries per provider and model, most first (Lane 2, #1882).
+         *
+         *     Counts retries, not failures: a phase that retried twice and then
+         *     succeeded counts 2 here. Quota, auth and anything unrecognised are never
+         *     retried, so they never appear.
+         */
+        UpstreamRetriesResponse: {
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "1h" | "24h" | "7d" | "30d";
+            /** Since */
+            since: string;
+            /** Total */
+            total: number;
+            /** Counts */
+            counts: components["schemas"]["UpstreamRetryCountResponse"][];
+        };
+        /**
+         * UpstreamRetryCountResponse
+         * @description In-phase retries one provider, model and upstream kind took in the window (#1882).
+         */
+        UpstreamRetryCountResponse: {
+            /** Provider */
+            provider: string | null;
+            /** Requested Model */
+            requested_model: string | null;
+            /** Upstream Kind */
+            upstream_kind: string | null;
+            /** Retries */
+            retries: number;
+        };
         /** ValidateYamlRequest */
         ValidateYamlRequest: {
             /**
@@ -9560,6 +9996,29 @@ export interface components {
          * @enum {string}
          */
         Verdict: "PASS" | "FAIL" | "ERROR";
+        /**
+         * WorkflowCardTrendResponse
+         * @description A workflow's trend points plus the card's formatted duration trend (#1872).
+         */
+        WorkflowCardTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Workflow Id */
+            workflow_id: string;
+            /** Items */
+            items: components["schemas"]["WorkflowTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            duration_trend: components["schemas"]["DurationTrendSummaryResponse"];
+        };
         /**
          * WorkflowDefaultEvalResponse
          * @description A workflow's default eval after an edit, read from the aggregate (#967).
@@ -9730,6 +10189,69 @@ export interface components {
             page_size: number;
         };
         /**
+         * WorkflowTrendsResponse
+         * @description The latest runs of several workflows as trend points, in one response (#1872).
+         *
+         *     The Workflows page reads every card on screen from this, so the page costs
+         *     one request however many workflows it shows. Each entry is what
+         *     ``GET /workflows/{id}/trend`` answers for page 1 at the same page size.
+         */
+        WorkflowTrendsResponse: {
+            /** Trends */
+            trends: components["schemas"]["WorkflowCardTrendResponse"][];
+        };
+        /**
+         * WorkspaceReclaimHealth
+         * @description What the workspace directory reclaimer last did (#1983).
+         */
+        WorkspaceReclaimHealth: {
+            /**
+             * Last Pass At
+             * @description When its last pass ended, UTC; null before the first.
+             */
+            last_pass_at: string | null;
+            /**
+             * Paused
+             * @description Why the last pass stopped before deleting anything, e.g. 'maintenance'.
+             */
+            paused: string | null;
+            /**
+             * Last Pass Skipped
+             * @description Why the last pass did not look at all (docker or a read model unreadable).
+             */
+            last_pass_skipped: string | null;
+            /**
+             * Reclaimed Bytes 24H
+             * @description Bytes this process reclaimed in the last 24 hours (resets on restart).
+             */
+            reclaimed_bytes_24h: number;
+            /**
+             * Dry Run Reclaimable
+             * @description Directories the last pass found reclaimable and left, in dry-run mode.
+             */
+            dry_run_reclaimable: number;
+            /**
+             * Deletes In Progress
+             * @description Proven directories whose delete ran out of the last pass's time budget; the next pass, or the first after a restart, finishes them.
+             */
+            deletes_in_progress: number;
+            /**
+             * Out Of Time
+             * @description Whether the last pass stopped at SYN_DISK_RECLAIM_PASS_BUDGET_MINUTES.
+             */
+            out_of_time: boolean;
+            /**
+             * Retained
+             * @description Directories kept at the last pass, per reason.
+             */
+            retained: components["schemas"]["RetainedWorkspaceDirs"][];
+            /**
+             * Delete Failed Passes
+             * @description Consecutive passes with a failed delete; 2 or more degrades /health.
+             */
+            delete_failed_passes: number;
+        };
+        /**
          * CostSummaryResponse
          * @description Summary of all costs across sessions/executions.
          */
@@ -9870,6 +10392,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateWorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workflow_trends_endpoint_workflows_trends_get: {
+        parameters: {
+            query: {
+                /** @description Comma-separated exact workflow ids, at most 200 */
+                ids: string;
+                /** @description Latest runs per workflow */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTrendsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12301,6 +12857,40 @@ export interface operations {
             };
         };
     };
+    get_shipped_metrics_endpoint_metrics_shipped_get: {
+        parameters: {
+            query?: {
+                /** @description Window length in UTC days: 7, 14 or 30 */
+                days?: 7 | 14 | 30;
+                /** @description Only commits of this workflow's executions */
+                workflow_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShippedMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_capture_status_capture_status_get: {
         parameters: {
             query?: {
@@ -12422,6 +13012,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestLatencyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_upstream_retries_observability_upstream_retries_get: {
+        parameters: {
+            query?: {
+                /** @description How far back to look */
+                window?: "1h" | "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpstreamRetriesResponse"];
                 };
             };
             /** @description Validation Error */

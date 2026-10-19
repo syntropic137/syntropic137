@@ -161,8 +161,18 @@ class AgentLaunchEvidence:
     wrapper announces immediately before ``exec``, so at the moment the line
     arrives "an agent exists" is a claim about the next instruction rather than
     an observation - and the one case that matters, an exec that fails, looks
-    identical until the status comes back. Waiting costs nothing: nobody reads
-    the launch fact while the phase is still running.
+    identical until the status comes back.
+
+    Waiting is not free, though: the load driver reads the launch fact while
+    the phase runs, to count agents actively working (#1717,
+    docs/north-star.md), and a fact settled only at exit hides every agent
+    that is working right now. So the wait ends as soon as the answer is
+    already decided. ``exec`` replaces the wrapper, so once a line the wrapper
+    did not sign follows its announcement, nothing ``settle`` could later be
+    told would retract the launch - and it is recorded then, live, rather than
+    at exit. Until that line arrives the marker stays provisional exactly as
+    before, so a failed exec, a missing interpreter and a transport that never
+    reached the container are all still decided by ``settle``.
 
     Settling is biased towards LAUNCHED, and every uncertain path takes that
     side. A stream the caller abandoned mid-way (the cancellation path breaks
@@ -230,8 +240,17 @@ class AgentLaunchEvidence:
         Transparent otherwise: every other line passes through untouched and
         every exception propagates unchanged, including the wrapper's own
         diagnostics, which an operator reading the phase log needs. Nothing is
-        recorded here, so a caller that stops reading early has withheld the
-        answer rather than answered no.
+        recorded here except the one answer the stream has already made final,
+        so a caller that stops reading early has withheld a "no" rather than
+        given one.
+
+        That answer is a launch: the first unsigned line after the
+        announcement. ``exec`` replaces the wrapper, so that line is the
+        agent's, and ``settle`` never retracts once something has spoken over
+        the wrapper. Recording it before the line is forwarded is what lets a
+        reader see the agent while it is still working. An unsigned line BEFORE
+        the announcement proves nothing about the exec, and waits for
+        ``settle`` like everything else.
         """
         async for line in stream:
             if line == self._announcement:
@@ -241,6 +260,8 @@ class AgentLaunchEvidence:
                 self._wrapper_spoke = True
             else:
                 self._spoke_over = True
+                if self._announced:
+                    await self._record()
             yield line
         self._ran_to_the_end = True
 
@@ -280,7 +301,7 @@ class AgentLaunchEvidence:
         ran, which is the bug.
 
         Idempotent, so a caller may settle from a ``finally`` without counting
-        the launch twice.
+        the launch twice - including a launch ``observing`` already recorded.
         """
         if self._recorded or self._launch_failed or not self._announced:
             return
@@ -291,6 +312,12 @@ class AgentLaunchEvidence:
             and not self._spoke_over
         ):
             self._launch_failed = True
+            return
+        await self._record()
+
+    async def _record(self) -> None:
+        """Notify the observer of the launch, once, whichever path decided it."""
+        if self._recorded:
             return
         self._recorded = True
         if self._observer is not None:

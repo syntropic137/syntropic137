@@ -93,7 +93,7 @@ Each event type has a dedicated key extractor that uses stable identifiers prese
 in both webhook and Events API payloads:
 
 - **Push events:** repository + commit SHA (`after` field)
-- **Pull requests:** repository + PR number + action + `updated_at` timestamp
+- **Pull requests:** repository + PR number + action + head commit SHA
 - **Check runs:** repository + check run ID + action
 - **Issue comments:** repository + comment ID + action
 
@@ -109,11 +109,12 @@ second-layer protection against duplicate workflows.
 
 ## GitHub API Quota
 
-The Events API has a rate limit of 60 conditional requests per hour per
-installation. Syntropic137 minimizes quota usage through several mechanisms:
+Events API calls use the App's installation token and count against that
+installation's REST rate limit. Syntropic137 minimizes quota usage through
+several mechanisms:
 
 - **ETag caching:** Uses `If-None-Match` headers for conditional requests.
-  304 Not Modified responses still count against the limit but return no data.
+  Conditional requests answered 304 Not Modified do not count against it.
 - **Selective polling:** Only repositories with active triggers are polled.
   Repos without triggers consume zero API calls.
 - **Adaptive intervals:** In Safety Net mode (webhooks healthy), polling drops
@@ -150,6 +151,8 @@ If you have reliable webhook delivery and want zero Events API quota usage:
 ```bash
 SYN_POLLING_DISABLED=true
 ```
+
+This turns off both the Events API poller and the Checks API poller.
 
 This is recommended for production deployments with a stable public webhook URL
 or Cloudflare Tunnel. The webhook endpoint continues to work normally regardless

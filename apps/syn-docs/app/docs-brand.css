@@ -1,0 +1,298 @@
+/*
+ * Docs chrome after the v4 Landing board: brand lockup, the site nav capsule
+ * and the page footer. Base rules read the --color-fd-* variables, so light
+ * mode keeps the docs' palette; .dark rules use Skyline tokens directly.
+ */
+
+/* ── Brand lockup: S mark + wordmark ───────────────────────────────── */
+.syn-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.syn-brand__mark {
+  display: block;
+  width: 17px;
+  height: auto;
+  overflow: visible;
+}
+
+.syn-wordmark {
+  font-family: var(--font-brand);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: var(--sky-tracking-brand);
+  color: var(--color-fd-foreground);
+}
+
+.syn-wordmark__num {
+  color: var(--color-fd-primary);
+}
+
+.syn-brand__tag {
+  font-family: var(--font-mono);
+  font-size: var(--ds-text-xs);
+  font-weight: 500;
+  letter-spacing: var(--sky-tracking-label);
+  text-transform: uppercase;
+  color: var(--color-fd-muted-foreground);
+  padding-left: 10px;
+  border-left: 1px solid var(--color-fd-border);
+}
+
+/* ── Site nav capsule ──────────────────────────────────────────────── */
+.syn-site-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--sky-radius-row);
+  border: 1px solid var(--color-fd-border);
+  background: color-mix(in oklab, var(--color-fd-card) 55%, transparent);
+  backdrop-filter: blur(12px);
+  font-size: var(--ds-text-md);
+}
+
+.syn-site-nav__link {
+  padding: 6px 12px;
+  border-radius: var(--ds-radius-md);
+  color: var(--color-fd-muted-foreground);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--sky-duration-fast) ease, color var(--sky-duration-fast) ease;
+}
+
+.syn-site-nav__link:hover {
+  background: var(--color-fd-accent);
+  color: var(--color-fd-accent-foreground);
+}
+
+.syn-site-nav__link[aria-current='page'] {
+  background: color-mix(in oklab, var(--color-fd-primary) 12%, transparent);
+  color: var(--color-fd-primary);
+  font-weight: 600;
+}
+
+.syn-site-nav__link:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--color-fd-ring);
+  outline-offset: var(--sky-focus-ring-offset);
+}
+
+/* Below xl the header has no room for the capsule next to search; the
+   sidebar menu carries the same links on small screens. */
+@media (max-width: 80rem) {
+  .syn-site-nav {
+    display: none;
+  }
+}
+
+.dark .syn-site-nav {
+  border-color: var(--sky-color-border-glass);
+  background: var(--sky-surface-glass);
+}
+
+.dark .syn-site-nav__link {
+  color: var(--sky-color-text-code);
+}
+
+.dark .syn-site-nav__link:hover {
+  background: var(--sky-color-control-hover);
+  color: var(--ds-color-fg);
+}
+
+.dark .syn-site-nav__link[aria-current='page'] {
+  background: var(--ds-color-overlay);
+  box-shadow: var(--sky-shadow-selected);
+  color: var(--ds-color-fg);
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────── */
+.syn-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 32px;
+  margin-top: 4rem;
+  padding: 40px 0 16px;
+  border-top: 1px solid var(--color-fd-border);
+}
+
+.syn-footer__brand {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 320px;
+}
+
+.syn-footer__mark {
+  display: block;
+  width: 13px;
+  height: auto;
+  overflow: visible;
+}
+
+.syn-footer__tagline,
+.syn-footer__meta {
+  margin: 0;
+  font-size: var(--sky-text-control);
+  line-height: 1.5;
+  color: var(--color-fd-muted-foreground);
+}
+
+.syn-footer__meta {
+  font-family: var(--font-mono);
+  font-size: var(--ds-text-xs);
+}
+
+.syn-footer__meta a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.syn-footer__meta a:hover {
+  color: var(--color-fd-primary);
+}
+
+.syn-footer__cols {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px 48px;
+}
+
+@media (max-width: 40rem) {
+  .syn-footer__cols {
+    gap: 24px 20px;
+  }
+}
+
+.syn-footer__col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.syn-footer__heading {
+  font-family: var(--font-mono);
+  font-size: var(--ds-text-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-fd-muted-foreground);
+}
+
+.syn-footer__col a {
+  font-size: var(--ds-text-md);
+  color: var(--color-fd-muted-foreground);
+  text-decoration: none;
+  transition: color var(--sky-duration-fast) ease;
+}
+
+.syn-footer__col a:hover {
+  color: var(--color-fd-foreground);
+}
+
+/* Social links lead with their brand mark, a step brighter than the text, so they stand out. */
+.syn-footer__col a[data-social] {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.syn-footer__col a[data-social] svg {
+  flex: none;
+  color: var(--color-fd-foreground);
+}
+
+.syn-footer a:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--color-fd-ring);
+  outline-offset: var(--sky-focus-ring-offset);
+  border-radius: var(--ds-radius-xs);
+}
+
+.dark .syn-footer {
+  border-top-color: var(--sky-color-section-rule);
+}
+
+.dark .syn-footer__heading,
+.dark .syn-footer__tagline,
+.dark .syn-footer__meta {
+  color: var(--ds-color-text-subtle);
+}
+
+.dark .syn-footer__col a {
+  color: var(--ds-color-text-muted);
+}
+
+.dark .syn-footer__col a:hover {
+  color: var(--ds-color-fg);
+}
+
+/* ── Sidebar card: docs for agents ─────────────────────────────────── */
+.syn-agent-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--ds-radius-md);
+  border: 1px solid color-mix(in oklab, var(--color-fd-primary) 40%, var(--color-fd-border));
+  background: color-mix(in oklab, var(--color-fd-primary) 8%, transparent);
+  font-size: var(--ds-text-sm);
+}
+
+.syn-agent-docs__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--color-fd-foreground);
+}
+
+.syn-agent-docs__icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-fd-primary);
+}
+
+.syn-agent-docs__body {
+  margin: 0;
+  color: var(--color-fd-muted-foreground);
+}
+
+.syn-agent-docs__url {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--ds-radius-sm);
+  border: 1px solid var(--color-fd-border);
+  background: var(--color-fd-background);
+  color: var(--color-fd-foreground);
+  cursor: pointer;
+  transition: border-color var(--sky-duration-fast) ease;
+}
+
+.syn-agent-docs__url:hover {
+  border-color: var(--color-fd-primary);
+}
+
+.syn-agent-docs__url svg {
+  width: 14px;
+  height: 14px;
+  color: var(--color-fd-muted-foreground);
+}
+
+.syn-agent-docs__more {
+  color: var(--color-fd-primary);
+  text-decoration: none;
+}
+
+.syn-agent-docs__more:hover {
+  text-decoration: underline;
+}
+
+.syn-agent-docs a:focus-visible,
+.syn-agent-docs button:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--color-fd-ring);
+  outline-offset: var(--sky-focus-ring-offset);
+}

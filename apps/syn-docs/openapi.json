@@ -3,7 +3,7 @@
   "info": {
     "title": "Syntropic137 API",
     "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "0.33.1"
+    "version": "1.0.3"
   },
   "paths": {
     "/workflows": {
@@ -152,6 +152,65 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CreateWorkflowResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/trends": {
+      "get": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "List Workflow Trends Endpoint",
+        "description": "Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872).",
+        "operationId": "list_workflow_trends_endpoint_workflows_trends_get",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated exact workflow ids, at most 200",
+              "title": "Ids"
+            },
+            "description": "Comma-separated exact workflow ids, at most 200"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Latest runs per workflow",
+              "default": 50,
+              "title": "Page Size"
+            },
+            "description": "Latest runs per workflow"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowTrendsResponse"
                 }
               }
             }
@@ -2435,7 +2494,7 @@
           "evals"
         ],
         "summary": "Create Eval Endpoint",
-        "description": "Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.",
+        "description": "Create an eval, pinning each baseline ref to a commit SHA.\n\nThe id is minted here, or derived from `stable_key`. A derived id is one\nstream however many creators race for it: the store admits the first and\nthe rest answer with that eval (#1920).",
         "operationId": "create_eval_endpoint_evals_post",
         "requestBody": {
           "required": true,
@@ -4214,6 +4273,75 @@
         }
       }
     },
+    "/metrics/shipped": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Get Shipped Metrics Endpoint",
+        "description": "What agents shipped over the last ``days`` UTC days, against the ``days`` before.\n\nAgent-attributed only, read from the shipped ledger's daily rollup: commits\nruns made, PRs runs created (a successful ``gh pr create``), merges of\nthose PRs (``pull_request`` closed+merged events from the GitHub\npipeline), merge rate as the share of the window's opened PRs merged by\nnow, and the repos all of that touched.",
+        "operationId": "get_shipped_metrics_endpoint_metrics_shipped_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Window length in UTC days: 7, 14 or 30",
+              "enum": [
+                7,
+                14,
+                30
+              ],
+              "default": 14,
+              "title": "Days"
+            },
+            "description": "Window length in UTC days: 7, 14 or 30"
+          },
+          {
+            "name": "workflow_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only commits of this workflow's executions",
+              "title": "Workflow Id"
+            },
+            "description": "Only commits of this workflow's executions"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShippedMetricsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/capture/status": {
       "get": {
         "tags": [
@@ -4441,6 +4569,58 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RequestLatencyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/observability/upstream-retries": {
+      "get": {
+        "tags": [
+          "observability"
+        ],
+        "summary": "Get Upstream Retries",
+        "description": "How often a busy upstream made a phase retry in place, per provider and model (#1882).\n\nRead from the ``upstream_retry`` observations (Lane 2). A store that cannot\nbe read is a 503, never an empty list: zero retries would tell an operator\nthere is no quota pressure when nobody looked.",
+        "operationId": "get_upstream_retries_observability_upstream_retries_get",
+        "parameters": [
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string",
+              "description": "How far back to look",
+              "default": "24h",
+              "title": "Window"
+            },
+            "description": "How far back to look"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpstreamRetriesResponse"
                 }
               }
             }
@@ -8154,6 +8334,16 @@
         "title": "AddTagsRequest",
         "description": "Tags to add to an execution or a workflow. Adds only: never replaces the set."
       },
+      "AgentLaunch": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "launched",
+          "not_launched"
+        ],
+        "title": "AgentLaunch",
+        "description": "What is known about whether a session's agent process ever started.\n\nThree states rather than a boolean, because \"we have no evidence either\nway\" and \"we have evidence it did not happen\" justify very different\nstatements to a user, and only the second one justifies telling them the\nsession never ran (#1047, #1065).\n\nA boolean has no room for the first state, so every source that cannot\nspeak - a session whose event stream predates this field, a write that\nnever landed, a storage read that failed - is forced to answer \"no\", and\nthe read path cannot tell that answer apart from a real one. Absence of\nevidence is not evidence of absence, and the type is what enforces it."
+      },
       "AliasResolutionBasis": {
         "type": "string",
         "enum": [
@@ -9110,7 +9300,8 @@
           "ok",
           "expiring",
           "expired",
-          "unreadable"
+          "unreadable",
+          "api_key"
         ],
         "title": "CodexAuthState",
         "description": "Freshness of the configured codex credential."
@@ -9756,6 +9947,20 @@
       },
       "CreateEvalRequest": {
         "properties": {
+          "stable_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stable Key",
+            "description": "Makes the create idempotent (#1920): the eval id is derived from this key, so every create with the same key, concurrent ones included, answers with the one eval. A create that differs from the one that made it is refused."
+          },
           "name": {
             "type": "string",
             "maxLength": 200,
@@ -9803,7 +10008,7 @@
           "goal"
         ],
         "title": "CreateEvalRequest",
-        "description": "A new eval (#967). The server mints its id; see `EvalCreatedResponse`."
+        "description": "A new eval (#967). The server mints its id unless `stable_key` names one."
       },
       "CreateOrganizationRequest": {
         "properties": {
@@ -10224,7 +10429,8 @@
           "check_run_poller",
           "anthropic_api_key",
           "github_app",
-          "disk_space"
+          "disk_space",
+          "workspace_reclaim"
         ],
         "title": "DegradedReason",
         "description": "Reasons the API may enter degraded mode.\n\nStrEnum so values serialize directly to JSON in health responses."
@@ -10407,15 +10613,55 @@
             "title": "Free Bytes",
             "description": "Bytes available; null when unmeasurable."
           },
+          "degraded_below_bytes": {
+            "type": "integer",
+            "title": "Degraded Below Bytes",
+            "description": "Degraded below this many bytes free: SYN_DISK_DEGRADED_BELOW_GIB, or twice the admission floor when unset."
+          },
+          "refuse_admission_below_bytes": {
+            "type": "integer",
+            "title": "Refuse Admission Below Bytes",
+            "description": "New executions refused below this many bytes free: SYN_DISK_REFUSE_ADMISSION_BELOW_GIB, or SYN_DISK_RUN_RESERVE_GIB x SYN_EXECUTION_MAX_CONCURRENT when unset."
+          },
           "degraded_below_percent": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Degraded Below Percent",
-            "description": "SYN_DISK_DEGRADED_BELOW_PERCENT."
+            "description": "SYN_DISK_DEGRADED_BELOW_PERCENT; null when unset (GiB floor only)."
           },
           "refuse_admission_below_percent": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Refuse Admission Below Percent",
-            "description": "SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+            "description": "SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT; null when unset (GiB floor only)."
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "One line for an operator: free space, the floors and where they came from."
+          },
+          "reclaim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceReclaimHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workspace directory reclaimer's last pass (#1983); null when its state could not be read."
           }
         },
         "additionalProperties": false,
@@ -10425,11 +10671,59 @@
           "state",
           "free_percent",
           "free_bytes",
-          "degraded_below_percent",
-          "refuse_admission_below_percent"
+          "degraded_below_bytes",
+          "refuse_admission_below_bytes",
+          "detail"
         ],
         "title": "DiskSpaceHealth",
         "description": "Free space on the workspace volume, as /health reports it (#1560)."
+      },
+      "DurationTrendSummaryResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "none",
+              "few",
+              "faster",
+              "slower",
+              "steady"
+            ],
+            "title": "Kind"
+          },
+          "pct": {
+            "type": "integer",
+            "title": "Pct"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "word_display": {
+            "type": "string",
+            "title": "Word Display"
+          },
+          "sub_display": {
+            "type": "string",
+            "title": "Sub Display"
+          },
+          "label_display": {
+            "type": "string",
+            "title": "Label Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "pct",
+          "runs",
+          "word_display",
+          "sub_display",
+          "label_display"
+        ],
+        "title": "DurationTrendSummaryResponse",
+        "description": "A workflow card's duration trend label, formatted here so the UI only renders it (#1872).\n\nFitted over the latest ``runs`` measured durations (at most 12): a change\nunder 5% is steady, fewer than 3 measured runs is too few to tell."
       },
       "EvalArchivedResponse": {
         "properties": {
@@ -12412,6 +12706,60 @@
               }
             ]
           },
+          "resumed_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResumedFromInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resumed_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed As"
+          },
+          "latest_resumed_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Resumed As"
+          },
+          "resumed_from_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed From Display"
+          },
+          "resumed_as_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed As Display"
+          },
           "resume_start": {
             "anyOf": [
               {
@@ -13223,6 +13571,27 @@
             },
             "type": "array",
             "title": "Tags"
+          },
+          "resumed_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResumedFromInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resumed_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed As"
           },
           "repos_display": {
             "anyOf": [
@@ -15047,6 +15416,11 @@
             },
             "type": "object",
             "title": "Breakdown"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
           }
         },
         "type": "object",
@@ -16115,6 +16489,76 @@
         ],
         "title": "ModelCostEntry",
         "description": "One model's share of a cost total."
+      },
+      "OomKilledPhaseResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "oom_killed": {
+            "type": "boolean",
+            "const": true,
+            "title": "Oom Killed"
+          },
+          "memory_peak_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Peak Bytes"
+          },
+          "oom_kills": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oom Kills"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "execution_id",
+          "oom_killed",
+          "memory_peak_bytes",
+          "oom_kills"
+        ],
+        "title": "OomKilledPhaseResponse",
+        "description": "One phase whose workspace was OOM-killed, as the provider measured it.\n\nSet from the provider's ``oom_killed`` (cgroup ``oom_kill`` count or\nDocker's ``State.OOMKilled``), never inferred from an exit code: an exit\n137 is any SIGKILL."
+      },
+      "OomKillsResponse": {
+        "properties": {
+          "killed": {
+            "type": "integer",
+            "title": "Killed"
+          },
+          "not_killed": {
+            "type": "integer",
+            "title": "Not Killed"
+          },
+          "unknown": {
+            "type": "integer",
+            "title": "Unknown"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "killed",
+          "not_killed",
+          "unknown"
+        ],
+        "title": "OomKillsResponse",
+        "description": "Every phase of this type in exactly one bucket.\n\n``unknown`` is a phase nothing measured: no usage row, or a row with no\nOOM signal. It is never folded into ``not_killed``."
       },
       "OperationInfo": {
         "properties": {
@@ -17393,6 +17837,12 @@
             "type": "string",
             "title": "Phase Id"
           },
+          "cpu_usage_seconds": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
+          "wall_seconds": {
+            "$ref": "#/components/schemas/ResourcePercentilesResponse"
+          },
           "cpu_seconds_per_wall_second": {
             "$ref": "#/components/schemas/ResourcePercentilesResponse"
           },
@@ -17405,6 +17855,16 @@
           "disk_bytes_at_teardown": {
             "$ref": "#/components/schemas/ResourcePercentilesResponse"
           },
+          "oom": {
+            "$ref": "#/components/schemas/OomKillsResponse"
+          },
+          "oom_killed_phases": {
+            "items": {
+              "$ref": "#/components/schemas/OomKilledPhaseResponse"
+            },
+            "type": "array",
+            "title": "Oom Killed Phases"
+          },
           "coverage": {
             "$ref": "#/components/schemas/ResourceCoverageResponse"
           }
@@ -17413,10 +17873,14 @@
         "type": "object",
         "required": [
           "phase_id",
+          "cpu_usage_seconds",
+          "wall_seconds",
           "cpu_seconds_per_wall_second",
           "cpu_throttled_seconds",
           "memory_peak_bytes",
           "disk_bytes_at_teardown",
+          "oom",
+          "oom_killed_phases",
           "coverage"
         ],
         "title": "PhaseResourceProfileResponse",
@@ -18795,6 +19259,17 @@
             ],
             "title": "P50"
           },
+          "p90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P90"
+          },
           "p95": {
             "anyOf": [
               {
@@ -18810,6 +19285,10 @@
             "type": "string",
             "title": "P50 Display"
           },
+          "p90_display": {
+            "type": "string",
+            "title": "P90 Display"
+          },
           "p95_display": {
             "type": "string",
             "title": "P95 Display"
@@ -18820,12 +19299,14 @@
         "required": [
           "n",
           "p50",
+          "p90",
           "p95",
           "p50_display",
+          "p90_display",
           "p95_display"
         ],
         "title": "ResourcePercentilesResponse",
-        "description": "p50/p95 of one measure over ``n`` measured phases; null below ten."
+        "description": "p50/p90/p95 of one measure over ``n`` measured phases; null below ten."
       },
       "ResumeRequest": {
         "properties": {
@@ -18960,6 +19441,73 @@
         ],
         "title": "ResumeStartInfo",
         "description": "How starting the child of this execution's resume is going (#1480).\n\nA resume is admitted with a 200 and its child is started afterwards, in a\nbackground task. When that start fails, this is the only place an operator\ncan see it: the child execution never appears, so there is nothing else to\nlook at."
+      },
+      "ResumedFromInfo": {
+        "properties": {
+          "parent_execution_id": {
+            "type": "string",
+            "title": "Parent Execution Id"
+          },
+          "resume_phase_id": {
+            "type": "string",
+            "title": "Resume Phase Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parent_execution_id",
+          "resume_phase_id"
+        ],
+        "title": "ResumedFromInfo",
+        "description": "The execution a resumed run continues, and the phase it picked up at (#1881)."
+      },
+      "RetainedReason": {
+        "type": "string",
+        "enum": [
+          "unowned",
+          "not_terminal",
+          "mounted",
+          "unreadable",
+          "dirty",
+          "unversioned",
+          "stash",
+          "unpushed_unproven",
+          "submodule_store_unproven",
+          "unreachable_objects",
+          "capture_unknown",
+          "identity_changed",
+          "delete_failed"
+        ],
+        "title": "RetainedReason",
+        "description": "Why a stale workspace directory was kept (#1983). Kept is not failed.\n\nEach names the one proof that could not be made. /health counts them, so\nan operator sees what the disk is holding and why, not one opaque number."
+      },
+      "RetainedWorkspaceDirs": {
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/RetainedReason",
+            "description": "The proof that could not be made."
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Directories kept for this reason."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes",
+            "description": "Bytes those directories hold, as measured."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "count",
+          "size_bytes"
+        ],
+        "title": "RetainedWorkspaceDirs",
+        "description": "Workspace directories the reclaimer kept for one reason, at its last pass (#1983)."
       },
       "ReviewVerdict": {
         "type": "string",
@@ -20136,6 +20684,10 @@
             "type": "string",
             "title": "Status"
           },
+          "agent_launch": {
+            "$ref": "#/components/schemas/AgentLaunch",
+            "default": "unknown"
+          },
           "workspace_path": {
             "anyOf": [
               {
@@ -20673,6 +21225,438 @@
         ],
         "title": "SetMaintenanceModeRequest",
         "description": "Set or clear maintenance mode (#1387).\n\nThe response is not sent until the state is durably persisted, so a caller\nthat has seen a 200 knows no further execution can be admitted."
+      },
+      "ShippedCountPointResponse": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "value": {
+            "type": "integer",
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "ShippedCountPointResponse",
+        "description": "One UTC day's count."
+      },
+      "ShippedCountTileResponse": {
+        "properties": {
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "previous_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Total"
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta"
+          },
+          "delta_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Percent"
+          },
+          "delta_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Display"
+          },
+          "delta_unit": {
+            "$ref": "#/components/schemas/ShippedDeltaUnit"
+          },
+          "total_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Display"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/ShippedCountPointResponse"
+            },
+            "type": "array",
+            "title": "Series"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "previous_total",
+          "delta",
+          "delta_percent",
+          "delta_display",
+          "delta_unit",
+          "total_display",
+          "series",
+          "source",
+          "reason"
+        ],
+        "title": "ShippedCountTileResponse",
+        "description": "A count over the window against the window before it.\n\nWhen ``reason`` is set the count cannot be answered from persisted data:\nevery number is null and ``series`` is empty. Never a zero standing in for\n\"unknown\"."
+      },
+      "ShippedDeltaUnit": {
+        "type": "string",
+        "enum": [
+          "percent",
+          "points",
+          "count"
+        ],
+        "title": "ShippedDeltaUnit",
+        "description": "What a tile's ``delta_display`` is expressed in."
+      },
+      "ShippedMetricsResponse": {
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/ShippedWindowResponse"
+          },
+          "previous": {
+            "$ref": "#/components/schemas/ShippedPreviousWindowResponse"
+          },
+          "workflow_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow Id"
+          },
+          "commits": {
+            "$ref": "#/components/schemas/ShippedCountTileResponse"
+          },
+          "prs_opened": {
+            "$ref": "#/components/schemas/ShippedCountTileResponse"
+          },
+          "prs_merged": {
+            "$ref": "#/components/schemas/ShippedCountTileResponse"
+          },
+          "merge_rate": {
+            "$ref": "#/components/schemas/ShippedRateTileResponse"
+          },
+          "repos_touched": {
+            "$ref": "#/components/schemas/ShippedCountTileResponse"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Repos"
+          },
+          "by_workflow": {
+            "items": {
+              "$ref": "#/components/schemas/ShippedWorkflowResponse"
+            },
+            "type": "array",
+            "title": "By Workflow"
+          },
+          "unavailable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unavailable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window",
+          "previous",
+          "workflow_id",
+          "commits",
+          "prs_opened",
+          "prs_merged",
+          "merge_rate",
+          "repos_touched",
+          "repos",
+          "by_workflow",
+          "unavailable"
+        ],
+        "title": "ShippedMetricsResponse",
+        "description": "What agents shipped over the window, tile by tile (the Overview block)."
+      },
+      "ShippedPreviousWindowResponse": {
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "title": "To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "ShippedPreviousWindowResponse",
+        "description": "The ``days`` UTC days immediately before the window, inclusive."
+      },
+      "ShippedRatePointResponse": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "ShippedRatePointResponse",
+        "description": "One UTC day's rate in percent; null on a day with no denominator."
+      },
+      "ShippedRateTileResponse": {
+        "properties": {
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "previous_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Total"
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta"
+          },
+          "delta_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Display"
+          },
+          "delta_unit": {
+            "$ref": "#/components/schemas/ShippedDeltaUnit"
+          },
+          "total_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Display"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/ShippedRatePointResponse"
+            },
+            "type": "array",
+            "title": "Series"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "previous_total",
+          "delta",
+          "delta_display",
+          "delta_unit",
+          "total_display",
+          "series",
+          "source",
+          "reason"
+        ],
+        "title": "ShippedRateTileResponse",
+        "description": "Merge rate: of the run PRs OPENED in the window, the percent merged by now.\n\nA cohort conversion, 0 to 100 by construction (the merged PRs are a subset\nof the opened ones). ``previous_total`` asks the same of the previous\nwindow's cohort, as of now. ``delta`` is in percentage points. A series\npoint is that day's opened PRs merged since, null on a day none opened.\nNull totals: no PR was opened, which is not 0%."
+      },
+      "ShippedWindowResponse": {
+        "properties": {
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "title": "To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "days",
+          "from",
+          "to"
+        ],
+        "title": "ShippedWindowResponse",
+        "description": "``days`` UTC calendar days, ``from`` and ``to`` inclusive; ``to`` is today."
+      },
+      "ShippedWorkflowResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "commits": {
+            "type": "integer",
+            "title": "Commits"
+          },
+          "prs_opened": {
+            "type": "integer",
+            "title": "Prs Opened"
+          },
+          "prs_merged": {
+            "type": "integer",
+            "title": "Prs Merged"
+          },
+          "repos_touched": {
+            "type": "integer",
+            "title": "Repos Touched"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "name",
+          "commits",
+          "prs_opened",
+          "prs_merged",
+          "repos_touched"
+        ],
+        "title": "ShippedWorkflowResponse",
+        "description": "One workflow's share of what was shipped in the window."
       },
       "SideEffectStatus": {
         "type": "string",
@@ -22908,6 +23892,96 @@
         ],
         "title": "UploadArtifactResponse"
       },
+      "UpstreamRetriesResponse": {
+        "properties": {
+          "window": {
+            "type": "string",
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "title": "Window"
+          },
+          "since": {
+            "type": "string",
+            "title": "Since"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "counts": {
+            "items": {
+              "$ref": "#/components/schemas/UpstreamRetryCountResponse"
+            },
+            "type": "array",
+            "title": "Counts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "window",
+          "since",
+          "total",
+          "counts"
+        ],
+        "title": "UpstreamRetriesResponse",
+        "description": "In-phase upstream retries per provider and model, most first (Lane 2, #1882).\n\nCounts retries, not failures: a phase that retried twice and then\nsucceeded counts 2 here. Quota, auth and anything unrecognised are never\nretried, so they never appear."
+      },
+      "UpstreamRetryCountResponse": {
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Model"
+          },
+          "upstream_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream Kind"
+          },
+          "retries": {
+            "type": "integer",
+            "title": "Retries"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "requested_model",
+          "upstream_kind",
+          "retries"
+        ],
+        "title": "UpstreamRetryCountResponse",
+        "description": "In-phase retries one provider, model and upstream kind took in the window (#1882)."
+      },
       "ValidateYamlRequest": {
         "properties": {
           "content": {
@@ -23036,6 +24110,80 @@
         ],
         "title": "Verdict",
         "description": "What a scorer concluded about one run of an eval.\n\n``ERROR`` is the scorer's own failure to reach a conclusion (the run left\nnothing to judge, or the scorer broke), never a judgement that the run\nfailed. It counts as scored, and not as passed."
+      },
+      "WorkflowCardTrendResponse": {
+        "properties": {
+          "definition_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Version"
+          },
+          "definition_changed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Changed At"
+          },
+          "definition_changes": {
+            "items": {
+              "$ref": "#/components/schemas/DefinitionChangeResponse"
+            },
+            "type": "array",
+            "title": "Definition Changes"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowTrendPointResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "duration_trend": {
+            "$ref": "#/components/schemas/DurationTrendSummaryResponse"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "definition_version",
+          "definition_changed_at",
+          "definition_changes",
+          "workflow_id",
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "duration_trend"
+        ],
+        "title": "WorkflowCardTrendResponse",
+        "description": "A workflow's trend points plus the card's formatted duration trend (#1872)."
       },
       "WorkflowDefaultEvalResponse": {
         "properties": {
@@ -23510,6 +24658,113 @@
         ],
         "title": "WorkflowTrendResponse",
         "description": "One page of a workflow's executions as trend points, newest first (#1788)."
+      },
+      "WorkflowTrendsResponse": {
+        "properties": {
+          "trends": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowCardTrendResponse"
+            },
+            "type": "array",
+            "title": "Trends"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "trends"
+        ],
+        "title": "WorkflowTrendsResponse",
+        "description": "The latest runs of several workflows as trend points, in one response (#1872).\n\nThe Workflows page reads every card on screen from this, so the page costs\none request however many workflows it shows. Each entry is what\n``GET /workflows/{id}/trend`` answers for page 1 at the same page size."
+      },
+      "WorkspaceReclaimHealth": {
+        "properties": {
+          "last_pass_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Pass At",
+            "description": "When its last pass ended, UTC; null before the first."
+          },
+          "paused": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused",
+            "description": "Why the last pass stopped before deleting anything, e.g. 'maintenance'."
+          },
+          "last_pass_skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Pass Skipped",
+            "description": "Why the last pass did not look at all (docker or a read model unreadable)."
+          },
+          "reclaimed_bytes_24h": {
+            "type": "integer",
+            "title": "Reclaimed Bytes 24H",
+            "description": "Bytes this process reclaimed in the last 24 hours (resets on restart)."
+          },
+          "dry_run_reclaimable": {
+            "type": "integer",
+            "title": "Dry Run Reclaimable",
+            "description": "Directories the last pass found reclaimable and left, in dry-run mode."
+          },
+          "deletes_in_progress": {
+            "type": "integer",
+            "title": "Deletes In Progress",
+            "description": "Proven directories whose delete ran out of the last pass's time budget; the next pass, or the first after a restart, finishes them."
+          },
+          "out_of_time": {
+            "type": "boolean",
+            "title": "Out Of Time",
+            "description": "Whether the last pass stopped at SYN_DISK_RECLAIM_PASS_BUDGET_MINUTES."
+          },
+          "retained": {
+            "items": {
+              "$ref": "#/components/schemas/RetainedWorkspaceDirs"
+            },
+            "type": "array",
+            "title": "Retained",
+            "description": "Directories kept at the last pass, per reason."
+          },
+          "delete_failed_passes": {
+            "type": "integer",
+            "title": "Delete Failed Passes",
+            "description": "Consecutive passes with a failed delete; 2 or more degrades /health."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "last_pass_at",
+          "paused",
+          "last_pass_skipped",
+          "reclaimed_bytes_24h",
+          "dry_run_reclaimable",
+          "deletes_in_progress",
+          "out_of_time",
+          "retained",
+          "delete_failed_passes"
+        ],
+        "title": "WorkspaceReclaimHealth",
+        "description": "What the workspace directory reclaimer last did (#1983)."
       },
       "syn_api__routes__costs__CostSummaryResponse": {
         "properties": {

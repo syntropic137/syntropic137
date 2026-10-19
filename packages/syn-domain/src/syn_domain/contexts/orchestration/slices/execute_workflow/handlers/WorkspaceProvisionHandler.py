@@ -37,7 +37,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     ProvisionStepTimeoutError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.agent_env import (
-    _build_agent_env,
+    build_agent_env,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sandbox_probe import (
     require_codex_sandbox,
@@ -57,14 +57,17 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     PhaseOutputCache,
 )
 from syn_shared.agents import AgentProvider, require_executable_provider
-from syn_shared.env_constants import ENV_GH_REPO, ENV_SYN_PHASE_DEADLINE
+from syn_shared.env_constants import (
+    ENV_GH_REPO,
+    ENV_SYN_PHASE_DEADLINE,
+)
 from syn_shared.process_exit import describe_process_failure
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
     from typing import Protocol
 
-    from syn_adapters.workspace_backends.service import WorkspaceService
+    from syn_adapters.workspace_backends.service import SetupPhaseSecrets, WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
         ResolvedClaudePlugin,
@@ -72,6 +75,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.resolved_skill import ResolvedSkill
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
+    )
+    from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+        WorkspaceCredentialPolicy,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
@@ -227,6 +233,37 @@ _DEADLINE_NOTICE = (
     f"This phase is killed at ${ENV_SYN_PHASE_DEADLINE} (ISO 8601 UTC; read it with "
     f"`echo ${ENV_SYN_PHASE_DEADLINE}`). Only pushed work survives: commit and push before then."
 )
+
+
+async def _setup_secrets(
+    workspace: ManagedWorkspace,
+    effective_repos: list[str],
+    *,
+    clone_repos: bool,
+    pinned_commits: Sequence[SourceCommit],
+    continued_branches: Mapping[str, str] | None,
+    include_codex_auth: bool,
+    credential_policy: WorkspaceCredentialPolicy,
+) -> SetupPhaseSecrets:
+    """The ADR-024 setup secrets, or none at all under NoCredentials (#1914).
+
+    NoCredentials resolves no GitHub, Claude or Codex credential, so nothing is
+    minted for teardown to revoke. Repos were refused by `admit` before the
+    workspace existed.
+    """
+    from syn_adapters.workspace_backends.service import SetupPhaseSecrets
+
+    if not credential_policy.supplies_credentials:
+        return SetupPhaseSecrets(clone_repos=clone_repos)
+    return await SetupPhaseSecrets.create(
+        repositories=effective_repos,
+        clone_repos=clone_repos,
+        pinned_commits={c.repository: c.sha for c in pinned_commits if c.sha is not None},
+        continued_branches=continued_branches,
+        require_github=bool(effective_repos),
+        include_codex_auth=include_codex_auth,
+        ledger=workspace.issuance_ledger,
+    )
 
 
 def _repo_full_names(repos: Sequence[str]) -> list[str]:
@@ -389,12 +426,17 @@ class WorkspaceProvisionHandler:
 
         outputs = phase_outputs if phase_outputs is not None else PhaseOutputCache()
         effective_repos = repos or []
+        # The backend's policy, not the phase, decides whether credentials
+        # reach the workspace (#1914). A phase it cannot run is refused here,
+        # before any workspace or token exists.
+        policy = self._workspace_service.credential_policy
+        policy.admit(phase_name=phase.name, repositories=effective_repos)
         workspace_cm = self._workspace_service.create_workspace(
             execution_id=todo.execution_id,
             workflow_id=workflow_id,
             phase_id=todo.phase_id,
-            with_sidecar=True,
-            inject_tokens=True,
+            with_sidecar=policy.supplies_credentials,
+            inject_tokens=policy.supplies_credentials,
             capture_session_id=session_id,
         )
 
@@ -410,6 +452,7 @@ class WorkspaceProvisionHandler:
                 pinned_commits=pinned_commits,
                 continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
+                credential_policy=policy,
                 inline_instructions=not all(
                     agent.expands_at_imports for agent in _agents_that_may_run(phase)
                 ),
@@ -460,6 +503,7 @@ class WorkspaceProvisionHandler:
         pinned_commits: Sequence[SourceCommit] = (),
         continued_branches: Mapping[str, str] | None = None,
         include_codex_auth: bool,
+        credential_policy: WorkspaceCredentialPolicy,
         inline_instructions: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
@@ -483,17 +527,16 @@ class WorkspaceProvisionHandler:
         """
         from syn_adapters.workspace_backends.service import (
             PINNED_COMMIT_UNREACHABLE_EXIT_CODE,
-            SetupPhaseSecrets,
         )
 
-        secrets = await SetupPhaseSecrets.create(
-            repositories=effective_repos,
+        secrets = await _setup_secrets(
+            workspace,
+            effective_repos,
             clone_repos=clone_repos,
-            pinned_commits={c.repository: c.sha for c in pinned_commits if c.sha is not None},
+            pinned_commits=pinned_commits,
             continued_branches=continued_branches,
-            require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
-            ledger=workspace.issuance_ledger,
+            credential_policy=credential_policy,
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
@@ -739,10 +782,14 @@ class WorkspaceProvisionHandler:
         _, needs_claude_env = _auth_staging_for(
             phase.agent_config.provider, phase.agent_config.allow_delegation
         )
-        agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
+        agent_env = (
+            await build_agent_env(workspace, session_id, self._workspace_service.credential_policy)
+            if needs_claude_env
+            else {}
+        )
         # OUTSIDE the branch above, deliberately. A codex phase gets an empty
         # agent env by design - it authenticates from ~/.codex/auth.json and
-        # must not see claude credentials - so `_build_agent_env` is the one
+        # must not see claude credentials - so `build_agent_env` is the one
         # place repository identity must NOT live: put it there and it reaches
         # claude phases only, leaving every codex phase with the defect this
         # fixes. It is provider-independent, and this is the single point both

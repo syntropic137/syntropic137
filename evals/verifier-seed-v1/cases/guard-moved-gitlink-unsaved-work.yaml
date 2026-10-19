@@ -13,6 +13,13 @@ task: >
   while the workspace holds work that was never pushed. Repositories under
   work can contain git submodules.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The unpushed-work guard counts every `git status --porcelain` line as
+    unsaved work, and a submodule gitlink that git merely moved (checkout
+    without --recurse-submodules) prints the same ' M <path>' as real
+    submodule edits, so a phase with a moved but clean, pushed submodule is
+    refused as holding unpushed work.
   files:
     - packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/unpushed_work_guard.py
   keywords:

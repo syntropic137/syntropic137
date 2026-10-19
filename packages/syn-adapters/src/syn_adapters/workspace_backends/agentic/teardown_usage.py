@@ -2,18 +2,16 @@
 
 The provider (agentic-workspace's `WorkspaceDockerProvider`) owns HOW usage is
 measured - which cgroup files, which exec, which delete - and returns a
-`TeardownReport` from `destroy()`. This module owns only the SHAPE Syntropic137
+`TeardownReport` from `teardown()`, whose `usage` is mapped here. This module owns only the SHAPE Syntropic137
 depends on, as a Protocol, so the domain never imports a harness format and a
 provider that measures nothing (None, or an older one returning no report)
 maps to None rather than to a usage of zeroes.
 
-The field names match `WorkspaceUsage` one for one, on purpose. Today nothing
-checks the provider against `TeardownReportLike` statically: the pinned
-provider's `destroy` is annotated `-> None`, so the adapter receives the report
-as `object`. Until agentic-workspace types `destroy` against this Protocol, a
-provider-side rename is caught at runtime here instead: a report that is not
-None but lacks a field is logged with the missing names, and the fields it
-does carry are still mapped.
+The field names match `WorkspaceUsage` one for one, on purpose, and
+agentic-workspace's `TeardownUsage` matches them in turn. A provider-side
+rename is still caught at runtime here: a report that is not None but lacks a
+field is logged with the missing names, and the fields it does carry are still
+mapped.
 """
 
 from __future__ import annotations
@@ -22,9 +20,15 @@ import dataclasses
 import logging
 from typing import Protocol, runtime_checkable
 
-from syn_domain.contexts.orchestration import WorkspaceUsage
+from syn_domain.contexts.orchestration import WorkspaceDeleteFallback, WorkspaceUsage
 
 logger = logging.getLogger(__name__)
+
+#: The outcomes a provider reports. `UNRECOGNIZED` is syn's own marker for a
+#: value outside these, never one a provider may send.
+_PROVIDER_FALLBACKS: tuple[WorkspaceDeleteFallback, ...] = tuple(
+    o for o in WorkspaceDeleteFallback if o is not WorkspaceDeleteFallback.UNRECOGNIZED
+)
 
 #: The one list of field names. The Protocol below must expose exactly these;
 #: a unit test pins the two together.
@@ -46,6 +50,8 @@ class TeardownReportLike(Protocol):
     @property
     def oom_kills(self) -> int | None: ...
     @property
+    def oom_killed(self) -> bool | None: ...
+    @property
     def disk_bytes_at_teardown(self) -> int | None: ...
     @property
     def delete_failures(self) -> tuple[str, ...] | None: ...
@@ -53,6 +59,8 @@ class TeardownReportLike(Protocol):
     def net_rx_bytes(self) -> int | None: ...
     @property
     def net_tx_bytes(self) -> int | None: ...
+    @property
+    def delete_fallback(self) -> str | None: ...
 
 
 def usage_from_report(report: object) -> WorkspaceUsage | None:
@@ -79,4 +87,28 @@ def usage_from_report(report: object) -> WorkspaceUsage | None:
     usage = WorkspaceUsage(**{name: getattr(report, name, None) for name in USAGE_FIELDS})
     if usage.delete_failures is not None:
         usage = dataclasses.replace(usage, delete_failures=tuple(usage.delete_failures))
+    if usage.delete_fallback is not None:
+        usage = dataclasses.replace(
+            usage, delete_fallback=_delete_fallback(report, usage.delete_fallback)
+        )
     return usage
+
+
+def _delete_fallback(report: object, value: object) -> WorkspaceDeleteFallback:
+    """The provider's fallback-delete outcome, typed.
+
+    A value the provider may not send (anything outside `deleted`, `failed`,
+    `refused`) is a contract mismatch: logged with the raw value and recorded
+    as `UNRECOGNIZED`, so the telemetry row keeps it distinct from None ("not
+    attempted / not reported"). Never raised: this is Lane 2 and teardown must
+    not fail on it.
+    """
+    for outcome in _PROVIDER_FALLBACKS:
+        if value == outcome.value:
+            return outcome
+    logger.warning(
+        "Provider teardown report %s has unknown delete_fallback %r; recorded as unrecognized",
+        type(report).__qualname__,
+        value,
+    )
+    return WorkspaceDeleteFallback.UNRECOGNIZED

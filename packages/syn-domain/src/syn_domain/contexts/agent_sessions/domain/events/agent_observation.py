@@ -94,6 +94,12 @@ class ObservationType(StrEnum):
     # it sizes the platform (docs/north-star.md) and decides nothing.
     WORKSPACE_RESOURCE_USAGE = "workspace_resource_usage"
 
+    # One in-phase retry of a busy upstream (#1882): provider, model, and the
+    # transient kind that earned it. Lane 2: it makes quota pressure visible
+    # per provider and decides nothing - the retry itself is decided, and
+    # bounded, by `UpstreamRetryPolicy`, never by reading these back.
+    UPSTREAM_RETRY = "upstream_retry"
+
 
 @event("AgentObservation", "v1")
 class AgentObservationEvent(DomainEvent):

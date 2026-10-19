@@ -17,8 +17,8 @@ description: Declare Claude Code plugins per workflow and per phase so the agent
 
 Workflows can declare a curated set of Claude Code plugins that the agent
 running each phase should see. The platform fetches the plugin source once,
-content-addresses the result in object storage, and (in a follow-up release)
-materializes the resolved plugin set into each workspace at setup time.
+content-addresses the result in object storage, and materializes the
+resolved plugin set into each workspace at setup time.
 
 This page covers the workflow author's view: the YAML field, the CLI
 commands, error modes, and reproducibility guarantees. Implementation detail
@@ -29,8 +29,8 @@ and the gating issue is
 ## Why this exists
 
 Without workflow-scoped plugins, every workspace sees only the four
-plugins baked into the base image (`sdlc`, `workspace`, `observability`,
-`git`). New plugins ship through a dogfooded loop: the leverage-points
+plugins baked into the base image (`delegation`, `observability`, `sdlc`,
+`workspace`). New plugins ship through a dogfooded loop: the leverage-points
 review workflow needs `software-leverage-points`; future workflows will
 declare their own plugin dependencies. Shipping the dependency alongside
 the workflow definition makes the workflow self-contained.
@@ -146,15 +146,16 @@ syn claude-plugin show software-leverage-points 5.0.7
 
 ## Error codes
 
-The API returns these error codes when a reference cannot be resolved:
+The API returns these error codes when a plugin cannot be registered or resolved:
 
 | `error_code` | Meaning |
 |---|---|
-| `claude_plugin_unreachable` | Source URL did not respond or returned 404 |
-| `claude_plugin_version_not_found` | Tag, branch, or sha not present in the source |
-| `claude_plugin_manifest_missing` | Tree has no `.claude-plugin/plugin.json` |
-| `claude_plugin_manifest_invalid` | `plugin.json` failed to parse |
-| `claude_plugin_auth_required` | Source needs credentials (not yet supported) |
+| `not_a_claude_plugin` | Tree has no `.claude-plugin/plugin.json` |
+| `claude_plugin_manifest_invalid` | `plugin.json` failed to parse or validate |
+| `claude_plugin_invalid_name` | Plugin name is not a safe single path segment |
+| `claude_plugin_invalid_path` | A file path in the uploaded tree failed safety validation |
+| `claude_plugin_not_registered` | Referenced `(name, version)` is not in the lock; run `syn claude-plugin install` first |
+| `claude_plugin_version_hash_mismatch` | A `sha256-` version does not match the submitted tree's hash |
 
 The CLI surfaces these directly so you can fix the YAML and retry without
 parsing log output.
@@ -168,16 +169,9 @@ parsing log output.
 
 ## Status and roadmap
 
-This feature lands in two stages:
-
-- **PR1 (this release).** Dormant plumbing. Workflows can declare
-  `claude_plugins:`, the CLI commands work, and the lock projection fills
-  up. Workspaces still see only the baked-in plugin set.
-- **PR2 (follow-up).** The materialization step. The resolved plugin set
-  is written into `<workspace>/.syn-plugins/<plugin>/` and the agent is
-  invoked with `--plugin-dir` flags pointing at each one. Behavior change
-  only takes effect when a workflow declares `claude_plugins:` or a
-  global plugin is registered.
+Materialization has shipped. The resolved plugin set is written into
+`<workspace>/.syn-plugins/<plugin>/` and a Claude phase is invoked with one
+`--plugin-dir` flag per plugin, in addition to the baked-in plugins.
 
 Org-level and system-level scopes are tracked in
 [#761](https://github.com/syntropic137/syntropic137/issues/761).

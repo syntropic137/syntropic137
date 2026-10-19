@@ -6,16 +6,15 @@ used to be taken from the stream advancing, which proves only that a `docker
 exec` CLIENT started - and that client merges its own stderr into the agent's
 stdout, so its failure diagnostics arrive looking exactly like agent output.
 
-These drive the REAL adapter and the REAL observer against the two shapes a
-`docker exec` failure actually takes, because a double cannot reproduce what
-made this wrong. A mock raising ``RuntimeError`` from its first advance - the
-previous guard - asserts a behaviour the real adapter does not have: it does
-not raise when the client starts and the container is gone. It returns a line,
-and exits non-zero long after the observer has fired.
-
-The daemon is faked, not the transport: a ``docker`` on PATH reproduces the
-observable behaviour of the real client, and everything from
-``_build_exec_command`` inwards is production code.
+These drive the REAL adapter and the REAL observer through agentic-workspace's
+REAL launcher: the stream runs on the provider operation contract, and the
+provider here is AW's local one, whose launch marker is printed by a transient
+``sh`` named by the marker's argv0 that the workload then replaces - the same
+announce-then-exec shape the Docker provider runs inside the container. A real
+``sh`` really fails a real ``exec``. Transport failures (no such container, a
+refused exec) are now the provider's to report: ``start`` raises rather than
+merging a client diagnostic into the stream, so there is no stream line left
+for them to forge.
 
 The marker alone is not the answer either, and the failures below are why. It
 is printed immediately BEFORE the ``exec`` that would make its announcer into
@@ -29,20 +28,16 @@ a number chosen by the test.
 from __future__ import annotations
 
 import os
-import shutil
-import stat
-import subprocess
 import sys
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
+from agentic_isolation import WorkspaceConfig, WorkspaceLocalProvider
+from agentic_isolation.providers.operation_spool import OperationFailure
 
+from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 from syn_adapters.workspace_backends.agentic.stream_adapter import (
     AgenticEventStreamAdapter,
-)
-from syn_adapters.workspace_backends.agentic.stream_helpers import _build_exec_command
-from syn_domain.contexts.orchestration import (
-    AGENT_LAUNCH_MARKER as PUBLISHED_LAUNCH_MARKER,
 )
 from syn_domain.contexts.orchestration import announce_as
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -57,82 +52,47 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
     from pathlib import Path
 
-pytestmark = pytest.mark.unit
+    from agentic_isolation.providers.base import Workspace
 
-_CONTAINER = "agentic-ws-abc123"
+from syn_shared.settings.session_store import SessionStoreSettings
 
-#: Every fake client leaves this behind before doing anything else. Two of the
-#: three cases are entirely silent, so without it a client that failed to run
-#: at all would look identical to one that ran and refused the exec - and the
-#: tests below would pass having exercised nothing. Deliberately NOT the
-#: process exit code, which says whether the WRAPPER ran, not the client: the
-#: two are different questions and each case below asks both.
-_RECEIPT = 'open(sys.argv[0] + ".ran", "w").close()\n'
-
-#: The daemon rejects the exec and the CLIENT reports it - on stderr, which the
-#: adapter merges into stdout, and with an exit code that only exists once the
-#: stream is over. Nothing ran inside the container.
-_NO_SUCH_CONTAINER = (
-    "import sys\n"
-    + _RECEIPT
-    + f'sys.stderr.write("Error response from daemon: No such container: {_CONTAINER}\\n")\n'
-    + "sys.exit(1)\n"
-)
-
-#: The same failure without the courtesy of a diagnostic: the exec is refused
-#: and the stream ends immediately, having yielded nothing.
-_EXEC_REFUSED = "import sys\n" + _RECEIPT + "sys.exit(126)\n"
-
-#: The daemon accepts the exec and creates a process from the container-side
-#: argv, which is the only thing a real `docker exec` adds here. Skipping the
-#: client's own flags and the container name leaves exactly what the daemon
-#: would run - including the announce-then-exec wrapper under test.
-_RUNS_THE_CONTAINER_ARGV = (
-    "import os, sys\n"
-    + _RECEIPT
-    + """argv = sys.argv[1:]
-assert argv[0] == "exec", argv
-i = 1
-while i < len(argv):
-    if argv[i] in ("-i", "-t", "-d"):
-        i += 1
-    elif argv[i] in ("-w", "-e", "-u"):
-        i += 2
-    else:
-        break
-container_argv = argv[i + 1 :]
-os.execvp(container_argv[0], container_argv)
-"""
-)
+# The launcher these tests drive is agentic-workspace's Local provider, which
+# refuses to run on anything but Linux (it reads /proc and uses setsid).
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform != "linux", reason="agentic-workspace Local operations require Linux"
+    ),
+]
 
 
-class _FakeDocker(NamedTuple):
-    """A stream adapter wired to a ``docker`` that behaves a chosen way."""
+class _Launch(NamedTuple):
+    """A stream adapter wired to AW's local operations provider."""
 
     adapter: AgenticEventStreamAdapter
-    receipt: Path
 
-    @property
-    def client_ran(self) -> bool:
-        """Whether the fake client was really executed."""
-        return self.receipt.exists()
+
+class _LocalHost:
+    def __init__(self, provider: WorkspaceLocalProvider, workspace: Workspace) -> None:
+        self.operations = provider
+        self.credentials = WorkspaceCredentials(SessionStoreSettings())
+        self._workspace = workspace
+
+    def workspace(self, isolation_id: str) -> Workspace | None:
+        return self._workspace
 
 
 @pytest.fixture
-def fake_docker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[str], _FakeDocker]:
-    """Put a ``docker`` behaving a given way on PATH, ahead of any real one."""
+async def local_launch(tmp_path: Path) -> AsyncIterator[Callable[[], _Launch]]:
+    """A real launcher on this host: the workload runs, unisolated, under ``sh``."""
+    provider = WorkspaceLocalProvider(base_dir=tmp_path, allow_insecure=True)
+    workspace = await provider.create(WorkspaceConfig(provider="local"))
 
-    def _install(behaviour: str) -> _FakeDocker:
-        docker = tmp_path / "docker"
-        docker.write_text(f"#!/usr/bin/env python3\n{behaviour}")
-        docker.chmod(docker.stat().st_mode | stat.S_IEXEC)
-        monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    def _make() -> _Launch:
+        return _Launch(AgenticEventStreamAdapter(_LocalHost(provider, workspace)))  # type: ignore[arg-type]
 
-        adapter = AgenticEventStreamAdapter()
-        adapter.set_provider(object())
-        return _FakeDocker(adapter, tmp_path / "docker.ran")
-
-    return _install
+    yield _make
+    await provider.destroy(workspace)
 
 
 async def _launches_and_lines(
@@ -166,51 +126,12 @@ async def _launches_and_lines(
     return launches, lines
 
 
-async def test_a_client_diagnostic_is_not_evidence_that_an_agent_ran(
-    fake_docker: Callable[[str], _FakeDocker],
-) -> None:
-    """The break, in its exact production shape.
-
-    The container is gone, so the client says so and quits. The stream carries
-    a line and then ends cleanly - the two things the launch signal used to be
-    taken from - and no process was ever created inside the container. The
-    diagnostic is asserted on deliberately: without it this would pass against
-    an empty stream and prove nothing.
-    """
-    docker = fake_docker(_NO_SUCH_CONTAINER)
-
-    launches, lines = await _launches_and_lines(docker.adapter, ["claude", "-p", "hello"])
-
-    assert lines == [f"Error response from daemon: No such container: {_CONTAINER}"], (
-        "the fake client must really emit its diagnostic, or this test cannot fail"
-    )
-    assert launches == 0
-
-
-async def test_a_refused_exec_is_not_evidence_that_an_agent_ran(
-    fake_docker: Callable[[str], _FakeDocker],
-) -> None:
-    """The silent form of the same failure.
-
-    Nothing is written and the stream ends at once. Read as "the process ran
-    and printed nothing" that becomes a launch; it is a client that never got
-    inside the container.
-    """
-    docker = fake_docker(_EXEC_REFUSED)
-
-    launches, lines = await _launches_and_lines(docker.adapter, ["claude", "-p", "hello"])
-
-    assert docker.client_ran, "the fake client must really run, or this test cannot fail"
-    assert lines == []
-    assert launches == 0
-
-
 async def test_a_process_in_the_container_is_evidence_and_its_output_is_untouched(
-    fake_docker: Callable[[str], _FakeDocker],
+    local_launch: Callable[[], _Launch],
 ) -> None:
     """The positive case, through the real wrapper.
 
-    Drop the announce-then-exec wrapper from ``_build_exec_command`` and this
+    Drop the launch marker from the stream adapter's ``OperationSpec`` and this
     fails: nothing else in the stream can attest a launch. The marker must also
     stay out of the stream - a processor parsing JSONL would choke on it.
 
@@ -219,7 +140,7 @@ async def test_a_process_in_the_container_is_evidence_and_its_output_is_untouche
     that keyed on the stream ENDING rather than on how it ended would show
     itself: the launch has to survive the process finishing.
     """
-    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    docker = local_launch()
 
     launches, lines = await _launches_and_lines(
         docker.adapter, ["python3", "-c", 'print("{\\"type\\":\\"result\\"}")']
@@ -233,7 +154,7 @@ async def test_a_process_in_the_container_is_evidence_and_its_output_is_untouche
 
 @pytest.mark.parametrize("exit_code", [3, 126, 127])
 async def test_an_agent_that_dies_before_printing_anything_still_counts(
-    fake_docker: Callable[[str], _FakeDocker],
+    local_launch: Callable[[], _Launch],
     exit_code: int,
 ) -> None:
     """The mirror-image error, which counting agent output would commit.
@@ -243,7 +164,7 @@ async def test_an_agent_that_dies_before_printing_anything_still_counts(
     statement pointing the other way. It has already announced itself by the
     time it dies.
     """
-    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    docker = local_launch()
 
     launches, lines = await _launches_and_lines(
         docker.adapter, ["python3", "-c", f"raise SystemExit({exit_code})"]
@@ -257,7 +178,7 @@ async def test_an_agent_that_dies_before_printing_anything_still_counts(
 
 
 async def test_a_missing_agent_binary_is_not_evidence_that_an_agent_ran(
-    fake_docker: Callable[[str], _FakeDocker],
+    local_launch: Callable[[], _Launch],
 ) -> None:
     """The failure the announcement itself used to manufacture (#1065).
 
@@ -268,21 +189,19 @@ async def test_a_missing_agent_binary_is_not_evidence_that_an_agent_ran(
     launch, so the exact case the marker exists to detect was the one it could
     not see, and the API would tell a user their session ran and lost its log.
     """
-    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    docker = local_launch()
     missing = "/definitely/missing/claude"
 
-    launches, lines = await _launches_and_lines(docker.adapter, [missing, "-p", "hello"])
-
-    assert docker.client_ran, "the fake client must really run, or this test cannot fail"
-    assert any(missing in line for line in lines), (
-        f"the shell must really have tried and failed to exec {missing}; without its "
-        f"diagnostic this would pass against a stream that never reached the wrapper: {lines}"
-    )
-    assert launches == 0
+    # AW's local provider refuses an argv0 it cannot exec before launching
+    # anything, so no stream exists to carry a marker. The Docker provider
+    # cannot see inside the container and lets the shell fail instead; that
+    # shape is the missing-interpreter case below.
+    with pytest.raises(OperationFailure, match="could not launch"):
+        await _launches_and_lines(docker.adapter, [missing, "-p", "hello"])
 
 
 async def test_an_agent_binary_that_cannot_be_executed_is_not_evidence(
-    fake_docker: Callable[[str], _FakeDocker],
+    local_launch: Callable[[], _Launch],
     tmp_path: Path,
 ) -> None:
     """The same lie told by a file that exists, which resolution alone misses.
@@ -296,16 +215,14 @@ async def test_an_agent_binary_that_cannot_be_executed_is_not_evidence(
     agent = tmp_path / "claude-without-the-bit"
     agent.write_text("#!/bin/sh\necho 'never reached'\n")
     agent.chmod(0o644)
-    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    docker = local_launch()
 
-    launches, lines = await _launches_and_lines(docker.adapter, [str(agent), "-p", "hello"])
-
-    assert docker.client_ran, "the fake client must really run, or this test cannot fail"
-    assert any(str(agent) in line for line in lines), (
-        f"the shell must really have tried and failed to exec {agent}; without its "
-        f"diagnostic this would pass against a stream that never reached the wrapper: {lines}"
-    )
-    assert launches == 0
+    # AW's local provider refuses an argv0 it cannot exec before launching
+    # anything, so no stream exists to carry a marker. The Docker provider
+    # cannot see inside the container and lets the shell fail instead; that
+    # shape is the missing-interpreter case below.
+    with pytest.raises(OperationFailure, match="could not launch"):
+        await _launches_and_lines(docker.adapter, [str(agent), "-p", "hello"])
 
 
 # The one case here whose expected status is decided by the host rather than by
@@ -327,7 +244,7 @@ async def test_an_agent_binary_that_cannot_be_executed_is_not_evidence(
     ),
 )
 async def test_an_agent_whose_interpreter_is_missing_is_not_evidence(
-    fake_docker: Callable[[str], _FakeDocker],
+    local_launch: Callable[[], _Launch],
     tmp_path: Path,
 ) -> None:
     """The case that defeats every check a wrapper could make before ``exec``.
@@ -348,7 +265,7 @@ async def test_an_agent_whose_interpreter_is_missing_is_not_evidence(
     agent = tmp_path / "claude-with-a-missing-interpreter"
     agent.write_text("#!/definitely/missing/interpreter\nprint('never reached')\n")
     agent.chmod(0o755)
-    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    docker = local_launch()
 
     launches, lines = await _launches_and_lines(docker.adapter, [str(agent), "-p", "hello"])
 
@@ -400,7 +317,7 @@ def test_the_missing_interpreter_case_still_runs_where_it_is_true() -> None:
 
 
 async def test_an_agent_that_spoke_and_then_exited_127_is_still_launched(
-    fake_docker: Callable[[str], _FakeDocker],
+    local_launch: Callable[[], _Launch],
 ) -> None:
     """The retraction's own residue, which reading the status alone got wrong (#1065).
 
@@ -415,7 +332,7 @@ async def test_an_agent_that_spoke_and_then_exited_127_is_still_launched(
     not lost data. That is the same false statement as #1047, reached from the
     other direction.
     """
-    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    docker = local_launch()
 
     launches, lines = await _launches_and_lines(
         docker.adapter,
@@ -432,7 +349,7 @@ async def test_an_agent_that_spoke_and_then_exited_127_is_still_launched(
 
 
 async def test_an_agent_that_impersonates_the_wrapper_is_still_launched(
-    fake_docker: Callable[[str], _FakeDocker],
+    local_launch: Callable[[], _Launch],
 ) -> None:
     """Why the wrapper's name is minted rather than written down (#1065).
 
@@ -447,7 +364,7 @@ async def test_an_agent_that_impersonates_the_wrapper_is_still_launched(
     exits 127, and the launch survives, because the name it could not see is
     the part that counts.
     """
-    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    docker = local_launch()
     forged = "syn-launch: 1: exec: /usr/local/bin/claude: not found"
 
     launches, lines = await _launches_and_lines(
@@ -460,7 +377,7 @@ async def test_an_agent_that_impersonates_the_wrapper_is_still_launched(
 
 
 async def test_an_agent_that_announces_a_wrapper_name_of_its_own_is_still_launched(
-    fake_docker: Callable[[str], _FakeDocker],
+    local_launch: Callable[[], _Launch],
 ) -> None:
     """The forgery a minted name alone does not stop (#1065).
 
@@ -481,7 +398,7 @@ async def test_an_agent_that_announces_a_wrapper_name_of_its_own_is_still_launch
     running the real wrapper, a real failed process status, the real observer -
     because the defect lived in exactly the hop between them.
     """
-    docker = fake_docker(_RUNS_THE_CONTAINER_ARGV)
+    docker = local_launch()
     forged_name = "syn-launch-deadbeefdeadbeef"
     forged_announcement = announce_as(forged_name)
     forged_diagnostic = f"{forged_name}: 1: exec: /usr/local/bin/claude: not found"
@@ -510,24 +427,6 @@ async def test_an_agent_that_announces_a_wrapper_name_of_its_own_is_still_launch
     )
 
 
-class _ContainerArgv(NamedTuple):
-    """The three things the adapter hands a container, read back out of the argv.
-
-    Taken positionally, from what a container would really be given, rather
-    than by importing the constants a third time - an assertion that re-imports
-    the value it is checking cannot see the two halves disagree.
-    """
-
-    script: str
-    wrapper: str
-    announcement: str
-
-    @classmethod
-    def of(cls, exec_argv: list[str]) -> _ContainerArgv:
-        sh = exec_argv.index("sh")
-        return cls(*exec_argv[sh + 2 : sh + 5])
-
-
 async def _observed(lines_for: Callable[[str], list[str]]) -> tuple[bool, list[str]]:
     """Put lines through the real observer, settled as a clean exit would settle it.
 
@@ -552,118 +451,3 @@ async def _observed(lines_for: Callable[[str], list[str]]) -> tuple[bool, list[s
     survived = [line async for line in evidence.observing(stream())]
     await evidence.settle(exit_code=0)
     return launched, survived
-
-
-async def test_the_announcement_the_adapter_makes_is_the_one_the_domain_counts() -> None:
-    """The hop between the two halves of the launch contract (#1065).
-
-    ``_build_exec_command`` bakes the announcement into a container-side argv
-    and reaches it through the orchestration context's public API;
-    ``AgentLaunchEvidence`` decides what counts as evidence and defines it. Both
-    ends are exercised above, but only against each other - so a public export
-    that drifted from the line it re-exports would leave the adapter announcing
-    a string the observer ignores, every session would report never-started,
-    and every other test here would still pass.
-    """
-    built: list[_ContainerArgv] = []
-
-    def as_the_adapter_would(wrapper_name: str) -> list[str]:
-        built.append(
-            _ContainerArgv.of(
-                _build_exec_command(
-                    _CONTAINER,
-                    ["claude", "-p", "hello"],
-                    None,
-                    None,
-                    wrapper_name=wrapper_name,
-                )
-            )
-        )
-        return [built[0].announcement, '{"type":"result"}']
-
-    launched, survived = await _observed(as_the_adapter_would)
-
-    argv = built[0]
-    assert launched is True, (
-        f"the observer does not count {argv.announcement!r}, the line the adapter really prints"
-    )
-    assert survived == ['{"type":"result"}'], "the announcement is consumed, not forwarded"
-    assert argv.announcement == announce_as(argv.wrapper), (
-        "the context owns this line's format; the adapter must announce exactly what "
-        "it publishes, or the observer will not recognise the wrapper it then quotes"
-    )
-    assert argv.announcement.startswith(PUBLISHED_LAUNCH_MARKER), (
-        "the context publishes this constant as the wire contract"
-    )
-
-
-async def test_each_exec_is_wrapped_under_a_name_the_last_one_did_not_use() -> None:
-    """What stops the discriminator from being a string an agent can type (#1065).
-
-    The retraction now turns on whether a line was signed by the wrapper, and
-    agent stdout and the wrapper's stderr are the same stream by design
-    (ADR-043). A wrapper named by a constant would therefore let an agent
-    print its own retraction and be reported as never having existed - the
-    exact false statement this module exists to prevent, reachable from
-    ordinary output. Being unable to guess the name is the whole defence, so a
-    name that repeats is the defect.
-    """
-    names = {
-        _ContainerArgv.of(
-            _build_exec_command(
-                _CONTAINER,
-                ["claude"],
-                None,
-                None,
-                wrapper_name=AgentLaunchEvidence(None).wrapper_name,
-            )
-        ).wrapper
-        for _ in range(50)
-    }
-
-    assert len(names) == 50, f"wrapper names repeat across execs: {sorted(names)[:5]}"
-    assert all(len(name) >= 16 for name in names), f"too short to be unguessable: {names}"
-
-
-@pytest.mark.parametrize("shell", ["dash", "bash"])
-async def test_the_shell_signs_its_exec_diagnostic_with_the_name_we_gave_it(shell: str) -> None:
-    """The property the retraction rests on, taken from a real shell (#1065).
-
-    ``AgentLaunchEvidence`` tells the wrapper's voice from the agent's by the
-    ``$0`` this repo sets, and NOT by the wording after it - because the
-    wording is not ours. These two disagree about it completely:
-
-        dash: ``NAME: 1: exec: /missing: not found``
-        bash: ``NAME: line 1: /missing: No such file or directory``
-
-    Which of them is /bin/sh is a property of the workspace image, so a rule
-    that read the wording would pass here and fail in production the day that
-    image changed. Both agree on the prefix, and this is what pins that.
-    """
-    if (shell_path := shutil.which(shell)) is None:
-        pytest.skip(f"{shell} is not installed")
-    argv = _ContainerArgv.of(
-        _build_exec_command(
-            _CONTAINER,
-            ["/definitely/missing/claude"],
-            None,
-            None,
-            wrapper_name=AgentLaunchEvidence(None).wrapper_name,
-        )
-    )
-
-    missing = "/definitely/missing/claude"
-    result = subprocess.run(
-        [shell_path, "-c", argv.script, argv.wrapper, argv.announcement, missing],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    printed = (result.stdout + result.stderr).splitlines()
-    assert argv.announcement in printed, f"{shell} did not make the announcement: {printed}"
-    diagnostic = next(line for line in printed if line != argv.announcement)
-    assert diagnostic.startswith(f"{argv.wrapper}:"), (
-        f"{shell} does not sign its exec diagnostic with $0: {diagnostic!r}"
-    )
-    assert result.returncode == 127

@@ -47,6 +47,12 @@ For each non-draft agent PR:
    `uv run pytest ci/fitness -q` and `just preflight`.
 4. CI: every required check green and none cancelled. "CI Success" passes on
    cancelled jobs (#1623). The Vercel preview is not required.
+   A red `Mutation Patches Not Merged` is yours, never a workflow phase's: the
+   PR still tracks `.mutations/`. Run `just mutation-evidence N "<ids>"`, and
+   only once its `<!-- mutation-evidence -->` comment reports PASS for the
+   current head SHA, commit the removal of `.mutations/` yourself. If a phase
+   deleted them before that PASS, restore them from the last head that had
+   them and dispatch the trusted run (#2028).
 5. `gh pr merge N --merge --match-head-commit <sha>`.
 6. After merging one of two sibling PRs, merge main into the other and re-test
    it.

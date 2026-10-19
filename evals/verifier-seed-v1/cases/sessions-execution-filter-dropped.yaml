@@ -13,6 +13,13 @@ task: >
   filters it offers. Every session row carries the execution it belongs to,
   and clients use this endpoint to find one run's sessions.
 expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    GET /api/v1/sessions declares no execution_id query parameter, and
+    FastAPI silently drops unknown query parameters, so a client filtering
+    sessions by execution gets every session unfiltered with no error, even
+    though each row carries its execution id and the projection supports the
+    filter.
   files:
     - apps/syn-api/src/syn_api/routes/sessions.py
   keywords:
