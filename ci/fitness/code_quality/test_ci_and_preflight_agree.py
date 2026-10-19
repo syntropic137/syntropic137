@@ -116,6 +116,9 @@ _NOT_A_GATE: dict[str, str] = {
     "test-e2e-container": _TESTS,
     "test-e2e-container-build": _TESTS,
     "fitness-report": "a verbose re-run of fitness-invariants, which preflight already runs",
+    "check-docs-drift": (
+        "prints the full list behind test_docs_drift.py, which fitness-invariants already runs"
+    ),
     "check": "an older sweep of lint, format, typecheck and fitness; preflight runs each directly",
     "qa": "the broad local sweep; it runs tests, which preflight deliberately does not",
     "qa-full": "qa plus coverage; it runs tests, which preflight deliberately does not",

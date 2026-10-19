@@ -24,8 +24,8 @@ All data in Syntropic137 flows through two strictly separated lanes:
 | **Purpose** | Source of truth for business logic and state transitions | High-throughput telemetry for dashboards and debugging |
 | **Validation** | Aggregate invariants: commands can be rejected | Schema only, always accepted |
 | **Storage** | TimescaleDB (append-only, replay-safe) | TimescaleDB (hypertable, time-series optimized) |
-| **Pipeline** | Command → Aggregate → Event → Projection | Agent stdout → Collector → EventBuffer → TimescaleDB |
-| **Examples** | `WorkflowCreated`, `ExecutionStarted`, `TriggerFired` | `ToolExecuted`, `TokensUsed`, `StreamChunk` |
+| **Pipeline** | Command → Aggregate → Event → Projection | Agent stdout → API stream processor → AgentEventStore → TimescaleDB |
+| **Examples** | `WorkflowTemplateCreated`, `WorkflowExecutionStarted`, `github.TriggerFired` | `tool_execution_completed`, `token_usage`, `session_summary` |
 
 <Callout type="info">
 Observability events never flow through aggregates. Telemetry (token counts, tool traces, timing) is append-only and never replayed to reconstruct state. The two lanes are architecturally separate.
@@ -39,7 +39,7 @@ Commands and queries are strictly separated.
 
 **Commands** modify state by going through aggregates. The aggregate validates the command against its current state, decides whether to accept or reject it, and emits one or more events.
 
-**Queries** never touch aggregates. They read from pre-built projections, read models computed from the event stream and cached in Redis or PostgreSQL for fast lookups.
+**Queries** never touch aggregates. They read from pre-built projections, read models computed from the event stream and stored in PostgreSQL for fast lookups.
 
 ### How Projections Work
 
@@ -128,9 +128,9 @@ Projections subscribe to the event stream through a catch-up subscription with l
 
 1. On startup, a projection reads all events from its last checkpoint position
 2. Once caught up, it switches to live mode, receiving new events as they are committed
-3. Each projection maintains its own checkpoint, they advance independently
+3. Each projection maintains its own checkpoint
 
-This means projections can safely restart mid-stream without reprocessing the full history, and a slow projection doesn't block faster ones.
+This means projections can safely restart mid-stream without reprocessing the full history. Projections at the head of the stream share one subscription and take each event in turn, so a slow one delays the others; a projection that has to replay far behind head gets its own subscription so its rebuild does not hold up the rest.
 
 ## Real-Time Communication
 
@@ -146,6 +146,6 @@ SSE was chosen over WebSockets because execution updates are unidirectional: the
 
 Both event pipelines are optimized for their access patterns:
 
-- **Domain events** use append-only writes with aggregate-level consistency. Reads go through Redis-cached projections for sub-millisecond response times.
+- **Domain events** use append-only writes with aggregate-level consistency. Reads go through projections stored in PostgreSQL, not the event store.
 - **Observability events** use TimescaleDB hypertables with automatic time-based partitioning for high-throughput ingest. Tool timelines and token metrics are never on the critical path of command processing.
-- **Read models** are computed once and cached. Dashboard queries hit Redis, not the event store.
+- **Read models** are computed once and stored. Dashboard queries read projections, not the event store.

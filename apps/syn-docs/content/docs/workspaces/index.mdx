@@ -11,13 +11,13 @@ Workspace images are built by [agentic-workspace](https://github.com/AgentParadi
 
 | Image | Harnesses | Notes |
 |-------|-----------|-------|
-| `ghcr.io/agentparadise/agentic-workspace-buildfloor` | claude and codex | The default. `omni-agent` plus build tooling (build-essential, pkg-config, unzip, rustup, pnpm, bun). `SYN_WORKSPACE_DOCKER_IMAGE` pins it by digest. |
+| `ghcr.io/agentparadise/agentic-workspace-toolchain` | claude and codex | The default. `omni-agent` plus build tooling (build-essential, pkg-config, unzip, rustup, pnpm, bun). `SYN_WORKSPACE_DOCKER_IMAGE` pins it by digest. |
 | `ghcr.io/agentparadise/agentic-workspace-omni-agent` | claude and codex | The lighter base, without the extra build/language tooling. |
 | `ghcr.io/agentparadise/agentic-workspace-claude` | claude and codex | The heaviest image. Adds LSP servers and the Rust toolchain, which back Claude Code LSP plugin identifiers and are harness-specific weight. |
 
 All three images ship both CLIs, pinned to explicit versions. What varies is the tooling stacked around them:
 
-| Component | omni-agent | buildfloor | claude |
+| Component | omni-agent | toolchain | claude |
 |-----------|------------|------------|--------|
 | Claude CLI | Yes | Yes | Yes |
 | Codex CLI | Yes | Yes | Yes |
@@ -25,7 +25,7 @@ All three images ship both CLIs, pinned to explicit versions. What varies is the
 | Node.js 22 LTS | Yes | Yes | Yes |
 | GitHub CLI | Yes | Yes | Yes |
 | RTK token compression | Yes | Yes | No |
-| Build tooling (build-essential, pkg-config, unzip, rustup, pnpm, bun) | No | Yes | No |
+| Build tooling (build-essential, pkg-config, unzip, rustup, pnpm, bun) | No | Yes | Partial (no pnpm or bun) |
 | Rust toolchain | No | No | Yes |
 | LSP servers (pyright, typescript-language-server, rust-analyzer) | No | No | Yes |
 | Claude Code plugins (sdlc, workspace, observability, delegation) | Yes | Yes | Yes |
@@ -68,8 +68,7 @@ enabling version-aware dashboards and audit trails.
 
 Images are built for both `linux/amd64` and `linux/arm64`:
 
-- **amd64**: Pre-built static binaries (fast builds)
-- **arm64**: prebuilt release binaries per architecture. RTK takes upstream's glibc build on arm64 and its static musl build on amd64
+RTK is compiled from source in the image build against the base image's glibc, on both architectures. Upstream's prebuilt arm64 binary needs a newer glibc than the base provides.
 
 ## Next Steps
 
