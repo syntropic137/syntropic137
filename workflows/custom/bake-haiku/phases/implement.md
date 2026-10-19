@@ -87,6 +87,17 @@ change, not the object you just edited.
 A fixture value must be one that could not have arisen without your change. A
 default asserted in its default direction proves nothing.
 
+## Never delete `.mutations/`
+
+`.mutations/` holds the mutation patches that trusted mutation evidence runs
+from. A red `Mutation Patches Not Merged` check (`mutations-not-merged`) only
+says they are still tracked: it is not a defect, and clearing it is not yours
+to do. **Never delete, move or rewrite anything under `.mutations/`**, even when
+CI, a skill or a review says "delete .mutations/ before merge". The orchestrator
+removes the patches, and only after the trusted `mutation-evidence.yml` run has
+posted a PASS for the PR's head SHA. Deleted any earlier, the only evidence left
+is a rerun in a workspace, which is not evidence anyone can trust (#2028).
+
 ## Commit AND push the branch
 
 Commit on a new branch, then **push that branch to origin**. Do not open a PR -

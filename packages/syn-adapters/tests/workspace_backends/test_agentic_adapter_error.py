@@ -27,7 +27,7 @@ def _stub_image_verification() -> object:
         return image_ref
 
     with patch(
-        "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+        "syn_adapters.workspace_backends.backend_kit.verify_image_async",
         side_effect=_passthrough,
     ) as stub:
         yield stub

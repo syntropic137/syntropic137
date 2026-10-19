@@ -6,22 +6,17 @@ See ADR-021: Isolated Workspace Architecture
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from syn_shared.settings import (
     DEFAULT_WORKSPACE_IMAGE,
-    CloudProvider,
     ContainerLoggingSettings,
     GitCredentialType,
     GitIdentityResolver,
     GitIdentitySettings,
-    IsolationBackend,
-    WorkspaceSecuritySettings,
     WorkspaceSettings,
-    get_default_isolation_backend,
     reset_settings,
 )
 
@@ -32,90 +27,6 @@ def reset_settings_cache() -> None:
     reset_settings()
     yield
     reset_settings()
-
-
-@pytest.mark.integration
-class TestIsolationBackend:
-    """Test IsolationBackend enum."""
-
-    def test_all_backends_defined(self) -> None:
-        """All expected isolation backends should be defined."""
-        assert IsolationBackend.FIRECRACKER == "firecracker"
-        assert IsolationBackend.KATA == "kata"
-        assert IsolationBackend.GVISOR == "gvisor"
-        assert IsolationBackend.DOCKER_HARDENED == "docker_hardened"
-        assert IsolationBackend.CLOUD == "cloud"
-
-    def test_backend_count(self) -> None:
-        """Should have exactly 5 backends."""
-        assert len(IsolationBackend) == 5
-
-
-@pytest.mark.unit
-class TestCloudProvider:
-    """Test CloudProvider enum."""
-
-    def test_all_providers_defined(self) -> None:
-        """All expected cloud providers should be defined."""
-        assert CloudProvider.E2B == "e2b"
-        assert CloudProvider.MODAL == "modal"
-
-
-@pytest.mark.unit
-class TestWorkspaceSecuritySettings:
-    """Test WorkspaceSecuritySettings class."""
-
-    def test_default_values_are_restrictive(self) -> None:
-        """Default values should be maximally restrictive."""
-        with patch.dict(os.environ, {}, clear=True):
-            security = WorkspaceSecuritySettings(_env_file=None)
-
-            # Network isolated by default
-            assert security.allow_network is False
-            assert security.allowed_hosts == ""
-            assert security.get_allowed_hosts_list() == []
-
-            # Filesystem protected
-            assert security.read_only_root is True
-            assert security.max_workspace_size == "1Gi"
-
-            # Resource limits set
-            assert security.max_pids == 100
-            assert security.max_execution_time == 3600
-
-    def test_environment_override(self) -> None:
-        """Environment variables should override defaults."""
-        env = {
-            "SYN_SECURITY_ALLOW_NETWORK": "true",
-            "SYN_SECURITY_MAX_PIDS": "500",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            security = WorkspaceSecuritySettings(_env_file=None)
-
-            assert security.allow_network is True
-            assert security.max_pids == 500
-
-    def test_allowed_hosts_comma_format(self) -> None:
-        """allowed_hosts should parse comma-separated format."""
-        env = {
-            "SYN_SECURITY_ALLOWED_HOSTS": "pypi.org, api.github.com",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            security = WorkspaceSecuritySettings(_env_file=None)
-
-            assert security.allowed_hosts == "pypi.org, api.github.com"
-            assert security.get_allowed_hosts_list() == ["pypi.org", "api.github.com"]
-
-    def test_allowed_hosts_empty_string(self) -> None:
-        """allowed_hosts should handle empty string."""
-        env = {
-            "SYN_SECURITY_ALLOWED_HOSTS": "",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            security = WorkspaceSecuritySettings(_env_file=None)
-
-            assert security.allowed_hosts == ""
-            assert security.get_allowed_hosts_list() == []
 
 
 @pytest.mark.unit
@@ -132,38 +43,7 @@ class TestWorkspaceSettings:
             assert settings.memory_limit_mb == 4096
             assert settings.cpu_limit == 2.0
 
-            assert settings.cloud_provider == CloudProvider.E2B
-            assert settings.cloud_api_key is None
-
-            # Docker settings
             assert settings.docker_image == DEFAULT_WORKSPACE_IMAGE
-            assert settings.docker_runtime == "runsc"
-            assert settings.docker_network == "none"
-
-    def test_isolation_backend_override(self) -> None:
-        """isolation_backend should be overridable via env."""
-        env = {
-            "SYN_WORKSPACE_ISOLATION_BACKEND": "docker_hardened",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            settings = WorkspaceSettings(_env_file=None)
-
-            assert settings.isolation_backend == IsolationBackend.DOCKER_HARDENED
-
-    def test_cloud_settings_override(self) -> None:
-        """Cloud settings should be overridable via env."""
-        env = {
-            "SYN_WORKSPACE_CLOUD_PROVIDER": "modal",
-            "SYN_WORKSPACE_CLOUD_API_KEY": "secret-key",
-            "SYN_WORKSPACE_CLOUD_TEMPLATE": "custom-template",
-        }
-        with patch.dict(os.environ, env, clear=True):
-            settings = WorkspaceSettings(_env_file=None)
-
-            assert settings.cloud_provider == CloudProvider.MODAL
-            assert settings.cloud_api_key is not None
-            assert settings.cloud_api_key.get_secret_value() == "secret-key"
-            assert settings.cloud_template == "custom-template"
 
     def test_container_limits_override(self) -> None:
         """Per-container limits are read from SYN_WORKSPACE_* env vars."""
@@ -176,37 +56,6 @@ class TestWorkspaceSettings:
 
             assert settings.memory_limit_mb == 1536
             assert settings.cpu_limit == 1.5
-
-
-@pytest.mark.unit
-class TestGetDefaultIsolationBackend:
-    """Test get_default_isolation_backend function."""
-
-    def test_returns_isolation_backend(self) -> None:
-        """Should return an IsolationBackend enum value."""
-        backend = get_default_isolation_backend()
-        assert isinstance(backend, IsolationBackend)
-
-    @patch("sys.platform", "linux")
-    @patch("shutil.which")
-    def test_linux_with_firecracker(self, mock_which: patch) -> None:
-        """Linux with KVM and Firecracker should use Firecracker."""
-        mock_which.return_value = "/usr/bin/firecracker"
-
-        with patch.object(Path, "exists", return_value=True):
-            backend = get_default_isolation_backend()
-            # If firecracker is available, should return FIRECRACKER
-            assert backend == IsolationBackend.FIRECRACKER
-
-    @patch("sys.platform", "darwin")
-    @patch("shutil.which")
-    def test_macos_uses_gvisor_fallback(self, mock_which: patch) -> None:
-        """macOS should fall back to gVisor."""
-        mock_which.return_value = "/usr/local/bin/docker"
-
-        backend = get_default_isolation_backend()
-        # macOS can't use Firecracker, should fall back to GVISOR
-        assert backend == IsolationBackend.GVISOR
 
 
 @pytest.mark.unit
@@ -319,24 +168,15 @@ class TestSettingsWorkspaceIntegration:
             workspace = WorkspaceSettings(_env_file=None)
             assert isinstance(workspace, WorkspaceSettings)
 
-    def test_workspace_security_settings_creation(self) -> None:
-        """WorkspaceSecuritySettings should be creatable with defaults."""
-        with patch.dict(os.environ, {}, clear=True):
-            security = WorkspaceSecuritySettings(_env_file=None)
-            assert isinstance(security, WorkspaceSecuritySettings)
-
     def test_workspace_respects_env_vars(self) -> None:
         """Workspace settings should respect env vars."""
         env = {
             "SYN_WORKSPACE_MEMORY_LIMIT_MB": "2000",
-            "SYN_SECURITY_MAX_PIDS": "200",
         }
         with patch.dict(os.environ, env, clear=True):
             workspace = WorkspaceSettings(_env_file=None)
-            security = WorkspaceSecuritySettings(_env_file=None)
 
             assert workspace.memory_limit_mb == 2000
-            assert security.max_pids == 200
 
 
 # =============================================================================

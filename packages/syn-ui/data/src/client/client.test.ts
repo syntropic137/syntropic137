@@ -147,7 +147,8 @@ describe('time-window bucketing', () => {
     expect(queryKey('listExecutions', [a])).toBe(queryKey('listExecutions', [b]))
     expect(a.started_after).toBe('2026-10-08T11:00:00.000Z') // floored: never narrower than asked
     expect(queryKey('listExecutions', [at(base + 61_000)])).not.toBe(queryKey('listExecutions', [a]))
-    expect(bucketTimeWindow({ page: 1, page_size: 1, started_before: '2026-10-08T11:00:00.001Z' }).started_before).toBe('2026-10-08T11:01:00.000Z')
+    // The upper bound is inclusive and never clock-derived: passed through, never rounded up into the next bucket.
+    expect(bucketTimeWindow({ page: 1, page_size: 1, started_before: '2026-10-13T23:59:59.999999Z' }).started_before).toBe('2026-10-13T23:59:59.999999Z')
   })
   it('listExecutions keys by the bucketed window, so a second call within the minute is a cache hit', async () => {
     const { listExecutions } = await import('../resources/executions')

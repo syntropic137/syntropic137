@@ -27,17 +27,17 @@ Syntropic137 distinguishes between two kinds of events, each optimized for its u
 
 Commands and queries are strictly separated. Commands modify state through aggregates; queries read from pre-built projections cached in Redis.
 
-**Commands (62):** `CreateWorkflow`, `StartExecution`, `CancelExecution`, `ResumeExecution`, `RegisterTrigger`, `UpdateTrigger`, `DeleteTrigger`, and more.
+**Commands (80):** `CreateWorkflow`, `StartExecution`, `CancelExecution`, `ResumeExecution`, `RegisterTrigger`, `UpdateTrigger`, `DeleteTrigger`, and more.
 
-**Events (90):** Every command produces one or more events: `WorkflowCreated`, `ExecutionStarted`, `ExecutionResumed`, `ExecutionCompleted`, `TriggerRegistered`, etc.
+**Events (114):** Every command produces one or more events: `WorkflowCreated`, `ExecutionStarted`, `ExecutionResumed`, `ExecutionCompleted`, `TriggerRegistered`, etc.
 
-**Projections (31):** Pre-computed read models subscribed to domain events, cached in Redis or PostgreSQL for sub-millisecond query response times. Includes a `repo_correlation` projection that maps repositories to workflow executions for cross-context insight queries.
+**Projections (32):** Pre-computed read models subscribed to domain events, cached in Redis or PostgreSQL for sub-millisecond query response times. Includes a `repo_correlation` projection that maps repositories to workflow executions for cross-context insight queries.
 
 <CQRSFlow />
 
 ## Domain Model
 
-Syntropic137 is organized into five bounded contexts. The diagram below is a simplified view; the generated list of every aggregate per context is in the [repository README](https://github.com/syntropic137/syntropic137#architecture).
+Syntropic137 is organized into six bounded contexts. The diagram below is a simplified view; the generated list of every aggregate per context is in the [repository README](https://github.com/syntropic137/syntropic137#architecture).
 
 <DomainModelFlow />
 
@@ -46,8 +46,10 @@ Syntropic137 is organized into five bounded contexts. The diagram below is a sim
 Syntropic137 uses **Server-Sent Events (SSE)** for real-time monitoring of executions: progress updates, tool events, token metrics, and state changes all stream over a single connection:
 
 ```
-GET /api/executions/{execution_id}/stream
+GET /api/v1/sse/executions/{execution_id}
 ```
+
+Global activity across all executions streams from `GET /api/v1/sse/activity`. From the CLI, `syn watch execution <id>` and `syn watch activity` follow the same streams.
 
 Control commands (cancel, inject) are sent via standard REST API calls rather than a persistent connection.
 

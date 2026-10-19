@@ -1,0 +1,313 @@
+name: Mutation Evidence
+
+# Proves that named tests KILL reviewed mutation patches committed on a PR.
+#
+# Replaces local Docker verifier runs: the owner banned them (permission
+# prompts) and agent workspaces have no Docker. Dispatch only:
+#
+#   just mutation-evidence <pr> "<node id> <node id>"
+#
+# Each `*.patch` in `mutations_dir` on the PR head is one mutation of non-test
+# source. The named tests must pass on the unmutated head first, then every
+# patch must be killed. The runner is scripts/mutation_evidence.py; read its
+# docstring for exactly what KILLED and SURVIVED do and do not prove.
+#
+# Delete the mutations dir before merge: ci.yml's `mutations-not-merged` job
+# fails any PR into main that still carries `.mutations/`. The PR comment this
+# workflow writes is the record.
+#
+# SECURITY MODEL. This runs PR code, so:
+# - Inputs reach shell only through env vars and are validated by a trusted
+#   script before anything else runs. No free-form expressions are accepted.
+# - Fork PRs are refused: only branches in this repository, which already
+#   required write access to push.
+# - The workflow, the runner script and the setup action come from the
+#   dispatched ref (`trusted/`), never from the PR head (`pr/`).
+# - PR code never runs on the runner host. `uv sync` (which executes build
+#   backends) and every pytest run happen in a throwaway container: the PR
+#   checkout mounted, its .git read-only, no Docker socket, only the test
+#   variables forwarded. So PR code cannot rewrite the trusted runner or its
+#   report, plant git hooks the host then runs, or reach the runner's
+#   credentials (GITHUB_TOKEN, the Actions runtime token and so the cache).
+# - `cache-mode: none` for the whole workflow: a dispatch on main may otherwise
+#   write default-branch caches, and in docker mode PR code on the host can
+#   recover the runtime token. With no cache access, nothing it plants is ever
+#   restored by another workflow. (actionlint 1.7.12 does not know the key yet;
+#   .github/actionlint.yaml ignores exactly that error for this file.)
+# - EXCEPT with `docker: true`, for tests that drive the Docker daemon
+#   themselves (docker compose with host bind mounts). A container holding the
+#   Docker socket IS the host, so PR code runs on the runner host and could
+#   forge its own report. The guards below still hold; the verdict is evidence
+#   about honest PR code, not a security boundary. This is the DEFAULT, as in
+#   ci.yml's integration job: the first real target (#1929) runs docker
+#   compose. `docker: false` opts into the sandbox for tests that need no
+#   Docker, and is the stronger guarantee when it applies.
+# - That job has `contents: read`, no secrets, no persisted credentials and no
+#   uv cache. The `pull-requests: write` token exists only in the comment job,
+#   on a fresh runner, and posts the report the TRUSTED runner wrote.
+# - Trusted host steps run stdlib-only scripts on setup-python's interpreter
+#   with `python -I`, never through uv: `uv run` discovers a virtualenv in the
+#   working directory, and a PR can commit a `.venv` whose `bin/python` is
+#   anything. Nothing on the host reads the PR's uv config or environment.
+
+run-name: "Mutation evidence for PR #${{ inputs.pr }} ${{ inputs.dispatch_id }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Pull request number'
+        required: true
+        type: number
+      tests:
+        description: 'Space-separated pytest node ids (path/test_x.py::test_y)'
+        required: true
+        type: string
+      mutations_dir:
+        description: 'Directory of *.patch files on the PR head'
+        required: false
+        default: '.mutations/'
+        type: string
+      docker:
+        description: >-
+          Run PR code on the runner host so tests can drive the Docker daemon,
+          as ci.yml does. false = socket-less sandbox (stronger isolation; see
+          SECURITY MODEL)
+        required: false
+        default: true
+        type: boolean
+      dispatch_id:
+        description: 'Optional nonce shown in the run name, so a dispatcher can find its own run'
+        required: false
+        default: ''
+        type: string
+
+permissions: {}
+
+cache-mode: none
+
+# One group per dispatch (PC-197). A group per PR let a second dispatch on
+# the same PR cancel the first, so a dispatcher waiting on its own run saw it
+# `cancelled` and had no evidence. Keyed on the dispatch nonce, a run can be
+# cancelled only by its own attempt. Without a nonce, `github.run_id` keeps the
+# group unique: with a shared group, GitHub cancels a PENDING run when a newer
+# one queues even with cancel-in-progress false.
+concurrency:
+  group: mutation-evidence-pr-${{ inputs.pr }}-${{ inputs.dispatch_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Validate inputs and resolve PR head
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      sha: ${{ steps.head.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate inputs
+        env:
+          MUTATION_PR: ${{ inputs.pr }}
+          MUTATION_TESTS: ${{ inputs.tests }}
+          MUTATION_DIR: ${{ inputs.mutations_dir }}
+          MUTATION_DISPATCH_ID: ${{ inputs.dispatch_id }}
+        run: python -I scripts/mutation_evidence.py validate
+
+      - name: Resolve PR head
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+          REPO: ${{ github.repository }}
+        run: |
+          pr_json="$(gh api "repos/$REPO/pulls/$PR")"
+          state="$(jq -r .state <<<"$pr_json")"
+          head_repo="$(jq -r .head.repo.full_name <<<"$pr_json")"
+          sha="$(jq -r .head.sha <<<"$pr_json")"
+          if [ "$state" != open ]; then
+            echo "::error::PR #$PR is $state; evidence is only gathered for open PRs"
+            exit 1
+          fi
+          if [ "$head_repo" != "$REPO" ]; then
+            echo "::error::PR #$PR comes from $head_repo; fork PRs are refused"
+            exit 1
+          fi
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::unexpected head sha: $sha"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "PR #$PR head: \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
+
+  evidence:
+    name: Baseline and mutations
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    services:
+      # Same service as ci.yml python-integration-tests. A composite action
+      # cannot declare services, so this block is the one duplicated piece.
+      timescaledb:
+        image: timescale/timescaledb:2.29.2-pg16
+        env:
+          POSTGRES_USER: syn
+          POSTGRES_PASSWORD: syn_dev_password
+          POSTGRES_DB: syn
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout trusted tooling (dispatched ref)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          path: trusted
+          persist-credentials: false
+
+      - name: Checkout PR head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          path: pr
+          submodules: true
+          persist-credentials: false
+
+      - name: Python integration environment
+        uses: ./trusted/.github/actions/python-integration-env
+        with:
+          working-directory: pr
+          timescaledb-network: ${{ job.services.timescaledb.network }}
+          timescaledb-container: ${{ job.services.timescaledb.id }}
+          install-dependencies: 'false'
+          enable-cache: 'false'
+
+      # The script runs on the host from the trusted checkout; every command
+      # that executes PR code goes through `docker run` on SANDBOX_IMAGE. The
+      # image is uv 0.10.6 (the version infra/docker pins) on python:3.12
+      # trixie, which ships git for tests that read the repo.
+      - name: Run baseline and every mutation
+        working-directory: trusted
+        env:
+          SANDBOX_IMAGE: ghcr.io/astral-sh/uv:0.10.6-python3.12-trixie@sha256:24a38374048d1def85b62ccc6e0f8e0e9e57b40c52286beeecff8bbad2c77c6d
+          MUTATION_PR: ${{ inputs.pr }}
+          MUTATION_TESTS: ${{ inputs.tests }}
+          MUTATION_DIR: ${{ inputs.mutations_dir }}
+          MUTATION_DISPATCH_ID: ${{ inputs.dispatch_id }}
+          MUTATION_SHA: ${{ needs.resolve.outputs.sha }}
+          MUTATION_DOCKER: ${{ inputs.docker }}
+          TERM: dumb
+          NO_COLOR: "1"
+          COLUMNS: "200"
+          TEST_TIMESCALEDB_HOST: localhost
+          TEST_TIMESCALEDB_PORT: "15432"
+          TEST_EVENTSTORE_HOST: localhost
+          TEST_EVENTSTORE_PORT: "55051"
+        # evidence.json goes in its own directory: the `evidence` artifact
+        # uploads exactly that directory and nothing else from RUNNER_TEMP.
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          if [ "$MUTATION_DOCKER" = true ]; then mode=(--host); else mode=(--image "$SANDBOX_IMAGE"); fi
+          python -I scripts/mutation_evidence.py run --root "$GITHUB_WORKSPACE/pr" \
+            --report "$RUNNER_TEMP/mutation-evidence.md" \
+            --evidence "$RUNNER_TEMP/evidence/evidence.json" "${mode[@]}"
+
+      - name: Job summary
+        if: always()
+        env:
+          REPORT: ${{ runner.temp }}/mutation-evidence.md
+        run: |
+          if [ -s "$REPORT" ]; then
+            cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No report was written; read the step log." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-evidence
+          path: ${{ runner.temp }}/mutation-evidence.md
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # The platform's evidence gate downloads this artifact BY NAME and reads
+      # evidence.json (plan docs/plans/20261015_platform-dispatched-evidence.md
+      # §A.1). Absent when the run reached no verdict (a red sync, a bad
+      # input): the gate then reads "no evidence", never a verdict nothing
+      # backs. The `mutation-evidence` artifact above stays for the PR comment
+      # and `just mutation-evidence`.
+      - name: Upload evidence.json
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: evidence
+          path: ${{ runner.temp }}/evidence/evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Event store logs
+        if: failure()
+        run: docker logs eventstore || true
+
+  comment:
+    name: Post evidence on the PR
+    needs: [resolve, evidence]
+    if: always() && needs.resolve.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Download report
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mutation-evidence
+          path: report
+
+      - name: Create or update the marker comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          RESULT: ${{ needs.evidence.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          marker='<!-- mutation-evidence -->'
+          body="$RUNNER_TEMP/body.md"
+          if [ -s report/mutation-evidence.md ]; then
+            head -c 60000 report/mutation-evidence.md > "$body"
+          else
+            # shellcheck disable=SC2016 # literal backticks are markdown
+            printf '%s\n## Mutation evidence\n\n**FAIL** | PR #%s | head `%s` | [run](%s)\n\nThe evidence job ended `%s` before writing a report. Read the run log.\n' \
+              "$marker" "$PR" "$SHA" "$RUN_URL" "$RESULT" > "$body"
+          fi
+          existing="$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\")))][0].id // empty" \
+            | head -n1)"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F "body=@$body" >/dev/null
+            echo "updated comment $existing"
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -F "body=@$body" >/dev/null
+            echo "created comment"
+          fi

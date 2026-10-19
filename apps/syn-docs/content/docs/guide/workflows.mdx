@@ -6,21 +6,28 @@ description: Install, create, and distribute pre-built workflow packages.
 import { Files, Folder, File } from 'fumadocs-ui/components/files';
 
 Workflow packages are the standard format for distributing pre-built workflows in Syntropic137.
-After running `npx syntropic137 setup`, installing a workflow package is the fastest way to start
+After running `npx @syntropic137/setup init`, installing a workflow package is the fastest way to start
 doing useful work with the platform.
 
 ## Quick Start
 
 ```bash
-# Install the starter research workflow
+# Install the starter research workflow (the path is inside a clone of
+# syntropic137/syntropic137; any local package directory works the same way)
 syn workflow install ./workflows/examples/research-package/
 
-# Run it
-syn workflow run research-package-v1 --task "Investigate event sourcing patterns for our platform"
+# Run it against a repository the GitHub App is installed on
+syn workflow run research-package-v1 -R owner/repo \
+  --task "Investigate event sourcing patterns for our platform"
 
 # See what's installed
-syn workflow installed
+syn workflow packages
 ```
+
+`-R` (`--repo`, repeatable) names the repositories the workspace clones. A
+workflow needs at least one unless its YAML sets `requires_repos: false`, and
+running on a repository currently needs the GitHub App
+([#1948](https://github.com/syntropic137/syntropic137/issues/1948)).
 
 `--task` (`-t`) must say something. `syn workflow run <name> -t ""` (or a
 whitespace-only task) is refused by the CLI before any request is sent, and the
@@ -256,38 +263,65 @@ fails on its first command.
 
 ### `allowed_tools` and the two harnesses
 
-**`allowed_tools` restricts nothing today, on either harness.** Treat it as
-documentation of intent, not as a control.
+`allowed_tools` is enforced on claude phases and refused on codex phases (since
+v0.28.0).
 
-Per [ADR-069](https://github.com/syntropic137/syntropic137/blob/main/docs/adrs/ADR-069-harness-neutral-phase-definition.md),
-`_build_agent_config_from_phase` builds `AgentConfiguration` from `provider`,
-`model` and `allow_delegation` only. `allowed_tools` keeps its default of `()`,
-so the guard that would emit `--tools` never fires and every phase inherits the
-full toolset. A closed-vocabulary validator still rejects `bash` for `Bash` at
-authoring time, which enforces a restriction that is never applied.
+**Claude phases.** Each name is checked against a fixed vocabulary when the
+workflow is created or installed: `Bash`, `Edit`, `Glob`, `Grep`, `Read`,
+`Skill`, `Task`, `WebFetch`, `WebSearch` and `Write`
+([`ToolName`](https://github.com/syntropic137/syntropic137/blob/main/packages/syn-shared/src/syn_shared/tools.py)).
+Matching is case-insensitive, so `bash` is accepted as `Bash`, and an unknown
+name such as `git` is refused. The list is passed to the CLI as
+`claude --tools <list>`
+([`_build_claude_command`](https://github.com/syntropic137/syntropic137/blob/main/apps/syn-api/src/syn_api/_wiring_agent_command.py)),
+so the agent can use only those tools. An empty or omitted list means
+unrestricted. It restricts **tools, not commands**: a phase granted `Bash` can
+run any shell command, including `git`. When the workflow declares skills and
+the phase lists tools, `Skill` is added automatically so the skills stay usable.
 
-The codex path additionally carries an `UnsupportedToolPolicyError` guard,
-because codex exposes no tool flag and translating an allowlist into a sandbox
-mode would be a category error. That guard is currently unreachable for the same
-reason: `allowed_tools` never arrives populated.
-
-To bound what a codex phase can write, declare `sandbox: workspace-write`; see
+**Codex phases.** Codex has no tool vocabulary: it enforces where a process may
+write, not which tools exist. A non-empty `allowed_tools` on a phase whose
+`agent` or `fallback_agent` is codex is therefore refused when the workflow is
+created or installed (`PhaseYamlDefinition.validate_tool_policy_is_supported_by_provider`),
+again before a workspace is provisioned, and again when the command is built.
+That includes a list inherited from a prompt file's `allowed-tools`
+frontmatter. To bound what a codex phase can write, declare
+`sandbox: workspace-write`; see
 [What `sandbox` actually does](#what-sandbox-actually-does).
+
+**Frontmatter.** A phase prompt file's `allowed-tools` frontmatter applies only
+when the phase in `workflow.yaml` omits `allowed_tools`; a value in
+`workflow.yaml` wins.
 
 ### Codex authentication
 
-Codex phases need `CODEX_AUTH_JSON` set on the deployment, holding the full
-contents of a Codex `~/.codex/auth.json`. Without it, a phase with
-`agent.provider: codex` fails to provision. Claude phases are unaffected.
+Codex phases need one of two settings on the deployment:
 
-The agent process itself never receives that environment variable. Provisioning
-stages the value to a file, relocates it to `~/.codex/auth.json` inside the
-workspace at mode 0600, and deletes the staged copy. A codex phase runs with an
+- `CODEX_AUTH_JSON`: the full contents of a Codex `~/.codex/auth.json`, usually
+  from `codex login` with a ChatGPT account. Takes priority when both are set,
+  and provisioning logs a warning naming both settings (never their values).
+- `OPENAI_API_KEY`: an OpenAI API key. Syntropic137 writes it as the same
+  `auth.json` content that `codex login --with-api-key` produces,
+  `{"auth_mode": "apikey", "OPENAI_API_KEY": "..."}`. Usage is billed to the
+  key's OpenAI account.
+
+With neither set, a phase with `agent.provider: codex` has no credential and
+cannot authenticate. Claude phases are unaffected.
+
+The agent process itself never receives either environment variable.
+Provisioning stages the `auth.json` to a file, relocates it to
+`~/.codex/auth.json` inside the workspace at mode 0600, and deletes the staged
+copy. A codex phase runs with an
 empty agent environment, which is also what keeps `ANTHROPIC_API_KEY` and
 `CLAUDE_CODE_OAUTH_TOKEN` out of reach of a codex run.
 
+`GET /health` reports which kind of credential is configured in its
+`codex_auth` block: an API key shows as `api_key`, with no expiry. A ChatGPT
+login shows its access token's expiry when the token carries a readable one.
+
 For a durable deployment credential that a developer running `codex login` on a
-laptop cannot revoke, use a ChatGPT Business or Enterprise access token. See
+laptop cannot revoke, use an `OPENAI_API_KEY`, or a ChatGPT Business or
+Enterprise access token. See
 [Codex access tokens: setup and validation](https://github.com/syntropic137/syntropic137/blob/main/docs/testing/codex-access-token-setup.md).
 
 ### Claude model aliases

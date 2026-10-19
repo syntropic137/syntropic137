@@ -8,6 +8,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING
 
 from syn_adapters.in_memory import InMemoryAdapter
+from syn_adapters.postgres_text import pg_safe
 from syn_domain.contexts.agent_sessions import BilledUsage
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ class InMemoryImportLedger(InMemoryAdapter):
         self._locks: defaultdict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def already_billed(self, execution_id: str, harness_session_id: str) -> BilledUsage:
-        return self._marks.get((execution_id, harness_session_id), BilledUsage())
+        return self._marks.get(_key(execution_id, harness_session_id), BilledUsage())
 
     async def record_billed(
         self, execution_id: str, harness_session_id: str, billed: BilledUsage
@@ -42,7 +43,7 @@ class InMemoryImportLedger(InMemoryAdapter):
         the same semantics or the tests certify behaviour production does not
         have.
         """
-        key = (execution_id, harness_session_id)
+        key = _key(execution_id, harness_session_id)
         previous = self._marks.get(key, BilledUsage())
         self._marks[key] = BilledUsage(
             uncached_input_tokens=max(previous.uncached_input_tokens, billed.uncached_input_tokens),
@@ -58,5 +59,16 @@ class InMemoryImportLedger(InMemoryAdapter):
         `asyncio.Lock` is loop-affine, which is fine here: an in-process ledger
         is only correct within one process anyway, and the API runs one loop.
         """
-        async with self._locks[(execution_id, harness_session_id)]:
+        async with self._locks[_key(execution_id, harness_session_id)]:
             yield
+
+
+def _key(execution_id: str, harness_session_id: str) -> tuple[str, str]:
+    """The row a session owns, spelled as the Postgres ledger spells it.
+
+    That adapter puts both halves through ``pg_safe`` for its key, its lookups
+    and its lock (#1241). A double keyed on the raw text would hold a raw id
+    and its stored spelling as two sessions, which production never does
+    (#1675).
+    """
+    return pg_safe(execution_id), pg_safe(harness_session_id)

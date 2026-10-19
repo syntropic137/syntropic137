@@ -1,0 +1,4536 @@
+{
+  "AgentExecutionCompletedEvent": {
+    "event_type": "AgentExecutionCompleted",
+    "schema": {
+      "$defs": {
+        "ReviewVerdict": {
+          "enum": [
+            "certified",
+            "blocked"
+          ],
+          "type": "string"
+        },
+        "SideEffectStatus": {
+          "enum": [
+            "none",
+            "succeeded",
+            "denied",
+            "failed"
+          ],
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "agent_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "agent_provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "completed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "exit_code": {
+          "default": 0,
+          "type": "integer"
+        },
+        "input_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "last_agent_message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "output_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "reported_review_verdict": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewVerdict"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reported_side_effects": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SideEffectStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "session_id",
+        "completed_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "ArtifactsCollectedForPhaseEvent": {
+    "event_type": "ArtifactsCollectedForPhase",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "collected_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "deliverable_recovered": {
+          "default": false,
+          "type": "boolean"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "first_content_preview": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "artifact_ids",
+        "collected_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "CancelledWorkQuarantinedEvent": {
+    "event_type": "CancelledWorkQuarantined",
+    "schema": {
+      "$defs": {
+        "QuarantinedRef": {
+          "additionalProperties": false,
+          "properties": {
+            "branch": {
+              "type": "string"
+            },
+            "commit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "commit_count": {
+              "type": "integer"
+            },
+            "diffstat": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "pull_request": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ref": {
+              "type": "string"
+            },
+            "repository": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repository",
+            "branch",
+            "ref",
+            "commit",
+            "commit_count"
+          ],
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "quarantined_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "quarantined_refs": {
+          "items": {
+            "$ref": "#/$defs/QuarantinedRef"
+          },
+          "type": "array"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "quarantined_at",
+        "quarantined_refs"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "ClaudePluginRegisteredEvent": {
+    "event_type": "ClaudePluginRegistered",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "manifest": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "registered_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "resolved_sha": {
+          "type": "string"
+        },
+        "source_url": {
+          "type": "string"
+        },
+        "tree_storage_prefix": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_url",
+        "version",
+        "resolved_sha",
+        "name",
+        "tree_storage_prefix",
+        "registered_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "CommandExecutedEvent": {
+    "event_type": "CommandExecuted",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "duration_ms": {
+          "type": "number"
+        },
+        "executed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "stderr_lines": {
+          "default": 0,
+          "type": "integer"
+        },
+        "stdout_lines": {
+          "default": 0,
+          "type": "integer"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "command",
+        "exit_code",
+        "success",
+        "duration_ms",
+        "executed_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "CommandFailedEvent": {
+    "event_type": "CommandFailed",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "duration_ms": {
+          "type": "number"
+        },
+        "error_message": {
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "failed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "timed_out": {
+          "default": false,
+          "type": "boolean"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "command",
+        "exit_code",
+        "error_message",
+        "duration_ms",
+        "failed_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "EvalArchivedEvent": {
+    "event_type": "EvalArchived",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "archived_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "archived_by": {
+          "default": "",
+          "type": "string"
+        },
+        "eval_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "eval_id",
+        "archived_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "EvalCreatedEvent": {
+    "event_type": "EvalCreated",
+    "schema": {
+      "$defs": {
+        "BaselineRepoPayload": {
+          "additionalProperties": false,
+          "properties": {
+            "commit_sha": {
+              "type": "string"
+            },
+            "repository": {
+              "$ref": "#/$defs/RepositoryPayload"
+            },
+            "requested_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repository",
+            "requested_ref",
+            "commit_sha"
+          ],
+          "type": "object"
+        },
+        "RepositoryPayload": {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "name"
+          ],
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "baseline_repos": {
+          "items": {
+            "$ref": "#/$defs/BaselineRepoPayload"
+          },
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "eval_id": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "starting_workflow_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "eval_id",
+        "name",
+        "goal",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "EvalFrozenEvent": {
+    "event_type": "EvalFrozen",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "eval_id": {
+          "type": "string"
+        },
+        "frozen_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "eval_id",
+        "frozen_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "EvalRunScoredEvent": {
+    "event_type": "EvalRunScored",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "eval_id": {
+          "type": "string"
+        },
+        "evidence": {
+          "default": "",
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "judge_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scored_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "scorer": {
+          "type": "string"
+        },
+        "scorer_version": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "eval_id",
+        "execution_id",
+        "verdict",
+        "scorer",
+        "scorer_version",
+        "scored_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "EvalUpdatedEvent": {
+    "event_type": "EvalUpdated",
+    "schema": {
+      "$defs": {
+        "BaselineRepoPayload": {
+          "additionalProperties": false,
+          "properties": {
+            "commit_sha": {
+              "type": "string"
+            },
+            "repository": {
+              "$ref": "#/$defs/RepositoryPayload"
+            },
+            "requested_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repository",
+            "requested_ref",
+            "commit_sha"
+          ],
+          "type": "object"
+        },
+        "RepositoryPayload": {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "owner",
+            "name"
+          ],
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "baseline_repos": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/BaselineRepoPayload"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "eval_id": {
+          "type": "string"
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tags_added": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tags_removed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "eval_id",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "ExecutionAttachedToEvalEvent": {
+    "event_type": "ExecutionAttachedToEval",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "attached_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "eval_id": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "workflow_id",
+        "eval_id",
+        "attached_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "ExecutionCancelledEvent": {
+    "event_type": "ExecutionCancelled",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "cancelled_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "cancelled_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "ExecutionDetachedFromEvalEvent": {
+    "event_type": "ExecutionDetachedFromEval",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "association_kind": {
+          "type": "string"
+        },
+        "detached_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "eval_id": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "workflow_id",
+        "eval_id",
+        "association_kind",
+        "detached_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "ExecutionRequestWithdrawnEvent": {
+    "event_type": "ExecutionRequestWithdrawn",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "withdrawn_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "workflow_id",
+        "withdrawn_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "ExecutionRequestedEvent": {
+    "event_type": "ExecutionRequested",
+    "schema": {
+      "$defs": {
+        "EvalBaselinePin": {
+          "additionalProperties": false,
+          "properties": {
+            "commit_sha": {
+              "type": "string"
+            },
+            "repository": {
+              "type": "string"
+            },
+            "requested_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repository",
+            "requested_ref",
+            "commit_sha"
+          ],
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "eval_baseline": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/EvalBaselinePin"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "eval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "eval_ordinary": {
+          "default": false,
+          "type": "boolean"
+        },
+        "eval_selection": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "repos": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "requested_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "workflow_id",
+        "requested_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "ExecutionResumedEvent": {
+    "event_type": "ExecutionResumed",
+    "schema": {
+      "$defs": {
+        "InheritedPhase": {
+          "additionalProperties": false,
+          "properties": {
+            "artifact_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "origin_execution_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "phase_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase_id",
+            "artifact_ids"
+          ],
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "cancellation_overridden": {
+          "default": false,
+          "type": "boolean"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "external_effects_acknowledged": {
+          "default": false,
+          "type": "boolean"
+        },
+        "inherited_phases": {
+          "items": {
+            "$ref": "#/$defs/InheritedPhase"
+          },
+          "type": "array"
+        },
+        "inherited_skipped_phase_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "resume_execution_id": {
+          "type": "string"
+        },
+        "resume_phase_id": {
+          "type": "string"
+        },
+        "resumed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "resume_execution_id",
+        "inherited_phases",
+        "resume_phase_id",
+        "resumed_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "ExecutionTagsAddedEvent": {
+    "event_type": "ExecutionTagsAdded",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "ExecutionTagsRemovedEvent": {
+    "event_type": "ExecutionTagsRemoved",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "GlobalClaudePluginAddedEvent": {
+    "event_type": "GlobalClaudePluginAdded",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "added_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolved_sha": {
+          "type": "string"
+        },
+        "source_url": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "source_url",
+        "version",
+        "resolved_sha",
+        "added_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "GlobalClaudePluginRemovedEvent": {
+    "event_type": "GlobalClaudePluginRemoved",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "removed_at": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "removed_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "IsolationStartedEvent": {
+    "event_type": "IsolationStarted",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "image_manifest": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "isolation_id": {
+          "type": "string"
+        },
+        "isolation_type": {
+          "type": "string"
+        },
+        "proxy_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "started_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "isolation_id",
+        "isolation_type",
+        "started_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "NextPhaseReadyEvent": {
+    "event_type": "NextPhaseReady",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "completed_phase_id": {
+          "type": "string"
+        },
+        "decided_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "next_phase_id": {
+          "type": "string"
+        },
+        "next_phase_order": {
+          "type": "integer"
+        },
+        "skipped_phase_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "completed_phase_id",
+        "next_phase_id",
+        "next_phase_order",
+        "decided_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "PhaseCommitPushedEvent": {
+    "event_type": "PhaseCommitPushed",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "pushed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "repository",
+        "branch",
+        "sha",
+        "pushed_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "PhaseCompletedEvent": {
+    "event_type": "PhaseCompleted",
+    "schema": {
+      "$defs": {
+        "SideEffectStatus": {
+          "enum": [
+            "none",
+            "succeeded",
+            "denied",
+            "failed"
+          ],
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cache_creation_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "cache_read_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "deliverable_recovered": {
+          "default": false,
+          "type": "boolean"
+        },
+        "duration_seconds": {
+          "default": 0.0,
+          "type": "number"
+        },
+        "error_message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "input_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "output_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "reported_side_effects": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SideEffectStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "total_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "completed_at",
+        "success"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "PhaseRetryScheduledEvent": {
+    "event_type": "PhaseRetryScheduled",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "scheduled_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "attempt",
+        "reason",
+        "scheduled_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "PhaseStartedEvent": {
+    "event_type": "PhaseStarted",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "phase_name": {
+          "type": "string"
+        },
+        "phase_order": {
+          "type": "integer"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "started_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "phase_name",
+        "phase_order",
+        "started_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "SkillRegisteredEvent": {
+    "event_type": "SkillRegistered",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "manifest": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "registered_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "resolved_sha": {
+          "type": "string"
+        },
+        "skill_name": {
+          "type": "string"
+        },
+        "source_url": {
+          "type": "string"
+        },
+        "tree_storage_prefix": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_url",
+        "version",
+        "resolved_sha",
+        "skill_name",
+        "tree_storage_prefix",
+        "registered_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "TokensInjectedEvent": {
+    "event_type": "TokensInjected",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "injected_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "injected_via": {
+          "type": "string"
+        },
+        "token_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ttl_seconds": {
+          "type": "integer"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "token_types",
+        "ttl_seconds",
+        "injected_via",
+        "injected_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowCompletedEvent": {
+    "event_type": "WorkflowCompleted",
+    "schema": {
+      "$defs": {
+        "ReviewVerdict": {
+          "enum": [
+            "certified",
+            "blocked"
+          ],
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "artifact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "completed_phases": {
+          "type": "integer"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "review_verdict": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewVerdict"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "total_cache_creation_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "total_cache_read_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "total_duration_seconds": {
+          "type": "number"
+        },
+        "total_input_tokens": {
+          "type": "integer"
+        },
+        "total_output_tokens": {
+          "type": "integer"
+        },
+        "total_phases": {
+          "type": "integer"
+        },
+        "total_tokens": {
+          "type": "integer"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "completed_at",
+        "total_phases",
+        "completed_phases",
+        "total_input_tokens",
+        "total_output_tokens",
+        "total_tokens",
+        "total_duration_seconds",
+        "artifact_ids"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowDefaultEvalSetEvent": {
+    "event_type": "WorkflowDefaultEvalSet",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "eval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowExecutionStartedEvent": {
+    "event_type": "WorkflowExecutionStarted",
+    "schema": {
+      "$defs": {
+        "AbandonedBranch": {
+          "additionalProperties": false,
+          "properties": {
+            "branch": {
+              "type": "string"
+            },
+            "head_sha": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "repository": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repository",
+            "branch",
+            "head_sha",
+            "reason"
+          ],
+          "type": "object"
+        },
+        "AgentConfiguration": {
+          "properties": {
+            "allow_delegation": {
+              "default": false,
+              "type": "boolean"
+            },
+            "allowed_tools": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "max_tokens": {
+              "default": 4096,
+              "type": "integer"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "provider": {
+              "default": "claude",
+              "type": "string"
+            },
+            "require_delegation": {
+              "default": false,
+              "type": "boolean"
+            },
+            "sandbox": {
+              "default": "full-access",
+              "type": "string"
+            },
+            "temperature": {
+              "default": 0.7,
+              "type": "number"
+            },
+            "timeout_seconds": {
+              "default": 300,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "ContinuedBranch": {
+          "additionalProperties": false,
+          "properties": {
+            "branch": {
+              "type": "string"
+            },
+            "head_sha": {
+              "type": "string"
+            },
+            "pull_request": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "pushed_shas": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "repository": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repository",
+            "branch",
+            "head_sha"
+          ],
+          "type": "object"
+        },
+        "EvalBaselinePin": {
+          "additionalProperties": false,
+          "properties": {
+            "commit_sha": {
+              "type": "string"
+            },
+            "repository": {
+              "type": "string"
+            },
+            "requested_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repository",
+            "requested_ref",
+            "commit_sha"
+          ],
+          "type": "object"
+        },
+        "ExecutablePhase": {
+          "properties": {
+            "agent_config": {
+              "$ref": "#/$defs/AgentConfiguration"
+            },
+            "claude_plugins": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/ResolvedClaudePlugin"
+              },
+              "type": "array"
+            },
+            "clone_repos": {
+              "default": true,
+              "type": "boolean"
+            },
+            "delivers_repo_changes": {
+              "default": true,
+              "type": "boolean"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "fallback_agent": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AgentConfiguration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "inputs": {
+              "items": {
+                "$ref": "#/$defs/PhaseInput"
+              },
+              "type": "array"
+            },
+            "max_cost_usd": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "name": {
+              "type": "string"
+            },
+            "order": {
+              "type": "integer"
+            },
+            "output_artifact_types": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "phase_id": {
+              "type": "string"
+            },
+            "prompt_template": {
+              "default": "",
+              "type": "string"
+            },
+            "requires_verdict": {
+              "default": false,
+              "type": "boolean"
+            },
+            "skills": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/ResolvedSkill"
+              },
+              "type": "array"
+            },
+            "timeout_seconds": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "phase_id",
+            "name",
+            "order"
+          ],
+          "type": "object"
+        },
+        "InheritedPhase": {
+          "additionalProperties": false,
+          "properties": {
+            "artifact_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "origin_execution_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "phase_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase_id",
+            "artifact_ids"
+          ],
+          "type": "object"
+        },
+        "PhaseInput": {
+          "properties": {
+            "from_phase": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "name": {
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "ResolvedClaudePlugin": {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "resolved_sha": {
+              "type": "string"
+            },
+            "source_url": {
+              "type": "string"
+            },
+            "tree_storage_prefix": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "source_url",
+            "version",
+            "resolved_sha",
+            "tree_storage_prefix"
+          ],
+          "type": "object"
+        },
+        "ResolvedSkill": {
+          "properties": {
+            "resolved_sha": {
+              "type": "string"
+            },
+            "skill_name": {
+              "type": "string"
+            },
+            "source_url": {
+              "type": "string"
+            },
+            "tree_storage_prefix": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "skill_name",
+            "source_url",
+            "version",
+            "resolved_sha",
+            "tree_storage_prefix"
+          ],
+          "type": "object"
+        },
+        "ResumeOrigin": {
+          "additionalProperties": false,
+          "properties": {
+            "inherited_phases": {
+              "items": {
+                "$ref": "#/$defs/InheritedPhase"
+              },
+              "type": "array"
+            },
+            "parent_execution_id": {
+              "type": "string"
+            },
+            "resume_phase_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "parent_execution_id",
+            "inherited_phases",
+            "resume_phase_id"
+          ],
+          "type": "object"
+        },
+        "SourceCommit": {
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": "string"
+            },
+            "sha": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "repository"
+          ],
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "abandoned_branches": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/AbandonedBranch"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "continued_branches": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ContinuedBranch"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "eval_baseline": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/EvalBaselinePin"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "eval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "eval_selection": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "expected_completion_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inherited_skipped_phase_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "inputs": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "phase_definitions": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pinned_phases": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ExecutablePhase"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resumed_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResumeOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_commits": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SourceCommit"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "started_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "total_phases": {
+          "type": "integer"
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "workflow_name": {
+          "type": "string"
+        },
+        "workflow_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "workflow_name",
+        "started_at",
+        "total_phases",
+        "inputs"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowFailedEvent": {
+    "event_type": "WorkflowFailed",
+    "schema": {
+      "$defs": {
+        "BranchObservation": {
+          "additionalProperties": false,
+          "properties": {
+            "branch": {
+              "type": "string"
+            },
+            "pull_request": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "remote": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "remote_commit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "remote_commit_at_phase_start": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "repo": {
+              "type": "string"
+            },
+            "unpushed_commits": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "repo",
+            "branch",
+            "remote",
+            "remote_commit",
+            "remote_commit_at_phase_start",
+            "unpushed_commits"
+          ],
+          "type": "object"
+        },
+        "DelegationAttempt": {
+          "additionalProperties": false,
+          "properties": {
+            "delegate_id": {
+              "type": "string"
+            },
+            "exit_code": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "outcome": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DelegationOutcome"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "target_harness": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "delegate_id",
+            "target_harness",
+            "outcome"
+          ],
+          "type": "object"
+        },
+        "DelegationFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "attempts": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/DelegationAttempt"
+              },
+              "type": "array"
+            },
+            "detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "reason": {
+              "$ref": "#/$defs/DelegationFailureReason"
+            },
+            "required_delegate": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        },
+        "DelegationFailureReason": {
+          "enum": [
+            "not_attempted",
+            "failed",
+            "unverifiable"
+          ],
+          "type": "string"
+        },
+        "DelegationOutcome": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "cancelled",
+            "timed_out"
+          ],
+          "type": "string"
+        },
+        "FailureClassification": {
+          "enum": [
+            "platform",
+            "task",
+            "correct_refusal",
+            "unclassified"
+          ],
+          "type": "string"
+        },
+        "QuarantinedRef": {
+          "additionalProperties": false,
+          "properties": {
+            "branch": {
+              "type": "string"
+            },
+            "commit": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "commit_count": {
+              "type": "integer"
+            },
+            "diffstat": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "pull_request": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "ref": {
+              "type": "string"
+            },
+            "repository": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repository",
+            "branch",
+            "ref",
+            "commit",
+            "commit_count"
+          ],
+          "type": "object"
+        },
+        "ReportedFailureReason": {
+          "enum": [
+            "task",
+            "platform",
+            "refused",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "UpstreamFailureKind": {
+          "enum": [
+            "capacity",
+            "rate_limited",
+            "auth",
+            "quota",
+            "refusal",
+            "unavailable",
+            "unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "completed_phases": {
+          "type": "integer"
+        },
+        "delegation_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DelegationFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error_message": {
+          "type": "string"
+        },
+        "error_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "failed_phase_artifact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "failed_phase_cache_creation_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "failed_phase_cache_read_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "failed_phase_duration_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failed_phase_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failed_phase_input_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "failed_phase_output_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "failure_classification": {
+          "$ref": "#/$defs/FailureClassification",
+          "default": "unclassified"
+        },
+        "observed_branches": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/BranchObservation"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "quarantined_refs": {
+          "items": {
+            "$ref": "#/$defs/QuarantinedRef"
+          },
+          "type": "array"
+        },
+        "reported_failure_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReportedFailureReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "total_input_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "total_output_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "total_phases": {
+          "type": "integer"
+        },
+        "total_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "upstream_failure_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UpstreamFailureKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "failed_at",
+        "error_message",
+        "completed_phases",
+        "total_phases"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowInterruptedEvent": {
+    "event_type": "WorkflowInterrupted",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "git_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "interrupted_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "partial_artifact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "partial_input_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "partial_output_tokens": {
+          "default": 0,
+          "type": "integer"
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "interrupted_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowPhaseUpdatedEvent": {
+    "event_type": "WorkflowPhaseUpdated",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_tools": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_defaulted": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "prompt_template": {
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "phase_id",
+        "prompt_template"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowTagsAddedEvent": {
+    "event_type": "WorkflowTagsAdded",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowTagsRemovedEvent": {
+    "event_type": "WorkflowTagsRemoved",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowTemplateArchivedEvent": {
+    "event_type": "WorkflowTemplateArchived",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "archived_by": {
+          "default": "",
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowTemplateCreatedEvent": {
+    "event_type": "WorkflowTemplateCreated",
+    "schema": {
+      "$defs": {
+        "ClaudePluginRef": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "source"
+                  ]
+                },
+                {
+                  "required": [
+                    "source_url"
+                  ]
+                }
+              ],
+              "properties": {
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name_overridden": {
+                  "type": "boolean"
+                },
+                "source": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "source_url": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "FallbackAgent": {
+          "additionalProperties": false,
+          "properties": {
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "provider": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider"
+          ],
+          "type": "object"
+        },
+        "InputDeclaration": {
+          "properties": {
+            "default": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "required": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "PhaseDefinition": {
+          "properties": {
+            "allow_delegation": {
+              "default": false,
+              "type": "boolean"
+            },
+            "allowed_tools": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "argument_hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "claude_plugins": {
+              "items": {
+                "$ref": "#/$defs/ClaudePluginRef"
+              },
+              "type": "array"
+            },
+            "clone_repos": {
+              "default": true,
+              "type": "boolean"
+            },
+            "delivers_repo_changes": {
+              "default": true,
+              "type": "boolean"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "execution_type": {
+              "$ref": "#/$defs/PhaseExecutionType",
+              "default": "sequential"
+            },
+            "fallback_agent": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FallbackAgent"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "input_artifact_types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "max_cost_usd": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "max_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "model_defaulted": {
+              "default": false,
+              "type": "boolean"
+            },
+            "name": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "order": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "output_artifact_types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "phase_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "prompt_template": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "require_delegation": {
+              "default": false,
+              "type": "boolean"
+            },
+            "requires_verdict": {
+              "default": false,
+              "type": "boolean"
+            },
+            "sandbox": {
+              "default": "full-access",
+              "type": "string"
+            },
+            "skills": {
+              "items": {
+                "$ref": "#/$defs/SkillRef"
+              },
+              "type": "array"
+            },
+            "timeout_seconds": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "phase_id",
+            "name",
+            "order"
+          ],
+          "type": "object"
+        },
+        "PhaseExecutionType": {
+          "enum": [
+            "sequential",
+            "parallel",
+            "human_in_loop"
+          ],
+          "type": "string"
+        },
+        "SkillRef": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "source"
+                  ]
+                },
+                {
+                  "required": [
+                    "source_url"
+                  ]
+                }
+              ],
+              "properties": {
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name_overridden": {
+                  "type": "boolean"
+                },
+                "names": {
+                  "items": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "source": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "source_url": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "WorkflowClassification": {
+          "enum": [
+            "simple",
+            "standard",
+            "complex",
+            "epic"
+          ],
+          "type": "string"
+        },
+        "WorkflowType": {
+          "enum": [
+            "research",
+            "planning",
+            "implementation",
+            "review",
+            "deployment",
+            "custom"
+          ],
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "$ref": "#/$defs/WorkflowClassification"
+        },
+        "claude_plugins": {
+          "items": {
+            "$ref": "#/$defs/ClaudePluginRef"
+          },
+          "type": "array"
+        },
+        "default_eval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "input_declarations": {
+          "items": {
+            "$ref": "#/$defs/InputDeclaration"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "package_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "phases": {
+          "items": {
+            "$ref": "#/$defs/PhaseDefinition"
+          },
+          "type": "array"
+        },
+        "project_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "repos": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "repository_ref": {
+          "type": "string"
+        },
+        "repository_url": {
+          "type": "string"
+        },
+        "requires_repos": {
+          "default": true,
+          "type": "boolean"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/SkillRef"
+          },
+          "type": "array"
+        },
+        "source_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "workflow_type": {
+          "$ref": "#/$defs/WorkflowType"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "name",
+        "workflow_type",
+        "classification",
+        "repository_url",
+        "repository_ref",
+        "phases"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowTemplateExecutionLaunchedEvent": {
+    "event_type": "WorkflowTemplateExecutionLaunched",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "launched_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "launched_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkflowTemplateUpdatedEvent": {
+    "event_type": "WorkflowTemplateUpdated",
+    "schema": {
+      "$defs": {
+        "ClaudePluginRef": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "source"
+                  ]
+                },
+                {
+                  "required": [
+                    "source_url"
+                  ]
+                }
+              ],
+              "properties": {
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name_overridden": {
+                  "type": "boolean"
+                },
+                "source": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "source_url": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "FallbackAgent": {
+          "additionalProperties": false,
+          "properties": {
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "provider": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider"
+          ],
+          "type": "object"
+        },
+        "InputDeclaration": {
+          "properties": {
+            "default": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "required": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "PhaseDefinition": {
+          "properties": {
+            "allow_delegation": {
+              "default": false,
+              "type": "boolean"
+            },
+            "allowed_tools": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "argument_hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "claude_plugins": {
+              "items": {
+                "$ref": "#/$defs/ClaudePluginRef"
+              },
+              "type": "array"
+            },
+            "clone_repos": {
+              "default": true,
+              "type": "boolean"
+            },
+            "delivers_repo_changes": {
+              "default": true,
+              "type": "boolean"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "execution_type": {
+              "$ref": "#/$defs/PhaseExecutionType",
+              "default": "sequential"
+            },
+            "fallback_agent": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FallbackAgent"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "input_artifact_types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "max_cost_usd": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "max_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "model_defaulted": {
+              "default": false,
+              "type": "boolean"
+            },
+            "name": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "order": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "output_artifact_types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "phase_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "prompt_template": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "require_delegation": {
+              "default": false,
+              "type": "boolean"
+            },
+            "requires_verdict": {
+              "default": false,
+              "type": "boolean"
+            },
+            "sandbox": {
+              "default": "full-access",
+              "type": "string"
+            },
+            "skills": {
+              "items": {
+                "$ref": "#/$defs/SkillRef"
+              },
+              "type": "array"
+            },
+            "timeout_seconds": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "phase_id",
+            "name",
+            "order"
+          ],
+          "type": "object"
+        },
+        "PhaseExecutionType": {
+          "enum": [
+            "sequential",
+            "parallel",
+            "human_in_loop"
+          ],
+          "type": "string"
+        },
+        "SkillRef": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "source"
+                  ]
+                },
+                {
+                  "required": [
+                    "source_url"
+                  ]
+                }
+              ],
+              "properties": {
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name_overridden": {
+                  "type": "boolean"
+                },
+                "names": {
+                  "items": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "source": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "source_url": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "WorkflowClassification": {
+          "enum": [
+            "simple",
+            "standard",
+            "complex",
+            "epic"
+          ],
+          "type": "string"
+        },
+        "WorkflowType": {
+          "enum": [
+            "research",
+            "planning",
+            "implementation",
+            "review",
+            "deployment",
+            "custom"
+          ],
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "$ref": "#/$defs/WorkflowClassification"
+        },
+        "claude_plugins": {
+          "items": {
+            "$ref": "#/$defs/ClaudePluginRef"
+          },
+          "type": "array"
+        },
+        "default_eval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "input_declarations": {
+          "items": {
+            "$ref": "#/$defs/InputDeclaration"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "package_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "phases": {
+          "items": {
+            "$ref": "#/$defs/PhaseDefinition"
+          },
+          "type": "array"
+        },
+        "project_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "repos": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "repository_ref": {
+          "type": "string"
+        },
+        "repository_url": {
+          "type": "string"
+        },
+        "requires_repos": {
+          "default": true,
+          "type": "boolean"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/SkillRef"
+          },
+          "type": "array"
+        },
+        "source_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "workflow_type": {
+          "$ref": "#/$defs/WorkflowType"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "name",
+        "workflow_type",
+        "classification",
+        "repository_url",
+        "repository_ref",
+        "phases"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkspaceCommandExecutedEvent": {
+    "event_type": "WorkspaceCommandExecuted",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "duration_ms": {
+          "type": "number"
+        },
+        "executed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "stderr_lines": {
+          "default": 0,
+          "type": "integer"
+        },
+        "stdout_lines": {
+          "default": 0,
+          "type": "integer"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "working_directory": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "session_id",
+        "command",
+        "exit_code",
+        "success",
+        "duration_ms",
+        "executed_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkspaceCreatedEvent": {
+    "event_type": "WorkspaceCreated",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "container_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "create_duration_ms": {
+          "type": "number"
+        },
+        "created_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "isolation_backend": {
+          "type": "string"
+        },
+        "phase_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "security_settings": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workspace_id": {
+          "type": "string"
+        },
+        "workspace_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "workspace_id",
+        "session_id",
+        "isolation_backend",
+        "created_at",
+        "create_duration_ms"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkspaceCreatingEvent": {
+    "event_type": "WorkspaceCreating",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "container_image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "isolation_backend": {
+          "type": "string"
+        },
+        "phase_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workflow_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "session_id",
+        "isolation_backend",
+        "started_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkspaceDestroyedEvent": {
+    "event_type": "WorkspaceDestroyed",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "artifacts_collected": {
+          "default": 0,
+          "type": "integer"
+        },
+        "commands_executed": {
+          "default": 0,
+          "type": "integer"
+        },
+        "destroy_duration_ms": {
+          "type": "number"
+        },
+        "destroyed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "total_lifetime_ms": {
+          "type": "number"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "session_id",
+        "destroyed_at",
+        "destroy_duration_ms",
+        "total_lifetime_ms"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkspaceDestroyingEvent": {
+    "event_type": "WorkspaceDestroying",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "session_id",
+        "started_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkspaceErrorEvent": {
+    "event_type": "WorkspaceError",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "error_message": {
+          "type": "string"
+        },
+        "error_type": {
+          "type": "string"
+        },
+        "isolation_backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "session_id",
+        "operation",
+        "error_type",
+        "error_message",
+        "occurred_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkspaceProvisionedForPhaseEvent": {
+    "event_type": "WorkspaceProvisionedForPhase",
+    "schema": {
+      "$defs": {
+        "SourceCommit": {
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": "string"
+            },
+            "sha": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "repository"
+          ],
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "checked_out_commits": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SourceCommit"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "provisioned_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "workspace_id",
+        "session_id",
+        "provisioned_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
+  "WorkspaceTerminatedEvent": {
+    "event_type": "WorkspaceTerminated",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "terminated_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "total_commands": {
+          "type": "integer"
+        },
+        "total_duration_seconds": {
+          "type": "number"
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "reason",
+        "total_commands",
+        "total_duration_seconds",
+        "terminated_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  }
+}

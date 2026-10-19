@@ -1,5 +1,5 @@
 /**
- * The S mark, in cubes (design/brand/s-mark.svg; ported from s_mark() in
+ * The S mark, in cubes (design/brand/v2/logo/s-mark.svg; ported from s_mark() in
  * design/reference/gen_landing3.py).
  *
  * Eleven true-isometric cubes stand in one vertical plane that runs down and
@@ -8,7 +8,7 @@
  * draw order (back to front: by column, then bottom to top), which is also
  * the order the landing animation drops them in.
  *
- * sMark(40) reproduces design/brand/s-mark.svg (viewBox 0 0 147 308).
+ * sMark(40) reproduces design/brand/v2/logo/s-mark.svg (viewBox 0 0 147 308).
  */
 import { ISO_TRUE, type IsoCube, isoCube } from './isoCube'
 
@@ -71,7 +71,7 @@ export function sMark(cubeSize = 40, options: SMarkOptions = {}): SMarkLayout {
   return { cubes, width, height, viewBox: `0 0 ${width} ${height}` }
 }
 
-/** Face fills per tone, as token expressions (design/brand/s-mark.themable.svg): left lit, right shaded, top lightest. */
+/** Face fills per tone, as token expressions (design/brand/v2/logo/s-mark.themable.svg): left lit, right shaded, top lightest. */
 export interface SMarkFaces {
   left: string
   right: string

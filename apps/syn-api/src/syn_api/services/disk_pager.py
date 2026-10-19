@@ -6,12 +6,14 @@ admission use (`DiskSpaceGuard`) is read on a clock, and every change of its
 verdict - into ``low`` at 15% free, into ``critical`` at 5%, and back to
 ``ok`` - is POSTed once to ``SYN_DISK_PAGE_WEBHOOK_URL``. A state that has not
 changed is not sent again; a delivery that failed is retried next tick.
+
+The clock is `disk_pressure.DiskPressureMonitor`'s, which runs whether or not
+a webhook is set and builds a pager only when one is (#1983).
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import urllib.request
@@ -26,9 +28,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts._shared.disk_space import DiskCheck
 
 logger = logging.getLogger(__name__)
-
-#: How often the verdict is read; a stat() per tick costs nothing.
-DISK_PAGE_INTERVAL_SECONDS = 60.0
 
 
 class DiskPage(BaseModel):
@@ -97,45 +96,3 @@ def webhook_sender(url: str) -> Callable[[DiskPage], Awaitable[None]]:
         await asyncio.to_thread(post, page)
 
     return send
-
-
-async def page_on_a_clock(pager: DiskPager, interval_seconds: float) -> None:
-    while True:
-        await pager.run_once()
-        await asyncio.sleep(interval_seconds)
-
-
-_pager_task: asyncio.Task[None] | None = None
-
-
-def start_disk_pager() -> None:
-    """Start the pager, once; a no-op without ``SYN_DISK_PAGE_WEBHOOK_URL``."""
-    global _pager_task
-    from syn_shared.settings import get_settings
-
-    url = get_settings().disk.page_webhook_url
-    if not url:
-        logger.warning("SYN_DISK_PAGE_WEBHOOK_URL is not set; low disk space pages nobody")
-        return
-    if _pager_task is not None and not _pager_task.done():
-        return
-    from syn_api._wiring_admission import get_disk_space_guard
-
-    guard = get_disk_space_guard()
-    _pager_task = asyncio.create_task(
-        page_on_a_clock(
-            DiskPager(check=guard.check, send=webhook_sender(url)), DISK_PAGE_INTERVAL_SECONDS
-        ),
-        name="disk-pager",
-    )
-
-
-async def stop_disk_pager() -> None:
-    """Stop the pager; a no-op if never started."""
-    global _pager_task
-    task, _pager_task = _pager_task, None
-    if task is None:
-        return
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task

@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="./design/brand/banners/syntropic137.svg" alt="Syntropic137: agent work that compounds" width="100%" />
+  <img src="./design/brand/v2/readme-banners/syntropic137.svg" alt="Syntropic137: agent work that compounds" width="100%" />
 </p>
 
 # Syntropic137
@@ -44,7 +44,7 @@ Claude Code and Codex are compared here as the bare CLIs you would drive by hand
 
 ## Self-Hosting (recommended)
 
-Get your own instance running in minutes. Prerequisites: **Node.js 18+** and **Docker**.
+Get your own instance running in minutes. Prerequisites: **Node.js 22+** (the setup CLI alone needs 20.12+; the `syn` CLI declares 22+) and **Docker**.
 
 ```bash
 npx @syntropic137/setup init
@@ -56,7 +56,7 @@ Access: http://localhost:8137
 
 > [!NOTE]
 > **Optional features** (configurable during setup or anytime after):
-> - **Cloudflare Tunnel**: remote access + webhook delivery (highly recommended, free; required for GitHub webhook triggers; without it, manual workflow runs only and dashboard on localhost only; domain costs $10-15/year if buying new)
+> - **Cloudflare Tunnel**: remote access + webhook delivery (highly recommended, free; needed for instant webhook delivery and remote access; without it, GitHub triggers still work through polling and the dashboard is on localhost only; domain costs $10-15/year if buying new)
 > - **1Password**: encrypted secrets management
 
 > [!WARNING]
@@ -105,7 +105,7 @@ Use `just dev-fresh` instead for a clean slate (wipes volumes and re-seeds).
 
 ## Architecture
 
-The system is organized into 5 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
+The system is organized into 6 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
 
 ![Syn137 Architecture](./docs/architecture/vsa-overview.svg)
 
@@ -119,6 +119,7 @@ The system is organized into 5 bounded contexts following Vertical Slice Archite
 | **`agent_sessions`** | AgentSession, InventoryClock, InventoryReconciliation | Agent sessions and observability metrics |
 | **`github`** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
 | **`artifacts`** | Artifact | Artifact storage and retrieval |
+| **`feedback`** | Source, Ticket | Feedback tickets: membership, screening, fix tracking and resolution |
 
 **Infrastructure:** PostgreSQL (event store + projections) · Redis · MinIO
 
@@ -141,13 +142,13 @@ syn workflow show <id>
 syn workflow create --type implementation --repo owner/repo --description "Feature X"
 syn workflow delete <id>                      # archive (soft-delete) a template
 syn workflow delete <id> --force              # skip confirmation prompt
-syn workflow run <id> --task "Implement retry logic" --input key=value
+syn workflow run <id> -R owner/repo --task "Implement retry logic" --input key=value
 syn workflow status <id>
 syn workflow validate path/to/workflow.yaml
 
 # Examples
 syn workflow run research-workflow-v2 --task "$(gh issue view 211 --json body -q .body)"
-syn workflow run github-pr --task "Add error handling" -i repository=owner/repo
+syn workflow run github-pr -R owner/repo --task "Add error handling"
 ```
 
 ### Execution Control
@@ -174,8 +175,9 @@ phases:
       model: gpt-sol            # platform alias for gpt-6.1-sol, see note below
 ```
 
-Codex phases need `CODEX_AUTH_JSON` set in your `.env`. Without it, a phase
-with `agent.provider: codex` fails to provision.
+Codex phases need `CODEX_AUTH_JSON` (a Codex `~/.codex/auth.json`) or
+`OPENAI_API_KEY` set in your `.env`; `CODEX_AUTH_JSON` wins when both are set.
+With neither, a phase with `agent.provider: codex` cannot authenticate.
 
 A phase that names no model gets the platform default: `opus` on claude
 phases, `gpt-sol` on codex phases. `gpt-sol` is a platform alias that runs

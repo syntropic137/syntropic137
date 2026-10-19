@@ -7,18 +7,28 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime  # noqa: TC003 - needed at runtime for dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Annotated, Any, Final, Self
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
+    StringConstraints,
     model_serializer,
+    model_validator,
 )
 
 # Runtime import: a pydantic field type of DelegationAttempt.
 from syn_domain.contexts.agent_sessions import DelegationOutcome  # noqa: TC001
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    EvidenceRequest,  # noqa: TC001 - needed at runtime for Pydantic
+    EvidenceStepKind,  # noqa: TC001 - needed at runtime for Pydantic
+    PullRequestNumber,  # noqa: TC001 - needed at runtime for Pydantic
+    Reason,  # noqa: TC001 - needed at runtime for Pydantic
+    StepOutcome,  # noqa: TC001 - needed at runtime for Pydantic
+    StepRef,  # noqa: TC001 - needed at runtime for Pydantic
+)
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,  # noqa: TC001 - needed at runtime for dataclass field default
 )
@@ -848,6 +858,22 @@ class InheritedPhase(BaseModel):
     None on every event written before #1462. Read it through
     `ResumeOrigin.owner_of`, never directly: absent means the parent the event
     names, which is what it meant when those events were written."""
+    artifact_owners: dict[str, str] = Field(default_factory=dict)
+    """The execution holding each of ``artifact_ids`` that the phase's owner
+    does not: the reports and manifest a resume filed when it settled the
+    phase's inherited evidence gate (plan §A.7). By artifact id; an id absent
+    here is held by the phase's owner.
+
+    Written only when there is one, so every phase without settled-elsewhere
+    evidence reads exactly as a release before PR 5c wrote it."""
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_artifact_owners(self, handler: SerializerFunctionWrapHandler) -> object:
+        """Leave ``artifact_owners`` off the payload when empty."""
+        payload = handler(self)
+        if isinstance(payload, dict) and not payload.get("artifact_owners"):
+            payload.pop("artifact_owners", None)
+        return payload
 
 
 #: The key under which a resume's events carry the execution that ran each
@@ -1187,6 +1213,22 @@ class ResumeOrigin(BaseModel):
     #: these; their artifacts are the ones it hands forward.
     inherited_phases: list[InheritedPhase]
     resume_phase_id: str
+    #: The parent's open evidence gate, when the parent stopped inside one
+    #: (plan §A.7). The child seeds its own gate from it and runs the gate's
+    #: first unsettled step before the held phase.
+    inherited_evidence_gate: InheritedEvidenceGate | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_gate(self, handler: SerializerFunctionWrapHandler) -> object:
+        """Written only when there is one: a resume outside a gate reads as before.
+
+        Every release before PR 5c forbids extra keys here, so an absent gate
+        written as null would make a rollback unable to replay any resume.
+        """
+        payload = handler(self)
+        if isinstance(payload, dict) and payload.get("inherited_evidence_gate") is None:
+            payload.pop("inherited_evidence_gate", None)
+        return payload
 
     def owner_of(self, phase: InheritedPhase) -> str:
         """The execution holding ``phase``'s artifacts.
@@ -1199,6 +1241,19 @@ class ResumeOrigin(BaseModel):
     def owners(self) -> dict[str, str]:
         """Every inherited phase's owner, by phase id."""
         return {p.phase_id: self.owner_of(p) for p in self.inherited_phases}
+
+    def artifacts_by_owner(self, phase: InheritedPhase) -> dict[str, list[str]]:
+        """``phase``'s artifact ids grouped by the execution holding each, in collection order.
+
+        Usually one group, the phase's owner. A phase whose evidence gate a
+        resume settled also has the reports that resume filed, held by it
+        (plan §A.7): asking the phase's owner for those finds nothing.
+        """
+        grouped: dict[str, list[str]] = {}
+        for artifact_id in phase.artifact_ids:
+            owner = phase.artifact_owners.get(artifact_id) or self.owner_of(phase)
+            grouped.setdefault(owner, []).append(artifact_id)
+        return grouped
 
 
 # Re-exported for `WorkflowExecutionStarted` (#1513): a domain event imports its
@@ -1284,3 +1339,118 @@ class DelegationFailure(BaseModel):
         as `None` rather than raising.
         """
         return None if value is None else cls.model_validate(value)
+
+
+# --- Evidence (docs/plans/20261015_platform-dispatched-evidence.md §A.2, PR 5a) ---
+#
+# The two payloads `AgentExecutionCompleted` and `ArtifactsCollectedForPhase`
+# carry. They live here, not beside `EvidenceRecord`, because an event may
+# import value objects and nothing else: the parse, the replay readers and the
+# per-phase state are in `evidence_record`.
+
+
+class DeclaredEvidence(BaseModel):
+    """One `evidence` entry: a readable `EvidenceRequest`, or why it is not one.
+
+    Exactly one of the two is set. PR 1's `EvidenceRequest` is strict, so an
+    entry it refuses cannot be one; it is carried here instead, and settles
+    `void: unreadable evidence request` once a gate exists (§A.1). Reading a
+    reported entry into one is `evidence_record.declared_evidence_from_reported`.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    request: EvidenceRequest | None = None
+    unreadable: Reason | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> Self:
+        if (self.request is None) == (self.unreadable is None):
+            raise ValueError("a declaration is either a request or unreadable, never both or none")
+        return self
+
+    @classmethod
+    def refused(cls, reason: str) -> DeclaredEvidence:
+        return cls(unreadable=reason)
+
+
+class ObservedHead(BaseModel):
+    """One branch as the forge had it while a phase's output was collected.
+
+    ``readable`` False means nobody could ask, never that the branch is gone.
+    ``mutation_patches_present`` is None when it was not asked or could not be
+    answered: unknown is not absent.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: `owner/name`.
+    repository: Annotated[str, StringConstraints(min_length=1)]
+    branch: Annotated[str, StringConstraints(min_length=1)]
+    readable: bool
+    #: Where the branch is; None when it does not exist or was not readable.
+    head_sha: str | None = None
+    mutation_patches_present: bool | None = None
+    open_pr_number: PullRequestNumber | None = None
+
+
+# --- Evidence gate (docs/plans/20261015_platform-dispatched-evidence.md §A.3, PR 5b) ---
+#
+# What `EvidenceRequested` carries. The rules that produce them are
+# `evidence_gate`; they are here because an event may import nothing else.
+
+
+class EvidenceGatePolicy(BaseModel):
+    """What the host tells collection about gates: that they are on, and over which repositories.
+
+    Absent from a command means the gate is OFF (`SYN_EVIDENCE_GATE_ENABLED`
+    defaults false), so every caller written before PR 5b keeps today's path.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: The execution's repositories, `owner/name`: a phase cannot aim the
+    #: platform's App token anywhere else (§A.1).
+    repositories: tuple[str, ...]
+
+
+class EvidencePreset(BaseModel):
+    """A planned step that settles when reached, without dispatching anything."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    outcome: StepOutcome
+    reason: Reason | None = None
+    reused_from: StepRef | None = None
+
+
+class EvidencePlanStep(BaseModel):
+    """One step of a gate's plan.
+
+    ``head_sha`` None with ``on_cleaned_head`` True means "the head the
+    removal step produced", which does not exist when the plan is made.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    index: Annotated[int, Field(ge=0)]
+    kind: EvidenceStepKind
+    repository: str | None = None
+    branch: str | None = None
+    pr: PullRequestNumber | None = None
+    head_sha: str | None = None
+    tests: tuple[str, ...] = ()
+    on_cleaned_head: bool = False
+    preset: EvidencePreset | None = None
+
+
+# Re-exported for `ExecutionResumed` and `ResumeOrigin` (plan §A.7): this module
+# is past the file-size limit, and the gate's value objects need EvidencePlanStep.
+from syn_domain.contexts.orchestration.domain.aggregate_execution.inherited_evidence import (  # noqa: E402
+    InheritedAttempt as InheritedAttempt,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.inherited_evidence import (  # noqa: E402
+    InheritedEvidenceGate as InheritedEvidenceGate,  # noqa: TC001 - ResumeOrigin's field, resolved by model_rebuild
+)
+
+ResumeOrigin.model_rebuild()

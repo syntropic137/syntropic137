@@ -77,28 +77,24 @@ Create `.env` file:
 # Syn137 Production Configuration
 # =============================================================================
 
-# ---- Isolation Backend ----
-# Options: firecracker (Linux+KVM), gvisor (Docker+runsc), docker_hardened, cloud
-SYN_WORKSPACE_ISOLATION_BACKEND=firecracker
-
 # ---- Per-workspace limits (applied to every workspace container) ----
 SYN_WORKSPACE_MEMORY_LIMIT_MB=4096      # 4GB per workspace
 SYN_WORKSPACE_CPU_LIMIT=2.0             # 2 CPUs per workspace
 
-# ---- Cloud provider ----
-SYN_WORKSPACE_CLOUD_PROVIDER=e2b
-SYN_WORKSPACE_CLOUD_API_KEY=your-e2b-api-key
-
-# ---- Security Settings ----
-SYN_SECURITY_ALLOW_NETWORK=false        # No network by default
-SYN_SECURITY_READ_ONLY_ROOT=true        # Read-only root filesystem
-SYN_SECURITY_MAX_PIDS=100               # Process limit
-SYN_SECURITY_MAX_EXECUTION_TIME=3600    # 1 hour timeout
+# ---- Security hardening ----
+# Not configurable, by design. Every workspace container gets agentic_isolation's
+# SecurityConfig.production(): all capabilities dropped, no-new-privileges,
+# read-only root with tmpfs for scratch, pids limit 256, and the seccomp/AppArmor
+# profiles. agent-net is NOT an internal network: model API calls route through
+# the Envoy proxy, which injects credentials, but other outbound traffic (git to
+# github.com and anything else) leaves directly and is not allowlisted. The
+# former SYN_SECURITY_* variables were never applied and were removed (#1805).
 
 # ---- Docker Settings ----
 SYN_WORKSPACE_DOCKER_IMAGE=syn-workspace:latest
-SYN_WORKSPACE_DOCKER_RUNTIME=runsc      # gVisor runtime
-SYN_WORKSPACE_DOCKER_NETWORK=none       # No network
+# The agent network is SYN_AGENT_NETWORK. SYN_WORKSPACE_ISOLATION_BACKEND,
+# SYN_WORKSPACE_CLOUD_*, SYN_WORKSPACE_DOCKER_RUNTIME and
+# SYN_WORKSPACE_DOCKER_NETWORK were never applied and were removed (#1827).
 
 # ---- Firecracker Settings (if using Firecracker) ----
 SYN_FIRECRACKER_KERNEL_PATH=/var/lib/syn/firecracker/vmlinux

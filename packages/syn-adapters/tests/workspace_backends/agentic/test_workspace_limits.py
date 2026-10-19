@@ -75,7 +75,7 @@ async def _render_docker_run(isolation_config: IsolationConfig) -> list[str]:
     with (
         patch.object(adapter, "_provider", provider),
         patch(
-            "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+            "syn_adapters.workspace_backends.backend_kit.verify_image_async",
             side_effect=_passthrough,
         ),
     ):
@@ -194,3 +194,95 @@ async def test_no_cpu_limit_puts_no_hints_on_docker_run() -> None:
     )
 
     assert not set(_HINT_KEYS) & _env_flags(argv).keys()
+
+
+#: The six SYN_WORKSPACE_* settings #1827 deleted. Nothing ever read them, so an
+#: operator's existing .env may still carry any of them.
+_DELETED_WORKSPACE_ENV = {
+    "SYN_WORKSPACE_ISOLATION_BACKEND": "firecracker",
+    "SYN_WORKSPACE_CLOUD_PROVIDER": "modal",
+    "SYN_WORKSPACE_CLOUD_API_KEY": "stale-key",
+    "SYN_WORKSPACE_CLOUD_TEMPLATE": "stale-template",
+    "SYN_WORKSPACE_DOCKER_RUNTIME": "runc",
+    "SYN_WORKSPACE_DOCKER_NETWORK": "host",
+}
+
+
+@pytest.mark.asyncio
+async def test_production_wiring_survives_an_env_with_the_deleted_settings() -> None:
+    """The real settings and the production factory still build after #1827.
+
+    A deleted field breaks wiring, not its own tests, so this goes through the
+    same hops as `_wiring.get_execution_processor`: the root `Settings`, then
+    `WorkspaceServiceConfig.from_settings`, then `WorkspaceService.create`. The
+    argv is rendered from the config and provider that factory returned, not
+    from fresh ones, so a factory that drops the config or picks another network
+    fails here.
+    """
+    from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
+    from syn_shared.settings.config import Settings
+
+    env = {
+        "APP_ENVIRONMENT": "test",
+        "SYN_WORKSPACE_MEMORY_LIMIT_MB": "1536",
+        "SYN_AGENT_NETWORK": "wiring-test-agent-net",
+        **_DELETED_WORKSPACE_ENV,
+    }
+    with patch.dict(os.environ, env, clear=True):
+        ws_settings = Settings(_env_file=None).workspace  # type: ignore[call-arg]
+        service = WorkspaceService.create(
+            config=WorkspaceServiceConfig.from_settings(ws_settings), environment={}
+        )
+
+    assert service._config.memory_limit_mb == 1536
+    adapter = service._isolation
+    assert isinstance(adapter, AgenticIsolationAdapter)
+    provider = adapter.operations
+    assert isinstance(provider, WorkspaceDockerProvider)
+
+    workspace = MagicMock()
+    workspace.id = "ws-1"
+    workspace.metadata = {"workspace_dir": "/tmp/ws-1"}
+
+    async def _passthrough(image_ref: str) -> str:
+        return image_ref
+
+    # Only Docker itself and the image signature check are doubled.
+    with (
+        patch.object(provider, "create", AsyncMock(return_value=workspace)) as create,
+        patch.object(
+            provider,
+            "execute",
+            AsyncMock(return_value=ExecuteResult(exit_code=0, stdout="", stderr="")),
+        ),
+        patch(
+            "syn_adapters.workspace_backends.backend_kit.verify_image_async",
+            side_effect=_passthrough,
+        ),
+    ):
+        await adapter.create(
+            build_isolation_config(
+                config=service._config,
+                workspace_id="ws-1",
+                execution_id="exec-1",
+                workflow_id="wf-1",
+                phase_id=None,
+                extra_environment=None,
+            )
+        )
+
+    ws_config: WorkspaceConfig = create.call_args.args[0]
+    argv = provider._build_run_command(
+        container_name="c-1",
+        workspace_id="ws-1",
+        workspace_dir=Path("/tmp/ws-1"),
+        image=ws_config.image,
+        config=ws_config,
+        security=SecurityConfig.production(),
+    )
+
+    assert "--memory=1536m" in argv
+    # The network is SYN_AGENT_NETWORK's; the stale SYN_WORKSPACE_DOCKER_NETWORK
+    # was never applied.
+    assert "--network=wiring-test-agent-net" in argv
+    assert "--network=host" not in argv

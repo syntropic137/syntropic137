@@ -1,6 +1,8 @@
 """Per-phase-type usage profiles for capacity sizing (#1716)."""
 
 from syn_domain.contexts.orchestration.slices.phase_profiles.query_service import (
+    OomKilledPhase,
+    OomKills,
     Percentiles,
     PhaseProfileQueryService,
     PhaseProfiles,
@@ -10,6 +12,8 @@ from syn_domain.contexts.orchestration.slices.phase_profiles.query_service impor
 )
 
 __all__ = [
+    "OomKilledPhase",
+    "OomKills",
     "Percentiles",
     "PhaseProfileQueryService",
     "PhaseProfiles",

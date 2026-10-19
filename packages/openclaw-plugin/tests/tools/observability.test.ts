@@ -5,6 +5,7 @@ import {
   synGetMetrics,
   synGetSession,
 } from "../../src/tools/observability.js";
+import type { PhaseMetrics } from "../../src/types.js";
 import { executionCost, metricsResponse, sessionDetail } from "../fixtures/responses.js";
 
 const mockFetch = vi.fn<typeof globalThis.fetch>();
@@ -64,6 +65,18 @@ describe("synGetExecutionCost", () => {
     expect(result.content).toContain("Cost by Tool");
   });
 
+  it("renders a cost the API reports without breakdowns (#1182)", async () => {
+    // cost_by_* are optional in the schema; Object.entries(undefined) threw.
+    const { cost_by_phase: _p, cost_by_model: _m, cost_by_tool: _t, ...rest } = executionCost;
+    mockFetch.mockResolvedValueOnce(jsonResponse(rest));
+
+    const result = await synGetExecutionCost(client, { execution_id: "exec-abc-123" });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toContain("$0.75");
+    expect(result.content).not.toContain("Cost by");
+  });
+
   it("passes query params", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(executionCost));
 
@@ -86,6 +99,20 @@ describe("synGetMetrics", () => {
     expect(result.content).toContain("Platform Metrics");
     expect(result.content).toContain("5");
     expect(result.content).toContain("$5.25");
+  });
+
+  it("renders a phase the API reports with no duration (#1182)", async () => {
+    const phase: PhaseMetrics = {
+      phase_id: "phase-run", phase_name: "Run", status: "running", input_tokens: 10, output_tokens: 5,
+      total_tokens: 15, cost_usd: "0.01", unpriced_observation_count: 0, cost_in_progress: true,
+      duration_seconds: null, artifact_count: 0,
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ...metricsResponse, phases: [phase] }));
+
+    const result = await synGetMetrics(client, {});
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toContain("**Run** (running) — 15 tokens, $0.01, n/a");
   });
 
   it("passes workflow_id filter", async () => {

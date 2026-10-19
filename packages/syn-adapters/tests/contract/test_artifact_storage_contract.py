@@ -57,7 +57,13 @@ def _reachable(endpoint: str) -> bool:
 @pytest.fixture(
     params=[
         pytest.param("memory", marks=pytest.mark.unit),
-        pytest.param("minio", marks=pytest.mark.integration),
+        pytest.param(
+            "minio",
+            marks=[
+                pytest.mark.integration,
+                pytest.mark.may_skip(reason="skips when no MinIO answers", issue="#1984"),
+            ],
+        ),
     ]
 )
 async def storage(request: pytest.FixtureRequest) -> AsyncIterator[ArtifactStorage]:

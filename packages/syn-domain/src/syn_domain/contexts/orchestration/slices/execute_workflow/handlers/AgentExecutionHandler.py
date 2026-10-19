@@ -604,6 +604,7 @@ class AgentExecutionHandler:
             last_agent_message=stream_result.last_agent_message,
             reported_side_effects=stream_result.verdict.reported_side_effects,
             reported_review_verdict=stream_result.verdict.reported_review_verdict,
+            reported_evidence=stream_result.verdict.reported_evidence,
         )
 
         return AgentExecutionResult(

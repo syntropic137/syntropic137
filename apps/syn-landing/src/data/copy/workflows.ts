@@ -10,6 +10,7 @@ export const WORKFLOWS = {
     { title: "Start it from anywhere", body: "The CLI, the API, or a GitHub event through a trigger." },
     { title: "Share and reuse", body: "Install workflows from any repo and pin the version." },
   ],
+  cta: { label: "Browse workflow templates", href: "https://github.com/syntropic137/syntropic137-marketplace" },
   /**
    * Ways to start a workflow. Commands are real: `syn workflow run`,
    * `syn workflow install --ref` (docs guide/workflows), and the trigger

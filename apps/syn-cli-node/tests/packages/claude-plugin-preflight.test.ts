@@ -26,6 +26,31 @@ vi.mock("../../src/packages/git.js", async () => {
 });
 
 import { runClaudePluginPreflight } from "../../src/packages/claude-plugin-preflight.js";
+import type { ResolvedWorkflow } from "../../src/packages/models.js";
+import { parseYaml } from "../../src/packages/yaml.js";
+
+/** The resolved workflow for `<dir>/workflow.yaml`; preflight reads only definitions. */
+function workflowsIn(dir: string): ResolvedWorkflow[] {
+  const file = path.join(dir, "workflow.yaml");
+  const definition = parseYaml(fs.readFileSync(file, "utf-8"), file) as Record<string, unknown>;
+  return [
+    {
+      definition,
+      id: "foo",
+      name: "foo",
+      workflow_type: "custom",
+      classification: "standard",
+      repository_url: "",
+      repository_ref: "main",
+      description: null,
+      project_name: null,
+      requires_repos: false,
+      phases: [],
+      input_declarations: [],
+      source_path: file,
+    },
+  ];
+}
 
 describe("runClaudePluginPreflight", () => {
   let tmp: string;
@@ -58,7 +83,7 @@ describe("runClaudePluginPreflight", () => {
       "id: foo\nname: foo\nphases: []\n",
       "utf-8",
     );
-    const r = await runClaudePluginPreflight(tmp);
+    const r = await runClaudePluginPreflight(workflowsIn(tmp));
     expect(r).toBeNull();
     expect(mockFetch).not.toHaveBeenCalled();
   });
@@ -105,7 +130,7 @@ describe("runClaudePluginPreflight", () => {
         ),
       );
 
-    const r = await runClaudePluginPreflight(tmp);
+    const r = await runClaudePluginPreflight(workflowsIn(tmp));
     expect(r).not.toBeNull();
     expect(r!.registered.map((p) => p.name)).toEqual(["missing"]);
     expect(r!.skipped.map((p) => p.name)).toEqual(["already"]);
@@ -143,7 +168,7 @@ describe("runClaudePluginPreflight", () => {
         ),
       );
 
-    const r = await runClaudePluginPreflight(tmp);
+    const r = await runClaudePluginPreflight(workflowsIn(tmp));
     expect(r).not.toBeNull();
     expect(r!.registered.map((p) => p.name)).toEqual(["alias-a"]);
 
@@ -197,7 +222,7 @@ describe("runClaudePluginPreflight", () => {
         ),
       );
 
-    const r = await runClaudePluginPreflight(tmp);
+    const r = await runClaudePluginPreflight(workflowsIn(tmp));
     expect(r).not.toBeNull();
     expect(r!.registered.map((p) => p.name).sort()).toEqual([
       "alias-b",
@@ -226,7 +251,7 @@ describe("runClaudePluginPreflight", () => {
         jsonResponse({ detail: "boom" }, 500),
       );
 
-    await expect(runClaudePluginPreflight(tmp)).rejects.toThrow(
+    await expect(runClaudePluginPreflight(workflowsIn(tmp))).rejects.toThrow(
       /pre-flight failed.*missing.*No workflows were installed/s,
     );
   });
