@@ -107,6 +107,24 @@ async def test_register_trigger_invalid_input():
     assert isinstance(result, Err)
 
 
+async def test_register_trigger_rejects_non_zero_debounce():
+    """A debounce the platform never applies is refused, not stored (#1961)."""
+    from syn_api.routes.triggers import register_trigger
+    from syn_api.routes.triggers.commands import TriggerError
+
+    result = await register_trigger(
+        name="debounced",
+        event="check_run.completed",
+        repository="syntropic137/my-project",
+        workflow_id="ci-fix-workflow",
+        config={"debounce_seconds": 60},
+    )
+
+    assert isinstance(result, Err)
+    assert result.error == TriggerError.INVALID_INPUT
+    assert "debounce_seconds" in (result.message or "")
+
+
 async def test_list_triggers_empty():
     """List triggers when none exist."""
     from syn_api.routes.triggers import list_triggers

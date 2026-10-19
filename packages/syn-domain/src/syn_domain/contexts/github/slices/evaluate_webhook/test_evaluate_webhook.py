@@ -16,6 +16,9 @@ from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate im
 from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
     RegisterTriggerCommand,
 )
+from syn_domain.contexts.github.domain.events.TriggerRegisteredEvent import (
+    TriggerRegisteredEvent,
+)
 from syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator import (
     _check_operator,
     _coerce_bool,
@@ -375,7 +378,6 @@ async def _register_trigger(
     store: InMemoryTriggerQueryStore,
     *,
     max_attempts: int = 3,
-    debounce_seconds: int = 0,
     cooldown_seconds: int = 300,
 ) -> None:
     """Register a ci-heal trigger and index it in the store."""
@@ -387,7 +389,6 @@ async def _register_trigger(
         workflow_id="ci-fix-workflow",
         config=(
             ("max_attempts", max_attempts),
-            ("debounce_seconds", debounce_seconds),
             ("cooldown_seconds", cooldown_seconds),
         ),
     )
@@ -396,16 +397,39 @@ async def _register_trigger(
     await _index_aggregate(store, agg)
 
 
+async def _register_legacy_debounced_trigger(store: InMemoryTriggerQueryStore) -> None:
+    """Index a trigger whose stored event carries debounce_seconds=60.
+
+    Registration now rejects that value (#1961), so the only way such a rule
+    exists is an event written before the rejection; replay it directly.
+    """
+    agg = TriggerRuleAggregate()
+    agg._initialize("tr-legacy01")
+    agg._apply(
+        TriggerRegisteredEvent(
+            trigger_id="tr-legacy01",
+            name="ci-heal",
+            event="check_run.completed",
+            conditions=({"field": "check_run.conclusion", "operator": "eq", "value": "failure"},),
+            repository="org/repo",
+            workflow_id="ci-fix-workflow",
+            config={"max_attempts": 3, "debounce_seconds": 60, "cooldown_seconds": 300},
+        )
+    )
+    assert agg.config.debounce_seconds == 60
+    await _index_aggregate(store, agg)
+
+
 @pytest.mark.unit
 class TestDebounceAndRetry:
     """Tests for debounce and cooldown-retry integration."""
 
     @pytest.mark.asyncio
-    async def test_debounce_defers_when_configured(self) -> None:
-        """debounce_seconds > 0 + debouncer → TriggerDeferredResult."""
+    async def test_legacy_debounce_seconds_fires_immediately(self) -> None:
+        """A stored debounce_seconds > 0 is not applied, even with a debouncer (#1961)."""
         store = InMemoryTriggerQueryStore()
         debouncer = TriggerDebouncer()
-        await _register_trigger(store, debounce_seconds=60)
+        await _register_legacy_debounced_trigger(store)
 
         handler = EvaluateWebhookHandler(
             store=store, repository=NullRepository(), debouncer=debouncer
@@ -418,28 +442,10 @@ class TestDebounceAndRetry:
         )
 
         assert len(results) == 1
-        assert isinstance(results[0], TriggerDeferredResult)
-        assert results[0].defer_seconds == 60
-        assert debouncer.pending_count == 1
-        debouncer.cancel_all()
-
-    @pytest.mark.asyncio
-    async def test_no_debounce_without_debouncer(self) -> None:
-        """No debouncer injected → fires immediately even with debounce_seconds > 0."""
-        store = InMemoryTriggerQueryStore()
-        await _register_trigger(store, debounce_seconds=60)
-
-        handler = EvaluateWebhookHandler(store=store, repository=NullRepository(), debouncer=None)
-        results = await handler.evaluate(
-            event="check_run.completed",
-            repository="org/repo",
-            installation_id="inst-1",
-            payload=_make_payload(),
-        )
-
-        assert len(results) == 1
         assert isinstance(results[0], TriggerMatchResult)
         assert results[0].execution_id.startswith("exec-")
+        assert debouncer.pending_count == 0
+        debouncer.cancel_all()
 
     @pytest.mark.asyncio
     async def test_cooldown_blocked_schedules_retry(self) -> None:
@@ -502,28 +508,6 @@ class TestDebounceAndRetry:
         debouncer.cancel_all()
 
     @pytest.mark.asyncio
-    async def test_debounce_last_write_wins(self) -> None:
-        """3 rapid events → only 1 pending timer (previous 2 cancelled)."""
-        store = InMemoryTriggerQueryStore()
-        debouncer = TriggerDebouncer()
-        await _register_trigger(store, debounce_seconds=60)
-
-        handler = EvaluateWebhookHandler(
-            store=store, repository=NullRepository(), debouncer=debouncer
-        )
-
-        for i in range(3):
-            await handler.evaluate(
-                event="check_run.completed",
-                repository="org/repo",
-                installation_id="inst-1",
-                payload=_make_payload(delivery_id=f"del-{i}"),
-            )
-
-        assert debouncer.pending_count == 1
-        debouncer.cancel_all()
-
-    @pytest.mark.asyncio
     async def test_cooldown_guard_is_retryable(self) -> None:
         """GuardResult from cooldown has retryable=True and retry_after_seconds > 0."""
         store = InMemoryTriggerQueryStore()
@@ -571,7 +555,7 @@ class TestDebounceAndRetry:
         """debounce_seconds=0 with debouncer present fires immediately."""
         store = InMemoryTriggerQueryStore()
         debouncer = TriggerDebouncer()
-        await _register_trigger(store, debounce_seconds=0)
+        await _register_trigger(store)
 
         handler = EvaluateWebhookHandler(
             store=store, repository=NullRepository(), debouncer=debouncer
