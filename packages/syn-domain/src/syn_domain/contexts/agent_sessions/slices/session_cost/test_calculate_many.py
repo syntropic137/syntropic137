@@ -378,3 +378,31 @@ async def test_one_id_past_the_cap_becomes_a_second_batch() -> None:
     assert pool.acquisitions == 2
     assert len(results) == MAX_SESSIONS_PER_QUERY + 1
     assert results[f"sess-{MAX_SESSIONS_PER_QUERY}"].total_cost_usd == Decimal("0.25")
+
+
+@pytest.mark.unit
+@pytest.mark.anyio
+async def test_a_summary_without_a_cost_is_costed_from_its_token_usage() -> None:
+    """A NULL ``sdk_cost`` sends the session to the token_usage query (#1420).
+
+    Its tokens stay the summary's; its cost is what the token rows priced to,
+    never the summary's own totals re-priced.
+    """
+    summary = _summary_row("sess-killed")
+    summary["sdk_cost"] = None
+    q, pool = _query(
+        {
+            _SESSION_SUMMARY_BATCH_QUERY: [summary],
+            _TOKEN_USAGE_FALLBACK_BATCH_QUERY: [_token_row("sess-killed")],
+            _TALLY: [],
+            _MIN_TIME_BATCH_QUERY: [],
+        }
+    )
+
+    result = (await q.calculate_many(["sess-killed"]))["sess-killed"]
+
+    assert _TOKEN_USAGE_FALLBACK_BATCH_QUERY in pool.conn.calls
+    assert result.input_tokens == 1_000
+    # 2,000 input + 1,000 output at Sonnet 4.5 rates ($3 / $15 per 1M).
+    assert result.total_cost_usd == Decimal("0.021")
+    assert result.cost_by_model == {_MODEL: Decimal("0.021")}
