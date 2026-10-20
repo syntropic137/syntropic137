@@ -288,6 +288,7 @@ class _Fixture:
     module: _Module
     autouse: bool
     legs: list[_Leg] | None  # None when the fixture is not parametrized
+    explicit_name: bool  # declared ``name=``, which wins even when it equals the function's
 
 
 def _fixtures(functions: Iterable[_Function], module: _Module) -> dict[str, _Fixture]:
@@ -300,15 +301,14 @@ def _fixtures(functions: Iterable[_Function], module: _Module) -> dict[str, _Fix
                 continue
             kw = {k.arg: k.value for k in getattr(fixture, "keywords", [])}
             name_node = kw.get("name")
-            name = (
-                name_node.value
-                if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str)
-                else node.name
+            explicit_name = isinstance(name_node, ast.Constant) and isinstance(
+                name_node.value, str
             )
+            name = name_node.value if explicit_name else node.name
             autouse_node = kw.get("autouse")
             autouse = isinstance(autouse_node, ast.Constant) and bool(autouse_node.value)
             legs = _legs(kw["params"], module.names) if "params" in kw else None
-            found[name] = _Fixture(name, node, module, autouse, legs)
+            found[name] = _Fixture(name, node, module, autouse, legs, explicit_name)
     return found
 
 
@@ -652,9 +652,8 @@ class _Census:
                     found = self._bound(target, alias.name, frozenset({path})) if target else None
                     if found is None:
                         continue
-                    named = found.name != found.node.name
-                    imported[found.name if named else local] = (
-                        found if named else replace(found, name=local)
+                    imported[found.name if found.explicit_name else local] = (
+                        found if found.explicit_name else replace(found, name=local)
                     )
             self._registered[path] = {**imported, **module.fixtures}
         return self._registered[path]

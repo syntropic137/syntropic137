@@ -1105,6 +1105,26 @@ _PARITY: dict[str, tuple[dict[str, str], str, bool]] = {
         "1 skipped",
         True,
     ),
+    "imported_fixture_keeps_an_explicit_name": (
+        {
+            "tests/__init__.py": "",
+            "tests/helpers.py": """
+            import pytest
+            @pytest.fixture(name="backend")
+            def backend():
+                pytest.skip("no backend")
+            """,
+            "tests/test_x.py": """
+            import pytest
+            from tests.helpers import backend as alias
+            @pytest.mark.integration
+            def test_x(backend):
+                pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
     "overridden_autouse_no_longer_skips": (
         {
             "tests/conftest.py": """
