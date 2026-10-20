@@ -74,6 +74,11 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
             yield line
         self._last_exit_code = 0
 
+    async def cancel_running(self, handle: IsolationHandle) -> bool:
+        """Nothing to cancel: no process is created here."""
+        del handle
+        return False
+
     def set_stream_output(self, handle: IsolationHandle, lines: list[str]) -> None:
         """Configure stream output for testing.
 

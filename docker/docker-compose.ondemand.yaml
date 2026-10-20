@@ -36,6 +36,14 @@ services:
   docker-socket-proxy:
     container_name: syn-env-${SYN_ENV_NAME}-docker-socket-proxy
 
+  docker-create-guard:
+    # The API's workspaces root, read-only, so the guard resolves symlinks in
+    # bind sources the way the daemon will (#1806).
+    environment:
+      SYN_WORKSPACE_CONTAINER_DIR: /workspaces
+    volumes:
+      - ../workspaces:/workspaces:ro
+
   api:
     container_name: syn-env-${SYN_ENV_NAME}-api
     build:
@@ -66,6 +74,9 @@ services:
       # Codex auth.json contents, staged into ~/.codex/auth.json during setup.
       # Without this a phase with `agent.provider: codex` fails to provision.
       CODEX_AUTH_JSON: ${CODEX_AUTH_JSON:-}
+      # Fallback when CODEX_AUTH_JSON is unset: turned into an API-key auth.json
+      # and staged the same way (#1971). Never reaches the agent environment.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       SYN_WORKSPACE_CONTAINER_DIR: /workspaces
       SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-${PWD}}/workspaces
       # Agent network derives from compose project name - set by env_manager.py

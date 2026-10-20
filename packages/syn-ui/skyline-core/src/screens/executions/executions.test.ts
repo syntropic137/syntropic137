@@ -5,9 +5,11 @@ import {
   runDurationText,
   ageGroupTitle,
   calendarDaysAgo,
+  dayBounds,
   evalBadge,
   evalRowTag,
   runRowSub,
+  resumeRowTag,
   parseEvalFilter,
   phaseProgressText,
   isExecutionEvent,
@@ -66,6 +68,23 @@ describe('list', () => {
     expect(parseTimeWindow('nope')).toBe('all')
     expect(timeWindowStart('all', NOW)).toBeUndefined()
     expect(timeWindowStart('1h', NOW)).toBe('2026-10-08T11:00:00.000Z')
+  })
+
+  it('turns ?day= into that UTC day, the day the Skyline bucketed it under (#1938)', () => {
+    expect(dayBounds('2026-10-13')).toEqual({
+      started_after: '2026-10-13T00:00:00.000Z',
+      started_before: '2026-10-13T23:59:59.999999Z',
+    })
+    expect(dayBounds(null)).toBeNull()
+    expect(dayBounds('2026-02-30')).toBeNull()
+    expect(dayBounds('yesterday')).toBeNull()
+  })
+
+  it('marks a resumed run and names its parent; a fresh run gets no marker (#1926)', () => {
+    expect(resumeRowTag({ parent_execution_id: 'exec-abc' })).toEqual({ label: 'Resumed', title: 'Resumed from exec-abc', href: '/executions/exec-abc' })
+    expect(resumeRowTag({ parent_execution_id: 'exec abc' }, (p) => `/ui${p}`)?.href).toBe('/ui/executions/exec%20abc')
+    expect(resumeRowTag(null)).toBeNull()
+    expect(resumeRowTag(undefined)).toBeNull()
   })
 
   it('defaults the lists to 24h; All stays selectable as ?window=all', () => {
@@ -236,7 +255,7 @@ describe('detail', () => {
 
 describe('isExecutionEvent', () => {
   it("matches the API's real event_type names, not snake_case guesses", () => {
-    for (const t of ['WorkflowExecutionStarted', 'WorkflowCompleted', 'WorkflowFailed', 'PhaseStarted', 'PhaseCompleted']) expect(isExecutionEvent(t)).toBe(true)
+    for (const t of ['WorkflowExecutionStarted', 'WorkflowCompleted', 'WorkflowFailed', 'ExecutionCancelled', 'PhaseStarted', 'PhaseCompleted']) expect(isExecutionEvent(t)).toBe(true)
     for (const t of ['SessionStarted', 'git_commit', 'connected']) expect(isExecutionEvent(t)).toBe(false)
   })
 })

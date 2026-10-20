@@ -1,8 +1,10 @@
 /**
- * Social image (Open Graph / Twitter card): the S over the run city, from
- * the same geometry the page uses (heroCity() with the hero's sample days,
- * sMark()). Writes design/brand/og-image.svg (1200 x 630) and renders
- * design/brand/og-image.png with rsvg-convert.
+ * Vector social image: the S over the run city, from the same geometry the
+ * page uses (heroCity() with the hero's sample days, sMark()). Writes
+ * design/brand/v2/link-preview/og-image-vector.svg (1200 x 630) and renders
+ * design/brand/v2/link-preview/og-image-vector.png with rsvg-convert. The live share image
+ * (og-image.png) is the Blender render with the wordmark, from
+ * design/brand/v2/sources/render.sh.
  *
  *   pnpm --filter @syn137/skyline-core run og-image
  *
@@ -61,9 +63,9 @@ ${cityBlocks}
 </svg>
 `
 
-const brand = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../design/brand')
-const svgPath = resolve(brand, 'og-image.svg')
-const pngPath = resolve(brand, 'og-image.png')
+const brand = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../design/brand/v2/link-preview')
+const svgPath = resolve(brand, 'og-image-vector.svg')
+const pngPath = resolve(brand, 'og-image-vector.png')
 writeFileSync(svgPath, svg)
 execFileSync('rsvg-convert', ['-w', String(W), '-h', String(H), svgPath, '-o', pngPath])
 console.log(`wrote ${svgPath}\nwrote ${pngPath}`)

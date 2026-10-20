@@ -35,6 +35,7 @@ from pydantic import (
 # allowed to define it (#1380).
 from syn_adapters.subscriptions.read_model_lag import ProjectionLag  # noqa: TC001
 from syn_adapters.subscriptions.unapplied_starts import UnappliedStart  # noqa: TC001
+from syn_api.inventory_types import AgentLaunch as AgentLaunch
 from syn_api.inventory_types import CaptureRevisionHashes as CaptureRevisionHashes
 from syn_api.inventory_types import LocalTranscriptResponse as LocalTranscriptResponse
 from syn_api.inventory_types import (
@@ -92,6 +93,7 @@ from syn_domain.contexts.orchestration import (
     PlannedPhase,
     QuarantinedRef,
     ReportedFailureReason,
+    RetainedReason,
     ReviewVerdict,
     SideEffectStatus,
     TagSet,
@@ -106,6 +108,7 @@ from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.display import format_utc_timestamp
 from syn_shared.display.formatters import EM_DASH, format_cost, format_tokens
 from syn_shared.observed_model import format_observed_model
+from syn_shared.platform_access import PlatformScope
 from syn_shared.pricing import (  # noqa: TC001 - pydantic resolves at runtime
     CostSplitBasis,
     TokenTypeCost,
@@ -603,6 +606,9 @@ class PhaseDefinitionResponse(BaseModel):
     fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
+    platform_access: PlatformScope = PlatformScope.READ
+    """What this phase's workspace may do against the API (ADR-072). ``eval``
+    can launch runs into a named eval and score them."""
     # PC-116: the phase fails when it reports no review_verdict.
     requires_verdict: bool = False
     sandbox: str = DEFAULT_PHASE_SANDBOX
@@ -716,6 +722,15 @@ class PlannedPhaseInfo(BaseModel):
         )
 
 
+class ResumedFromInfo(BaseModel):
+    """The execution a resumed run continues, and the phase it picked up at (#1881)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    parent_execution_id: str
+    resume_phase_id: str
+
+
 class ExecutionSummary(BaseModel):
     """Summary of a workflow execution run."""
 
@@ -789,6 +804,10 @@ class ExecutionSummary(BaseModel):
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
     tags: list[str] = Field(default_factory=list)
     """The execution's current tags, normalised and sorted (#967)."""
+    resumed_from: ResumedFromInfo | None = None
+    """The execution this run resumed, or None for a fresh run (#1881)."""
+    resumed_as: str | None = None
+    """The execution that resumed this one, or None. At most one (#1881)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -1068,10 +1087,20 @@ class EvalBaselineRepoRequest(BaseModel):
 
 
 class CreateEvalRequest(BaseModel):
-    """A new eval (#967). The server mints its id; see `EvalCreatedResponse`."""
+    """A new eval (#967). The server mints its id unless `stable_key` names one."""
 
     model_config = ConfigDict(extra="forbid")
 
+    stable_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1000,
+        description=(
+            "Makes the create idempotent (#1920): the eval id is derived from this key, so "
+            "every create with the same key, concurrent ones included, answers with the one "
+            "eval. A create that differs from the one that made it is refused."
+        ),
+    )
     name: str = Field(min_length=1, max_length=200)
     goal: str = Field(min_length=1, description="What the eval sets out to measure.")
     starting_workflow_id: str | None = Field(
@@ -1390,6 +1419,51 @@ class WorkflowTrendResponse(TrendDefinition):
     """Every execution of the workflow, whatever the page size."""
     page: int
     page_size: int
+
+
+DurationTrendKind = Literal["none", "few", "faster", "slower", "steady"]
+
+
+class DurationTrendSummaryResponse(BaseModel):
+    """A workflow card's duration trend label, formatted here so the UI only renders it (#1872).
+
+    Fitted over the latest ``runs`` measured durations (at most 12): a change
+    under 5% is steady, fewer than 3 measured runs is too few to tell.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: DurationTrendKind
+    pct: int
+    """Signed fitted change in duration over the window, percent; 0 when not classified."""
+    runs: int
+    """Measured runs in the window."""
+    word_display: str
+    """The card's headline word: Faster, Slower, Steady, Too few runs, ..."""
+    sub_display: str
+    """The line under it, e.g. ``+44% time, last 3``."""
+    label_display: str
+    """The accessible label for the whole trend."""
+
+
+class WorkflowCardTrendResponse(WorkflowTrendResponse):
+    """A workflow's trend points plus the card's formatted duration trend (#1872)."""
+
+    duration_trend: DurationTrendSummaryResponse
+
+
+class WorkflowTrendsResponse(BaseModel):
+    """The latest runs of several workflows as trend points, in one response (#1872).
+
+    The Workflows page reads every card on screen from this, so the page costs
+    one request however many workflows it shows. Each entry is what
+    ``GET /workflows/{id}/trend`` answers for page 1 at the same page size.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    trends: list[WorkflowCardTrendResponse]
+    """One per requested workflow that exists, in the order asked. Unknown ids are left out."""
 
 
 class ExecutionEvalRunResponse(BaseModel):
@@ -2365,6 +2439,10 @@ class ExecutionDetailFull(BaseModel):
     Enough to re-dispatch the run: a caller retrying one that died on the
     platform posts these back rather than reconstructing them from its own
     notes (#1307)."""
+    resumed_from: ResumedFromInfo | None = None
+    """The execution this run resumed, or None for a fresh run (#1881)."""
+    resumed_as: str | None = None
+    """The execution that resumed this one, or None. At most one (#1881)."""
 
 
 class ControlResult(BaseModel):
@@ -2430,6 +2508,13 @@ class SessionDetail(BaseModel):
     root_session_id: str | None = None
     agent_type: str = ""
     status: str = ""
+    agent_launch: AgentLaunch = AgentLaunch.UNKNOWN
+    """Whether the agent process for this session has demonstrably started.
+
+    ``status`` is ``running`` from ``SessionStarted``, which is written before
+    the workspace is provisioned; this is ``launched`` only once
+    ``AgentLaunched`` is recorded (#1065, #1717).
+    """
     workspace_path: str | None = None
     repos: list[str] = Field(default_factory=list)
     input_tokens: int = 0
@@ -3035,6 +3120,51 @@ class SubscriptionHealth(_OmitsAbsentFields):
     )
 
 
+class RetainedWorkspaceDirs(BaseModel):
+    """Workspace directories the reclaimer kept for one reason, at its last pass (#1983)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: RetainedReason = Field(description="The proof that could not be made.")
+    count: int = Field(description="Directories kept for this reason.")
+    size_bytes: int = Field(description="Bytes those directories hold, as measured.")
+
+
+class WorkspaceReclaimHealth(BaseModel):
+    """What the workspace directory reclaimer last did (#1983)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    last_pass_at: datetime | None = Field(
+        description="When its last pass ended, UTC; null before the first."
+    )
+    paused: str | None = Field(
+        description="Why the last pass stopped before deleting anything, e.g. 'maintenance'."
+    )
+    last_pass_skipped: str | None = Field(
+        description="Why the last pass did not look at all (docker or a read model unreadable)."
+    )
+    reclaimed_bytes_24h: int = Field(
+        description="Bytes this process reclaimed in the last 24 hours (resets on restart)."
+    )
+    dry_run_reclaimable: int = Field(
+        description="Directories the last pass found reclaimable and left, in dry-run mode."
+    )
+    deletes_in_progress: int = Field(
+        description="Proven directories whose delete ran out of the last pass's time "
+        "budget; the next pass, or the first after a restart, finishes them."
+    )
+    out_of_time: bool = Field(
+        description="Whether the last pass stopped at SYN_DISK_RECLAIM_PASS_BUDGET_MINUTES."
+    )
+    retained: list[RetainedWorkspaceDirs] = Field(
+        description="Directories kept at the last pass, per reason."
+    )
+    delete_failed_passes: int = Field(
+        description="Consecutive passes with a failed delete; 2 or more degrades /health."
+    )
+
+
 class DiskSpaceHealth(BaseModel):
     """Free space on the workspace volume, as /health reports it (#1560)."""
 
@@ -3046,9 +3176,30 @@ class DiskSpaceHealth(BaseModel):
     )
     free_percent: float | None = Field(description="Percent free; null when unmeasurable.")
     free_bytes: int | None = Field(description="Bytes available; null when unmeasurable.")
-    degraded_below_percent: float = Field(description="SYN_DISK_DEGRADED_BELOW_PERCENT.")
-    refuse_admission_below_percent: float = Field(
-        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT."
+    degraded_below_bytes: int = Field(
+        description="Degraded below this many bytes free: SYN_DISK_DEGRADED_BELOW_GIB, "
+        "or twice the admission floor when unset."
+    )
+    refuse_admission_below_bytes: int = Field(
+        description="New executions refused below this many bytes free: "
+        "SYN_DISK_REFUSE_ADMISSION_BELOW_GIB, or SYN_DISK_RUN_RESERVE_GIB x "
+        "SYN_EXECUTION_MAX_CONCURRENT when unset."
+    )
+    degraded_below_percent: float | None = Field(
+        default=None,
+        description="SYN_DISK_DEGRADED_BELOW_PERCENT; null when unset (GiB floor only).",
+    )
+    refuse_admission_below_percent: float | None = Field(
+        default=None,
+        description="SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT; null when unset (GiB floor only).",
+    )
+    detail: str = Field(
+        description="One line for an operator: free space, the floors and where they came from."
+    )
+    reclaim: WorkspaceReclaimHealth | None = Field(
+        default=None,
+        description="The workspace directory reclaimer's last pass (#1983); null when its "
+        "state could not be read.",
     )
 
 
@@ -4112,15 +4263,17 @@ class TokenPercentilesResponse(BaseModel):
 
 
 class ResourcePercentilesResponse(BaseModel):
-    """p50/p95 of one measure over ``n`` measured phases; null below ten."""
+    """p50/p90/p95 of one measure over ``n`` measured phases; null below ten."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     n: int
     p50: float | None
+    p90: float | None
     p95: float | None
     p50_display: str
     """``"insufficient"`` when ``n < 10``."""
+    p90_display: str
     p95_display: str
 
     @classmethod
@@ -4130,8 +4283,10 @@ class ResourcePercentilesResponse(BaseModel):
         return cls(
             n=stat.n,
             p50=stat.p50,
+            p90=stat.p90,
             p95=stat.p95,
             p50_display=_display(stat.p50, kind),
+            p90_display=_display(stat.p90, kind),
             p95_display=_display(stat.p95, kind),
         )
 
@@ -4176,17 +4331,56 @@ class ResourceCoverageResponse(BaseModel):
     """e.g. ``"0/42 phases measured"``."""
 
 
+class OomKillsResponse(BaseModel):
+    """Every phase of this type in exactly one bucket.
+
+    ``unknown`` is a phase nothing measured: no usage row, or a row with no
+    OOM signal. It is never folded into ``not_killed``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    killed: int
+    not_killed: int
+    unknown: int
+
+
+class OomKilledPhaseResponse(BaseModel):
+    """One phase whose workspace was OOM-killed, as the provider measured it.
+
+    Set from the provider's ``oom_killed`` (cgroup ``oom_kill`` count or
+    Docker's ``State.OOMKilled``), never inferred from an exit code: an exit
+    137 is any SIGKILL.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution_id: str
+    oom_killed: Literal[True]
+    memory_peak_bytes: int | None
+    """Null when the cgroup peak could not be read."""
+    oom_kills: int | None
+    """The cgroup's kill count; null when it could not be read."""
+
+
 class PhaseResourceProfileResponse(BaseModel):
     """One phase type's workspace resource use at teardown (cgroup counters)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     phase_id: str
+    cpu_usage_seconds: ResourcePercentilesResponse
+    """Absolute CPU-seconds the workspace used over its lifetime."""
+    wall_seconds: ResourcePercentilesResponse
+    """The workspace lifetime recorded with the usage, creation to termination."""
     cpu_seconds_per_wall_second: ResourcePercentilesResponse
     """CPU-seconds over the workspace lifetime recorded with them, creation to termination."""
     cpu_throttled_seconds: ResourcePercentilesResponse
     memory_peak_bytes: ResourcePercentilesResponse
     disk_bytes_at_teardown: ResourcePercentilesResponse
+    oom: OomKillsResponse
+    oom_killed_phases: list[OomKilledPhaseResponse]
+    """Every OOM-killed phase of this type in the window, by execution id."""
     coverage: ResourceCoverageResponse
 
 
@@ -4234,6 +4428,10 @@ class PhaseProfilesResponse(BaseModel):
             resources=[
                 PhaseResourceProfileResponse(
                     phase_id=r.phase_id,
+                    cpu_usage_seconds=ResourcePercentilesResponse.of(
+                        r.cpu_usage_seconds, "seconds"
+                    ),
+                    wall_seconds=ResourcePercentilesResponse.of(r.wall_seconds, "seconds"),
                     cpu_seconds_per_wall_second=ResourcePercentilesResponse.of(
                         r.cpu_seconds_per_wall_second, "ratio"
                     ),
@@ -4244,6 +4442,18 @@ class PhaseProfilesResponse(BaseModel):
                     disk_bytes_at_teardown=ResourcePercentilesResponse.of(
                         r.disk_bytes_at_teardown, "bytes"
                     ),
+                    oom=OomKillsResponse(
+                        killed=r.oom.killed, not_killed=r.oom.not_killed, unknown=r.oom.unknown
+                    ),
+                    oom_killed_phases=[
+                        OomKilledPhaseResponse(
+                            execution_id=k.execution_id,
+                            oom_killed=True,
+                            memory_peak_bytes=k.memory_peak_bytes,
+                            oom_kills=k.oom_kills,
+                        )
+                        for k in r.oom_killed_phases
+                    ],
                     coverage=ResourceCoverageResponse(
                         phases=r.coverage.phases,
                         phases_without_usage_row=r.coverage.phases_without_usage_row,
@@ -4496,6 +4706,38 @@ class LatencyRecorderStatusResponse(BaseModel):
     cleanup_failures: int
     """Written batches whose connection could not be released in time (terminated)."""
     buffered: int
+
+
+class UpstreamRetryCountResponse(BaseModel):
+    """In-phase retries one provider, model and upstream kind took in the window (#1882)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: str | None
+    """The agent provider retried, e.g. ``codex``. None if the row did not say."""
+    requested_model: str | None
+    """The model the phase asked for, possibly an alias (ADR-067 D9). None when the phase left it to the provider."""
+    upstream_kind: str | None
+    """The transient kind that earned the retry: ``capacity`` or ``rate_limited``."""
+    retries: int
+
+
+class UpstreamRetriesResponse(BaseModel):
+    """In-phase upstream retries per provider and model, most first (Lane 2, #1882).
+
+    Counts retries, not failures: a phase that retried twice and then
+    succeeded counts 2 here. Quota, auth and anything unrecognised are never
+    retried, so they never appear.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    window: LatencyWindow
+    since: str
+    """ISO 8601 UTC start of the window."""
+    total: int
+    """Every retry in the window, summed over ``counts``."""
+    counts: list[UpstreamRetryCountResponse]
 
 
 class RequestLatencyResponse(BaseModel):

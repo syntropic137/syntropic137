@@ -316,7 +316,7 @@ export function canCancel(status: string | null | undefined): boolean {
 }
 
 /** Activity events that should refresh an execution page or list: the API's real `event_type` names (data live/events.ts). */
-const EXECUTION_EVENTS = new Set(['WorkflowExecutionStarted', 'WorkflowCompleted', 'WorkflowFailed', 'PhaseStarted', 'PhaseCompleted'])
+const EXECUTION_EVENTS = new Set(['WorkflowExecutionStarted', 'WorkflowCompleted', 'WorkflowFailed', 'ExecutionCancelled', 'PhaseStarted', 'PhaseCompleted'])
 export function isExecutionEvent(type: string): boolean {
   return EXECUTION_EVENTS.has(type)
 }

@@ -29,7 +29,7 @@ brew install cloudflare/cloudflare/cloudflared
 cloudflared tunnel login
 ```
 
-2. Create a tunnel in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/) and copy the tunnel token.
+2. Create a tunnel in the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/), set its public hostname service URL to `http://gateway:8081`, and copy the tunnel token. Port 8081 is the gateway listener that requires Basic Auth when `SYN_API_PASSWORD` is set; do not point the tunnel at port 80 or 8137, which have no authentication by default.
 
 3. Add three variables to your `~/.syntropic137/.env`:
 
@@ -50,20 +50,22 @@ The `cloudflared` container starts automatically and routes traffic from your do
 
 ### Updating the GitHub App Webhook URL
 
-After setting up the tunnel, update your GitHub App's webhook URL:
+After setting up the tunnel, set your GitHub App's webhook URL to `https://syn137.yourdomain.com/api/v1/webhooks/github`. To open the App's settings page in your browser:
 
 ```bash
 npx @syntropic137/setup github-app
 ```
 
-Or manually in GitHub → Settings → Developer Settings → Your App → Webhook URL → set to `https://syn137.yourdomain.com/api/v1/webhooks/github`.
+Or navigate manually: GitHub → Settings → Developer Settings → Your App → Webhook URL.
 
 ## Other Tunnel Options
 
-While Cloudflare Tunnels are the built-in option, any tunnel that forwards HTTPS traffic to `localhost:8137` works:
+Cloudflare Tunnels are the only option the setup CLI configures.
 
-- **ngrok**: `ngrok http 8137`
-- **Tailscale Funnel**: `tailscale funnel 8137`
-- **SSH tunnel**: `ssh -R 80:localhost:8137 your-server`
+<Callout type="warn">
+Do not forward `localhost:8137` to the internet. Port 8137 is the gateway's port 80, which has no authentication while `SYN_GATEWAY_BIND` is loopback (the default), so a tunnel to it exposes the dashboard and API with no credential.
+</Callout>
+
+Another provider must reach the authenticated listener `gateway:8081` with `SYN_API_PASSWORD` set. Port 8081 is not published to the host, so the tunnel client has to run as a container on the stack's Docker network, as `cloudflared` does.
 
 Set `SYN_PUBLIC_HOSTNAME` in your `.env` to your tunnel's public URL regardless of which provider you use.

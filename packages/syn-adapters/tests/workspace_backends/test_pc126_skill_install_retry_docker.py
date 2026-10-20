@@ -64,6 +64,15 @@ _TIMEOUT_SECONDS = 10
 #: the real installer's `rm -rf` of its destination would.
 _HANG_SECONDS = 2 * _TIMEOUT_SECONDS + 3
 
+#: Opens the directories the container identity made under /workspace to the
+#: host (this fixture makes plain, non-sticky, traversable ones). `alpine:3`
+#: runs as root, so on a host that is not root (a CI runner) teardown cannot
+#: delete what the container wrote and reports the workspace retained. Shipped
+#: topologies match uids (syn-api image and workspace images are both 1000), so
+#: they do not hit this; a mismatched deployment would, and is tracked in #1932.
+#: Only the container's own entries: `--cap-drop=ALL` leaves it no CAP_FOWNER.
+_HAND_BACK_TO_HOST = 'find /workspace -user "$(id -u)" -type d -exec chmod a+rwx {} +'
+
 #: Stands in for the real `skills` CLI. Records every call. The first
 #: /workspace/.hang_calls calls hang past the deadline and then wipe the
 #: install; every later call installs.
@@ -153,7 +162,7 @@ async def live(
     # The supply-chain gate refuses an unpinned public image; it is not what
     # is under test here (tests/workspace_backends/test_image_verification.py).
     with patch(
-        "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+        "syn_adapters.workspace_backends.backend_kit.verify_image_async",
         side_effect=_passthrough,
     ):
         handle = await adapter.create(
@@ -176,7 +185,13 @@ async def live(
         )
         yield result
     finally:
-        await adapter.destroy(handle)
+        try:
+            handed_back = await adapter.execute(
+                handle, ["sh", "-c", _HAND_BACK_TO_HOST], timeout_seconds=30
+            )
+            assert handed_back.exit_code == 0, handed_back.stderr
+        finally:
+            await adapter.destroy(handle)
 
 
 async def test_a_hung_first_install_is_retried_once_and_succeeds(live: _Live) -> None:

@@ -13,11 +13,11 @@ provisional ``abandoned`` (D2).
 
 from __future__ import annotations
 
-from datetime import timedelta  # noqa: TC003
-from enum import StrEnum
-from typing import Protocol
+from datetime import timedelta
+from enum import IntEnum, StrEnum
+from typing import Annotated, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 
 class RunLeaseLost(RuntimeError):
@@ -38,6 +38,67 @@ class ExecutionStreamProbe(Protocol):
     async def presence(self, execution_id: str) -> StreamPresence: ...
 
 
+class PoolDefinitionConflict(RuntimeError):
+    """An executor declared a different definition for an Executor Pool that live members hold (D13)."""
+
+
+_SLUG = r"^[a-z][a-z0-9-]{0,62}$"
+PoolId = Annotated[str, StringConstraints(pattern=_SLUG)]
+"""An Executor Pool's name. Operator data, so a validated slug, never an enum."""
+ProviderId = Annotated[str, StringConstraints(pattern=_SLUG)]
+"""What runs a pool's workspaces: ``docker`` today."""
+RegionId = Annotated[str, StringConstraints(pattern=_SLUG)]
+
+
+class Capability(StrEnum):
+    """A feature of a pool's hosts that platform code must understand to use (D13)."""
+
+    NESTED_DOCKER = "nested_docker"
+
+
+class IsolationLevel(IntEnum):
+    """How strongly a pool isolates one workspace from another; compared as a minimum (D13).
+
+    Spaced so a level between the two (gVisor) needs no renumbering.
+    """
+
+    CONTAINER = 10
+    """A shared kernel: runc."""
+    MICROVM = 30
+    """A kernel of its own: Kata, Firecracker, E2B."""
+
+
+class ExecutorPool(BaseModel):
+    """A named group of executors sharing a priority and what they can run (D13).
+
+    One ``executor_pools`` row. Its capacity is the sum of its members'
+    budgets: reported, never claimed against (D3).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    pool_id: PoolId
+    priority: int = Field(ge=0, le=32767)
+    """0 is tried first."""
+    provider: ProviderId
+    region: RegionId | None = None
+    isolation: IsolationLevel = IsolationLevel.CONTAINER
+    capabilities: frozenset[Capability] = frozenset()
+    overflow_delay: timedelta = Field(default=timedelta(seconds=60), ge=timedelta(0))
+    """How long this pool's executors wait on a full higher-priority pool before overflowing."""
+
+    @field_validator("overflow_delay")
+    @classmethod
+    def _whole_seconds(cls, value: timedelta) -> timedelta:
+        # Stored as integer seconds: a fraction would never compare equal on re-register.
+        if value.microseconds:
+            raise ValueError("overflow_delay must be whole seconds")
+        return value
+
+
+DEFAULT_EXECUTOR_POOL = ExecutorPool(pool_id="default", priority=0, provider="docker")
+"""The pool every executor joins unless it declares another; the schema seeds this row."""
+
+
 class ExecutorHost(BaseModel):
     """One registered Executor process. A ``host_id`` is never reused (D5)."""
 
@@ -47,6 +108,8 @@ class ExecutorHost(BaseModel):
     generation: str = Field(min_length=1)
     epoch: int = Field(ge=0)
     """The ``ORCHESTRATION_EVENT_EPOCH`` this host reads (D9)."""
+    pool: ExecutorPool = DEFAULT_EXECUTOR_POOL
+    """The Executor Pool this host joins on ``register`` (D13)."""
 
 
 class ClaimedRun(BaseModel):
@@ -70,6 +133,8 @@ class FencedRun(BaseModel):
     executor_id: str
     reconciler: str
     token: int = Field(ge=1)
+    reaped: bool = False
+    """The row is ``reaped``: the dead host's containers are already gone."""
 
 
 class OpeningSweep(BaseModel):
@@ -100,8 +165,15 @@ class ExecutionRunQueue(Protocol):
     async def register(self, host: ExecutorHost, capacity: int) -> None:
         """Add the host's ``executor_hosts`` row and its own ``execution_budget`` row.
 
+        First deletes any other host's row in the same ``container_id``: the
+        restart is the proof that process stopped, so it has **left** (D5).
         Idempotent for the same host. ``capacity`` is seeded from
         ``SYN_EXECUTION_MAX_CONCURRENT`` by the caller (D12).
+
+        Joins ``host.pool`` (D13): defines it if new. A declaration that differs
+        from the stored definition overwrites it only when every other member
+        is draining or no longer live; otherwise raises
+        ``PoolDefinitionConflict`` and writes nothing.
         """
         ...
 
@@ -114,6 +186,10 @@ class ExecutionRunQueue(Protocol):
         ...
 
     async def is_draining(self, host_id: str) -> bool: ...
+
+    async def others_live(self, host_id: str) -> bool:
+        """Whether any executor other than ``host_id`` has a live heartbeat (D6)."""
+        ...
 
     async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
         """Insert an ``opening`` row. False when the execution already has one."""
@@ -139,8 +215,30 @@ class ExecutionRunQueue(Protocol):
         """``claimed`` -> ``done``; releases the slot (D3)."""
         ...
 
-    async def fence_expired(self, reconciler: str) -> list[FencedRun]:
-        """Every expired ``claimed`` run this host can read -> ``fencing``, owned by ``reconciler``."""
+    async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        """At most ``limit`` expired ``claimed`` runs this host can read -> ``fencing``.
+
+        Oldest ``leased_until`` first, owned by ``reconciler``. Two fencers never
+        take the same row; the rest stay ``claimed`` for a later turn or another
+        live host (D5).
+        """
+        ...
+
+    async def take_over(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        """At most ``limit`` ``fencing``/``reaped`` rows whose reconciler has **left**.
+
+        Each is taken under a new token, oldest ``leased_until`` first. Leaving
+        means its ``executor_hosts`` row is gone: a stale heartbeat alone is not
+        leaving, so a stalled reconciler is never taken over while registered.
+        """
+        ...
+
+    async def reconciling(self, reconciler: str) -> list[FencedRun]:
+        """Every ``fencing``/``reaped`` row ``reconciler`` owns, read from the row (D5).
+
+        Read-only: it acquires nothing. Acquisition is ``fence_expired`` and
+        ``take_over``, each bounded by the caller.
+        """
         ...
 
     async def mark_reaped(self, run: FencedRun) -> None:

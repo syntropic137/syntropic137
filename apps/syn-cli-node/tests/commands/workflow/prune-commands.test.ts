@@ -118,7 +118,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockReturnValue(undefined);
   setTTY(false);
   installed = [priorInstall()];
-  resolvePackage.mockReturnValue({ manifest: { name: "pkg", version: "1.0.0" }, workflows: [workflow(KEPT)] });
+  resolvePackage.mockReturnValue({ manifest: { name: "pkg", version: "1.0.0" }, workflows: [workflow(KEPT)], skipped: [] });
 });
 
 afterEach(() => {

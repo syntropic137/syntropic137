@@ -1,8 +1,10 @@
-# Plan: priority-tiered executor pools with overflow, then queue
+# Plan: Executor Pools in priority order, with overflow, then queue
 
-**Status:** revised plan. No code and no commits. This file is the body of
-`docs/plans/20261014_pool-priority-placement.md`, and PR 0 commits it there. This phase had
-Read/Grep/Glob/Write only, so it could not commit.
+**Status:** approved 2026-10-14 with the orchestrator's defaults, which the owner may revise:
+D1 land PR 0-3 now; D2 the §6 ADR-072 amendment, applied in place; D3 the grace period is
+saturation duration (`full_since`). PR 0 (this file, the amendment, the vocabulary) and PR 1
+(the pool model) landed together in one PR. PR 2-6 are not started. The body below is the
+plan as reviewed; its `file:line` citations are to `6b5b0abe6` and drift as the PRs land.
 
 **Read on:** `main` as checked out in the workspace (`6b5b0abe6`, the merge of #1894). Every
 `file:line` below was re-read in this phase unless it is marked *(research phase)*.

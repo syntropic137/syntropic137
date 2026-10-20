@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
-import struct
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import asyncpg
 
+from syn_adapters.advisory_locks import (
+    ROLLUP_SCHEMA_LOCK_KEY,
+    ROLLUP_STARTUP_LOCK_KEY,
+    SESSION_UNLOCK_SQL,
+    STARTUP_LOCK_RETRY_SECONDS,
+    TRY_SESSION_LOCK_SQL,
+    USAGE_ROLLUP_SCHEMA_LOCK_KEY,
+    session_advisory_lock,
+)
 from syn_adapters.events.models import EXPECTED_COLUMNS
 from syn_domain.contexts.agent_sessions import (
     SUMMARY_USAGE_TABLE,
@@ -19,6 +28,9 @@ from syn_domain.contexts.agent_sessions import (
     turn_usage_columns,
 )
 from syn_shared.events import GIT_COMMIT, SESSION_SUMMARY, TOKEN_USAGE
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -204,13 +216,13 @@ SELECT EXISTS (
 # Is the rollup still being maintained? See _rollup_is_complete().
 ROLLUP_TRIGGER_LIVE_SQL = trigger_live_sql("agent_events_day_rollup")
 
-# One stable key for the whole rollup schema step (#1371). Derived from a name
-# the way PostgresImportLedger derives its keys, rather than picked as a magic
-# number, so it cannot collide with those by accident and a row in `pg_locks`
-# can be traced back to this line.
-ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
-    ">q", hashlib.blake2b(b"agent_event_day_rollup:schema", digest_size=8).digest()
-)[0]
+# The rollup lock keys live in syn_adapters.advisory_locks with every other
+# startup key, so none can collide with another (#1371, #1906, #1965).
+ROLLUP_STARTUP_TRY_LOCK_SQL = TRY_SESSION_LOCK_SQL
+ROLLUP_STARTUP_UNLOCK_SQL = SESSION_UNLOCK_SQL
+
+# How often a replica that lost the startup lock asks again. Startup only.
+_STARTUP_LOCK_RETRY_SECONDS = STARTUP_LOCK_RETRY_SECONDS
 
 
 # TAKE agent_events FIRST. Re-attaching a rollup trigger means DROP TRIGGER
@@ -459,10 +471,6 @@ ON CONFLICT (singleton) DO UPDATE SET backfilled_at = EXCLUDED.backfilled_at
 USAGE_ROLLUP_MARK_INCOMPLETE_SQL = f"DELETE FROM {USAGE_ROLLUP_STATE_TABLE}"
 USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL = f"SELECT EXISTS (SELECT 1 FROM {USAGE_ROLLUP_STATE_TABLE})"
 
-USAGE_ROLLUP_SCHEMA_LOCK_KEY: int = struct.unpack(
-    ">q", hashlib.blake2b(b"agent_usage_rollup:schema", digest_size=8).digest()
-)[0]
-
 USAGE_ROLLUP_TRIGGER = "agent_events_usage_rollup"
 
 
@@ -481,6 +489,29 @@ _ROLLUP_TRIGGERS: tuple[tuple[str, str], ...] = (
     ("agent_events_day_rollup", _DAY_ROLLUP_MIGRATION),
     (USAGE_ROLLUP_TRIGGER, _USAGE_ROLLUP_MIGRATION),
 )
+
+
+@asynccontextmanager
+async def _day_rollup_startup_lock(conn: asyncpg.Connection) -> AsyncIterator[None]:
+    """Serialise the day rollup step across replicas, CONCURRENTLY build included (#1906).
+
+    _create_day_rollup's advisory lock is transaction-scoped, so it is released
+    before _create_rollup_execution_index runs CREATE INDEX CONCURRENTLY. A
+    second replica could then enter its rollup transaction and ask for a
+    ShareLock on agent_event_day_rollup (CREATE INDEX IF NOT EXISTS locks
+    before it checks), which conflicts with the concurrent build, while the
+    build waits for that transaction's snapshot to end: a deadlock.
+
+    Holding one session-level lock across both steps closes it. It is taken by
+    retrying pg_try_advisory_lock rather than by blocking in pg_advisory_lock,
+    because a backend blocked inside a statement holds a snapshot, and
+    CREATE INDEX CONCURRENTLY waits for every older snapshot: the waiter would
+    deadlock with the holder's build. Between attempts the waiter holds none.
+    """
+    async with session_advisory_lock(
+        conn, ROLLUP_STARTUP_LOCK_KEY, retry_seconds=_STARTUP_LOCK_RETRY_SECONDS
+    ):
+        yield
 
 
 class SchemaValidationError(Exception):
@@ -574,8 +605,9 @@ class EventStoreSchema:
             await self._create_table(conn)
             await self._create_indexes(conn)
             await self._configure_compression(conn)
-            await self._create_day_rollup(conn)
-            await self._create_rollup_execution_index(conn)
+            async with _day_rollup_startup_lock(conn):
+                await self._create_day_rollup(conn)
+                await self._create_rollup_execution_index(conn)
             await self._create_usage_rollup(conn)
 
         await self.validate(conn)

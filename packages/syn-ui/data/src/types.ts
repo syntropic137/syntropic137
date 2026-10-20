@@ -23,7 +23,12 @@ export interface WorkflowSummary {
   phase_count: number
   created_at: string | null
   runs_count: number
+  /** Every distinct skill the phases declare, first-declared first (GET /workflows since v1.0.0). */
+  skills: DeclaredSkill[]
 }
+
+/** A skill a workflow declares, aliased to the generated schema rather than restated. */
+export type DeclaredSkill = components['schemas']['DeclaredSkillResponse']
 
 export interface InputDeclaration {
   name: string
@@ -569,6 +574,14 @@ export interface ExecutionDetailResponse {
    * (Evals v2). Null in no eval; absent from a server that predates the field.
    */
   eval?: components['schemas']['ExecutionEvalRunResponse'] | null
+  /** The execution this run resumed, and the phase it picked up at (#1881). */
+  resumed_from?: components['schemas']['ResumedFromInfo'] | null
+  /** The execution that resumed this one; a run is resumed at most once (#1881). */
+  resumed_as?: string | null
+  /** The newest run in the chain this one was resumed into (#1881). */
+  latest_resumed_as?: string | null
+  resumed_from_display?: string | null
+  resumed_as_display?: string | null
   /** Skill use across every phase (feedback 01308bcf); absent from a server that predates it. */
   skill_use?: components['schemas']['ExecutionSkillUseSummary']
 }

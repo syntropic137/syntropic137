@@ -37,6 +37,7 @@ from syn_domain.contexts.orchestration._shared.eval_choice import (
 from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
     EvalMembershipResult,
 )
+from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
 from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
@@ -82,6 +83,14 @@ from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     WorkflowType,
     require_supported_execution_type,
 )
+from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+    HOST_CREDENTIALS,
+    NO_CREDENTIALS,
+    CredentialFreePhaseRefusedError,
+    HostCredentials,
+    NoCredentials,
+    WorkspaceCredentialPolicy,
+)
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
 )
@@ -99,6 +108,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_eval import (
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
+    InterruptExecutionCommand,
     ResumeExecutionCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
@@ -146,6 +156,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     IsolationConfig,
     SecurityPolicy,
     SidecarConfig,
+    WorkspaceDeleteFallback,
     WorkspaceUsage,
 )
 from syn_domain.contexts.orchestration.domain.commands import (
@@ -244,14 +255,19 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
     AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.orphaned_workspace import (
+    TERMINAL_EXECUTION_STATUSES,
     HostWorkspaceGit,
     OrphanedWorkspace,
-    PatchArchive,
+    OwnerExecution,
     ReclaimableDir,
+    RemoteRefs,
+    Retained,
+    RetainedReason,
     StaleWorkspaceDir,
     WorkspaceDirRemover,
     guard_orphaned_workspace,
     guard_stale_workspace_dir,
+    judge_owner,
     remove_reclaimed_dir,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
@@ -348,7 +364,10 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
+    "HOST_CREDENTIALS",
     "MAX_START_ATTEMPTS",
+    "NO_CREDENTIALS",
+    "ORCHESTRATION_EVENT_EPOCH",
     "OWED_STATUSES",
     "PHASE_ID_PATTERN",
     "RESERVED_INPUT_NAMES",
@@ -356,6 +375,7 @@ __all__ = [
     "SHIPPED_WINDOW_DAYS",
     "SKILL_TOOL_NAME",
     "TASK_PLACEHOLDER",
+    "TERMINAL_EXECUTION_STATUSES",
     # Tag edits after creation (#967)
     "AddExecutionTagsCommand",
     "AddExecutionTagsHandler",
@@ -393,6 +413,7 @@ __all__ = [
     "CreateWorkflowTemplateHandler",
     "CreateWorkspaceCommand",
     "CreatedPullRequest",
+    "CredentialFreePhaseRefusedError",
     "CredentialRenewalFailedError",
     "DefinitionChangeKind",
     "DelegationAttempt",
@@ -437,17 +458,20 @@ __all__ = [
     "Goal",
     # Aggregates
     "HandlerResult",
+    "HostCredentials",
     "HostWorkspaceGit",
     "ImageManifest",
     "InheritanceUnavailableError",
     "InjectTokensCommand",
     # Value objects - workflow template
     "InputDeclaration",
+    "InterruptExecutionCommand",
     "InvalidTagsError",
     "IsolationConfig",
     "LaunchEval",
+    "NoCredentials",
     "OrphanedWorkspace",
-    "PatchArchive",
+    "OwnerExecution",
     "Percentiles",
     "PhaseDefinition",
     "PhaseExecutionType",
@@ -467,6 +491,7 @@ __all__ = [
     "ReclaimableDir",
     "RecordEvalRunScoreCommand",
     "RecordEvalRunScoreHandler",
+    "RemoteRefs",
     "RemoveExecutionTagsCommand",
     "RemoveExecutionTagsHandler",
     "RemoveWorkflowTagsCommand",
@@ -481,6 +506,8 @@ __all__ = [
     "ResumeStartRecord",
     "ResumeStartStatus",
     "ResumeStarter",
+    "Retained",
+    "RetainedReason",
     "ReviewVerdict",
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
@@ -527,6 +554,8 @@ __all__ = [
     "WorkflowTemplateVersionAlreadyInstalledError",
     "WorkflowType",
     "WorkspaceAggregate",
+    "WorkspaceCredentialPolicy",
+    "WorkspaceDeleteFallback",
     "WorkspaceDirRemover",
     "WorkspaceUsage",
     "announce_as",
@@ -538,6 +567,7 @@ __all__ = [
     "inherited_outputs",
     "is_gh_pr_create",
     "is_phase_id",
+    "judge_owner",
     "launch_eval_for",
     "mint_wrapper_name",
     "open_eval",

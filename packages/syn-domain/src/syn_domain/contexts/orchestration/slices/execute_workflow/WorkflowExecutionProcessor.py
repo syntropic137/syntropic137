@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.shipped_ledger import ShippedLedgerProvider
 from syn_domain.contexts.orchestration._shared.shipped_recorder import shipped_recorder
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
@@ -40,18 +41,21 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown i
 from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
     CancelledWorkLedger,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
-    SavedWork,
+from syn_domain.contexts.orchestration.slices.execute_workflow.evidence_heads import (
+    EvidenceHeadObserver,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
     ExecutionJournal,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.failure_teardown import (
-    record_failure_and_release,
+from syn_domain.contexts.orchestration.slices.execute_workflow.failed_execution import (
+    record_failed_execution,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_completion import (
+    complete_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_conversation import (
     record_phase_conversation,
@@ -64,8 +68,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegation 
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_outcome import (
     completed_execution,
-    completed_phase,
-    failed_phase_outcome,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import push_recorder
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_retry import (
@@ -78,28 +80,25 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_workspace i
     PhaseWorkspace,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    UNWIRED_EVIDENCE_STEPS,
     # Imported at RUNTIME on purpose, not annotation-only: this module re-exports
     # it, and `slices/execute_workflow/__init__.py` plus a dozen tests do
     # `from ...WorkflowExecutionProcessor import WorkflowExecutionResult`. Moving
     # it into the type-checking block below would break every one of them at
     # import time, which is why TC001 is silenced here rather than obeyed.
-    WorkflowExecutionResult,  # noqa: TC001
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.pull_request_observation import (
-    with_open_pull_requests,
+    WorkflowExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     inherited_outputs,
     inherited_phase_ids,
     record_continuation,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import open_start
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
+    RunScopedTodoFold,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.shutdown_interruption import (
     preserve_interrupted_run,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
-    already_saved_by_the_completion_gate,
-    quarantined_records,
-    refuse_to_complete_unsaved_phase,
 )
 
 if TYPE_CHECKING:
@@ -112,7 +111,6 @@ if TYPE_CHECKING:
     )
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_domain.contexts._shared.maintenance import AdmissionTicket
-    from syn_domain.contexts._shared.repository_ref import RepositoryRef
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
@@ -128,9 +126,13 @@ if TYPE_CHECKING:
         ResumeOrigin,
         SourceCommit,
     )
-    from syn_domain.contexts.orchestration.ports import DelegationEvidencePort
+    from syn_domain.contexts.orchestration.ports import (
+        ClaimedRun,
+        DelegationEvidencePort,
+        ExecutionRunQueue,
+    )
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
-    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
+    from syn_domain.contexts.orchestration.ports.RemoteTreePort import RemoteTreePort
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -145,11 +147,16 @@ if TYPE_CHECKING:
         AgentHandlerProtocol,
         ArtifactRepository,
         CommandBuilder,
+        EvidenceStepDriver,
         ExecutionRepository,
         PhaseOutputCache,
         PromptBuilder,
         SessionRepository,
         TodoProjection,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
+        ExecutionEventStream,
+        TodoProjectionType,
     )
 
 logger = logging.getLogger(__name__)
@@ -184,6 +191,10 @@ class _DispatchContext:
     #: number an agent is told to work on. Nothing downstream could detect it:
     #: a prompt is valid whichever run's inputs it names.
     inputs: dict[str, Any] = field(default_factory=dict)
+    #: The run's own to-do list and the journal that keeps it current, for a
+    #: claimed run (ADR-072 D8, #1310 1.4). None is today's path: the
+    #: processor's shared list, which `run` and `run_resume` still drain.
+    fold: RunScopedTodoFold | None = None
 
 
 class WorkflowExecutionProcessor:
@@ -211,11 +222,28 @@ class WorkflowExecutionProcessor:
         import_ledger: ImportLedgerPort | None = None,
         retry_policy: UpstreamRetryPolicy | None = None,
         remote_branches: RemoteBranchPort | None = None,
+        remote_tree: RemoteTreePort | None = None,
         owed_cancelled_work: ProjectionStore | None = None,
         delegation_evidence: DelegationEvidencePort | None = None,
         interrupt_budget_seconds: float = 60.0,
+        run_queue: ExecutionRunQueue | None = None,
         shipped_ledger: ShippedLedger | None = None,
+        execution_events: ExecutionEventStream | None = None,
+        todo_projection_type: TodoProjectionType | None = None,
+        evidence_steps: EvidenceStepDriver = UNWIRED_EVIDENCE_STEPS,
     ) -> None:
+        #: Where an admitted run waits for an Executor (ADR-072, #1310 1.3).
+        #: None is today's path: `run` starts AND drains in this call. Set,
+        #: `run` and `run_resume` only admit, and `run_claimed` drains.
+        self._run_queue = run_queue
+        #: Drives RUN_EVIDENCE_STEP (plan §A.5). Unwired until the adapters are
+        #: wired (A.15 PR 6); no gate opens before then, because nothing yet
+        #: attaches an `EvidenceGatePolicy` to collection.
+        self._evidence_steps = evidence_steps
+        #: What `run_claimed` folds a claimed run's own to-do list from (D8).
+        self._execution_repo = execution_repository
+        self._execution_events = execution_events
+        self._todo_projection_type = todo_projection_type
         #: Where what each phase shipped is recorded, once, as its stream is read:
         #: given, else kept by the Lane 2 store itself when it can (ShippedLedgerProvider).
         self._shipped_ledger = shipped_ledger or (
@@ -237,6 +265,13 @@ class WorkflowExecutionProcessor:
         #: Asked, as a phase fails, which PR is open from each branch it left,
         #: so a resume continues that PR and no other (#1513).
         self._remote_branches = remote_branches
+        #: Each phase's collection records the forge's heads with these (plan
+        #: §A.2). None without a forge; the tree port is optional until PR 6.
+        self._evidence_heads = (
+            EvidenceHeadObserver(remote_branches, remote_tree)
+            if remote_branches is not None
+            else None
+        )
         self._workspace_service = workspace_service
         self._artifact_repo = artifact_repository
         self._artifact_content_storage = artifact_content_storage
@@ -275,6 +310,7 @@ class WorkflowExecutionProcessor:
         self,
         execution_id: str,
         inputs: dict[str, Any],
+        journal: ExecutionJournal | None = None,
     ) -> PhaseWorkspace:
         """The storage seam of a phase: provision it, claim what it produced.
 
@@ -300,9 +336,14 @@ class WorkflowExecutionProcessor:
             claude_plugin_materializer=self._claude_plugin_materializer,
             skill_materializer=self._skill_materializer,
             runtime=self._runtimes.of(execution_id),
-            journal=self._journal,
+            journal=journal or self._journal,
             inputs=inputs,
+            evidence_heads=self._evidence_heads,
         )
+
+    def _journal_of(self, dispatch_ctx: _DispatchContext) -> ExecutionJournal:
+        """The journal a run's saves go through: its own fold's, else the shared one."""
+        return self._journal if dispatch_ctx.fold is None else dispatch_ctx.fold.journal
 
     async def resolve_inheritance(self, origin: ResumeOrigin | None) -> None:
         """Raise unless a resume's inherited outputs can be handed over.
@@ -339,6 +380,10 @@ class WorkflowExecutionProcessor:
         is durable. Nowhere earlier would be true: everything between the
         admission decision and that write is queueing, and a deploy that
         drained over it would count a quiet system and then kill this run.
+
+        With a run queue (#1310 1.3) this only admits: it returns once the
+        start is durable and the run is ``admitted``, with status
+        ``"admitted"``, and an Executor drains it through `run_claimed`.
         """
         # PromptBuilder reads ``inputs["repos"]`` for ``{{repos}}`` template substitution.
         # ADR-063: write the canonical HTTPS form of typed RepositoryRef so the prompt
@@ -399,33 +444,112 @@ class WorkflowExecutionProcessor:
         admitted: AdmissionTicket | None,
         origin: ResumeOrigin | None = None,
     ) -> WorkflowExecutionResult:
-        """Record the start, then drain the to-do list until the run ends."""
+        """Record the start, then drain here - or, with a run queue, admit and return."""
         await self._cancelled_work.settle()
         started_at = datetime.now(UTC)
-        execution_id = aggregate.id or ""
-        phase_map = {p.phase_id: p for p in phases}
+        phase_outputs = await self._start(aggregate, admitted, origin)
+        if self._run_queue is not None:
+            return WorkflowExecutionResult(
+                workflow_id=workflow_id,
+                execution_id=aggregate.id or "",
+                status="admitted",
+                started_at=started_at,
+            )
+        return await self._drain(
+            aggregate,
+            workflow_id,
+            phases,
+            _DispatchContext(inputs=inputs),
+            repos,
+            origin,
+            phase_outputs,
+            started_at,
+        )
+
+    async def _start(
+        self,
+        aggregate: WorkflowExecutionAggregate,
+        admitted: AdmissionTicket | None,
+        origin: ResumeOrigin | None,
+    ) -> PhaseOutputCache:
+        """Make the start durable; with a run queue, bracket it as ``opening -> admitted``.
+
+        Raises:
+            StreamAlreadyExistsError: the execution already has a stream - it
+                was started before, by this or another process.
+        """
         # Before the stream opens: a resume whose inheritance cannot be read
         # must not leave a child that exists and can never run its first phase.
         phase_outputs = await inherited_outputs(self._artifact_query, origin)
         record_continuation(phase_outputs, aggregate.start_pins)
-        # #1387: durable, therefore visible. From the write the drain counts
-        # this execution and a maintenance transition may proceed over it;
-        # before it, it existed only as a queued task, and `set_mode(active=True)`
-        # was waiting on this line. #1707: the write is also where whoever
-        # queued it learns it started - not later, where an exception would
-        # read as a start that never happened. If `open()` raised before the
-        # write - a duplicate stream, a store that is down - the lease is
-        # ended by the worker instead, which is the other honest answer:
-        # nothing started.
-        await self._journal.open(
-            aggregate, written=admitted.mark_durable if admitted is not None else None
+        await open_start(
+            self._run_queue, self._journal, aggregate, admitted, is_resume=origin is not None
         )
+        return phase_outputs
+
+    async def run_claimed(self, claimed: ClaimedRun) -> WorkflowExecutionResult:
+        """Drain a run an Executor claimed, from its stream alone (#1310 1.3).
+
+        Everything `run` was handed is read back from the start pins: phases,
+        inputs, the resume origin, and the repositories, rebuilt from the
+        source commits, which keep each repository even where its SHA is
+        unknown. The to-do list is the run's own (ADR-072 D8, #1310 1.4):
+        folded from this execution's stream at the claim and kept current by
+        the run's own saves, never read from the shared `execution_todo`
+        store, whose other writers this run cannot see. Closing the run row
+        is the claimer's (1.5), not this.
+
+        Raises:
+            RuntimeError: the processor was built without the event stream and
+                projection type the fold is made from - a wiring defect.
+            LookupError: the claimed execution has no stream.
+        """
+        if self._execution_events is None or self._todo_projection_type is None:
+            msg = "run_claimed needs execution_events and todo_projection_type (ADR-072 D8)"
+            raise RuntimeError(msg)
+        fold = await RunScopedTodoFold.for_execution(
+            claimed.execution_id,
+            self._execution_repo,
+            self._execution_events,
+            self._todo_projection_type,
+        )
+        aggregate = await fold.journal.reload(claimed.execution_id)
+        if aggregate is None:
+            msg = f"Claimed run {claimed.execution_id} has no execution stream"
+            raise LookupError(msg)
+        pins = aggregate.start_pins
+        repos = [RepositoryRef.from_slug(c.repository) for c in pins.source_commits]
+        phase_outputs = await inherited_outputs(self._artifact_query, pins.resumed_from)
+        return await self._drain(
+            aggregate,
+            aggregate.workflow_id or "",
+            pins.pinned_phases,
+            _DispatchContext(inputs=dict(pins.inputs), fold=fold),
+            repos or None,
+            pins.resumed_from,
+            phase_outputs,
+            datetime.now(UTC),
+        )
+
+    async def _drain(
+        self,
+        aggregate: WorkflowExecutionAggregate,
+        workflow_id: str,
+        phases: list[ExecutablePhase],
+        dispatch_ctx: _DispatchContext,
+        repos: list[RepositoryRef] | None,
+        origin: ResumeOrigin | None,
+        phase_outputs: PhaseOutputCache,
+        started_at: datetime,
+    ) -> WorkflowExecutionResult:
+        """Drain the to-do list of a started run until it ends."""
+        execution_id = aggregate.id or ""
+        journal = self._journal_of(dispatch_ctx)
+        phase_map = {p.phase_id: p for p in phases}
 
         phase_results: list[PhaseResult] = []
         all_artifact_ids: list[str] = []
         completed_phase_ids = inherited_phase_ids(origin)
-        dispatch_ctx = _DispatchContext(inputs=inputs)
-
         try:
             await self._drain_todo_list(
                 execution_id=execution_id,
@@ -447,7 +571,7 @@ class WorkflowExecutionProcessor:
                 return await record_cancel_and_release(
                     aggregate=aggregate,
                     runtime=self._runtimes.of(execution_id),
-                    workspaces=self._workspaces_for(execution_id, {}),
+                    workspaces=self._workspaces_for(execution_id, {}, journal),
                     ledger=self._cancelled_work,
                     execution_id=execution_id,
                     workflow_id=workflow_id,
@@ -465,6 +589,7 @@ class WorkflowExecutionProcessor:
                 phase_results,
                 all_artifact_ids,
                 started_at,
+                journal,
             )
         except Exception as e:
             logger.exception(
@@ -485,6 +610,7 @@ class WorkflowExecutionProcessor:
                 started_at,
                 failed_phase_id=dispatch_ctx.current_phase_id,
                 kept_artifact_ids=dispatch_ctx.kept_artifact_ids,
+                journal=journal,
             )
         except asyncio.CancelledError:
             # Platform shutdown (#1381): neither path above saves the work on a
@@ -493,8 +619,8 @@ class WorkflowExecutionProcessor:
             await preserve_interrupted_run(
                 aggregate=aggregate,
                 runtime=self._runtimes.of(execution_id),
-                workspaces=self._workspaces_for(execution_id, {}),
-                journal=self._journal,
+                workspaces=self._workspaces_for(execution_id, {}, journal),
+                journal=journal,
                 workflow_id=workflow_id,
                 execution_id=execution_id,
                 phase_id=dispatch_ctx.current_phase_id,
@@ -524,8 +650,11 @@ class WorkflowExecutionProcessor:
         dispatch_ctx: _DispatchContext,
     ) -> None:
         """Process to-do items until the list is empty (all phases done or cancelled)."""
+        todo_list = (
+            self._todo_projection if dispatch_ctx.fold is None else dispatch_ctx.fold.projection
+        )
         while True:
-            todos = await self._todo_projection.get_pending(execution_id)
+            todos = await todo_list.get_pending(execution_id)
             if not todos:
                 break
             await self._dispatch(
@@ -560,8 +689,9 @@ class WorkflowExecutionProcessor:
         # real phase id and unstrand the inner phase record. Stored on
         # the per-run _DispatchContext, never on the shared processor.
         dispatch_ctx.current_phase_id = todo.phase_id
+        journal = self._journal_of(dispatch_ctx)
         if todo.action == TodoAction.PROVISION_WORKSPACE:
-            await self._workspaces_for(todo.execution_id, dispatch_ctx.inputs).start_phase(
+            await self._workspaces_for(todo.execution_id, dispatch_ctx.inputs, journal).start_phase(
                 todo,
                 phase,
                 aggregate,
@@ -572,16 +702,18 @@ class WorkflowExecutionProcessor:
         elif todo.action == TodoAction.RUN_AGENT:
             await self._handle_run_agent(todo, phase, aggregate, dispatch_ctx)
         elif todo.action == TodoAction.COLLECT_ARTIFACTS:
-            await self._workspaces_for(todo.execution_id, dispatch_ctx.inputs).collect(
+            await self._workspaces_for(todo.execution_id, dispatch_ctx.inputs, journal).collect(
                 todo,
                 phase,
                 aggregate,
                 all_artifact_ids,
                 phase_outputs,
             )
+        elif todo.action == TodoAction.RUN_EVIDENCE_STEP:
+            await self._evidence_steps.handle(todo, aggregate, journal.append, phase_outputs)
         elif todo.action == TodoAction.COMPLETE_PHASE:
             await self._handle_complete_phase(
-                todo, phase, aggregate, phase_results, completed_phase_ids
+                todo, phase, aggregate, phase_results, completed_phase_ids, journal
             )
             # The phase finished cleanly; a later workflow-level failure
             # (between phases) must not be attributed to it.
@@ -596,21 +728,13 @@ class WorkflowExecutionProcessor:
         phase_results: list[PhaseResult],
         all_artifact_ids: list[str],
         started_at: datetime,
+        journal: ExecutionJournal,
     ) -> WorkflowExecutionResult:
         """Build completion command, save, and return success result."""
         completion = completed_execution(phase_results, all_artifact_ids)
         aggregate.complete_execution(completion.as_command(execution_id, total_phases=len(phases)))
-        await self._journal.append(aggregate)
+        await journal.append(aggregate)
         return completion.execution_result(workflow_id, execution_id, started_at=started_at)
-
-    async def _observe_branches(
-        self, observed: ObservedBranches | None, aggregate: WorkflowExecutionAggregate
-    ) -> ObservedBranches | None:
-        """The failing phase's branches, with the PR open from each when a forge is wired (#1513)."""
-        if self._remote_branches is None:
-            return observed
-        repositories = [c.repository for c in aggregate.start_pins.source_commits]
-        return await with_open_pull_requests(observed, self._remote_branches, repositories)
 
     async def _fail_execution(
         self,
@@ -625,6 +749,7 @@ class WorkflowExecutionProcessor:
         started_at: datetime,
         failed_phase_id: str | None = None,
         kept_artifact_ids: list[str] | None = None,
+        journal: ExecutionJournal | None = None,
     ) -> WorkflowExecutionResult:
         """Close open sessions, save failure event, and return failed result.
 
@@ -636,94 +761,22 @@ class WorkflowExecutionProcessor:
         execution's own artifact list, the failed phase's record and the
         event - otherwise the artifact exists and nothing points at it.
         """
-        kept = list(kept_artifact_ids or [])
-        for artifact_id in kept:
-            if artifact_id not in all_artifact_ids:
-                all_artifact_ids.append(artifact_id)
-        # BEFORE any await: teardown clears both maps, so reading them
-        # afterwards timed the phase to the end of cleanup and lost the
-        # session_id entirely (#1036).
-        runtime = self._runtimes.of(execution_id)
-        timings = runtime.timings()
-        # Read in the same breath as the timings, and for the same reason: the
-        # counts are the dying phase's own, and this is the last frame in which
-        # anything can still ask for them (#1262). Without this the phase
-        # reported zero tokens no matter what it had burned, so an exit 124
-        # after 735 tokens - a stall - was indistinguishable from one after
-        # 300k, which needed a bigger budget rather than a retry.
-        #
-        # Asked with `execution_id`, not just the phase: this processor is
-        # shared across concurrent dispatches and two runs of one workflow have
-        # the same phase ids, so "what did `implement` spend" names two answers.
-        # The id is the run's own, so it always names this one's.
-        usage = runtime.usage_for(execution_id, failed_phase_id)
-        # Before the teardown below, the only window in which either is
-        # possible: SAVE what would die with the container (#1231), then read
-        # where that leaves the branches (#1200). Saving first is what lets the
-        # branch report point at a quarantine ref instead of at nothing.
-        #
-        # This does not make the phase succeed and must not be read as doing
-        # so. `error` is untouched, `failed_phase_outcome` appends to its reason
-        # rather than replacing it, and the aggregate is still told the
-        # execution failed: a phase killed at its timeout_seconds is still a
-        # phase that ran out of time. What changes is only that the time is now
-        # the whole of what the timeout costs.
-        #
-        # The one failure that arrives with the workspace already emptied is
-        # the completion gate's own refusal, which quarantined before it raised
-        # (#1184). Saving again would push a second, differently-timestamped
-        # commit to the same ref, be rejected as a non-fast-forward, and report
-        # the work as lost directly under the gate's report that it is not.
-        saved = (
-            SavedWork()
-            if already_saved_by_the_completion_gate(error)
-            else await runtime.save_unpushed_work(failed_phase_id, execution_id=execution_id)
-        )
-        # Whichever of the two saved it, the workflow changes a rescue had to
-        # leave out are stored now, while the run still knows them, and
-        # pointed at from the failed phase like everything else it kept (#1437).
-        records = quarantined_records(error, saved)
-        for artifact_id in await self._workspaces_for(execution_id, {}).keep_dropped_workflows(
-            records,
-            workflow_id=workflow_id,
-            phase_id=failed_phase_id,
-            execution_id=execution_id,
-            session_id=timings.session_ids.get(failed_phase_id or "", ""),
-        ):
-            kept.append(artifact_id)
-            if artifact_id not in all_artifact_ids:
-                all_artifact_ids.append(artifact_id)
-        observed = await self._observe_branches(await runtime.observe(failed_phase_id), aggregate)
-        failure = failed_phase_outcome(
+        return await record_failed_execution(
             error,
-            failed_phase_id,
-            timings.started_at,
-            timings.session_ids,
-            observed=observed,
-            kept_artifact_ids=kept,
-            usage=usage,
-            saved=saved,
-            quarantined=records,
-            repositories=[c.repository for c in aggregate.start_pins.source_commits],
-        )
-        if failure.result is not None:
-            phase_results.append(failure.result)
-
-        await record_failure_and_release(
-            failure,
-            aggregate=aggregate,
-            journal=self._journal,
-            runtime=runtime,
+            aggregate,
+            runtime=self._runtimes.of(execution_id),
+            workspaces=self._workspaces_for(execution_id, {}, journal),
+            journal=journal or self._journal,
+            remote_branches=self._remote_branches,
             execution_id=execution_id,
-            completed_phases=len(completed_phase_ids),
+            workflow_id=workflow_id,
             total_phases=len(phases),
-        )
-        return failure.execution_result(
-            workflow_id,
-            execution_id,
-            started_at=started_at,
             phase_results=phase_results,
-            artifact_ids=all_artifact_ids,
+            all_artifact_ids=all_artifact_ids,
+            completed_phase_ids=completed_phase_ids,
+            started_at=started_at,
+            failed_phase_id=failed_phase_id,
+            kept_artifact_ids=kept_artifact_ids,
         )
 
     def _get_agent_handler(self) -> AgentHandlerProtocol:
@@ -743,6 +796,7 @@ class WorkflowExecutionProcessor:
         assert todo.phase_id is not None
         session_id = todo.session_id or ""
         runtime = self._runtimes.of(todo.execution_id)
+        journal = self._journal_of(dispatch_ctx)
         launch = runtime.launch(todo.phase_id, session_id=session_id)
         workflow_id = aggregate.workflow_id or ""
 
@@ -777,7 +831,7 @@ class WorkflowExecutionProcessor:
                 session_id=session_id,
                 observability=self._observability_writer,
                 retry_policy=self._retry_policy,
-                on_push=push_recorder(aggregate, self._journal, todo.phase_id),
+                on_push=push_recorder(aggregate, journal, todo.phase_id),
                 shipped=shipped_recorder(self._shipped_ledger, aggregate, todo.execution_id),
             )
             said = result.stream_result.last_agent_message
@@ -814,7 +868,7 @@ class WorkflowExecutionProcessor:
                     said,
                     UnfinishedPhase.INTERRUPTED,
                 )
-                await self._handle_cancel_signal(todo, result, aggregate)
+                await self._handle_cancel_signal(todo, result, aggregate, journal)
                 return
 
             command = result.command
@@ -839,7 +893,7 @@ class WorkflowExecutionProcessor:
                     todo,
                     aggregate,
                     runtime,
-                    self._journal,
+                    journal,
                     reason=result.stream_result.error_reason,
                     failure=str(failure),
                 ):
@@ -847,7 +901,7 @@ class WorkflowExecutionProcessor:
                 raise failure
 
             aggregate.agent_execution_completed(command)
-            await self._journal.append(aggregate)
+            await journal.append(aggregate)
         except Exception:
             if not kept:
                 await self._keep(
@@ -867,7 +921,7 @@ class WorkflowExecutionProcessor:
     ) -> None:
         """Keep what an unfinished phase wrote or said, before its workspace goes."""
         dispatch_ctx.kept_artifact_ids = await self._workspaces_for(
-            todo.execution_id, dispatch_ctx.inputs
+            todo.execution_id, dispatch_ctx.inputs, self._journal_of(dispatch_ctx)
         ).keep_unfinished_output(
             todo,
             phase,
@@ -882,6 +936,7 @@ class WorkflowExecutionProcessor:
         todo: TodoItem,
         result: AgentExecutionResult,
         aggregate: WorkflowExecutionAggregate,
+        journal: ExecutionJournal,
     ) -> None:
         """Dispatch CancelExecutionCommand when the agent stream was interrupted by a cancel signal."""
         assert todo.phase_id is not None, "phase_id must be set for a running agent todo"
@@ -891,7 +946,7 @@ class WorkflowExecutionProcessor:
             reason=result.stream_result.interrupt_reason or "Cancelled by user",
         )
         aggregate.cancel_execution(cancel_cmd)
-        await self._journal.append(aggregate)
+        await journal.append(aggregate)
 
     async def _handle_complete_phase(
         self,
@@ -900,53 +955,15 @@ class WorkflowExecutionProcessor:
         aggregate: WorkflowExecutionAggregate,
         phase_results: list[PhaseResult],
         completed_phase_ids: list[str],
+        journal: ExecutionJournal | None = None,
     ) -> None:
-        """Dispatch COMPLETE_PHASE.
-
-        THE ORDER OF THE FOUR STEPS BELOW IS THE GUARANTEE (#1184). The guard
-        runs before the phase gives anything up, before the aggregate is told
-        it succeeded, before that is persisted, and before the runtime tears
-        the workspace down. Every one of those is a point of no return, and the
-        guard is only a guard on the near side of all four.
-
-        `phase` is here for the guard, which cannot tell an authored edit from
-        a build tool's side effect without the phase's own declaration (#1308).
-        Every other handler already took it; this one dropped it, which is why
-        the declaration had nowhere to arrive.
-        """
-        assert todo.phase_id is not None
-        runtime = self._runtimes.of(todo.execution_id)
-        # FIRST, and on the real path rather than inside a try: nothing has
-        # been popped, the workspace is still alive and the aggregate has not
-        # been told this phase succeeded, so the raise IS the outcome (#1184).
-        await refuse_to_complete_unsaved_phase(
-            runtime.live_workspaces,
+        """Dispatch COMPLETE_PHASE, in the order `complete_phase` guarantees (#1184)."""
+        await complete_phase(
             todo,
-            delivers_repo_changes=phase.delivers_repo_changes,
-        )
-
-        harvest = runtime.harvest(todo.execution_id, todo.phase_id)
-        outcome = completed_phase(
-            execution_id=todo.execution_id,
-            workflow_id=aggregate.workflow_id or "",
-            phase_id=todo.phase_id,
-            session_id=todo.session_id,
-            started_at=harvest.started_at,
-            artifact_ids=harvest.artifact_ids,
-            auth_tokens=harvest.auth_tokens,
-        )
-        phase_results.append(outcome.result)
-        completed_phase_ids.append(todo.phase_id)
-
-        aggregate.complete_phase(outcome.command)
-        await self._journal.append(aggregate)
-
-        await runtime.finalize(
-            todo.phase_id,
-            input_tokens=outcome.input_tokens,
-            output_tokens=outcome.output_tokens,
-            cache_creation_tokens=outcome.cache_creation_tokens,
-            cache_read_tokens=outcome.cache_read_tokens,
-            total_tokens=outcome.total_tokens,
-            duration_seconds=outcome.duration_seconds,
+            phase,
+            aggregate,
+            phase_results,
+            completed_phase_ids,
+            runtime=self._runtimes.of(todo.execution_id),
+            journal=journal or self._journal,
         )

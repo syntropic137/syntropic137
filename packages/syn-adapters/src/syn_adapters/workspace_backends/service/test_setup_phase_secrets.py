@@ -17,12 +17,12 @@ import pytest
 
 from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
 from syn_adapters.workspace_backends.service.setup_phase_secrets import (
-    DEFAULT_SETUP_SCRIPT,
     RepoNameCollisionError,
     SetupPhaseSecrets,
     _repo_full_name,
     _repo_name,
 )
+from syn_adapters.workspace_backends.service.setup_script_header import DEFAULT_SETUP_SCRIPT
 from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
     PROVISIONED_CREDENTIAL_FILE,
     PROVISIONED_REMOTE_SETTINGS,

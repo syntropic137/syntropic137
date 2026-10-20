@@ -13,15 +13,17 @@ from syn_adapters.in_memory import InMemoryAdapter
 from syn_domain.contexts.orchestration.ports import (
     ClaimedRun,
     ExecutorHost,
+    ExecutorPool,
     FencedRun,
     OpeningSweep,
+    PoolDefinitionConflict,
     RunCounts,
     RunLeaseLost,
     StreamPresence,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from syn_domain.contexts.orchestration.ports import ExecutionStreamProbe
 
@@ -35,10 +37,12 @@ class _Host(BaseModel):
 
     host: ExecutorHost
     capacity: int
+    registered_at: datetime
     in_use: int = 0
     heartbeat_at: datetime = _NEVER
     draining: bool = False
     registered: bool = True
+    successor_id: str | None = None
 
 
 class _Run(BaseModel):
@@ -72,13 +76,52 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         super().__init__()
         self._ttl, self._stale, self._now = lease_ttl, heartbeat_stale, clock
         self._hosts: dict[str, _Host] = {}
+        self._pools: dict[str, ExecutorPool] = {}
         self._runs: dict[str, _Run] = {}
         self._lock = asyncio.Lock()
 
     async def register(self, host: ExecutorHost, capacity: int) -> None:
         if capacity < 0:
             raise ValueError("executor capacity must be nonnegative")
-        self._hosts.setdefault(host.host_id, _Host(host=host, capacity=capacity))
+        held = {
+            other_id: other
+            for other_id, other in self._hosts.items()
+            if other.host.container_id == host.container_id and other_id != host.host_id
+        }
+        self._join_pool(host, retired=held.keys())
+        if host.host_id not in self._hosts and held:
+            capacity = sum(other.capacity - other.in_use for other in held.values())
+            for other_id, other in held.items():
+                self._hosts[other_id] = other.model_copy(
+                    update={"capacity": other.in_use, "successor_id": host.host_id}
+                )
+        for other_id in held:
+            self._hosts[other_id] = self._hosts[other_id].model_copy(update={"registered": False})
+        self._hosts.setdefault(
+            host.host_id, _Host(host=host, capacity=capacity, registered_at=self._now())
+        )
+
+    def _join_pool(self, host: ExecutorHost, retired: Iterable[str]) -> None:
+        """Postgres's rule (D13); ``retired`` are this container's predecessors, already gone."""
+        declared = host.pool
+        held = self._pools.setdefault(declared.pool_id, declared)
+        if held == declared:
+            return
+        now, gone = self._now(), set(retired)
+        if any(
+            other.registered
+            and not other.draining
+            and other_id != host.host_id
+            and other_id not in gone
+            and other.host.pool.pool_id == declared.pool_id
+            and max(other.heartbeat_at, other.registered_at) > now - self._stale
+            for other_id, other in self._hosts.items()
+        ):
+            raise PoolDefinitionConflict(
+                f"executor {host.host_id!r} declares Executor Pool {declared!r}, "
+                f"but live members hold {held!r}; drain them or declare the same definition"
+            )
+        self._pools[declared.pool_id] = declared
 
     async def deregister(self, host_id: str) -> None:
         if host_id in self._hosts:
@@ -94,6 +137,13 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
     async def is_draining(self, host_id: str) -> bool:
         entry = self._hosts.get(host_id)
         return entry is not None and entry.registered and entry.draining
+
+    async def others_live(self, host_id: str) -> bool:
+        cutoff = self._now() - self._stale
+        return any(
+            other_id != host_id and entry.registered and entry.heartbeat_at > cutoff
+            for other_id, entry in self._hosts.items()
+        )
 
     async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
         if execution_id in self._runs:
@@ -155,31 +205,64 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
     async def close(self, run: ClaimedRun) -> None:
         self._release(run.execution_id, run.token, "claimed", "done")
 
-    async def fence_expired(self, reconciler: str) -> list[FencedRun]:
+    async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        entry = self._hosts.get(reconciler)
+        if entry is None or not entry.registered or limit < 1:
+            return []
+        now, epoch = self._now(), entry.host.epoch
+        expired = sorted(
+            (
+                held
+                for held in self._runs.values()
+                if held.state == "claimed"
+                and held.leased_until < now
+                and held.writer_epoch <= epoch
+            ),
+            key=lambda held: (held.leased_until, held.execution_id),
+        )
+        fenced: list[FencedRun] = []
+        for held in expired[:limit]:
+            row = self._put(
+                held,
+                state="fencing",
+                reconciler=reconciler,
+                token=held.token + 1,
+                reader_epoch=min(
+                    held.reader_epoch if held.reader_epoch is not None else epoch, epoch
+                ),
+            )
+            fenced.append(self._fenced(row, reconciler))
+        return fenced
+
+    async def take_over(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        entry = self._hosts.get(reconciler)
+        if entry is None or not entry.registered or limit < 1:
+            return []
+        orphaned = sorted(
+            (
+                held
+                for held in self._runs.values()
+                if held.state in ("fencing", "reaped")
+                and held.reconciler != reconciler
+                and self._adoptable(held, entry.host.epoch)
+            ),
+            key=lambda held: (held.leased_until, held.execution_id),
+        )
+        return [
+            self._fenced(self._put(held, reconciler=reconciler, token=held.token + 1), reconciler)
+            for held in orphaned[:limit]
+        ]
+
+    async def reconciling(self, reconciler: str) -> list[FencedRun]:
         entry = self._hosts.get(reconciler)
         if entry is None or not entry.registered:
             return []
-        now, epoch, fenced = self._now(), entry.host.epoch, []
-        for held in list(self._runs.values()):
-            if held.state == "claimed" and held.leased_until < now and held.writer_epoch <= epoch:
-                row = self._put(
-                    held,
-                    state="fencing",
-                    reconciler=reconciler,
-                    token=held.token + 1,
-                    reader_epoch=min(
-                        held.reader_epoch if held.reader_epoch is not None else epoch, epoch
-                    ),
-                )
-                fenced.append(
-                    FencedRun(
-                        execution_id=row.execution_id,
-                        executor_id=row.executor_id or "",
-                        reconciler=reconciler,
-                        token=row.token,
-                    )
-                )
-        return fenced
+        owned = [
+            self._fenced(held, reconciler)
+            for held in self._runs.values()
+            if held.state in ("fencing", "reaped") and held.reconciler == reconciler
+        ]
+        return sorted(owned, key=lambda run: run.execution_id)
 
     async def mark_reaped(self, run: FencedRun) -> None:
         row = self._held(run.execution_id, run.token, "fencing")
@@ -225,6 +308,21 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             and entry.heartbeat_at > now - self._stale
         )
 
+    def _adoptable(self, row: _Run, epoch: int) -> bool:
+        """The Postgres takeover predicate: its reconciler has left, and the epoch is readable."""
+        left = self._hosts.get(row.reconciler or "")
+        return (left is None or not left.registered) and row.writer_epoch <= epoch
+
+    @staticmethod
+    def _fenced(row: _Run, reconciler: str) -> FencedRun:
+        return FencedRun(
+            execution_id=row.execution_id,
+            executor_id=row.executor_id or "",
+            reconciler=reconciler,
+            token=row.token,
+            reaped=row.state == "reaped",
+        )
+
     def _promote(self, execution_id: str) -> bool:
         row = self._runs.get(execution_id)
         if row is None or row.state not in ("opening", "abandoned"):
@@ -249,5 +347,13 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         if row is None or row.executor_id is None:
             raise RunLeaseLost(f"{execution_id} is no longer {held} under token {token}")
         charged = self._hosts[row.executor_id]
-        self._hosts[row.executor_id] = charged.model_copy(update={"in_use": charged.in_use - 1})
+        moved = int(charged.successor_id is not None)
+        self._hosts[row.executor_id] = charged.model_copy(
+            update={"in_use": charged.in_use - 1, "capacity": charged.capacity - moved}
+        )
+        if charged.successor_id is not None:
+            heir = self._hosts[charged.successor_id]
+            self._hosts[charged.successor_id] = heir.model_copy(
+                update={"capacity": heir.capacity + 1}
+            )
         return self._put(row, state=to, executor_id=None, leased_until=_NEVER)

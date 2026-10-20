@@ -4,7 +4,7 @@
  */
 import { formatCost } from '../format/cost'
 import { formatTokens, TOKEN_SERIES } from '../format/tokens'
-import { MONTHS, WEEKDAYS, dayMs, type SkylineDay } from '../geometry/skyline'
+import { DAY_ZONE_SUFFIX, MONTHS, WEEKDAYS, dayMs, type SkylineDay } from '../geometry/skyline'
 
 export interface ReadoutPart {
   key: (typeof TOKEN_SERIES)[number]['key']
@@ -24,6 +24,8 @@ export interface DayReadoutModel {
   dateLabel: string
   /** "2026". */
   year: string
+  /** " (UTC)": the zone the day is cut in, shown after the date (#1939). */
+  zone: string
   sessions: string
   executions: string
   commits: string
@@ -55,6 +57,7 @@ export function dayReadout(day: SkylineDay): DayReadoutModel {
     date: day.date,
     dateLabel: `${WEEKDAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`,
     year: String(d.getUTCFullYear()),
+    zone: DAY_ZONE_SUFFIX,
     sessions: count(day.sessions),
     executions: count(day.executions),
     commits: count(day.commits),

@@ -20,7 +20,7 @@ export type ResourceName =
   | 'listSessionCosts' | 'getSessionCost' | 'listExecutionCosts' | 'getExecutionCost' | 'getCostSummary'
   | 'getMetrics' | 'getToolTimeline' | 'getTokenMetrics' | 'getConversationLog' | 'getSSEHealth' | 'getFeatures' | 'getBuildInfo'
   | 'getContributionHeatmap'
-  | 'getEvalTrend' | 'getWorkflowTrend'
+  | 'getEvalTrend' | 'getWorkflowTrend' | 'getWorkflowTrends'
   | 'getWorkflowLatestOutputs'
   | 'getShippedMetrics'
 

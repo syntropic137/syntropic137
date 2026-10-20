@@ -1,0 +1,34 @@
+id: event-schema-gate-ignores-identity
+polarity: defect
+source_pr: 1921
+escape_class: schema gate covers shape not identity
+# Escaped on 2026-10-14: verification judged #1921 at f479241 without naming
+# this; an independent second verify at the same head blocked it (M2: an
+# event's version changed from v1 to v2 survived both the snapshot and
+# check-event-compat). A merge of main (32b038e) sits between the head and
+# the fix, so the pin is the judged head, cited in `certified_in`. The fix is
+# a series: 84019a2 (the snapshot) then a6a3246 (the compat probe).
+commit: f479241456ed792cad7823c01b39135187ad5a7b
+certified_in: https://github.com/syntropic137/syntropic137/pull/1921#issuecomment-6177828889
+first_fix_commit: 84019a26080035860d1fc7cdf6ad7ac5de294c8e
+fix_commit: a6a324653190d1f99c6081e2cb349e85a1953838
+task: >
+  The change under review adds an event schema snapshot as a fitness gate and
+  a release check, check-event-compat, that probes stored events against the
+  current models. Review whether the two together refuse every change to an
+  orchestration event that would break reading events already stored.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    The snapshot records only each event model's validation schema, not the
+    event's type name and version, and the compat probe resolves models by
+    Python class name. Renaming an event type, or bumping its version in the
+    @event decorator, changes what stored events are read as while both the
+    snapshot and check-event-compat stay green.
+  files:
+    - ci/fitness/event_sourcing/_orchestration_event_schemas.py
+    - scripts/event_compat/probe.py
+  keywords:
+    - [event type, event_type, type name, version, identity, decorator, "@event"]
+    - [snapshot, compat, probe, gate, schema]
+split: train

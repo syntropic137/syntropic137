@@ -21,6 +21,7 @@ from syn_adapters.workspace_backends.agentic.adapter import (
     AgenticIsolationAdapter,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import cpu_concurrency_env
+from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     DEPLOYMENT_SEPARATOR,
     apply_session_store_env,
@@ -29,6 +30,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
     deployment_identity,
     encode_tag_value,
     sanitize_partition_segment,
+    session_store_credential_bindings,
 )
 from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_shared.env_constants import (
@@ -129,8 +131,11 @@ class TestEnabled:
             phase_id="phase-1",
         )
         assert set(env) <= set(SESSION_STORE_CONTRACT_ENV_VARS)
+        # AUTH is reserved too, but it is a credential: it travels as a
+        # binding (see test_auth_is_a_binding_the_resolver_fills), never here.
         assert set(env) == set(SESSION_STORE_CONTRACT_ENV_VARS) - {
-            ENV_AGENTIC_SESSION_STORE_DEPLOYMENT
+            ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
+            ENV_AGENTIC_SESSION_STORE_AUTH,
         }
 
     def test_the_deployment_variable_appears_when_supplied(self) -> None:
@@ -140,7 +145,7 @@ class TestEnabled:
             workspace_id="ws-xyz",
             deployment="syntropic137__development",
         )
-        assert set(env) == set(SESSION_STORE_CONTRACT_ENV_VARS)
+        assert set(env) == set(SESSION_STORE_CONTRACT_ENV_VARS) - {ENV_AGENTIC_SESSION_STORE_AUTH}
 
     def test_provider_url_spool_values(self) -> None:
         env = build_session_store_env(
@@ -152,19 +157,31 @@ class TestEnabled:
         assert env[ENV_AGENTIC_SESSION_STORE_SPOOL] == DEFAULT_SPOOL_DIR
         assert env[ENV_AGENTIC_SESSION_STORE_SPOOL] == "/spool"
 
-    def test_auth_carries_the_token(self) -> None:
-        env = build_session_store_env(
-            _enabled_settings(), execution_id="exec-abc", workspace_id="ws-xyz"
-        )
-        assert env[ENV_AGENTIC_SESSION_STORE_AUTH] == STORE_TOKEN
+    @pytest.mark.asyncio
+    async def test_auth_is_a_binding_the_resolver_fills(self) -> None:
+        settings = _enabled_settings()
+        env = build_session_store_env(settings, execution_id="exec-abc", workspace_id="ws-xyz")
+        [binding] = session_store_credential_bindings(settings)
 
-    def test_auth_is_empty_when_store_needs_no_token(self) -> None:
+        assert ENV_AGENTIC_SESSION_STORE_AUTH not in env
+        assert STORE_TOKEN not in binding.model_dump_json()
+        assert (binding.delivery, binding.target) == ("env", ENV_AGENTIC_SESSION_STORE_AUTH)
+        assert await WorkspaceCredentials(settings).resolve(binding.ref) == STORE_TOKEN
+
+    @pytest.mark.asyncio
+    async def test_auth_is_empty_when_store_needs_no_token(self) -> None:
         """An unauthenticated store is legitimate; a missing token must not
         silently disable capture for an operator who configured a URL."""
         settings = _enabled_settings(auth_token=None)
         env = build_session_store_env(settings, execution_id="e", workspace_id="w")
-        assert env[ENV_AGENTIC_SESSION_STORE_AUTH] == ""
+        [binding] = session_store_credential_bindings(settings)
+        assert await WorkspaceCredentials(settings).resolve(binding.ref) == ""
         assert env[ENV_AGENTIC_SESSION_STORE_PROVIDER] == SESHMAGIC_PROVIDER
+
+    def test_disabled_store_binds_nothing(self) -> None:
+        assert (
+            session_store_credential_bindings(SessionStoreSettings(_env_file=None, url=None)) == []
+        )
 
     def test_partition_is_execution_then_workspace(self) -> None:
         env = build_session_store_env(
@@ -377,7 +394,7 @@ async def _create(
     with (
         patch.object(adapter, "_provider", provider),
         patch(
-            "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+            "syn_adapters.workspace_backends.backend_kit.verify_image_async",
             side_effect=_passthrough_verify,
         ),
     ):
@@ -389,13 +406,41 @@ class TestAdapterIntegration:
     """The adapter is the seam that actually reaches the provider."""
 
     @pytest.mark.asyncio
+    async def test_the_real_provider_is_built_with_the_resolver_that_fills_the_binding(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The binding is only half: the provider resolves it with what it was built with."""
+        from syn_adapters.workspace_backends.agentic import adapter as adapter_module
+
+        real = adapter_module.WorkspaceDockerProvider
+        resolvers: list[object] = []
+
+        def recording_provider(*args: object, **kwargs: object) -> object:
+            resolvers.append(kwargs.get("credentials"))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(adapter_module, "WorkspaceDockerProvider", recording_provider)
+        adapter = AgenticIsolationAdapter(session_store=_enabled_settings())
+
+        [resolver] = resolvers
+        assert resolver is adapter.credentials
+        assert isinstance(resolver, WorkspaceCredentials)
+        [binding] = session_store_credential_bindings(_enabled_settings())
+        assert await resolver.resolve(binding.ref) == STORE_TOKEN
+
+    @pytest.mark.asyncio
     async def test_configured_store_reaches_the_provider(self) -> None:
         provider = await _create(_enabled_settings())
         ws_config = provider.create.await_args.args[0]
 
-        assert set(SESSION_STORE_CONTRACT_ENV_VARS) <= set(ws_config.environment)
+        assert set(SESSION_STORE_CONTRACT_ENV_VARS) - {ENV_AGENTIC_SESSION_STORE_AUTH} <= set(
+            ws_config.environment
+        )
         assert ws_config.environment[ENV_AGENTIC_SESSION_STORE_URL] == STORE_URL
-        assert ws_config.environment[ENV_AGENTIC_SESSION_STORE_AUTH] == STORE_TOKEN
+        assert ENV_AGENTIC_SESSION_STORE_AUTH not in ws_config.environment
+        [binding] = ws_config.credentials
+        assert binding.target == ENV_AGENTIC_SESSION_STORE_AUTH
+        assert await WorkspaceCredentials(_enabled_settings()).resolve(binding.ref) == STORE_TOKEN
         assert ws_config.environment[ENV_AGENTIC_SESSION_STORE_PARTITION] == "exec-abc/ws-xyz"
         assert _tags_to_dict(ws_config.environment[ENV_AGENTIC_SESSION_STORE_TAGS]) == {
             "source": "syntropic137",
@@ -527,7 +572,8 @@ class TestReservedKeys:
         env = provider.create.await_args.args[0].environment
 
         assert env[ENV_AGENTIC_SESSION_STORE_URL] == STORE_URL
-        assert env[ENV_AGENTIC_SESSION_STORE_AUTH] == STORE_TOKEN
+        assert env.get(ENV_AGENTIC_SESSION_STORE_AUTH) != "attacker-token"
+        assert ENV_AGENTIC_SESSION_STORE_AUTH not in env
         assert env[ENV_AGENTIC_SESSION_STORE_SPOOL] == DEFAULT_SPOOL_DIR
         assert env[ENV_AGENTIC_SESSION_STORE_PARTITION] == "exec-abc/ws-xyz"
         assert _tags_to_dict(env[ENV_AGENTIC_SESSION_STORE_TAGS])["source"] == "syntropic137"

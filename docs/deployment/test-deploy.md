@@ -8,10 +8,9 @@ audience for it other than you.
 This exists because we stopped distinguishing the two. Seven `v0.28.0-beta.*`
 prereleases were created on GitHub in roughly 48 hours, one per test deploy,
 and none of them marked anything a reader would care about. The habit came
-from [the release process doc](../release-process.md#published-beta-a-release-entry-with-an-audience),
-whose Beta Release section says to run `gh release create` - correct for a beta
-you are asking people to install, wrong for "put the current code on the VPS so
-I can look at it", which is what actually happens most of the time.
+from the release process doc, whose Beta Release section used to say to run
+`gh release create --prerelease`. It no longer does: a beta is a test deploy,
+and [Beta Release](../release-process.md#beta-release) now points here.
 
 Everything below was executed against the selfhost VPS on 2026-09-05 deploying
 `v0.28.0-beta.9`, which created no GitHub Release. Two things went wrong on that
@@ -72,8 +71,9 @@ stop dispatches the probe workflow `telemetry-lag-probe-v1`
 `completed`. Then it cancels the probe and reads the cancel back, because a
 probe still in flight is in-flight work to the next pit stop's drain.
 
-- **It is not free.** No token-free runner exists yet (the
-  `ScriptedAgentProfile` contract from #1609 has no driver), so the probe is a
+- **It is not free.** The token-free load-test driver exists
+  (`python -m syn_perf.loadtest`, #1717) but the stub agent image it needs
+  does not yet (AgentParadise/agentic-workspace#44), so the probe is a
   real `sonnet` agent in a real workspace. It is cancelled the moment a phase
   is running, so it costs workspace startup plus the first agent turns, not the
   ~2 minute heartbeat it would otherwise run.

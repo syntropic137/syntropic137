@@ -35,12 +35,28 @@ import pytest
 from syn_adapters.events.schema import (
     ROLLUP_BACKFILL_SQL,
     ROLLUP_EXECUTION_INDEX_VALID_SQL,
+    ROLLUP_STARTUP_UNLOCK_SQL,
     USAGE_ROLLUP_BACKFILL_SESSIONS_SQL,
     USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL,
     USAGE_ROLLUP_MARK_COMPLETE_SQL,
     USAGE_ROLLUP_MARK_INCOMPLETE_SQL,
     EventStoreSchema,
 )
+
+# Written out rather than imported: an oracle that is the production constant
+# moves with it, so `pg_advisory_lock` in its place would still pass (#1965).
+ROLLUP_STARTUP_TRY_LOCK_SQL = "SELECT pg_try_advisory_lock($1)"
+# A session lock waited for inside a statement holds a snapshot, and the
+# concurrent index build waits on it (#1906). The xact lock is the schema
+# transaction's own (#1371) and is not refused.
+_BLOCKING_SESSION_LOCK = re.compile(r"\bpg_advisory_lock(_shared)?\s*\(")
+
+
+def _refuse_blocking_session_lock(sql: str) -> None:
+    if _BLOCKING_SESSION_LOCK.search(sql):
+        msg = f"the startup lock must never block: {sql!r}"
+        raise AssertionError(msg)
+
 
 # CI runs `pytest -m unit`; an unmarked module collects zero tests and the
 # gate goes green having run none of them (#1065).
@@ -190,10 +206,27 @@ class CatalogueConnection:
         #: inside one, so this fake rejects it too rather than letting a build
         #: that would fail in production pass here.
         self.transaction_depth = 0
+        #: Session-level advisory locks this connection holds, with
+        #: PostgreSQL's per-key acquisition count. Answered from the lock and
+        #: unlock statements executed, so a startup that never releases one is
+        #: visible after it returns (#1906).
+        self.session_locks: dict[int, int] = {}
+        #: How many try-lock attempts to refuse first, as if another replica
+        #: held the lock.
+        self.refuse_try_locks = 0
 
-    async def execute(self, sql: str, *_args: object) -> None:
+    async def execute(self, sql: str, *args: object) -> None:
         self.executed.append(sql)
         self.calls.append(sql)
+        _refuse_blocking_session_lock(sql)
+        if sql == ROLLUP_STARTUP_UNLOCK_SQL:
+            key = args[0]
+            assert isinstance(key, int)
+            held = self.session_locks.get(key, 0)
+            if held <= 1:
+                self.session_locks.pop(key, None)
+            else:
+                self.session_locks[key] = held - 1
         if sql == USAGE_ROLLUP_MARK_COMPLETE_SQL:
             self._usage_rollup_marked = True
         elif sql == USAGE_ROLLUP_MARK_INCOMPLETE_SQL:
@@ -221,8 +254,17 @@ class CatalogueConnection:
         if dropped:
             self._indexes.pop(dropped.group(1), None)
 
-    async def fetchval(self, sql: str, *_args: object) -> bool | None:
+    async def fetchval(self, sql: str, *args: object) -> bool | None:
         self.calls.append(sql)
+        _refuse_blocking_session_lock(sql)
+        if sql == ROLLUP_STARTUP_TRY_LOCK_SQL:
+            if self.refuse_try_locks > 0:
+                self.refuse_try_locks -= 1
+                return False
+            key = args[0]
+            assert isinstance(key, int)
+            self.session_locks[key] = self.session_locks.get(key, 0) + 1
+            return True
         if sql == ROLLUP_EXECUTION_INDEX_VALID_SQL:
             # `indisvalid`, or NULL for no such index.
             return self._indexes.get(EXECUTION_INDEX)

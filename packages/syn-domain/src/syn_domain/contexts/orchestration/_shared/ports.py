@@ -41,7 +41,9 @@ class IsolationBackendPort(Protocol):
         """Destroy isolation environment. Idempotent.
 
         Returns what the workspace consumed, measured at teardown, or None when
-        this backend does not measure (or the handle was already gone).
+        this backend does not measure (or the handle was already gone). A
+        teardown that does not complete raises and keeps the handle, so
+        destroying it again retries rather than reporting it gone.
         """
         ...
 
@@ -224,6 +226,16 @@ class EventStreamPort(Protocol):
     @property
     def last_exit_code(self) -> int | None:
         """Exit code from the most recent stream() call."""
+        ...
+
+    async def cancel_running(self, handle: IsolationHandle) -> bool:
+        """Stop whatever ``stream()`` is running in ``handle``'s workspace, bounded.
+
+        Must not depend on the workload honouring a signal: an agent that traps
+        SIGINT and SIGTERM still has to end (#918). True once the process is
+        confirmed over; False when nothing was running or it could not be
+        confirmed, which is logged rather than raised.
+        """
         ...
 
 

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from syn_adapters.platform_access import WorkspacePlatformGrant
+    from syn_adapters.workspace_backends.errors import TeardownFailure
     from syn_adapters.workspace_backends.service.credential_keeper import CredentialLapse
     from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
     from syn_adapters.workspace_backends.service.setup_phase_secrets import (
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
         WorkspaceAggregate,
     )
 
+from syn_adapters.workspace_backends.dependency_seed import seed_dependency_caches
 from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
 from syn_adapters.workspace_backends.service.credential_keeper import keep_credential_fresh
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
@@ -51,9 +53,6 @@ from syn_adapters.workspace_backends.service.git_credential_renewal import (
     renew_git_credential as _renew_git_credential,
 )
 from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger
-from syn_adapters.workspace_backends.service.managed_workspace_ops import (
-    interrupt_container,
-)
 from syn_adapters.workspace_backends.service.setup_phase import (
     clear_secrets,
 )
@@ -94,6 +93,10 @@ class ManagedWorkspace:
     #: `finally`) and so only readable after `__aexit__`. None before teardown,
     #: and when the backend measured nothing.
     teardown_usage: WorkspaceUsage | None = None
+    #: Why teardown did not complete, set beside `teardown_usage`. Never the
+    #: run's primary failure: that propagates out of `create_workspace` on its
+    #: own, and this is recorded next to it rather than in its place.
+    teardown_failure: TeardownFailure | None = None
     #: This phase's read-only access to the Syntropic137 API (ADR-072), set by
     #: `create_workspace` and revoked by its teardown. None while platform
     #: access is OFF, which is the default.
@@ -297,6 +300,9 @@ class ManagedWorkspace:
         result = await _run_setup_phase(self, secrets, setup_script)
         if result.exit_code == 0:
             self._ledger.installed(secrets.issued)
+            # After the clone, before the agent: the lockfiles that key the
+            # seeds exist only now, and nothing has run in the workspace yet.
+            await seed_dependency_caches(self, secrets.clones_under(self.path))
         return result
 
     @property
@@ -368,9 +374,14 @@ class ManagedWorkspace:
             CredentialRenewalFailedError: the credential is not known to be
                 usable. A workspace whose setup phase never ran holds no
                 credential to renew and returns quietly instead - nothing
-                downstream of it can be depending on one.
+                downstream of it can be depending on one. Nor does a
+                credential-free (NoCredentials) workspace, which was given
+                none to renew (#1914).
         """
-        if self._credential_source is None:
+        if (
+            self._credential_source is None
+            or not self._service.credential_policy.supplies_credentials
+        ):
             return ()
         return await _renew_git_credential(self, self._credential_source, self._ledger)
 
@@ -394,15 +405,14 @@ class ManagedWorkspace:
         return await read_codex_rollout(self, native_session_id)
 
     async def interrupt(self) -> bool:
-        """Send SIGINT to the Claude CLI process inside the container.
+        """Stop the agent this workspace is streaming; True once it is confirmed over.
 
-        Uses docker exec to find and signal the claude process:
-            docker exec <container> sh -c "kill -INT $(pgrep -n claude)"
-
-        Returns True if signal was delivered successfully. Non-fatal on failure
-        so cleanup can continue even if the process is already gone.
+        Cancels the running operation through the provider, which escalates to
+        KILL and a container stop for an agent that ignores its signals (#918).
+        Non-fatal on failure: the caller stops reading either way, and closing
+        the stream cancels the operation again.
         """
-        return await interrupt_container(self.isolation_handle)
+        return await self._service._event_stream.cancel_running(self.isolation_handle)
 
     @property
     def proxy_url(self) -> str | None:

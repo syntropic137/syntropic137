@@ -45,14 +45,20 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.events import schema as schema_module
 from syn_adapters.events.schema import (
     ROLLUP_BACKFILL_SQL,
     ROLLUP_EXECUTION_INDEX_SQL,
     ROLLUP_EXECUTION_INDEX_VALID_SQL,
+    ROLLUP_STARTUP_UNLOCK_SQL,
     EventStoreSchema,
 )
 
-from .test_day_rollup_backfill_runs_once import EXECUTION_INDEX, CatalogueConnection
+from .test_day_rollup_backfill_runs_once import (
+    EXECUTION_INDEX,
+    ROLLUP_STARTUP_TRY_LOCK_SQL,
+    CatalogueConnection,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -327,3 +333,66 @@ class TestTheExecutionIndexIsBuiltOutsideTheLock:
         assert statements[0].startswith("DROP INDEX CONCURRENTLY")
         assert statements[1] == ROLLUP_EXECUTION_INDEX_SQL
         assert await conn.fetchval(ROLLUP_EXECUTION_INDEX_VALID_SQL) is True
+
+
+class TestTheIndexBuildIsInsideTheStartupLock:
+    """#1906: the CONCURRENTLY build deadlocked with a second replica's rollup step.
+
+    The rollup transaction's lock is released at COMMIT, before the build. A
+    second replica then asked for a ShareLock on the rollup table while the
+    build waited for that replica's snapshot. One session-level lock spanning
+    both steps means no second replica is inside either while the build runs.
+    Whether PostgreSQL agrees is test_day_rollup_reconciliation.py's
+    two-replica test; this pins the order that makes it so.
+    """
+
+    async def test_the_lock_spans_the_rollup_transaction_and_the_build(self) -> None:
+        conn = _OrderedConnection()
+
+        await _startup(conn, EventStoreSchema())
+
+        lock = conn.calls.index(ROLLUP_STARTUP_TRY_LOCK_SQL)
+        begin = conn.calls.index(_OrderedConnection.BEGIN)
+        build = conn.calls.index(ROLLUP_EXECUTION_INDEX_SQL)
+        unlock = conn.calls.index(ROLLUP_STARTUP_UNLOCK_SQL)
+
+        assert lock < begin < build < unlock, (
+            "the execution index is built outside the startup lock, so a second "
+            "replica's rollup transaction can deadlock with the build (#1906)"
+        )
+
+    async def test_it_is_released_before_startup_returns(self) -> None:
+        """A session lock outlives its transaction; a pooled connection would keep it."""
+        conn = _OrderedConnection()
+
+        await _startup(conn, EventStoreSchema())
+
+        assert conn.session_locks == {}
+
+    async def test_it_is_released_when_the_rollup_step_fails(self) -> None:
+        conn = _OrderedConnection()
+        schema = EventStoreSchema()
+
+        async def broken(_conn: object) -> None:
+            raise RuntimeError("rollup step failed")
+
+        schema._create_day_rollup = broken  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="rollup step failed"):
+            await _startup(conn, schema)
+
+        assert conn.session_locks == {}
+
+    async def test_a_replica_that_is_refused_retries_and_does_nothing_meanwhile(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Refused means retry, never proceed: no rollup DDL until the lock is granted."""
+        monkeypatch.setattr(schema_module, "_STARTUP_LOCK_RETRY_SECONDS", 0)
+        conn = _OrderedConnection()
+        conn.refuse_try_locks = 3
+
+        await _startup(conn, EventStoreSchema())
+
+        attempts = [i for i, sql in enumerate(conn.calls) if sql == ROLLUP_STARTUP_TRY_LOCK_SQL]
+        assert len(attempts) == 4
+        assert attempts[-1] < conn.calls.index(_OrderedConnection.BEGIN)
+        assert conn.session_locks == {}

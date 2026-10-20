@@ -63,6 +63,7 @@ from syn_domain.contexts.artifacts.slices.create_artifact import (
 from syn_domain.contexts.artifacts.slices.create_artifact.CreateArtifactHandler import (
     CreateArtifactHandler,
 )
+from syn_domain.contexts.artifacts.slices.get_artifact import GetArtifactHandler
 from syn_domain.contexts.artifacts.slices.manage_artifact.ManageArtifactHandler import (
     ManageArtifactHandler,
 )
@@ -89,6 +90,7 @@ __all__ = [
     "CreateArtifactCommand",
     "CreateArtifactHandler",
     "DeleteArtifactCommand",
+    "GetArtifactHandler",
     "ManageArtifactHandler",
     "PhaseOutputFile",
     "RecoverArtifactCreationTimeCommand",

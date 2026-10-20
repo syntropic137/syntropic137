@@ -24,6 +24,18 @@ from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import
 from syn_domain.contexts.orchestration.domain.events.CommandFailedEvent import (
     CommandFailedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.EvidenceAttemptStartedEvent import (
+    EvidenceAttemptStartedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.EvidenceRequestedEvent import (
+    EvidenceRequestedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.EvidenceRunAdoptedEvent import (
+    EvidenceRunAdoptedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.EvidenceStepSettledEvent import (
+    EvidenceStepSettledEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
     ExecutionAttachedToEvalEvent,
 )
@@ -56,6 +68,9 @@ from syn_domain.contexts.orchestration.domain.events.GlobalClaudePluginRemovedEv
 )
 from syn_domain.contexts.orchestration.domain.events.IsolationStartedEvent import (
     IsolationStartedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.MutationPatchesRemovedEvent import (
+    MutationPatchesRemovedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
     NextPhaseReadyEvent,
@@ -134,6 +149,10 @@ __all__ = [
     "ClaudePluginRegisteredEvent",
     "CommandExecutedEvent",
     "CommandFailedEvent",
+    "EvidenceAttemptStartedEvent",
+    "EvidenceRequestedEvent",
+    "EvidenceRunAdoptedEvent",
+    "EvidenceStepSettledEvent",
     "ExecutionAttachedToEvalEvent",
     "ExecutionCancelledEvent",
     "ExecutionDetachedFromEvalEvent",
@@ -145,6 +164,7 @@ __all__ = [
     "GlobalClaudePluginAddedEvent",
     "GlobalClaudePluginRemovedEvent",
     "IsolationStartedEvent",
+    "MutationPatchesRemovedEvent",
     "NextPhaseReadyEvent",
     "PhaseCommitPushedEvent",
     "PhaseCompletedEvent",

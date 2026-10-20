@@ -89,3 +89,26 @@ class TestRegisterTriggerHandler:
         t2 = await handler.handle(_make_command(name="trigger-2"))
 
         assert t1.trigger_id != t2.trigger_id
+
+
+@pytest.mark.unit
+class TestDebounceSecondsRejected:
+    """debounce_seconds is accepted nowhere it would be ignored (#1961)."""
+
+    def test_non_zero_debounce_seconds_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="debounce_seconds is not supported"):
+            _make_command(config=(("debounce_seconds", 60),))
+
+    @pytest.mark.asyncio
+    async def test_zero_debounce_seconds_still_registers(self) -> None:
+        """The CLI always sends 0; that must keep working."""
+        handler = RegisterTriggerHandler(
+            store=InMemoryTriggerQueryStore(), repository=NullRepository()
+        )
+
+        aggregate = await handler.handle(
+            _make_command(config=(("debounce_seconds", 0), ("cooldown_seconds", 120)))
+        )
+
+        assert aggregate.config.debounce_seconds == 0
+        assert aggregate.config.cooldown_seconds == 120

@@ -193,7 +193,7 @@ async def test_get_artifact_content_endpoint_returns_content() -> None:
     )
     with (
         patch(
-            "syn_api.prefix_resolver.resolve_or_raise",
+            "syn_api.prefix_resolver.resolve_prefix_or_keep",
             new_callable=AsyncMock,
             return_value="art-ready",
         ),
@@ -221,7 +221,7 @@ async def test_get_artifact_content_endpoint_races_returns_202() -> None:
     )
     with (
         patch(
-            "syn_api.prefix_resolver.resolve_or_raise",
+            "syn_api.prefix_resolver.resolve_prefix_or_keep",
             new_callable=AsyncMock,
             return_value="art-racing",
         ),
@@ -243,7 +243,7 @@ async def test_get_artifact_content_endpoint_missing_returns_404() -> None:
     """When get_artifact errors (artifact truly missing) the endpoint returns 404."""
     with (
         patch(
-            "syn_api.prefix_resolver.resolve_or_raise",
+            "syn_api.prefix_resolver.resolve_prefix_or_keep",
             new_callable=AsyncMock,
             return_value="art-missing",
         ),
@@ -270,7 +270,7 @@ async def test_get_artifact_content_endpoint_empty_artifact_returns_200() -> Non
     )
     with (
         patch(
-            "syn_api.prefix_resolver.resolve_or_raise",
+            "syn_api.prefix_resolver.resolve_prefix_or_keep",
             new_callable=AsyncMock,
             return_value="art-empty",
         ),
