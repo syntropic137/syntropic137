@@ -301,9 +301,7 @@ def _fixtures(functions: Iterable[_Function], module: _Module) -> dict[str, _Fix
                 continue
             kw = {k.arg: k.value for k in getattr(fixture, "keywords", [])}
             name_node = kw.get("name")
-            explicit_name = isinstance(name_node, ast.Constant) and isinstance(
-                name_node.value, str
-            )
+            explicit_name = isinstance(name_node, ast.Constant) and isinstance(name_node.value, str)
             name = name_node.value if explicit_name else node.name
             autouse_node = kw.get("autouse")
             autouse = isinstance(autouse_node, ast.Constant) and bool(autouse_node.value)
