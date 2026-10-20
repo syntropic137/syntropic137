@@ -40,6 +40,7 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
     PhaseYamlDefinition,
     WorkflowDefinition,
 )
+from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -743,6 +744,19 @@ class TestDefaultTrueFieldsSurviveExport:
     def test_delivers_repo_changes_true_stays_absent(self) -> None:
         entry = _parsed_phase(_valid_phase().model_copy(update={"delivers_repo_changes": True}))
         assert not entry.declares("delivers_repo_changes")
+
+    def test_eval_platform_access_is_emitted_and_reinstalls(self) -> None:
+        """#1744: dropped, a reinstalled eval phase can no longer launch or score runs."""
+        phase = _valid_phase().model_copy(update={"platform_access": PlatformScope.EVAL})
+        emitted = yaml.safe_load("phases:\n" + "\n".join(_yaml_phase_lines(phase)))["phases"][0]
+        emitted.pop("prompt_file", None)
+        emitted["prompt_template"] = "body"
+        reinstalled = PhaseYamlDefinition.model_validate(emitted)
+        assert reinstalled.platform_access is PlatformScope.EVAL
+
+    def test_read_platform_access_stays_absent(self) -> None:
+        entry = _parsed_phase(_valid_phase())
+        assert not entry.declares("platform_access")
 
 
 class TestSandboxSurvivesExport:

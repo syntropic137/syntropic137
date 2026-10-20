@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -49,6 +49,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.instruct
     install_codex_instructions,
     repo_instruction_imports,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.repo_identity import (
+    cloned_pins,
+    repo_identity_env,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install import (
     install_skill,
 )
@@ -58,7 +62,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 from syn_shared.agents import AgentProvider, require_executable_provider
 from syn_shared.env_constants import (
-    ENV_GH_REPO,
     ENV_SYN_PHASE_DEADLINE,
 )
 from syn_shared.process_exit import describe_process_failure
@@ -112,10 +115,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-#: `owner` and `repo`: the two trailing path segments every accepted repo shape
-#: ends with, whatever prefix it carries.
-_OWNER_REPO_SEGMENTS: Final[int] = 2
 
 # Maps our phase provider values onto the vercel skills-cli --agent keys.
 # The skills CLI (pinned 1.5.14 in the workspace images) owns the per-harness
@@ -266,65 +265,6 @@ async def _setup_secrets(
     )
 
 
-def _repo_full_names(repos: Sequence[str]) -> list[str]:
-    """`owner/repo` for each entry, first occurrence first, unparseable ones dropped.
-
-    Accepts the shapes the platform stores: a full URL with or without `.git`,
-    an `owner/repo` shorthand, and `git@` / `ssh://` remotes.
-    """
-    names: list[str] = []
-    for repo in repos:
-        text = repo.strip().removesuffix(".git")
-        if "github.com" in text:
-            _, _, tail = text.partition("github.com")
-            text = tail.lstrip(":/")
-        parts = [part for part in text.split("/") if part]
-        if len(parts) >= _OWNER_REPO_SEGMENTS:
-            name = f"{parts[-2]}/{parts[-1]}"
-            if name not in names:
-                names.append(name)
-    return names
-
-
-def _repo_identity_env(repos: Sequence[str]) -> dict[str, str]:
-    """The environment that tells `gh` WHICH repository this phase acts on.
-
-    Empty when the phase has no repository to name, so the caller adds it
-    unconditionally rather than branching on the answer.
-
-    WHY THIS IS PROVISIONED RATHER THAN INFERRED (#1187). `gh` resolves the
-    repository a command targets from the git remotes of the surrounding
-    working tree, and fails there - before it makes any API call - when there
-    is no tree::
-
-        $ gh pr list --limit 1
-        failed to run git: fatal: not a git repository
-
-    The clone used to supply that tree, so repository identity was never
-    provisioned; it was a by-product of the checkout. A `clone_repos: false`
-    phase still calls `gh pr create`, and after the checkout went there was
-    nothing left to infer from. `GH_REPO` states the answer instead of leaving
-    the agent to reconstruct it, which is why it is here and not in a prompt.
-
-    KEYED ON THE PRIMARY REPO - the same `effective_repos[0]` that becomes
-    `{{repo_url}}` in the prompt - so what the agent is told to work on and
-    what `gh` acts on cannot disagree. An unparseable primary therefore yields
-    no variable at all rather than falling through to the next repo's name:
-    silently retargeting `gh pr create` at a different repository is a worse
-    failure than the resolution error it would replace.
-    """
-    primary = _repo_full_names(repos[:1])
-    return {ENV_GH_REPO: primary[0]} if primary else {}
-
-
-def _cloned_pins(repos: Sequence[str], pinned_commits: Sequence[SourceCommit]) -> dict[str, str]:
-    """``owner/name`` -> pinned commit, for the pinned repositories this phase clones."""
-    cloned = set(_repo_full_names(repos))
-    return {
-        c.repository: c.sha for c in pinned_commits if c.sha is not None and c.repository in cloned
-    }
-
-
 class ProvisionResult:
     """Result of workspace provisioning."""
 
@@ -400,6 +340,7 @@ class WorkspaceProvisionHandler:
         inputs: dict[str, object] | None = None,
         pinned_commits: Sequence[SourceCommit] = (),
         continued_branches: Mapping[str, str] | None = None,
+        eval_id: str | None = None,
     ) -> ProvisionResult:
         """Provision workspace for a phase.
 
@@ -421,6 +362,8 @@ class WorkspaceProvisionHandler:
             continued_branches: ``owner/name`` -> the branch to check a pinned
                 repository out ON, at its head, for a phase that continues it
                 (`StartPins.checkout_for`, #1513).
+            eval_id: The eval the execution belongs to, which bounds what an
+                ``eval`` phase's platform token can write (#1744).
         """
         assert todo.phase_id is not None
 
@@ -438,6 +381,8 @@ class WorkspaceProvisionHandler:
             with_sidecar=policy.supplies_credentials,
             inject_tokens=policy.supplies_credentials,
             capture_session_id=session_id,
+            platform_access=phase.platform_access,
+            eval_id=eval_id,
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
@@ -462,7 +407,7 @@ class WorkspaceProvisionHandler:
             checked_out = (
                 await verify_provisioned_checkout(
                     workspace,
-                    _cloned_pins(effective_repos, pinned_commits),
+                    cloned_pins(effective_repos, pinned_commits),
                     continued_branches=continued_branches or {},
                     phase_name=phase.name,
                 )
@@ -794,7 +739,7 @@ class WorkspaceProvisionHandler:
         # claude phases only, leaving every codex phase with the defect this
         # fixes. It is provider-independent, and this is the single point both
         # providers pass through on their way to `workspace.stream(...)`.
-        agent_env.update(_repo_identity_env(effective_repos))
+        agent_env.update(repo_identity_env(effective_repos))
         return claude_cmd, agent_env
 
     @staticmethod
