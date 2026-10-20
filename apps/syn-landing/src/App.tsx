@@ -9,8 +9,10 @@ import UseCases from "./sections/UseCases";
 import WhyPlatform from "./sections/WhyPlatform";
 import Start from "./sections/Start";
 import Footer from "./components/Footer";
+import { useHashScroll } from "./components/useHashScroll";
 
 export default function App() {
+  useHashScroll();
   return (
     <>
       <a href="#main-content" className="skip-link">Skip to content</a>

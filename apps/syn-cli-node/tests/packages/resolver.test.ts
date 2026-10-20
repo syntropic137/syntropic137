@@ -263,7 +263,7 @@ describe("requires_repos inference (ADR-058)", () => {
       tmpDir = makeTmpDir();
       fs.writeFileSync(
         path.join(tmpDir, "my-workflow.yaml"),
-        "id: standalone\nname: Standalone\nphases: []\n",
+        "id: standalone\nname: Standalone\nphases:\n  - id: only\n    prompt_template: hi\n",
         "utf-8",
       );
       const { workflows } = resolvePackage(tmpDir);
@@ -275,7 +275,7 @@ describe("requires_repos inference (ADR-058)", () => {
       tmpDir = makeTmpDir();
       fs.writeFileSync(
         path.join(tmpDir, "my-workflow.yaml"),
-        "id: standalone\nname: Standalone\nrequires_repos: true\nphases: []\n",
+        "id: standalone\nname: Standalone\nrequires_repos: true\nphases:\n  - id: only\n    prompt_template: hi\n",
         "utf-8",
       );
       const { workflows } = resolvePackage(tmpDir);
@@ -287,7 +287,7 @@ describe("requires_repos inference (ADR-058)", () => {
       tmpDir = makeTmpDir();
       fs.writeFileSync(
         path.join(tmpDir, "my-workflow.yaml"),
-        "id: standalone\nname: Standalone\nrequires_repos: false\nphases: []\n",
+        "id: standalone\nname: Standalone\nrequires_repos: false\nphases:\n  - id: only\n    prompt_template: hi\n",
         "utf-8",
       );
       const { workflows } = resolvePackage(tmpDir);

@@ -7,10 +7,13 @@ compare-and-set on that token for every later write.
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from syn_adapters.advisory_locks import RUN_QUEUE_SCHEMA_LOCK_KEY, session_advisory_lock
 from syn_domain.contexts.orchestration.ports import (
     ClaimedRun,
     ExecutorHost,
@@ -30,6 +33,34 @@ if TYPE_CHECKING:
 _START_NOT_RECORDED = "start not recorded"
 
 
+@dataclass(frozen=True)
+class SchemaStep:
+    name: str
+    sql: str
+
+
+def schema_steps(text: str) -> tuple[SchemaStep, ...]:
+    """Split schema.sql at its ``-- step: <name>`` lines, in file order."""
+    preamble, *parts = re.split(r"^-- step: (\S+)$", text, flags=re.MULTILINE)
+    if any(line.strip() and not line.startswith("--") for line in preamble.splitlines()):
+        raise ValueError("Run Queue schema.sql has SQL before its first '-- step:' line")
+    steps = tuple(SchemaStep(name, sql) for name, sql in zip(parts[::2], parts[1::2], strict=True))
+    if len({step.name for step in steps}) != len(steps):
+        raise ValueError("Run Queue schema.sql names a step twice")
+    return steps
+
+
+SCHEMA_STEPS = schema_steps(Path(__file__).with_name("schema.sql").read_text())
+
+# Which steps this database has applied, and when each first was (#1965).
+_SCHEMA_LEDGER_SQL = """CREATE TABLE IF NOT EXISTS execution_run_queue_schema_steps (
+    step TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)"""
+_RECORD_STEP_SQL = """INSERT INTO execution_run_queue_schema_steps (step)
+    VALUES ($1) ON CONFLICT DO NOTHING"""
+
+
 class PostgresExecutionRunQueue:
     def __init__(
         self,
@@ -45,8 +76,23 @@ class PostgresExecutionRunQueue:
         self._stale_seconds = heartbeat_stale.total_seconds()
 
     async def ensure_ready(self) -> None:
-        async with self._pool.acquire() as conn:
-            await conn.execute(Path(__file__).with_name("schema.sql").read_text())
+        """Apply every schema step, one process at a time (#1965).
+
+        The api and each executor call this as they start. Every step is
+        idempotent, but concurrently it is not: two CREATE TABLE IF NOT EXISTS
+        race on the catalog, and the pool constraint is check-then-add. So the
+        whole apply holds one session lock, and no transaction is open while
+        waiting for it (see session_advisory_lock).
+        """
+        async with (
+            self._pool.acquire() as conn,
+            session_advisory_lock(conn, RUN_QUEUE_SCHEMA_LOCK_KEY),
+        ):
+            await conn.execute(_SCHEMA_LEDGER_SQL)
+            for step in SCHEMA_STEPS:
+                async with conn.transaction():
+                    await conn.execute(step.sql)
+                    await conn.execute(_RECORD_STEP_SQL, step.name)
 
     async def register(self, host: ExecutorHost, capacity: int) -> None:
         if capacity < 0:
@@ -200,33 +246,66 @@ class PostgresExecutionRunQueue:
     async def close(self, run: ClaimedRun) -> None:
         await self._release(run.execution_id, run.token, "claimed", "done")
 
-    async def fence_expired(self, reconciler: str) -> list[FencedRun]:
+    async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        if limit < 1:
+            return []
         async with self._pool.acquire() as conn:
+            # SKIP LOCKED keeps two fencers from blocking on, or sharing, a row;
+            # the outer predicate is re-checked once the row is locked. The
+            # pick is a MATERIALIZED CTE because an IN (... LIMIT) subquery may
+            # be rescanned once per outer row, each rescan locking LIMIT more.
             rows = await conn.fetch(
-                """UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
+                """WITH picked AS MATERIALIZED (
+                    SELECT c.execution_id FROM execution_runs c
+                    WHERE c.state='claimed' AND c.leased_until<now()
+                    AND c.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
+                    ORDER BY c.leased_until, c.execution_id
+                    FOR UPDATE OF c SKIP LOCKED LIMIT $2
+                ) UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
                     reconciler=h.host_id, reader_epoch=LEAST(r.reader_epoch,h.epoch)
-                FROM executor_hosts h
-                WHERE h.host_id=$1 AND r.state='claimed' AND r.leased_until<now()
-                AND r.writer_epoch<=h.epoch
+                FROM executor_hosts h, picked p
+                WHERE h.host_id=$1 AND r.execution_id=p.execution_id
+                AND r.state='claimed' AND r.leased_until<now() AND r.writer_epoch<=h.epoch
                 RETURNING jsonb_build_object('execution_id',r.execution_id,
                     'executor_id',r.executor_id,'reconciler',r.reconciler,
                     'token',r.lease_token)::text AS run""",
                 reconciler,
+                limit,
+            )
+        return [FencedRun.model_validate_json(row["run"]) for row in rows]
+
+    async def take_over(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        if limit < 1:
+            return []
+        async with self._pool.acquire() as conn:
+            # Take over rows whose reconciler has left. SKIP LOCKED keeps two
+            # adopters apart; the outer predicate is re-checked after the lock,
+            # so a second adopter finds a live owner and takes nothing. The pick
+            # is a MATERIALIZED CTE for the same reason as fence_expired's.
+            rows = await conn.fetch(
+                """WITH picked AS MATERIALIZED (
+                    SELECT o.execution_id FROM execution_runs o
+                    WHERE o.state IN ('fencing','reaped') AND o.reconciler IS DISTINCT FROM $1
+                    AND o.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
+                    AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=o.reconciler)
+                    ORDER BY o.leased_until, o.execution_id
+                    FOR UPDATE OF o SKIP LOCKED LIMIT $2
+                ) UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
+                FROM executor_hosts me, picked p
+                WHERE me.host_id=$1 AND r.execution_id=p.execution_id
+                AND r.state IN ('fencing','reaped')
+                AND r.reconciler IS DISTINCT FROM me.host_id AND r.writer_epoch<=me.epoch
+                AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=r.reconciler)
+                RETURNING jsonb_build_object('execution_id',r.execution_id,
+                    'executor_id',r.executor_id,'reconciler',r.reconciler,
+                    'token',r.lease_token,'reaped',r.state='reaped')::text AS run""",
+                reconciler,
+                limit,
             )
         return [FencedRun.model_validate_json(row["run"]) for row in rows]
 
     async def reconciling(self, reconciler: str) -> list[FencedRun]:
-        async with self._pool.acquire() as conn, conn.transaction():
-            # Take over rows whose reconciler has left. The row lock serialises two
-            # adopters; the second re-reads the predicate and finds a live owner.
-            await conn.execute(
-                """UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
-                FROM executor_hosts me
-                WHERE me.host_id=$1 AND r.state IN ('fencing','reaped')
-                AND r.reconciler IS DISTINCT FROM me.host_id AND r.writer_epoch<=me.epoch
-                AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=r.reconciler)""",
-                reconciler,
-            )
+        async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """SELECT jsonb_build_object('execution_id',execution_id,
                     'executor_id',executor_id,'reconciler',reconciler,

@@ -205,54 +205,63 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
     async def close(self, run: ClaimedRun) -> None:
         self._release(run.execution_id, run.token, "claimed", "done")
 
-    async def fence_expired(self, reconciler: str) -> list[FencedRun]:
+    async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
         entry = self._hosts.get(reconciler)
-        if entry is None or not entry.registered:
+        if entry is None or not entry.registered or limit < 1:
             return []
-        now, epoch, fenced = self._now(), entry.host.epoch, []
-        for held in list(self._runs.values()):
-            if held.state == "claimed" and held.leased_until < now and held.writer_epoch <= epoch:
-                row = self._put(
-                    held,
-                    state="fencing",
-                    reconciler=reconciler,
-                    token=held.token + 1,
-                    reader_epoch=min(
-                        held.reader_epoch if held.reader_epoch is not None else epoch, epoch
-                    ),
-                )
-                fenced.append(
-                    FencedRun(
-                        execution_id=row.execution_id,
-                        executor_id=row.executor_id or "",
-                        reconciler=reconciler,
-                        token=row.token,
-                    )
-                )
+        now, epoch = self._now(), entry.host.epoch
+        expired = sorted(
+            (
+                held
+                for held in self._runs.values()
+                if held.state == "claimed"
+                and held.leased_until < now
+                and held.writer_epoch <= epoch
+            ),
+            key=lambda held: (held.leased_until, held.execution_id),
+        )
+        fenced: list[FencedRun] = []
+        for held in expired[:limit]:
+            row = self._put(
+                held,
+                state="fencing",
+                reconciler=reconciler,
+                token=held.token + 1,
+                reader_epoch=min(
+                    held.reader_epoch if held.reader_epoch is not None else epoch, epoch
+                ),
+            )
+            fenced.append(self._fenced(row, reconciler))
         return fenced
+
+    async def take_over(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        entry = self._hosts.get(reconciler)
+        if entry is None or not entry.registered or limit < 1:
+            return []
+        orphaned = sorted(
+            (
+                held
+                for held in self._runs.values()
+                if held.state in ("fencing", "reaped")
+                and held.reconciler != reconciler
+                and self._adoptable(held, entry.host.epoch)
+            ),
+            key=lambda held: (held.leased_until, held.execution_id),
+        )
+        return [
+            self._fenced(self._put(held, reconciler=reconciler, token=held.token + 1), reconciler)
+            for held in orphaned[:limit]
+        ]
 
     async def reconciling(self, reconciler: str) -> list[FencedRun]:
         entry = self._hosts.get(reconciler)
         if entry is None or not entry.registered:
             return []
-        owned: list[FencedRun] = []
-        for held in list(self._runs.values()):
-            if held.state not in ("fencing", "reaped"):
-                continue
-            row = held
-            if held.reconciler != reconciler:
-                if not self._adoptable(held, entry.host.epoch):
-                    continue
-                row = self._put(held, reconciler=reconciler, token=held.token + 1)
-            owned.append(
-                FencedRun(
-                    execution_id=row.execution_id,
-                    executor_id=row.executor_id or "",
-                    reconciler=reconciler,
-                    token=row.token,
-                    reaped=row.state == "reaped",
-                )
-            )
+        owned = [
+            self._fenced(held, reconciler)
+            for held in self._runs.values()
+            if held.state in ("fencing", "reaped") and held.reconciler == reconciler
+        ]
         return sorted(owned, key=lambda run: run.execution_id)
 
     async def mark_reaped(self, run: FencedRun) -> None:
@@ -303,6 +312,16 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         """The Postgres takeover predicate: its reconciler has left, and the epoch is readable."""
         left = self._hosts.get(row.reconciler or "")
         return (left is None or not left.registered) and row.writer_epoch <= epoch
+
+    @staticmethod
+    def _fenced(row: _Run, reconciler: str) -> FencedRun:
+        return FencedRun(
+            execution_id=row.execution_id,
+            executor_id=row.executor_id or "",
+            reconciler=reconciler,
+            token=row.token,
+            reaped=row.state == "reaped",
+        )
 
     def _promote(self, execution_id: str) -> bool:
         row = self._runs.get(execution_id)

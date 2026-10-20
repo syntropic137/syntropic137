@@ -1,8 +1,8 @@
 /** The /links page (link in bio, from the X profile): order is priority. */
-import { DOCS_URL, GITHUB_URL, X_URL } from "../copy";
+import { DOCS_URL, GITHUB_URL, X_URL, YOUTUBE_URL } from "../copy";
 
 /** Stable ids for click analytics (data-link-id); never rename one. */
-export type LinkId = "website" | "github" | "docs" | "canny" | "discussions" | "x" | "email";
+export type LinkId = "website" | "github" | "docs" | "canny" | "discussions" | "x" | "youtube" | "email";
 
 export interface BioLink {
   id: LinkId;
@@ -29,5 +29,6 @@ export const BIO_LINKS: readonly BioLink[] = [
   { id: "canny", title: "Request a feature", desc: "Suggest and vote on Canny", href: "https://syntropic137.canny.io/", tier: "secondary" },
   { id: "discussions", title: "GitHub Discussions", desc: "Questions and community help", href: `${GITHUB_URL}/discussions`, tier: "secondary" },
   { id: "x", title: "@syntropic137", desc: "Updates and announcements on X", href: X_URL, tier: "secondary" },
+  { id: "youtube", title: "YouTube", desc: "Demos and walkthroughs", href: YOUTUBE_URL, tier: "secondary" },
   { id: "email", title: "Email", desc: "hello@syntropic137.com", href: "mailto:hello@syntropic137.com", tier: "secondary" },
 ];

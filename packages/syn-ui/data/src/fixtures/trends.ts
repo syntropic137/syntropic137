@@ -1,5 +1,6 @@
 /**
- * Trend rows for GET /evals/{id}/trend and GET /workflows/{id}/trend.
+ * Trend rows for GET /evals/{id}/trend, GET /workflows/{id}/trend and
+ * GET /workflows/trends.
  *
  * Eval rows are the Eval board's renderVals() sample (RAW): 28 runs over 30
  * days by four verifiers, judged by claude-opus-5-5, with the verify prompt
@@ -8,7 +9,7 @@
  * Steady by the same rule the board used.
  */
 import type { EvalVerdict } from '../resources/evals'
-import type { DefinitionChange, EvalTrendResponse, EvalTrendRow, WorkflowTrendResponse, WorkflowTrendRow } from '../resources/trends'
+import type { DefinitionChange, DurationTrendSummary, EvalTrendResponse, EvalTrendRow, WorkflowTrendResponse, WorkflowTrendRow, WorkflowTrendsResponse } from '../resources/trends'
 import { RUNS, WORKFLOWS, type CatalogRun, type CatalogWorkflow } from './catalog'
 import { type FixtureRoute, notFound, route } from './define'
 import { costDisplay, durationDisplay, paginate } from './seed'
@@ -148,15 +149,71 @@ const definition = (changes: DefinitionChange[]) => ({
   definition_changes: changes,
 })
 
+function workflowTrend(w: CatalogWorkflow, query: URLSearchParams): WorkflowTrendResponse {
+  const page = paginate(workflowRows(w), query, 50)
+  return { workflow_id: w.id, items: page.rows, total: page.total, page: page.page, page_size: page.page_size, ...definition(workflowChanges(w)) }
+}
+
+/** The API's card label (routes/trends.py duration_trend): least-squares change over the last 12 measured runs. */
+function durationSummary(rows: readonly WorkflowTrendRow[], runsCount: number): DurationTrendSummary {
+  const ds = rows
+    .filter((r) => r.date && !r.duration_is_lower_bound && typeof r.duration_seconds === 'number')
+    .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''))
+    .slice(-12)
+    .map((r) => r.duration_seconds as number)
+  if (ds.length === 0) return emptySummary(rows.length > 0, runsCount > 0)
+  if (ds.length < 3) {
+    const runs = `${ds.length} ${ds.length === 1 ? 'run' : 'runs'}`
+    return { kind: 'few', pct: 0, runs: ds.length, word_display: 'Too few runs', sub_display: runs, label_display: `Duration trend: too few runs to tell (${runs})` }
+  }
+  return classifiedSummary(fittedPct(ds), ds.length)
+}
+
+function emptySummary(hasRows: boolean, hasRuns: boolean): DurationTrendSummary {
+  const [word, label] = hasRows ? [hasRuns ? 'No finished runs' : 'No runs yet', 'No finished runs yet'] : hasRuns ? ['No trend', 'Duration trend not available'] : ['No runs yet', 'No runs yet']
+  return { kind: 'none', pct: 0, runs: 0, word_display: word, sub_display: '—', label_display: label }
+}
+
+function fittedPct(ds: readonly number[]): number {
+  const n = ds.length
+  const mean = ds.reduce((a, d) => a + d, 0) / n
+  const mx = (n - 1) / 2
+  const slope = ds.reduce((a, d, x) => a + (x - mx) * (d - mean), 0) / ds.reduce((a, _, x) => a + (x - mx) ** 2, 0)
+  const start = mean - slope * mx
+  return start > 0 ? Math.round(((mean + slope * mx - start) / start) * 100) : 0
+}
+
+const SUMMARY_WORD = { faster: 'Faster', slower: 'Slower', steady: 'Steady' } as const
+const SUMMARY_SIGN = { faster: '−', slower: '+', steady: '±' } as const
+
+function classifiedSummary(pct: number, n: number): DurationTrendSummary {
+  const size = Math.abs(pct)
+  const kind = size < 5 ? 'steady' : pct < 0 ? 'faster' : 'slower'
+  const how = kind === 'steady' ? 'steady' : `${size}% ${kind}`
+  return { kind, pct, runs: n, word_display: SUMMARY_WORD[kind], sub_display: `${SUMMARY_SIGN[kind]}${size}% time, last ${n}`, label_display: `Duration trend: ${how} over the last ${n} runs` }
+}
+
 export const trendRoutes: FixtureRoute[] = [
   route('GET', '/evals/:evalId/trend', ({ params, query }): EvalTrendResponse => {
     const e = EVALS.find((x) => x.summary.eval_id === params.evalId) ?? notFound('Eval')
     const page = paginate(EVAL_TREND_ROWS, query, 50)
     return { eval_id: e.summary.eval_id, items: page.rows, total: page.total, page: page.page, page_size: page.page_size, ...definition(EVAL_CHANGES) }
   }),
-  route('GET', '/workflows/:workflowId/trend', ({ params, query }): WorkflowTrendResponse => {
-    const w = [...WORKFLOWS, ...EXTRA_WORKFLOWS].find((x) => x.id === params.workflowId) ?? notFound('Workflow')
-    const page = paginate(workflowRows(w), query, 50)
-    return { workflow_id: w.id, items: page.rows, total: page.total, page: page.page, page_size: page.page_size, ...definition(workflowChanges(w)) }
+  // Before '/workflows/:workflowId', as the API declares it, so "trends" is never read as an id.
+  route('GET', '/workflows/trends', ({ query }): WorkflowTrendsResponse => {
+    const ids = [...new Set((query.get('ids') ?? '').split(',').filter(Boolean))]
+    const page = new URLSearchParams({ page: '1', page_size: query.get('page_size') ?? '50' })
+    const all = [...WORKFLOWS, ...EXTRA_WORKFLOWS]
+    return {
+      trends: ids.flatMap((id) =>
+        all
+          .filter((w) => w.id === id)
+          .map((w) => workflowTrend(w, page))
+          .map((t) => ({ ...t, duration_trend: durationSummary(t.items, t.total) })),
+      ),
+    }
   }),
+  route('GET', '/workflows/:workflowId/trend', ({ params, query }): WorkflowTrendResponse =>
+    workflowTrend([...WORKFLOWS, ...EXTRA_WORKFLOWS].find((x) => x.id === params.workflowId) ?? notFound('Workflow'), query),
+  ),
 ]

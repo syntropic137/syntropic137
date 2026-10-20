@@ -160,7 +160,11 @@ async def main(
         reaper=DockerDeadHostReaper(),
         interrupter=AggregateRunInterrupter(executions),
         streams=EventStoreExecutionEventStream(clients[1]),
-        timing=HostTiming(loop_interval=timedelta(milliseconds=200), lease_ttl=ttl),
+        timing=HostTiming(
+            loop_interval=timedelta(milliseconds=200),
+            lease_ttl=ttl,
+            turn_budget=ttl / 3 - timedelta(milliseconds=200),
+        ),
     ).run_until_drained()
 
 

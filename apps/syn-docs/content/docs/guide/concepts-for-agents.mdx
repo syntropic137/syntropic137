@@ -158,6 +158,7 @@ do about it:
 | `unavailable` | Service did not answer: dropped connection, timeout, 5xx after every retry | Yes |
 | `auth` | Credentials or permissions refused (401, 403) | No - an operator must fix credentials |
 | `quota` | Account allowance spent until a named reset | Not retried; use a different agent or wait |
+| `refusal` | Provider's content or safety filter declined the request; the model never worked on it | Not retried; only a different agent can run it |
 | `unknown` | A fault nothing recognised | Read the reason |
 
 ## Admission and maintenance mode

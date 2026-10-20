@@ -50,12 +50,15 @@ from syn_adapters.events.schema import (
     ROLLUP_BACKFILL_SQL,
     ROLLUP_EXECUTION_INDEX_SQL,
     ROLLUP_EXECUTION_INDEX_VALID_SQL,
-    ROLLUP_STARTUP_TRY_LOCK_SQL,
     ROLLUP_STARTUP_UNLOCK_SQL,
     EventStoreSchema,
 )
 
-from .test_day_rollup_backfill_runs_once import EXECUTION_INDEX, CatalogueConnection
+from .test_day_rollup_backfill_runs_once import (
+    EXECUTION_INDEX,
+    ROLLUP_STARTUP_TRY_LOCK_SQL,
+    CatalogueConnection,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable

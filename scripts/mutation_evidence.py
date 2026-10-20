@@ -17,9 +17,10 @@ The contract, one PR at a time:
    (git reports only their destination, so a source could escape vetting).
    Every path it names must be
    tracked-or-trackable (not ignored), must not be or sit behind a symlink,
-   must not be a named test file, and must not be test code, test config or
-   infrastructure. After applying, the tree must have changed, and only on
-   those paths. A mutation of a test proves nothing, and a patch that changes
+   must not be a named test file, a test module, conftest, pytest config, a
+   lockfile, or workflow/CI config. Harness and adapter source beside the tests
+   IS allowed: it stands in for production and is where gaps hide. After
+   applying, the tree must have changed, and only on those paths. A mutation of a test proves nothing, and a patch that changes
    nothing reads exactly like a kill.
 4. Bytecode is cleared before every run (the stale `.pyc` trap) and the tree is
    proven clean after every restore.
@@ -35,7 +36,7 @@ beyond a fixed list of test variables. PR code therefore cannot rewrite this
 script, the report it writes, the git hooks it runs, or reach the runner's
 credentials or the Actions cache.
 
-`--host` (workflow input `docker=true`) is the exception, for tests that drive
+`--host` (workflow input `docker=true`, the DEFAULT) is the exception, for tests that drive
 the Docker daemon themselves (docker compose with bind mounts, as the broker
 integration suite does): a container holding the Docker socket IS the host, so
 PR code runs on the runner host. The remaining guards are the workflow's: no
@@ -44,7 +45,9 @@ and a separate comment job. The limit: a PR written to forge its own verdict
 could. Host-mode evidence is for honest PR code, not a security boundary.
 
 A named test that SKIPS, XFAILS or XPASSES voids the baseline: none of those
-is a pass, and each would read as one under every mutant.
+is a pass, and each would read as one under every mutant. So does a named
+selector with no PASSED test of its own on record (`-rp`): a file that collects
+nothing beside one that passes would otherwise share its pass.
 
 What a survival means, and what it does not: these are the NAMED tests only. A
 narrow selection can prove a kill, never that the wider suite misses the
@@ -54,12 +57,18 @@ input shape production produces.
 Usage:
 
     mutation_evidence.py validate                      # inputs from env
-    mutation_evidence.py run --root PR --report FILE (--image IMAGE | --host)
+    mutation_evidence.py run --root PR --report FILE [--evidence FILE] (--image IMAGE | --host)
+
+`--evidence` also writes `evidence.json` (schema 1, ADR-014 §10), the
+machine-readable verdict an evidence gate reads. It is written only when the
+run reached a verdict: an input or setup failure writes none, because no
+report could name what it proved, and a missing report reads as "no evidence".
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -67,7 +76,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Final
@@ -105,21 +114,42 @@ _PR_RE: Final = re.compile(r"^[1-9][0-9]{0,6}$")
 _SHA_RE: Final = re.compile(r"^[0-9a-f]{40}$")
 _DISPATCH_ID_RE: Final = re.compile(r"^[A-Za-z0-9-]{0,64}$")
 #: `path/to/test_x.py` then zero or more `::Name`, the last may carry a
-#: parametrize id in brackets.
+#: parametrize id in brackets. The first segment and the file name start with
+#: neither `.` nor `-`, as the report contract demands of every id it carries
+#: (`evidence_contract.NODE_ID_PATTERN`): a selector the report refuses is
+#: refused here, before anything runs.
 _NODE_ID_RE: Final = re.compile(
-    r"^(?P<path>[A-Za-z0-9_][A-Za-z0-9_./-]*\.py)"
+    r"^(?P<path>(?:[A-Za-z0-9_][A-Za-z0-9_.-]*/(?:[A-Za-z0-9_.-]*/)*)?[A-Za-z0-9_][A-Za-z0-9_.-]*\.py)"
     r"(?P<rest>(::[A-Za-z_][A-Za-z0-9_]*)*(::[A-Za-z_][A-Za-z0-9_]*\[[A-Za-z0-9_.,=+-]*\])?)$"
 )
 _DIR_RE: Final = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_./-]*$")
 
-_TEST_DIR_NAMES: Final = frozenset({"tests", "test"})
-_CONFIG_NAMES: Final = frozenset(
-    {"conftest.py", "pyproject.toml", "setup.cfg", "pytest.ini", "tox.ini", "uv.lock"}
+#: What a mutation may touch is decided by the owner (#1941): ANY production
+#: source, including harness and adapter code that lives beside the tests (a
+#: broker stand-in under tests/ is where an uncaught deny-path mutant lived).
+#: Refused: test modules, conftest, the mutations dir, workflow and CI config,
+#: pytest configuration (it decides what the named tests even are) and
+#: lockfiles.
+#: Any `*.lock` (uv, poetry, Cargo, yarn, Pipfile, bun, Gemfile, composer) plus
+#: the lockfiles that do not use that suffix.
+_LOCKFILES: Final = frozenset(
+    {"pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json", "bun.lockb", "go.sum"}
 )
-_FORBIDDEN_PREFIXES: Final = (".github/", "ci/fitness/", "lib/")
+#: Every file pytest reads configuration from, at any depth.
+_TEST_CONFIG: Final = frozenset(
+    {
+        "conftest.py", "pyproject.toml", "setup.cfg", "tox.ini",
+        "pytest.ini", ".pytest.ini", "pytest.toml", ".pytest.toml",
+    }
+)  # fmt: skip
+_TEST_DIR_NAMES: Final = frozenset({"tests", "test"})
+_FORBIDDEN_PREFIXES: Final = (".github/", "ci/")
 _SKIP_WALK: Final = frozenset({".git", ".venv", "node_modules"})
 
 _SUMMARY_LINE_RE: Final = re.compile(r"^(FAILED|ERROR) (\S+)")
+#: `-rp` lists each passing test as `PASSED <node id>`, with no reason, so the
+#: rest of the line is the id (parameters may hold spaces).
+_PASSED_LINE_RE: Final = re.compile(r"^PASSED (.+)$")
 _PASSED_RE: Final = re.compile(r"\b(\d+) passed\b")
 _SKIPPED_RE: Final = re.compile(r"\b(\d+) skipped\b")
 _XFAIL_RE: Final = re.compile(r"\b(\d+) x(?:failed|passed)\b")
@@ -157,6 +187,9 @@ class PytestRun:
     seconds: float
     skipped: int = 0
     xfail: int = 0
+    #: Node ids pytest reported PASSED. A requested id is proven only by these:
+    #: the counts cannot say WHICH selector supplied a pass.
+    passing: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -186,6 +219,74 @@ class Evidence:
 
 
 # --------------------------------------------------------------------------
+# evidence.json
+# --------------------------------------------------------------------------
+
+#: `evidence.json` is `EvidenceReport` in syn_domain's evidence_contract. This
+#: script runs stdlib-only on the host (see the workflow), so it cannot import
+#: the model; scripts/tests validate every report these types write through it.
+#: `scripts/integration_evidence.py` writes the same document with them.
+EVIDENCE_SCHEMA: Final = 1
+
+
+class Verdict(StrEnum):
+    PASSED = "passed"
+    FAILED = "failed"
+    VOID = "void"
+
+
+class TestOutcome(StrEnum):
+    __test__ = False  # a vocabulary, not a pytest class
+
+    PASSED = "passed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    XFAIL = "xfail"
+    NOT_COLLECTED = "not_collected"
+
+
+@dataclass(frozen=True)
+class RequestedResult:
+    id: str
+    outcome: TestOutcome
+
+
+@dataclass(frozen=True)
+class SuiteCounts:
+    collected: int
+    passed: int
+    failed: int
+    skipped: int
+
+
+@dataclass(frozen=True)
+class EvidenceReport:
+    kind: str
+    pr: int
+    head_sha: str
+    dispatch_id: str
+    verdict: Verdict
+    requested: tuple[RequestedResult, ...]
+    suite: SuiteCounts
+    summary: str
+    report_md: str
+
+    def to_json(self) -> str:
+        return json.dumps({"schema": EVIDENCE_SCHEMA, **asdict(self)}, indent=2) + "\n"
+
+
+def selects(selector: str, node_id: str) -> bool:
+    """Whether `node_id` is the test `selector` names, or one inside it."""
+    return node_id == selector or node_id.startswith((f"{selector}::", f"{selector}["))
+
+
+def covers(selector: str, node_id: str) -> bool:
+    """Whether two node ids name overlapping tests: equal, or one inside the other."""
+    shorter, longer = sorted((selector, node_id), key=len)
+    return longer == shorter or longer.startswith((f"{shorter}::", f"{shorter}["))
+
+
+# --------------------------------------------------------------------------
 # Validation
 # --------------------------------------------------------------------------
 
@@ -194,13 +295,14 @@ def _safe_relative(path: str, what: str) -> PurePosixPath:
     """A relative path with no `..`, no absolute root and no option-like segment."""
     if not path or path.startswith("/") or "\\" in path or "//" in path:
         raise InputError(f"{what} {path!r} must be a plain relative path")
-    pure = PurePosixPath(path)
-    for part in pure.parts:
+    # The raw segments, not `PurePosixPath.parts`: that folds a `.` away, and
+    # the string checked would no longer be the string reported.
+    for part in path.split("/"):
         if part in {"..", "."} or part == ".git":
             raise InputError(f"{what} {path!r} may not contain '.', '..' or '.git' segments")
         if part.startswith("-"):
             raise InputError(f"{what} {path!r} has a segment starting with '-'")
-    return pure
+    return PurePosixPath(path)
 
 
 def parse_pr(raw: str) -> int:
@@ -293,12 +395,18 @@ def forbidden_reason(path: str, mutations_dir: PurePosixPath) -> str | None:
     if pure.is_relative_to(mutations_dir) or pure.is_relative_to(MUTATIONS_ROOT):
         return "the mutations dir itself"
     if any(path.startswith(prefix) for prefix in _FORBIDDEN_PREFIXES):
-        return "CI, fitness or submodule path"
-    if name in _CONFIG_NAMES:
-        return "test or build configuration"
-    if any(part in _TEST_DIR_NAMES for part in pure.parts[:-1]):
-        return "inside a tests directory"
-    if name.startswith("test_") or name.endswith("_test.py"):
+        return "workflow or CI config"
+    if name in _LOCKFILES or name.endswith(".lock"):
+        return "a lockfile"
+    if name in _TEST_CONFIG:
+        return "conftest or pytest configuration"
+    if name == "__init__.py" and any(p in _TEST_DIR_NAMES for p in pure.parts[:-1]):
+        # Test package scaffolding, not harness: a raise here is a collection
+        # error, which would read as a kill without touching any behaviour.
+        return "a test package __init__"
+    if (name.startswith("test_") and name.endswith(".py")) or name.endswith("_test.py"):
+        return "a test module"
+    if ".test." in name or ".spec." in name:
         return "a test module"
     return None
 
@@ -329,16 +437,33 @@ def is_rename_or_copy(summary_line: str) -> bool:
     return summary_line.lstrip().startswith(("rename ", "copy "))
 
 
+def gitlinks(root: Path) -> list[PurePosixPath]:
+    """Every submodule path (index entries with mode 160000)."""
+    out = _git(root, "ls-files", "--stage", "-z").stdout
+    found: list[PurePosixPath] = []
+    for entry in out.split("\0"):
+        meta, _, path = entry.partition("\t")
+        if path and meta.startswith("160000 "):
+            found.append(PurePosixPath(path))
+    return found
+
+
 def vet_paths(root: Path, paths: list[str], inputs: Inputs) -> list[str]:
     """Every reason the patch may not be applied, path by path."""
     problems: list[str] = []
     real_root = root.resolve()
     test_targets = {(root / t).resolve() for t in inputs.test_files}
+    submodules = gitlinks(root)
     for path in paths:
         try:
             pure = _safe_relative(path, "patched path")
         except InputError as exc:
             problems.append(str(exc))
+            continue
+        if any(pure.is_relative_to(sub) for sub in submodules):
+            # Restore and the tree checks are parent-repo only, so a nested
+            # edit would survive restore. Mutate a submodule in its own repo.
+            problems.append(f"{path} (inside submodule; mutate it in its own repository)")
             continue
         if why := forbidden_reason(path, inputs.mutations_dir):
             problems.append(f"{path} ({why})")
@@ -430,12 +555,19 @@ def parse_pytest_output(output: str) -> tuple[tuple[str, ...], int, int, int]:
     return failing, passed, skipped, xfail
 
 
+def parse_passing_ids(output: str) -> tuple[str, ...]:
+    """Node ids from the `-rp` short summary's PASSED lines."""
+    return tuple(
+        dict.fromkeys(m.group(1) for ln in output.splitlines() if (m := _PASSED_LINE_RE.match(ln)))
+    )
+
+
 def pytest_args(tests: tuple[str, ...]) -> list[str]:
     # `-m ""` clears the repo's `-m "not integration"` addopt: a named
     # integration test must run, not be deselected into a vacuous pass.
     return [
         "uv", "run", "--frozen", "pytest", "-m", "", "-p", "no:cacheprovider",
-        "--color=no", "-rfEsxX", "--", *tests,
+        "--color=no", "-rfEsxXp", "--", *tests,
     ]  # fmt: skip
 
 
@@ -505,7 +637,9 @@ def make_runner(sandbox: Sandbox | None) -> Runner:
         print(output[-20000:], flush=True)
         failing, passed, skipped, xfail = parse_pytest_output(output)
         elapsed = time.monotonic() - started
-        return PytestRun(proc.returncode, failing, passed, elapsed, skipped, xfail)
+        return PytestRun(
+            proc.returncode, failing, passed, elapsed, skipped, xfail, parse_passing_ids(output)
+        )
 
     return run
 
@@ -567,6 +701,10 @@ def evaluate_patch(root: Path, patch: Path, inputs: Inputs, runner: Runner) -> P
     return PatchResult(name, outcome, files, run.failing, run.seconds, detail)
 
 
+def _baseline_passed(baseline: PytestRun, selector: str) -> bool:
+    return any(selects(selector, node_id) for node_id in baseline.passing)
+
+
 def execute(root: Path, inputs: Inputs, sha: str, runner: Runner) -> Evidence:
     evidence = Evidence(pr=inputs.pr, sha=sha, tests=inputs.tests)
     for test_file in sorted(inputs.test_files):
@@ -591,7 +729,7 @@ def execute(root: Path, inputs: Inputs, sha: str, runner: Runner) -> Evidence:
     elif evidence.baseline.skipped:
         # A skipped test passes under every mutant, so it would turn real
         # coverage into a SURVIVED (or hide a gap behind other kills). Usually
-        # a Docker-backed test in sandbox mode: dispatch with docker=true.
+        # a Docker-backed test in sandbox mode (docker=false).
         evidence.baseline_detail = (
             f"baseline skipped {evidence.baseline.skipped} test(s), evidence void "
             "(Docker-backed? dispatch with docker=true)"
@@ -601,6 +739,12 @@ def execute(root: Path, inputs: Inputs, sha: str, runner: Runner) -> Evidence:
         # executes, and a non-strict xpass is green whether or not it works.
         evidence.baseline_detail = (
             f"baseline has {evidence.baseline.xfail} xfailed/xpassed test(s), evidence void"
+        )
+    elif unproven := [t for t in inputs.tests if not _baseline_passed(evidence.baseline, t)]:
+        # The pass count is the suite's, not each selector's: a requested file
+        # that collected nothing sits silently beside one that passed.
+        evidence.baseline_detail = (
+            f"baseline ran no passing test for {', '.join(dict.fromkeys(unproven))}, evidence void"
         )
     if evidence.baseline_detail:
         return evidence
@@ -662,8 +806,9 @@ def render(evidence: Evidence, run_url: str) -> str:
         lines.append("")
     lines += [
         "A kill proves the named test catches the mutant. A survival is against the",
-        "named tests only. Patches are evidence for this PR: delete `.mutations/`",
-        "before merge (CI enforces it); this comment is the record.",
+        "named tests only. Patches are evidence for this PR: the orchestrator deletes",
+        "`.mutations/` after a PASS on this head, never a workflow phase",
+        "(CI enforces removal before merge); this comment is the record.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -672,6 +817,65 @@ def render_error(pr: int, sha: str, run_url: str, message: str) -> str:
     return (
         f"{MARKER}\n## Mutation evidence\n\n**FAIL** | PR #{pr} | head `{sha}` | "
         f"[run]({run_url})\n\n`{_cell(message)}`\n"
+    )
+
+
+def requested_outcome(baseline: PytestRun, node_id: str) -> TestOutcome:
+    """What the unmutated baseline did to one requested id.
+
+    The baseline reports failing ids but only COUNTS for everything else, so a
+    skip or xfail among several requested ids is charged to each of them. That
+    is the honest direction: such a baseline is void, and an id is reported
+    `passed` only when the baseline reported a PASSED test it selects.
+    """
+    if any(covers(node_id, failing) for failing in baseline.failing):
+        return TestOutcome.FAILED
+    if baseline.skipped:
+        return TestOutcome.SKIPPED
+    if baseline.xfail:
+        return TestOutcome.XFAIL
+    if baseline.exit_code not in {0, 4, 5} and not baseline.failing:
+        # Red with nothing on record: an interrupt or a timeout. (5 is nothing
+        # collected; 4 is a node id pytest could not find.)
+        return TestOutcome.FAILED
+    if not _baseline_passed(baseline, node_id):
+        return TestOutcome.NOT_COLLECTED
+    return TestOutcome.PASSED
+
+
+def evidence_report(evidence: Evidence, dispatch_id: str, report_md: str) -> EvidenceReport:
+    """`evidence.json` for a run that reached a verdict (`execute` returned)."""
+    base = evidence.baseline
+    if base is None:
+        raise RuntimeError("no baseline ran, so there is no evidence to report")
+    if evidence.baseline_detail:
+        verdict, summary = Verdict.VOID, evidence.baseline_detail
+    elif evidence.ok:
+        verdict, summary = Verdict.PASSED, f"every mutation killed ({len(evidence.results)})"
+    else:
+        missed = [r for r in evidence.results if r.outcome is not Outcome.KILLED]
+        named = ", ".join(f"{r.patch} {r.outcome.value}" for r in missed)
+        verdict = Verdict.FAILED
+        summary = f"{len(missed)} of {len(evidence.results)} mutations not killed: {named}"
+    return EvidenceReport(
+        kind="mutation",
+        pr=evidence.pr,
+        head_sha=evidence.sha,
+        dispatch_id=dispatch_id,
+        verdict=verdict,
+        # The contract refuses a repeated id; a selection may repeat one.
+        requested=tuple(
+            RequestedResult(node_id, requested_outcome(base, node_id))
+            for node_id in dict.fromkeys(evidence.tests)
+        ),
+        suite=SuiteCounts(
+            collected=base.passed + len(base.failing) + base.skipped + base.xfail,
+            passed=base.passed,
+            failed=len(base.failing),
+            skipped=base.skipped + base.xfail,
+        ),
+        summary=summary,
+        report_md=report_md,
     )
 
 
@@ -689,6 +893,7 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="baseline + every patch against a PR checkout")
     run.add_argument("--root", type=Path, required=True, help="the PR checkout")
     run.add_argument("--report", type=Path, required=True)
+    run.add_argument("--evidence", type=Path, help="also write evidence.json here")
     mode = run.add_mutually_exclusive_group(required=True)
     mode.add_argument("--image", help="run PR code in this container image (sandbox)")
     mode.add_argument(
@@ -722,8 +927,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error::{exc}")
         report.write_text(render_error(inputs.pr, sha, _run_url(), str(exc)))
         return 1
-    report.write_text(render(evidence, _run_url()))
-    print(report.read_text())
+    markdown = render(evidence, _run_url())
+    report.write_text(markdown)
+    if args.evidence is not None:
+        dispatch_id = env.get(ENV_DISPATCH_ID, "")  # validated by inputs_from_env
+        args.evidence.write_text(evidence_report(evidence, dispatch_id, markdown).to_json())
+    print(markdown)
     return 0 if evidence.ok else 1
 
 

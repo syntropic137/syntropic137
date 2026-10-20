@@ -7,6 +7,7 @@
  * most every `minIntervalMs`, so a chatty stream cannot refetch a screen
  * once per event.
  */
+import { queryCache } from '../client/queryCache'
 import type { QueryTarget } from '../keys'
 import { invalidateTargets } from '../keys'
 import type { SSEEventFrame } from '../types'
@@ -36,6 +37,7 @@ const RULES: ReadonlyArray<readonly [(t: string) => boolean, (ids: FrameIds) => 
       { name: 'listWorkflowRuns', id: workflowId },
       { name: 'getWorkflowHistory', id: workflowId },
       { name: 'getWorkflowTrend', id: workflowId },
+      { name: 'getWorkflowTrends' },
       { name: 'listExecutionCosts' },
       { name: 'getCostSummary' },
       { name: 'getShippedMetrics' },
@@ -107,14 +109,17 @@ export interface LiveInvalidationOptions {
   /** Minimum gap between invalidation passes, ms (default 1000). */
   minIntervalMs?: number
   /** Injectable for tests; defaults to the activity stream. */
-  subscribe?: (onFrames: (frames: SSEEventFrame[]) => void) => () => void
+  subscribe?: (onFrames: (frames: SSEEventFrame[]) => void, onReconnect: () => void) => () => void
   apply?: (targets: QueryTarget[]) => void
+  /** After a reconnect the missed frames are unknowable, so everything cached is suspect. Default: stale every read. */
+  resync?: () => void
 }
 
 /** Keep the cache in step with the activity stream. Returns the stop function. */
 export function connectLiveInvalidation(options: LiveInvalidationOptions = {}): () => void {
   const gap = options.minIntervalMs ?? 1000
   const apply = options.apply ?? ((targets: QueryTarget[]) => void invalidateTargets(targets))
+  const onReconnect = options.resync ?? (() => void queryCache.invalidate(() => true))
   let pending: QueryTarget[] = []
   let last = 0
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -132,7 +137,7 @@ export function connectLiveInvalidation(options: LiveInvalidationOptions = {}): 
     if (wait <= 0) flush()
     else timer = setTimeout(flush, wait)
   }
-  const unsubscribe = options.subscribe?.(onFrames) ?? subscribeActivity({ onFrames })
+  const unsubscribe = options.subscribe?.(onFrames, onReconnect) ?? subscribeActivity({ onFrames, onReconnect })
   // Teardown flushes what the throttle was holding, so a queued invalidation is never lost.
   return () => {
     unsubscribe()
@@ -151,6 +156,6 @@ export function connectLiveInvalidation(options: LiveInvalidationOptions = {}): 
 export function connectExecutionInvalidation(executionId: string, options: LiveInvalidationOptions = {}): () => void {
   return connectLiveInvalidation({
     ...options,
-    subscribe: options.subscribe ?? ((onFrames) => subscribeExecution(executionId, { onFrames })),
+    subscribe: options.subscribe ?? ((onFrames, onReconnect) => subscribeExecution(executionId, { onFrames, onReconnect })),
   })
 }

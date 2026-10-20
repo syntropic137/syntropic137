@@ -12,6 +12,7 @@ runner that fails exactly when the source file differs from HEAD.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -38,6 +39,19 @@ from scripts.mutation_evidence import (
     parse_tests,
     render,
     restore,
+)
+
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    EvidenceKind as ContractKind,
+)
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    EvidenceReport as EvidenceContract,
+)
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    EvidenceVerdict as ContractVerdict,
+)
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    TestOutcome as ContractOutcome,
 )
 
 pytestmark = pytest.mark.unit
@@ -150,26 +164,55 @@ def test_dispatch_id_is_validated() -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "pkg/tests/helper.py",
-        "pkg/test/x.py",
         "pkg/test_mod.py",
+        "pkg/tests/test_mod.py",
         "pkg/mod_test.py",
         "pkg/conftest.py",
+        "pkg/tests/conftest.py",
+        "apps/web/src/a.test.ts",
+        "apps/web/src/a.spec.tsx",
         "pyproject.toml",
         "apps/a/pyproject.toml",
+        "pytest.ini",
+        "pkg/tests/.pytest.ini",
+        "pkg/tests/pytest.toml",
+        "pkg/tests/.pytest.toml",
+        "pkg/tests/tox.ini",
+        "pkg/tests/__init__.py",
+        "pkg/tests/integration/broker/__init__.py",
         "uv.lock",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
+        "pkg/tests/harness/Pipfile.lock",
+        "pkg/tests/harness/npm-shrinkwrap.json",
+        "apps/x/bun.lock",
+        "apps/x/bun.lockb",
+        "svc/go.sum",
         ".github/workflows/ci.yml",
-        "ci/fitness/x.py",
-        "lib/event-sourcing-platform/x.py",
+        ".github/actions/x/action.yml",
+        "ci/fitness/helpers.py",
         ".mutations/other.patch",
     ],
 )
-def test_forbids_tests_config_and_infra(path: str) -> None:
+def test_forbids_tests_config_ci_and_lockfiles(path: str) -> None:
     assert forbidden_reason(path, PurePosixPath(".mutations")) is not None
 
 
-@pytest.mark.parametrize("path", ["pkg/mod.py", "apps/syn-api/src/x/testing_utils.py", "README.md"])
-def test_allows_source(path: str) -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "pkg/mod.py",
+        # Owner decision (#1941): harness and adapter code beside the tests is
+        # production stand-in, and mutating it is the point.
+        "packages/syn-adapters/tests/integration/github_broker/authorizer.py",
+        "packages/syn-adapters/tests/integration/github_broker/envoy.yaml",
+        "pkg/tests/helpers.py",
+        "pkg/__init__.py",
+        "apps/syn-api/src/x/testing_utils.py",
+        "README.md",
+    ],
+)
+def test_allows_production_and_harness_source(path: str) -> None:
     assert forbidden_reason(path, PurePosixPath(".mutations")) is None
 
 
@@ -305,7 +348,7 @@ def repo(tmp_path: Path) -> Path:
 
 def _runner_sensitive_to_mod(root: Path, tests: tuple[str, ...]) -> PytestRun:
     if (root / "pkg" / "mod.py").read_text() == ORIGINAL:
-        return PytestRun(0, (), len(tests), 0.01)
+        return PytestRun(0, (), len(tests), 0.01, passing=tests)
     return PytestRun(1, tests, 0, 0.02)
 
 
@@ -456,7 +499,7 @@ def test_patch_through_a_symlink_is_refused(repo: Path) -> None:
 def test_interrupt_is_an_error_not_a_kill(repo: Path) -> None:
     def interrupted(root: Path, tests: tuple[str, ...]) -> PytestRun:
         if (root / "pkg" / "mod.py").read_text() == ORIGINAL:
-            return PytestRun(0, (), 1, 0.0)
+            return PytestRun(0, (), 1, 0.0, passing=tests)
         return PytestRun(2, (), 0, 0.0)
 
     evidence = execute(repo, _inputs(), SHA, interrupted)
@@ -534,3 +577,284 @@ def test_run_name_carries_the_pr_and_the_dispatch_nonce() -> None:
     value = line.removeprefix("run-name:").strip()
     assert value.startswith('"') and value.endswith('"'), line
     assert "${{ inputs.pr }}" in value and "${{ inputs.dispatch_id }}" in value
+
+
+def test_a_harness_file_under_tests_is_mutated_and_killed(repo: Path) -> None:
+    harness = repo / "pkg" / "tests" / "authorizer.py"
+    harness.write_text("ALLOW = False\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "harness")
+    patch = _commit_patch(
+        repo, "05-harness.patch", _diff_patch(repo, "pkg/tests/authorizer.py", "ALLOW = True\n")
+    )
+
+    def deny_path_test(root: Path, tests: tuple[str, ...]) -> PytestRun:
+        allowed = (root / "pkg" / "tests" / "authorizer.py").read_text() == "ALLOW = True\n"
+        return PytestRun(1, tests, 0, 0.0) if allowed else PytestRun(0, (), 1, 0.0)
+
+    result = evaluate_patch(repo, patch, _inputs(), deny_path_test)
+    restore(repo)
+
+    assert result.outcome is Outcome.KILLED
+    assert result.files == ("pkg/tests/authorizer.py",)
+    assert harness.read_text() == "ALLOW = False\n"
+
+
+def test_patch_inside_a_submodule_is_refused(repo: Path, tmp_path: Path) -> None:
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    _git(sub, "init", "-q")
+    _git(sub, "config", "user.email", "t@example.invalid")
+    _git(sub, "config", "user.name", "t")
+    (sub / "x.py").write_text("X = 1\n")
+    _git(sub, "add", ".")
+    _git(sub, "commit", "-q", "-m", "sub")
+    subprocess.run(
+        ["git", "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "lib/sub"],
+        cwd=repo, check=True, capture_output=True,
+    )  # fmt: skip
+    _git(repo, "commit", "-q", "-m", "submodule")
+    text = (
+        "diff --git a/lib/sub/x.py b/lib/sub/x.py\n--- a/lib/sub/x.py\n+++ b/lib/sub/x.py\n"
+        "@@ -1 +1 @@\n-X = 1\n+X = 2\n"
+    )
+    patch = _commit_patch(repo, "05-sub.patch", text)
+
+    result = evaluate_patch(repo, patch, _inputs(), _runner_sensitive_to_mod)
+    restore(repo)
+
+    assert result.outcome is Outcome.REFUSED
+    assert "submodule" in result.detail
+    assert (repo / "lib" / "sub" / "x.py").read_text() == "X = 1\n"
+
+
+# --------------------------------------------------------------------------
+# evidence.json: every report the runner writes must parse as PR 1's contract
+# --------------------------------------------------------------------------
+
+
+def _contract(text: str) -> EvidenceContract:
+    return EvidenceContract.model_validate_json(text)
+
+
+def _evidence_json(repo: Path, runner: me.Runner, *tests: str) -> EvidenceContract:
+    evidence = execute(repo, _inputs(*tests), SHA, runner)
+    return _contract(me.evidence_report(evidence, "d-1", render(evidence, "u")).to_json())
+
+
+def _only_the_killer(repo: Path) -> None:
+    for name in ("02-survive.patch", "03-test.patch", "04-stale.patch"):
+        _git(repo, "rm", "-q", f".mutations/{name}")
+    _git(repo, "commit", "-q", "-m", "only the killer")
+
+
+def test_evidence_json_for_every_kill_is_a_passed_contract(repo: Path) -> None:
+    _only_the_killer(repo)
+
+    report = _evidence_json(repo, _runner_sensitive_to_mod)
+
+    assert report.kind is ContractKind.MUTATION
+    assert report.verdict is ContractVerdict.PASSED
+    assert (report.pr, report.head_sha, report.dispatch_id) == (7, SHA, "d-1")
+    assert [(r.id, r.outcome) for r in report.requested] == [(TEST_ID, ContractOutcome.PASSED)]
+    assert report.suite.passed == 1
+    assert "PASS: every mutation killed" in report.report_md
+
+
+def test_evidence_json_for_a_survivor_is_failed_and_names_it(repo: Path) -> None:
+    report = _evidence_json(repo, _runner_sensitive_to_mod)
+
+    assert report.verdict is ContractVerdict.FAILED
+    assert "02-survive.patch SURVIVED" in report.summary
+    assert "01-kill.patch" not in report.summary
+    # The baseline was green: the requested test passed, the mutants did not die.
+    assert [r.outcome for r in report.requested] == [ContractOutcome.PASSED]
+
+
+@pytest.mark.parametrize(
+    ("baseline", "outcome", "detail"),
+    [
+        (PytestRun(1, (TEST_ID,), 0, 0.0), ContractOutcome.FAILED, "baseline red"),
+        (PytestRun(5, (), 0, 0.0), ContractOutcome.NOT_COLLECTED, "baseline red"),
+        (PytestRun(0, (), 0, 0.0), ContractOutcome.NOT_COLLECTED, "zero tests"),
+        (PytestRun(0, (), 1, 0.0, skipped=1), ContractOutcome.SKIPPED, "skipped 1"),
+        (PytestRun(0, (), 1, 0.0, xfail=1), ContractOutcome.XFAIL, "xfailed"),
+        (PytestRun(-1, (), 0, 0.0), ContractOutcome.FAILED, "baseline red"),
+    ],
+)
+def test_evidence_json_for_a_void_baseline_never_claims_a_pass(
+    repo: Path, baseline: PytestRun, outcome: ContractOutcome, detail: str
+) -> None:
+    report = _evidence_json(repo, lambda _root, _tests: baseline)
+
+    assert report.verdict is ContractVerdict.VOID
+    assert detail in report.summary
+    assert [r.outcome for r in report.requested] == [outcome]
+
+
+def test_evidence_json_charges_a_failure_only_to_the_id_that_failed(repo: Path) -> None:
+    other = "checks/spec.py::test_guard"
+    collection_error = PytestRun(2, ("pkg/tests/test_mod.py",), 1, 0.0, passing=(other,))
+
+    report = _evidence_json(repo, lambda _root, _tests: collection_error, TEST_ID, other)
+
+    assert report.verdict is ContractVerdict.VOID
+    assert [(r.id, r.outcome) for r in report.requested] == [
+        (TEST_ID, ContractOutcome.FAILED),
+        (other, ContractOutcome.PASSED),
+    ]
+
+
+def test_evidence_json_reports_a_repeated_id_once(repo: Path) -> None:
+    _only_the_killer(repo)
+
+    report = _evidence_json(repo, _runner_sensitive_to_mod, TEST_ID, TEST_ID)
+
+    assert [r.id for r in report.requested] == [TEST_ID]
+
+
+def _cli_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(me.ENV_PR, "7")
+    monkeypatch.setenv(me.ENV_TESTS, TEST_ID)
+    monkeypatch.setenv(me.ENV_DIR, ".mutations/")
+    monkeypatch.setenv(me.ENV_SHA, SHA)
+    monkeypatch.setenv(me.ENV_DISPATCH_ID, "nonce-42")
+    monkeypatch.setattr(me, "sync_dependencies", lambda _root, _sandbox: None)
+
+
+def test_run_writes_evidence_json_from_the_cli(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _cli_env(monkeypatch)
+    monkeypatch.setattr(me, "make_runner", lambda _sandbox: _runner_sensitive_to_mod)
+    md, evidence_file = tmp_path / "r.md", tmp_path / "evidence.json"
+
+    code = me.main(
+        [
+            "run",
+            "--root",
+            str(repo),
+            "--report",
+            str(md),
+            "--evidence",
+            str(evidence_file),
+            "--host",
+        ]
+    )
+
+    report = _contract(evidence_file.read_text())
+    assert code == 1
+    assert report.verdict is ContractVerdict.FAILED
+    assert report.dispatch_id == "nonce-42"
+    assert report.report_md == md.read_text()
+
+
+# Ids pytest would run but the report contract refuses: a `.` segment that
+# `PurePosixPath` folds away, and a dot-led file name. Alone, and behind a good id.
+UNREPORTABLE = ["tests/./test_x.py::test_ok", "tests/.test_x.py::test_ok"]
+
+
+@pytest.mark.parametrize("tests", [*UNREPORTABLE, *(f"{TEST_ID} {bad}" for bad in UNREPORTABLE)])
+def test_an_id_the_report_refuses_is_refused_before_anything_runs(
+    tests: str, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _cli_env(monkeypatch)
+    monkeypatch.setenv(me.ENV_TESTS, tests)
+    ran: list[object] = []
+    monkeypatch.setattr(me, "make_runner", lambda sandbox: ran.append(sandbox))
+    md, evidence_file = tmp_path / "r.md", tmp_path / "evidence.json"
+
+    code = me.main(
+        [
+            "run",
+            "--root",
+            str(repo),
+            "--report",
+            str(md),
+            "--evidence",
+            str(evidence_file),
+            "--host",
+        ]
+    )
+
+    assert code == 1
+    assert ran == []
+    assert not evidence_file.exists()
+
+
+def test_run_writes_no_evidence_json_when_no_verdict_was_reached(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _cli_env(monkeypatch)
+    monkeypatch.setenv(me.ENV_DIR, ".mutations/missing")
+    md, evidence_file = tmp_path / "r.md", tmp_path / "evidence.json"
+
+    code = me.main(
+        [
+            "run",
+            "--root",
+            str(repo),
+            "--report",
+            str(md),
+            "--evidence",
+            str(evidence_file),
+            "--host",
+        ]
+    )
+
+    assert code == 1
+    assert "does not exist" in md.read_text()
+    assert not evidence_file.exists()
+
+
+def _real_pytest_runner(monkeypatch: pytest.MonkeyPatch) -> me.Runner:
+    """The production runner with only `uv run --frozen` swapped for this
+    interpreter: real pytest output, parsed by the real parsers."""
+    prefix = ["uv", "run", "--frozen", "pytest"]
+
+    def host(args: list[str]) -> tuple[list[str], dict[str, str]]:
+        assert args[: len(prefix)] == prefix
+        return [sys.executable, "-m", "pytest", *args[len(prefix) :]], {
+            "PYTHONDONTWRITEBYTECODE": "1"
+        }
+
+    monkeypatch.setattr(me, "_host_command", host)
+    return me.make_runner(None)
+
+
+def test_evidence_json_never_lends_a_pass_to_a_requested_file_that_collected_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One requested file has a real killing test; the other collects nothing.
+    # The suite's pass count is 1 either way: only per-id identity tells them apart.
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pytest.ini").write_text("[pytest]\npythonpath = .\n")
+    (root / "mod.py").write_text("VALUE = 1\n")
+    (root / "tests" / "test_real.py").write_text(
+        "import mod\ndef test_value():\n    assert mod.VALUE == 1\n"
+    )
+    (root / "tests" / "test_empty.py").write_text("")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@example.invalid")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "source")
+    (root / ".mutations").mkdir()
+    _commit_patch(root, "01-value.patch", _diff_patch(root, "mod.py", "VALUE = 2\n"))
+    runner = _real_pytest_runner(monkeypatch)
+    real, empty = "tests/test_real.py", "tests/test_empty.py"
+
+    killed = _evidence_json(root, runner, real)
+    report = _evidence_json(root, runner, real, empty)
+
+    # The killing test alone certifies: the regression is in the empty file only.
+    assert killed.verdict is ContractVerdict.PASSED, killed.report_md
+    assert [r.outcome for r in killed.requested] == [ContractOutcome.PASSED]
+    assert report.verdict is ContractVerdict.VOID, report.report_md
+    assert [(r.id, r.outcome) for r in report.requested] == [
+        (real, ContractOutcome.PASSED),
+        (empty, ContractOutcome.NOT_COLLECTED),
+    ]
+    assert f"no passing test for {empty}" in report.summary
+    assert report.suite.passed == 1

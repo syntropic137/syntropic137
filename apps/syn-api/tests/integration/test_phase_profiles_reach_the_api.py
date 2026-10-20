@@ -38,6 +38,8 @@ if TYPE_CHECKING:
     import asyncpg
     import httpx
 
+    from syn_api.types import PhaseResourceProfileResponse
+
 pytestmark = pytest.mark.integration
 
 WORKFLOW = "wf-profiles"
@@ -341,3 +343,64 @@ async def test_a_completed_phase_rate_does_not_depend_on_the_look_back(
         rates.append(soak["cpu_seconds_per_wall_second"]["p50"])
     # 60s of CPU per 600s of workspace life, whatever the window cut off.
     assert rates == [pytest.approx(0.1), pytest.approx(0.1)]
+
+
+async def _retry_profile(client: httpx.AsyncClient) -> PhaseResourceProfileResponse:
+    from syn_api.types import PhaseProfilesResponse
+
+    response = await client.get("/metrics/phase-profiles", params={"workflow_id": WORKFLOW})
+    assert response.status_code == 200, response.text
+    body = PhaseProfilesResponse.model_validate(response.json())
+    (retry,) = [r for r in body.resources if r.phase_id == "retry"]
+    return retry
+
+
+async def test_a_retry_after_an_oom_kill_does_not_erase_it(
+    profiled_client: httpx.AsyncClient,
+) -> None:
+    from syn_adapters.events import store_helpers
+
+    store = store_helpers._event_store
+    assert store is not None and store.pool is not None
+    pool = store.pool
+    now = datetime.now(UTC).replace(microsecond=0)
+    killed = {"oom_killed": True, "oom_kills": 1, "memory_peak_bytes": 512 * MIB}
+    clean = {"oom_killed": False, "oom_kills": 0, "memory_peak_bytes": 8 * MIB}
+    unmeasured = {"oom_killed": None, "oom_kills": None, "memory_peak_bytes": None}
+
+    async def write(execution: str, minutes_ago: int, usage: dict[str, bool | int | None]) -> None:
+        row = (
+            now - timedelta(minutes=minutes_ago),
+            "workspace_resource_usage",
+            f"{execution}-retry",
+            execution,
+            "retry",
+            json.dumps(usage),
+        )
+        async with pool.acquire() as conn:
+            await conn.copy_records_to_table("agent_events", records=[row], columns=_COLUMNS)
+
+    await write("exec-00", 30, killed)
+    before = await _retry_profile(profiled_client)
+    assert (before.oom.killed, before.oom.not_killed, before.oom.unknown) == (1, 0, 0)
+
+    # exec-00 retries clean and the clean row is delivered twice; exec-01 is
+    # killed and its retry measured nothing.
+    await write("exec-00", 20, clean)
+    await write("exec-00", 20, clean)
+    await write("exec-01", 40, killed)
+    await write("exec-01", 10, unmeasured)
+    after = await _retry_profile(profiled_client)
+
+    assert (after.oom.killed, after.oom.not_killed, after.oom.unknown) == (2, 0, 0)
+    assert [
+        (k.execution_id, k.memory_peak_bytes, k.oom_kills) for k in before.oom_killed_phases
+    ] == [("exec-00", 512 * MIB, 1)]
+    assert [
+        (k.execution_id, k.memory_peak_bytes, k.oom_kills) for k in after.oom_killed_phases
+    ] == [
+        ("exec-00", 512 * MIB, 1),
+        ("exec-01", 512 * MIB, 1),
+    ]
+    # The resource sample is still each phase's newest attempt.
+    assert after.memory_peak_bytes.n == 1

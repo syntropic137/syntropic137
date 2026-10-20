@@ -20,6 +20,7 @@ from syn_shared.agents import (
     AgentProvider,
     UnsupportedAgentProviderError,
     require_executable_provider,
+    resolve_claude_model,
 )
 
 if TYPE_CHECKING:
@@ -50,10 +51,13 @@ def _build_claude_command(
             "alias for provider='claude'."
         )
         raise ValueError(msg)
+    # The explicit id, never the alias: the CLI's own alias catalog differs by
+    # API provider (2.1.293 sends `sonnet` to Sonnet 4.5 on Bedrock/Vertex).
+    # Raises RetiredModelError, the last refusal before a retired model runs.
     cmd = [
         "claude",
         "--model",
-        model,
+        resolve_claude_model(model),
         "--verbose",
         "--output-format",
         "stream-json",

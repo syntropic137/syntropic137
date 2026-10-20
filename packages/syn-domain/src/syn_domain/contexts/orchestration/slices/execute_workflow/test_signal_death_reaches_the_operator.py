@@ -203,6 +203,9 @@ async def test_secret_injection_killed_by_a_signal_says_so() -> None:
     """
     from unittest.mock import AsyncMock, MagicMock, patch
 
+    from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+        HOST_CREDENTIALS,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         WorkspaceProvisionHandler,
     )
@@ -234,6 +237,7 @@ async def test_secret_injection_killed_by_a_signal_says_so() -> None:
             phase_name="premise",
             clone_repos=True,
             include_codex_auth=False,
+            credential_policy=HOST_CREDENTIALS,
             inline_instructions=False,
         )
 
@@ -256,6 +260,9 @@ async def test_secret_injection_names_the_status_even_with_no_diagnostic() -> No
     """
     from unittest.mock import AsyncMock, MagicMock, patch
 
+    from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+        HOST_CREDENTIALS,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
         WorkspaceProvisionHandler,
     )
@@ -285,6 +292,7 @@ async def test_secret_injection_names_the_status_even_with_no_diagnostic() -> No
             phase_name="premise",
             clone_repos=True,
             include_codex_auth=False,
+            credential_policy=HOST_CREDENTIALS,
             inline_instructions=False,
         )
 

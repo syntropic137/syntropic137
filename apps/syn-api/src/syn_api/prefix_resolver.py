@@ -60,3 +60,27 @@ async def resolve_or_raise(
         status_code=404,
         detail=f"{entity_type} not found: {partial_id}",
     )
+
+
+async def resolve_prefix_or_keep(
+    store: ProjectionStoreProtocol,
+    namespace: str,
+    partial_id: str,
+    entity_type: str,
+) -> str:
+    """Resolve a prefix through the projection, or hand the id back unchanged.
+
+    For reads whose domain lookup does not end at the projection (#1570): a
+    projection that has not caught up has no row to match, and that is not
+    proof the entity is missing. Only the caller's lookup can say "not found".
+
+    Raises:
+        HTTPException: 409 Conflict if the prefix is ambiguous.
+    """
+    result = await resolve_by_prefix(store, namespace, partial_id)
+    if result.is_ambiguous:
+        raise HTTPException(
+            status_code=409,
+            detail=format_ambiguous_error(entity_type, partial_id, result.candidates),
+        )
+    return result.full_id or partial_id
