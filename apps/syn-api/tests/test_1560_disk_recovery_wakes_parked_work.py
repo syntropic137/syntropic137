@@ -32,7 +32,7 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.services import admission_announcement
 from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket
-from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskUsage
+from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskThresholds, DiskUsage
 from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
     WorkflowDispatchProjection,
@@ -160,7 +160,16 @@ class _Api:
         self.gate = AdmissionGate(
             self.port,
             EventStoreAdmissionAnnouncer(self.events),  # type: ignore[arg-type]
-            DiskSpaceGuard(self.disk, degraded_below_percent=10, refuse_admission_below_percent=5),
+            DiskSpaceGuard(
+                self.disk,
+                DiskThresholds(
+                    refuse_admission_below_bytes=0,
+                    degraded_below_bytes=0,
+                    refuse_basis="test",
+                    refuse_admission_below_percent=5.0,
+                    degraded_below_percent=10.0,
+                ),
+            ),
         )
         self.handlers = _Handlers()
         self.dispatcher = BackgroundWorkflowDispatcher(

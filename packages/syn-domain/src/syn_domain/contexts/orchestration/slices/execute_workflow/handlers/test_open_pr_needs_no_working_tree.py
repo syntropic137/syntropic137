@@ -1143,7 +1143,7 @@ class TestGhCanNameTheRepositoryWithNoCheckoutToInferItFrom:
         A codex phase gets an EMPTY agent env by design: it authenticates from
         ~/.codex/auth.json and must not be handed claude credentials. So the
         obvious place to put GH_REPO - beside the credentials in
-        `_build_agent_env` - is the one place it must not go, because that
+        `build_agent_env` - is the one place it must not go, because that
         function does not run for codex at all. Asserted on the real `verify`
         phase, which is the codex phase this workflow ships.
         """

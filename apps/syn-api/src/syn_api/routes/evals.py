@@ -291,14 +291,19 @@ def _baseline_requests(body: CreateEvalRequest) -> list[BaselineRequest]:
     },
 )
 async def create_eval_endpoint(body: CreateEvalRequest) -> EvalCreatedResponse:
-    """Create an eval, pinning each baseline ref to a commit SHA. The id is minted here."""
+    """Create an eval, pinning each baseline ref to a commit SHA.
+
+    The id is minted here, or derived from `stable_key`. A derived id is one
+    stream however many creators race for it: the store admits the first and
+    the rest answer with that eval (#1920).
+    """
     baseline = _baseline_requests(body)
     try:
         goal = Goal(body.goal)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from exc
     await ensure_connected()
-    eval_id = EvalId.new()
+    eval_id = EvalId.new() if body.stable_key is None else EvalId.for_key(body.stable_key)
     repository = get_eval_repo()
     handler = CreateEvalHandler(repository, get_revision_resolver(), get_publisher())
     result = await handler.handle(

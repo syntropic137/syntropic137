@@ -4,7 +4,7 @@
  */
 import { durationBetween, formatDuration } from '../../format/duration'
 import { toTime } from '../../format/shared'
-import { runSubline } from '../../patterns/runRow'
+import { type RunRowTag, runSubline } from '../../patterns/runRow'
 import { statusSemantics } from '../../patterns/status'
 import { phaseProgressText } from './detail'
 
@@ -37,6 +37,31 @@ export function parseTimeWindow(value: string | null | undefined, fallback: Time
 export function timeWindowParam(window: string | undefined, fallback: TimeWindow = 'all'): string | null {
   const w = parseTimeWindow(window, fallback)
   return w === fallback ? null : w
+}
+
+/** `started_at` bounds for one day: both inclusive, as the API takes them. */
+export interface DayBounds {
+  started_after: string
+  started_before: string
+}
+
+/**
+ * `?day=YYYY-MM-DD` (the Skyline's "Runs →" link, #1938) -> that day's
+ * `started_at` bounds, or null when the value is not a real date. The day is
+ * a UTC day because the Skyline buckets by UTC day (#1371), and the two must
+ * name the same 24 hours. The day is [00:00, 24:00); `started_before` is
+ * inclusive and the API compares at microsecond precision (Python datetimes),
+ * so the upper bound is the day's last microsecond. The last millisecond would
+ * drop a run stamped 23:59:59.9995.
+ */
+export function dayBounds(day: string | null | undefined): DayBounds | null {
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null
+  const start = Date.parse(`${day}T00:00:00Z`)
+  if (Number.isNaN(start) || new Date(start).toISOString().slice(0, 10) !== day) return null
+  return {
+    started_after: new Date(start).toISOString(),
+    started_before: `${day}T23:59:59.999999Z`,
+  }
 }
 
 /** Inclusive lower bound for `started_after`, ISO 8601 with an offset (the API rejects naive bounds); undefined for "all". */
@@ -188,6 +213,25 @@ export function evalRowTag(e: ExecutionEvalLike | null | undefined): EvalBadge |
   const badge = evalBadge(e)
   if (!badge) return null
   return e?.verdict ? { ...badge, label: `Eval · ${e.verdict}` } : badge
+}
+
+/** The lineage a list row carries when the run was resumed from another (the API's `resumed_from`). */
+export interface ResumedFromLike {
+  parent_execution_id: string
+}
+
+/**
+ * The run row's "Resumed" marker (#1926), titled with and linking to the run
+ * it picked up from; null for a run that started fresh. `href` builds the
+ * app's path (the router's base) from `/executions/<parent>`.
+ */
+export function resumeRowTag(
+  resumed: ResumedFromLike | null | undefined,
+  href: (path: string) => string = (path) => path,
+): RunRowTag | null {
+  if (!resumed) return null
+  const parent = resumed.parent_execution_id
+  return { label: 'Resumed', title: `Resumed from ${parent}`, href: href(`/executions/${encodeURIComponent(parent)}`) }
 }
 
 /** A list row's phase progress as the API words it (`phase_progress`); the counts are the fallback for a server without it. */

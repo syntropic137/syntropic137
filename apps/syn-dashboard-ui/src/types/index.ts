@@ -46,7 +46,7 @@ export interface PhaseDefinition {
   model: string | null
   /** Concrete id the alias resolves to; null when not an alias. Never what a run used. */
   resolved_model?: string | null
-  /** "translated" (platform rewrites it, codex) or "expected" (the CLI picks, claude). */
+  /** "translated" (the platform rewrites it before launch; every provider today) or "expected" (the CLI picks; unused). */
   resolution_basis?: 'translated' | 'expected' | null
   /** e.g. "gpt-sol → gpt-6.1-sol"; the bare model otherwise. Render verbatim. */
   model_display?: string | null

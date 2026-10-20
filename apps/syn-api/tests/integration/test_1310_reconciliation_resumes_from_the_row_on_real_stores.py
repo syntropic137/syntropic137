@@ -123,6 +123,14 @@ async def _assert_closed_once(
     assert in_use == 0
 
 
+async def _reconcile_turn(reconciler: Reconciler) -> None:
+    """One acquiring turn, then wait for its attempts: a turn no longer awaits them (#1944)."""
+    await reconciler.turn(acquire=True)
+    async with asyncio.timeout(60):
+        while not reconciler.idle:
+            await asyncio.sleep(0.01)
+
+
 @pytest.mark.parametrize("when", ["before", "after"])
 @pytest.mark.parametrize("write", ["mark_reaped", "close_interrupted"])
 async def test_a_failed_write_is_resumed_from_the_row(
@@ -142,10 +150,10 @@ async def test_a_failed_write_is_resumed_from_the_row(
         reaper,
         AggregateRunInterrupter(await infra.executions()),
     )
-    await reconciler.turn()
+    await _reconcile_turn(reconciler)
     assert flaky.lost
-    await reconciler.turn()
-    await reconciler.turn()
+    await _reconcile_turn(reconciler)
+    await _reconcile_turn(reconciler)
     # Only a mark_reaped that never committed leaves the row fencing, so the
     # (idempotent) reap runs again; every other case resumes past it.
     reaps = 2 if (write, when) == ("mark_reaped", "before") else 1
@@ -163,7 +171,7 @@ async def test_a_dead_reconcilers_row_is_finished_by_its_successor_only_after_it
     await _online(infra, successor)
 
     # rec-1 fences, reaps and interrupts, then dies before closing the row.
-    (fenced,) = await infra.queue.fence_expired(first.host_id)
+    (fenced,) = await infra.queue.fence_expired(first.host_id, limit=10)
     await infra.queue.mark_reaped(fenced)
     await AggregateRunInterrupter(await infra.executions()).interrupt(fenced)
 
@@ -171,10 +179,10 @@ async def test_a_dead_reconcilers_row_is_finished_by_its_successor_only_after_it
     rec2 = Reconciler(
         infra.queue, successor.host_id, reaper, AggregateRunInterrupter(await infra.executions())
     )
-    await rec2.turn()
+    await _reconcile_turn(rec2)
     assert (await infra.queue.in_use()).reaped == 1  # rec-1 is still registered
 
     await infra.queue.deregister(first.host_id)
-    await rec2.turn()
+    await _reconcile_turn(rec2)
     assert reaper.calls == []  # the row said reaped
     await _assert_closed_once(infra, pool, execution_id, dead)

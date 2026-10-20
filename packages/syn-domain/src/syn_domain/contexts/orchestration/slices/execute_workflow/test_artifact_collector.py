@@ -20,6 +20,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseProducedNoDeclaredOutputError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+    PhaseOutputCache,
+)
 
 if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
@@ -756,3 +759,68 @@ class TestTheFlatAliasDerivesFromTheTree:
         injected = await self._inject(phase_outputs={}, phase_files={"p1": []})
 
         assert injected == {}
+
+
+@pytest.mark.unit
+class TestAnEvidenceGateAppendsToItsPhase:
+    """`PhaseOutputCache.append` (evidence plan §A.6, PR 5b).
+
+    A gate files its reports as artifacts OWNED by the phase it follows. The
+    cache wins over the projection, so on the live path the next workspace
+    sees only what the cache holds for that phase: these drive the real
+    collector to show the reports arrive beside the phase's own output, and
+    that the phase's alias is still its own deliverable.
+    """
+
+    @staticmethod
+    async def _inject(cache: PhaseOutputCache) -> dict[str, bytes]:
+        collector = ArtifactCollector(MockArtifactRepo(), None, None)  # type: ignore[arg-type]
+        workspace = MockWorkspace()
+        await collector.inject_from_previous_phases_explicit(
+            workspace=workspace,
+            completed_phase_ids=["p1"],
+            phase_outputs=cache.primary,
+            execution_id="e1",
+            phase_files=cache.files,
+        )
+        return dict(workspace.injected_files)
+
+    @staticmethod
+    def _report(name: str, content: str) -> PhaseOutputFile:
+        return PhaseOutputFile(
+            source_path=f"artifacts/output/platform-evidence/g-1/{name}", content=content
+        )
+
+    @pytest.mark.asyncio
+    async def test_reports_reach_the_next_workspace_beside_the_phase_output(self) -> None:
+        cache = PhaseOutputCache()
+        own = PhaseOutputFile(source_path="artifacts/output/implement.md", content="# mine")
+        cache.record("p1", "# mine", [own])
+        cache.append("p1", [self._report("manifest.json", '{"complete": true}')])
+
+        injected = await self._inject(cache)
+
+        assert injected["artifacts/input/p1/implement.md"] == b"# mine"
+        assert injected["artifacts/input/p1/platform-evidence/g-1/manifest.json"] == (
+            b'{"complete": true}'
+        )
+        assert injected["artifacts/input/p1.md"] == b"# mine"
+
+    def test_a_second_append_at_the_same_path_replaces_that_file_only(self) -> None:
+        cache = PhaseOutputCache()
+        own = PhaseOutputFile(source_path="artifacts/output/implement.md", content="# mine")
+        cache.record("p1", "# mine", [own])
+        cache.append("p1", [self._report("0-mutation.json", "old")])
+        cache.append("p1", [self._report("0-mutation.json", "new"), self._report("1-x.md", "x")])
+
+        assert [(f.source_path, f.content) for f in cache.files["p1"]] == [
+            ("artifacts/output/implement.md", "# mine"),
+            ("artifacts/output/platform-evidence/g-1/0-mutation.json", "new"),
+            ("artifacts/output/platform-evidence/g-1/1-x.md", "x"),
+        ]
+        assert cache.primary == {"p1": "# mine"}
+
+    def test_appending_nothing_records_nothing(self) -> None:
+        cache = PhaseOutputCache()
+        cache.append("p1", [])
+        assert "p1" not in cache.files

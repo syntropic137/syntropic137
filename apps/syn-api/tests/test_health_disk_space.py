@@ -9,7 +9,12 @@ import pytest
 from syn_api.services import lifecycle
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.types import DiskSpaceHealth, HealthResponse, Ok
-from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskState, DiskUsage
+from syn_domain.contexts._shared.disk_space import (
+    DiskSpaceGuard,
+    DiskState,
+    DiskThresholds,
+    DiskUsage,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -28,7 +33,14 @@ class _FakeDisk:
 
 def _use_disk(monkeypatch: pytest.MonkeyPatch, free_percent: float) -> None:
     guard = DiskSpaceGuard(
-        _FakeDisk(free_percent), degraded_below_percent=10.0, refuse_admission_below_percent=5.0
+        _FakeDisk(free_percent),
+        DiskThresholds(
+            refuse_admission_below_bytes=0,
+            degraded_below_bytes=0,
+            refuse_basis="test",
+            refuse_admission_below_percent=5.0,
+            degraded_below_percent=10.0,
+        ),
     )
     monkeypatch.setattr("syn_api._wiring_admission.get_disk_space_guard", lambda: guard)
 
@@ -47,13 +59,22 @@ async def test_low_disk_degrades_health_and_says_how_much_is_free(
 
     assert health.mode == "degraded"
     assert DegradedReason.DISK_SPACE in (health.degraded_reasons or [])
-    assert health.disk == DiskSpaceHealth(
+    assert health.disk is not None
+    # #1983: the reclaimer's block rides along; its own tests pin its content.
+    assert health.disk.reclaim is not None
+    assert health.disk.model_copy(update={"reclaim": None}) == DiskSpaceHealth(
         path="/workspaces",
         state="low",
         free_percent=7.0,
         free_bytes=70,
+        degraded_below_bytes=0,
+        refuse_admission_below_bytes=0,
         degraded_below_percent=10.0,
         refuse_admission_below_percent=5.0,
+        detail=(
+            "0 GiB free on /workspaces (7.0% of 0 GiB); degraded below 0 GiB or 10%; "
+            "new executions refused below 0 GiB or 5% (test)."
+        ),
     )
     # And it reaches the wire, not just the model.
     assert health.model_dump(mode="json")["disk"]["state"] == "low"

@@ -10,7 +10,9 @@ import {
   type PackageFormat,
   type PluginManifest,
   PluginManifestSchema,
+  type ResolvedPackage,
   type ResolvedWorkflow,
+  type SkippedFile,
 } from "./models.js";
 import { gitClone, gitHeadSha, makeTempDir, removeTempDir } from "./git.js";
 import { parseYaml } from "./yaml.js";
@@ -253,16 +255,46 @@ function loadWorkflowYaml(
   return loadWorkflowYamlFromPath(yamlPath, sourcePath, phaseLibraryDir);
 }
 
+type WorkflowDocument =
+  | { ok: true; data: Record<string, unknown>; phases: unknown[] }
+  | { ok: false; reason: string };
+
+/**
+ * Read a YAML file as a workflow definition, or say why it is not one.
+ *
+ * WHY (#1949): a missing `phases` key used to default to `[]`, so any YAML
+ * document at all - a lockfile, a tool config - resolved as a valid
+ * 0-phase workflow and install would register it. A workflow is a mapping
+ * with at least one phase; anything else is not a workflow.
+ */
+function readWorkflowDocument(filePath: string): WorkflowDocument {
+  const data: unknown = parseYaml(fs.readFileSync(filePath, "utf-8"), filePath);
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return { ok: false, reason: "not a YAML mapping" };
+  }
+  const record = data as Record<string, unknown>;
+  const phases = record["phases"];
+  if (!Array.isArray(phases)) {
+    return { ok: false, reason: "no `phases` list" };
+  }
+  if (phases.length === 0) {
+    return { ok: false, reason: "`phases` is empty" };
+  }
+  return { ok: true, data: record, phases };
+}
+
 function loadWorkflowYamlFromPath(
   yamlPath: string,
   sourcePath: string,
   phaseLibraryDir: string | null = null,
 ): ResolvedWorkflow {
   const workflowDir = path.dirname(yamlPath);
-  const content = fs.readFileSync(yamlPath, "utf-8");
-  const data = parseYaml(content, yamlPath) as Record<string, unknown>;
+  const doc = readWorkflowDocument(yamlPath);
+  if (!doc.ok) {
+    throw new Error(`${yamlPath} is not a workflow definition: ${doc.reason}`);
+  }
+  const { data, phases } = doc;
 
-  const phases = Array.isArray(data["phases"]) ? data["phases"] : [];
   const resolvedPhases = phases.map((phase) =>
     resolvePhase(phase as Record<string, unknown>, workflowDir, phaseLibraryDir),
   );
@@ -610,27 +642,31 @@ function resolveMultiWorkflow(
 function resolveStandaloneYaml(
   pkgPath: string,
   source: string,
-): ResolvedWorkflow[] {
+): { workflows: ResolvedWorkflow[]; skipped: SkippedFile[] } {
   const files = fs
     .readdirSync(pkgPath)
     .filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"))
     .sort();
 
-  return files.map((f) => {
-    const filePath = path.join(pkgPath, f);
-    const content = fs.readFileSync(filePath, "utf-8");
-    const data = parseYaml(content, filePath) as Record<string, unknown>;
+  const workflows: ResolvedWorkflow[] = [];
+  const skipped: SkippedFile[] = [];
+  for (const f of files) {
+    const doc = readWorkflowDocument(path.join(pkgPath, f));
+    if (!doc.ok) {
+      skipped.push({ file: f, reason: doc.reason });
+      continue;
+    }
+    const { data } = doc;
     const baseName = path.basename(f, path.extname(f));
 
     // Resolve prompt_file against the package dir for the same reason the
     // multi-workflow path does: the server has no base_dir and rejects an
     // unresolved ref, and this document is uploaded verbatim.
-    const rawPhases = Array.isArray(data["phases"]) ? data["phases"] : [];
-    const resolvedPhases = rawPhases.map((phase) =>
+    const resolvedPhases = doc.phases.map((phase) =>
       resolvePhase(phase as Record<string, unknown>, pkgPath),
     ) as Record<string, unknown>[];
 
-    return {
+    workflows.push({
       definition: { ...data, phases: resolvedPhases },
       id: String(data["id"] ?? baseName),
       name: String(data["name"] ?? baseName),
@@ -644,27 +680,43 @@ function resolveStandaloneYaml(
       phases: resolvedPhases,
       input_declarations: [],
       source_path: source,
-    };
-  });
+    });
+  }
+
+  // A package of nothing but skipped files is not a package: failing here
+  // keeps a dry run from calling it valid (#1949).
+  if (workflows.length === 0) {
+    const listed = skipped.map((s) => `  ${s.file}: ${s.reason}`).join("\n");
+    throw new Error(
+      `No workflow definitions found in ${pkgPath}\n` +
+        "A standalone workflow is a top-level YAML mapping with a non-empty `phases` list. Skipped:\n" +
+        listed,
+    );
+  }
+  return { workflows, skipped };
 }
 
-export function resolvePackage(
-  pkgPath: string,
-): { manifest: PluginManifest | null; workflows: ResolvedWorkflow[] } {
+/**
+ * Resolve a package directory into the workflows it declares.
+ *
+ * Throws when the directory holds no workflow definition. `skipped` lists
+ * top-level YAML files a standalone package passed over; callers must show it.
+ */
+export function resolvePackage(pkgPath: string): ResolvedPackage {
   const format = detectFormat(pkgPath);
   const manifest = loadManifest(pkgPath);
   const source = pkgPath;
 
   if (format === "single") {
     const workflow = loadWorkflowYaml(pkgPath, source);
-    return { manifest, workflows: [workflow] };
+    return { manifest, workflows: [workflow], skipped: [] };
   }
 
   if (format === "multi") {
-    return { manifest, workflows: resolveMultiWorkflow(pkgPath, source) };
+    return { manifest, workflows: resolveMultiWorkflow(pkgPath, source), skipped: [] };
   }
 
-  return { manifest, workflows: resolveStandaloneYaml(pkgPath, source) };
+  return { manifest, ...resolveStandaloneYaml(pkgPath, source) };
 }
 
 // ---------------------------------------------------------------------------
@@ -674,12 +726,7 @@ export function resolvePackage(
 export async function resolveFromGit(
   url: string,
   ref: string,
-): Promise<{
-  tmpdir: string;
-  manifest: PluginManifest | null;
-  workflows: ResolvedWorkflow[];
-  gitSha: string | null;
-}> {
+): Promise<ResolvedPackage & { tmpdir: string; gitSha: string | null }> {
   const tmpdir = makeTempDir("syn-pkg-");
   try {
     await gitClone(url, ref, tmpdir);
@@ -693,8 +740,13 @@ export async function resolveFromGit(
   // check was silently inert for both. A policy that does not apply on two
   // of the resolution paths is not a policy.
   const gitSha = await gitHeadSha(tmpdir);
-  const { manifest, workflows } = resolvePackage(tmpdir);
-  return { tmpdir, manifest, workflows, gitSha };
+  try {
+    return { tmpdir, ...resolvePackage(tmpdir), gitSha };
+  } catch (err) {
+    // The caller never receives tmpdir on failure, so it cannot clean up.
+    removeTempDir(tmpdir);
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -61,7 +61,7 @@ describe("resolveSource", () => {
     );
     fs.writeFileSync(
       path.join(fixtureDir, "workflow.yaml"),
-      "id: fixture\nname: Fixture\nphases: []\n",
+      "id: fixture\nname: Fixture\nphases:\n  - id: only\n    prompt_template: hi\n",
       "utf-8",
     );
     try {

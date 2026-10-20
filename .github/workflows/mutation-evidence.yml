@@ -29,8 +29,19 @@ name: Mutation Evidence
 #   variables forwarded. So PR code cannot rewrite the trusted runner or its
 #   report, plant git hooks the host then runs, or reach the runner's
 #   credentials (GITHUB_TOKEN, the Actions runtime token and so the cache).
-#   `cache-mode: none` would be belt and braces, but actionlint 1.7.12 does not
-#   know the key yet; add it once it does.
+# - `cache-mode: none` for the whole workflow: a dispatch on main may otherwise
+#   write default-branch caches, and in docker mode PR code on the host can
+#   recover the runtime token. With no cache access, nothing it plants is ever
+#   restored by another workflow. (actionlint 1.7.12 does not know the key yet;
+#   .github/actionlint.yaml ignores exactly that error for this file.)
+# - EXCEPT with `docker: true`, for tests that drive the Docker daemon
+#   themselves (docker compose with host bind mounts). A container holding the
+#   Docker socket IS the host, so PR code runs on the runner host and could
+#   forge its own report. The guards below still hold; the verdict is evidence
+#   about honest PR code, not a security boundary. This is the DEFAULT, as in
+#   ci.yml's integration job: the first real target (#1929) runs docker
+#   compose. `docker: false` opts into the sandbox for tests that need no
+#   Docker, and is the stronger guarantee when it applies.
 # - That job has `contents: read`, no secrets, no persisted credentials and no
 #   uv cache. The `pull-requests: write` token exists only in the comment job,
 #   on a fresh runner, and posts the report the TRUSTED runner wrote.
@@ -39,7 +50,7 @@ name: Mutation Evidence
 #   working directory, and a PR can commit a `.venv` whose `bin/python` is
 #   anything. Nothing on the host reads the PR's uv config or environment.
 
-run-name: Mutation evidence for PR #${{ inputs.pr }} ${{ inputs.dispatch_id }}
+run-name: "Mutation evidence for PR #${{ inputs.pr }} ${{ inputs.dispatch_id }}"
 
 on:
   workflow_dispatch:
@@ -57,6 +68,14 @@ on:
         required: false
         default: '.mutations/'
         type: string
+      docker:
+        description: >-
+          Run PR code on the runner host so tests can drive the Docker daemon,
+          as ci.yml does. false = socket-less sandbox (stronger isolation; see
+          SECURITY MODEL)
+        required: false
+        default: true
+        type: boolean
       dispatch_id:
         description: 'Optional nonce shown in the run name, so a dispatcher can find its own run'
         required: false
@@ -65,10 +84,17 @@ on:
 
 permissions: {}
 
-# Dispatch-only, so a newer run for the same PR always supersedes the older.
+cache-mode: none
+
+# One group per dispatch (PC-197). A group per PR let a second dispatch on
+# the same PR cancel the first, so a dispatcher waiting on its own run saw it
+# `cancelled` and had no evidence. Keyed on the dispatch nonce, a run can be
+# cancelled only by its own attempt. Without a nonce, `github.run_id` keeps the
+# group unique: with a shared group, GitHub cancels a PENDING run when a newer
+# one queues even with cancel-in-progress false.
 concurrency:
-  group: mutation-evidence-pr-${{ inputs.pr }}
-  cancel-in-progress: true
+  group: mutation-evidence-pr-${{ inputs.pr }}-${{ inputs.dispatch_id || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   resolve:
@@ -184,6 +210,7 @@ jobs:
           MUTATION_DIR: ${{ inputs.mutations_dir }}
           MUTATION_DISPATCH_ID: ${{ inputs.dispatch_id }}
           MUTATION_SHA: ${{ needs.resolve.outputs.sha }}
+          MUTATION_DOCKER: ${{ inputs.docker }}
           TERM: dumb
           NO_COLOR: "1"
           COLUMNS: "200"
@@ -191,10 +218,14 @@ jobs:
           TEST_TIMESCALEDB_PORT: "15432"
           TEST_EVENTSTORE_HOST: localhost
           TEST_EVENTSTORE_PORT: "55051"
-        run: >-
-          python -I scripts/mutation_evidence.py
-          run --root "$GITHUB_WORKSPACE/pr" --image "$SANDBOX_IMAGE"
-          --report "$RUNNER_TEMP/mutation-evidence.md"
+        # evidence.json goes in its own directory: the `evidence` artifact
+        # uploads exactly that directory and nothing else from RUNNER_TEMP.
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          if [ "$MUTATION_DOCKER" = true ]; then mode=(--host); else mode=(--image "$SANDBOX_IMAGE"); fi
+          python -I scripts/mutation_evidence.py run --root "$GITHUB_WORKSPACE/pr" \
+            --report "$RUNNER_TEMP/mutation-evidence.md" \
+            --evidence "$RUNNER_TEMP/evidence/evidence.json" "${mode[@]}"
 
       - name: Job summary
         if: always()
@@ -213,6 +244,21 @@ jobs:
         with:
           name: mutation-evidence
           path: ${{ runner.temp }}/mutation-evidence.md
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # The platform's evidence gate downloads this artifact BY NAME and reads
+      # evidence.json (plan docs/plans/20261015_platform-dispatched-evidence.md
+      # §A.1). Absent when the run reached no verdict (a red sync, a bad
+      # input): the gate then reads "no evidence", never a verdict nothing
+      # backs. The `mutation-evidence` artifact above stays for the PR comment
+      # and `just mutation-evidence`.
+      - name: Upload evidence.json
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: evidence
+          path: ${{ runner.temp }}/evidence/evidence.json
           if-no-files-found: ignore
           retention-days: 30
 

@@ -77,17 +77,9 @@ Create `.env` file:
 # Syn137 Production Configuration
 # =============================================================================
 
-# ---- Isolation Backend ----
-# Options: firecracker (Linux+KVM), gvisor (Docker+runsc), docker_hardened, cloud
-SYN_WORKSPACE_ISOLATION_BACKEND=firecracker
-
 # ---- Per-workspace limits (applied to every workspace container) ----
 SYN_WORKSPACE_MEMORY_LIMIT_MB=4096      # 4GB per workspace
 SYN_WORKSPACE_CPU_LIMIT=2.0             # 2 CPUs per workspace
-
-# ---- Cloud provider ----
-SYN_WORKSPACE_CLOUD_PROVIDER=e2b
-SYN_WORKSPACE_CLOUD_API_KEY=your-e2b-api-key
 
 # ---- Security hardening ----
 # Not configurable, by design. Every workspace container gets agentic_isolation's
@@ -100,9 +92,9 @@ SYN_WORKSPACE_CLOUD_API_KEY=your-e2b-api-key
 
 # ---- Docker Settings ----
 SYN_WORKSPACE_DOCKER_IMAGE=syn-workspace:latest
-# SYN_WORKSPACE_DOCKER_RUNTIME and SYN_WORKSPACE_DOCKER_NETWORK are not yet
-# applied to the container (#1805); see [workspace_settings_consumed] in
-# ci/fitness/fitness_exceptions.toml for every setting in that state.
+# The agent network is SYN_AGENT_NETWORK. SYN_WORKSPACE_ISOLATION_BACKEND,
+# SYN_WORKSPACE_CLOUD_*, SYN_WORKSPACE_DOCKER_RUNTIME and
+# SYN_WORKSPACE_DOCKER_NETWORK were never applied and were removed (#1827).
 
 # ---- Firecracker Settings (if using Firecracker) ----
 SYN_FIRECRACKER_KERNEL_PATH=/var/lib/syn/firecracker/vmlinux

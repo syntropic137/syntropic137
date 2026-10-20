@@ -18,6 +18,9 @@ DEV_API_HOST_PORT = 9137
 SELFHOST_GATEWAY_PORT = 8137
 """Host port for the selfhost nginx gateway."""
 
+API_CONTAINER_PORT = 8000
+"""Port uvicorn listens on inside the API container (``SYN_API_PORT``)."""
+
 # ---------------------------------------------------------------------------
 # Derived URLs
 # ---------------------------------------------------------------------------
@@ -29,7 +32,8 @@ DEFAULT_SELFHOST_API_URL = f"http://localhost:{SELFHOST_GATEWAY_PORT}"
 """Default API URL for selfhost users (CLI, browser)."""
 
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
-"""Anthropic Messages API endpoint (the eval suite's LLM judge, scripts/eval_suite.py)."""
+"""Anthropic Messages API endpoint (the eval suite's LLM judge, scripts/eval_suite.py,
+and the feedback AnthropicScreener)."""
 
 TAURI_DESKTOP_ORIGINS: tuple[str, ...] = ("tauri://localhost", "http://tauri.localhost")
 """Origins the packaged desktop app (apps/syn-desktop) sends requests from:
@@ -65,3 +69,6 @@ ENV_CLAUDE_CODE_OAUTH_TOKEN = "CLAUDE_CODE_OAUTH_TOKEN"
 
 ENV_CODEX_AUTH_JSON = "CODEX_AUTH_JSON"
 """Env var carrying the contents of ~/.codex/auth.json for codex-runner phases."""
+
+ENV_OPENAI_API_KEY = "OPENAI_API_KEY"
+"""Env var for the OpenAI API key codex phases fall back to without CODEX_AUTH_JSON."""

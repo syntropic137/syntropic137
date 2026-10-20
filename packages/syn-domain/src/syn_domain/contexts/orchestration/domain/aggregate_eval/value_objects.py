@@ -12,6 +12,7 @@ already-written stream from replaying.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from enum import StrEnum
 from typing import Annotated, Self
@@ -43,6 +44,19 @@ class EvalId(RootModel[str]):
     def new(cls) -> Self:
         """A fresh id, for a caller that has none to supply."""
         return cls(f"eval-{uuid4().hex}")
+
+    @classmethod
+    def for_key(cls, key: str) -> Self:
+        """The one id for ``key``, the same on every call and every host (#1920).
+
+        Two creators that derive their id from the same key write to the same
+        stream, so the store's no-stream guard admits exactly one of them and
+        the other finds the winner. A random id gives each its own stream and
+        nothing to collide on.
+        """
+        if not key:
+            raise ValueError("a stable eval key must not be empty")
+        return cls(f"eval-{hashlib.sha256(key.encode('utf-8')).hexdigest()[:32]}")
 
     @classmethod
     def recorded(cls, value: str) -> Self:

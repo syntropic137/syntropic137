@@ -46,6 +46,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     INHERITED_PHASE_OWNERS,
     ExecutablePhase,
+    InheritedEvidenceGate,
     InheritedPhase,
     PhaseDefinition,
     ResumeOrigin,
@@ -158,6 +159,7 @@ class AdmittedResume(BaseModel):
     inherited_phases: list[InheritedPhase] = Field(default_factory=list)
     resume_phase_id: str | None = None
     inherited_skipped_phase_ids: list[str] = Field(default_factory=list)
+    inherited_evidence_gate: InheritedEvidenceGate | None = None
 
 
 def phase_definitions_of(phases: Sequence[ExecutablePhase]) -> list[PhaseDefinition]:
@@ -282,6 +284,7 @@ def read_admitted_resume(event: DomainEvent) -> AdmittedResume:
         ),
         resume_phase_id=evt(event, "resume_phase_id"),
         inherited_skipped_phase_ids=read_phase_ids(evt(event, "inherited_skipped_phase_ids")),
+        inherited_evidence_gate=evt(event, "inherited_evidence_gate"),
     )
 
 

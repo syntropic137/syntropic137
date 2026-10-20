@@ -115,6 +115,14 @@ class _Ordered:
         await self._interrupter.interrupt(run)
 
 
+async def _reconcile_turn(reconciler: Reconciler) -> None:
+    """One acquiring turn, then wait for its attempts: a turn no longer awaits them (#1944)."""
+    await reconciler.turn(acquire=True)
+    async with asyncio.timeout(60):
+        while not reconciler.idle:
+            await asyncio.sleep(0.01)
+
+
 async def test_v12_a_stalled_executor_is_fenced_and_its_stale_commit_refused(
     infra: _Infra,  # noqa: F811
     pool: asyncpg.Pool,  # noqa: F811
@@ -149,7 +157,7 @@ async def test_v12_a_stalled_executor_is_fenced_and_its_stale_commit_refused(
         await infra.queue.register(b, capacity=1)
         await infra.queue.heartbeat(b.host_id)
         ordered = _Ordered(AggregateRunInterrupter(await infra.executions()), a_host)
-        await Reconciler(infra.queue, b.host_id, ordered, ordered).turn()
+        await _reconcile_turn(Reconciler(infra.queue, b.host_id, ordered, ordered))
         assert ordered.log == ["reaped:True:left=0", "interrupt:left=0"]
         assert (await infra.queue.in_use()).interrupted == 1
 

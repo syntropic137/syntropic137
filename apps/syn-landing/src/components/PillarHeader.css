@@ -197,3 +197,7 @@
     flex-direction: row-reverse;
   }
 }
+
+.pillar-header__cta {
+  align-self: flex-start;
+}

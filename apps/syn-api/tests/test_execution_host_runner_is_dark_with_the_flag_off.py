@@ -38,6 +38,8 @@ async def test_flag_on_starts_one_host_and_stop_cancels_it(
         await asyncio.Event().wait()
 
     host = MagicMock()
+    host.join = AsyncMock()
+    host.leave = AsyncMock()
     host.run_until_drained = _forever
     built = MagicMock(return_value=host)
     monkeypatch.setattr(runner, "get_execution_run_queue", AsyncMock(return_value=MagicMock()))
@@ -80,6 +82,8 @@ async def test_the_production_startup_and_shutdown_drive_the_host_only_with_the_
     monkeypatch.setattr(runner, "get_workflow_execution_repository", MagicMock())
     monkeypatch.setattr(runner, "get_execution_event_stream", MagicMock())
     built = MagicMock()
+    built.return_value.join = AsyncMock()
+    built.return_value.leave = AsyncMock()
     built.return_value.run_until_drained = lambda: asyncio.Event().wait()
     monkeypatch.setattr(runner, "ExecutionHost", built)
     monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())

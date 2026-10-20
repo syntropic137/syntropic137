@@ -36,11 +36,11 @@ def test_codex_alias_is_served_with_its_translation() -> None:
     assert served.model_display == "gpt-sol → gpt-6.1-sol"
 
 
-def test_claude_alias_is_served_with_its_expected_target() -> None:
+def test_claude_alias_is_served_with_its_translation() -> None:
     served = _served("opus", provider="claude")
     assert served.model == "opus"
     assert served.resolved_model == "claude-opus-5-5"
-    assert served.resolution_basis is AliasResolutionBasis.EXPECTED
+    assert served.resolution_basis is AliasResolutionBasis.TRANSLATED
     assert served.model_display == "opus → claude-opus-5-5"
 
 

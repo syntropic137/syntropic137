@@ -12,11 +12,11 @@ labelled by production's label producers.
 * V7b: an unlabelled workspace container is left, with a WARN, while B's real
   heartbeat is live, and is reaped once B is SIGKILLed and its heartbeat stale.
 
-B writes its heartbeat at the start of each loop turn (ADR-072 D4), and the
-turn in which B reaps A spends two ``docker stop -t 5`` waits. So "B is live"
-is established by a heartbeat written after that reap, never by timing, and the
-observer's staleness is a wide multiple of B's 200 ms idle turn. That a busy
-turn reads as stale at all is the production gap #1944.
+B writes its heartbeat at the start of each loop turn (ADR-072 D4). Since
+#1944 the reap of A runs in a task the turn does not wait for, so a busy B no
+longer reads as stale; "B is live" is still established by a heartbeat written
+after that reap, never by timing, and the observer's staleness is a wide
+multiple of B's 200 ms idle turn.
 
 Run: ``uv run pytest -m integration apps/syn-api/tests/integration/test_1310_v7_a_killed_executor_is_reaped_by_a_live_one.py``
 """

@@ -33,7 +33,7 @@ from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dependency_seed import DependencySeedSettings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from syn_shared.settings.disk import DiskSettings  # noqa: E402
-from syn_shared.settings.execution import ExecutionSettings  # noqa: E402
+from syn_shared.settings.execution import ExecutionSettings, ExecutorPoolSettings  # noqa: E402
 from syn_shared.settings.git_identity import OperatorSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
 from syn_shared.settings.image_verification import (  # noqa: E402
@@ -435,6 +435,17 @@ def generate_env_example() -> str:
             "EXECUTION CONCURRENCY (#1557)",
             prefix="SYN_EXECUTION_",
             description="How many workflow executions run at once; the rest queue, visibly.",
+        )
+    )
+
+    # The Executor Pool this process's ExecutionHost joins (SYN_EXECUTOR_POOL_*,
+    # ADR-072 D13). Read only with SYN_EXECUTION_RUN_QUEUE_ENABLED on.
+    lines.extend(
+        generate_settings_section(
+            ExecutorPoolSettings,
+            "EXECUTOR POOL (ADR-072 D13)",
+            prefix="SYN_EXECUTOR_POOL_",
+            description="Which Executor Pool this executor joins. Read only with the run queue on.",
         )
     )
 

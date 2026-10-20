@@ -187,6 +187,13 @@ export function skylineAspectRatio(dims: SkylineDims): number {
   return vb.width / vb.height
 }
 
+/**
+ * " (UTC)": every Skyline day is a UTC calendar day (the rollup's `day`
+ * column is `utc_day(time)`), so labels that name a day say so. Interim
+ * until the local-day decision in #1939; drop it there, in one place.
+ */
+export const DAY_ZONE_SUFFIX = ' (UTC)'
+
 /** "2026-08-28" -> UTC epoch ms at midnight; NaN when malformed. */
 export function dayMs(key: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(key)

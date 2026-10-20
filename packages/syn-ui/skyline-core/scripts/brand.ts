@@ -3,7 +3,7 @@
  * brand-asset scripts (og-image.ts, repo-banner.ts).
  *
  * Colour literals are allowed here only because the outputs are static
- * assets that can't read CSS variables. They mirror design/brand/s-mark.svg
+ * assets that can't read CSS variables. They mirror design/brand/v2/logo/s-mark.svg
  * (S faces) and the syn137 theme (ground #0A0C14, accent #4D80FF, status
  * red and amber, text colours).
  */
