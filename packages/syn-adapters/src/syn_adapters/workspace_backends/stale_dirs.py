@@ -172,6 +172,17 @@ class ContainerMounts:
     container_id: str
     sources: tuple[str, ...]
     running: bool = False
+    #: Docker's name for it, for the operator reading /health; "" when unknown.
+    name: str = ""
+    #: Why it is not a pure observer of the host tree (`observer_unsafe`), or
+    #: None when every observer condition held at inspect. A container built
+    #: without an inspect is never one.
+    observer_unsafe: str | None = "not inspected"
+
+    @property
+    def label(self) -> str:
+        """``name (id12)``: what /health names a container that keeps a directory."""
+        return f"{self.name or 'unnamed'} ({self.container_id[:12]})"
 
     def blocks(self, workspace_id: str, host_base: str) -> bool:
         """Whether any source can reach the workspace directory under any of its names.
@@ -181,6 +192,11 @@ class ContainerMounts:
         ANCESTOR of it - the base, its parent, ``/`` - reaches it. Only the
         caller's own container is exempt, and the caller decides that
         (`own_container_id`), not this method.
+
+        Read-only binds block like any other: read-only does not mean unused,
+        and ``RW: false`` alone does not keep submounts read-only. The one
+        other exemption is an operator-listed observer that passes every
+        observer condition, and the reclaimer decides that (`_bound`).
         """
         base = PurePosixPath(posixpath.normpath(host_base))
         names = (workspace_id, CLAIM_PREFIX + workspace_id, DELETE_PREFIX + workspace_id)
@@ -310,7 +326,13 @@ async def list_containers() -> list[ContainerMounts]:
         if inspected is None or inspected.mount_sources is None:
             raise RuntimeError(f"could not inspect container {container_id}")
         containers.append(
-            ContainerMounts(container_id, inspected.mount_sources, running=inspected.running)
+            ContainerMounts(
+                container_id,
+                inspected.mount_sources,
+                running=inspected.running,
+                name=inspected.name,
+                observer_unsafe=inspected.observer_unsafe,
+            )
         )
     return containers
 
