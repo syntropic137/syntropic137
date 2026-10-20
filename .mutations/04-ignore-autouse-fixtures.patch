@@ -1,12 +1,13 @@
 diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
-index 7176f2866..3e51bc117 100644
+index e75d2ac93..59d2def8b 100644
 --- a/scripts/check_integration_skips.py
 +++ b/scripts/check_integration_skips.py
-@@ -458,6 +458,7 @@ class Scanner:
-         return False
+@@ -478,7 +478,7 @@ class _Scope:
+         return None
  
-     def autouse_skips(self, mod: _Module) -> bool:
-+        return False
-         for owner in (mod, *self._conftests(mod.path)):
-             if any(self.can_skip(owner, fn, as_fixture=True) for fn in owner.autouse):
-                 return True
+     def autouse(self) -> list[str]:
+-        return [n for level in self._levels for n, f in level.items() if f.autouse]
++        return []
+ 
+     def _requests(self, fixture: _Fixture, level: int) -> Iterator[tuple[str, int]]:
+         for name in _params(fixture.node):

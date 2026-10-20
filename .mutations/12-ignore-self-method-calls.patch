@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index e75d2ac93..6382f947c 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -423,7 +423,7 @@ class _Module:
+             and isinstance(target.value, ast.Name)
+             and target.value.id in {"self", "cls"}
+         ):
+-            return [(self, f) for f in self._methods(receiver, target.attr)]
++            return []
+         return []
+ 
+     def body_skips(self, func: _Function, receiver: ast.ClassDef | None = None) -> str | None:
