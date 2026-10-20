@@ -197,6 +197,34 @@ never run at once. The setup script is not retried, because a clone killed
 mid-transfer would be skipped by the re-run. Resuming provisions a fresh
 workspace instead. Each deadline is a Setting.
 
+## Workspace Credential Policy
+
+Whether a workspace may hold the host's credentials (`WorkspaceCredentialPolicy`,
+#1914). It is a port the orchestration context owns, fixed per backend by its
+[Backend Kit](#backend-kit) and never chosen per run, because a workflow cannot
+say "this phase needs no credential": a Scripted Agent runs under the same
+`claude` or `codex` provider as a real agent. Every credential source asks the
+policy. Those sources are the sidecar and token injection at `create_workspace`,
+the platform grant, the setup secrets (GitHub App tokens, Claude and Codex auth),
+the Claude credential in the agent env, and the session-store write token.
+There are two policies:
+
+- **HostCredentials**: every configured host credential is supplied. This is
+  the behaviour from before the policy existed.
+- **NoCredentials**: nothing from the host reaches the workspace. A phase with
+  repositories is refused before a workspace exists, because a repository
+  always means a GitHub credential (`clone_repos: false` still credentials it).
+
+## Backend Kit
+
+The one composition point for a workspace backend (`BackendKit`, #1914). Built
+once at wiring, it owns every decision that differs between backends: which
+image may run and how it is verified, whether sessions are captured, the
+[Workspace Credential Policy](#workspace-credential-policy), and the isolation
+type reported on the handle. Only the Docker kit exists. A NoCredentials kit
+starts only with an image approved for credential-free runs, and no such image
+is pinned yet, so today none can start.
+
 ## Fallback Agent
 
 The agent (provider and model) a Phase declares under `fallback_agent`, to be
@@ -1177,7 +1205,12 @@ association was made after the fact.
 
 What one Phase's workspace consumed, measured once as it is torn down: CPU
 time, CPU throttling, memory peak, OOM kills, the workspace's disk size, network
-bytes, and the paths its delete could not remove (`WorkspaceUsage`). The
+bytes, the paths its delete could not remove, and how the provider's fallback
+delete went when the host could not delete the directory alone
+(`WorkspaceDeleteFallback`: `deleted`, `failed`, or `refused` when the
+directory is not one the provider created; `unrecognized` when the provider
+reported any other value, a contract mismatch kept distinct from "not
+attempted") (`WorkspaceUsage`). The
 workspace provider measures it; the Phase that held the workspace records it,
 as one `workspace_resource_usage` observation under that Phase's session.
 
@@ -1199,27 +1232,57 @@ Unmeasured is unknown, never "not OOM-killed". Read from
 
 ## Stale Workspace Directory
 
-A workspace directory on the host that nothing will come back for
-(`StaleWorkspaceDir`, PC-130): no running container mounts it, the Execution
-that owns it (when anything still names one) is not running, and nothing in it
-has changed for the reclaim grace period. Its container is already gone, so
-unlike an **Orphaned Workspace** (`OrphanedWorkspace`, #1560) it cannot be
+A workspace directory on the host whose one owning Execution is terminal
+(`completed`, `failed` or `cancelled`) and has been for the settle period
+(`StaleWorkspaceDir`, PC-130, #1983). Terminal is read from the execution read
+model's terminal event, never from file times. Its container is already gone,
+so unlike an **Orphaned Workspace** (`OrphanedWorkspace`, #1560) it cannot be
 guarded from inside.
 
 **Reclaiming** one means deleting it, and only through a `ReclaimableDir`,
-which only a guard can produce. The host-side guard
-(`guard_stale_workspace_dir`) keeps the directory if any commit is not on a
-remote, and archives an uncommitted change as a patch artifact under the
-Execution before the delete. Each deletion is logged as `WorkspaceReclaimed`
-with its size. It is housekeeping, not domain state: no event, no aggregate.
+which only a guard can produce. A directory is reclaimed only when deleting
+it loses nothing, every clause proven: fully readable, no session capture
+inside, no container of any name or state binding it, a settled terminal
+owner whose captures all went to spool volumes, clean, unstashed, nothing
+unversioned outside proven caches, and every commit shown by `git ls-remote`
+on a repository the Execution names. Nothing is archived first. Each deletion
+is logged as `WorkspaceReclaimed` with its size. It is housekeeping, not
+domain state: no event, no aggregate.
+
+**Retained** (`Retained`, `RetainedReason`) is the outcome of a directory a
+reclaim pass kept, with the one proof that failed: `unowned`, `not_terminal`,
+`mounted`, `unreadable`, `dirty`, `unversioned`, `stash`, `unpushed_unproven`,
+`submodule_store_unproven` (any `.git/modules`, never proven), `unreachable_objects`
+(any object no ref or reflog reaches: a staged-then-reset blob, a dropped commit),
+`capture_unknown`, `identity_changed` or `delete_failed`. Retained is not a
+failure; /health counts each reason.
+
+**Claim** is the rename of a directory to `.reclaiming-<workspace id>` before
+it is judged the second time, so nothing can reach it at its workspace path.
+A claimed directory whose second look fails, or whose `(st_dev, st_ino)`
+changed, is put back. One that passes is renamed again to
+`.deleting-<workspace id>`, the commit point: it is deleted within each
+pass's time budget, and a pass or a restart that finds one only finishes the
+delete, never judges it again or puts it back. The name alone authorizes
+nothing: a **Deletion Authorization** (`DeletionAuthorization`), written
+before the rename under `<base>/.syn-reclaim-auth`, outside every workspace,
+binds it to the directory's `(st_dev, st_ino)`; a `.deleting-` directory
+without a matching one is retained (`identity_changed`).
+
+Reclaiming touches only scratch: a direct child of the workspace base
+directory. Run history (events, Postgres, artifacts, transcripts, telemetry)
+is kept for every run, failed runs included, which get no longer hold than
+successful ones.
+
+**Unclear:** **Clearance** (AW's verdict that a directory holds nothing it
+still needs) is the slice 2 contract, not yet a term in this code (#1983).
 
 **Workspace ownership** is the durable association from a
 `WorkspaceProvisionedForPhase` event's Workspace to its Execution. The
 `workspace_ownership` projection retains this association after a container
-is removed and rebuilds it during replay. Conflicting owners protect the
-directory. Authored work with no known owner is retained, so its archive
-cannot disappear into an unattributed storage prefix. Only a directory with
-an explicit `CACHEDIR.TAG` is treated as disposable cache data; an installed
+is removed and rebuilds it during replay. A directory with no owner, or with
+conflicting owners, is retained (`unowned`). Only a directory with an
+explicit `CACHEDIR.TAG` is treated as disposable cache data; an installed
 dependency directory can still contain authored changes.
 
 ## Scripted Agent
@@ -1256,6 +1319,174 @@ contract lives in `syn_perf.loadtest.scripted_agent_profile`:
 
 The workspace image that carries a Scripted Agent is still called the stub
 image in agentic-workspace; that names the image, not these models.
+
+## Evidence Gate
+
+A hold on the transition from a Phase P to the Phase the aggregate already
+decided runs next, while the platform gathers evidence about P's work (ADR-014
+section 10). It opens because P declared Evidence Requests, or because the
+platform observed `.mutations/` on a head this Execution pushed. It never sits
+after the final Phase. Identified by a `gate_id`, recorded by
+`EvidenceRequested`, which carries the held next Phase instead of
+`NextPhaseReady`.
+
+A gate **opens on any outcome**: once every Evidence Step is Settled, whatever
+the outcomes, `NextPhaseReady` follows. Evidence is input to the next Phase,
+never a verdict on the Execution, and never changes P's `success`.
+
+Not the [Event Compatibility Gate](#event-compatibility-gate), which is a CI
+check on releases. The contracts are in
+`_shared/evidence_contract.py`; the rules are `evidence_gate.py` and the
+aggregate's decisions `evidence_steps.py`, both in `aggregate_execution/`
+(plan PR 5b). A gate opens only when collection carries an Evidence Gate
+Policy, and nothing attaches one until the adapters are wired (plan PR 6), so
+it is off by default.
+
+## Evidence Gate Policy
+
+What the host tells collection about Evidence Gates: that they are on, and over
+which repositories (`EvidenceGatePolicy` on `ArtifactsCollectedCommand`).
+Absent is off. The aggregate reads no settings, so this is how the flag
+`SYN_EVIDENCE_GATE_ENABLED` reaches it.
+
+## Predetermined Step
+
+An Evidence Step whose outcome the aggregate already knows without any I/O: a
+step planned `void` or `unavailable` (an unreadable request, a foreign
+repository, a moved head, a PR mismatch), a step Settled `passed` by reuse, a
+Patch Removal whose mutation evidence did not pass, or a `required_check` when
+nothing was removed. `EvidenceGate.predetermined`. The handler can only Settle
+it exactly as decided; the aggregate refuses anything else.
+
+## Evidence Request
+
+What a Phase asks the platform to prove, as one entry of the `evidence` list in
+its TASK_RESULT: `kind` (`mutation` or `integration`), `repository`, `branch`,
+`pr`, `head_sha` and a non-empty `tests` list of pytest node ids. In code:
+`EvidenceRequest`. The `repository` must be one of the Execution's own, so a
+Phase cannot aim the platform's token elsewhere. A malformed entry is not
+dropped: it becomes a request that Settles `void`, because a dropped request
+would read as "no proof needed".
+
+## Declared Evidence
+
+One Evidence Request as a Phase's latest agent run declared it, or, when the
+entry was malformed, the reason it could not be one. In code:
+`DeclaredEvidence`, carried on `AgentExecutionCompleted.reported_evidence` and
+kept per Phase by the aggregate (`EvidenceRecord`). A retry overwrites its
+Phase's declarations, as it does a Review Verdict. The Evidence Gate plans
+from it when the Phase is collected.
+
+## Observed Head
+
+Where the forge had one branch while a Phase's output was collected: the
+repository, the branch, whether it could be read, its head commit, the PR open
+from it, and whether `.mutations/` was present at that head (unknown when not
+asked, never "absent"). In code: `ObservedHead`, read host-side by
+`EvidenceHeadObserver` for every branch the Execution pushed, inherited as a
+Continued Branch, or declared, and recorded on `ArtifactsCollectedForPhase`.
+The aggregate does no I/O, so this is how the forge's state reaches it.
+
+## Evidence Report
+
+`evidence.json`, schema 1 (`EvidenceReport`): what one run of a repository's
+`<kind>-evidence.yml` workflow found on one head. It carries an **evidence
+verdict**, `passed`, `failed` or `void`, and, for each requested node id, what
+happened to it (`passed`, `failed`, `skipped`, `xfail`, `not_collected`).
+Written by code in the PR under test, so it is evidence for a reader, never
+authority: a `passed` verdict over a requested test that did not pass does not
+parse.
+
+The evidence verdict is not an Eval [Verdict](#verdict) and not a [Review
+Verdict](#review-verdict). Its `suite` field counts the pytest run's tests
+(`collected`, `passed`, `failed`, `skipped`); it is not an Eval
+[Suite](#suite).
+
+## Evidence Step
+
+One planned unit of an Evidence Gate, ordered and indexed from 0: a
+`mutation` or `integration` run, or one of the two steps no Phase can declare,
+`remove_mutation_patches` (the Patch Removal) and `required_check` (waiting for
+CI on the new head). Planned once, when the gate opens. A step whose kind, head
+and tests already Settled `passed` earlier in the Execution is not run again: it
+Settles `passed` and points at the earlier step (`reused_from`).
+
+## Evidence Attempt
+
+One dispatch of an Evidence Step's workflow, identified by a fresh
+`dispatch_id` and bounded by the step's `not_after` deadline. Recorded by
+`EvidenceAttemptStarted` BEFORE the dispatch is sent, so any later process
+knows which run to look for. A step gets at most two. Retries share the step's
+`not_after`.
+
+Not [Attempt Work](#attempt-work), which is what a failed Phase attempt did to
+its workspace, and not a [Retry](#words-we-do-not-use) of a Phase. Taking up a
+dispatched GitHub run is recorded as `EvidenceRunAdopted` in the plan. That is
+not the reserved **Adopt** (an Executor taking over a running Phase). PR 5b
+kept the name `EvidenceRunAdopted`: the event and its command
+(`RecordEvidenceRunAdoptedCommand`) always say **Evidence Run**, which no
+Executor term uses, so the two cannot be read for each other.
+
+## Settled
+
+An Evidence Step that has a final outcome, recorded once by
+`EvidenceStepSettled`: `passed`, `failed`, `void` or `unavailable`, with a
+reason, the run, and the head it evidences. A step Settles at most once. The
+gate opens when the last step Settles.
+
+## Void
+
+An Evidence Step or Evidence Report that proves nothing either way. The run
+happened, or was asked for, but its result cannot be read as a pass or a
+fail: a requested test was not collected, was skipped, or xfailed; the head
+moved; the report disagrees with its run's conclusion; the request was
+unreadable. A void step MUST carry a reason. It is not `failed`, which is
+evidence against the change.
+
+## Unavailable
+
+An Evidence Step for which no evidence exists, because the platform could not
+get any: `permission`, `workflow_absent`, `dispatch_lost`, `runner`,
+`superseded` or `timeout`. An unavailable step MUST carry a reason. It falls
+back to today's handoff to a person. It says nothing about the change.
+
+## Patch Removal
+
+The platform's own commit S -> S' that deletes `.mutations/` from a PR branch,
+made by compare-and-swap on the head, and only at the gate in front of the
+final Phase after a `certified` review with every mutation step `passed`. Its
+provenance (`before_sha`, `after_sha`, author; `MutationPatchesRemoved`) is
+what keeps evidence about S valid at S'. A moved head refuses it and the step
+Settles `void`. In code: the `remove_mutation_patches` Evidence Step and
+`PatchRemoval`.
+
+## Evidence Manifest
+
+`manifest.json`, schema 1 (`EvidenceManifest`): the authoritative record of one
+Evidence Gate, written by the platform from its events, never from an Evidence
+Report. It lists every planned Evidence Step with its outcome, reason, run URL,
+head SHA and reuse pointer, the Patch Removal provenance if there was one, and
+`complete: true`. A step with no report still appears, so a missing report
+cannot read as "all passed". `finalize_pr` trusts S -> S' only from here.
+
+## Inherited Evidence Gate
+
+An Evidence Gate a Resume takes over from the Execution it came from, because
+that Execution stopped while the gate was still holding its transition: an
+`EvidenceRequested` with no `NextPhaseReady` after it (ADR-014 section 10,
+point 4). It travels on `ExecutionResumed.inherited_evidence_gate` and on to
+the Resume's own start in `resumed_from`, carrying the plan, the steps already
+Settled, the Patch Removal if one was made, and the parent's last Evidence
+Attempt at each step it never settled.
+
+The Phase the gate followed is an Inherited Phase even if the run stopped
+before recording it complete: its output was collected before the gate was
+requested. The Resume Phase is the Phase the gate held, which never started,
+so no acknowledgement is asked. The Resume's first to-do is the gate's first
+unsettled step, and its first attempt at that step carries the parent's nonce,
+so the parent's run is adopted rather than posted again. The deadline is new:
+a person-started Resume is a new decision. Code:
+`domain/aggregate_execution/inherited_evidence.py`.
 
 ## Words we do not use
 

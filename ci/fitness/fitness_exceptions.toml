@@ -523,22 +523,88 @@ allowed_prefixes = [
 # its first run; SYN_SECURITY_* (the original #1805 finding) was deleted in the
 # same change. "Class.field" = { issue = "#NNN" }. EXACT: a field that gains a
 # consumer, or is deleted, fails as stale.
-# TODO(#1805): the cloud backend fields describe a backend nothing provisions;
-# docker_runtime/docker_network are not passed to the provider (the network
-# comes from agentic_isolation's SecurityConfig); isolation_backend is not read
-# by WorkspaceService, which picks the backend from WorkspaceServiceConfig.
-"WorkspaceSettings.cloud_api_key" = { issue = "#1805" }
-"WorkspaceSettings.cloud_provider" = { issue = "#1805" }
-"WorkspaceSettings.cloud_template" = { issue = "#1805" }
-"WorkspaceSettings.docker_network" = { issue = "#1805" }
-"WorkspaceSettings.docker_runtime" = { issue = "#1805" }
-"WorkspaceSettings.isolation_backend" = { issue = "#1805" }
+# (none: #1827 deleted the six fields this gate found on its first run)
+
+[docs_drift]
+# ci/fitness/code_quality/test_docs_drift.py (#1960). Every `syn` command,
+# `npx @syntropic137/setup` command and /api/v1 route in the public docs must be
+# one the software accepts (scripts/check_docs_drift.py says how each is read).
+#
+# [[docs_drift.allow]]: one snippet that is illustrative ON PURPOSE. `text` is
+# the snippet exactly as the checker prints it; `reason` says why it is not a
+# claim a reader can run. An entry that matches nothing fails, so fixing the
+# page removes its waiver in the same diff.
+#
+# [docs_drift.budget]: existing false claims in one file, owned by an open
+# issue. EXACT both ways: more fails, and fewer fails until the budget comes
+# down. "<path>" = { max = N, issue = "#NNN" }
+
+[[docs_drift.allow]]
+file = "README.md"
+text = "npx @syntropic137/cli <command>"
+reason = "Usage shape for running the CLI without installing it; <command> is any command."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/setup-cli.mdx"
+text = "npx @syntropic137/setup [command]"
+reason = "Usage shape of the setup CLI; the command table below it lists every command."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/event-ingestion.mdx"
+text = "GET /repos/{owner}/{repo}/commits/{sha}/check-runs"
+reason = "GitHub's Checks API, which the check-run poller calls; not a Syntropic137 route."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/github-integration.mdx"
+text = "POST /app/installations/{id}/access_tokens"
+reason = "GitHub's installation token API, called during workspace setup; not a Syntropic137 route."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/observability.mdx"
+text = "POST /events"
+reason = "syn-collector's ingest route (packages/syn-collector/src/syn_collector/collector/routes.py), not the API."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/observability.mdx"
+text = "POST /v1/metrics"
+reason = "syn-collector's OTLP route (packages/syn-collector/src/syn_collector/collector/routes.py), not the API."
+
+[[docs_drift.allow]]
+file = "apps/syn-docs/content/docs/guide/resuming-executions.mdx"
+text = "syn control resume"
+reason = "History: names the command removed in v0.32, in a callout that says it was removed."
+
+[docs_drift.budget]
+# Empty: every page passes. Add an entry only for debt owned by an open issue.
+
+[deletion_primitives]
+# Every module that deletes from the host or removes docker objects (#1983).
+# See ci/fitness/code_quality/test_deletion_primitives_are_confined.py.
+# A module not listed here fails the gate; a listed module that no longer
+# deletes fails it too, so this table only shrinks.
+# "<path>" = { reason = "..." }
+"apps/syn-api/src/syn_api/services/reconciliation.py" = { reason = "Startup reap: force-removes agentic-ws containers after the unpushed-work guard ran inside them (#1560)." }
+"apps/syn-api/src/syn_api/services/unlabelled_containers.py" = { reason = "Force-removes unlabelled agentic-ws containers after the guard (#1560)." }
+"packages/syn-adapters/src/syn_adapters/session_inventory/capture_outboxes.py" = { reason = "Removes an outbox entry the platform itself wrote, after delivery." }
+"packages/syn-adapters/src/syn_adapters/session_inventory/docker_recovery.py" = { reason = "Removes its own recovery helper container, and a capture volume only once spool_release proved it drained and unreferenced." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py" = { reason = "Platform-owned dependency seed store: prunes seeds it published, and scratch copies it made." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/docker/docker_container_ops.py" = { reason = "Workspace provider teardown of the container it created." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/reclaim_delete.py" = { reason = "delete_tree_until: descriptor-relative delete of a .deleting- directory whose identity-bound authorization the reclaimer wrote after proving it lossless (#1983)." }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/orphaned.py" = { reason = "ShutilWorkspaceDirRemover: deletes only a ReclaimableDir, which only a guard produces (#1560, #1983)." }
+
+[os_walk_without_onerror]
+# os.walk calls under workspace_backends with no onerror (#1983). Budgets are
+# exact current counts and may only decrease.
+# "<path>" = { max = N, issue = "#NNN" }
+"packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py" = { max = 5, issue = "#1983" }
 
 [integration_skips]
-# Integration tests that can skip (skip/skipif marks, pytest.skip,
-# importorskip, or a fixture that does) without declaring it with
-# @pytest.mark.may_skip(reason="...", issue="#N"). A skipped integration test
-# passes CI having checked nothing (PC-192/PC-193). Exact count, may only go
-# down: test_integration_skips_are_declared fails above it AND below it.
-# List them: python3 scripts/check_integration_skips.py
-max_undeclared = 118
+# ci/fitness/code_quality/test_integration_skips_declared.py (PC-192, PC-193).
+# Tests marked `integration` that can skip and do not carry
+# @pytest.mark.may_skip(reason=..., issue="#N"). A skip reports neither pass nor
+# fail, so a store that was not provisioned turns a test into a green no-op.
+# EXACT: the count may only go down, and a lower count fails until this value
+# is lowered to match. Fix one by failing instead of skipping when the
+# dependency is missing, or by declaring the skip with a reason and an issue.
+undeclared = 104
+issue = "#1984"

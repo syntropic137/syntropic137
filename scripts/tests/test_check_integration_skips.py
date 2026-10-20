@@ -1,15 +1,15 @@
-"""The integration-skip checker must see every way a test can skip (PC-192/PC-193).
+"""The integration-skip census must see every path a skip travels, and nothing else.
 
-Three PRs in one week passed with their integration tests skipped: an image
-defaulted to ``:latest``, a store was not provisioned, an env var was unset.
-None of those skips was in the test body; two were in fixtures. So these tests
-plant each shape as a real file tree and assert on what ``scan`` reports,
-including that a declared skip passes and a half-written declaration does not.
+Each case writes a small test tree and asks the census what it finds. The three
+the task names are the spine: a skip without the marker fails, a marker without
+an issue fails, and a marked skip passes. The rest pin the paths a skip takes
+that a text grep misses (a fixture in a conftest, a fixture behind a fixture, a
+helper the test calls) and the shapes that must NOT count, because a false
+positive pushes people to put ``may_skip`` on tests that cannot skip.
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -18,487 +18,957 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from check_integration_skips import Finding, Problem, scan
+from check_integration_skips import Finding, find_integration_skips
 
 pytestmark = pytest.mark.unit
 
-
-def _plant(root: Path, files: dict[str, str]) -> list[Path]:
-    paths = []
-    for rel, source in files.items():
-        path = root / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(textwrap.dedent(source))
-        paths.append(path)
-    return [p for p in paths if p.name.startswith("test_")]
+_DECLARED = '@pytest.mark.may_skip(reason="needs the event store", issue="#1984")'
 
 
-def _scan(root: Path, files: dict[str, str]) -> list[tuple[str, Problem]]:
-    findings: list[Finding] = scan(root, _plant(root, files), [root / "src"])
-    return [(f.test, f.problem) for f in findings]
+def _write(root: Path, rel: str, source: str) -> None:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(source))
 
 
-_UNDECLARED = Problem.UNDECLARED
+def _census(root: Path) -> list[tuple[str, str]]:
+    return [(f.test, f.kind) for f in find_integration_skips(root)]
 
 
-def test_a_skip_in_the_body_without_the_marker_fails(tmp_path: Path) -> None:
-    assert _scan(
+# ---------------------------------------------------------------- the three named cases
+
+
+def test_a_skip_without_the_marker_is_found(tmp_path: Path) -> None:
+    _write(
         tmp_path,
-        {
-            "tests/test_a.py": """
-                import os, pytest
+        "pkg/tests/test_store.py",
+        """
+        import pytest
 
-                @pytest.mark.integration
-                def test_store():
-                    if not os.environ.get("STORE_URL"):
-                        pytest.skip("no store")
-            """
-        },
-    ) == [("test_store", _UNDECLARED)]
-
-
-def test_a_marked_skip_passes(tmp_path: Path) -> None:
-    assert (
-        _scan(
-            tmp_path,
-            {
-                "tests/test_a.py": """
-                import pytest
-
-                @pytest.mark.integration
-                @pytest.mark.may_skip(reason="needs the Docker daemon", issue="#1234")
-                def test_store():
-                    pytest.skip("no docker")
-            """
-            },
-        )
-        == []
+        @pytest.mark.integration
+        def test_round_trip():
+            pytest.skip("no store")
+        """,
     )
-
-
-def test_a_marker_without_an_issue_fails(tmp_path: Path) -> None:
-    # Fails as a malformed declaration, and does not count as declared.
-    assert _scan(
-        tmp_path,
-        {
-            "tests/test_a.py": """
-                import pytest
-
-                @pytest.mark.integration
-                @pytest.mark.may_skip(reason="needs the Docker daemon")
-                def test_store():
-                    pytest.skip("no docker")
-            """
-        },
-    ) == [("test_store", Problem.NO_ISSUE)]
-
-
-@pytest.mark.parametrize("issue", ['""', '"1234"', '"see #1234"', "ISSUE"])
-def test_an_issue_that_is_not_a_literal_reference_fails(tmp_path: Path, issue: str) -> None:
-    assert _scan(
-        tmp_path,
-        {
-            "tests/test_a.py": f"""
-                import pytest
-
-                @pytest.mark.integration
-                @pytest.mark.may_skip(reason="why", issue={issue})
-                def test_store():
-                    pass
-            """
-        },
-    ) == [("test_store", Problem.NO_ISSUE)]
-
-
-def test_a_marker_without_a_reason_fails(tmp_path: Path) -> None:
-    assert _scan(
-        tmp_path,
-        {
-            "tests/test_a.py": """
-                import pytest
-
-                @pytest.mark.integration
-                @pytest.mark.may_skip(reason="  ", issue="syntropic137/syntropic137#1")
-                def test_store():
-                    pytest.skip("no docker")
-            """
-        },
-    ) == [("test_store", Problem.NO_REASON)]
-
-
-def test_a_skip_in_a_conftest_fixture_fails(tmp_path: Path) -> None:
-    # The shape behind "a store was not provisioned": the test body is clean.
-    assert _scan(
-        tmp_path,
-        {
-            "tests/conftest.py": """
-                import pytest
-
-                @pytest.fixture
-                def store_url():
-                    pytest.skip("event store not available")
-
-                @pytest.fixture
-                def store(store_url):
-                    return store_url
-            """,
-            "tests/integration/test_a.py": """
-                import pytest
-
-                pytestmark = pytest.mark.integration
-
-                def test_roundtrip(store):
-                    assert store
-            """,
-        },
-    ) == [("test_roundtrip", _UNDECLARED)]
-
-
-def test_an_autouse_or_usefixtures_fixture_that_skips_fails(tmp_path: Path) -> None:
-    assert _scan(
-        tmp_path,
-        {
-            "tests/a/conftest.py": """
-                import pytest
-
-                @pytest.fixture(autouse=True)
-                def _docker():
-                    pytest.importorskip("docker")
-            """,
-            "tests/a/test_a.py": """
-                import pytest
-
-                @pytest.mark.integration
-                def test_auto():
-                    pass
-            """,
-            "tests/b/test_b.py": """
-                import pytest
-
-                @pytest.fixture
-                def env():
-                    pytest.skip("unset")
-
-                @pytest.mark.integration
-                @pytest.mark.usefixtures("env")
-                def test_used():
-                    pass
-            """,
-        },
-    ) == [("test_auto", _UNDECLARED), ("test_used", _UNDECLARED)]
-
-
-def test_a_skip_in_a_helper_imported_from_another_module_fails(tmp_path: Path) -> None:
-    assert _scan(
-        tmp_path,
-        {
-            "src/helpers/docker.py": """
-                from pytest import skip as _skip
-
-                def require_docker():
-                    _skip("no docker")
-            """,
-            "tests/test_a.py": """
-                import pytest
-                from helpers.docker import require_docker
-
-                class TestReap:
-                    pytestmark = [pytest.mark.integration]
-
-                    def test_reaps(self):
-                        require_docker()
-            """,
-        },
-    ) == [("TestReap::test_reaps", _UNDECLARED)]
-
-
-def test_skip_marks_and_module_level_skips_fail(tmp_path: Path) -> None:
-    assert _scan(
-        tmp_path,
-        {
-            "tests/test_mark.py": """
-                import os, pytest
-
-                @pytest.mark.integration
-                @pytest.mark.skipif(not os.environ.get("IMAGE"), reason="unset")
-                def test_image():
-                    pass
-            """,
-            "tests/test_module.py": """
-                import pytest
-
-                docker = pytest.importorskip("docker")
-                pytestmark = pytest.mark.integration
-
-                def test_client():
-                    pass
-            """,
-        },
-    ) == [("test_image", _UNDECLARED), ("test_client", _UNDECLARED)]
-
-
-def test_integration_applied_through_a_parametrized_fixture_counts(tmp_path: Path) -> None:
-    assert _scan(
-        tmp_path,
-        {
-            "tests/test_a.py": """
-                import pytest
-
-                @pytest.fixture(params=["memory", pytest.param("postgres", marks=pytest.mark.integration)])
-                def backend(request):
-                    if request.param == "postgres":
-                        pytest.skip("no postgres")
-                    return request.param
-
-                def test_backend(backend):
-                    pass
-            """
-        },
-    ) == [("test_backend", _UNDECLARED)]
-
-
-def test_a_module_level_declaration_covers_every_test(tmp_path: Path) -> None:
-    assert (
-        _scan(
-            tmp_path,
-            {
-                "tests/test_a.py": """
-                import pytest
-
-                pytestmark = [
-                    pytest.mark.integration,
-                    pytest.mark.may_skip(reason="needs docker", issue="#7"),
-                ]
-
-                def test_one():
-                    pytest.skip("no docker")
-
-                def test_two():
-                    pytest.skip("no docker")
-            """
-            },
-        )
-        == []
+    [finding] = find_integration_skips(tmp_path)
+    assert (finding.path, finding.test, finding.kind) == (
+        "pkg/tests/test_store.py",
+        "test_round_trip",
+        "undeclared",
     )
+    assert "test_store.py:6" in finding.detail
 
 
-def test_tests_that_cannot_skip_or_are_not_integration_pass(tmp_path: Path) -> None:
-    assert (
-        _scan(
-            tmp_path,
-            {
-                "tests/test_a.py": """
-                import pytest
+def test_a_marker_without_an_issue_is_malformed(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "pkg/tests/test_store.py",
+        """
+        import pytest
 
-                @pytest.mark.integration
-                def test_real():
-                    assert 1
-
-                @pytest.mark.unit
-                def test_unit_skip():
-                    pytest.skip("not integration, not this gate's business")
-
-                def _recursive(n):
-                    return _recursive(n - 1) if n else 0
-
-                @pytest.mark.integration
-                def test_recursion_is_not_a_skip():
-                    _recursive(3)
-            """
-            },
-        )
-        == []
+        @pytest.mark.integration
+        @pytest.mark.may_skip(reason="needs the event store")
+        def test_round_trip():
+            pytest.skip("no store")
+        """,
     )
+    assert _census(tmp_path) == [("test_round_trip", "malformed")]
 
 
-# Each shape below skips under real pytest without a skip call in the test body
-# or a skip mark on the test itself. The checker must see all of them, and each
-# test also runs the planted tree through pytest so the checker's model of
-# pytest cannot drift from pytest unnoticed.
-_SHAPES: dict[str, tuple[str, dict[str, str]]] = {
-    "parameter_skip_mark": (
-        "test_real",
-        {
-            "tests/test_a.py": """
-                import pytest
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        'issue="#1984"',
+        'reason="", issue="#1984"',
+        'reason="needs docker", issue="1984"',
+        'reason="needs docker", issue="#"',
+        '"needs docker", "#1984"',
+    ],
+)
+def test_an_opt_out_needs_a_named_reason_and_a_hash_issue(tmp_path: Path, arguments: str) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        f"""
+        import pytest
 
-                @pytest.mark.integration
-                @pytest.mark.parametrize("n", [pytest.param(1, marks=pytest.mark.skip(reason="no store"))])
-                def test_real(n):
-                    pass
-            """
-        },
-    ),
-    "fixture_parameter_skip_mark": (
-        "test_real",
-        {
-            "tests/test_a.py": """
-                import pytest
+        @pytest.mark.integration
+        @pytest.mark.may_skip({arguments})
+        def test_x():
+            pytest.skip("no docker")
+        """,
+    )
+    assert _census(tmp_path) == [("test_x", "malformed")]
 
-                @pytest.fixture(params=[pytest.param(1, marks=pytest.mark.skipif(True, reason="no store"))])
-                def store(request):
-                    return request.param
 
-                @pytest.mark.integration
-                def test_real(store):
-                    pass
-            """
-        },
-    ),
-    "class_fixture": (
-        "TestReal::test_real",
-        {
-            "tests/test_a.py": """
-                import pytest
+def test_a_declared_skip_passes(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "pkg/tests/test_store.py",
+        f"""
+        import pytest
 
-                @pytest.mark.integration
-                class TestReal:
-                    @pytest.fixture
-                    def store(self):
-                        pytest.skip("no store")
+        @pytest.mark.integration
+        {_DECLARED}
+        def test_round_trip():
+            pytest.skip("no store")
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
 
-                    def test_real(self, store):
-                        pass
-            """
-        },
-    ),
-    "renamed_fixture": (
-        "test_real",
-        {
-            "tests/test_a.py": """
-                import pytest
 
-                @pytest.fixture(name="store")
-                def _store():
-                    pytest.skip("no store")
+@pytest.mark.parametrize("where", ["module", "class"])
+def test_a_declaration_on_the_module_or_class_covers_its_tests(tmp_path: Path, where: str) -> None:
+    mark = _DECLARED.removeprefix("@")
+    module_line = f"pytestmark = [pytest.mark.integration, {mark}]" if where == "module" else ""
+    class_line = f"pytestmark = [pytest.mark.integration, {mark}]" if where == "class" else ""
+    _write(
+        tmp_path,
+        "test_x.py",
+        f"""
+        import pytest
 
-                @pytest.mark.integration
-                def test_real(store):
-                    pass
-            """
-        },
-    ),
-    "pytest_module_alias": (
-        "test_real",
-        {
-            "tests/test_a.py": """
-                import pytest as pt
+        {module_line}
 
-                @pt.mark.integration
-                def test_real():
-                    pt.skip("no store")
-            """
-        },
-    ),
-    "package_reexport": (
-        "test_real",
-        {
-            "src/helpers/__init__.py": """
-                from .requirement import require_store
-            """,
-            "src/helpers/requirement.py": """
-                import pytest
+        class TestStore:
+            {class_line}
 
-                def require_store():
-                    pytest.skip("no store")
-            """,
-            "tests/test_a.py": """
-                import pytest
-                from helpers import require_store
+            def test_x(self):
+                pytest.skip("no store")
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
 
-                @pytest.mark.integration
-                def test_real():
-                    require_store()
-            """,
-        },
-    ),
-    "setup_method": (
-        "TestReal::test_real",
-        {
-            "tests/test_a.py": """
-                import pytest
 
-                @pytest.mark.integration
-                class TestReal:
-                    def setup_method(self):
-                        pytest.skip("no store")
+# ---------------------------------------------------------------- paths a skip travels
 
-                    def test_real(self):
-                        pass
-            """
-        },
-    ),
-    "setup_module": (
-        "test_real",
-        {
-            "tests/test_a.py": """
-                import pytest
 
-                def setup_module():
-                    pytest.skip("no store")
+def test_a_module_skipif_marks_every_test(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_docker.py",
+        """
+        import shutil
+        import pytest
 
-                @pytest.mark.integration
-                def test_real():
-                    pass
-            """
-        },
-    ),
-}
+        pytestmark = [
+            pytest.mark.integration,
+            pytest.mark.skipif(shutil.which("docker") is None, reason="docker"),
+        ]
 
-_PYTEST_INI = """\
-[pytest]
-pythonpath = src
-markers =
-    integration: x
-    may_skip(reason, issue): x
+        def test_one():
+            pass
+
+        async def test_two():
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_one", "undeclared"), ("test_two", "undeclared")]
+
+
+def test_a_fixture_in_a_parent_conftest_behind_another_fixture(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "pkg/tests/conftest.py",
+        """
+        import pytest
+
+        @pytest.fixture
+        def grpc_client():
+            pytest.skip("event store not available")
+
+        @pytest.fixture
+        def repository_factory(grpc_client):
+            return grpc_client
+        """,
+    )
+    _write(
+        tmp_path,
+        "pkg/tests/integration/test_round_trip.py",
+        """
+        import pytest
+
+        @pytest.mark.integration
+        async def test_round_trip(repository_factory):
+            assert repository_factory
+        """,
+    )
+    [finding] = find_integration_skips(tmp_path)
+    assert finding.kind == "undeclared"
+    assert "'repository_factory' requests fixture 'grpc_client'" in finding.detail
+    assert "pkg/tests/conftest.py" in finding.detail
+
+
+def test_a_fixture_requested_by_its_name_override_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture(name="minio")
+        def _minio():
+            pytest.skip("no minio")
+
+        @pytest.mark.integration
+        @pytest.mark.usefixtures("minio")
+        def test_upload():
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_upload", "undeclared")]
+
+
+def test_an_autouse_fixture_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture(autouse=True)
+        def _env():
+            pytest.skip("unset")
+
+        @pytest.mark.integration
+        def test_upload():
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_upload", "undeclared")]
+
+
+def test_a_renamed_importorskip_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+        from pytest import importorskip as need
+
+        @pytest.mark.integration
+        def test_upload():
+            need("boto3")
+        """,
+    )
+    assert _census(tmp_path) == [("test_upload", "undeclared")]
+
+
+def test_an_aliased_pytest_module_skips_and_marks(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest as pt
+
+        @pt.mark.integration
+        def test_store():
+            pt.skip("no store")
+
+        @pt.mark.integration
+        @pt.mark.may_skip(reason="no store", issue="#1")
+        def test_declared():
+            pt.skip("no store")
+        """,
+    )
+    assert _census(tmp_path) == [("test_store", "undeclared")]
+
+
+def test_a_directly_imported_mark_is_a_marker(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+        from pytest import mark
+
+        @mark.integration
+        def test_store():
+            pytest.skip("no store")
+
+        @mark.integration
+        @mark.may_skip(reason="no store", issue="#1")
+        def test_declared():
+            pytest.skip("no store")
+        """,
+    )
+    assert _census(tmp_path) == [("test_store", "undeclared")]
+
+
+# ---------------------------------------------------------------- scope
+
+
+def test_a_class_fixture_does_not_hide_the_module_fixture(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture
+        def store():
+            pytest.skip("no store")
+
+        class TestOther:
+            @pytest.fixture
+            def store(self):
+                return 1
+
+        @pytest.mark.integration
+        def test_x(store):
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_x", "undeclared")]
+
+
+def test_another_classes_autouse_fixture_is_not_in_scope(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class TestUnit:
+            @pytest.fixture(autouse=True)
+            def _env(self):
+                pytest.skip("unit only")
+
+            def test_u(self):
+                pass
+
+        @pytest.mark.integration
+        def test_x():
+            pass
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
+
+
+def test_an_inherited_fixture_that_skips_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Base:
+            @pytest.fixture
+            def backend(self):
+                pytest.skip("base backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Base):
+            def test_store(self, backend):
+                pass
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+def test_an_inherited_autouse_fixture_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Base:
+            @pytest.fixture(autouse=True)
+            def _env(self):
+                pytest.skip("no env")
+
+        @pytest.mark.integration
+        class TestDerived(Base):
+            def test_store(self):
+                pass
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+def test_a_subclass_override_replaces_the_inherited_fixture(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Base:
+            @pytest.fixture
+            def backend(self):
+                pytest.skip("base backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Base):
+            @pytest.fixture
+            def backend(self):
+                return 1
+
+            def test_store(self, backend):
+                pass
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
+
+
+def test_a_diamond_takes_the_fixture_its_mro_reaches_first(tmp_path: Path) -> None:
+    # MRO is TestDerived, Left, Right, Root: Right's override hides Root's,
+    # even though Left (searched first) inherits Root's.
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Root:
+            @pytest.fixture
+            def backend(self):
+                return 1
+
+        class Left(Root):
+            pass
+
+        class Right(Root):
+            @pytest.fixture
+            def backend(self):
+                pytest.skip("right backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Left, Right):
+            def test_store(self, backend):
+                pass
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+def test_a_diamond_resolves_self_calls_in_mro_order(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Root:
+            def setup_backend(self):
+                return 1
+
+        class Left(Root):
+            pass
+
+        class Right(Root):
+            def setup_backend(self):
+                pytest.skip("right backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Left, Right):
+            def test_store(self):
+                self.setup_backend()
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+def test_class_hierarchies_python_rejects_do_not_stop_the_census(tmp_path: Path) -> None:
+    # TestOrder's bases have no C3 order (TypeError at import); TestLoop's
+    # rebound names make each class its own ancestor here. Neither may hang or
+    # crash the census, and the clean file beside them is still read.
+    _write(
+        tmp_path,
+        "test_bad.py",
+        """
+        import pytest
+
+        class X:
+            pass
+
+        class Y(X):
+            pass
+
+        class TestOrder(X, Y):
+            def test_o(self):
+                pass
+
+        class A:
+            pass
+
+        class B(A):
+            pass
+
+        class A(B):
+            pass
+
+        class TestLoop(A):
+            def test_l(self):
+                self.missing()
+        """,
+    )
+    _write(
+        tmp_path,
+        "test_good.py",
+        """
+        import pytest
+
+        @pytest.mark.integration
+        def test_i():
+            pytest.skip("no backend")
+        """,
+    )
+    assert _census(tmp_path) == [("test_i", "undeclared")]
+
+
+def test_self_calls_resolve_in_the_tests_own_class(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class TestUnit:
+            def backend(self):
+                pytest.skip("unit only")
+
+            def test_u(self):
+                self.backend()
+
+        @pytest.mark.integration
+        class TestIntegration:
+            def backend(self):
+                return 1
+
+            def test_i(self):
+                self.backend()
+
+        @pytest.mark.integration
+        class TestSkipping(TestUnit):
+            def test_inherited(self):
+                self.backend()
+        """,
+    )
+    assert _census(tmp_path) == [("TestSkipping::test_inherited", "undeclared")]
+
+
+# ---------------------------------------------------------------- parameter legs
+
+
+def test_an_integration_leg_of_a_fixture_parameter_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture(
+            params=[
+                pytest.param("memory", marks=pytest.mark.unit),
+                pytest.param("minio", marks=pytest.mark.integration),
+            ]
+        )
+        def storage(request):
+            if request.param == "minio":
+                pytest.skip("no minio")
+            return request.param
+
+        @pytest.fixture
+        def wrapped(storage):
+            return storage
+
+        def test_x(wrapped):
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_x", "undeclared")]
+
+
+def test_an_integration_leg_of_a_parametrize_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.mark.parametrize(
+            "backend", [pytest.param("memory"), pytest.param("pg", marks=[pytest.mark.integration])]
+        )
+        def test_x(backend):
+            pytest.skip("no pg")
+        """,
+    )
+    assert _census(tmp_path) == [("test_x", "undeclared")]
+
+
+def test_a_unit_only_parameter_leg_is_not_this_gates_business(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.mark.parametrize("backend", [pytest.param("memory", marks=pytest.mark.unit)])
+        def test_x(backend):
+            pytest.skip("unit")
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
+
+
+def test_a_parameter_skipif_on_an_integration_test_counts(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.mark.integration
+        @pytest.mark.parametrize(
+            "backend",
+            ["memory", pytest.param("pg", marks=pytest.mark.skipif(True, reason="no pg"))],
+        )
+        def test_x(backend):
+            pass
+        """,
+    )
+    [finding] = find_integration_skips(tmp_path)
+    assert (finding.test, finding.kind) == ("test_x", "undeclared")
+    assert "marked skipif" in finding.detail
+
+
+def test_an_opt_out_on_one_leg_does_not_cover_another(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture(
+            params=[
+                pytest.param("redis", marks=[pytest.mark.integration, pytest.mark.may_skip(reason="no redis", issue="#1")]),
+                pytest.param("pg", marks=pytest.mark.integration),
+            ]
+        )
+        def store(request):
+            pytest.skip("no backend")
+
+        def test_x(store):
+            pass
+        """,
+    )
+    [finding] = find_integration_skips(tmp_path)
+    assert (finding.test, finding.kind) == ("test_x", "undeclared")
+    assert "parameter set 1" in finding.detail
+
+
+def test_a_declared_leg_passes_and_a_malformed_one_is_reported(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.fixture(
+            params=[
+                pytest.param("memory", marks=pytest.mark.unit),
+                pytest.param("pg", marks=[pytest.mark.integration, pytest.mark.may_skip(reason="no pg", issue="#1")]),
+            ]
+        )
+        def good(request):
+            pytest.skip("no backend")
+
+        @pytest.fixture(
+            params=[pytest.param("pg", marks=[pytest.mark.integration, pytest.mark.may_skip(reason="no pg")])]
+        )
+        def bad(request):
+            pytest.skip("no backend")
+
+        def test_good(good):
+            pass
+
+        def test_bad(bad):
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_bad", "malformed")]
+
+
+_ALIASED_CONFTEST = """
+import pytest as pt
+
+@pt.fixture(params=[pt.param("pg", marks=[pt.mark.integration{declaration}])])
+def backend(request):
+    pt.skip("pg missing")
 """
 
 
-def _with_declaration(files: dict[str, str], declaration: str) -> dict[str, str]:
-    declared = dict(files)
-    declared["tests/test_a.py"] = (
-        textwrap.dedent(files["tests/test_a.py"])
-        + f"\nimport pytest\npytestmark = pytest.mark.may_skip({declaration})\n"
+@pytest.mark.parametrize(
+    ("declaration", "expected"),
+    [
+        ("", [("test_store", "undeclared")]),
+        (', pt.mark.may_skip(reason="no pg", issue="#1")', []),
+        (', pt.mark.may_skip(reason="no pg")', [("test_store", "malformed")]),
+    ],
+    ids=["undeclared", "declared", "malformed"],
+)
+def test_a_conftest_parameters_marks_are_read_with_the_conftests_imports(
+    tmp_path: Path, declaration: str, expected: list[tuple[str, str]]
+) -> None:
+    # The test module imports nothing: ``pt`` exists only in the conftest.
+    _write(tmp_path, "conftest.py", _ALIASED_CONFTEST.format(declaration=declaration))
+    _write(
+        tmp_path,
+        "test_store.py",
+        """
+        def test_store(backend):
+            pass
+        """,
     )
-    return declared
+    assert _census(tmp_path) == expected
 
 
-@pytest.mark.parametrize("shape", sorted(_SHAPES))
-def test_a_skip_pytest_reaches_without_a_marker_fails(tmp_path: Path, shape: str) -> None:
-    test, files = _SHAPES[shape]
-    assert _scan(tmp_path, files) == [(test, _UNDECLARED)]
-    (tmp_path / "pytest.ini").write_text(_PYTEST_INI)
-    run = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-p",
-            "no:cacheprovider",
-            "-p",
-            "no:randomly",
-            "-q",
-            "-m",
-            "integration",
-            "tests",
-        ],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=False,
+def test_a_helper_the_test_calls_is_followed(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        def _probe(url):
+            if not url:
+                pytest.skip("no backend")
+
+        def _require(url):
+            _probe(url)
+
+        class TestContract:
+            pytestmark = pytest.mark.integration
+
+            def _backend(self):
+                _require("")
+
+            def test_dedup(self):
+                self._backend()
+        """,
     )
-    assert "1 skipped" in run.stdout, run.stdout + run.stderr
+    [finding] = find_integration_skips(tmp_path)
+    assert "calls _backend(), which calls _require()" in finding.detail
 
 
-@pytest.mark.parametrize("shape", sorted(_SHAPES))
-def test_a_declared_skip_of_each_shape_passes(tmp_path: Path, shape: str) -> None:
-    _, files = _SHAPES[shape]
-    assert _scan(tmp_path, _with_declaration(files, 'reason="no store", issue="#1982"')) == []
+def test_module_level_importorskip_skips_the_module(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        boto3 = pytest.importorskip("boto3")
+
+        @pytest.mark.integration
+        def test_upload():
+            pass
+        """,
+    )
+    assert _census(tmp_path) == [("test_upload", "undeclared")]
 
 
-@pytest.mark.parametrize("shape", sorted(_SHAPES))
-def test_a_malformed_declaration_of_each_shape_fails(tmp_path: Path, shape: str) -> None:
-    test, files = _SHAPES[shape]
-    assert _scan(tmp_path, _with_declaration(files, 'reason="no store"')) == [
-        (test, Problem.NO_ISSUE)
-    ]
+# ---------------------------------------------------------------- what must not count
+
+
+def test_a_unit_test_that_skips_is_not_this_gates_business(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        @pytest.mark.unit
+        def test_x():
+            pytest.skip("not here")
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
+
+
+def test_an_integration_test_with_no_path_to_a_skip_is_clean(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        def helper():
+            return 1
+
+        @pytest.fixture
+        def store():
+            pytest.fail("a missing store is a failure, not a skip")
+
+        @pytest.mark.integration
+        def test_x(store, tmp_path):
+            assert helper()
+            assert "pytest.skip(" in "a string is not a call"
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
+
+
+def test_a_sibling_conftest_fixture_is_not_in_scope(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "conftest.py",
+        """
+        import pytest
+
+        @pytest.fixture
+        def store():
+            return 1
+        """,
+    )
+    _write(
+        tmp_path,
+        "a/conftest.py",
+        """
+        import pytest
+
+        @pytest.fixture
+        def store():
+            pytest.skip("no store")
+
+        @pytest.fixture(autouse=True)
+        def _trap():
+            pytest.skip("sibling autouse")
+        """,
+    )
+    _write(
+        tmp_path,
+        "b/test_x.py",
+        """
+        import pytest
+
+        @pytest.mark.integration
+        def test_x(store):
+            pass
+        """,
+    )
+    assert find_integration_skips(tmp_path) == []
+
+
+def test_submodules_and_worktrees_are_not_scanned(tmp_path: Path) -> None:
+    source = """
+        import pytest
+
+        @pytest.mark.integration
+        def test_x():
+            pytest.skip("x")
+        """
+    _write(tmp_path, "lib/event-sourcing-platform/tests/test_x.py", source)
+    _write(tmp_path, ".claude/worktrees/agent/tests/test_x.py", source)
+    _write(tmp_path, "pkg/tests/test_x.py", source)
+    assert [f.path for f in find_integration_skips(tmp_path)] == ["pkg/tests/test_x.py"]
+
+
+def test_render_names_the_node_and_the_route(tmp_path: Path) -> None:
+    finding = Finding(path="a/test_x.py", test="test_x", kind="undeclared", detail="can skip: y")
+    assert finding.render() == "a/test_x.py::test_x: can skip: y"
+
+
+def test_an_inherited_helper_dispatches_self_calls_from_the_tests_class(tmp_path: Path) -> None:
+    # Root.prepare() is inherited; its self.setup_backend() is TestDerived's
+    # lookup, which reaches Right's skipping override before Root's.
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Root:
+            def setup_backend(self):
+                return 1
+
+            def prepare(self):
+                self.setup_backend()
+
+        class Left(Root):
+            pass
+
+        class Right(Root):
+            def setup_backend(self):
+                pytest.skip("right backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Left, Right):
+            def test_store(self):
+                self.prepare()
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+def test_an_inherited_fixture_dispatches_self_calls_from_the_tests_class(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "test_x.py",
+        """
+        import pytest
+
+        class Root:
+            def setup_backend(self):
+                return 1
+
+            @pytest.fixture
+            def backend(self):
+                return self.setup_backend()
+
+        class Left(Root):
+            pass
+
+        class Right(Root):
+            def setup_backend(self):
+                pytest.skip("right backend missing")
+
+        @pytest.mark.integration
+        class TestDerived(Left, Right):
+            def test_store(self, backend):
+                pass
+        """,
+    )
+    assert _census(tmp_path) == [("TestDerived::test_store", "undeclared")]
+
+
+_CLEAN = """
+@pytest.mark.integration
+class TestClean(Root):
+    def test_store(self):
+        self.prepare()
+"""
+
+_SKIPPING = """
+@pytest.mark.integration
+class TestSkipping(Root):
+    def setup_backend(self):
+        pytest.skip("subclass backend missing")
+
+    def test_store(self):
+        self.prepare()
+"""
+
+
+@pytest.mark.parametrize(
+    "order", [(_CLEAN, _SKIPPING), (_SKIPPING, _CLEAN)], ids=["clean-first", "skipping-first"]
+)
+def test_a_shared_inherited_helper_is_answered_per_receiver(
+    tmp_path: Path, order: tuple[str, str]
+) -> None:
+    # Both classes inherit Root.prepare(); only TestSkipping's override skips.
+    # Whichever class is read first must not answer for the other.
+    root = """
+import pytest
+
+class Root:
+    def setup_backend(self):
+        return 1
+
+    def prepare(self):
+        self.setup_backend()
+"""
+    _write(tmp_path, "test_x.py", root + "".join(order))
+    assert _census(tmp_path) == [("TestSkipping::test_store", "undeclared")]

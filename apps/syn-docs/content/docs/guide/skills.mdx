@@ -97,8 +97,8 @@ skills:
 
 Registration is content-addressed: a skill is stored under the sha256 of its file
 tree, and that hash is the cache. A reference that resolves to an
-already-registered hash does no network work at all, which is what makes repeated
-installs fast. An unpinned reference cannot be cached honestly, because the same
+already-registered hash costs one API lookup and skips the clone and upload,
+which is what makes repeated installs fast. An unpinned reference cannot be cached honestly, because the same
 reference may mean different bytes tomorrow.
 
 So pinning is what makes the cache sound, not merely what makes runs reproducible.
@@ -139,12 +139,9 @@ A bad or unreachable reference fails the **install**, and no workflow is created
 That is the point of doing this at install time: a typo surfaces before you have
 committed to a run, not in the middle of one.
 
-<Callout type="warn">
-  Installing a package whose workflow id already exists currently fails with a
-  concurrency error. See
-  [#822](https://github.com/syntropic137/syntropic137/issues/822). Skills are
-  unaffected: the preflight reports them as already registered first.
-</Callout>
+Reinstalling a package whose workflow is unchanged prints `already installed`.
+Reinstalling the same version with different content is refused unless you pass
+`--force`.
 
 ## Inspecting what is registered
 
@@ -199,9 +196,12 @@ against the wrong capabilities, which is worse than a clear failure.
   `phases[].pinned_at_start.skills[]`, with `phases[].start_pins_status`
   (`recorded`, `not_recorded`, `unavailable`) saying why it may be empty.
 
-**Limit:** whether the agent actually **used** a skill is not recorded yet. The
-execution page says "skill use not recorded yet"; it never claims a skill was
-unused.
+Whether the agent actually **used** a skill is reported per phase at
+`GET /executions/{id}` -> `phases[].skill_use`: `status` (`observed`,
+`not_observable`, `unavailable`), `invoked[]` with call counts, and
+`declared_not_invoked`. Only `observed` is a measurement; a codex phase is
+`not_observable` because codex has no Skill tool, so an empty `invoked` there
+never means a skill was unused.
 
 ## Storage
 
@@ -209,7 +209,7 @@ Skill storage is content-addressed and grows monotonically. Eviction is
 deliberately not implemented, so size is reported rather than assumed small:
 
 ```bash
-curl "$SYN_API_URL/skills/storage"
+curl "$SYN_API_URL/api/v1/skills/storage"
 ```
 
 ```json

@@ -146,7 +146,7 @@ class EvaluateWebhookHandler:
         installation_id: str,
         payload: dict[str, Any],
     ) -> TriggerMatchResult | TriggerDeferredResult | TriggerBlockedResult | None:
-        """Guard check → debounce → fire, called under the per-(trigger, pr) lock."""
+        """Guard check → fire, called under the per-(trigger, pr) lock."""
         guard_result = await self._guards.check_all(rule, payload, self._store)
         if not guard_result.passed:
             return await self._handle_guard_block(
@@ -158,18 +158,8 @@ class EvaluateWebhookHandler:
                 payload,
             )
 
-        if rule.config.debounce_seconds > 0 and self._debouncer is not None:
-            return await self._schedule_deferred(
-                rule=rule,
-                event=event,
-                repository=repository,
-                installation_id=installation_id,
-                payload=payload,
-                delay=rule.config.debounce_seconds,
-                reason=f"Debouncing for {rule.config.debounce_seconds}s",
-                key_suffix="",
-            )
-
+        # rule.config.debounce_seconds is deliberately not read: registration
+        # rejects non-zero values (#1961), and a legacy rule fires immediately.
         return await self._fire_trigger(rule, event, repository, payload)
 
     async def _handle_guard_block(

@@ -1,592 +1,651 @@
-"""Find integration tests that can skip without saying so (PC-192/PC-193).
+"""Census: integration tests that can skip without saying so (PC-192, PC-193).
 
-An integration test that skips passes. On a clean runner where an image
-defaulted to ``:latest``, a store was not provisioned or an env var was unset,
-"passes" means nothing ran, and CI stays green. The fix is not to forbid skips
-but to make each one a declared decision with an owner:
+A skipped test reports neither pass nor fail. When an integration test skips
+because an image defaulted to ``:latest``, a store was not provisioned or an
+env var was unset, the job stays green and the test proves nothing. The
+mutation-evidence runner caught three of those in one week, by voiding a
+baseline with a skip. This module makes the class visible statically.
 
-    @pytest.mark.integration
-    @pytest.mark.may_skip(reason="needs the Docker daemon", issue="#1234")
-    def test_reaps_dead_host(...): ...
+The rule: a test marked ``integration`` that CAN skip must say so with
 
-**Which tests.** A function named ``test_*`` at module level, or in a class
-named ``Test*``, in a test module (``test_*.py``/``*_test.py``), that carries
-``pytest.mark.integration`` on itself, its class (decorator or ``pytestmark``)
-or its module (``pytestmark``).
+    @pytest.mark.may_skip(reason="...", issue="#N")
 
-**What can skip.** Any of these, reached from the test:
+on the test, its class or its module ``pytestmark``. ``reason`` and ``issue``
+are both required, and ``issue`` is a ``#N`` reference, because an opt-out with
+no ticket is a skip nobody will come back for.
 
-- a ``skip``/``skipif`` mark on the test, its class or its module, including
-  one carried by ``pytest.param(..., marks=...)`` in a parametrize or in a
-  fixture's ``params``;
-- a call to ``skip`` or ``importorskip`` on ``pytest`` (or any ``import pytest
-  as`` alias of it), in the test, in its module's top level, or in any function
-  it calls that resolves to a module-level function here or imported by name
-  from a repo module, through any chain of re-exports;
-- a fixture that does any of the above: requested as a parameter, through
-  ``usefixtures``, or autouse in the test's class, its module or a
-  ``conftest.py`` above it. Fixture names resolve as pytest registers them
-  (``name=`` first, else the attribute name; class first, then module, then
-  conftests), and fixture parameters are followed the same way;
-- an xunit setup hook pytest runs before the test: ``setup_module``/
-  ``setUpModule``, ``setup_function``, and in its class ``setup_class``/
-  ``setup_method``/``setUpClass``/``setUp``.
+"Can skip" is decided from the AST, never from text, and follows the paths a
+skip actually travels:
 
-Calls are followed by name only. A skip behind a method call, a ``getattr`` or
-``request.getfixturevalue`` is not seen; that is a false pass, and the reason
-the declaration lives on the test rather than being inferred from it.
+- a ``skip``/``skipif`` marker on the test, its class or its module;
+- ``pytest.skip`` / ``pytest.importorskip`` in the test body;
+- the same calls in a function of the same module the test calls, at any depth
+  (``_require(url)`` that skips is the commonest shape here);
+- a fixture that skips, requested by parameter, by ``usefixtures`` or by
+  ``autouse``, defined in the module or in any ``conftest.py`` between the
+  module and the repo root, followed through the fixtures IT requests;
+- a module-level ``importorskip`` / ``skip(allow_module_level=True)``.
 
-**What declares it.** ``pytest.mark.may_skip`` on the test, its class or its
-module, with ``reason`` a non-empty string literal and ``issue`` a literal
-``#N`` or ``owner/repo#N``. A marker missing either is reported on its own,
-whether or not the test can skip, so a half-written declaration never counts.
+Parameter marks count too: ``pytest.param(..., marks=...)`` in a
+``parametrize`` or a fixture's ``params`` gives one leg of the test its own
+``integration``, ``skipif`` or ``may_skip``, and each leg is judged on its own
+marks. Names are resolved where pytest resolves them: a class's fixtures and
+``self.`` methods belong to that class, a fixture that requests its own name
+reaches the next scope out, and ``import pytest as pt`` / ``from pytest import
+mark, skip`` are one vocabulary for markers and skip calls alike.
 
-The whole-codebase count of undeclared skips is ratcheted by
-``ci/fitness/code_quality/test_integration_skips_are_declared.py``.
+What it cannot see: a skip in a helper imported from another module, a fixture
+from a plugin, and marks built dynamically. Those are reported as "cannot
+skip", so the census undercounts there. It also cannot tell which parameter a
+fixture body's ``if request.param == ...`` branch belongs to, so a skip in a
+parametrized fixture's body is charged to every integration leg that fixture
+has. Both errors are deliberate trade-offs, not guarantees: a false positive
+pushes someone to put ``may_skip`` on a test that cannot skip, which is how an
+opt-out stops meaning anything, so keep the census as close to pytest as the
+AST allows.
+
+The budget lives in ``ci/fitness/fitness_exceptions.toml`` ``[integration_skips]``
+and is enforced by ``ci/fitness/code_quality/test_integration_skips_declared.py``.
 """
 
 from __future__ import annotations
 
 import ast
-import enum
 import re
-import sys
-import tomllib
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import TYPE_CHECKING
+from itertools import product
+from typing import TYPE_CHECKING, Literal
+
+from check_test_markers import is_excluded
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Iterable, Iterator
+    from pathlib import Path
 
-MARKER = "may_skip"
-#: Not in pyproject's ``testpaths`` but run by the integration job all the same.
-_EXTRA_TEST_DIRS = ("syn_tests",)
-_ISSUE = re.compile(r"^([\w.-]+/[\w.-]+)?#\d+$")
+INTEGRATION_MARKER = "integration"
+OPT_OUT_MARKER = "may_skip"
+
+#: Markers that skip by themselves. ``xfail`` is not a skip and is censused by
+#: ``check_test_markers``.
+_SKIP_MARKERS = frozenset({"skip", "skipif"})
+
+#: ``pytest.<name>(...)`` calls that end the test as skipped.
 _SKIP_CALLS = frozenset({"skip", "importorskip"})
-_SKIP_MARKS = frozenset({"skip", "skipif"})
-_FIXTURE_DECORATORS = frozenset({"fixture"})
-#: xunit-style setup hooks; pytest registers each as an autouse fixture.
-_MODULE_SETUP = frozenset({"setup_module", "setUpModule"})
-_FUNCTION_SETUP = frozenset({"setup_function"})
-_CLASS_SETUP = frozenset({"setup_class", "setup_method", "setUpClass", "setUp"})
 
-_Fn = ast.FunctionDef | ast.AsyncFunctionDef
+#: The ``issue`` argument of the opt-out. Same shape as ``TODO(#N)``.
+_ISSUE_PATTERN = re.compile(r"#\d+")
 
-
-class Problem(enum.Enum):
-    UNDECLARED = "can skip but declares no may_skip marker"
-    NO_REASON = "may_skip marker has no non-empty literal reason"
-    NO_ISSUE = "may_skip marker has no literal issue (#N or owner/repo#N)"
+#: Not first-party tests of this repo: the submodules under ``lib/`` are their
+#: own repositories with their own gates, on top of the directories
+#: ``check_test_markers`` already excludes.
+_EXCLUDED_TOP_LEVEL = frozenset({"lib"})
 
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
 class Finding:
-    path: str  # repo-relative, posix
-    line: int
-    test: str  # "Class::test" or "test"
-    problem: Problem = field(compare=False)
+    """One test the rule applies to, and why.
 
-    def __str__(self) -> str:
-        return f"{self.path}:{self.line} {self.test}: {self.problem.value}"
+    ``kind`` is ``undeclared`` (it can skip and has no opt-out, the budgeted
+    count) or ``malformed`` (an opt-out without a reason or a ``#N`` issue,
+    which is never budgeted: it is new code by definition).
+    """
 
+    path: str
+    test: str
+    kind: Literal["undeclared", "malformed"]
+    detail: str
 
-def _dotted(expr: ast.expr) -> str:
-    if isinstance(expr, ast.Call):
-        return _dotted(expr.func)
-    if isinstance(expr, ast.Attribute):
-        head = _dotted(expr.value)
-        return f"{head}.{expr.attr}" if head else ""
-    return expr.id if isinstance(expr, ast.Name) else ""
+    def render(self) -> str:
+        return f"{self.path}::{self.test}: {self.detail}"
 
 
-def _mark_name(expr: ast.expr) -> str:
-    """``pytest.mark.skipif(...)`` -> ``skipif``; anything else -> ``""``."""
-    parts = _dotted(expr).split(".")
-    return parts[-1] if len(parts) >= 2 and parts[-2] == "mark" else ""
+# ---------------------------------------------------------------- pytest's names
 
 
-def _pytestmark(body: Sequence[ast.stmt]) -> list[ast.expr]:
+@dataclass(frozen=True)
+class _PytestNames:
+    """How one module spells pytest: ``import pytest [as pt]`` binds the module,
+    ``from pytest import mark [as m], skip [as s], param`` binds its members.
+
+    Markers, skip calls and ``pytest.param`` are all resolved through this one
+    table, so an alias that works for one works for all of them.
+    """
+
+    modules: frozenset[str]
+    members: tuple[tuple[str, str], ...]  # (local name, pytest attribute)
+
+    @classmethod
+    def of(cls, tree: ast.Module) -> _PytestNames:
+        modules = {"pytest"}
+        members: list[tuple[str, str]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.update(a.asname or a.name for a in node.names if a.name == "pytest")
+            elif isinstance(node, ast.ImportFrom) and node.module == "pytest":
+                members.extend((a.asname or a.name, a.name) for a in node.names)
+        return cls(modules=frozenset(modules), members=tuple(members))
+
+    def refers_to(self, node: ast.expr, attributes: frozenset[str]) -> bool:
+        """``node`` is ``pytest.<a>`` (any module alias) or a name bound to ``<a>``."""
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            return node.value.id in self.modules and node.attr in attributes
+        if isinstance(node, ast.Name):
+            return any(local == node.id and attr in attributes for local, attr in self.members)
+        return False
+
+    def mark_name(self, node: ast.expr) -> str | None:
+        """``x`` for ``pytest.mark.x[(...)]`` or ``mark.x[(...)]``, else None."""
+        if isinstance(node, ast.Call):
+            node = node.func
+        if isinstance(node, ast.Attribute) and self.refers_to(node.value, _MARK):
+            return node.attr
+        return None
+
+    def is_skip_call(self, call: ast.Call) -> bool:
+        return self.refers_to(call.func, _SKIP_CALLS)
+
+
+_MARK = frozenset({"mark"})
+_PARAM = frozenset({"param"})
+
+
+# ---------------------------------------------------------------- marker reading
+
+
+def _pytestmark_marks(body: Iterable[ast.stmt]) -> list[ast.expr]:
+    """The marks in a ``pytestmark = <mark> | [<mark>, ...]`` assignment."""
     marks: list[ast.expr] = []
     for stmt in body:
+        targets: list[ast.expr] = []
         if isinstance(stmt, ast.Assign):
             targets, value = stmt.targets, stmt.value
         elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
             targets, value = [stmt.target], stmt.value
         else:
             continue
-        if any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets):
-            marks.extend(value.elts if isinstance(value, (ast.List, ast.Tuple)) else [value])
+        if not any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets):
+            continue
+        marks.extend(_listed(value))
     return marks
 
 
-def _fixture_decl(fn: _Fn) -> tuple[str | None, bool] | None:
-    """(``name=`` it registers under, if any; is autouse), or None if not a fixture."""
-    for dec in fn.decorator_list:
-        if _dotted(dec).split(".")[-1] not in _FIXTURE_DECORATORS:
-            continue
-        keywords = {kw.arg: kw.value for kw in dec.keywords} if isinstance(dec, ast.Call) else {}
-        name, autouse = keywords.get("name"), keywords.get("autouse")
-        return (
-            name.value if isinstance(name, ast.Constant) and isinstance(name.value, str) else None,
-            isinstance(autouse, ast.Constant) and autouse.value is True,
-        )
+def _listed(value: ast.expr) -> list[ast.expr]:
+    return list(value.elts) if isinstance(value, ast.List | ast.Tuple) else [value]
+
+
+def _declaration_error(mark: ast.expr) -> str | None:
+    """Why a ``may_skip`` mark does not count as a declaration, or None."""
+    keywords = {kw.arg: kw.value for kw in mark.keywords} if isinstance(mark, ast.Call) else {}
+    texts = {
+        name: value.value.strip()
+        for name, value in keywords.items()
+        if isinstance(value, ast.Constant) and isinstance(value.value, str) and name
+    }
+    if not texts.get("reason"):
+        return "may_skip needs reason='<why it may skip>' as a non-empty string"
+    if not _ISSUE_PATTERN.fullmatch(texts.get("issue", "")):
+        return "may_skip needs issue='#N' naming the issue that removes the skip"
     return None
 
 
-def _fixtures(body: Sequence[ast.stmt]) -> tuple[dict[str, _Fn], list[_Fn]]:
-    """Fixtures defined in a module or class body, keyed as pytest registers them:
-    by ``name=`` when given, else by the attribute name; and the autouse ones."""
-    fixtures: dict[str, _Fn] = {}
-    autouse: list[_Fn] = []
-    for stmt in body:
-        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            decl = _fixture_decl(stmt)
-            if decl is not None:
-                fixtures[decl[0] or stmt.name] = stmt
-                if decl[1]:
-                    autouse.append(stmt)
-    return fixtures, autouse
+@dataclass(frozen=True)
+class _Mark:
+    """A mark with its name resolved in the module that WROTE it.
+
+    A fixture's ``params`` reach tests in other modules, which may spell
+    pytest differently, so a mark is named where it is defined, never where
+    it is used.
+    """
+
+    name: str | None
+    node: ast.expr
+
+    @classmethod
+    def read(cls, node: ast.expr, names: _PytestNames) -> _Mark:
+        return cls(names.mark_name(node), node)
 
 
-def _params(fn: _Fn) -> list[str]:
-    args = fn.args
-    return [
-        a.arg
-        for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)
-        if a.arg not in {"self", "cls"}
-    ]
+#: One parameter leg: the marks ``pytest.param(..., marks=...)`` gives it.
+_Leg = tuple[_Mark, ...]
 
 
-def _usefixtures(marks: Iterable[ast.expr]) -> list[str]:
+def _legs(values: ast.expr | None, names: _PytestNames) -> list[_Leg]:
+    """The legs of a ``params=[...]`` / parametrize argvalues list.
+
+    A value that is not a literal list has no marks pytest can see statically,
+    so it is one unmarked leg.
+    """
+    if not isinstance(values, ast.List | ast.Tuple):
+        return [()]
+    legs: list[_Leg] = []
+    for value in values.elts:
+        marks: _Leg = ()
+        if isinstance(value, ast.Call) and names.refers_to(value.func, _PARAM):
+            for kw in value.keywords:
+                if kw.arg == "marks":
+                    marks = tuple(_Mark.read(m, names) for m in _listed(kw.value))
+        legs.append(marks)
+    return legs or [()]
+
+
+def _parametrize_legs(marks: Iterable[ast.expr], names: _PytestNames) -> list[list[_Leg]]:
+    """One list of legs per ``parametrize`` mark among ``marks``."""
+    sources: list[list[_Leg]] = []
+    for mark in marks:
+        if not isinstance(mark, ast.Call) or names.mark_name(mark) != "parametrize":
+            continue
+        values = mark.args[1] if len(mark.args) > 1 else None
+        for kw in mark.keywords:
+            if kw.arg == "argvalues":
+                values = kw.value
+        sources.append(_legs(values, names))
+    return sources
+
+
+# ---------------------------------------------------------------- skip reachability
+
+
+_Function = ast.FunctionDef | ast.AsyncFunctionDef
+
+
+def _calls(node: ast.AST) -> Iterator[ast.Call]:
+    return (n for n in ast.walk(node) if isinstance(n, ast.Call))
+
+
+def _fixture_decorator(decorator: ast.expr) -> ast.expr | None:
+    """The decorator if it is ``@fixture`` / ``@pytest.fixture[(...)]``."""
+    func = decorator.func if isinstance(decorator, ast.Call) else decorator
+    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+    return decorator if name == "fixture" else None
+
+
+def _params(func: _Function) -> list[str]:
+    args = func.args
+    return [a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]]
+
+
+def _usefixtures(marks: Iterable[ast.expr], names: _PytestNames) -> list[str]:
     return [
         arg.value
         for mark in marks
-        if _mark_name(mark) == "usefixtures" and isinstance(mark, ast.Call)
+        if isinstance(mark, ast.Call) and names.mark_name(mark) == "usefixtures"
         for arg in mark.args
         if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
     ]
 
 
-def _own_nodes(fn: _Fn) -> Iterator[ast.AST]:
-    """Nodes that run when ``fn`` runs: its body, nested defs included (they are
-    usually called from it), decorators and defaults excluded."""
-    for stmt in fn.body:
-        yield from ast.walk(stmt)
+def _functions(body: Iterable[ast.stmt]) -> list[_Function]:
+    return [s for s in body if isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef)]
 
 
-def _module_level_nodes(body: Sequence[ast.stmt]) -> Iterator[ast.AST]:
-    stack: list[ast.AST] = list(body)
-    while stack:
-        node = stack.pop()
-        yield node
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
-            stack.extend(ast.iter_child_nodes(node))
+@dataclass
+class _Fixture:
+    name: str
+    node: _Function
+    module: _Module
+    autouse: bool
+    legs: list[_Leg] | None  # None when the fixture is not parametrized
 
 
-def _hooks(body: Sequence[ast.stmt], names: frozenset[str]) -> list[_Fn]:
-    return [
-        stmt
-        for stmt in body
-        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name in names
-    ]
+def _fixtures(functions: Iterable[_Function], module: _Module) -> dict[str, _Fixture]:
+    """The fixtures among ``functions``, keyed by the name a test requests."""
+    found: dict[str, _Fixture] = {}
+    for node in functions:
+        for decorator in node.decorator_list:
+            fixture = _fixture_decorator(decorator)
+            if fixture is None:
+                continue
+            kw = {k.arg: k.value for k in getattr(fixture, "keywords", [])}
+            name_node = kw.get("name")
+            name = (
+                name_node.value
+                if isinstance(name_node, ast.Constant) and isinstance(name_node.value, str)
+                else node.name
+            )
+            autouse_node = kw.get("autouse")
+            autouse = isinstance(autouse_node, ast.Constant) and bool(autouse_node.value)
+            legs = _legs(kw["params"], module.names) if "params" in kw else None
+            found[name] = _Fixture(name, node, module, autouse, legs)
+    return found
 
 
 @dataclass
 class _Module:
-    path: Path
-    tree: ast.Module
-    functions: dict[str, _Fn]
-    fixtures: dict[str, _Fn]
-    autouse: list[_Fn]
-    imports: dict[str, tuple[str, str]]  # local name -> (module, name)
-    pytest_names: frozenset[str]  # names bound to the pytest module itself
-    pytest_skip_names: frozenset[str]  # bare names bound to pytest.skip/importorskip
+    """One parsed file, with every name kept at the scope that defines it.
 
-    @property
-    def marks(self) -> list[ast.expr]:
-        return _pytestmark(self.tree.body)
-
-
-class Scanner:
-    """Parses modules once and answers "can this function skip?" across them.
-
-    ``cls`` threads through fixture lookup because pytest resolves a fixture
-    name in the requesting test's class first, then its module, then the
-    conftests above it.
+    Module functions resolve bare calls; a class's methods resolve
+    ``self.``/``cls.`` calls made inside that class, and a class's fixtures are
+    visible only to that class's tests. Both are looked up along the class's
+    MRO, restricted to its same-module bases, as Python's attribute lookup does.
     """
 
-    def __init__(self, root: Path, import_roots: Sequence[Path]) -> None:
-        self.root = root
-        self._import_roots = [root, *import_roots]
-        self._modules: dict[Path, _Module | None] = {}
-        self._targets: dict[str, Path | None] = {}
-        self._skips: dict[tuple[Path, str], bool] = {}
+    rel: str
+    tree: ast.Module
+    names: _PytestNames
+    functions: dict[str, list[_Function]] = field(default_factory=dict)
+    classes: dict[str, ast.ClassDef] = field(default_factory=dict)
+    fixtures: dict[str, _Fixture] = field(default_factory=dict)
+    _owner: dict[int, ast.ClassDef] = field(default_factory=dict)
+    _mro: dict[int, list[ast.ClassDef]] = field(default_factory=dict)
+    _class_fixtures: dict[int, dict[str, _Fixture]] = field(default_factory=dict)
+    _reach: dict[tuple[int, int], str | None] = field(default_factory=dict)
 
-    # -- parsing ------------------------------------------------------------
-
-    def module(self, path: Path) -> _Module | None:
-        path = path.resolve()
-        if path not in self._modules:
-            self._modules[path] = self._parse(path)
-        return self._modules[path]
-
-    def _parse(self, path: Path) -> _Module | None:
+    @classmethod
+    def parse(cls, path: Path, rel: str) -> _Module | None:
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except (OSError, SyntaxError, UnicodeDecodeError):
+            tree = ast.parse(path.read_text(errors="ignore"), filename=rel)
+        except SyntaxError:
             return None
-        functions: dict[str, _Fn] = {}
-        imports: dict[str, tuple[str, str]] = {}
-        pytest_names: set[str] = {"pytest"}
-        skip_names: set[str] = set()
-        for stmt in tree.body:
-            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                functions[stmt.name] = stmt
-            elif isinstance(stmt, ast.Import):
-                pytest_names.update(
-                    alias.asname for alias in stmt.names if alias.name == "pytest" and alias.asname
-                )
-            elif isinstance(stmt, ast.ImportFrom):
-                base = self._resolve_relative(path, stmt)
-                for alias in stmt.names:
-                    local = alias.asname or alias.name
-                    if stmt.module == "pytest" and alias.name in _SKIP_CALLS:
-                        skip_names.add(local)
-                    elif base:
-                        imports[local] = (base, alias.name)
-        fixtures, autouse = _fixtures(tree.body)
-        return _Module(
-            path,
-            tree,
-            functions,
-            fixtures,
-            autouse,
-            imports,
-            frozenset(pytest_names),
-            frozenset(skip_names),
-        )
+        module = cls(rel=rel, tree=tree, names=_PytestNames.of(tree))
+        for node in _functions(tree.body):
+            module.functions.setdefault(node.name, []).append(node)
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                module.classes[node.name] = node
+                for method in _functions(node.body):
+                    module._owner[id(method)] = node
+        module.fixtures = _fixtures(_functions(tree.body), module)
+        return module
 
-    @staticmethod
-    def _resolve_relative(path: Path, stmt: ast.ImportFrom) -> str:
-        if not stmt.level:
-            return stmt.module or ""
-        # Relative: express as a path relative to the importing package, marked
-        # with a leading "/" so _import_target knows not to search the roots.
-        package = path.parent
-        for _ in range(stmt.level - 1):
-            package = package.parent
-        tail = (stmt.module or "").replace(".", "/")
-        return "/" + str(package / tail)
+    def mro(self, owner: ast.ClassDef) -> list[ast.ClassDef]:
+        """``owner`` and its same-module bases, in Python's C3 method resolution order.
 
-    def _import_target(self, module: str) -> Path | None:
-        if module in self._targets:
-            return self._targets[module]
-        if module.startswith("/"):
-            candidates = [Path(module[1:])]
-        else:
-            rel = module.replace(".", "/")
-            candidates = [r / rel for r in self._import_roots]
-        self._targets[module] = next(
-            (
-                path
-                for base in candidates
-                for path in (base.with_suffix(".py"), base / "__init__.py")
-                if path.is_file()
-            ),
-            None,
-        )
-        return self._targets[module]
+        Bases defined elsewhere (imports, ``object``) are dropped: nothing here
+        can see their fixtures or methods anyway.
+        """
+        if id(owner) in self._mro:
+            return self._mro[id(owner)]
+        self._mro[id(owner)] = [owner]  # recursion guard: a rebound name can loop
+        parents = [
+            parent
+            for base in owner.bases
+            if isinstance(base, ast.Name)
+            and (parent := self.classes.get(base.id)) is not None
+            and parent is not owner
+        ]
+        pending = [list(self.mro(parent)) for parent in parents] + [parents]
+        order = [owner]
+        while pending := [seq for seq in pending if seq]:
+            tails = {id(c) for seq in pending for c in seq[1:]}
+            # A head no tail still waits on comes next. Python refuses a class
+            # with none (TypeError at import, so pytest never runs its tests);
+            # taking the first head keeps the census going on such a file.
+            head = next((seq[0] for seq in pending if id(seq[0]) not in tails), pending[0][0])
+            order.append(head)
+            for seq in pending:
+                if seq[0] is head:
+                    del seq[0]
+        self._mro[id(owner)] = order
+        return order
 
-    def _resolve(
-        self, mod: _Module, name: str, seen: frozenset[tuple[Path, str]] = frozenset()
-    ) -> tuple[_Module, _Fn] | None:
-        """The function bound to ``name`` in ``mod``, through any chain of
-        ``from x import name`` re-exports (a package ``__init__`` re-exporting
-        from a submodule, say)."""
-        found = mod.functions.get(name)
-        if found is not None:
-            return mod, found
-        if name not in mod.imports or (mod.path, name) in seen:
-            return None
-        target_module, target_name = mod.imports[name]
-        target_path = self._import_target(target_module)
-        target = self.module(target_path) if target_path else None
-        if target is None:
-            return None
-        return self._resolve(target, target_name, seen | {(mod.path, name)})
+    def class_fixtures(self, owner: ast.ClassDef) -> dict[str, _Fixture]:
+        """The fixtures ``owner``'s tests see: each name from the first class in its MRO."""
+        if id(owner) not in self._class_fixtures:
+            merged: dict[str, _Fixture] = {}
+            for cls in reversed(self.mro(owner)):
+                merged.update(_fixtures(_functions(cls.body), self))
+            self._class_fixtures[id(owner)] = merged
+        return self._class_fixtures[id(owner)]
 
-    def _conftests(self, path: Path) -> Iterator[_Module]:
-        """conftest.py modules that apply to ``path``, nearest first."""
-        directory = path.parent
-        while True:
-            conftest = directory / "conftest.py"
-            if conftest != path and conftest.is_file():
-                mod = self.module(conftest)
-                if mod is not None:
-                    yield mod
-            if directory == self.root or directory.parent == directory:
-                return
-            directory = directory.parent
-
-    def _fixture_in(self, mod: _Module, name: str) -> tuple[_Module, _Fn] | None:
-        """A fixture ``mod`` registers as ``name``: defined there, or imported
-        and bound to an attribute pytest registers under ``name``."""
-        if name in mod.fixtures:
-            return mod, mod.fixtures[name]
-        for local in mod.imports:
-            found = self._resolve(mod, local)
-            decl = _fixture_decl(found[1]) if found is not None else None
-            if decl is not None and (decl[0] or local) == name:
+    def _methods(self, owner: ast.ClassDef, name: str) -> list[_Function]:
+        """``name`` as ``self.name`` sees it from ``owner``: the first class in its MRO."""
+        for cls in self.mro(owner):
+            if found := [f for f in _functions(cls.body) if f.name == name]:
                 return found
-        return None
+        return []
 
-    def _fixture(
-        self, mod: _Module, name: str, cls: ast.ClassDef | None
-    ) -> tuple[_Module, _Fn] | None:
-        if cls is not None and name in (class_fixtures := _fixtures(cls.body)[0]):
-            return mod, class_fixtures[name]
-        found = self._fixture_in(mod, name)
-        if found is not None:
-            return found
-        for conftest in self._conftests(mod.path):
-            found = self._fixture_in(conftest, name)
-            if found is not None:
-                return found
-        return None
+    def _receiver(self, func: _Function, receiver: ast.ClassDef | None) -> ast.ClassDef | None:
+        """The class ``self`` is inside ``func``: the test's class when ``func`` is
+        inherited by it, else the class that defines ``func``, else none."""
+        owner = self._owner.get(id(func))
+        if owner is None:
+            return None
+        if receiver is not None and any(cls is owner for cls in self.mro(receiver)):
+            return receiver
+        return owner
 
-    # -- the question -------------------------------------------------------
+    def _callees(self, receiver: ast.ClassDef | None, call: ast.Call) -> list[_Function]:
+        target = call.func
+        if isinstance(target, ast.Name):
+            return self.functions.get(target.id, [])
+        if (
+            receiver is not None
+            and isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id in {"self", "cls"}
+        ):
+            return self._methods(receiver, target.attr)
+        return []
 
-    def marks_skip(self, marks: Iterable[ast.expr]) -> bool:
-        """A skip/skipif mark anywhere in ``marks``, including one carried by a
-        ``pytest.param(..., marks=...)`` inside a parametrize or fixture params."""
-        return any(
-            isinstance(node, ast.expr) and _mark_name(node) in _SKIP_MARKS
-            for mark in marks
-            for node in ast.walk(mark)
-        )
+    def body_skips(self, func: _Function, receiver: ast.ClassDef | None = None) -> str | None:
+        """Where ``func`` reaches a skip through its own body and same-module calls.
 
-    def _calls_skip(self, mod: _Module, nodes: Iterable[ast.AST]) -> list[str]:
-        """Whether ``nodes`` call a skip directly; else the bare names they call."""
-        called: list[str] = []
-        for node in nodes:
-            if not isinstance(node, ast.Call):
+        ``receiver`` is the test's class. An inherited body's ``self.`` calls
+        resolve along its MRO, not the defining class's, so the answer is
+        cached per receiver: one subclass's override must not answer for another.
+        """
+        receiver = self._receiver(func, receiver)
+        key = (id(func), id(receiver))
+        if key in self._reach:
+            return self._reach[key]
+        self._reach[key] = None  # recursion guard: a cycle adds no new skip
+        found: str | None = None
+        for call in _calls(func):
+            if self.names.is_skip_call(call):
+                found = f"skips at {self.rel}:{call.lineno}"
+                break
+            for target in self._callees(receiver, call):
+                if target is not func and (via := self.body_skips(target, receiver)):
+                    found = f"calls {target.name}(), which {via}"
+                    break
+            if found:
+                break
+        self._reach[key] = found
+        return found
+
+    def module_level_skip(self) -> str | None:
+        for stmt in self.tree.body:
+            if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 continue
-            head, _, attr = _dotted(node.func).rpartition(".")
-            if head in mod.pytest_names and attr in _SKIP_CALLS:
-                return ["<skip>"]
-            if not head and attr in mod.pytest_skip_names:
-                return ["<skip>"]
-            if isinstance(node.func, ast.Name):
-                called.append(node.func.id)
-        return called
+            for call in _calls(stmt):
+                if self.names.is_skip_call(call):
+                    return f"module skips at {self.rel}:{call.lineno}"
+        return None
 
-    def module_skips(self, mod: _Module) -> bool:
-        """Importing the module can skip it, every test in it is skip-marked, or
-        its xunit module setup can skip."""
-        if self.marks_skip(mod.marks):
-            return True
-        if self._calls_skip(mod, _module_level_nodes(mod.tree.body)) == ["<skip>"]:
-            return True
-        return any(
-            self.can_skip(mod, hook, as_fixture=False)
-            for hook in _hooks(mod.tree.body, _MODULE_SETUP)
-        )
 
-    def can_skip(
-        self, mod: _Module, fn: _Fn, *, as_fixture: bool, cls: ast.ClassDef | None = None
-    ) -> bool:
-        scope = cls.lineno if cls is not None else 0
-        key = (mod.path, f"{'fixture' if as_fixture else 'fn'}:{fn.name}:{fn.lineno}:{scope}")
-        if key in self._skips:
-            return self._skips[key]
-        self._skips[key] = False  # cycle guard: a recursion is not a skip
-        result = self._can_skip(mod, fn, as_fixture=as_fixture, cls=cls)
-        self._skips[key] = result
-        return result
+class _Scope:
+    """The fixtures visible from one test: its class's, its module's, then its
+    conftests', nearest first. A fixture that requests its own name reaches the
+    next level out, as pytest's overrides do."""
 
-    def _can_skip(
-        self, mod: _Module, fn: _Fn, *, as_fixture: bool, cls: ast.ClassDef | None
-    ) -> bool:
-        if self.marks_skip(fn.decorator_list):
-            return True
-        called = self._calls_skip(mod, _own_nodes(fn))
-        if called == ["<skip>"]:
-            return True
-        for name in called:
-            found = self._resolve(mod, name)
-            if found is not None and self.can_skip(*found, as_fixture=False):
-                return True
-        if as_fixture:
-            return self.requests_skipping_fixture(mod, _params(fn), cls)
-        return False
+    def __init__(self, levels: list[dict[str, _Fixture]], receiver: ast.ClassDef | None) -> None:
+        self._levels = levels  # nearest first
+        self._receiver = receiver  # the test's class: ``self`` inside a class fixture
 
-    def requests_skipping_fixture(
-        self, mod: _Module, names: Iterable[str], cls: ast.ClassDef | None = None
-    ) -> bool:
-        for name in names:
-            found = self._fixture(mod, name, cls)
+    def _lookup(self, name: str, start: int = 0) -> tuple[int, _Fixture] | None:
+        for level in range(start, len(self._levels)):
+            if name in self._levels[level]:
+                return level, self._levels[level][name]
+        return None
+
+    def autouse(self) -> list[str]:
+        return [n for level in self._levels for n, f in level.items() if f.autouse]
+
+    def _requests(self, fixture: _Fixture, level: int) -> Iterator[tuple[str, int]]:
+        for name in _params(fixture.node):
+            yield name, (level + 1 if name == fixture.name else 0)
+
+    def fixture_skips(
+        self,
+        requests: Iterable[tuple[str, int]],
+        seen: set[tuple[str, int]] | None = None,
+    ) -> str | None:
+        seen = set() if seen is None else seen
+        for name, start in requests:
+            if (name, start) in seen:
+                continue
+            seen.add((name, start))
+            found = self._lookup(name, start)
             if found is None:
                 continue
-            owner, fixture = found
-            # A class-local fixture resolves its own requests in that class.
-            in_class = cls is not None and any(item is fixture for item in cls.body)
-            if self.can_skip(owner, fixture, as_fixture=True, cls=cls if in_class else None):
-                return True
-        return False
+            level, fixture = found
+            if via := fixture.module.body_skips(fixture.node, self._receiver):
+                return f"fixture '{name}' {via}"
+            if via := self.fixture_skips(self._requests(fixture, level), seen):
+                return f"fixture '{name}' requests {via}"
+        return None
 
-    def parametrized_integration(
-        self, mod: _Module, fn: _Fn, cls: ast.ClassDef | None = None, seen: set[int] | None = None
-    ) -> bool:
-        """Some parametrization of ``fn`` is integration: ``pytest.param(...,
-        marks=pytest.mark.integration)`` in its decorators or in the ``params``
-        of a fixture it requests, however deep."""
-        seen = set() if seen is None else seen
-        if id(fn) in seen:
-            return False
-        seen.add(id(fn))
-        if any(
-            isinstance(node, ast.expr) and _mark_name(node) == "integration"
-            for dec in fn.decorator_list
-            for node in ast.walk(dec)
-        ):
-            return True
-        for name in _params(fn):
-            found = self._fixture(mod, name, cls)
-            if found is not None and self.parametrized_integration(*found, cls, seen):
-                return True
-        return False
-
-    def autouse_skips(self, mod: _Module) -> bool:
-        for owner in (mod, *self._conftests(mod.path)):
-            if any(self.can_skip(owner, fn, as_fixture=True) for fn in owner.autouse):
-                return True
-        return False
-
-    def class_skips(self, mod: _Module, cls: ast.ClassDef, class_marks: list[ast.expr]) -> bool:
-        """Every test in ``cls`` can skip: a skip mark on it, an autouse fixture
-        it defines, or an xunit class/method setup hook (pytest turns those into
-        autouse fixtures, so they run before every test)."""
-        if self.marks_skip(class_marks):
-            return True
-        if any(self.can_skip(mod, fn, as_fixture=True, cls=cls) for fn in _fixtures(cls.body)[1]):
-            return True
-        return any(
-            self.can_skip(mod, hook, as_fixture=False) for hook in _hooks(cls.body, _CLASS_SETUP)
-        )
-
-    def function_setup_skips(self, mod: _Module) -> bool:
-        """``setup_function`` runs before every module-level test function."""
-        return any(
-            self.can_skip(mod, hook, as_fixture=False)
-            for hook in _hooks(mod.tree.body, _FUNCTION_SETUP)
-        )
-
-
-def _marker_problems(marks: Iterable[ast.expr]) -> tuple[bool, list[Problem]]:
-    """(declared, problems) for every may_skip marker in ``marks``."""
-    declared = False
-    problems: list[Problem] = []
-    for mark in marks:
-        if _mark_name(mark) != MARKER:
-            continue
-        declared = True
-        keywords = {kw.arg: kw.value for kw in mark.keywords} if isinstance(mark, ast.Call) else {}
-        reason, issue = keywords.get("reason"), keywords.get("issue")
-        if not (
-            isinstance(reason, ast.Constant)
-            and isinstance(reason.value, str)
-            and reason.value.strip()
-        ):
-            problems.append(Problem.NO_REASON)
-        if not (
-            isinstance(issue, ast.Constant)
-            and isinstance(issue.value, str)
-            and _ISSUE.match(issue.value)
-        ):
-            problems.append(Problem.NO_ISSUE)
-    return declared, problems
-
-
-def _tests(tree: ast.Module) -> Iterator[tuple[str, _Fn, ast.ClassDef | None]]:
-    """(qualified name, function, enclosing ``Test*`` class) for each collected test."""
-    for stmt in tree.body:
-        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name.startswith(
-            "test"
-        ):
-            yield stmt.name, stmt, None
-        elif isinstance(stmt, ast.ClassDef) and stmt.name.startswith("Test"):
-            for item in stmt.body:
-                if isinstance(
-                    item, (ast.FunctionDef, ast.AsyncFunctionDef)
-                ) and item.name.startswith("test"):
-                    yield f"{stmt.name}::{item.name}", item, stmt
-
-
-def scan(root: Path, files: Iterable[Path], import_roots: Sequence[Path] = ()) -> list[Finding]:
-    """Every integration test in ``files`` that skips undeclared, or declares badly."""
-    scanner = Scanner(root.resolve(), [r.resolve() for r in import_roots])
-    findings: list[Finding] = []
-    for path in files:
-        mod = scanner.module(path)
-        if mod is None:
-            continue
-        rel = mod.path.relative_to(scanner.root).as_posix()
-        module_marks = mod.marks
-        module_wide: bool | None = None  # computed once, only if needed
-        for name, fn, cls in _tests(mod.tree):
-            class_marks = [*cls.decorator_list, *_pytestmark(cls.body)] if cls else []
-            marks = [*fn.decorator_list, *class_marks, *module_marks]
-            declared, problems = _marker_problems(marks)
-            findings.extend(Finding(rel, fn.lineno, name, p) for p in problems)
-            integration = any(_mark_name(m) == "integration" for m in marks)
-            if declared or not (integration or scanner.parametrized_integration(mod, fn, cls)):
+    def closure(self, requests: Iterable[tuple[str, int]]) -> list[_Fixture]:
+        """Every fixture the requests reach, each once."""
+        reached: dict[int, _Fixture] = {}
+        pending = list(requests)
+        seen: set[tuple[str, int]] = set()
+        while pending:
+            request = pending.pop()
+            if request in seen:
                 continue
-            if module_wide is None:
-                module_wide = scanner.module_skips(mod) or scanner.autouse_skips(mod)
-            if (
-                module_wide
-                or (
-                    scanner.class_skips(mod, cls, class_marks)
-                    if cls
-                    else scanner.function_setup_skips(mod)
+            seen.add(request)
+            if (found := self._lookup(*request)) is None:
+                continue
+            level, fixture = found
+            reached[id(fixture.node)] = fixture
+            pending.extend(self._requests(fixture, level))
+        return list(reached.values())
+
+
+# ---------------------------------------------------------------- the census
+
+
+def _test_files(root: Path) -> list[Path]:
+    files = {*root.rglob("test_*.py"), *root.rglob("*_test.py")}
+    return sorted(
+        p
+        for p in files
+        if not is_excluded(p.relative_to(root))
+        and p.relative_to(root).parts[0] not in _EXCLUDED_TOP_LEVEL
+    )
+
+
+@dataclass(frozen=True)
+class _Test:
+    """One collected test function and the marks it inherits from outside it."""
+
+    node: _Function
+    owner: ast.ClassDef | None
+    owner_marks: list[ast.expr]
+
+    @property
+    def node_id(self) -> str:
+        return f"{self.owner.name}::{self.node.name}" if self.owner else self.node.name
+
+
+def _tests(tree: ast.Module) -> Iterator[_Test]:
+    """Each collected test function, with the marks its class contributes."""
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            if node.name.startswith("test"):
+                yield _Test(node, None, [])
+        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            class_marks = [*node.decorator_list, *_pytestmark_marks(node.body)]
+            for item in _functions(node.body):
+                if item.name.startswith("test"):
+                    yield _Test(item, node, class_marks)
+
+
+class _Census:
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._conftests: dict[Path, _Module | None] = {}
+
+    def _conftest(self, directory: Path) -> _Module | None:
+        if directory not in self._conftests:
+            path = directory / "conftest.py"
+            self._conftests[directory] = (
+                _Module.parse(path, path.relative_to(self._root).as_posix())
+                if path.is_file()
+                else None
+            )
+        return self._conftests[directory]
+
+    def _conftest_levels(self, path: Path) -> list[dict[str, _Fixture]]:
+        levels: list[dict[str, _Fixture]] = []
+        directory = path.parent
+        while True:
+            conftest = self._conftest(directory)
+            if conftest is not None:
+                levels.append(conftest.fixtures)
+            if directory == self._root or self._root not in directory.parents:
+                break
+            directory = directory.parent
+        return levels
+
+    def file_findings(self, path: Path) -> list[Finding]:
+        rel = path.relative_to(self._root).as_posix()
+        module = _Module.parse(path, rel)
+        if module is None:
+            return []
+        conftests = self._conftest_levels(path)
+        module_marks = _pytestmark_marks(module.tree.body)
+        findings: list[Finding] = []
+        for test in _tests(module.tree):
+            own = [module.class_fixtures(test.owner)] if test.owner else []
+            scope = _Scope([*own, module.fixtures, *conftests], test.owner)
+            findings.extend(self._test_findings(rel, module, scope, test, module_marks))
+        return findings
+
+    def _test_findings(
+        self,
+        rel: str,
+        module: _Module,
+        scope: _Scope,
+        test: _Test,
+        module_marks: list[ast.expr],
+    ) -> list[Finding]:
+        names = module.names
+        static_nodes = [*test.node.decorator_list, *test.owner_marks, *module_marks]
+        static = [_Mark.read(m, names) for m in static_nodes]
+        requests = [
+            (name, 0)
+            for name in [*_params(test.node), *_usefixtures(static_nodes, names), *scope.autouse()]
+        ]
+        sources = [
+            *_parametrize_legs(static_nodes, names),
+            *(f.legs for f in scope.closure(requests) if f.legs is not None),
+        ]
+        legs = [tuple(m for leg in combo for m in leg) for combo in product(*sources)]
+
+        findings: list[Finding] = []
+        reported: set[int] = set()
+        for mark in [*static, *(m for leg in legs for m in leg)]:
+            if mark.name == OPT_OUT_MARKER and id(mark.node) not in reported:
+                reported.add(id(mark.node))
+                if error := _declaration_error(mark.node):
+                    findings.append(Finding(rel, test.node_id, "malformed", error))
+
+        reachable: str | None = None
+        for index, leg in enumerate(legs):
+            marked = {m.name for m in [*static, *leg]}
+            if INTEGRATION_MARKER not in marked or OPT_OUT_MARKER in marked:
+                continue
+            skip_marks = sorted(n for n in marked if n in _SKIP_MARKERS)
+            if not skip_marks and reachable is None:
+                reachable = (
+                    module.module_level_skip()
+                    or module.body_skips(test.node, test.owner)
+                    or scope.fixture_skips(requests)
+                    or ""
                 )
-                or scanner.can_skip(mod, fn, as_fixture=False)
-                or scanner.requests_skipping_fixture(mod, [*_params(fn), *_usefixtures(marks)], cls)
-            ):
-                findings.append(Finding(rel, fn.lineno, name, Problem.UNDECLARED))
-    return sorted(findings)
+            via = f"marked {skip_marks[0]}" if skip_marks else reachable
+            if via:
+                where = f" (parameter set {index})" if len(legs) > 1 else ""
+                findings.append(Finding(rel, test.node_id, "undeclared", f"can skip{where}: {via}"))
+                break
+        return findings
 
 
-def _pytest_config(root: Path) -> tuple[list[str], list[str]]:
-    with (root / "pyproject.toml").open("rb") as f:
-        options = tomllib.load(f)["tool"]["pytest"]["ini_options"]
-    return list(options["testpaths"]), list(options["pythonpath"])
-
-
-def collected_test_files(root: Path) -> list[Path]:
-    """Every test module the repo's pytest collects, plus ``_EXTRA_TEST_DIRS``."""
-    testpaths, _ = _pytest_config(root)
-    files: set[Path] = set()
-    for directory in (*testpaths, *_EXTRA_TEST_DIRS):
-        for pattern in ("test_*.py", "*_test.py"):
-            files.update(p for p in (root / directory).rglob(pattern) if "fixtures" not in p.parts)
-    return sorted(files)
-
-
-def scan_repo(root: Path) -> list[Finding]:
-    _, pythonpath = _pytest_config(root)
-    return scan(root, collected_test_files(root), [root / p for p in pythonpath])
-
-
-def main() -> int:
-    root = Path(__file__).resolve().parents[1]
-    findings = scan_repo(root)
-    for finding in findings:
-        print(finding)
-    print(f"{len(findings)} finding(s)", file=sys.stderr)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+def find_integration_skips(root: Path) -> list[Finding]:
+    """Every integration test under ``root`` that can skip undeclared, and every
+    malformed ``may_skip``, in path order."""
+    root = root.resolve()
+    census = _Census(root)
+    return [finding for path in _test_files(root) for finding in census.file_findings(path)]

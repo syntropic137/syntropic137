@@ -33,17 +33,28 @@ Run both: `just fitness`
 | 15 | Harness Format Boundary (#1398) | test_harness_format_boundary | fitness_exceptions.toml `[harness_format_boundary]` | Enforced |
 | 16 | Codex Sandbox Stays On (#1398) | test_no_codex_sandbox_bypass | no exemptions | Enforced |
 | 17 | Cross-Generation Event Compatibility | test_orchestration_event_schema_snapshot (ADR-072 D9) | snapshots/orchestration_events.epoch-<N>.json; release-time half is `just check-event-compat` | Enforced |
-| 18 | Tests Exercise Reality (PC-192/PC-193) | test_integration_skips_are_declared | fitness_exceptions.toml `[integration_skips]` | Enforced (ratchet) |
+| 18 | Tests Exercise Reality (#1984) | test_integration_skips_declared | fitness_exceptions.toml `[integration_skips]` (exact ratchet) | Enforced |
 
-### 18. Tests Exercise Reality (PC-192/PC-193)
+### 18. Tests Exercise Reality (#1984, PC-192/PC-193)
 
-A skipped integration test reports as a pass. An integration test that can skip
-(a `skip`/`skipif` mark, `pytest.skip`, `importorskip`, or a fixture that does
-any of them) must declare it with `@pytest.mark.may_skip(reason="...",
-issue="#N")`. The checker is `scripts/check_integration_skips.py` (in
-`scripts/` so mutation evidence may patch it); the undeclared count is an exact
-ratchet in `[integration_skips] max_undeclared`, failing above and below it. A
-`may_skip` with no reason or no `#N` issue always fails.
+A skipped test reports neither pass nor fail. Three PRs in one week carried
+integration tests that skipped on a clean runner (an image defaulted to
+`:latest`, a store was not provisioned, an env var was unset), and only the
+mutation-evidence runner noticed, because a skip voids its baseline.
+
+A test marked `integration` that can reach a skip - a `skip`/`skipif` marker,
+`pytest.skip`/`importorskip` in its body or in a same-module helper it calls, or
+a fixture that skips, followed through `conftest.py` and through the fixtures
+that fixture requests - must carry
+`@pytest.mark.may_skip(reason="...", issue="#N")`. Marks given by
+`pytest.param(..., marks=...)` count per parameter leg, so a declaration on one
+leg does not cover another. The census reads the AST
+(`scripts/check_integration_skips.py`) and resolves names in the scope pytest
+does (class fixtures and `self.` methods stay in their class). It cannot see a
+skip inside a helper imported from another module, a plugin fixture or a
+dynamically built mark, and it charges a skip in a parametrized fixture's body
+to every integration leg of that fixture. A malformed `may_skip` has no budget. The undeclared
+count is an exact ratchet: lower it when it drops.
 
 ### 17. Cross-Generation Event Compatibility (#1310, ADR-072 D9)
 
@@ -334,7 +345,6 @@ Sections:
 - `[projection_purity]` - project-specific allowed import prefixes
 - `[in_memory_state]` - registry of in-memory state requiring classification
 - `[in_memory_adapters_guarded]` - classes matching the in-memory adapter rule that are not guarded (ADR-060). A non-adapter carries a `reason`; a real violation carries a `reason` and an `issue`. Stale entries fail the test
-- `[integration_skips]` - `max_undeclared`: exact count of integration tests that can skip without a `may_skip` marker. Ratchet: fails above and below
 
 ### 3. Inline in test files (being migrated to TOML)
 
@@ -370,7 +380,6 @@ Legacy: some tests define config inline. Being consolidated into
 | test_in_memory_state_audit | Every in-memory state var is classified | 9 |
 | test_in_memory_adapters_are_guarded | No in-memory adapter is constructible in production (ADR-060) | 9 |
 | test_harness_format_boundary | Vendor formats only in adapters; one inference owner; no harness branches | 15 |
-| test_integration_skips_are_declared | Integration tests that can skip declare `may_skip(reason, issue)`; undeclared count ratcheted | 18 |
 
 ### API (`ci/fitness/api/`)
 

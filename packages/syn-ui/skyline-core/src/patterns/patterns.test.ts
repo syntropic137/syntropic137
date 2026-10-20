@@ -86,6 +86,7 @@ describe('dayReadout', () => {
     })
     expect(r.dateLabel).toBe('Fri, Aug 28')
     expect(r.year).toBe('2026')
+    expect(r.zone).toBe(' (UTC)')
     expect([r.sessions, r.executions, r.commits]).toEqual(['43', '23', '0'])
     expect(r.tokens).toBe('5.67M')
     expect(r.cost).toBe('$4.98')

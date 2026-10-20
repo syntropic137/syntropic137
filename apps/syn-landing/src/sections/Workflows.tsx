@@ -17,6 +17,7 @@ export default function Workflows() {
       title={WORKFLOWS.title}
       lede={WORKFLOWS.lede}
       points={WORKFLOWS.points}
+      cta={WORKFLOWS.cta}
       visual={
         <div className="workflows__visual">
           <CodeWindow title={WORKFLOW_FILE} pad="code">

@@ -23,6 +23,7 @@ from syn_shared.agents import (
     CodexModelAlias,
     ModelAlias,
     PhaseModelDefaults,
+    resolve_claude_model,
 )
 from syn_shared.codex_auth_file import CODEX_AUTH_FILE_FORMAT
 from syn_shared.codex_credential_port import CodexCredentialFileKind
@@ -466,6 +467,8 @@ class Settings(BaseSettings):
                 f"CLI cannot run it. Use a Claude alias such as {ModelAlias.OPUS!r}."
             )
             raise ValueError(msg)
+        # Refuse a retired model at startup, not at the first install.
+        resolve_claude_model(value)
         return value
 
     @property

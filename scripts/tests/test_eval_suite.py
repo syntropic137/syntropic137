@@ -20,6 +20,7 @@ import sys
 from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
+from typing import get_args
 
 import httpx
 import pytest
@@ -111,7 +112,7 @@ _PINNED_CODEX_WFS = {
 def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     loaded = load_suite(DEFAULT_SUITE)
 
-    assert loaded.tag == "verifier-seed-v1:v7:eval-verify-pinned-v1"
+    assert loaded.tag == "verifier-seed-v1:v8:eval-verify-pinned-v1"
     assert loaded.workflow.id == "eval-verify-pinned-v1"
     assert loaded.workflow.models == {"verify": "opus"}
     by_polarity = {
@@ -120,7 +121,7 @@ def test_the_seed_suite_loads_and_records_its_workflow_and_models() -> None:
     }
     assert by_polarity["defect"] >= {1574, 1649, 1652, 1654, 1679, 1680}
     assert by_polarity["clean"] == {917, 1010} | _V6_CLEAN_PRS
-    assert sum(c.polarity == "defect" for c in loaded.cases) == 32
+    assert sum(c.polarity == "defect" for c in loaded.cases) == 36
     assert sum(c.polarity == "clean" for c in loaded.cases) == 4
 
 
@@ -131,7 +132,7 @@ def test_the_same_cases_load_under_the_codex_verifier_with_their_own_tag() -> No
 
     assert codex.workflow.id == _CODEX_WF
     assert codex.workflow.models == {"verify": "gpt-sol"}
-    assert codex.tag == f"verifier-seed-v1:v7:{_CODEX_WF}"
+    assert codex.tag == f"verifier-seed-v1:v8:{_CODEX_WF}"
     assert codex.tag != opus.tag
     assert codex.cases == opus.cases
 
@@ -143,7 +144,7 @@ def test_the_same_cases_load_under_the_sonnet_verifier_with_their_own_tag() -> N
 
     assert sonnet.workflow.id == _SONNET_WF
     assert sonnet.workflow.models == {"verify": "sonnet"}
-    assert sonnet.tag == f"verifier-seed-v1:v7:{_SONNET_WF}"
+    assert sonnet.tag == f"verifier-seed-v1:v8:{_SONNET_WF}"
     assert sonnet.cases == opus.cases
 
 
@@ -154,7 +155,7 @@ def test_the_same_cases_load_under_each_pinned_codex_verifier(variant: str, slug
     pinned = load_suite(DEFAULT_SUITE, workflow=variant)
 
     assert pinned.workflow.models == {"verify": slug}
-    assert pinned.tag == f"verifier-seed-v1:v7:{variant}"
+    assert pinned.tag == f"verifier-seed-v1:v8:{variant}"
     assert pinned.cases == opus.cases
 
 
@@ -248,8 +249,8 @@ def test_the_agentic_workspace_suite_is_its_own_suite_over_its_own_repository() 
 
     assert aw.suite.repository == "AgentParadise/agentic-workspace"
     assert aw.suite.suite_tag == "suite:verifier-seed-aw" != seed.suite.suite_tag
-    assert aw.tag == "verifier-seed-aw-v1:v3:eval-verify-pinned-v1"
-    assert {c.source_pr for c in aw.cases if c.polarity == "defect"} == {47, 49, 56}
+    assert aw.tag == "verifier-seed-aw-v1:v4:eval-verify-pinned-v1"
+    assert {c.source_pr for c in aw.cases if c.polarity == "defect"} == {47, 49, 56, 66}
     assert not {c.id for c in aw.cases} & {c.id for c in seed.cases}
 
 
@@ -454,7 +455,12 @@ def history(tmp_path: Path) -> tuple[Path, str, str, str]:
 
 
 def _one_case_suite(
-    tmp_path: Path, commit: str, fix: str, file: str, first_fix: str | None = None
+    tmp_path: Path,
+    commit: str,
+    fix: str,
+    file: str,
+    first_fix: str | None = None,
+    **extra: object,
 ) -> Path:
     suite_dir = _copy_suite(tmp_path)
     suite_file = suite_dir / "suite.yaml"
@@ -476,8 +482,140 @@ def _one_case_suite(
     }
     if first_fix is not None:
         case["first_fix_commit"] = first_fix
+    case.update(extra)
     (cases / "seed.yaml").write_text(json.dumps(case))
     return suite_dir
+
+
+_VERIFY_RECORD = "https://github.com/o/r/pull/1#issuecomment-1"
+
+
+@pytest.fixture
+def merged_history(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """A PR branch: certified head -> merge of main -> fix (touching bug.py).
+
+    Returns the repo, the certified head, the merge and the fix.
+    """
+    repo = tmp_path / "merged"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    (repo / "bug.py").write_text("ok\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "checkout", "-qb", "pr")
+    (repo / "bug.py").write_text("broken\n")
+    _git(repo, "commit", "-qam", "bug")
+    head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "main")
+    (repo / "main.py").write_text("x\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "main moves on")
+    _git(repo, "checkout", "-q", "pr")
+    _git(repo, "merge", "-q", "--no-edit", "main")
+    merge = _git(repo, "rev-parse", "HEAD")
+    (repo / "bug.py").write_text("fixed\n")
+    _git(repo, "commit", "-qam", "fix")
+    fix = _git(repo, "rev-parse", "HEAD")
+    return repo, head, merge, fix
+
+
+@pytest.mark.unit
+def test_check_passes_the_certified_head_across_a_merge_of_main(
+    tmp_path: Path, merged_history: tuple[Path, str, str, str]
+) -> None:
+    repo, head, _, fix = merged_history
+    suite = _one_case_suite(tmp_path, head, fix, "bug.py", certified_in=_VERIFY_RECORD)
+    assert check_commits(load_suite(suite), repo) == []
+
+
+@pytest.mark.unit
+def test_check_still_refuses_the_certified_head_when_no_record_names_it(
+    tmp_path: Path, merged_history: tuple[Path, str, str, str]
+) -> None:
+    # Without the verify record the old rule holds: the fix's first parent is the merge.
+    repo, head, merge, fix = merged_history
+    problems = check_commits(load_suite(_one_case_suite(tmp_path, head, fix, "bug.py")), repo)
+    assert problems == [
+        f"seed: pins {head[:12]}, but the fix {fix[:12]}'s first parent is {merge[:12]}; "
+        "pin the tree just before the fix"
+    ]
+
+
+@pytest.mark.unit
+def test_check_still_passes_the_fixs_first_parent_on_a_merged_branch(
+    tmp_path: Path, merged_history: tuple[Path, str, str, str]
+) -> None:
+    repo, _, merge, fix = merged_history
+    assert check_commits(load_suite(_one_case_suite(tmp_path, merge, fix, "bug.py")), repo) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("pin", ["fix", "after"])
+def test_check_refuses_a_certified_head_that_is_not_before_the_fix(
+    tmp_path: Path, history: tuple[Path, str, str, str], pin: str
+) -> None:
+    repo, _, fix, unrelated = history
+    commit = fix if pin == "fix" else unrelated
+    suite = _one_case_suite(tmp_path, commit, fix, "bug.py", certified_in=_VERIFY_RECORD)
+    problems = check_commits(load_suite(suite), repo)
+    assert (
+        f"seed: pins {commit[:12]}, which is not before the fix {fix[:12]}; "
+        "a judged tree's pin must precede it"
+    ) in problems
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "record", ["", "see the PR", "https://github.com/o/r/issues/1#issuecomment-1"]
+)
+def test_a_certified_head_must_cite_a_pr_comment(
+    tmp_path: Path, history: tuple[Path, str, str, str], record: str
+) -> None:
+    _, bug, fix, _ = history
+    with pytest.raises(DefinitionError, match="certified_in"):
+        load_suite(_one_case_suite(tmp_path, bug, fix, "bug.py", certified_in=record))
+
+
+@pytest.mark.unit
+def test_a_case_file_carries_its_escape_class_to_the_loaded_case(
+    tmp_path: Path, history: tuple[Path, str, str, str]
+) -> None:
+    _, bug, fix, _ = history
+    suite = _one_case_suite(tmp_path, bug, fix, "bug.py", escape_class="deny path untested")
+    (case,) = load_suite(suite).cases
+    assert case.escape_class == "deny path untested"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("label", ["", "flaky", "Deny path untested"])
+def test_an_unknown_escape_class_is_refused(
+    tmp_path: Path, history: tuple[Path, str, str, str], label: str
+) -> None:
+    _, bug, fix, _ = history
+    with pytest.raises(DefinitionError, match="escape_class"):
+        load_suite(_one_case_suite(tmp_path, bug, fix, "bug.py", escape_class=label))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("label", get_args(eval_suite.EscapeClass))
+def test_the_escape_class_does_not_change_a_score(
+    tmp_path: Path, history: tuple[Path, str, str, str], label: str
+) -> None:
+    _, bug, fix, _ = history
+    labelled = load_suite(
+        _one_case_suite(tmp_path / "a", bug, fix, "bug.py", escape_class=label)
+    ).cases[0]
+    plain = load_suite(_one_case_suite(tmp_path / "b", bug, fix, "bug.py")).cases[0]
+    # A report that names the defect: a label that only bent a matched score
+    # would otherwise compare two misses and pass (PR #1980 verify, B1).
+    report = _report(("bug.py", "broken"))
+    assert score_case(plain, "blocked", report).passed
+    for verdict in ("blocked", "certified", None):
+        unlabelled = score_case(plain, verdict, report)
+        assert unlabelled.findings == 1 and unlabelled.named_file is not None
+        assert score_case(labelled, verdict, report) == unlabelled
 
 
 @pytest.mark.unit
@@ -528,8 +666,8 @@ def test_check_passes_a_pin_before_the_first_commit_of_a_fix_series(
     ids=lambda c: c.id,
 )
 def test_every_committed_defect_pins_its_fixs_first_parent(case: DefectCase) -> None:
-    if case.reclassified_from:
-        # A reclassified control keeps the pin both verifiers reviewed, before the fix.
+    if case.judged_tree:
+        # A judged tree keeps the pin a verifier reviewed, before the fix.
         assert eval_suite._git_ok(ROOT, "merge-base", "--is-ancestor", case.commit, case.fix_start)
         assert case.commit != case.fix_start
     else:
@@ -729,6 +867,74 @@ def _case(case_id: str) -> DefectCase:
 # the keyword tables - including the three per seed the verification probe at
 # ca52f38c wrote, of which the scorer then passed 1 in 12. Each must pass.
 _PARAPHRASES: dict[str, tuple[tuple[str, str], ...]] = {
+    "event-schema-gate-ignores-identity": (
+        (
+            "_orchestration_event_schemas.py:85",
+            "the snapshot records only each model's validation schema, never the event type "
+            "name or version, so bumping @event from v1 to v2 passes the gate.",
+        ),
+        (
+            "scripts/event_compat/probe.py:24",
+            "the compat probe resolves models by class name, so renaming an event_type leaves "
+            "check-event-compat green while stored events no longer resolve.",
+        ),
+        (
+            "_orchestration_event_schemas.py",
+            "the schema gate compares shape only; an identity change (type or version) is "
+            "invisible to the snapshot.",
+        ),
+    ),
+    "broker-deny-path-untested": (
+        (
+            "test_git_gh_through_broker.py:120",
+            "no test sends a valid capability for an ungranted repo to the broker, so the "
+            "deny is never exercised.",
+        ),
+        (
+            "github_broker/test_git_gh_through_broker.py",
+            "test_an_ungranted_repository_is_offered_nothing only checks the sandbox; the "
+            "broker could grant an unlisted repository and no test would fail.",
+        ),
+        (
+            "test_git_gh_through_broker.py",
+            "the refusal path is untested: a mutation that makes the broker allow everything "
+            "survives every case.",
+        ),
+    ),
+    "docker-runtime-tests-skip-on-clean-runner": (
+        (
+            "test_docker_workspace_runtime.py:30",
+            "the module is skipped unless SYN_CONTRACT_TEST_IMAGE is set, so on a clean runner "
+            "the Docker tests never run.",
+        ),
+        (
+            "packages/syn-adapters/tests/test_docker_workspace_runtime.py",
+            "a skipif on an unset environment variable means CI reports skipped tests, which "
+            "look the same as evidence nobody collected.",
+        ),
+        (
+            "test_docker_workspace_runtime.py",
+            "with no image configured the whole suite skips instead of pulling a pinned image "
+            "and failing.",
+        ),
+    ),
+    "fence-bound-fails-on-real-postgres": (
+        (
+            "execution_runs/postgres.py:254",
+            "fence_expired picks rows with an IN (SELECT ... FOR UPDATE SKIP LOCKED LIMIT $2) "
+            "subquery that a nested loop can rescan, so the limit does not bound the statement.",
+        ),
+        (
+            "postgres.py",
+            "the per-call bound is unbounded in practice: each rescan of the semi join locks "
+            "LIMIT more rows, so one call fences every expired run.",
+        ),
+        (
+            "syn_adapters/execution_runs/postgres.py",
+            "take_over has the same shape; pick the rows once in a MATERIALIZED CTE or the "
+            "limit is per rescan, not per statement.",
+        ),
+    ),
     "binary-artifact-minio-key": (
         (
             "minio.py:212",
@@ -1639,7 +1845,7 @@ def test_score_reads_verdict_report_cost_and_model_from_the_api() -> None:
 
     table = render(loaded, rows)
     assert "exec-1" in table and "PASS" in table and "$3.75" in table
-    assert "1/1 passed (ERROR excluded, as in the API); 35 not scored" in table
+    assert "1/1 passed (ERROR excluded, as in the API); 39 not scored" in table
 
 
 @pytest.mark.unit
@@ -1712,7 +1918,7 @@ def test_launch_on_a_fresh_server_installs_the_workflow_before_any_eval(tmp_path
     assert keys == [f"suite:verifier-seed\n{c.tag}" for c in loaded.cases]
     assert keys == [stable_key(loaded, c) for c in loaded.cases]
     assert len(set(keys)) == len(loaded.cases)
-    assert all(s["tags"] == ["suite-version:7", f"verifier:{_WF}"] for s in starts)
+    assert all(s["tags"] == ["suite-version:8", f"verifier:{_WF}"] for s in starts)
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
     assert len(lines) == 1 + len(loaded.cases)
 
@@ -1794,13 +2000,13 @@ def test_launch_under_the_codex_verifier_runs_and_records_the_codex_workflow(
     # The case evals are shared by every verifier; the run says which one it was.
     assert all("starting_workflow_id" not in c for c in creates)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:7", f"verifier:{_CODEX_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:8", f"verifier:{_CODEX_WF}")}
     assert all(not any(t.startswith("verifier") for t in c["tags"][1:]) for c in creates)
     starts = [r.url.path for r in server.requests if r.url.path.endswith("/execute")]
     assert set(starts) == {f"/workflows/{_CODEX_WF}/execute"}
     recorded = read_launches(ledger)
     assert {(x.suite, x.workflow_id) for x in recorded} == {
-        (f"verifier-seed-v1:v7:{_CODEX_WF}", _CODEX_WF)
+        (f"verifier-seed-v1:v8:{_CODEX_WF}", _CODEX_WF)
     }
 
 
@@ -1998,16 +2204,16 @@ def test_v1_runs_never_count_toward_the_current_version(tmp_path: Path) -> None:
     current = load_suite(DEFAULT_SUITE)
     rows, unrecorded = score_suite(current, _LedgerServer(launches).client(), launches)
 
-    assert len(rows) == 36 and {r.status for r in rows} == {"not launched"}
+    assert len(rows) == 40 and {r.status for r in rows} == {"not launched"}
     assert unrecorded == ()
 
 
 @pytest.mark.unit
 def test_score_prints_every_version_the_workflow_ran() -> None:
     suite = load_suite(DEFAULT_SUITE).suite
-    assert versions_run(suite, _WF) == [1, 3, 4, 5, 6, 7]
-    assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5, 6, 7]
-    assert versions_run(suite, _SONNET_WF) == [3, 4, 5, 6, 7]
+    assert versions_run(suite, _WF) == [1, 3, 4, 5, 6, 8]
+    assert versions_run(suite, _CODEX_WF) == [2, 3, 4, 5, 6, 8]
+    assert versions_run(suite, _SONNET_WF) == [3, 4, 5, 6, 8]
 
 
 # The twelve cases of #1750's v3: the six v2 defects and the six clean controls.
@@ -2065,7 +2271,13 @@ def test_v5_scores_its_own_cases_under_every_verifier_without_the_v6_controls(
     assert len(v5.cases) == 33
     assert {c.source_pr for c in v5.cases if c.polarity == "clean"} == {917, 1010}
     added = {c.id for c in current.cases} - {c.id for c in v5.cases}
-    assert {c.source_pr for c in current.cases if c.id in added} == _V6_CLEAN_PRS | {1808}
+    assert {c.source_pr for c in current.cases if c.id in added} == _V6_CLEAN_PRS | {
+        1808,
+        1921,
+        1929,
+        1968,
+        1975,
+    }
 
 
 @pytest.mark.unit
@@ -2077,8 +2289,14 @@ def test_v6_scores_its_own_cases_under_every_verifier_without_v7s_escape(workflo
     assert v6.tag == f"verifier-seed-v1:v6:{workflow}"
     assert len(v6.cases) == 35
     added = {c.id for c in current.cases} - {c.id for c in v6.cases}
-    assert added == {"start-clock-read-before-settle"}
-    assert {c.source_pr for c in current.cases if c.id in added} == {1808}
+    assert added == {
+        "start-clock-read-before-settle",
+        "event-schema-gate-ignores-identity",
+        "broker-deny-path-untested",
+        "docker-runtime-tests-skip-on-clean-runner",
+        "fence-bound-fails-on-real-postgres",
+    }
+    assert {c.source_pr for c in current.cases if c.id in added} == {1808, 1921, 1929, 1968, 1975}
 
 
 @pytest.mark.unit
@@ -2112,8 +2330,8 @@ def test_a_past_version_under_a_workflow_it_never_ran_is_refused() -> None:
 
 @pytest.mark.unit
 def test_an_unknown_version_is_refused() -> None:
-    with pytest.raises(DefinitionError, match="version 8 is not one of"):
-        load_suite(DEFAULT_SUITE, version=8)
+    with pytest.raises(DefinitionError, match="version 9 is not one of"):
+        load_suite(DEFAULT_SUITE, version=9)
 
 
 @pytest.mark.unit
@@ -2157,7 +2375,7 @@ def test_the_holdout_is_new_cases_only_and_within_its_share() -> None:
     cases = load_suite(DEFAULT_SUITE).cases
     holdout = {c.id for c in cases if c.split == "holdout"}
 
-    assert len(holdout) == 10 and len(cases) == 36
+    assert len(holdout) == 11 and len(cases) == 40
     # The pre-v4 defects were already run against the verifiers: never holdout.
     assert not holdout & _V2_CASES
 
@@ -2170,7 +2388,7 @@ def test_a_train_launch_never_starts_a_holdout_case(tmp_path: Path) -> None:
 
     holdout = {c.id for c in load_suite(DEFAULT_SUITE, split="holdout").cases}
     launched = {x.case for x in read_launches(ledger)}
-    assert len(launched) == 26
+    assert len(launched) == 29
     assert not launched & holdout
 
 
@@ -2189,9 +2407,9 @@ def test_the_split_flag_selects_the_cases_check_reports(
 
     monkeypatch.setattr(eval_suite, "check_commits", record)
     assert main(["check", "--split", "holdout"]) == 0
-    assert [c.split for c in checked[0].cases] == ["holdout"] * 10
+    assert [c.split for c in checked[0].cases] == ["holdout"] * 11
     out = capsys.readouterr().out
-    assert ": 10 case(s)" in out
+    assert ": 11 case(s)" in out
     assert "case:binary-artifact-minio-key" not in out
 
 
@@ -2211,7 +2429,7 @@ def test_a_suite_with_too_little_holdout_is_refused(tmp_path: Path) -> None:
     for path in (suite_dir / "cases").glob("*.yaml"):
         path.write_text(path.read_text().replace("split: holdout", "split: train"))
 
-    with pytest.raises(DefinitionError, match="0 of 36 cases are holdout"):
+    with pytest.raises(DefinitionError, match="0 of 40 cases are holdout"):
         load_suite(suite_dir)
 
 
@@ -2325,8 +2543,8 @@ def test_an_identical_relaunch_is_an_unchanged_install(tmp_path: Path) -> None:
     _, client = _provenanced_server(loaded, templates)
     again = launch_suite(loaded, client, ledger)
 
-    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 7.1.0")
-    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 7.1.0")
+    assert first[0].startswith(f"workflow {_CODEX_WF}: created as 8.1.0")
+    assert again[0].startswith(f"workflow {_CODEX_WF}: unchanged as 8.1.0")
 
 
 @pytest.mark.unit
@@ -2373,7 +2591,7 @@ def test_a_cli_installed_archived_record_is_restored_by_launch_without_force(
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
     stored = templates.by_id[_CODEX_WF]
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 7.1.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 8.1.0")
     assert not stored.is_archived
     assert stored.source_digest == install_provenance(loaded, document).source_digest
 
@@ -2424,7 +2642,7 @@ def test_an_unchanged_relaunch_restores_an_archived_template(tmp_path: Path) -> 
     _, client = _provenanced_server(loaded, templates)
     lines = launch_suite(loaded, client, tmp_path / "launches.jsonl")
 
-    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 7.1.0")
+    assert lines[0].startswith(f"workflow {_CODEX_WF}: created as 8.1.0")
     assert not templates.by_id[_CODEX_WF].is_archived
 
 
@@ -2490,7 +2708,7 @@ def test_launch_reuses_each_case_eval_and_creates_none(tmp_path: Path) -> None:
     assert not any(r.method == "POST" and r.url.path == "/evals" for r in server.requests)
     starts = [json.loads(r.content) for r in server.requests if r.url.path.endswith("/execute")]
     assert [s["eval_id"] for s in starts] == [f"eval-{c.commit[:6]}" for c in loaded.cases]
-    assert {tuple(s["tags"]) for s in starts} == {("suite-version:7", f"verifier:{_WF}")}
+    assert {tuple(s["tags"]) for s in starts} == {("suite-version:8", f"verifier:{_WF}")}
 
 
 @pytest.mark.unit
@@ -2504,7 +2722,7 @@ def test_score_records_each_verdict_on_the_eval() -> None:
     assert path == "/evals/eval-1/runs/exec-1/score"
     assert body["verdict"] == "PASS"
     assert body["score"] == 1.0
-    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "7")
+    assert (body["scorer"], body["scorer_version"]) == ("eval_suite.py", "8")
     assert isinstance(body["evidence"], str) and _CASE in body["evidence"]
 
 
@@ -2914,7 +3132,7 @@ def test_score_records_a_certified_clean_control_as_a_pass() -> None:
     assert (body["verdict"], body["score"]) == ("PASS", 1.0)
     assert f"{_clean_case().id} (clean)" in str(body["evidence"])
     table = render(loaded, rows)
-    assert "1/1 passed (ERROR excluded, as in the API); 35 not scored" in table
+    assert "1/1 passed (ERROR excluded, as in the API); 39 not scored" in table
     assert "false-block rate (clean controls blocked): 0/1 (0%)" in table
     assert "catch rate (defect cases blocked and named): -" in table
 
@@ -2928,7 +3146,7 @@ def test_score_records_a_blocked_clean_control_as_a_false_block() -> None:
     [(_, body)] = server.scores
     assert (body["verdict"], body["score"]) == ("FAIL", 0.0)
     table = render(loaded, rows)
-    assert "0/1 passed (ERROR excluded, as in the API); 35 not scored" in table
+    assert "0/1 passed (ERROR excluded, as in the API); 39 not scored" in table
     assert "false-block rate (clean controls blocked): 1/1 (100%)" in table
 
 
@@ -2984,7 +3202,7 @@ def test_a_completed_run_with_no_verdict_is_recorded_as_error_whatever_its_repor
     [row] = [r for r in rows if r.case == _CASE]
     assert row.status == "completed" and row.verdict == "ERROR"
     table = render(loaded, rows)
-    assert "0/0 passed (ERROR excluded, as in the API); 1 ERROR; 35 not scored" in table
+    assert "0/0 passed (ERROR excluded, as in the API); 1 ERROR; 39 not scored" in table
     assert "catch rate (defect cases blocked and named): -" in table
     assert (
         f"warning: {_CASE} exec-1: report says VERDICT: BLOCKED, engine recorded no verdict"
@@ -3168,7 +3386,7 @@ def test_llm_judged_score_is_recorded_under_the_judges_identity(
     rows, _ = score_suite(loaded, server.client(), [_LAUNCHED], eval_suite.LlmJudge(model))
 
     [(_, body)] = server.scores
-    assert body["scorer_version"] == "7+llm:claude-sonnet-4-6@prompt-v3"
+    assert body["scorer_version"] == "8+llm:claude-sonnet-4-6@prompt-v3"
     assert body["verdict"] == "PASS"
     assert "LLM judge (`llm:claude-sonnet-4-6@prompt-v3`): `match`" in str(body["evidence"])
     assert "keyword judge: no match" in str(body["evidence"])
@@ -3189,7 +3407,7 @@ def test_keyword_only_scoring_records_the_plain_suite_version(
     score_suite(loaded, server.client(), [_LAUNCHED])
 
     [(_, body)] = server.scores
-    assert (body["scorer_version"], body["verdict"]) == ("7", "FAIL")
+    assert (body["scorer_version"], body["verdict"]) == ("8", "FAIL")
     assert "LLM judge" not in str(body["evidence"])
 
 

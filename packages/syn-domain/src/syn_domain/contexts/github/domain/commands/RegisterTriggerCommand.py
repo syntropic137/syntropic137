@@ -48,3 +48,10 @@ class RegisterTriggerCommand:
             raise ValueError("repository is required")
         if not self.workflow_id:
             raise ValueError("workflow_id is required")
+        # Rejected here, not in TriggerConfig, so triggers registered with a
+        # non-zero value before #1961 still replay (they fire immediately).
+        if dict(self.config).get("debounce_seconds", 0) != 0:
+            raise ValueError(
+                "debounce_seconds is not supported: it must be 0 (#1961). "
+                "Use cooldown_seconds to space out fires for the same PR."
+            )

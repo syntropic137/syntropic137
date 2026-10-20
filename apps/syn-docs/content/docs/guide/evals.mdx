@@ -58,7 +58,9 @@ refuses the whole `create`.
 | --- | --- |
 | `POST /evals` | Create |
 | `GET /evals`, `GET /evals/{eval_id}` | List, show |
-| `GET /evals/{eval_id}/runs` | Executions in the eval (an `ExecutionListResponse`) |
+| `GET /evals/{eval_id}/runs` | Runs in the eval, each with the models it ran, its cost and its current score (an `EvalRunListResponse`) |
+| `GET /evals/{eval_id}/trend` | The eval's runs as trend points: date, verifier and judge model, score, verdict, cost, duration, tokens |
+| `POST /evals/{eval_id}/runs/{execution_id}/score` | Record a verdict on one run; re-scoring replaces its current score |
 | `POST /evals/{eval_id}/archive` | Archive |
 | `POST /executions/{execution_id}/eval` | Attach |
 | `DELETE /executions/{execution_id}/eval` | Detach |
@@ -106,13 +108,14 @@ uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--vers
 
 - `check` needs only git.
 - `launch` installs the suite's workflow from the checked-in file with install
-  provenance (version `<n>.0.0`, `source_digest` of the YAML), creates the
+  provenance (version `<suite version>.<workflow revision>.0`, `source_digest` of the YAML), creates the
   evals and starts **real agent runs, which cost money**. Never run it from CI.
-  A workflow file changed without a suite version bump is refused (409) before
+  A workflow file changed without a suite version or revision bump is refused (409) before
   any eval exists. Each launch is appended to `evals/<suite-id>/launches.jsonl`;
   commit that file, because `score` reads only the runs it names.
-- `score` only reads. It prints one table per suite version the selected
-  workflow ran, each version against its own case set.
+- `score` prints one table per suite version the selected workflow ran, each
+  version against its own case set, and records each verdict on its eval
+  (`POST /evals/{id}/runs/{run}/score`). Re-scoring replaces the current score.
 - `--workflow` picks which listed workflow (variant) to launch or score; the
   first listed is the default.
 
@@ -136,12 +139,7 @@ versions keep their scores under `history` in `suite.yaml`.
 
 - One eval per baseline. Cases at different commits of the same repository need
   separate evals.
-- There is no stored per-run score and no first-class variant object yet:
-  variants are separate workflows, and scoring is done by `eval_suite.py score`.
+- There is no first-class variant object: variants are grouped at read time
+  from the models each run actually ran. Per-run scores are stored on the eval
+  and served by `/runs` and `/trend`.
 - An attached run is not guaranteed to have started from the eval's baseline.
-
-## Coming in Evals v2 (not shipped)
-
-Evals v2 is open as pull requests and is **not** in a release yet: recorded run
-scores and variants on the backend, and an Evals section in the dashboard.
-Until it merges, use the CLI and `eval_suite.py` described above.
