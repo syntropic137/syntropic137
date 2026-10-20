@@ -196,9 +196,11 @@ _NOT_A_CHECK: dict[str, frozenset[str]] = {
     ),
     "operates a self-hosted deployment": frozenset(
         {
+            "selfhost-backup",
             "selfhost-down",
             "selfhost-logs",
             "selfhost-reset",
+            "selfhost-restore",
             "selfhost-restart",
             "selfhost-seed",
             "selfhost-status",
