@@ -31,6 +31,7 @@ IMAGE = "alpine:3.20"
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(not Path(SOCKET).exists(), reason=f"no Docker socket at {SOCKET}"),
+    pytest.mark.may_skip(reason="skips when no Docker socket answers", issue="#1984"),
 ]
 
 
