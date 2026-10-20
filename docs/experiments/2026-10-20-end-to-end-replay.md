@@ -40,8 +40,8 @@ reading. It cannot decide model choice on its own.
 
   | Run | Arm | implement | verify / reverify | When |
   |---|---|---|---|---|
-  | R1 | swap | codex gpt-6.1-sol | claude-opus-5-5 | first; lightest on Claude |
-  | R2 | prod | claude-opus-5-5 | codex gpt-6.1-sol | after the Claude weekly reset (10-23 15:00Z) |
+  | R1 | swap | codex gpt-6.1-sol | claude-opus-5-5 | first, once the replay repo exists |
+  | R2 | prod | claude-opus-5-5 | codex gpt-6.1-sol | after R1 is graded |
 
   Cross-family verification holds in both arms. R2's workflow is the installed
   production one. Before R1, R1's variant is diffed against it: only the
@@ -112,8 +112,9 @@ its base was not the pin.
   - message syntropic137-62 and post the exec id;
   - tag the run `eval-research` and `experiment:e4-replay`;
   - check that the platform total is at most 2.
-- Hold the dispatch if `claude@bryce` weekly is below 20% (20.0% at 2026-10-20
-  ~21Z). Codex had 95% at the same time.
+- Quota (owner, 2026-10-20): the week runs on 3 Claude accounts via cswap,
+  about 2 days each, and the owner swaps an account at 3% left. A single
+  account being low is not a reason to hold. The run cap of 2 stands.
 - Replay PRs are never merged. They are closed after grading.
 
 ## Open decision
