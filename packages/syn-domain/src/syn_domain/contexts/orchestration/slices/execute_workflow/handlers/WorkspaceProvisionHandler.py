@@ -789,7 +789,7 @@ class WorkspaceProvisionHandler:
         )
         # OUTSIDE the branch above, deliberately. A codex phase gets an empty
         # agent env by design - it authenticates from ~/.codex/auth.json and
-        # must not see claude credentials - so `_build_agent_env` is the one
+        # must not see claude credentials - so `build_agent_env` is the one
         # place repository identity must NOT live: put it there and it reaches
         # claude phases only, leaving every codex phase with the defect this
         # fixes. It is provider-independent, and this is the single point both
