@@ -56,6 +56,7 @@ from syn_shared.agents import (
     require_enforceable_cost_limit,
     require_runnable_sandbox,
 )
+from syn_shared.platform_access import PlatformScope
 from syn_shared.tools import require_supported_tools
 
 _SHARED_PREFIX = "shared://"
@@ -410,6 +411,16 @@ class PhaseYamlDefinition(BaseModel):
     #1129 token routing: dropping it would fall back to the first
     installation, which in a multi-org deployment is the wrong one."""
 
+    platform_access: PlatformScope = PlatformScope.READ
+    """What this phase's workspace may do against the platform API (ADR-072, #1744).
+
+    `read` (the default, and what a phase that says nothing gets) reads
+    executions, sessions, artifacts, evals and insights. `eval` adds exactly
+    two writes: launching a workflow INTO an eval the request names, and
+    scoring a run of an eval. Declared per phase because the token is minted
+    per phase and dies with it; a workflow that wants one phase to score runs
+    does not hand that power to its other phases."""
+
     delivers_repo_changes: bool = True
     """Whether a change to the repositories is part of what this phase delivers (#1308).
 
@@ -683,6 +694,7 @@ class PhaseYamlDefinition(BaseModel):
             allowed_tools=self.allowed_tools,
             clone_repos=self.clone_repos,
             delivers_repo_changes=self.delivers_repo_changes,
+            platform_access=self.platform_access,
             requires_verdict=self.requires_verdict,
             argument_hint=self.argument_hint,
             model=model,

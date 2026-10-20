@@ -97,24 +97,15 @@ services:
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
     # Upstream policy plus inspect (GET) and release (DELETE) of retained
-    # capture volumes, by exact syn-capture-<64 hex> name only (#1398).
-    # Inline so the standalone published compose needs no extra host asset.
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        set -eu
-        template=/usr/local/etc/haproxy/haproxy.cfg.template
-        [ "$$(grep -c '^[[:space:]]*http-request deny$$' "$$template")" = 1 ]
-        awk '
-        /^[[:space:]]*http-request deny$$/ {
-            print "    http-request allow if { method GET DELETE } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }"
-        }
-        { print }
-        ' "$$template" > /tmp/capture-haproxy.template
-        cat /tmp/capture-haproxy.template > "$$template"
-        exec /docker-entrypoint.sh "$$@"
-      - capture-policy
+    # capture volumes, by exact syn-capture-<64 hex> name only (#1398), plus
+    # container create and exec routed through docker-create-guard, which
+    # refuses privileged / host-access HostConfig shapes (#1806). The policy is
+    # a generated file (scripts/docker_socket_proxy_config.py), mounted
+    # read-only over the image's template; the image's own entrypoint renders
+    # it at start. The published compose inlines it as config content.
+    configs:
+      - source: docker-socket-proxy-haproxy
+        target: /usr/local/etc/haproxy/haproxy.cfg.template
     command: ["haproxy", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
     environment:
       CONTAINERS: 1     # Allow /containers/* path prefix (inspect, list, rm)
@@ -140,6 +131,47 @@ services:
       - SETGID
     tmpfs:
       - /tmp
+    networks:
+      - docker-proxy
+    depends_on:
+      docker-create-guard:
+        condition: service_started
+
+  # Container-create guard (#1806): the proxy above filters on path only, so it
+  # routes POST /containers/create and POST /containers/{id}/exec here. The guard refuses privileged, CapAdd,
+  # host network/pid/ipc, devices, binds outside the workspaces root, foreign
+  # volumes and non-allowlisted images, then forwards the rest to the socket.
+  # Allowlist and how to extend it: syn_adapters/docker_create_guard/policy.py.
+  docker-create-guard:
+    build:
+      context: ..
+      dockerfile: infra/docker/images/syn-api/Dockerfile
+    command: ["python", "-m", "syn_adapters.docker_create_guard"]
+    # Root only to open the root-owned socket; every capability is dropped.
+    user: "0:0"
+    environment:
+      # HOST path workspace bind mounts must sit under (same value the API gets).
+      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-${PWD}}/workspaces
+      # An operator-pinned workspace image is allowed automatically (#954).
+      SYN_WORKSPACE_DOCKER_IMAGE:
+      # Extra comma-separated image repository prefixes to allow.
+      SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES: ${SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    healthcheck:
+      # By path, stdlib only: `-m` would import all of syn_adapters per probe.
+      test: ["CMD", "python", "-I", "/app/packages/syn-adapters/src/syn_adapters/docker_create_guard/healthcheck.py"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - docker-proxy
 
@@ -308,3 +340,9 @@ networks:
 
 volumes:
   session_inventory_data:
+
+configs:
+  # docker-socket-proxy policy (#1398, #1806). Generated, never edit by hand:
+  # just gen-compose (scripts/docker_socket_proxy_config.py).
+  docker-socket-proxy-haproxy:
+    file: ./generated/docker-socket-proxy.haproxy.cfg.template
