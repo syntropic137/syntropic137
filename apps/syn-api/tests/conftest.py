@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskUsage
+from syn_domain.contexts._shared.disk_space import DiskSpaceGuard, DiskThresholds, DiskUsage
 
 
 class _RoomyDisk:
@@ -27,7 +27,14 @@ def _roomy_workspace_volume(monkeypatch: pytest.MonkeyPatch) -> None:
     to it. Tests about disk space replace this guard with their own.
     """
     guard = DiskSpaceGuard(
-        _RoomyDisk(), degraded_below_percent=10.0, refuse_admission_below_percent=5.0
+        _RoomyDisk(),
+        DiskThresholds(
+            refuse_admission_below_bytes=0,
+            degraded_below_bytes=0,
+            refuse_basis="test",
+            refuse_admission_below_percent=5.0,
+            degraded_below_percent=10.0,
+        ),
     )
     monkeypatch.setattr("syn_api._wiring_admission.get_disk_space_guard", lambda: guard)
 

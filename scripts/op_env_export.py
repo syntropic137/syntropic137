@@ -24,6 +24,7 @@ from syn_shared.settings.constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
     ENV_CODEX_AUTH_JSON,
+    ENV_OPENAI_API_KEY,
     ENV_SYN_PUBLIC_HOSTNAME,
 )
 from syn_shared.settings.session_store import (
@@ -68,6 +69,7 @@ _KEYS = {
     ENV_ANTHROPIC_API_KEY,
     ENV_CLAUDE_CODE_OAUTH_TOKEN,
     ENV_CODEX_AUTH_JSON,
+    ENV_OPENAI_API_KEY,
     ENV_SYN_API_PASSWORD,
     # Central session store. Without these, `just _env-check` reports session
     # capture as unconfigured even when the vault holds it, because this script

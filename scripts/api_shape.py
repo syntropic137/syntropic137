@@ -23,6 +23,7 @@ actually lives under, rather than confirming the key you assumed.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import sys
 import urllib.error
@@ -221,6 +222,11 @@ def _fetch(url: str, timeout: float) -> Any:  # noqa: ANN401 - arbitrary JSON
         content_type = response.headers.get("Content-Type", "")
     try:
         return json.loads(body)
+    except RecursionError:
+        # Raised by the decoder itself, before any search or walk begins, so
+        # the RecursionError handlers in `main` never see it.
+        print("response nests too deeply to decode", file=sys.stderr)
+        raise SystemExit(2) from None
     except json.JSONDecodeError:
         # The SPA catch-all serves HTML for unknown paths and returns 200, so a
         # decode failure here usually means the path is wrong, not the server.
@@ -247,10 +253,19 @@ def main() -> int:
 
     try:
         payload = _fetch(args.url, args.timeout)
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        OSError,
+        ValueError,
+        http.client.HTTPException,
+    ) as exc:
         # All transport failures are 2, not 1. Exit 1 means "looked and it is
         # absent"; a read that never completed did not look, and collapsing
         # the two makes a network blip indistinguishable from a real answer.
+        # HTTPException is listed because most of its subclasses -- a body cut
+        # short (IncompleteRead), a garbled status line (BadStatusLine) -- are
+        # not OSErrors, and an uncaught exception also exits 1.
         print(f"request failed: {exc}", file=sys.stderr)
         return 2
     except UnicodeDecodeError as exc:

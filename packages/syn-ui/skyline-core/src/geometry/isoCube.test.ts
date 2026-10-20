@@ -38,7 +38,7 @@ describe('isoCube', () => {
   })
 
   it('draws the true isometric of the S mark', () => {
-    // One cube of design/brand/s-mark.svg: edge 40, ground centre (38.64, 244).
+    // One cube of design/brand/v2/logo/s-mark.svg: edge 40, ground centre (38.64, 244).
     const p = isoCubePoints({ x: 38.64, y: 244, size: 40 * 0.866, height: 40, ratio: ISO_TRUE })
     const fmt = (pts: Point[]) => pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
     expect(fmt(p.left)).toBe('4.0,204.0 38.6,224.0 38.6,264.0 4.0,244.0')

@@ -32,6 +32,10 @@ from syn_adapters.workspace_backends.service.workspace_lifecycle import (
     create_workspace_aggregate,
     provision_workspace,
 )
+from syn_domain.contexts.orchestration import (
+    HOST_CREDENTIALS,
+    WorkspaceCredentialPolicy,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     CapabilityType,
     IsolationBackendType,
@@ -124,6 +128,18 @@ class WorkspaceServiceConfig:
         )
 
 
+def _refuse_credentials_under(
+    policy: WorkspaceCredentialPolicy, with_sidecar: bool, inject_tokens: bool
+) -> None:
+    """A credential-free (NoCredentials) workspace takes no sidecar and no tokens (#1914)."""
+    if not policy.supplies_credentials and (with_sidecar or inject_tokens):
+        msg = (
+            "A credential-free (NoCredentials) workspace takes no sidecar and no "
+            f"injected tokens (with_sidecar={with_sidecar}, inject_tokens={inject_tokens})"
+        )
+        raise ValueError(msg)
+
+
 class WorkspaceService:
     """Orchestrates workspace lifecycle with all adapters.
 
@@ -143,6 +159,7 @@ class WorkspaceService:
         token_injection: SidecarTokenInjectionAdapter,
         event_stream: EventStreamPort,
         config: WorkspaceServiceConfig | None = None,
+        credential_policy: WorkspaceCredentialPolicy = HOST_CREDENTIALS,
     ) -> None:
         """Initialize WorkspaceService with adapters.
 
@@ -152,8 +169,11 @@ class WorkspaceService:
             token_injection: Adapter for token injection
             event_stream: Adapter for event streaming
             config: Service configuration
+            credential_policy: Whether host credentials reach its workspaces
+                (#1914). The Docker factory takes it from the BackendKit.
         """
         self._isolation = isolation
+        self._credential_policy = credential_policy
         self._sidecar = sidecar
         self._token_injection = token_injection
         self._event_stream = event_stream
@@ -161,6 +181,11 @@ class WorkspaceService:
         #: Mints each workspace's read-only API token (ADR-072). None, or a
         #: disabled service, means workspaces get no token at all.
         self._platform_tokens: PlatformTokenService | None = None
+
+    @property
+    def credential_policy(self) -> WorkspaceCredentialPolicy:
+        """Whether host credentials reach this service's workspaces (#1914)."""
+        return self._credential_policy
 
     @classmethod
     def create(
@@ -171,6 +196,7 @@ class WorkspaceService:
         environment: dict[str, str] | None = None,
         capture_source_instance_id: str | None = None,
         platform_tokens: PlatformTokenService | None = None,
+        credential_policy: WorkspaceCredentialPolicy = HOST_CREDENTIALS,
     ) -> WorkspaceService:
         """Create WorkspaceService with explicit backend selection.
 
@@ -184,6 +210,8 @@ class WorkspaceService:
             token_service: Optional TokenVendingService
             environment: Environment variables for containers
             platform_tokens: Issues each workspace's read-only API token (ADR-072)
+            credential_policy: HostCredentials (today's behaviour) or
+                NoCredentials, fixed for every workspace this service makes (#1914)
 
         Returns:
             Configured WorkspaceService
@@ -199,7 +227,7 @@ class WorkspaceService:
             service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
         """
         if backend == WorkspaceBackend.MEMORY:
-            service = cls._create_memory_impl(config=config)
+            service = cls._create_memory_impl(config=config, credential_policy=credential_policy)
         elif backend == WorkspaceBackend.LOCAL:
             service = cls._create_local_impl(config=config)
         else:
@@ -208,6 +236,7 @@ class WorkspaceService:
                 token_service=token_service,
                 environment=environment,
                 capture_source_instance_id=capture_source_instance_id,
+                credential_policy=credential_policy,
             )
         service._platform_tokens = platform_tokens
         return service
@@ -219,6 +248,7 @@ class WorkspaceService:
         token_service: object | None = None,
         environment: dict[str, str] | None = None,
         capture_source_instance_id: str | None = None,
+        credential_policy: WorkspaceCredentialPolicy = HOST_CREDENTIALS,
     ) -> WorkspaceService:
         """Internal: Create WorkspaceService with Docker backend."""
         from agentic_isolation import SecurityConfig
@@ -227,6 +257,7 @@ class WorkspaceService:
             AgenticEventStreamAdapter,
             AgenticIsolationAdapter,
         )
+        from syn_adapters.workspace_backends.backend_kit import BackendKit
         from syn_adapters.workspace_backends.docker import SharedEnvoyAdapter
         from syn_adapters.workspace_backends.tokens import (
             SidecarTokenInjectionAdapter,
@@ -255,11 +286,14 @@ class WorkspaceService:
         )
 
         # Create adapters using agentic_isolation
-        isolation = AgenticIsolationAdapter(
+        # The Docker BackendKit (#1914): image verification, capture and the
+        # credential policy are decided here, once, for every workspace.
+        kit = BackendKit(
             default_image=cfg.image,
-            security=security,
+            credential_policy=credential_policy,
             capture_source_instance_id=capture_source_instance_id,
         )
+        isolation = AgenticIsolationAdapter(security=security, kit=kit)
         event_stream = AgenticEventStreamAdapter(isolation)
 
         # Shared Envoy proxy for credential injection (ISS-43).
@@ -278,12 +312,14 @@ class WorkspaceService:
             token_injection=token_injection,
             event_stream=event_stream,
             config=cfg,
+            credential_policy=kit.credential_policy,
         )
 
     @classmethod
     def _create_memory_impl(
         cls,
         config: WorkspaceServiceConfig | None = None,
+        credential_policy: WorkspaceCredentialPolicy = HOST_CREDENTIALS,
     ) -> WorkspaceService:
         """Internal: Create WorkspaceService with memory backend (test only)."""
         from syn_adapters.workspace_backends.memory import (
@@ -316,6 +352,7 @@ class WorkspaceService:
             token_injection=token_injection,
             event_stream=event_stream,
             config=cfg,
+            credential_policy=credential_policy,
         )
 
     @classmethod
@@ -487,6 +524,8 @@ class WorkspaceService:
         """
         import uuid
 
+        _refuse_credentials_under(self._credential_policy, with_sidecar, inject_tokens)
+
         workspace_id = str(uuid.uuid4())
 
         aggregate, isolation_config = self._build_workspace_aggregate_and_config(
@@ -524,7 +563,7 @@ class WorkspaceService:
                 types = token_types or [TokenType.ANTHROPIC]
                 await workspace.inject_tokens(types)
 
-            if self._platform_tokens is not None:
+            if self._platform_tokens is not None and self._credential_policy.supplies_credentials:
                 workspace.platform_grant = await self._platform_tokens.grant_workspace(
                     execution_id, platform_access, eval_id
                 )

@@ -20,7 +20,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_1308_the_dec
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 _ROUNDS = ("verify", "reverify", "reverify_2")
-_REVIEWS = [(w, p) for w in ("sdlc/implement-v3", "sdlc/reverify-pr") for p in _ROUNDS]
+_REVIEWS = [
+    (w, p)
+    for w in ("sdlc/implement-v3", "sdlc/implement-v4-precheck", "sdlc/reverify-pr")
+    for p in _ROUNDS
+]
 
 #: Phases whose silence must still advance by order, so a change that declared
 #: every phase would not satisfy the list above.

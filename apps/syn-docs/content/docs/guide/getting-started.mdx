@@ -1,9 +1,9 @@
 ---
 title: Getting Started
-description: Install Syntropic137 and run your first AI agent workflow in under 5 minutes.
+description: Install Syntropic137 and run your first AI agent workflow.
 ---
 
-Syntropic137 orchestrates **coding agent sessions inside isolated Docker workspaces**, giving you scalable, observable, trigger-driven AI agent execution. Each workflow phase runs in its own container with injected credentials, captured output, and token tracking. Cost tracking depends on the harness: Claude phases are priced per run, Codex phases are priced only when the phase names a concrete model id and never report vendor cost.
+Syntropic137 orchestrates **coding agent sessions inside isolated Docker workspaces**, giving you scalable, observable, trigger-driven AI agent execution. Each workflow phase runs in its own container with injected credentials, captured output, and token tracking. Cost tracking depends on the harness: Claude phases are priced per run, Codex phases are priced from their token counts whenever the model has a price entry, including the default `gpt-sol` alias, which resolves to a concrete, priced model id, and never report vendor cost.
 
 Two agent harnesses are supported: **Claude Code** and **OpenAI Codex**. Each phase picks one in the workflow YAML, so a single workflow can implement with one vendor and review with the other. See [Choosing an Agent Harness](/docs/guide/workflows#choosing-an-agent-harness).
 
@@ -12,36 +12,37 @@ Get up and running in a single command: no config files, no YAML, no manual setu
 </Callout>
 
 ```bash title="Terminal"
-npx @syntropic137/setup
-```
-
-This opens an **interactive terminal** with arrow-key navigation, styled prompts, and progress tracking. Choose from available commands or jump straight to a full install with `init`.
-
-## Available Commands
-
-```bash title="Setup CLI"
-npx @syntropic137/setup init        # Full interactive install wizard
-npx @syntropic137/setup status      # Show running services
-npx @syntropic137/setup start       # Start the stack
-npx @syntropic137/setup stop        # Stop the stack
-npx @syntropic137/setup logs        # Tail service logs
-npx @syntropic137/setup update      # Pull latest images and restart
-npx @syntropic137/setup github-app  # Configure GitHub App integration
-npx @syntropic137/setup skills      # Install agent skills (Claude Code, Codex)
-npx @syntropic137/setup reset       # Factory reset (dry run until --yes)
+npx @syntropic137/setup init
 ```
 
 ## Prerequisites
 
-You need three things installed on your machine:
-
-- **Node.js 18+**: for running the setup CLI
-- **Docker**: for isolated agent workspaces
-- **Docker Compose v2.20+**: for orchestrating the service stack
+- **Node.js 22+**: the `syn` CLI declares Node.js 22 or later. The setup CLI alone runs on 20.12+ and stops older versions with a clear message
+- **Docker** with **Docker Compose v2.20+**: for the service stack and the isolated agent workspaces
+- **A Claude credential**: an Anthropic API key, or a Claude subscription token from `claude setup-token`
+- **A GitHub account**: for the GitHub App that lets workflows clone and work on your repos
+- **Codex** *(optional)*: a Codex login, only if you want to run Codex phases
 
 <Callout type="warn">
 Syntropic137 requires Docker Compose v2 (the `docker compose` plugin), not the legacy v1 (`docker-compose`). Check with `docker compose version`.
 </Callout>
+
+## What You Need for Each Capability
+
+Each tier adds to the one before it.
+
+| Tier | You add | You get |
+|------|---------|---------|
+| **Core** | Docker, Node.js 22+, a Claude credential | The stack, the dashboard, observability, the `syn` CLI and the agent skills |
+| **Repos and polling triggers** | A GitHub account, and two clicks: create the GitHub App, install it on your repos | Workflows that clone and work on your repos, and triggers on PRs, pushes, issues and CI results through polling (no public URL needed) |
+| **Codex** | A Codex login, its `~/.codex/auth.json` contents set as `CODEX_AUTH_JSON` in `~/.syntropic137/.env`, or an OpenAI API key set as `OPENAI_API_KEY` there | Codex phases, alongside or instead of Claude phases |
+| **Instant webhooks and remote access** | A Cloudflare account, a domain and a tunnel token | Real-time webhook delivery (about 1s instead of a polling interval), the CI/CD events only webhooks carry, and the dashboard from anywhere |
+
+<Callout type="warn">
+Running a workflow on a repository currently needs the GitHub App, even for a public repository ([#1948](https://github.com/syntropic137/syntropic137/issues/1948)). Core alone gives you the stack, the dashboard and the CLI, but not a repo workflow run yet. Create the App during `init`: adding one to an existing install is not supported yet, so skipping it means a [reset](/docs/guide/setup-cli#reset) and a fresh `init` later.
+</Callout>
+
+For Codex, see [Codex authentication](/docs/guide/workflows#codex-authentication). For webhooks and remote access, see [Tunnels](/docs/guide/tunnels).
 
 ## Install
 
@@ -49,55 +50,80 @@ Syntropic137 requires Docker Compose v2 (the `docker compose` plugin), not the l
 npx @syntropic137/setup init
 ```
 
-The `init` wizard walks you through the full setup step-by-step:
+The `init` wizard walks you through the full setup step by step:
 
 1. **Docker check**: verifies Docker and Compose are available
 2. **Directory setup**: creates `~/.syntropic137/` with config, secrets, and workspace directories
-3. **Secret generation**: creates cryptographically random passwords for Postgres, Redis, and MinIO (stored as `chmod 600` files)
-4. **API key**: prompts for your `ANTHROPIC_API_KEY`. To run codex phases, add `CODEX_AUTH_JSON` to your `.env` afterwards
-5. **GitHub App**: opens your browser to create a GitHub App via manifest flow for webhook-triggered workflows
-6. **Agent skills** *(optional)*: installs the [Syntropic137 agent skills](/docs/guide/agent-skills) for Claude Code and Codex, whichever is on your `PATH`
-7. **Pull & start**: downloads container images and starts the full stack
+3. **Secret generation**: creates cryptographically random passwords for Postgres, Redis, and MinIO, stored as files in a `secrets/` directory only you can read
+4. **Claude credential**: paste an Anthropic API key, or run `claude setup-token` in another terminal and paste the token it prints. The wizard stores it under the right variable for its type
+5. **GitHub App**: say yes, then create the App in the browser window that opens and install it on the repos you want Syntropic137 to work on
+6. **Agent skills**: say yes to install the [Syntropic137 agent skills](/docs/guide/agent-skills) for Claude Code and Codex, whichever is on your `PATH`
+7. **`syn` CLI**: say yes to install the `syn` command line tool globally
+8. **Pull & start**: downloads container images and starts the full stack
 
 <Callout type="info">
-The agent skills step is optional: skip it during setup and add later with `npx @syntropic137/setup skills`. The GitHub App is required for event-driven workflows (self-healing, triggers, etc.).
+Skipped the skills or the CLI? Add them later with `npx @syntropic137/setup skills` and `npx @syntropic137/setup cli`. For a non-interactive install, `--yes` answers yes to the skills and the CLI, and `--install-cli` installs just the CLI (setup 1.0.2 and later).
 </Callout>
 
-Once complete, the dashboard is live at **http://localhost:8137**.
+Once complete, open the dashboard at **http://localhost:8137**.
 
 ## Run Your First Workflow
 
-Install the example research workflow package and run it:
+Add the Syntropic137 marketplace, install the `code-review` workflow, and run it on a pull request in a repo the GitHub App is installed on:
 
 ```bash title="Terminal"
-# Install the starter research workflow from GitHub
-syn workflow install syntropic137/syntropic137 --ref main --path workflows/examples/research-package
+# Register the marketplace and install a workflow from it
+syn marketplace add syntropic137/syntropic137-marketplace
+syn workflow install code-review
 
-# Run it with a task
-syn workflow run research-package-v1 \
-  --task "Investigate event sourcing patterns for building reliable agent systems"
+# Review pull request 42 on owner/repo, whose head branch is my-feature
+syn workflow run code-review -R owner/repo \
+  --input pr_number=42 \
+  --input branch=my-feature
 ```
 
-The workflow executes in an isolated Docker workspace. Watch it in real time on the dashboard or via SSE:
+`-R` (`--repo`) names the repository the workspace clones, and is required for any workflow that works on a repo. Each workflow declares its own inputs: `syn workflow show code-review` lists them. Workflows whose prompts take a free-form task get it with `--task` (`-t`), for example `syn workflow run <workflow-id> -R owner/repo --task "Add retry logic to the client"`. The CLI refuses `--task` for a workflow, like `code-review`, that has nowhere to put it.
+
+<Callout type="info">
+With the agent skills installed, you can ask Claude Code or Codex to do this for you: "add the Syntropic137 marketplace, install code-review and run it on PR 42 of owner/repo".
+</Callout>
+
+## Watch It Run
+
+`syn workflow run` prints the execution ID. Follow the run in any of three ways:
 
 ```bash title="Terminal"
-# Stream execution events
-curl -N http://localhost:8137/api/executions/{execution-id}/stream
+# Dashboard: http://localhost:8137
+
+# Stream live events in the terminal
+syn watch execution <execution-id>
+
+# Phases, cost and sessions so far
+syn execution show <execution-id>
+```
+
+The stream is plain Server-Sent Events, so anything that speaks SSE can follow it too:
+
+```bash title="Terminal"
+curl -N http://localhost:8137/api/v1/sse/executions/<execution-id>
 ```
 
 ## What's Running
 
-After setup, your `~/.syntropic137/` directory contains a Docker Compose stack with these services:
+After setup, `~/.syntropic137/` holds a Docker Compose stack. Only the gateway is published on your machine, at `127.0.0.1:8137`; every other service is reachable only inside the stack's Docker network.
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| `gateway` | 8137 | nginx reverse proxy + dashboard UI |
-| `api` | 8000 | FastAPI: REST API, SSE |
-| `event-store` | 50051 | gRPC event sourcing server |
-| `collector` | 8080 | Agent event ingestion |
-| `timescaledb` | 5432 | PostgreSQL + TimescaleDB |
-| `redis` | 6379 | Caching and pub/sub |
-| `minio` | 9000 | S3-compatible artifact storage |
+| Service | Purpose |
+|---------|---------|
+| `gateway` | nginx reverse proxy and dashboard UI, published at `127.0.0.1:8137` |
+| `api` | FastAPI: REST API and SSE, served under `/api/v1/` through the gateway |
+| `event-store` | gRPC event sourcing server |
+| `collector` | Agent event ingestion |
+| `timescaledb` | PostgreSQL + TimescaleDB |
+| `redis` | Caching and pub/sub |
+| `minio` | S3-compatible artifact storage |
+| `docker-socket-proxy` | Restricted Docker API access for workspace provisioning |
+| `envoy-proxy`, `token-injector` | Workspace egress proxy and credential injection |
+| `cloudflared` | Cloudflare tunnel, only when the `tunnel` profile is enabled |
 
 ## Next Steps
 

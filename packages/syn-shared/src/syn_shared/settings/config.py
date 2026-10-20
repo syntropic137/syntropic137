@@ -23,14 +23,17 @@ from syn_shared.agents import (
     CodexModelAlias,
     ModelAlias,
     PhaseModelDefaults,
+    resolve_claude_model,
 )
+from syn_shared.codex_auth_file import CODEX_AUTH_FILE_FORMAT
+from syn_shared.codex_credential_port import CodexCredentialFileKind
 from syn_shared.env_constants import ENV_CODEX_AUTH_JSON
 
 if TYPE_CHECKING:
     from syn_shared.settings.dependency_seed import DependencySeedSettings
     from syn_shared.settings.dev_tooling import DevToolingSettings
     from syn_shared.settings.disk import DiskSettings
-    from syn_shared.settings.execution import ExecutionSettings
+    from syn_shared.settings.execution import ExecutionSettings, ExecutorPoolSettings
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.image_verification import ImageVerificationSettings
     from syn_shared.settings.platform_access import PlatformAccessSettings
@@ -309,10 +312,32 @@ class Settings(BaseSettings):
     codex_auth_json: SecretStr | None = Field(
         default=None,
         description=(
-            "Full contents of Codex ~/.codex/auth.json for ChatGPT subscription auth. "
+            "Full contents of Codex ~/.codex/auth.json (normally a ChatGPT subscription "
+            "login; an API-key login's auth.json also works). Takes priority over "
+            "OPENAI_API_KEY when both are set. "
             "Injected file-only during setup and never passed through argv or logs."
         ),
     )
+
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "OpenAI API key for codex phases. Used only when CODEX_AUTH_JSON is not set "
+            "(CODEX_AUTH_JSON wins when both are). Converted into codex's API-key "
+            "auth.json and injected file-only during setup, like CODEX_AUTH_JSON: it is "
+            "never placed in the agent environment, argv, or logs. "
+            "Get from: https://platform.openai.com/api-keys."
+        ),
+    )
+
+    @field_validator("openai_api_key", mode="after")
+    @classmethod
+    def _strip_openai_api_key(cls, value: SecretStr | None) -> SecretStr | None:
+        """Drop surrounding whitespace from a pasted key; treat a blank one as unset."""
+        if value is None:
+            return None
+        raw = value.get_secret_value().strip()
+        return SecretStr(raw) if raw else None
 
     @field_validator("codex_auth_json", mode="after")
     @classmethod
@@ -368,6 +393,16 @@ class Settings(BaseSettings):
 
         if not isinstance(parsed, dict):
             msg = f"{ENV_CODEX_AUTH_JSON} must be a JSON object, got {type(parsed).__name__}"
+            raise ValueError(msg)
+
+        # An API-key auth.json with no usable key would pass as configured and
+        # then fail inside codex (#1971). The message names nothing from the file.
+        if CODEX_AUTH_FILE_FORMAT.classify(raw).kind is CodexCredentialFileKind.API_KEY_WITHOUT_KEY:
+            msg = (
+                f"{ENV_CODEX_AUTH_JSON} is an API-key auth.json without a usable "
+                "OPENAI_API_KEY (missing, null or blank). Set OPENAI_API_KEY instead, "
+                f"or put a complete auth.json in {ENV_CODEX_AUTH_JSON}."
+            )
             raise ValueError(msg)
 
         # Return the normalised SOURCE TEXT, not a re-serialisation of `parsed`.
@@ -432,6 +467,8 @@ class Settings(BaseSettings):
                 f"CLI cannot run it. Use a Claude alias such as {ModelAlias.OPUS!r}."
             )
             raise ValueError(msg)
+        # Refuse a retired model at startup, not at the first install.
+        resolve_claude_model(value)
         return value
 
     @property
@@ -885,6 +922,13 @@ class Settings(BaseSettings):
         from syn_shared.settings.execution import ExecutionSettings
 
         return ExecutionSettings()
+
+    @property
+    def executor_pool(self) -> ExecutorPoolSettings:
+        """The Executor Pool this process's ExecutionHost joins (ADR-072 D13)."""
+        from syn_shared.settings.execution import ExecutorPoolSettings
+
+        return ExecutorPoolSettings()
 
     # =========================================================================
     # DISK (#1560) - free space on the workspace volume

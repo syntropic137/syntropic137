@@ -15,20 +15,23 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Mapping, Sequence
     from datetime import datetime
 
     import asyncpg
 
     from syn_domain.agent_event_span import EventSpan
+    from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
     from syn_shared.observed_model import RecordedModel
 
 from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions import (
     CostCalculator,
+    SessionCostQueryService,
     recorded_model_from_row,
     recorded_model_group_by,
     recorded_model_select,
+    zero_usage_group_by,
 )
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
     UNATTRIBUTED_MODEL,
@@ -99,6 +102,9 @@ from syn_shared.pricing import parse_vendor_cost
 # unpriced row. The result undercounts: tokens from both rows, cost from
 # one. Splitting on the NULL flag gives the unpriced rows their own group,
 # which _price_session_summary_row then prices from its own tokens.
+#
+# An unreported summary is further split per SESSION: its cost is what that
+# session's turns priced to (#1420), so each such row has to name exactly one.
 _SESSION_SUMMARY_QUERY = f"""
 SELECT
     {recorded_model_select()},
@@ -117,7 +123,8 @@ SELECT
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
   AND time >= $3 AND time < $4
-GROUP BY {recorded_model_group_by()}, ((data->>'total_cost_usd') IS NULL)
+GROUP BY {recorded_model_group_by()}, ((data->>'total_cost_usd') IS NULL),
+    CASE WHEN (data->>'total_cost_usd') IS NULL THEN session_id END
 """
 
 # Fallback: aggregate from individual token_usage events when no
@@ -143,7 +150,7 @@ SELECT
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
   AND time >= $3 AND time < $4
-GROUP BY {recorded_model_group_by()}
+GROUP BY {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
 # The true start of an execution: the earliest event of ANY type.
@@ -203,12 +210,14 @@ SELECT
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
     SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
     SUM((data->>'total_cost_usd')::numeric) as sdk_cost,
+    ARRAY_AGG(DISTINCT session_id) as session_ids,
     COUNT(*) as observation_count
 FROM agent_events
 WHERE execution_id = $1
   AND event_type = $2
   AND time >= $3 AND time < $4
-GROUP BY phase_id, {recorded_model_group_by()}, ((data->>'total_cost_usd') IS NULL)
+GROUP BY phase_id, {recorded_model_group_by()}, ((data->>'total_cost_usd') IS NULL),
+    CASE WHEN (data->>'total_cost_usd') IS NULL THEN session_id END
 """
 
 
@@ -378,14 +387,19 @@ def price_grouped_token_usage(
         started_at, end_at = _extend_time_range(started_at, end_at, row)
 
         model = _resolve_row_model(row)
-        pricing_model = model.pricing_model
-        pricing = cost_calculator.resolve_pricing(pricing_model)
-        if pricing is None or pricing_model is None:
+        # The entry point replay prices each turn with, so a zero-token turn
+        # is a priced zero here too, whatever its model (#890, #1420).
+        priced = cost_calculator.calculate_token_cost(
+            input_tokens=group.input_tokens,
+            output_tokens=group.output_tokens,
+            cache_creation=group.cache_creation,
+            cache_read=group.cache_read,
+            model=model.pricing_model,
+        )
+        if priced.cost is None:
             unpriced_observation_count += _row_observation_count(row)
             continue
-        group_cost = pricing.calculate_cost(
-            group.input_tokens, group.output_tokens, group.cache_creation, group.cache_read
-        )
+        group_cost = priced.cost
         total_cost += group_cost
         key = model.cost_key
         cost_by_model[key] = cost_by_model.get(key, Decimal("0")) + group_cost
@@ -417,10 +431,78 @@ class _RowPricing:
     model: RecordedModel | None
     """The row's classified model; None only when the row went unpriced."""
     unpriced_count: int
+    turns_cost_by_model: dict[str, Decimal] | None = None
+    """Set when the cost is its session's turns' (#1420): their own breakdown."""
+
+    def cost_by_model(self) -> dict[str, Decimal]:
+        """Where this row's cost goes, keyed by what RAN; empty when unpriced."""
+        if self.turns_cost_by_model is not None:
+            return self.turns_cost_by_model
+        if self.cost is None:
+            return {}
+        # Every priced row is attributed, the unreported ones to the unknown
+        # bucket, so the breakdown sums to the total it decomposes (#812).
+        key = self.model.cost_key if self.model is not None else UNATTRIBUTED_MODEL
+        return {key: self.cost}
+
+
+class UnreportedSessionCosts:
+    """What each session with an unreported summary cost, per the session reader.
+
+    A summary with no ``total_cost_usd`` is costed by the agent_sessions rule
+    (``cost_under_unreported_summary``): what the session's turns priced to,
+    never its own totals re-priced under its single model (#1420). The
+    session reader already applies that rule, so the execution readers take
+    its answer per session rather than restating it.
+
+    Each session settles once per roll-up: a second unreported row for the same
+    session adds nothing, as a repeated summary adds nothing on replay.
+    """
+
+    def __init__(self, sessions: Mapping[str, SessionCost] | None = None) -> None:
+        self._sessions = dict(sessions or {})
+        self._settled: set[str] = set()
+
+    def another_rollup(self) -> UnreportedSessionCosts:
+        """The same answers, for a separate roll-up (the phase map, the total)."""
+        return UnreportedSessionCosts(self._sessions)
+
+    def settle(self, row: asyncpg.Record, model: RecordedModel) -> _RowPricing | None:
+        """Cost an unreported row from its sessions' turns; None if none is known."""
+        ids = [sid for sid in row.get("session_ids") or [] if sid in self._sessions]
+        if not ids:
+            return None
+        total = Decimal("0")
+        by_model: dict[str, Decimal] = {}
+        unpriced = 0
+        for sid in ids:
+            if sid in self._settled:
+                continue
+            self._settled.add(sid)
+            session = self._sessions[sid]
+            total += session.total_cost_usd
+            unpriced += session.unpriced_observation_count
+            for key, cost in session.cost_by_model.items():
+                by_model[key] = by_model.get(key, Decimal("0")) + cost
+        return _RowPricing(
+            cost=total, model=model, unpriced_count=unpriced, turns_cost_by_model=by_model
+        )
+
+
+def unreported_session_ids(rows: Iterable[asyncpg.Record]) -> list[str]:
+    """The sessions whose summary rows report no cost, so need their turns' (#1420)."""
+    ids: dict[str, None] = {}
+    for row in rows:
+        if parse_vendor_cost(row.get("sdk_cost")) is None:
+            ids.update(dict.fromkeys(row.get("session_ids") or []))
+    return list(ids)
 
 
 def _price_session_summary_row(
-    row: asyncpg.Record, group: _GroupTokens, cost_calculator: CostCalculator
+    row: asyncpg.Record,
+    group: _GroupTokens,
+    cost_calculator: CostCalculator,
+    unreported: UnreportedSessionCosts | None = None,
 ) -> _RowPricing:
     """Price one session_summary row: authoritative ``sdk_cost`` first, else per-model calc.
 
@@ -435,6 +517,8 @@ def _price_session_summary_row(
     sdk_cost = parse_vendor_cost(row.get("sdk_cost"))
     if sdk_cost is not None:
         return _RowPricing(cost=sdk_cost, model=model, unpriced_count=0)
+    if unreported is not None and (settled := unreported.settle(row, model)) is not None:
+        return settled
 
     pricing_model = model.pricing_model
     pricing = cost_calculator.resolve_pricing(pricing_model)
@@ -473,7 +557,11 @@ class PhaseCosts:
     """
 
 
-def price_phase_rows(rows: Sequence[asyncpg.Record], cost_calculator: CostCalculator) -> PhaseCosts:
+def price_phase_rows(
+    rows: Sequence[asyncpg.Record],
+    cost_calculator: CostCalculator,
+    unreported: UnreportedSessionCosts | None = None,
+) -> PhaseCosts:
     """Accumulate per-phase cost from split (phase, model, priced?) groups.
 
     Uses the same per-row rule as the execution total: authoritative
@@ -499,23 +587,28 @@ def price_phase_rows(rows: Sequence[asyncpg.Record], cost_calculator: CostCalcul
     by_model: dict[str, dict[str, Decimal]] = {}
     for row in rows:
         phase_id = row["phase_id"] or UNATTRIBUTED_PHASE_ID
-        priced = _price_session_summary_row(row, _extract_group_tokens(row), cost_calculator)
-        if priced.cost is None:
+        priced = _price_session_summary_row(
+            row, _extract_group_tokens(row), cost_calculator, unreported
+        )
+        if priced.unpriced_count:
             unpriced[phase_id] = unpriced.get(phase_id, 0) + priced.unpriced_count
+        if priced.cost is None:
             continue
         costs[phase_id] = costs.get(phase_id, Decimal("0")) + priced.cost
         # A priced row with NO model still spent money. Bucketing it under a
         # sentinel keeps sum(models_by_phase[p]) == cost_by_phase[p]; dropping
         # it made the breakdown quietly sum to less than the total it is
         # supposed to decompose.
-        model = priced.model.cost_key if priced.model is not None else UNATTRIBUTED_MODEL
         phase_models = by_model.setdefault(phase_id, {})
-        phase_models[model] = phase_models.get(model, Decimal("0")) + priced.cost
+        for model, cost in priced.cost_by_model().items():
+            phase_models[model] = phase_models.get(model, Decimal("0")) + cost
     return PhaseCosts(cost_by_phase=costs, unpriced_by_phase=unpriced, models_by_phase=by_model)
 
 
 def price_grouped_session_summary(
-    rows: list[asyncpg.Record], cost_calculator: CostCalculator
+    rows: list[asyncpg.Record],
+    cost_calculator: CostCalculator,
+    unreported: UnreportedSessionCosts | None = None,
 ) -> GroupedSessionSummary:
     """Merge model-grouped session_summary rows into one priced aggregate.
 
@@ -548,15 +641,13 @@ def price_grouped_session_summary(
         duration_ms_raw += int(row.get("duration_ms_val") or 0)
         total_turns += int(row.get("total_turns") or 0)
 
-        priced = _price_session_summary_row(row, group, cost_calculator)
+        priced = _price_session_summary_row(row, group, cost_calculator, unreported)
+        unpriced_observation_count += priced.unpriced_count
         if priced.cost is None:
-            unpriced_observation_count += priced.unpriced_count
             continue
         total_cost += priced.cost
-        # Every priced row is attributed, the unreported ones to the unknown
-        # bucket, so the breakdown sums to the total it decomposes (#812).
-        key = priced.model.cost_key if priced.model is not None else UNATTRIBUTED_MODEL
-        cost_by_model[key] = cost_by_model.get(key, Decimal("0")) + priced.cost
+        for key, cost in priced.cost_by_model().items():
+            cost_by_model[key] = cost_by_model.get(key, Decimal("0")) + cost
 
     return GroupedSessionSummary(
         input_tokens=totals.input_tokens,
@@ -601,14 +692,16 @@ class TimescaleExecutionCostQuery:
             _TOKEN_USAGE_FALLBACK_QUERY, execution_id, TOKEN_USAGE, span.lower, span.upper
         )
 
-    def _price_session_summary_groups(self, rows: list[asyncpg.Record]) -> _PricedTokenUsage:
+    def _price_session_summary_groups(
+        self, rows: list[asyncpg.Record], unreported: UnreportedSessionCosts
+    ) -> _PricedTokenUsage:
         """Merge model-grouped session_summary rows into one priced aggregate.
 
         Delegates to ``price_grouped_session_summary`` (shared with
         ``ExecutionCostQueryService``) and repackages the result as
         ``_TokenData`` for this class's internal pipeline.
         """
-        grouped = price_grouped_session_summary(rows, self._cost_calculator)
+        grouped = price_grouped_session_summary(rows, self._cost_calculator, unreported)
         data = _TokenData(
             input_tokens=grouped.input_tokens,
             output_tokens=grouped.output_tokens,
@@ -691,12 +784,21 @@ class TimescaleExecutionCostQuery:
 
     async def _query_cost_by_phase(
         self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str, span: EventSpan
-    ) -> PhaseCosts:
-        """Query per-phase cost breakdown from session_summary events."""
-        phase_rows = await conn.fetch(
+    ) -> list[asyncpg.Record]:
+        """Query per-phase cost rows from session_summary events."""
+        return await conn.fetch(
             _COST_BY_PHASE_QUERY, execution_id, SESSION_SUMMARY, span.lower, span.upper
         )
-        return price_phase_rows(phase_rows, self._cost_calculator)
+
+    async def _unreported_session_costs(
+        self, summary_rows: list[asyncpg.Record]
+    ) -> UnreportedSessionCosts:
+        """The session reader's cost for each session whose summary reports none (#1420)."""
+        ids = unreported_session_ids(summary_rows)
+        if not ids:
+            return UnreportedSessionCosts()
+        sessions = await SessionCostQueryService(self._pool, self._cost_calculator).get_many(ids)
+        return UnreportedSessionCosts(sessions)
 
     async def _resolve_token_rows(
         self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str, span: EventSpan
@@ -791,28 +893,39 @@ class TimescaleExecutionCostQuery:
                 _EXECUTION_START_QUERY, execution_id, span.lower, span.upper
             )
 
-            if has_summary:
-                priced = self._price_session_summary_groups(token_rows)
-                phase_costs = await self._query_cost_by_phase(conn, execution_id, span)
-            else:
-                priced = self._price_token_usage_groups(token_rows)
-                phase_costs = PhaseCosts(cost_by_phase={}, unpriced_by_phase={})
+            if not has_summary:
+                in_progress = self._price_token_usage_groups(token_rows)
+                return self._build_execution_cost(
+                    execution_id=execution_id,
+                    started_at=execution_started_at,
+                    data=in_progress.data,
+                    total_cost=in_progress.total_cost,
+                    duration_ms=self._calculate_duration(in_progress.data),
+                    tool_count=tool_count,
+                    turn_count=await self._query_turn_count(
+                        conn, execution_id, in_progress.data, span
+                    ),
+                    phase_costs=PhaseCosts(cost_by_phase={}, unpriced_by_phase={}),
+                    cost_by_model=in_progress.cost_by_model,
+                    unpriced_observation_count=in_progress.unpriced_observation_count,
+                )
+            phase_rows = await self._query_cost_by_phase(conn, execution_id, span)
 
-            data = priced.data
-            total_cost = priced.total_cost
-            turn_count = await self._query_turn_count(conn, execution_id, data, span)
-            cost_by_model = priced.cost_by_model
-            unpriced_observation_count = priced.unpriced_observation_count
-
-            return self._build_execution_cost(
-                execution_id=execution_id,
-                started_at=execution_started_at,
-                data=data,
-                total_cost=total_cost,
-                duration_ms=self._calculate_duration(data),
-                tool_count=tool_count,
-                turn_count=turn_count,
-                phase_costs=phase_costs,
-                cost_by_model=cost_by_model,
-                unpriced_observation_count=unpriced_observation_count,
-            )
+        # Outside the connection above: the session reader acquires its own.
+        unreported = await self._unreported_session_costs(token_rows)
+        priced = self._price_session_summary_groups(token_rows, unreported)
+        data = priced.data
+        return self._build_execution_cost(
+            execution_id=execution_id,
+            started_at=execution_started_at,
+            data=data,
+            total_cost=priced.total_cost,
+            duration_ms=self._calculate_duration(data),
+            tool_count=tool_count,
+            turn_count=data.total_turns,
+            phase_costs=price_phase_rows(
+                phase_rows, self._cost_calculator, unreported.another_rollup()
+            ),
+            cost_by_model=priced.cost_by_model,
+            unpriced_observation_count=priced.unpriced_observation_count,
+        )

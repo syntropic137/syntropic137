@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from agentic_isolation.contract import (
     MISSING,
+    TERMINAL_STATES,
     LaunchMarker,
     ObservationGap,
     OperationSpec,
@@ -63,8 +64,14 @@ _PAGE_BYTES = 1 << 20
 #: How long one ``observe`` may wait for output before returning an empty page.
 _OBSERVE_WAIT_SECONDS = 1.0
 
-#: Given to the operation to exit on its own when the reader stops early.
+#: Given to the operation to exit on its own when it is cancelled - by an
+#: interrupt, or because the reader stopped early - before the provider KILLs it.
 _CANCEL_GRACE_SECONDS = 5.0
+#: What a cancel answer must say for the process to be known over. ``failed``
+#: is not among them: after a cancel it is how the provider reports a stop it
+#: could not confirm (the container may still be running), so it is never read
+#: as stopped (#918).
+_STOPPED_STATES = TERMINAL_STATES - {"failed"}
 
 _CONTAINER_WORKSPACE = "/workspace"
 
@@ -168,6 +175,8 @@ class AgenticEventStreamAdapter:
         self._last_exit_code: int | None = None
         self._last_signal_death: SignalDeath | None = None
         self._last_lost_bytes: int | None = None
+        # Keyed by workspace: one adapter serves every workspace of its service.
+        self._running: dict[str, tuple[SupportsOperations, OperationRef]] = {}
 
     @property
     def last_signal_death(self) -> SignalDeath | None:
@@ -264,6 +273,7 @@ class AgenticEventStreamAdapter:
             credentials.release(parked)
         logger.debug("Started stream operation %s (cmd=%s)", ref.operation_id, command)
 
+        self._running[handle.isolation_id] = (provider, ref)
         try:
             async for line in self._observe(provider, ref):
                 yield line
@@ -283,7 +293,46 @@ class AgenticEventStreamAdapter:
                     ref.operation_id,
                 )
             raise
+        finally:
+            if self._running.get(handle.isolation_id) == (provider, ref):
+                del self._running[handle.isolation_id]
         await self._settle(status, spec)
+
+    async def cancel_running(self, handle: IsolationHandle) -> bool:
+        """Stop the operation streaming in ``handle``'s workspace; True once it is over.
+
+        Bounded by the provider, not by the workload's cooperation: it TERMs
+        the operation's process group, KILLs it after the grace, and stops the
+        container when even that is not confirmed. An agent that traps SIGINT
+        and SIGTERM therefore still ends (#918). The stream itself is left to
+        its reader, which settles the cancelled operation when it is closed.
+        """
+        running = self._running.get(handle.isolation_id)
+        if running is None:
+            logger.error(
+                "Cancel asked for workspace %s, but no stream operation is running there",
+                handle.isolation_id,
+            )
+            return False
+        provider, ref = running
+        try:
+            status = await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS)
+        except Exception:
+            logger.exception(
+                "Cancelling stream operation %s failed: the agent may still be running",
+                ref.operation_id,
+            )
+            return False
+        if status.state not in _STOPPED_STATES:
+            logger.error(
+                "Cancelled stream operation %s is %s, not confirmed stopped: "
+                "the agent may still be running",
+                ref.operation_id,
+                status.state,
+            )
+            return False
+        logger.info("Stream operation %s cancelled (%s)", ref.operation_id, status.state)
+        return True
 
     async def _observe(self, provider: SupportsOperations, ref: OperationRef) -> AsyncIterator[str]:
         decoder = LineDecoder()

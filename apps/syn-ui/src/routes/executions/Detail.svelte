@@ -309,7 +309,12 @@
             {@const total = phaseTokens(p)}
             {@const target = phaseRowTarget(p)}
             {@const skills = phaseSkillUseText(p)}
-            <li class="sky-exec__phase" data-linked={target.kind === 'session' ? '' : undefined} title={reasonOf(target)}>
+            <li
+              class="sky-exec__phase"
+              data-linked={target.kind === 'session' ? '' : undefined}
+              data-running={statusSemantics(p.status).kind === 'running' ? '' : undefined}
+              title={reasonOf(target)}
+            >
               <div class="sky-exec__phase-head">
                 <span class="sky-exec__num">{phaseNumber(i)}</span>
                 {#if target.kind === 'session'}
@@ -573,6 +578,24 @@
   }
   .sky-exec__phase :global(.sky-run-tiles__pair) {
     min-width: 0;
+  }
+  /* The phase running now is backlit, and breathes where motion is welcome (#1925); a badge alone blended in. */
+  .sky-exec__phase[data-running] {
+    background: var(--sky-color-accent-soft);
+    box-shadow: inset 0 0 0 var(--ds-border-width) var(--sky-color-accent-ring);
+    color: var(--ds-color-fg);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .sky-exec__phase[data-running] {
+      animation: sky-exec-phase-glow 1.8s var(--sky-ease-in-out) infinite alternate;
+    }
+  }
+  @keyframes sky-exec-phase-glow {
+    to {
+      box-shadow:
+        inset 0 0 0 var(--ds-border-width) var(--sky-color-accent-ring),
+        0 0 var(--ds-space-4) var(--sky-color-accent-ring);
+    }
   }
   .sky-exec__phase[data-pending] {
     opacity: 0.7;

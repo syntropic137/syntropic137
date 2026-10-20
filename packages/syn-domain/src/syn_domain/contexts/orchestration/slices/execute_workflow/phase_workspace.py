@@ -79,6 +79,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.evidence_heads import (
+        EvidenceHeadObserver,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
         ExecutionJournal,
     )
@@ -117,6 +120,7 @@ class PhaseWorkspace:
         runtime: PhaseRuntime,
         journal: ExecutionJournal,
         inputs: dict[str, Any],
+        evidence_heads: EvidenceHeadObserver | None = None,
     ) -> None:
         self._session_repo = session_repository
         self._workspace_service = workspace_service
@@ -135,6 +139,8 @@ class PhaseWorkspace:
         #: executions: this object is built against one run's collaborators and
         #: must not be able to see another run's inputs.
         self._inputs = inputs
+        #: None when no forge is wired: collection then records no heads.
+        self._evidence_heads = evidence_heads
 
     def _collector(self) -> ArtifactCollector:
         """One collector shape, built the same way for every path through here."""
@@ -416,5 +422,9 @@ class PhaseWorkspace:
         all_artifact_ids.extend(result.artifact_ids)
         self._runtime.record_artifacts(todo.phase_id, result.artifact_ids)
         phase_outputs.record(todo.phase_id, result.first_content, result.files)
+        if self._evidence_heads is not None:
+            # Before the aggregate is told, so the forge's heads are a fact on
+            # the event it records rather than I/O inside it (plan §A.2).
+            result.command.observed(await self._evidence_heads.observe(aggregate, todo.phase_id))
         aggregate.artifacts_collected(result.command)
         await self._journal.append(aggregate)

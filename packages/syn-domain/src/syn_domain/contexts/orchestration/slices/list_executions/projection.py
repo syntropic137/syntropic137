@@ -396,6 +396,12 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
         executions.sort(key=lambda e: e.started_at or "", reverse=True)
         return executions
 
+    async def get_by_id(self, execution_id: str) -> WorkflowExecutionSummary | None:
+        """One execution by its id, a primary-key read; None when it has no row."""
+        documents = await read_by_keys(self._store, self.PROJECTION_NAME, [execution_id])
+        document = documents.get(execution_id)
+        return None if document is None else WorkflowExecutionSummary.from_dict(dict(document))
+
     async def applied_starts(self, execution_ids: Sequence[str]) -> set[str]:
         """Which of ``execution_ids`` this read model applied the start of, in one query.
 

@@ -1,0 +1,74 @@
+# S2 spike broker (#1735): the D4 GitHub routes, exercised against a fake
+# GitHub. Not the production config: docker/sidecar-proxy/envoy.yaml gains
+# these routes in PR 4, with the token-injector as the authorizer.
+#
+# - :443 terminates TLS for github.com and api.github.com with a certificate
+#   from the broker CA. gh stays on github.com (see github_presentation).
+# - :8081 is the plaintext git authority git reaches through insteadOf.
+static_resources:
+  listeners:
+    - name: github_tls
+      address: {socket_address: {address: 0.0.0.0, port_value: 443}}
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain: {filename: /certs/broker.pem}
+                    private_key: {filename: /certs/broker.key}
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config: &hcm
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: github
+                codec_type: AUTO
+                route_config:
+                  virtual_hosts:
+                    - name: github
+                      domains: ["github.com", "github.com:443", "api.github.com", "api.github.com:443",
+                                "github-git.broker", "github-git.broker:8081"]
+                      routes:
+                        - match: {prefix: "/"}
+                          route: {cluster: fake_github, timeout: 120s}
+                    - name: blocked
+                      domains: ["*"]
+                      routes:
+                        - match: {prefix: "/"}
+                          direct_response: {status: 403}
+                http_filters:
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      http_service:
+                        server_uri: {uri: "http://authorizer:9002", cluster: authorizer, timeout: 5s}
+                        authorization_request:
+                          allowed_headers:
+                            patterns: [{exact: host}, {exact: authorization}]
+                        authorization_response:
+                          allowed_upstream_headers:
+                            patterns: [{exact: authorization}]
+                          allowed_client_headers:
+                            patterns: [{exact: www-authenticate}, {exact: content-type}]
+                      failure_mode_allow: false
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+    - name: github_git
+      address: {socket_address: {address: 0.0.0.0, port_value: 8081}}
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config: *hcm
+  clusters:
+    - name: fake_github
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: fake_github
+        endpoints: [{lb_endpoints: [{endpoint: {address: {socket_address: {address: fake-github, port_value: 8080}}}}]}]
+    - name: authorizer
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: authorizer
+        endpoints: [{lb_endpoints: [{endpoint: {address: {socket_address: {address: authorizer, port_value: 9002}}}}]}]

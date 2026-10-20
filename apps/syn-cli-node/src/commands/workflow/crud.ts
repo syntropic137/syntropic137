@@ -13,6 +13,7 @@ import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
 import { detectFormat, resolvePackage } from "../../packages/resolver.js";
+import { printSkippedFiles } from "./install.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -378,7 +379,8 @@ type WorkflowValidation = {
 function resolvePackageForValidation(pkgPath: string): { fmt: string; workflows: PackageWorkflows } {
   try {
     const fmt = detectFormat(pkgPath);
-    const { workflows } = resolvePackage(pkgPath);
+    const { workflows, skipped } = resolvePackage(pkgPath);
+    printSkippedFiles(skipped);
     return { fmt, workflows };
   } catch (err) {
     printError(err instanceof Error ? err.message : String(err));

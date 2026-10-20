@@ -20,6 +20,7 @@ enough here.
 
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -28,9 +29,17 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from syn_api.routes.workflows.queries import _yaml_phase_lines
-from syn_api.types import PhaseDefinitionResponse, PhaseRefResponse, WorkflowDetail
-from syn_domain.contexts.orchestration._shared.workflow_definition import PhaseYamlDefinition
+from syn_api.routes.workflows.queries import _build_package_files, _yaml_phase_lines
+from syn_api.types import (
+    InputDeclarationResponse,
+    PhaseDefinitionResponse,
+    PhaseRefResponse,
+    WorkflowDetail,
+)
+from syn_domain.contexts.orchestration._shared.workflow_definition import (
+    PhaseYamlDefinition,
+    WorkflowDefinition,
+)
 from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
@@ -129,6 +138,25 @@ def _parsed() -> Mapping[str, object]:
     (phase,) = document["phases"]
     assert isinstance(phase, dict)
     return phase
+
+
+def _reinstall(detail: WorkflowDetail) -> WorkflowDefinition:
+    """Export the package to disk and load it back through the real installer path.
+
+    `WorkflowDefinition.from_file` is what install runs, so this is the
+    consumer of the export rather than a parse of the text it wrote.
+    """
+    files: dict[str, str] = {}
+    _build_package_files(detail, files)
+
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        for rel, content in files.items():
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+
+        return WorkflowDefinition.from_file(root / "workflow.yaml")
 
 
 class TestTheExportedPhaseParsesBack:
@@ -292,13 +320,6 @@ class TestTheLoaderAcceptsWhatWeEmit:
         package disagreed and the package could not be installed. Only a test
         that writes the manifest and loads it back can see that.
         """
-        import tempfile
-
-        from syn_api.routes.workflows.queries import _build_package_files
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
-        )
-
         detail = _valid_workflow_detail()
         files: dict[str, str] = {}
         _build_package_files(detail, files)
@@ -328,25 +349,9 @@ class TestTheLoaderAcceptsWhatWeEmit:
 
     def test_tags_survive_export_and_reinstall(self) -> None:
         """An exported workflow re-installs with its tags, not without them (#967)."""
-        import tempfile
-
-        from syn_api.routes.workflows.queries import _build_package_files
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
+        loaded = _reinstall(
+            _valid_workflow_detail().model_copy(update={"tags": ["eval-a", "nightly"]})
         )
-
-        detail = _valid_workflow_detail().model_copy(update={"tags": ["eval-a", "nightly"]})
-        files: dict[str, str] = {}
-        _build_package_files(detail, files)
-
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            for rel, content in files.items():
-                target = root / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(content, encoding="utf-8")
-
-            loaded = WorkflowDefinition.from_file(root / "workflow.yaml")
 
         assert list(loaded.tags) == ["eval-a", "nightly"]
 
@@ -357,32 +362,14 @@ class TestTheLoaderAcceptsWhatWeEmit:
         `1.5` and `true` are valid eval ids that bare YAML would read back as a
         float and a bool; the export must quote them.
         """
-        import tempfile
-
-        from syn_api.routes.workflows.queries import _build_package_files
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            WorkflowDefinition,
+        loaded = _reinstall(
+            _valid_workflow_detail().model_copy(update={"default_eval_id": eval_id})
         )
-
-        detail = _valid_workflow_detail().model_copy(update={"default_eval_id": eval_id})
-        files: dict[str, str] = {}
-        _build_package_files(detail, files)
-
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            for rel, content in files.items():
-                target = root / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(content, encoding="utf-8")
-
-            loaded = WorkflowDefinition.from_file(root / "workflow.yaml")
 
         assert loaded.default_eval_id is not None
         assert str(loaded.default_eval_id) == eval_id
 
     def test_no_default_eval_exports_no_key(self) -> None:
-        from syn_api.routes.workflows.queries import _build_package_files
-
         files: dict[str, str] = {}
         _build_package_files(_valid_workflow_detail(), files)
 
@@ -1024,3 +1011,102 @@ class TestPresentNullIsNotAbsent:
         assert declared.agent_sandbox is None and omitted.agent_sandbox is None
         assert declared.declares_agent("sandbox")
         assert not omitted.declares_agent("sandbox")
+
+
+# ---------------------------------------------------------------------------
+# #1055: the `inputs:` block round-trips as the strings that were stored
+# ---------------------------------------------------------------------------
+#
+# Every value in this corpus is a STRING that bare YAML resolves to something
+# else. Exported unquoted, `default: false` reinstalled as a bool and the
+# loader refused the whole package (`inputs.3.default  Input should be a valid
+# string`), which is how this was found in production. A plain value like
+# `main` would pass unquoted too, so it proves nothing and is not in the list.
+_HAZARD_SCALARS: list[str] = [
+    "false",
+    "true",
+    "no",
+    "on",
+    "null",
+    "~",
+    "123",
+    "1.5",
+    "2026-01-01",
+    "",
+    "a: b",
+    "#x",
+    "*anchor",
+    "line one\nline two",
+]
+_NON_EMPTY_HAZARD_SCALARS = [v for v in _HAZARD_SCALARS if v]
+
+
+def _workflow_with_inputs(*declarations: InputDeclarationResponse) -> WorkflowDetail:
+    return _valid_workflow_detail().model_copy(update={"input_declarations": list(declarations)})
+
+
+class TestExportedInputsReinstallAsTheSameStrings:
+    """The `inputs:` block meets the same standard as the phase scalars (#1055).
+
+    Each test exports a package, loads it back through `WorkflowDefinition`,
+    and compares against the stored string. Asserting install success alone
+    would pass on a value that reinstalled as a different string.
+    """
+
+    @pytest.mark.parametrize("value", _HAZARD_SCALARS)
+    def test_a_default_reads_back_as_the_stored_string(self, value: str) -> None:
+        loaded = _reinstall(
+            _workflow_with_inputs(InputDeclarationResponse(name="flag", default=value))
+        )
+
+        (declared,) = loaded.inputs
+        assert declared.default == value
+        assert declared.to_domain().default == value
+
+    @pytest.mark.parametrize("value", _NON_EMPTY_HAZARD_SCALARS)
+    def test_a_name_reads_back_as_the_stored_string(self, value: str) -> None:
+        """Empty is excluded: the loader refuses an empty name before and after export."""
+        loaded = _reinstall(_workflow_with_inputs(InputDeclarationResponse(name=value)))
+
+        assert [i.name for i in loaded.inputs] == [value]
+
+    @pytest.mark.parametrize("value", _NON_EMPTY_HAZARD_SCALARS)
+    def test_a_description_reads_back_as_the_stored_string(self, value: str) -> None:
+        """Empty is excluded: export omits an empty description, so it reads back as None."""
+        loaded = _reinstall(
+            _workflow_with_inputs(InputDeclarationResponse(name="flag", description=value))
+        )
+
+        (declared,) = loaded.inputs
+        assert declared.description == value
+
+    def test_every_declaration_survives_in_order(self) -> None:
+        """The production shape: several inputs in one block, one per hazard.
+
+        One declaration per test cannot see a value that breaks the block for
+        its neighbours, or an emitter that drops all but the first.
+        """
+        stored = [
+            InputDeclarationResponse(name=f"input-{i}", default=value)
+            for i, value in enumerate(_HAZARD_SCALARS)
+        ]
+
+        loaded = _reinstall(_workflow_with_inputs(*stored))
+
+        assert [(i.name, i.default) for i in loaded.inputs] == [(d.name, d.default) for d in stored]
+
+    def test_an_optional_input_stays_optional(self) -> None:
+        """`required` defaults TRUE, so only an explicit `false` proves it is emitted."""
+        loaded = _reinstall(
+            _workflow_with_inputs(InputDeclarationResponse(name="draft", required=False))
+        )
+
+        (declared,) = loaded.inputs
+        assert declared.required is False
+
+    def test_no_default_stays_no_default(self) -> None:
+        """Absent is not the string "null" or "None"."""
+        loaded = _reinstall(_workflow_with_inputs(InputDeclarationResponse(name="flag")))
+
+        (declared,) = loaded.inputs
+        assert declared.default is None

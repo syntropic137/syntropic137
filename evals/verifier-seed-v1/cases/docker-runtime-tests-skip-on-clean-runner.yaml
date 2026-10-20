@@ -1,0 +1,34 @@
+id: docker-runtime-tests-skip-on-clean-runner
+polarity: defect
+source_pr: 1968
+escape_class: evidence that cannot run on CI
+# Escaped on 2026-10-15: reverify_2 (Codex) judged #1968 at b00f185 BLOCKED on
+# execution gaps: its finding 2 is that the Docker runtime tests "have never
+# run on the candidate", because CI's integration job is skipped for PRs to
+# main. It did not name why they could not run anywhere without setup: the
+# module skips unless SYN_CONTRACT_TEST_IMAGE is set. That finding alone does
+# not count: it needs the skip itself (the keyword groups below). A merge of
+# main (f0b89dc) sits between the head and the fix 077bc57, so the pin is the
+# judged head. The fix is on the unmerged branch feat/syn-1-workspace-runtime;
+# fetch it with `git fetch origin pull/1968/head`.
+commit: b00f185ca5d46b92198e34994c1f7643082660bb
+certified_in: https://github.com/syntropic137/syntropic137/pull/1968#issuecomment-6183890167
+fix_commit: 077bc5705ac611db66959f278b5d01ec4982f1a2
+task: >
+  The change under review adds a Docker workspace runtime and integration
+  tests for it. Review whether those tests produce evidence on a clean runner
+  with a Docker daemon, and what a run that cannot provision reports.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    test_docker_workspace_runtime.py skips the whole module unless
+    SYN_CONTRACT_TEST_IMAGE is set, so on a clean runner with Docker the
+    tests skip instead of running, and a skipped run looks the same as
+    evidence nobody collected. The image is not pinned by the tests and a
+    run that cannot provision skips rather than failing.
+  files:
+    - packages/syn-adapters/tests/test_docker_workspace_runtime.py
+  keywords:
+    - [skip, skips, skipped, skipif]
+    - [SYN_CONTRACT_TEST_IMAGE, image, environment variable, env var, unset]
+split: holdout

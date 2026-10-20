@@ -285,7 +285,7 @@ async def installation_token(
             wired up until #1197). None requests the installation's full
             grant. GitHub rejects a set that exceeds what the installation
             holds, so callers derive theirs from it rather than enumerating -
-            see ``agent_token.mint_agent_token``.
+            see ``agent_token.mint_agent_token``, which caps `actions`.
         repositories: Restrict the token to these repository names (#725).
             None reaches every repository the installation covers.
 

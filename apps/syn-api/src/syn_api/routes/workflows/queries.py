@@ -26,6 +26,7 @@ from syn_api.types import (
     WorkflowError,
     WorkflowSummary,
     WorkflowTrendResponse,
+    WorkflowTrendsResponse,
 )
 
 # Imported from the context's public surface, not its internals (ADR-062).
@@ -661,17 +662,15 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
 def _yaml_declaration_lines(phase: PhaseDefinitionResponse) -> list[str]:
     """The phase's declarations, each emitted only when it differs from its default.
 
-    `clone_repos` and `delivers_repo_changes` default True, `requires_verdict`
-    (PC-116) defaults False and `platform_access` (#1744) defaults `read`, so
-    "differs" is a different value for each.
+    Defaults: `clone_repos`, `delivers_repo_changes` True; `requires_verdict`
+    (PC-116) False; `platform_access` (#1744) `read`.
     """
     lines: list[str] = []
     if not phase.clone_repos:
         lines.append("    clone_repos: false")
     if not phase.delivers_repo_changes:
         lines.append("    delivers_repo_changes: false")
-    # #1744. Dropped, a reinstalled eval phase silently loses the access its
-    # workflow was written to need.
+    # #1744: dropping it would silently strip a reinstalled eval phase's access.
     if phase.platform_access is not PlatformScope.READ:
         lines.append(f"    platform_access: {phase.platform_access.value}")
     if phase.requires_verdict:
@@ -866,6 +865,26 @@ async def list_workflows_endpoint(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+# Declared before "/{workflow_id}", which would otherwise take "trends" as an id.
+@router.get("/trends", response_model=WorkflowTrendsResponse)
+async def list_workflow_trends_endpoint(
+    ids: str = Query(
+        ..., description=f"Comma-separated exact workflow ids, at most {MAX_PAGE_SIZE}"
+    ),
+    page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Latest runs per workflow"),
+) -> WorkflowTrendsResponse:
+    """Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872)."""
+    from syn_api.routes.trends import workflow_trends
+
+    wanted = list(dict.fromkeys(i.strip() for i in ids.split(",") if i.strip()))
+    if len(wanted) > MAX_PAGE_SIZE:
+        raise HTTPException(status_code=422, detail=f"At most {MAX_PAGE_SIZE} ids per request")
+    await ensure_connected()
+    return WorkflowTrendsResponse(
+        trends=await workflow_trends(get_projection_mgr(), wanted, page_size=page_size)
     )
 
 

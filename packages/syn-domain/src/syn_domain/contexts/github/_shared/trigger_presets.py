@@ -58,7 +58,6 @@ REVIEW_FIX_PRESET = {
     "config": (
         ("max_attempts", 2),
         ("daily_limit", 10),
-        ("debounce_seconds", 60),
         ("cooldown_seconds", 600),
     ),
 }

@@ -2,7 +2,8 @@
 # repository (syntropic137), and an eval's baseline holds one SHA per
 # repository, so escapes in AgentParadise/agentic-workspace are their own
 # suite. The rules are verifier-seed-v1's, unchanged: how a defect is pinned
-# (the first fix commit's first parent; `check` enforces it), how a clean
+# (the first fix commit's first parent, or the head a cited verify record
+# judged; `check` enforces it), how a clean
 # control is chosen, how a blocked run is judged, train and holdout. Read
 # ../verifier-seed-v1/README.md and ../verifier-seed-v1/suite.yaml; README.md
 # here holds only what differs.
@@ -114,13 +115,21 @@
 #     5 live cases, 1 holdout (replay-keeps-recorded-verdict); train is 4
 #     defects and 0 controls.
 #
+# v4: one defect escaped on 2026-10-14, AW#66 (live-presentation-tests-skip-on-latest),
+#     and `escape_class` on the cases it fits. The PR merged main between the
+#     head reverify judged (32c0a18) and the fix, so the case pins that head
+#     and cites its verify record in `certified_in` (verifier-seed-v1
+#     README.md). v3 has no runs in launches.jsonl, so no history entry.
+#     TRAIN AND HOLDOUT for the v4 batch of one defect: none is holdout.
+#     6 live cases, 1 holdout; train is 5 defects and 0 controls.
+#
 # EVERY VERSION KEEPS ITS SCORE: when the version goes up, record the old one
 # under `history`, as verifier-seed-v1 does.
 id: verifier-seed-aw-v1
 # Its own stable eval name: a case eval is tagged `suite:verifier-seed-aw` +
 # `case:<id>`, never shared with verifier-seed-v1's.
 eval_suite: verifier-seed-aw
-version: 3
+version: 4
 goal: >
   Does the verifier block an agentic-workspace change that carries a known
   escaped bug, naming the defect and the file it lives in, and certify a

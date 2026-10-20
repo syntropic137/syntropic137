@@ -20,16 +20,20 @@ if TYPE_CHECKING:
 from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions import (
     CostCalculator,
+    SessionCostQueryService,
     recorded_model_group_by,
     recorded_model_select,
+    zero_usage_group_by,
 )
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
     PhaseCosts,
     TimescaleExecutionCostQuery,
+    UnreportedSessionCosts,
     price_grouped_session_summary,
     price_grouped_token_usage,
     price_phase_rows,
+    unreported_session_ids,
 )
 from syn_domain.storable_text import pg_safe
 from syn_shared.events import (
@@ -78,7 +82,8 @@ SELECT
 FROM agent_events a
 JOIN recent_executions r ON r.execution_id = a.execution_id
 WHERE a.event_type = $1
-GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_cost_usd') IS NULL)
+GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_cost_usd') IS NULL),
+    CASE WHEN (a.data->>'total_cost_usd') IS NULL THEN a.session_id END
 """
 
 # Fallback: list executions from token_usage (in-progress, no summary yet).
@@ -104,7 +109,7 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
   AND execution_id IS NOT NULL
-GROUP BY execution_id, {recorded_model_group_by()}
+GROUP BY execution_id, {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
 # Same shape as _LIST_ALL_FROM_SUMMARY_QUERY, but scoped to a caller-provided
@@ -132,7 +137,8 @@ FROM agent_events a
 WHERE a.event_type = $1
   AND a.execution_id = ANY($2::text[])
   AND a.time >= $3 AND a.time < $4
-GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_cost_usd') IS NULL)
+GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_cost_usd') IS NULL),
+    CASE WHEN (a.data->>'total_cost_usd') IS NULL THEN a.session_id END
 """
 
 # Same shape as _LIST_ALL_FROM_TOKEN_USAGE_QUERY, scoped by id (issue #1077).
@@ -153,7 +159,7 @@ FROM agent_events
 WHERE event_type = $1
   AND execution_id = ANY($2::text[])
   AND time >= $3 AND time < $4
-GROUP BY execution_id, {recorded_model_group_by()}
+GROUP BY execution_id, {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
 # Per-execution, per-phase cost breakdown.
@@ -173,13 +179,15 @@ SELECT
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
     SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
     SUM((data->>'total_cost_usd')::numeric) as sdk_cost,
+    ARRAY_AGG(DISTINCT session_id) as session_ids,
     COUNT(*) as observation_count
 FROM agent_events
 WHERE event_type = $1
   AND execution_id = ANY($2::text[])
   AND time >= $3 AND time < $4
 GROUP BY execution_id, phase_id, {recorded_model_group_by()},
-    ((data->>'total_cost_usd') IS NULL)
+    ((data->>'total_cost_usd') IS NULL),
+    CASE WHEN (data->>'total_cost_usd') IS NULL THEN session_id END
 """
 
 
@@ -250,7 +258,9 @@ class ExecutionCostQueryService:
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
             # From the tally, not from a COUNT(*) over agent_events (#1322).
             tool_counts = await tool_call_counts.by_execution(conn)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
-            return await self._assemble(conn, summary_rows, token_rows, tool_counts)
+            phase_rows = await self._fetch_phase_rows(conn, summary_rows)
+        # Priced after the connection is back: settling needs one of its own.
+        return await self._assemble(summary_rows, token_rows, tool_counts, phase_rows)
 
     async def list_for_ids(self, execution_ids: Iterable[str]) -> list[ExecutionCost]:
         """Batch cost lookup for a caller-provided set of execution ids.
@@ -295,31 +305,34 @@ class ExecutionCostQueryService:
             tool_counts = await tool_call_counts.by_execution(conn, ids)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             # The phase costs read a subset of these ids, so this span already
             # bounds them; looking it up again was a wasted round trip (#1693).
-            costs = await self._assemble(conn, summary_rows, token_rows, tool_counts, span=span)
+            phase_rows = await self._fetch_phase_rows(conn, summary_rows, span=span)
+        costs = await self._assemble(summary_rows, token_rows, tool_counts, phase_rows)
         return ExecutionCostsForIds(costs=costs, tool_calls=tool_counts)
 
     async def _assemble(
         self,
-        conn: object,
         summary_rows: list[asyncpg.Record],
         token_rows: list[asyncpg.Record],
         tool_counts: dict[str, int],
-        *,
-        span: agent_event_span.EventSpan | None = None,
+        phase_rows: dict[str, list[asyncpg.Record]],
     ) -> list[ExecutionCost]:
-        """Build ``ExecutionCost`` records from already-fetched summary/token rows.
+        """Build ``ExecutionCost`` records from already-fetched rows.
 
-        ``span``, when given, must cover every execution in ``summary_rows``;
-        the phase costs are then bounded by it rather than by a fresh lookup.
+        Called with no connection held. Settling an unreported summary reads
+        through the session reader, which acquires its own; doing that while
+        holding the caller's connection deadlocks a saturated pool (#1420).
         """
         summary_rows_by_execution = self._group_rows_by_execution(summary_rows)
-        phase_map = await self._fetch_phase_cost_map(
-            conn, list(summary_rows_by_execution), span=span
-        )
+        unreported = await self._unreported_session_costs(summary_rows)
+        phase_map = self._price_phase_rows(phase_rows, unreported)
 
         results: list[ExecutionCost] = []
         for eid, rows in summary_rows_by_execution.items():
-            results.append(self._build_from_summary(eid, rows, tool_counts, phase_map))
+            results.append(
+                self._build_from_summary(
+                    eid, rows, tool_counts, phase_map, unreported.another_rollup()
+                )
+            )
 
         token_rows_by_execution = self._group_rows_by_execution(
             token_rows, exclude=summary_rows_by_execution.keys()
@@ -343,14 +356,24 @@ class ExecutionCostQueryService:
             rows_by_execution.setdefault(eid, []).append(row)
         return rows_by_execution
 
-    async def _fetch_phase_cost_map(
+    async def _unreported_session_costs(
+        self, summary_rows: list[asyncpg.Record]
+    ) -> UnreportedSessionCosts:
+        """The session reader's cost for each session whose summary reports none (#1420)."""
+        ids = unreported_session_ids(summary_rows)
+        if not ids:
+            return UnreportedSessionCosts()
+        sessions = await SessionCostQueryService(self._pool, self._cost_calculator).get_many(ids)
+        return UnreportedSessionCosts(sessions)
+
+    async def _fetch_phase_rows(
         self,
         conn: object,
-        execution_ids: list[str],
+        summary_rows: list[asyncpg.Record],
         *,
         span: agent_event_span.EventSpan | None = None,
-    ) -> dict[str, PhaseCosts]:
-        """Fetch per-execution, per-phase costs, priced like the execution total.
+    ) -> dict[str, list[asyncpg.Record]]:
+        """Fetch per-execution, per-phase cost rows, for ``_price_phase_rows``.
 
         Rows arrive split by (execution, phase, model, priced?) so an
         unpriced summary keeps its own group and can be priced from its own
@@ -363,6 +386,7 @@ class ExecutionCostQueryService:
         phase, so scanning every historical execution to then discard most
         of them costs real transfer and memory.
         """
+        execution_ids = list(self._group_rows_by_execution(summary_rows))
         if not execution_ids:
             return {}
         if span is None:
@@ -374,8 +398,18 @@ class ExecutionCostQueryService:
         for row in rows:  # type: ignore[union-attr]
             eid = row["execution_id"]  # type: ignore[index]
             rows_by_execution.setdefault(eid, []).append(row)
+        return rows_by_execution
+
+    def _price_phase_rows(
+        self,
+        rows_by_execution: dict[str, list[asyncpg.Record]],
+        unreported: UnreportedSessionCosts,
+    ) -> dict[str, PhaseCosts]:
+        """Price each execution's phase rows by the rule the execution total uses."""
         return {
-            eid: price_phase_rows(execution_rows, self._cost_calculator)
+            eid: price_phase_rows(
+                execution_rows, self._cost_calculator, unreported.another_rollup()
+            )
             for eid, execution_rows in rows_by_execution.items()
         }
 
@@ -401,6 +435,7 @@ class ExecutionCostQueryService:
         rows: list[asyncpg.Record],
         tool_counts: dict[str, int],
         phase_map: dict[str, PhaseCosts],
+        unreported: UnreportedSessionCosts | None = None,
     ) -> ExecutionCost:
         """Build an ExecutionCost from model-grouped session_summary rows.
 
@@ -411,7 +446,7 @@ class ExecutionCostQueryService:
         rows from the total instead of pricing them from that group's own
         tokens (issue #788).
         """
-        grouped = price_grouped_session_summary(rows, self._cost_calculator)
+        grouped = price_grouped_session_summary(rows, self._cost_calculator, unreported)
         phases = _phase_costs(phase_map, execution_id)
         return ExecutionCost(
             execution_id=execution_id,

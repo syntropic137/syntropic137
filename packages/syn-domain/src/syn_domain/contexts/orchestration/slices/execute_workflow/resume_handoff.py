@@ -113,14 +113,17 @@ async def _files_by_owner(
     """Each inherited phase's files, asked of the execution that ran it (#1462).
 
     One query per owner, since the artifact query filters on the execution id.
-    Raises `InheritanceUnavailableError` naming the owner that came back empty
-    for a phase that recorded artifact ids.
+    A phase can have more than one: a resume that settled the phase's evidence
+    gate holds the reports it filed (plan §A.7), and the phase's files are
+    those of every owner. Raises `InheritanceUnavailableError` naming the owner
+    that came back empty for a phase that recorded artifact ids with it.
     """
     wanted_by_owner: dict[str, dict[str, list[str]]] = {}
     for phase in origin.inherited_phases:
-        wanted_by_owner.setdefault(origin.owner_of(phase), {})[phase.phase_id] = list(
-            phase.artifact_ids
-        )
+        for owner, ids in (
+            origin.artifacts_by_owner(phase) or {origin.owner_of(phase): []}
+        ).items():
+            wanted_by_owner.setdefault(owner, {})[phase.phase_id] = ids
     files: dict[str, list[PhaseOutputFile]] = {}
     for owner, wanted in wanted_by_owner.items():
         found = await query.get_files_for_artifacts(owner, wanted)
@@ -132,7 +135,8 @@ async def _files_by_owner(
                 "for the artifact ids they recorded"
             )
             raise InheritanceUnavailableError(msg)
-        files.update(found)
+        for phase_id, phase_files in found.items():
+            files.setdefault(phase_id, []).extend(phase_files)
     return files
 
 
