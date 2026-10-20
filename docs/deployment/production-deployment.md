@@ -452,12 +452,55 @@ curl -X POST http://grafana.internal/api/dashboards/db \
 
 ### Database Backup
 
-```bash
-# Automated backup with pg_dump
-pg_dump -h localhost -U syn -d syn | gzip > backup-$(date +%Y%m%d).sql.gz
+On a Docker Compose self-host stack use `just selfhost-backup` and
+`just selfhost-restore <file>`, with scheduled backups from the `db-backup`
+service: see [Backup & Recovery](../../infra/docs/selfhost-deployment.md#backup--recovery).
 
-# Restore
-gunzip -c backup-20250101.sql.gz | psql -h localhost -U syn -d syn
+Elsewhere, keep the same shape, because a plain-SQL dump replayed with `psql`
+does not restore TimescaleDB hypertables correctly:
+
+Listing an archive (`pg_restore --list`) proves only that its table of
+contents survived: a truncated dump still lists. Prefer running the same
+script the self-host service uses, `docker/db-backup/syn-db-backup.sh`
+(`backup DIR` writes a manifest with a sha256 and every table's row count;
+`restore FILE` verifies both in a staging database before swapping it in).
+If you must do it by hand, stop on the first error and check row counts:
+
+```bash
+set -euo pipefail
+# Backup: custom format; record its checksum and per-table row counts
+pg_dump -h localhost -U syn -d syn --format=custom --file=syn.dump
+sha256sum syn.dump > syn.dump.sha256
+
+# Restore into an EMPTY staging database, writers stopped
+sha256sum -c syn.dump.sha256
+createdb -h localhost -U syn syn_staging
+psql -X -v ON_ERROR_STOP=1 -h localhost -U syn -d syn_staging \
+    -c 'CREATE EXTENSION IF NOT EXISTS timescaledb' -c 'SELECT timescaledb_pre_restore()'
+pg_restore --exit-on-error -h localhost -U syn -d syn_staging --no-owner --no-acl syn.dump   # no -j
+psql -X -v ON_ERROR_STOP=1 -h localhost -U syn -d syn_staging -c 'SELECT timescaledb_post_restore()'
+# Compare every table's count(*) in syn_staging with the source.
+# Pause admission IN THE RESTORED DATA, before the API can start, so the
+# backup's queued work does not start on its own (the table is the API's own,
+# see packages/syn-adapters/src/syn_adapters/maintenance/postgres_maintenance.py):
+psql -X -v ON_ERROR_STOP=1 -h localhost -U syn -d syn_staging <<'SQL'
+CREATE TABLE IF NOT EXISTS maintenance_mode (
+    singleton  BOOLEAN     PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    active     BOOLEAN     NOT NULL,
+    reason     TEXT        NOT NULL DEFAULT '',
+    since      TIMESTAMPTZ,
+    actor      TEXT        NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO maintenance_mode (singleton, active, reason, since, actor, updated_at)
+VALUES (TRUE, TRUE, 'restored from backup', now(), 'manual restore', now())
+ON CONFLICT (singleton) DO UPDATE SET active = TRUE, reason = EXCLUDED.reason,
+    since = EXCLUDED.since, actor = EXCLUDED.actor, updated_at = now();
+SQL
+# Then rename syn_staging into place and, in the renamed database, run
+#   SELECT _timescaledb_functions.start_background_workers();
+# (a rename stops them). Start the API; once the queue is reviewed, resume
+# with PUT /api/v1/maintenance {"active": false}.
 ```
 
 ### Disaster Recovery
