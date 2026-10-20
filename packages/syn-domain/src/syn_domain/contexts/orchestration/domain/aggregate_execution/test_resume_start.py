@@ -353,3 +353,28 @@ class TestTheChildRefusesASnapshotThatDoesNotMatch:
 
         assert child.id is None
         assert child.get_uncommitted_events() == []
+
+    @pytest.mark.parametrize("tied_first", ["plan", "implement"])
+    def test_a_snapshot_whose_phases_share_an_order(self, tied_first: str) -> None:
+        """'Before the resume phase' means nothing when two phases share an order (#1455)."""
+        command = self._command()
+        by_id = {p.phase_id: p for p in command.pinned_phases}
+        tied = [replace(by_id["plan"], order=2), replace(by_id["implement"], order=2)]
+        if tied_first == "implement":
+            tied.reverse()
+        command.pinned_phases = [by_id["research"], *tied]
+
+        with pytest.raises(ValueError, match="Phase orders must be unique"):
+            WorkflowExecutionAggregate().start_resume(command)
+
+    def test_a_snapshot_that_repeats_a_phase_id(self) -> None:
+        command = self._command()
+        research = command.pinned_phases[0]
+        command.pinned_phases = [
+            research,
+            *command.pinned_phases[1:],
+            replace(research, order=len(command.pinned_phases) + 1),
+        ]
+
+        with pytest.raises(ValueError, match="Phase IDs must be unique"):
+            WorkflowExecutionAggregate().start_resume(command)

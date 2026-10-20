@@ -10,17 +10,17 @@ Install pre-built plugins from GitHub-hosted marketplaces, or create your own an
 them with the community.
 
 ```bash
-# Register a marketplace
-syn marketplace add syntropic137/workflow-library
+# Register the official Syntropic137 marketplace
+syn marketplace add syntropic137/syntropic137-marketplace
 
 # Search for plugins
-syn workflow search "research"
+syn workflow search "review"
 
 # Install by name
-syn workflow install research-toolkit
+syn workflow install code-review
 
-# Run it
-syn workflow run deep-research -R owner/repo --task "Analyze our authentication architecture"
+# Run it on pull request 42 of owner/repo, whose head branch is my-feature
+syn workflow run code-review -R owner/repo --input pr_number=42 --input branch=my-feature
 ```
 
 ## Two Plugin Boundaries
@@ -62,7 +62,6 @@ is familiar:
 model: sonnet
 argument-hint: "[topic]"
 allowed-tools: Read,Glob,Grep,Bash
-max-tokens: 4096
 timeout-seconds: 300
 ---
 
@@ -76,8 +75,9 @@ Use {{discovery}} to reference output from a previous phase.
 | `model` | Model id for the phase's harness (`sonnet`, `opus`, `haiku` on claude, `gpt-sol` or a concrete id such as `gpt-6.1-sol` on codex). Defaults to `opus` on claude and `gpt-sol` on codex |
 | `argument-hint` | Shown to users when prompted for input |
 | `allowed-tools` | Comma-separated list of the tools a claude phase may use, passed as `claude --tools`. Used only when `workflow.yaml` omits `allowed_tools`. Refused on codex phases. See [`allowed_tools` and the two harnesses](/docs/guide/workflows#allowed_tools-and-the-two-harnesses) |
-| `max-tokens` | Maximum output tokens for the phase |
 | `timeout-seconds` | Phase execution timeout |
+
+`max-tokens` is refused: no agent CLI has a token cap, so it never bounded anything. Bound a phase with `timeout-seconds` instead.
 
 ## Exporting Plugins
 
@@ -123,19 +123,19 @@ registries. Any GitHub repo with a `marketplace.json` at the root can be a marke
 
 1. **Register** a marketplace: `syn marketplace add org/repo`
 2. **Search** across all registries: `syn workflow search "code review"`
-3. **Install** by name: `syn workflow install pr-review` (the CLI resolves the name
+3. **Install** by name: `syn workflow install code-review` (the CLI resolves the name
    from registered marketplaces, clones the repo, and installs the workflows)
-4. **Update** when new versions are available: `syn workflow update pr-review`
-5. **Uninstall** when you're done: `syn workflow uninstall pr-review`
+4. **Update** when new versions are available: `syn workflow update code-review`
+5. **Uninstall** when you're done: `syn workflow uninstall code-review`
 
 ### Registry Management
 
 ```bash
-syn marketplace add syntropic137/workflow-library     # Register
-syn marketplace add myorg/internal --name my-company  # Custom name
-syn marketplace list                                  # List registries
-syn marketplace refresh                               # Force cache refresh
-syn marketplace remove my-company                     # Remove
+syn marketplace add syntropic137/syntropic137-marketplace  # Register
+syn marketplace add myorg/internal --name my-company       # Custom name
+syn marketplace list                                       # List registries
+syn marketplace refresh                                    # Force cache refresh
+syn marketplace remove my-company                          # Remove
 ```
 
 Marketplace indexes are cached locally for 4 hours. The CLI refreshes automatically
@@ -145,33 +145,33 @@ when the cache expires, or you can force it with `syn marketplace refresh`.
 
 ```bash
 # Search by keyword (matches name, description, category, tags)
-syn workflow search "research"
+syn workflow search "review"
 
 # Filter by category or tag
-syn workflow search --category research
-syn workflow search --tag multi-phase
+syn workflow search --category sdlc
+syn workflow search --tag code-review
 
 # Get full details on a specific plugin
-syn workflow info research-toolkit
+syn workflow info code-review
 ```
 
 ### Install, Update, Uninstall
 
 ```bash
 # Install from marketplace by name
-syn workflow install research-toolkit
+syn workflow install code-review
 
 # Check for updates
-syn workflow update research-toolkit --dry-run
+syn workflow update code-review --dry-run
 
 # Update to latest
-syn workflow update research-toolkit
+syn workflow update code-review
 
 # Uninstall (removes workflows from platform)
-syn workflow uninstall research-toolkit
+syn workflow uninstall code-review
 
 # Uninstall but keep workflows running
-syn workflow uninstall research-toolkit --keep-workflows
+syn workflow uninstall code-review --keep-workflows
 ```
 
 Updates compare the remote git commit SHA against the installed SHA: if they match,
@@ -190,7 +190,8 @@ fires it when a pull request is opened. Since triggers need to be attached to sp
 repos (which vary across setups), the CLI would prompt during install to select target
 repos.
 
-Triggers exist today as a [separate system](/docs/cli/triggers) (`syn triggers register/list/pause/resume/delete`)
+Triggers exist today as a [separate system](/docs/cli/triggers) (`syn triggers register`,
+`syn triggers list`, `syn triggers pause`, `syn triggers resume`, `syn triggers delete`)
 but aren't yet part of the plugin package format.
 
 ## Creating Plugins

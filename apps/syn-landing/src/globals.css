@@ -437,6 +437,18 @@ img, video {
   color: var(--ds-color-fg);
 }
 
+/* Social links lead with their brand mark, a step brighter than the text, so they stand out. */
+.site-footer__link[data-social] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+
+.site-footer__link[data-social] svg {
+  flex: none;
+  color: var(--ds-color-fg);
+}
+
 .site-footer__link:focus-visible {
   outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
   outline-offset: var(--sky-focus-ring-offset);
@@ -531,4 +543,30 @@ img, video {
   clip: rect(0 0 0 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* An outlined link to a guide or repo, with a trailing arrow (Evals, Workflows). */
+.guide-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  height: 46px;
+  padding: 0 18px;
+  border-radius: var(--sky-radius-row);
+  border: var(--ds-border-width) solid var(--sky-color-border-strong);
+  color: var(--ds-color-fg);
+  font-size: var(--ds-text-md);
+  font-weight: var(--ds-font-weight-semibold);
+  text-decoration: none;
+  transition:
+    transform var(--sky-duration-fast) var(--sky-ease-out),
+    border-color var(--sky-duration-fast) var(--sky-ease-out);
+}
+.guide-link:hover {
+  border-color: var(--sky-color-border-hover);
+  transform: translateY(-1px);
+}
+.guide-link:focus-visible {
+  outline: var(--sky-focus-ring-width) solid var(--sky-color-focus);
+  outline-offset: var(--sky-focus-ring-offset);
 }

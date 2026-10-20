@@ -156,9 +156,18 @@ Installation tokens are scoped to:
   names them (#725); without that, a token reaches every repository the
   installation covers
 - Only permissions granted to the app (contents, issues, PRs, etc.). Every
-  phase holds the installation's own grant (#1477)
+  phase holds the installation's own grant (#1477), with one ceiling:
+  `actions` is capped at `read`
 
-Phases do not get a narrower permission set. #1197 used to mint
+The cap exists because the platform, not the agent, dispatches evidence
+workflows (docs/plans/20261015_platform-dispatched-evidence.md, A.10). An agent
+holding `actions: write` could dispatch or re-run the workflow that judges its
+own change. `mint_agent_token` reads the installation's live grant on every
+mint (`GET /app/installations/{id}`) and lowers only `actions`; it never adds
+it. If that lookup fails, no token is minted. The cap must be deployed before
+the App is granted `Actions: Read and write`.
+
+Apart from `actions`, phases get no narrower permission set. #1197 used to mint
 `pull_requests: read` for any phase without `can_open_pr: true`, to stop an
 early phase opening a PR. GitHub has no permission that allows commenting on a
 pull request without also allowing opening one: a `pull_requests: read` token

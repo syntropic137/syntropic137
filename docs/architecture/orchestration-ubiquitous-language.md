@@ -197,6 +197,34 @@ never run at once. The setup script is not retried, because a clone killed
 mid-transfer would be skipped by the re-run. Resuming provisions a fresh
 workspace instead. Each deadline is a Setting.
 
+## Workspace Credential Policy
+
+Whether a workspace may hold the host's credentials (`WorkspaceCredentialPolicy`,
+#1914). It is a port the orchestration context owns, fixed per backend by its
+[Backend Kit](#backend-kit) and never chosen per run, because a workflow cannot
+say "this phase needs no credential": a Scripted Agent runs under the same
+`claude` or `codex` provider as a real agent. Every credential source asks the
+policy. Those sources are the sidecar and token injection at `create_workspace`,
+the platform grant, the setup secrets (GitHub App tokens, Claude and Codex auth),
+the Claude credential in the agent env, and the session-store write token.
+There are two policies:
+
+- **HostCredentials**: every configured host credential is supplied. This is
+  the behaviour from before the policy existed.
+- **NoCredentials**: nothing from the host reaches the workspace. A phase with
+  repositories is refused before a workspace exists, because a repository
+  always means a GitHub credential (`clone_repos: false` still credentials it).
+
+## Backend Kit
+
+The one composition point for a workspace backend (`BackendKit`, #1914). Built
+once at wiring, it owns every decision that differs between backends: which
+image may run and how it is verified, whether sessions are captured, the
+[Workspace Credential Policy](#workspace-credential-policy), and the isolation
+type reported on the handle. Only the Docker kit exists. A NoCredentials kit
+starts only with an image approved for credential-free runs, and no such image
+is pinned yet, so today none can start.
+
 ## Fallback Agent
 
 The agent (provider and model) a Phase declares under `fallback_agent`, to be
@@ -1308,8 +1336,27 @@ never a verdict on the Execution, and never changes P's `success`.
 
 Not the [Event Compatibility Gate](#event-compatibility-gate), which is a CI
 check on releases. The contracts are in
-`_shared/evidence_contract.py`; the gate's behaviour is not built yet (plan PRs
-5b and 5c).
+`_shared/evidence_contract.py`; the rules are `evidence_gate.py` and the
+aggregate's decisions `evidence_steps.py`, both in `aggregate_execution/`
+(plan PR 5b). A gate opens only when collection carries an Evidence Gate
+Policy, and nothing attaches one until the adapters are wired (plan PR 6), so
+it is off by default.
+
+## Evidence Gate Policy
+
+What the host tells collection about Evidence Gates: that they are on, and over
+which repositories (`EvidenceGatePolicy` on `ArtifactsCollectedCommand`).
+Absent is off. The aggregate reads no settings, so this is how the flag
+`SYN_EVIDENCE_GATE_ENABLED` reaches it.
+
+## Predetermined Step
+
+An Evidence Step whose outcome the aggregate already knows without any I/O: a
+step planned `void` or `unavailable` (an unreadable request, a foreign
+repository, a moved head, a PR mismatch), a step Settled `passed` by reuse, a
+Patch Removal whose mutation evidence did not pass, or a `required_check` when
+nothing was removed. `EvidenceGate.predetermined`. The handler can only Settle
+it exactly as decided; the aggregate refuses anything else.
 
 ## Evidence Request
 
@@ -1327,8 +1374,8 @@ One Evidence Request as a Phase's latest agent run declared it, or, when the
 entry was malformed, the reason it could not be one. In code:
 `DeclaredEvidence`, carried on `AgentExecutionCompleted.reported_evidence` and
 kept per Phase by the aggregate (`EvidenceRecord`). A retry overwrites its
-Phase's declarations, as it does a Review Verdict. Recorded only: no decision
-reads it until the Evidence Gate exists.
+Phase's declarations, as it does a Review Verdict. The Evidence Gate plans
+from it when the Phase is collected.
 
 ## Observed Head
 
@@ -1375,9 +1422,10 @@ knows which run to look for. A step gets at most two. Retries share the step's
 Not [Attempt Work](#attempt-work), which is what a failed Phase attempt did to
 its workspace, and not a [Retry](#words-we-do-not-use) of a Phase. Taking up a
 dispatched GitHub run is recorded as `EvidenceRunAdopted` in the plan. That is
-not the reserved **Adopt** (an Executor taking over a running Phase).
-**Unclear:** whether the event keeps that name. Settle it before plan PR 5b
-introduces the event.
+not the reserved **Adopt** (an Executor taking over a running Phase). PR 5b
+kept the name `EvidenceRunAdopted`: the event and its command
+(`RecordEvidenceRunAdoptedCommand`) always say **Evidence Run**, which no
+Executor term uses, so the two cannot be read for each other.
 
 ## Settled
 
@@ -1420,6 +1468,25 @@ Report. It lists every planned Evidence Step with its outcome, reason, run URL,
 head SHA and reuse pointer, the Patch Removal provenance if there was one, and
 `complete: true`. A step with no report still appears, so a missing report
 cannot read as "all passed". `finalize_pr` trusts S -> S' only from here.
+
+## Inherited Evidence Gate
+
+An Evidence Gate a Resume takes over from the Execution it came from, because
+that Execution stopped while the gate was still holding its transition: an
+`EvidenceRequested` with no `NextPhaseReady` after it (ADR-014 section 10,
+point 4). It travels on `ExecutionResumed.inherited_evidence_gate` and on to
+the Resume's own start in `resumed_from`, carrying the plan, the steps already
+Settled, the Patch Removal if one was made, and the parent's last Evidence
+Attempt at each step it never settled.
+
+The Phase the gate followed is an Inherited Phase even if the run stopped
+before recording it complete: its output was collected before the gate was
+requested. The Resume Phase is the Phase the gate held, which never started,
+so no acknowledgement is asked. The Resume's first to-do is the gate's first
+unsettled step, and its first attempt at that step carries the parent's nonce,
+so the parent's run is adopted rather than posted again. The deadline is new:
+a person-started Resume is a new decision. Code:
+`domain/aggregate_execution/inherited_evidence.py`.
 
 ## Words we do not use
 

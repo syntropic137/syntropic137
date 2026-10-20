@@ -374,9 +374,14 @@ class ManagedWorkspace:
             CredentialRenewalFailedError: the credential is not known to be
                 usable. A workspace whose setup phase never ran holds no
                 credential to renew and returns quietly instead - nothing
-                downstream of it can be depending on one.
+                downstream of it can be depending on one. Nor does a
+                credential-free (NoCredentials) workspace, which was given
+                none to renew (#1914).
         """
-        if self._credential_source is None:
+        if (
+            self._credential_source is None
+            or not self._service.credential_policy.supplies_credentials
+        ):
             return ()
         return await _renew_git_credential(self, self._credential_source, self._ledger)
 

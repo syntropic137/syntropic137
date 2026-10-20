@@ -1218,14 +1218,14 @@ check-agent-docs:
 
 # Mirrors ci.yml `mutations-not-merged`. Deliberately NOT in preflight: the
 # pre-push hook would block pushing the very patches mutation-evidence.yml
-# reads. Delete the dir before merge; the PR comment is the record. See
+# reads. The orchestrator deletes the dir after a PASS; the PR comment is the record. See
 # .claude/skills/devops/agent_mutation_evidence.md.
 # Fail if `.mutations/` is tracked (PR-scoped evidence, never main).
 check-no-mutations:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -n "$(git ls-files -- .mutations)" ]; then
-        echo "❌ delete .mutations/ before merge; evidence is in the mutation-evidence comment"
+        echo "❌ .mutations/ is tracked; the orchestrator removes it after a mutation-evidence PASS on this head (#2028)"
         git ls-files -- .mutations
         exit 1
     fi
@@ -1946,6 +1946,15 @@ health-json:
 docs-cli-gen:
     @echo "📄 Generating CLI reference docs..."
     @cd apps/syn-cli-node && pnpm run generate:docs
+    @echo "📄 Generating CLI command manifest (read by the docs-drift gate)..."
+    @cd apps/syn-cli-node && pnpm run generate:manifest
+
+# List every `syn` command, setup command and /api/v1 route in the public docs
+# that the software rejects, budgeted or not. The gate itself is the fitness
+# test ci/fitness/code_quality/test_docs_drift.py, run by `fitness` (so by
+# `preflight` and CI); this prints the full list behind it.
+check-docs-drift *FILES:
+    @uv run python scripts/check_docs_drift.py {{FILES}}
 
 # Start docs site dev server (regenerates CLI docs first)
 docs: docs-cli-gen
@@ -1983,8 +1992,8 @@ docs-sync: check-env-example check-architecture-docs
         echo "   Run 'just codegen' and commit the changes."; \
         exit 1; \
     fi
-    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts apps/syn-dashboard-ui/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
-        echo "✅ API docs, CLI types, and dashboard types are up-to-date"; \
+    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts apps/syn-dashboard-ui/src/generated/api-types.ts packages/openclaw-plugin/src/generated/api-types.ts packages/syn-ui/data/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
+        echo "✅ API docs, CLI types, dashboard, OpenClaw plugin and syn-ui data types are up-to-date"; \
     else \
         echo "❌ API artifacts need to be committed:"; \
         echo "   Run 'just codegen' and commit the changes."; \
@@ -2004,6 +2013,10 @@ codegen: docs-cli-gen
     cd apps/syn-cli-node && pnpm run generate:types
     @echo "📄 Generating Dashboard TypeScript types..."
     cd apps/syn-dashboard-ui && pnpm run generate:types
+    @echo "📄 Generating OpenClaw plugin TypeScript types..."
+    cd packages/openclaw-plugin && pnpm run generate:types
+    @echo "📄 Generating syn-ui data-layer TypeScript types..."
+    cd packages/syn-ui/data && pnpm run generate:types
     @echo "📄 Exporting plugin JSON schemas..."
     uv run python scripts/export_plugin_schemas.py
     @echo "📄 Generating .env.example and the compose settings passthrough..."

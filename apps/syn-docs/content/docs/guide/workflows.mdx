@@ -131,7 +131,6 @@ Phase prompts use optional YAML frontmatter followed by the prompt body:
 model: sonnet
 argument-hint: "[topic]"
 allowed-tools: Read,Glob,Grep,Bash
-max-tokens: 4096
 timeout-seconds: 300
 ---
 
@@ -223,12 +222,15 @@ phases:
 ```
 
 - **When it runs:** only after the primary failed for **capacity** (after every
-  retry was spent) or **quota** (never retried). Any other failure, including
+  retry was spent), **quota** (never retried) or a **refusal** by the
+  provider's content filter (never retried). Any other failure, including
   `auth`, `rate_limited` and `unavailable`, is the phase's answer and the
   fallback does not run.
-- **Only if the primary got nowhere.** An attempt that did any work (edited a
-  file, ran a command, pushed) is not re-run on the fallback, for the same reason
-  it is not retried.
+- **Only if the primary may not have written anything.** An attempt that may
+  have changed the workspace or anything beyond it (edited a file, pushed, ran
+  a command not recognised as read-only) is not re-run on the fallback, because
+  the fallback would redo that work. Reading files, searching and viewing a
+  diff do not block it.
 - **One attempt.** The fallback is not itself retried.
 - **Shared limits.** It runs with the phase's prompt, tools, sandbox and budget,
   and draws on the **same** phase deadline as the primary's attempts, so
@@ -311,9 +313,14 @@ cannot authenticate. Claude phases are unaffected.
 The agent process itself never receives either environment variable.
 Provisioning stages the `auth.json` to a file, relocates it to
 `~/.codex/auth.json` inside the workspace at mode 0600, and deletes the staged
-copy. A codex phase runs with an
-empty agent environment, which is also what keeps `ANTHROPIC_API_KEY` and
-`CLAUDE_CODE_OAUTH_TOKEN` out of reach of a codex run.
+copy. A codex agent's environment carries no Claude credentials, which keeps
+`ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` out of reach of a codex run;
+besides its credential file it gets only non-secret run variables (such as
+`GH_REPO`, the phase deadline and attempt identifiers). The exception is
+`allow_delegation: true`, which stages both providers' credentials so the agent
+can call the other CLI. A claude `fallback_agent` gets the Claude credentials
+for its own run, and a codex `fallback_agent` on a claude phase puts
+`~/.codex/auth.json` in the workspace for the whole phase.
 
 `GET /health` reports which kind of credential is configured in its
 `codex_auth` block: an API key shows as `api_key`, with no expiry. A ChatGPT
@@ -521,7 +528,7 @@ root can serve as a marketplace.
 
 ```bash
 # Add the official Syntropic137 marketplace
-syn marketplace add syntropic137/workflow-library
+syn marketplace add syntropic137/syntropic137-marketplace
 
 # Add a company-internal marketplace
 syn marketplace add myorg/internal-workflows --name my-company
@@ -546,12 +553,12 @@ syn marketplace remove my-company
 
 ```bash
 # Search across all registered marketplaces
-syn workflow search "research"
-syn workflow search --category research
-syn workflow search --tag multi-phase
+syn workflow search "review"
+syn workflow search --category sdlc
+syn workflow search --tag code-review
 
 # Show details of a specific plugin
-syn workflow info research-toolkit
+syn workflow info code-review
 ```
 
 Search matches against plugin name, description, category, and tags
@@ -561,7 +568,7 @@ Search matches against plugin name, description, category, and tags
 
 ```bash
 # Install by plugin name (resolved from registered marketplaces)
-syn workflow install research-toolkit
+syn workflow install code-review
 
 # Still works: install from local paths and git URLs
 syn workflow install ./my-package/
@@ -576,16 +583,16 @@ plugin's subdirectory, and installs the workflows.
 
 ```bash
 # Update a package to the latest version
-syn workflow update research-toolkit
+syn workflow update code-review
 
 # Check for updates without applying
-syn workflow update research-toolkit --dry-run
+syn workflow update code-review --dry-run
 
 # Uninstall (removes workflows from the platform)
-syn workflow uninstall research-toolkit
+syn workflow uninstall code-review
 
 # Uninstall but keep workflows running
-syn workflow uninstall research-toolkit --keep-workflows
+syn workflow uninstall code-review --keep-workflows
 ```
 
 Updates compare the remote git SHA against the installed SHA. If they match,
@@ -594,7 +601,9 @@ the package is already up to date and no action is taken.
 ### Creating a Marketplace Repository
 
 Any GitHub repository can be a marketplace. Create a `marketplace.json` at the
-root and organize plugins in subdirectories:
+root and organize plugins in subdirectories. The plugin names below
+(`research-toolkit`, `pr-automation`) are illustrations of the layout, not
+plugins you can install:
 
 #### Step 1: Create the Repository Structure
 
@@ -679,9 +688,9 @@ marketplace. It must be a JSON object at the repository root.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | Yes | Human-readable marketplace name (used as default registry name) |
-| `syntropic137` | object | Yes | Marker identifying this as a Syntropic137 marketplace |
-| `syntropic137.type` | string | Yes | Must be `"workflow-marketplace"` |
-| `syntropic137.min_platform_version` | string | No | Minimum platform version (default `"0.0.0"`) |
+| `syntropic137` | object | No | Marker identifying this as a Syntropic137 marketplace. Optional, so plain Claude plugin marketplaces are accepted too |
+| `syntropic137.type` | string | Yes, if `syntropic137` is present | Conventionally `"workflow-marketplace"`; the CLI does not check the value |
+| `syntropic137.min_platform_version` | string | No | Minimum platform version (default `"0.0.0"`). Recorded, not enforced by the CLI |
 | `plugins` | array | No | List of plugin entries (default `[]`) |
 
 Each plugin entry in the `plugins` array:
@@ -716,30 +725,31 @@ entries are skipped silently.
 ### Private Marketplaces
 
 Private GitHub repositories work as marketplaces if git can authenticate.
-The CLI uses your local git credential configuration, no special flags needed.
+The CLI always clones `https://github.com/<org>/<repo>.git` with your local
+git, so what matters is your git configuration for HTTPS GitHub URLs. No
+special flags are needed.
 
 ```bash
-# Ensure git can access the private repo (any of these work):
-# - GitHub CLI: gh auth login
-# - SSH key: git clone git@github.com:myorg/private-marketplace.git
-# - Credential helper: git config credential.helper
+# Ensure git can clone the private repo over HTTPS, for example:
+# - GitHub CLI as the credential helper: gh auth login && gh auth setup-git
+# - Any other git credential helper that serves github.com
+# - SSH keys only: git config --global url."git@github.com:".insteadOf "https://github.com/"
 
 # Then register normally:
 syn marketplace add myorg/private-marketplace --name internal
 ```
 
-For CI environments, set the `GIT_ASKPASS` or `GH_TOKEN` environment variable,
-or configure a credential helper that reads from environment variables.
+An SSH key on its own does not help, because the URL is HTTPS; it works only
+through an `insteadOf` rule like the one above. `GH_TOKEN` is not read by the
+CLI or by git directly. In CI, configure a credential helper that supplies the
+token (for example `gh auth setup-git`, which uses `GH_TOKEN`) or set
+`GIT_ASKPASS`.
 
 ### Troubleshooting
 
-**"No marketplace.json found in repo"**: The repository must have a
-`marketplace.json` at the root of the default branch (or the branch specified
-with `--ref`).
-
-**"syntropic137.type must be 'workflow-marketplace'"**: The `syntropic137`
-key in `marketplace.json` must contain `"type": "workflow-marketplace"`.
-This marker distinguishes marketplace repos from other Syntropic137 content.
+**"No marketplace.json found in org/repo"**: The repository must have a
+`marketplace.json` at the root of `main` (or of the branch or tag given with
+`--ref`).
 
 **"Invalid registry name"**: Registry names must start with an alphanumeric
 character and contain only letters, digits, hyphens, underscores, and dots.
@@ -748,8 +758,8 @@ Names like `../evil` or `my/registry` are rejected.
 **Plugin not found after registering**: Run `syn marketplace refresh` to
 re-fetch the latest index. The local cache may be stale.
 
-**Private repo access denied**: Ensure `git clone` works for the repo URL
-from your terminal. The CLI uses the same git credentials as your shell.
+**Private repo access denied**: Ensure `git clone https://github.com/<org>/<repo>.git`
+works from your terminal. The CLI uses the same git credentials as your shell.
 
 **"Package is already up to date"**: `syn workflow update` compares git
 SHAs. If the remote HEAD hasn't changed, no update is needed.

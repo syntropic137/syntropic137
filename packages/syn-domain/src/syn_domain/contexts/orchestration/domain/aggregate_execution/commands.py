@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
+    from syn_domain.contexts.orchestration._shared.evidence_contract import StepOutcome, StepRef
     from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
         ContinuedBranch,
         RemoteBranchReading,
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
         BranchObservation,
         DeclaredEvidence,
         DelegationFailure,
+        EvidenceGatePolicy,
         ExecutablePhase,
         FailureClassification,
         ObservedHead,
@@ -474,10 +476,14 @@ class ArtifactsCollectedCommand:
         session_id: str | None = None,
         deliverable_recovered: bool = False,
         observed_heads: Sequence[ObservedHead] = (),
+        evidence_gate: EvidenceGatePolicy | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.artifact_ids = artifact_ids
+        #: None is the gate OFF (plan §A.3, `SYN_EVIDENCE_GATE_ENABLED`): the
+        #: aggregate reads no settings, so the host says it here.
+        self.evidence_gate = evidence_gate
         self.first_content_preview = first_content_preview
         self.session_id = session_id
         #: Whether what was stored came from the transcript rather than from
@@ -492,6 +498,87 @@ class ArtifactsCollectedCommand:
     def observed(self, heads: Sequence[ObservedHead]) -> None:
         """Attach what the forge showed; set by the one frame that asked."""
         self.observed_heads = tuple(heads)
+
+
+class StartEvidenceAttemptCommand:
+    """Record an attempt at a gate's current step BEFORE dispatching it (plan §A.5, B3).
+
+    ``not_after`` is honoured on the first attempt only: retries share the
+    step's deadline, and the aggregate keeps the first one.
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        gate_id: str,
+        step: int,
+        dispatch_id: str,
+        started_at: datetime,
+        not_after: datetime,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.gate_id = gate_id
+        self.step = step
+        self.dispatch_id = dispatch_id
+        self.started_at = started_at
+        self.not_after = not_after
+
+
+class RecordEvidenceRunAdoptedCommand:
+    """The forge run that answers a step's current attempt (plan §A.5)."""
+
+    def __init__(
+        self, execution_id: str, gate_id: str, step: int, attempt: int, run_id: int, run_url: str
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.gate_id = gate_id
+        self.step = step
+        self.attempt = attempt
+        self.run_id = run_id
+        self.run_url = run_url
+
+
+class RecordMutationPatchesRemovedCommand:
+    """The compare-and-swap S -> S' landed (or was found landed); settles the removal step."""
+
+    def __init__(
+        self, execution_id: str, gate_id: str, step: int, after_sha: str, author: str
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.gate_id = gate_id
+        self.step = step
+        self.after_sha = after_sha
+        self.author = author
+
+
+class SettleEvidenceStepCommand:
+    """A gate's current step reached its outcome. The last settle opens the gate."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        gate_id: str,
+        step: int,
+        outcome: StepOutcome,
+        reason: str | None = None,
+        run_id: int | None = None,
+        run_url: str | None = None,
+        head_sha_evidenced: str | None = None,
+        reused_from: StepRef | None = None,
+        report_artifact_ids: Sequence[str] = (),
+        manifest_artifact_id: str | None = None,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.gate_id = gate_id
+        self.step = step
+        self.outcome = outcome
+        self.reason = reason
+        self.run_id = run_id
+        self.run_url = run_url
+        self.head_sha_evidenced = head_sha_evidenced
+        self.reused_from = reused_from
+        self.report_artifact_ids = list(report_artifact_ids)
+        self.manifest_artifact_id = manifest_artifact_id
 
 
 class ResumeExecutionCommand:
