@@ -39,9 +39,9 @@ Each agent execution runs in an isolated Docker workspace with a two-phase secur
 
 <WorkspaceIsolationFlow />
 
-**Setup Phase**: Secrets are available briefly to configure credential helpers. Raw tokens are cleared before the agent starts.
+**Setup Phase**: Secrets are used to write git and gh credential files and are removed from the environment before the agent starts. The GitHub installation token stays in those files, readable by the agent, for the run ([#725](https://github.com/syntropic137/syntropic137/issues/725) tracks removing it).
 
-**Agent Phase**: A claude phase runs with its Anthropic credential, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, as its only runtime secret. A codex phase runs with an empty agent environment, its credential having been staged to `~/.codex/auth.json` during provisioning. `CODEX_AUTH_JSON` and `OPENAI_API_KEY` are deployment variables, not something the agent sees. Git operations use cached credentials from the setup phase.
+**Agent Phase**: A claude phase runs with its Anthropic credential, `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, as its only environment secret. A codex phase's credential is staged to `~/.codex/auth.json` during provisioning, and its environment carries no Claude credential unless the phase sets `allow_delegation: true`, which stages both. A claude `fallback_agent` gets the Claude credential only for its own run. `CODEX_AUTH_JSON` and `OPENAI_API_KEY` are deployment variables, not something the agent sees. Git operations use cached credentials from the setup phase.
 
 ### AppArmor hosts (Codex workspaces)
 
@@ -70,15 +70,13 @@ sudo apparmor_parser -r /etc/apparmor.d/agentic-codex-sandbox
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_ENVIRONMENT` | `development` | Environment mode (`development`, `production`) |
-| `TIMESCALEDB_HOST` | `localhost` | TimescaleDB hostname |
-| `TIMESCALEDB_PORT` | `5432` | TimescaleDB port |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
-| `MINIO_ENDPOINT` | `localhost:9000` | MinIO S3 endpoint |
-| `MINIO_ACCESS_KEY` | | MinIO access key |
-| `MINIO_SECRET_KEY` | | MinIO secret key |
-| `GITHUB_APP_ID` | | GitHub App ID for webhook triggers |
-| `GITHUB_APP_PRIVATE_KEY` | | GitHub App private key (PEM) |
+| `APP_ENVIRONMENT` | `development` | Environment mode (`development`, `beta`, `staging`, `production`, `selfhost`, `test`, `offline`). The setup CLI sets `selfhost` |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL. The self-host stack builds it from the Redis secret |
+| `SYN_STORAGE_MINIO_ENDPOINT` | | MinIO S3 endpoint |
+| `SYN_STORAGE_MINIO_ACCESS_KEY` | | MinIO access key |
+| `SYN_STORAGE_MINIO_SECRET_KEY` | | MinIO secret key. The self-host stack reads it from the MinIO secret |
+| `SYN_GITHUB_APP_ID` | | GitHub App ID for webhook triggers |
+| `SYN_GITHUB_APP_PRIVATE_KEY_FILE` | | Path to the GitHub App private key (PEM). The self-host stack mounts `secrets/github-app-private-key.pem` and sets this |
 | `ANTHROPIC_API_KEY` | | API key for claude phases. `CLAUDE_CODE_OAUTH_TOKEN` takes priority when both are set |
 | `CODEX_AUTH_JSON` | | Full contents of a Codex `~/.codex/auth.json`. Codex phases need it or `OPENAI_API_KEY`; it takes priority when both are set. Unused by claude phases |
 | `OPENAI_API_KEY` | | OpenAI API key for codex phases, used when `CODEX_AUTH_JSON` is unset. Staged as Codex's API-key `auth.json`, never in the agent environment. Unused by claude phases |
@@ -87,10 +85,7 @@ sudo apparmor_parser -r /etc/apparmor.d/agentic-codex-sandbox
 
 ### Single Server (Self-Host)
 
-Recommended for **10–100 concurrent agents**:
-- 4+ CPU cores, 8GB+ RAM (16GB recommended)
-- 500GB NVMe storage
-- Docker with workspace pooling (10–50 containers)
+One host runs up to `SYN_EXECUTION_MAX_CONCURRENT` executions at once (default 4); further starts queue. Each running execution holds a workspace container, by default limited to 2 CPU and 4 GB (`SYN_WORKSPACE_CPU_LIMIT`, `SYN_WORKSPACE_MEMORY_LIMIT_MB`), so size the host to the concurrency you set. In testing, 9 concurrent executions saturated a 16-core, 62 GB host.
 
 ### Multi-Server
 
@@ -125,10 +120,11 @@ export SYN_API_USER=admin
 export SYN_API_PASSWORD=$(grep SYN_API_PASSWORD ~/.syntropic137/.env | cut -d= -f2)
 ```
 
-To rotate credentials (generates a new password and restarts the stack):
+`npx @syntropic137/setup credentials rotate` rotates the PostgreSQL, Redis and MinIO credentials, not this password. To change the gateway password, edit `SYN_API_PASSWORD` in `~/.syntropic137/.env` and restart the stack:
 
 ```bash
-npx @syntropic137/setup credentials rotate
+npx @syntropic137/setup stop
+npx @syntropic137/setup start
 ```
 
 ### Port model
@@ -137,8 +133,8 @@ The gateway exposes two ports with different auth policies:
 
 | Port | Auth | Used by |
 |------|------|---------|
-| 80 | None | Docker health checks, internal service traffic, local dev (`localhost:8137`) |
-| 8081 | Basic Auth | Cloudflare Tunnel, any external access |
+| 80 (published at `SYN_GATEWAY_BIND`, default `127.0.0.1:8137`) | None while bound to loopback; Basic Auth otherwise (the gateway refuses to start without `SYN_API_PASSWORD`) | Docker health checks, internal service traffic, local dev (`localhost:8137`) |
+| 8081 (not published to the host) | Basic Auth when `SYN_API_PASSWORD` is set | Cloudflare Tunnel, any external access |
 
 **If you use Cloudflare Tunnel**, your tunnel config must route to `http://gateway:8081` (not `localhost:8137`). The setup wizard enforces this: `npx @syntropic137/setup tunnel` will exit with an error if `SYN_API_PASSWORD` is not set.
 
@@ -242,6 +238,48 @@ set `SYN_DISK_REFUSE_ADMISSION_BELOW_GIB` (or lower `SYN_DISK_RUN_RESERVE_GIB`
 when that is unset) in `~/.syntropic137/.env`, then recreate the API container
 so it reads the new value: compose `up -d`, since a plain `restart` keeps the
 container's old environment.
+
+## Backup and Restore
+
+From a repository checkout (the `just selfhost-*` stack), one command backs up
+the whole `syn` database: the event store, every projection, and the
+`agent_events` hypertable.
+
+```bash
+just selfhost-backup
+just selfhost-restore /var/backups/syn/syn-20261008T030000Z.dump
+```
+
+`selfhost-backup` writes a compressed `pg_dump` custom-format archive into
+`BACKUP_DIR`, with a `.manifest` beside it (sha256 and every table's row
+count), and reports success only after reading every row back. The `db-backup`
+service also takes one on a schedule and prunes old ones:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `BACKUP_SCHEDULE` | `0 3 * * *` | Five-field cron, in UTC |
+| `BACKUP_RETENTION_DAYS` | `7` | Backups older than this are deleted after each successful backup. Only files the backup recorded creating (in `BACKUP_DIR/.syn-db-backup.ledger`) are ever deleted |
+| `BACKUP_DIR` | `/var/backups/syn` | Host directory for the archives |
+
+`selfhost-restore` stops `api`, `collector`, `event-store` and `gateway`,
+checks the archive against its manifest, restores it into a staging database
+with TimescaleDB's restore mode around `pg_restore`, verifies every table's row
+count, and only then swaps it in and starts the writers again. Execution
+admission comes back **paused**: the backup's queued and pending work could
+have run since it was taken, so nothing starts until you review it and resume
+with `PUT /api/v1/maintenance` (`{"active": false}`). The replaced
+database is kept as `syn_pre_restore_<timestamp>`, never dropped; drop it
+yourself once satisfied. It refuses to replace a database that already holds
+rows unless you pass `--force`, which first takes a fresh backup of it and
+stops if that backup fails.
+
+**Take a backup before an upgrade** that bumps the event store or
+event-sourcing-platform, changes the PostgreSQL or TimescaleDB image, or runs a
+script that writes events. A normal application upgrade does not need one: the
+event store is append-only and projections are rebuilt from it.
+
+The `npx @syntropic137/setup` installation does not include the backup service
+yet ([#1791](https://github.com/syntropic137/syntropic137/issues/1791)).
 
 ## Tunnels (Optional)
 

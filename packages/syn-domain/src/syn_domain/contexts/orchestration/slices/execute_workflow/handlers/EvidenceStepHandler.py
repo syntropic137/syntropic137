@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         EvidencePlanStep,
+        InheritedAttempt,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
@@ -170,9 +171,7 @@ class _StepRun:
 
     async def _run(self) -> None:
         index = self.step.index
-        attempt = self.gate.attempts.get(index)
-        if attempt is None:
-            attempt = await self._attempt()
+        attempt = self.gate.attempts.get(index) or await self._first_attempt()
         while attempt is not None:
             if self.h.clock() >= attempt.not_after:
                 await self._settle(StepOutcome.UNAVAILABLE, "timeout")
@@ -244,15 +243,42 @@ class _StepRun:
             return None
         return await self._attempt()
 
-    async def _start(self) -> EvidenceAttempt:
+    async def _first_attempt(self) -> EvidenceAttempt | None:
+        """The parent's attempt when this is a resume that inherited one, else a new one."""
+        parent = self.gate.inherited_attempts.get(self.step.index)
+        return await (self._attempt() if parent is None else self._resume_parent_attempt(parent))
+
+    async def _resume_parent_attempt(self, parent: InheritedAttempt) -> EvidenceAttempt:
+        """Take over the parent's attempt before posting anything (§A.7 3).
+
+        Recorded under the parent's nonce and post time, so the look-up finds
+        the parent's run, but with a fresh deadline: a person-started resume is
+        a new decision. Nothing is posted here; a run the look-up cannot find
+        costs this step one attempt, then a fresh one is posted.
+        """
+        attempt = await self._start(parent.dispatch_id, parent.started_at)
+        if parent.run_id is not None and parent.run_url is not None:
+            return await self._adopt(attempt, RunRef(run_id=parent.run_id, run_url=parent.run_url))
+        return attempt
+
+    def _parents_run(self) -> RunRef | None:
+        """The parent's run, when a crash came between taking its attempt over and adopting it."""
+        parent = self.gate.parents_run(self.step.index)
+        if parent is None or parent.run_id is None or parent.run_url is None:
+            return None
+        return RunRef(run_id=parent.run_id, run_url=parent.run_url)
+
+    async def _start(
+        self, dispatch_id: str | None = None, started_at: datetime | None = None
+    ) -> EvidenceAttempt:
         now = self.h.clock()
         self.aggregate.start_evidence_attempt(
             StartEvidenceAttemptCommand(
                 self.execution_id,
                 self.gate.gate_id,
                 self.step.index,
-                str(uuid.uuid4()),
-                now,
+                dispatch_id or str(uuid.uuid4()),
+                started_at or now,
                 now + self.h.timings.step_deadline,
             )
         )
@@ -277,7 +303,11 @@ class _StepRun:
         """Look for the attempt's run until it should have become visible (§A.5 2).
 
         Never past the step's own deadline, which may be the sooner of the two.
+        No look-up at all when the attempt is the parent's and it named its run.
         """
+        known = self._parents_run()
+        if known is not None:
+            return known
         deadline = min(attempt.started_at + self.h.timings.dispatch_visibility, attempt.not_after)
         while True:
             run = await self.h.runner.find_run(self._ref(attempt))

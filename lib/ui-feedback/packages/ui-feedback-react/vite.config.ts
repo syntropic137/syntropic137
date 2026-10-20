@@ -8,9 +8,9 @@ export default defineConfig({
     react(),
     dts({
       include: ['src'],
-      outDir: 'dist',
+      outDirs: 'dist',
       // Don't roll up types - just emit .d.ts files alongside JS
-      rollupTypes: false,
+      bundleTypes: false,
     }),
   ],
   build: {

@@ -18,6 +18,7 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts.orchestration._shared.phase_order import refuse_phase_order_conflict
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     LeftBranches,
     PushedCommit,
@@ -77,11 +78,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.phase_step_eve
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
     evt,
-    parse_phase_definitions,
+    refuse_unordered,
+    replay_phases,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_rules import (
     ResumeRefused,
     decide_resume,
+    refuse_reopening,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
     refuse_resume_start,
@@ -250,6 +253,8 @@ class WorkflowExecutionAggregate(
         self._cancelled_work_recorded = False
         self._phase_definitions: list[PhaseDefinition] = []
         self._phase_order_map: dict[str, int] = {}
+        #: Why the replayed phase list is not a total order (#1455), if it is not.
+        self._phase_order_conflict: str | None = None
         self._current_phase_workspace_id: str | None = None
         #: What each RUNNING phase's agent left behind, keyed by phase.
         #:
@@ -302,6 +307,9 @@ class WorkflowExecutionAggregate(
         #: and a parent may be resumed only once.
         self._completed_phase_ids: set[str] = set()
         self._phase_artifact_ids: dict[str, list[str]] = {}
+        #: Who holds each artifact its phase's owner does not: the evidence
+        #: reports a resume filed for a phase it inherited (plan §A.7).
+        self._artifact_owners: dict[str, str] = {}
         #: Whether this execution has admitted a resume. THIS is the
         #: "resumed at most once" rule, deliberately separate from the child's
         #: id below, which under ADR-023 can replay as None and would make the
@@ -519,6 +527,7 @@ class WorkflowExecutionAggregate(
         if self.id is not None:
             msg = "Execution already started"
             raise ValueError(msg)
+        refuse_phase_order_conflict(command.phase_definitions or [])
 
         self._initialize(command.aggregate_id)
         self._apply(started_event(command))
@@ -547,6 +556,7 @@ class WorkflowExecutionAggregate(
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot complete execution in status {self._status}"
             raise ValueError(msg)
+        refuse_unordered(self._phase_order_conflict, "complete")
 
         self._apply(completed_event(command, self._workflow_id or "", self._reviews.latest))
 
@@ -559,24 +569,6 @@ class WorkflowExecutionAggregate(
 
         self._apply(failed_event(command, self._workflow_id or ""))
 
-    def _refuse_if_completed(self, phase_id: str, verb: str) -> None:
-        """A completed phase's record is closed (#1453).
-
-        Three commands could each reopen it - start, complete, collect - and
-        each corrupts it differently: a second start lets a retry drop the
-        artifacts of the attempt that did complete, a second completion inflates
-        the completed count and can append another attempt's artifact, and a
-        late collection injects artifacts into a phase that finished. A resume
-        inherits the completed prefix, so all three end up handing a child work
-        whose inputs are not what the record says (ADR-014 s7).
-
-        One guard rather than three copies: the doors are different, the rule is
-        the same, and a rule spelled once cannot be closed on two of them.
-        """
-        if phase_id in self._completed_phase_ids:
-            msg = f"Cannot {verb} phase {phase_id}: it has already completed"
-            raise ValueError(msg)
-
     @command_handler("StartPhaseCommand")
     def start_phase(self, command: StartPhaseCommand) -> None:
         """Handle StartPhaseCommand."""
@@ -587,7 +579,8 @@ class WorkflowExecutionAggregate(
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot start phase in status {self._status}"
             raise ValueError(msg)
-        self._refuse_if_completed(command.phase_id, "start")
+        refuse_unordered(self._phase_order_conflict, "start a phase of")
+        refuse_reopening(self._completed_phase_ids, command.phase_id, "start")
 
         event = PhaseStartedEvent(
             workflow_id=command.workflow_id,
@@ -663,7 +656,7 @@ class WorkflowExecutionAggregate(
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot complete phase in status {self._status}"
             raise ValueError(msg)
-        self._refuse_if_completed(command.phase_id, "complete")
+        refuse_reopening(self._completed_phase_ids, command.phase_id, "complete")
 
         event = PhaseCompletedEvent(
             workflow_id=command.workflow_id,
@@ -713,7 +706,7 @@ class WorkflowExecutionAggregate(
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot collect artifacts in status {self._status}"
             raise ValueError(msg)
-        self._refuse_if_completed(command.phase_id, "collect artifacts for")
+        refuse_reopening(self._completed_phase_ids, command.phase_id, "collect artifacts for")
 
         self._apply(artifacts_collected_event(command, self._workflow_id or ""))
 
@@ -838,6 +831,8 @@ class WorkflowExecutionAggregate(
             command=command,
             repair_point=self._reviews.repair_point(self._phase_definitions),
             skipped_phase_ids=self._reviews.skipped,
+            open_gate=None if (gate := self._gates.open_gate()) is None else gate.inherited(),
+            artifact_owners=self._artifact_owners,
         )
         if isinstance(decision, ResumeRefused):
             raise ValueError(decision.reason)
@@ -851,7 +846,9 @@ class WorkflowExecutionAggregate(
         self._started_at = evt(event, "started_at")
         self._total_phases = evt(event, "total_phases", 0)
         self._expected_completion_at = evt(event, "expected_completion_at")
-        self._phase_definitions = parse_phase_definitions(evt(event, "phase_definitions"))
+        self._phase_definitions, self._phase_order_conflict = replay_phases(
+            evt(event, "phase_definitions")
+        )
         self._phase_order_map = {p.phase_id: p.order for p in self._phase_definitions}
         self._status = ExecutionStatus.RUNNING
         self._pins = read_start_pins(event)
@@ -864,7 +861,7 @@ class WorkflowExecutionAggregate(
     def _inherit(self, origin: ResumeOrigin) -> None:
         """Take over the parent's completed prefix as this run's own.
 
-        As completed, not as merely skipped: `_refuse_if_completed` then closes
+        As completed, not as merely skipped: `resume_rules.refuse_reopening` then closes
         each one to start, completion and collection alike, and a resume of THIS
         run inherits them onward with the same artifacts - and with the
         execution that holds them, which is not this one (#1462).
@@ -872,7 +869,10 @@ class WorkflowExecutionAggregate(
         for phase in origin.inherited_phases:
             self._completed_phase_ids.add(phase.phase_id)
             self._phase_artifact_ids[phase.phase_id] = list(phase.artifact_ids)
+            self._artifact_owners.update(phase.artifact_owners)
         self._completed_phases = len(origin.inherited_phases)
+        if origin.inherited_evidence_gate is not None:
+            self._gates.inherit(origin.inherited_evidence_gate)
 
     @event_sourcing_handler("WorkflowCompleted")
     def on_execution_completed(self, event: WorkflowCompletedEvent) -> None:

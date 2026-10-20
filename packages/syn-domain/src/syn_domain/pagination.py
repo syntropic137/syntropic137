@@ -198,7 +198,7 @@ def coerce_datetime(value: object) -> datetime | None:
 
     Accepts an ISO 8601 string or an existing datetime, and handles the
     trailing ``Z`` suffix (RFC 3339), which ``fromisoformat`` rejects before
-    Python 3.11.
+    Python 3.11. Hour ``24`` names none on every Python: see ``_names_hour_24``.
 
     A value carrying no offset is read as UTC. Every timestamp reaching this
     module is UTC already -- aggregates stamp ``datetime.now(UTC)`` -- so UTC
@@ -221,13 +221,73 @@ def coerce_datetime(value: object) -> datetime | None:
     datetime left and nothing downstream has to know which kind it was given.
     """
     if isinstance(value, str):
+        text = value.replace("Z", "+00:00")
+        if _names_hour_24(text):
+            return None
         try:
-            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            value = datetime.fromisoformat(text)
         except ValueError:
             return None
     if not isinstance(value, datetime):
         return None
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _names_hour_24(text: str) -> bool:
+    """Whether the time of day ``fromisoformat`` would read in ``text`` is hour 24.
+
+    Python 3.14 reads ``T24:00`` as midnight of the next day; 3.12 and 3.13
+    refuse it, and so does the SQL gate in ``postgres_page_keys`` (#1637). Left
+    to the interpreter, the same stored row is dated on one Python and undated
+    on another, so the refusal is stated here instead of inherited.
+
+    The hour is the first two characters of the time, so the rule is only as
+    good as where it thinks the time starts. :func:`_time_of_day_start` finds
+    it the way ``fromisoformat`` does, separator digits included, which is why
+    a valid ``2026-10-01200:00`` (separator ``2``) is still a midnight.
+    """
+    start = _time_of_day_start(text)
+    return text[start : start + 2] == "24"
+
+
+def _time_of_day_start(text: str) -> int:
+    """Where ``fromisoformat`` starts reading the time of day in ``text``.
+
+    The separator is any one character, a digit included, so its place is
+    decided by the date form in front of it. This is the split CPython makes
+    in ``_find_isoformat_datetime_separator``, the same on 3.12, 3.13 and 3.14;
+    a string it cannot split gets no time of day, and the parser refuses it.
+    """
+    if len(text) < 8:
+        return len(text)
+    if text[4] == "-":
+        return _extended_time_start(text)
+    if text[4] == "W":
+        return _basic_week_time_start(text)
+    return 9  # YYYYMMDD
+
+
+def _extended_time_start(text: str) -> int:
+    if text[5] != "W":
+        return 11  # YYYY-MM-DD
+    # YYYY-Www-D, unless a digit follows the day: then CPython reads YYYY-Www
+    # with "-" as the separator.
+    week_day = len(text) > 9 and text[8] == "-"
+    digit_after_day = len(text) > 10 and _is_ascii_digit(text[10])
+    return 11 if week_day and not digit_after_day else 9
+
+
+def _basic_week_time_start(text: str) -> int:
+    end = 7
+    while end < len(text) and _is_ascii_digit(text[end]):
+        end += 1
+    if end < 9:
+        return end + 1  # YYYYWww or YYYYWwwD, separator not a digit
+    return 8 if end % 2 == 0 else 9  # a digit run: its parity names the date
+
+
+def _is_ascii_digit(char: str) -> bool:
+    return "0" <= char <= "9"
 
 
 class _WindowVerdict(Enum):

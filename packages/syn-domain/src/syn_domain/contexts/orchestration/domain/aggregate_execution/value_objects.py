@@ -44,6 +44,7 @@ from syn_shared.agents import (
     resolve_phase_model,
 )
 from syn_shared.delegation import DELEGATION_TARGET_BY_PRIMARY, DelegationTarget
+from syn_shared.platform_access import PlatformScope
 
 # Re-exported for the WorkflowFailed event, which may import value objects and
 # nothing else: the kind lives in the shared kernel so the GitHub adapter can
@@ -858,6 +859,22 @@ class InheritedPhase(BaseModel):
     None on every event written before #1462. Read it through
     `ResumeOrigin.owner_of`, never directly: absent means the parent the event
     names, which is what it meant when those events were written."""
+    artifact_owners: dict[str, str] = Field(default_factory=dict)
+    """The execution holding each of ``artifact_ids`` that the phase's owner
+    does not: the reports and manifest a resume filed when it settled the
+    phase's inherited evidence gate (plan §A.7). By artifact id; an id absent
+    here is held by the phase's owner.
+
+    Written only when there is one, so every phase without settled-elsewhere
+    evidence reads exactly as a release before PR 5c wrote it."""
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_artifact_owners(self, handler: SerializerFunctionWrapHandler) -> object:
+        """Leave ``artifact_owners`` off the payload when empty."""
+        payload = handler(self)
+        if isinstance(payload, dict) and not payload.get("artifact_owners"):
+            payload.pop("artifact_owners", None)
+        return payload
 
 
 #: The key under which a resume's events carry the execution that ran each
@@ -1104,6 +1121,11 @@ class ExecutablePhase:
     # which of the two its working tree can possibly hold.
     delivers_repo_changes: bool = True
 
+    # The scope of the platform token this phase's workspace is given (ADR-072,
+    # #1744). Like clone_repos it decides what the WORKSPACE holds, so it rides
+    # here and not on agent_config. Forgetting it falls back to READ: the
+    # failure mode is a phase with less access than declared, never more.
+    platform_access: PlatformScope = PlatformScope.READ
     # Whether this phase must report a `review_verdict` (PC-116). A review
     # phase that says nothing about what it found would otherwise advance by
     # order exactly as if it had found something, so the run fails instead.
@@ -1197,6 +1219,22 @@ class ResumeOrigin(BaseModel):
     #: these; their artifacts are the ones it hands forward.
     inherited_phases: list[InheritedPhase]
     resume_phase_id: str
+    #: The parent's open evidence gate, when the parent stopped inside one
+    #: (plan §A.7). The child seeds its own gate from it and runs the gate's
+    #: first unsettled step before the held phase.
+    inherited_evidence_gate: InheritedEvidenceGate | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_gate(self, handler: SerializerFunctionWrapHandler) -> object:
+        """Written only when there is one: a resume outside a gate reads as before.
+
+        Every release before PR 5c forbids extra keys here, so an absent gate
+        written as null would make a rollback unable to replay any resume.
+        """
+        payload = handler(self)
+        if isinstance(payload, dict) and payload.get("inherited_evidence_gate") is None:
+            payload.pop("inherited_evidence_gate", None)
+        return payload
 
     def owner_of(self, phase: InheritedPhase) -> str:
         """The execution holding ``phase``'s artifacts.
@@ -1209,6 +1247,19 @@ class ResumeOrigin(BaseModel):
     def owners(self) -> dict[str, str]:
         """Every inherited phase's owner, by phase id."""
         return {p.phase_id: self.owner_of(p) for p in self.inherited_phases}
+
+    def artifacts_by_owner(self, phase: InheritedPhase) -> dict[str, list[str]]:
+        """``phase``'s artifact ids grouped by the execution holding each, in collection order.
+
+        Usually one group, the phase's owner. A phase whose evidence gate a
+        resume settled also has the reports that resume filed, held by it
+        (plan §A.7): asking the phase's owner for those finds nothing.
+        """
+        grouped: dict[str, list[str]] = {}
+        for artifact_id in phase.artifact_ids:
+            owner = phase.artifact_owners.get(artifact_id) or self.owner_of(phase)
+            grouped.setdefault(owner, []).append(artifact_id)
+        return grouped
 
 
 # Re-exported for `WorkflowExecutionStarted` (#1513): a domain event imports its
@@ -1397,3 +1448,15 @@ class EvidencePlanStep(BaseModel):
     tests: tuple[str, ...] = ()
     on_cleaned_head: bool = False
     preset: EvidencePreset | None = None
+
+
+# Re-exported for `ExecutionResumed` and `ResumeOrigin` (plan §A.7): this module
+# is past the file-size limit, and the gate's value objects need EvidencePlanStep.
+from syn_domain.contexts.orchestration.domain.aggregate_execution.inherited_evidence import (  # noqa: E402
+    InheritedAttempt as InheritedAttempt,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.inherited_evidence import (  # noqa: E402
+    InheritedEvidenceGate as InheritedEvidenceGate,  # noqa: TC001 - ResumeOrigin's field, resolved by model_rebuild
+)
+
+ResumeOrigin.model_rebuild()
