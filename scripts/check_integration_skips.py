@@ -19,11 +19,13 @@ skip actually travels:
 
 - a ``skip``/``skipif`` marker on the test, its class or its module;
 - ``pytest.skip`` / ``pytest.importorskip`` in the test body;
-- the same calls in a function of the same module the test calls, at any depth
+- the same calls in a function the test calls, at any depth, defined in its
+  module or imported by ``from x import name`` from a first-party module
   (``_require(url)`` that skips is the commonest shape here);
 - a fixture that skips, requested by parameter, by ``usefixtures`` or by
-  ``autouse``, defined in the module or in any ``conftest.py`` between the
-  module and the repo root, followed through the fixtures IT requests;
+  ``autouse``, defined or imported in the module or in any ``conftest.py``
+  between the module and the repo root, followed through the fixtures IT
+  requests;
 - a module-level ``importorskip`` / ``skip(allow_module_level=True)``.
 
 Parameter marks count too: ``pytest.param(..., marks=...)`` in a
@@ -34,8 +36,8 @@ marks. Names are resolved where pytest resolves them: a class's fixtures and
 reaches the next scope out, and ``import pytest as pt`` / ``from pytest import
 mark, skip`` are one vocabulary for markers and skip calls alike.
 
-What it cannot see: a skip in a helper imported from another module, a fixture
-from a plugin, and marks built dynamically. Those are reported as "cannot
+What it cannot see: a skip reached through ``import x`` then ``x.helper()``, a
+fixture from a plugin, and marks built dynamically. Those are reported as "cannot
 skip", so the census undercounts there. It also cannot tell which parameter a
 fixture body's ``if request.param == ...`` branch belongs to, so a skip in a
 parametrized fixture's body is charged to every integration leg that fixture
@@ -52,14 +54,15 @@ from __future__ import annotations
 
 import ast
 import re
-from dataclasses import dataclass, field
+import tomllib
+from dataclasses import dataclass, field, replace
 from itertools import product
 from typing import TYPE_CHECKING, Literal
 
 from check_test_markers import is_excluded
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Callable, Iterable, Iterator
     from pathlib import Path
 
 INTEGRATION_MARKER = "integration"
@@ -317,6 +320,8 @@ class _Module:
     ``self.``/``cls.`` calls made inside that class, and a class's fixtures are
     visible only to that class's tests. Both are looked up along the class's
     MRO, restricted to its same-module bases, as Python's attribute lookup does.
+    A bare call to a name the module does not define is resolved by ``imported``,
+    which the census sets to follow ``from x import name`` into the repo.
     """
 
     rel: str
@@ -329,6 +334,7 @@ class _Module:
     _mro: dict[int, list[ast.ClassDef]] = field(default_factory=dict)
     _class_fixtures: dict[int, dict[str, _Fixture]] = field(default_factory=dict)
     _reach: dict[tuple[int, int], str | None] = field(default_factory=dict)
+    imported: Callable[[str], tuple[_Module, _Function] | None] = lambda _: None
 
     @classmethod
     def parse(cls, path: Path, rel: str) -> _Module | None:
@@ -404,17 +410,22 @@ class _Module:
             return receiver
         return owner
 
-    def _callees(self, receiver: ast.ClassDef | None, call: ast.Call) -> list[_Function]:
+    def _callees(
+        self, receiver: ast.ClassDef | None, call: ast.Call
+    ) -> list[tuple[_Module, _Function]]:
         target = call.func
         if isinstance(target, ast.Name):
-            return self.functions.get(target.id, [])
+            if target.id in self.functions:
+                return [(self, f) for f in self.functions[target.id]]
+            found = self.imported(target.id)
+            return [found] if found is not None else []
         if (
             receiver is not None
             and isinstance(target, ast.Attribute)
             and isinstance(target.value, ast.Name)
             and target.value.id in {"self", "cls"}
         ):
-            return self._methods(receiver, target.attr)
+            return [(self, f) for f in self._methods(receiver, target.attr)]
         return []
 
     def body_skips(self, func: _Function, receiver: ast.ClassDef | None = None) -> str | None:
@@ -434,8 +445,8 @@ class _Module:
             if self.names.is_skip_call(call):
                 found = f"skips at {self.rel}:{call.lineno}"
                 break
-            for target in self._callees(receiver, call):
-                if target is not func and (via := self.body_skips(target, receiver)):
+            for owner, target in self._callees(receiver, call):
+                if target is not func and (via := owner.body_skips(target, receiver)):
                     found = f"calls {target.name}(), which {via}"
                     break
             if found:
@@ -552,20 +563,101 @@ def _tests(tree: ast.Module) -> Iterator[_Test]:
                     yield _Test(item, node, class_marks)
 
 
+def _import_roots(root: Path) -> list[Path]:
+    """Where an absolute import is looked for: the root and pytest's ``pythonpath``."""
+    pyproject = root / "pyproject.toml"
+    if not pyproject.is_file():
+        return [root]
+    config = tomllib.loads(pyproject.read_text()).get("tool", {})
+    pythonpath = config.get("pytest", {}).get("ini_options", {}).get("pythonpath", [])
+    return [root, *(root / p for p in pythonpath if isinstance(p, str))]
+
+
 class _Census:
     def __init__(self, root: Path) -> None:
         self._root = root
-        self._conftests: dict[Path, _Module | None] = {}
+        self._import_roots = _import_roots(root)
+        self._modules: dict[Path, _Module | None] = {}
+        self._registered: dict[Path, dict[str, _Fixture]] = {}
 
-    def _conftest(self, directory: Path) -> _Module | None:
-        if directory not in self._conftests:
-            path = directory / "conftest.py"
-            self._conftests[directory] = (
+    def _module(self, path: Path) -> _Module | None:
+        if path not in self._modules:
+            module = (
                 _Module.parse(path, path.relative_to(self._root).as_posix())
                 if path.is_file()
                 else None
             )
-        return self._conftests[directory]
+            if module is not None:
+                module.imported = lambda name: self._binding(path, name, frozenset())
+            self._modules[path] = module
+        return self._modules[path]
+
+    def _conftest(self, directory: Path) -> _Module | None:
+        return self._module(directory / "conftest.py")
+
+    def _import_target(self, path: Path, stmt: ast.ImportFrom) -> Path | None:
+        tail = (stmt.module or "").split(".") if stmt.module else []
+        if stmt.level:
+            package = path.parent
+            for _ in range(stmt.level - 1):
+                package = package.parent
+            bases = [package.joinpath(*tail)]
+        else:
+            bases = [r.joinpath(*tail) for r in self._import_roots]
+        for base in bases:
+            for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+                if candidate.is_file() and self._root in candidate.resolve().parents:
+                    return candidate.resolve()
+        return None
+
+    def _binding(
+        self, path: Path, attribute: str, seen: frozenset[Path]
+    ) -> tuple[_Module, _Function] | None:
+        """The function ``path`` binds to ``attribute``: defined there, or
+        imported from another first-party module, through re-exports."""
+        if path in seen or (module := self._module(path)) is None:
+            return None
+        if defined := module.functions.get(attribute):
+            return module, defined[-1]
+        for stmt in module.tree.body:
+            if not isinstance(stmt, ast.ImportFrom):
+                continue
+            for alias in stmt.names:
+                if (alias.asname or alias.name) != attribute:
+                    continue
+                if (target := self._import_target(path, stmt)) is not None:
+                    return self._binding(target, alias.name, seen | {path})
+        return None
+
+    def _bound(self, path: Path, attribute: str, seen: frozenset[Path]) -> _Fixture | None:
+        """The fixture ``path`` binds to ``attribute``, if that function is one."""
+        if (found := self._binding(path, attribute, seen)) is None:
+            return None
+        module, node = found
+        return next((f for f in module.fixtures.values() if f.node is node), None)
+
+    def fixtures(self, path: Path, module: _Module) -> dict[str, _Fixture]:
+        """Every fixture pytest registers from ``module``: its own, and each
+        fixture imported into its namespace by ``from x import name``. pytest
+        names an imported fixture by its ``name=``, else by the attribute it is
+        bound to here."""
+        if path not in self._registered:
+            imported: dict[str, _Fixture] = {}
+            for stmt in module.tree.body:
+                if not isinstance(stmt, ast.ImportFrom) or stmt.module == "pytest":
+                    continue
+                target = self._import_target(path, stmt)
+                for alias in stmt.names:
+                    local = alias.asname or alias.name
+                    found = self._bound(target, alias.name, frozenset({path})) if target else None
+                    if found is None:
+                        continue
+                    named = found.name != found.node.name
+                    imported[found.name if named else local] = (
+                        found if named else replace(found, name=local)
+                    )
+            self._registered[path] = {**imported, **module.fixtures}
+        return self._registered[path]
 
     def _conftest_levels(self, path: Path) -> list[dict[str, _Fixture]]:
         levels: list[dict[str, _Fixture]] = []
@@ -573,7 +665,7 @@ class _Census:
         while True:
             conftest = self._conftest(directory)
             if conftest is not None:
-                levels.append(conftest.fixtures)
+                levels.append(self.fixtures(directory / "conftest.py", conftest))
             if directory == self._root or self._root not in directory.parents:
                 break
             directory = directory.parent
@@ -581,7 +673,7 @@ class _Census:
 
     def file_findings(self, path: Path) -> list[Finding]:
         rel = path.relative_to(self._root).as_posix()
-        module = _Module.parse(path, rel)
+        module = self._module(path)
         if module is None:
             return []
         conftests = self._conftest_levels(path)
@@ -589,7 +681,7 @@ class _Census:
         findings: list[Finding] = []
         for test in _tests(module.tree):
             own = [module.class_fixtures(test.owner)] if test.owner else []
-            scope = _Scope([*own, module.fixtures, *conftests], test.owner)
+            scope = _Scope([*own, self.fixtures(path, module), *conftests], test.owner)
             findings.extend(self._test_findings(rel, module, scope, test, module_marks))
         return findings
 
