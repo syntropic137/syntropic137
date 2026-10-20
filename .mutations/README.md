@@ -45,7 +45,7 @@ whose class has a `setup_method` that calls `pytest.skip()` is skipped by
 pytest, but the census does not report it. The census undercounts that shape, and
 no test (including `test_the_census_agrees_with_pytest`) covers it. Restoring it
 means changing `scripts/`, which this regeneration round was forbidden to do.
-It is tracked separately (see the PR thread).
+It is tracked in #2043.
 
 ## Dispatch (from a machine with `gh`)
 
