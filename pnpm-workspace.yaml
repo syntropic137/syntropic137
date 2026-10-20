@@ -40,7 +40,7 @@ overrides:
   # vitest takes vite as a peer and pnpm resolves a missing peer to the highest
   # vite in the workspace. apps/syn-landing brings vite 8; this keeps every
   # vitest suite on the vite 7 it was locked to before the landing page moved in.
-  vitest>vite: 7.3.6
+  vitest>vite: 7.3.7
   '@babel/core@<7.29.6': '>=7.29.6 <8'
   '@humanfs/node@<0.16.8': '>=0.16.8 <0.17'
   baseline-browser-mapping@>=2.0.0 <2.11.0: '>=2.11.0 <3'
@@ -75,5 +75,8 @@ overrides:
   sharp@<0.35.4: '>=0.35.4 <0.36'
   source-map-js@<1.2.2: 1.2.2
   undici@>=7.0.0 <7.29.1: '>=7.29.1 <8'
+  vite@>=6.0.0 <6.4.4: '>=6.4.4 <7'
+  vite@>=7.0.0 <7.3.7: '>=7.3.7 <8'
+  vite@>=8.0.0 <8.1.6: '>=8.1.6 <9'
   uuid@<11.1.1: '>=11.1.1 <12'
   yaml@>=2.0.0 <2.8.3: '>=2.8.3'
