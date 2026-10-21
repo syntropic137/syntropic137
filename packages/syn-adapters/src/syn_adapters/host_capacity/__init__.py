@@ -14,7 +14,8 @@ class ProcHostCapacity:
     """`HostCapacityPort` over ``os`` and ``/proc``. Raises ``OSError`` if a read fails.
 
     Cores are the CPUs this process may be scheduled on, which a cgroup cpuset
-    narrows; memory is physical RAM. Workspaces run as sibling containers on
+    narrows (all CPUs on macOS, which has no affinity call); memory is
+    physical RAM. CPU pressure is Linux PSI and reads None elsewhere. Workspaces run as sibling containers on
     the same host, so this is the capacity they share.
     """
 
@@ -25,7 +26,7 @@ class ProcHostCapacity:
     def read(self) -> HostCapacity:
         stat = os.statvfs(self._disk_path)
         return HostCapacity(
-            cpu_cores=float(len(os.sched_getaffinity(0))),
+            cpu_cores=float(_schedulable_cpus()),
             memory_bytes=os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"),
             disk_free_bytes=stat.f_bavail * stat.f_frsize,
             cpu_pressure_avg60=self._cpu_pressure_avg60(),
@@ -38,6 +39,13 @@ class ProcHostCapacity:
         except OSError:
             return None
         return parse_cpu_pressure_avg60(text)
+
+
+def _schedulable_cpus() -> int:
+    """CPUs this process may run on; every CPU where affinity is not exposed (macOS)."""
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 1
 
 
 def parse_cpu_pressure_avg60(text: str) -> float | None:

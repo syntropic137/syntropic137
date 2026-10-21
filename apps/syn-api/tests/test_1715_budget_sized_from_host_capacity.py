@@ -47,7 +47,7 @@ class HostDouble:
 
 class UnreadableHost:
     def read(self) -> HostCapacity:
-        raise OSError("no /proc here")
+        raise OSError("host not readable")
 
 
 #: 16 cores, 64 GiB, 500 GiB free, and a PSI reading no default produces.
