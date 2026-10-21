@@ -21,7 +21,7 @@ import sys
 from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from typing import get_args
+from typing import TYPE_CHECKING, get_args
 
 import httpx
 import pytest
@@ -75,6 +75,9 @@ from syn_shared.agents import (
     resolve_model_alias,
 )
 from syn_shared.pricing import resolve_model_pricing
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -3458,15 +3461,44 @@ def test_keyword_only_scoring_records_the_plain_suite_version(
     assert "LLM judge" not in str(body["evidence"])
 
 
+def _auth_status(
+    method: str = "claude.ai",
+    *,
+    logged_in: bool = True,
+    provider: str = "firstParty",
+    key_source: str | None = None,
+) -> str:
+    """What `claude auth status --json` prints (shape read from CLI 2.1.293)."""
+    status = {
+        "loggedIn": logged_in,
+        "authMethod": method,
+        "apiProvider": provider,
+        "analyticsDisabled": False,
+        "configDirectory": "/home/u/.claude",
+    }
+    if key_source is not None:
+        status["apiKeySource"] = key_source
+    return json.dumps(status)
+
+
 @dataclass
 class _FakeClaude:
-    """Stands in for `subprocess.run` under `ClaudeCode`: records each call, never runs `claude`."""
+    """Stands in for `subprocess.run` under `ClaudeCode`: records each call, never runs `claude`.
+
+    `claude auth status` is answered from `auth_stdout` and recorded in `auth_calls`;
+    every other call is an answer, recorded in `calls`. `envs` holds each call's `env`.
+    """
 
     stdout: str = ""
     returncode: int = 0
     stderr: str = ""
     timeout: bool = False
+    auth_stdout: str = field(default_factory=_auth_status)
+    auth_returncode: int = 0
+    auth_timeout: bool = False
     calls: list[tuple[list[str], int, float]] = field(default_factory=list)
+    auth_calls: list[tuple[list[str], int, float]] = field(default_factory=list)
+    envs: list[dict[str, str]] = field(default_factory=list)
 
     def __call__(
         self,
@@ -3476,7 +3508,14 @@ class _FakeClaude:
         capture_output: bool,
         text: bool,
         timeout: float,
+        env: Mapping[str, str],
     ) -> subprocess.CompletedProcess[str]:
+        self.envs.append(dict(env))
+        if args[1:3] == ["auth", "status"]:
+            self.auth_calls.append((list(args), stdin, timeout))
+            if self.auth_timeout:
+                raise subprocess.TimeoutExpired(args, timeout)
+            return subprocess.CompletedProcess(args, self.auth_returncode, self.auth_stdout, "")
         self.calls.append((list(args), stdin, timeout))
         if self.timeout:
             raise subprocess.TimeoutExpired(args, timeout)
@@ -3533,6 +3572,108 @@ def test_claude_code_closes_stdin_and_passes_its_timeout() -> None:
     [(_, stdin, timeout)] = fake.calls
     assert stdin == subprocess.DEVNULL
     assert timeout == 42.0
+
+
+@pytest.mark.unit
+def test_no_credential_in_the_parent_environment_reaches_the_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`claude -p` prefers an exported key to the OAuth login, so the child never sees one."""
+    for name in eval_suite.CLAUDE_CODE_CREDENTIAL_ENV:
+        monkeypatch.setenv(name, "synthetic-not-a-credential")
+    monkeypatch.setenv("HOME", "/home/u")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-oauth")
+    fake = _FakeClaude(stdout=_envelope("ok"))
+    eval_suite.ClaudeCode(run=fake).complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
+    assert len(fake.envs) == 2 and len(fake.auth_calls) == 1 and len(fake.calls) == 1
+    for env in fake.envs:
+        assert not set(env) & {
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
+        }
+        # The rest of the environment, the OAuth login's included, is kept.
+        assert env["HOME"] == "/home/u" and env["CLAUDE_CODE_OAUTH_TOKEN"] == "synthetic-oauth"
+
+
+@pytest.mark.unit
+def test_the_login_is_checked_with_the_answers_own_environment_before_it() -> None:
+    fake = _FakeClaude(stdout=_envelope("ok"))
+    eval_suite.ClaudeCode(timeout_s=42.0, run=fake).complete(
+        model=eval_suite.JUDGE_MODEL, system="s", prompt="p"
+    )
+    assert fake.auth_calls == [(["claude", "auth", "status", "--json"], subprocess.DEVNULL, 42.0)]
+    assert fake.envs[0] == fake.envs[1]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("method", ["claude.ai", "oauth_token"])
+def test_an_oauth_login_is_accepted(method: str) -> None:
+    fake = _FakeClaude(stdout=_envelope("ok"), auth_stdout=_auth_status(method))
+    client = eval_suite.ClaudeCode(run=fake)
+    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("fake", "error", "match"),
+    [
+        (
+            _FakeClaude(auth_stdout=_auth_status("api_key", key_source="ANTHROPIC_API_KEY")),
+            "ClaudeCodeNotOAuthError",
+            "authMethod=api_key",
+        ),
+        (
+            _FakeClaude(auth_stdout=_auth_status("api_key_helper", key_source="apiKeyHelper")),
+            "ClaudeCodeNotOAuthError",
+            "apiKeySource=apiKeyHelper",
+        ),
+        (
+            _FakeClaude(auth_stdout=_auth_status("claude.ai", key_source="apiKeyHelper")),
+            "ClaudeCodeNotOAuthError",
+            "apiKeySource=apiKeyHelper",
+        ),
+        (
+            _FakeClaude(auth_stdout=_auth_status("third_party", provider="bedrock")),
+            "ClaudeCodeNotOAuthError",
+            "apiProvider=bedrock",
+        ),
+        (
+            _FakeClaude(auth_stdout=_auth_status("none", logged_in=False), auth_returncode=1),
+            "ClaudeCodeNotOAuthError",
+            "loggedIn=False",
+        ),
+        (
+            _FakeClaude(auth_stdout=_auth_status(), auth_returncode=1),
+            "ClaudeCodeNotOAuthError",
+            "claude auth login",
+        ),
+        (_FakeClaude(auth_stdout="not json"), "ClaudeCodeUnreadableOutputError", "auth status"),
+        (_FakeClaude(auth_timeout=True), "ClaudeCodeTimeoutError", "auth status"),
+    ],
+    ids=[
+        "api-key",
+        "api-key-helper",
+        "oauth-but-key-source",
+        "bedrock",
+        "logged-out",
+        "status-exit",
+        "status-unreadable",
+        "status-timeout",
+    ],
+)
+def test_a_call_that_would_not_run_on_oauth_is_refused_before_any_answer(
+    fake: _FakeClaude, error: str, match: str
+) -> None:
+    """Settings can bring a key back (apiKeyHelper, `env`), so the CLI is asked, not assumed."""
+    with pytest.raises(getattr(eval_suite, error), match=match) as raised:
+        eval_suite.ClaudeCode(timeout_s=42.0, run=fake).complete(
+            model=eval_suite.JUDGE_MODEL, system="s", prompt="p"
+        )
+    assert isinstance(raised.value, eval_suite.JudgeError)
+    assert fake.calls == []
 
 
 @pytest.mark.unit

@@ -98,7 +98,7 @@ from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 import httpx
 import yaml
@@ -114,6 +114,9 @@ from pydantic import (
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_shared.settings.dev_tooling import get_dev_api_url
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUITE = ROOT / "evals" / "verifier-seed-v1"
@@ -1135,6 +1138,7 @@ class ProcessRunner(Protocol):
         capture_output: Literal[True],
         text: Literal[True],
         timeout: float,
+        env: Mapping[str, str],
     ) -> subprocess.CompletedProcess[str]: ...
 
 
@@ -1162,6 +1166,10 @@ class ClaudeCodeReportedError(ClaudeCodeError):
     """The envelope parsed and says `is_error`: the session failed (auth, a refusal, a limit)."""
 
 
+class ClaudeCodeNotOAuthError(ClaudeCodeError):
+    """`claude auth status` says the CLI would not run on its OAuth login, so nothing is asked."""
+
+
 class _ClaudeCodeResult(BaseModel):
     """The fields of `claude -p --output-format json` the judge reads."""
 
@@ -1169,6 +1177,30 @@ class _ClaudeCodeResult(BaseModel):
     is_error: bool
     result: str
 
+
+class _ClaudeAuthStatus(BaseModel):
+    """The fields of `claude auth status --json` that say which credential a call would use."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    logged_in: bool = Field(alias="loggedIn")
+    auth_method: str = Field(alias="authMethod")
+    api_provider: str = Field(alias="apiProvider")
+    api_key_source: str | None = Field(default=None, alias="apiKeySource")
+
+
+CLAUDE_CODE_CREDENTIAL_ENV = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+)
+"""Variables that would put a judge call on a key, a bearer token or a cloud provider,
+ahead of the OAuth login (`claude -p` prefers an API key whenever one is set). Never
+passed to the CLI."""
+
+CLAUDE_CODE_OAUTH_METHODS = frozenset({"claude.ai", "oauth_token"})
+"""`authMethod` values of `claude auth status` that are the OAuth login."""
 
 JUDGE_TIMEOUT_S = 300.0
 """Per-call ceiling on one `claude -p` answer, after which the call is an error."""
@@ -1178,8 +1210,13 @@ JUDGE_TIMEOUT_S = 300.0
 class ClaudeCode:
     """`ModelClient` over Claude Code run headless (`claude -p`), on the CLI's own login.
 
-    No API key is read or passed: the call runs on whatever the CLI is logged in as
-    (OAuth). Never add ``--bare``, which skips that login for an API key. Each call is
+    No API key is read or passed: the call runs on the CLI's OAuth login, and only on
+    it. The child gets the parent environment minus `CLAUDE_CODE_CREDENTIAL_ENV`, and
+    before each answer `claude auth status`, run with that same environment, must name
+    a first-party OAuth method (`CLAUDE_CODE_OAUTH_METHODS`) and no API key source, or
+    the call raises `ClaudeCodeNotOAuthError`. That catches what the environment alone
+    cannot, such as an ``apiKeyHelper`` or ``env`` key in a settings file. Never add
+    ``--bare``, which skips that login for an API key. Each call is
     one non-interactive session with stdin closed, tools disabled, nothing persisted,
     the model pinned to the exact allowed id (`require_judge_model`) and effort pinned
     to `JUDGE_EFFORT`. The reply is the ``result`` of the JSON envelope. Every way that
@@ -1208,8 +1245,46 @@ class ClaudeCode:
             "--no-session-persistence",
         ]
 
+    def _require_oauth(self, env: Mapping[str, str]) -> None:
+        """Raise unless a call with `env` would run on the OAuth login."""
+        try:
+            done = self.run(
+                [self.executable, "auth", "status", "--json"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_s,
+                env=env,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ClaudeCodeTimeoutError(
+                f"claude auth status gave no answer within {self.timeout_s:g}s"
+            ) from exc
+        try:
+            status = _ClaudeAuthStatus.model_validate_json(done.stdout)
+        except ValidationError as exc:
+            raise ClaudeCodeUnreadableOutputError(
+                f"claude auth status exited {done.returncode} with no readable status: "
+                f"{done.stdout[:500]!r} {done.stderr.strip()[-500:]}"
+            ) from exc
+        if (
+            done.returncode != 0
+            or not status.logged_in
+            or status.api_provider != "firstParty"
+            or status.auth_method not in CLAUDE_CODE_OAUTH_METHODS
+            or status.api_key_source is not None
+        ):
+            raise ClaudeCodeNotOAuthError(
+                f"the judge runs only on Claude Code's OAuth login, but claude auth status "
+                f"says loggedIn={status.logged_in} authMethod={status.auth_method} "
+                f"apiProvider={status.api_provider} apiKeySource={status.api_key_source}: "
+                "run `claude auth login`, and remove any apiKeyHelper or key from its settings"
+            )
+
     def complete(self, *, model: str, system: str, prompt: str) -> str:
         argv = self.argv(model=model, system=system, prompt=prompt)
+        env = {k: v for k, v in os.environ.items() if k not in CLAUDE_CODE_CREDENTIAL_ENV}
+        self._require_oauth(env)
         try:
             done = self.run(
                 argv,
@@ -1217,6 +1292,7 @@ class ClaudeCode:
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_s,
+                env=env,
             )
         except subprocess.TimeoutExpired as exc:
             raise ClaudeCodeTimeoutError(

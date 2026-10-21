@@ -1,0 +1,12 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1283,7 +1283,7 @@
+ 
+     def complete(self, *, model: str, system: str, prompt: str) -> str:
+         argv = self.argv(model=model, system=system, prompt=prompt)
+-        env = {k: v for k, v in os.environ.items() if k not in CLAUDE_CODE_CREDENTIAL_ENV}
++        env = dict(os.environ)
+         self._require_oauth(env)
+         try:
+             done = self.run(
