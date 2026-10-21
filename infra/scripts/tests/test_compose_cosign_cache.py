@@ -35,19 +35,26 @@ _COMPOSE = [
 _COSIGN_CACHE = "/home/syn/.sigstore"
 
 
-def _api_services() -> list[tuple[Path, dict]]:
+#: Services that run the syn-api image as its syn user. The executor is the
+#: same image in another role (ADR-072 D1, #1310 1.6) and verifies workspace
+#: image signatures the same way, so every rule below binds it too.
+_API_IMAGE_SERVICES = ("api", "executor")
+
+
+def _api_services() -> list[pytest.ParameterSet]:
     found = []
     for path in _COMPOSE:
         if not path.exists():
             continue
         doc = yaml.safe_load(path.read_text()) or {}
-        api = (doc.get("services") or {}).get("api")
-        if api:
-            found.append((path, api))
+        for name in _API_IMAGE_SERVICES:
+            api = (doc.get("services") or {}).get(name)
+            if api:
+                found.append(pytest.param(path, api, id=f"{path.name}-{name}"))
     return found
 
 
-@pytest.mark.parametrize("path,api", _api_services(), ids=lambda v: getattr(v, "name", ""))
+@pytest.mark.parametrize("path,api", _api_services())
 def test_readonly_api_can_still_write_the_cosign_cache(path: Path, api: dict) -> None:
     if not api.get("read_only"):
         pytest.skip(f"{path.name}: api is not read_only, cosign can write anywhere")
@@ -61,7 +68,7 @@ def test_readonly_api_can_still_write_the_cosign_cache(path: Path, api: dict) ->
     )
 
 
-@pytest.mark.parametrize("path,api", _api_services(), ids=lambda v: getattr(v, "name", ""))
+@pytest.mark.parametrize("path,api", _api_services())
 def test_the_cosign_cache_tmpfs_is_size_bounded(path: Path, api: dict) -> None:
     """An unbounded tmpfs may consume up to half of host RAM.
 
@@ -105,7 +112,7 @@ def _tmpfs_options(entry: str) -> dict[str, str]:
     return {key: value for key, _, value in pairs}
 
 
-@pytest.mark.parametrize("path,api", _api_services(), ids=lambda v: getattr(v, "name", ""))
+@pytest.mark.parametrize("path,api", _api_services())
 @pytest.mark.parametrize("mount", _USER_OWNED_TMPFS)
 def test_user_tmpfs_is_owned_by_the_api_user(path: Path, api: dict, mount: str) -> None:
     if not api.get("read_only"):
