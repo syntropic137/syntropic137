@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 704116c3a..8df456148 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1292,8 +1292,6 @@ class ClaudeCode:
+                 f"apiProvider={status.api_provider} apiKeySource={status.api_key_source}: "
+                 "run `claude auth login`, and remove any apiKeyHelper or key from its settings"
+             )
+-        if status.auth_method == "oauth_token":
+-            self._require_oauth_token_source(env)
+ 
+     def _require_oauth_token_source(self, env: Mapping[str, str]) -> None:
+         """Raise unless an `oauth_token` status comes from `CLAUDE_CODE_OAUTH_TOKEN_ENV`.

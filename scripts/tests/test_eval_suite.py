@@ -3487,6 +3487,7 @@ class _FakeClaude:
 
     `claude auth status` is answered from `auth_stdout` and recorded in `auth_calls`;
     every other call is an answer, recorded in `calls`. `envs` holds each call's `env`.
+    A status asked without CLAUDE_CODE_OAUTH_TOKEN is `auth_stdout_without_token` when set.
     """
 
     stdout: str = ""
@@ -3496,6 +3497,7 @@ class _FakeClaude:
     auth_stdout: str = field(default_factory=_auth_status)
     auth_returncode: int = 0
     auth_timeout: bool = False
+    auth_stdout_without_token: str | None = None
     calls: list[tuple[list[str], int, float]] = field(default_factory=list)
     auth_calls: list[tuple[list[str], int, float]] = field(default_factory=list)
     envs: list[dict[str, str]] = field(default_factory=list)
@@ -3515,6 +3517,8 @@ class _FakeClaude:
             self.auth_calls.append((list(args), stdin, timeout))
             if self.auth_timeout:
                 raise subprocess.TimeoutExpired(args, timeout)
+            if self.auth_stdout_without_token is not None and "CLAUDE_CODE_OAUTH_TOKEN" not in env:
+                return subprocess.CompletedProcess(args, 1, self.auth_stdout_without_token, "")
             return subprocess.CompletedProcess(args, self.auth_returncode, self.auth_stdout, "")
         self.calls.append((list(args), stdin, timeout))
         if self.timeout:
@@ -3609,11 +3613,75 @@ def test_the_login_is_checked_with_the_answers_own_environment_before_it() -> No
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("method", ["claude.ai", "oauth_token"])
-def test_an_oauth_login_is_accepted(method: str) -> None:
-    fake = _FakeClaude(stdout=_envelope("ok"), auth_stdout=_auth_status(method))
+def test_the_stored_oauth_login_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`claude.ai` is the stored login, which every other credential outranks."""
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    fake = _FakeClaude(stdout=_envelope("ok"), auth_stdout=_auth_status("claude.ai"))
     client = eval_suite.ClaudeCode(run=fake)
     assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
+    assert len(fake.auth_calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "without_token",
+    [_auth_status("none", logged_in=False), _auth_status("claude.ai")],
+    ids=["token-only", "token-over-stored-login"],
+)
+def test_an_oauth_token_shown_to_come_from_its_variable_is_accepted(
+    monkeypatch: pytest.MonkeyPatch, without_token: str
+) -> None:
+    """Asked again without CLAUDE_CODE_OAUTH_TOKEN, the status stops saying `oauth_token`."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-oauth")
+    fake = _FakeClaude(
+        stdout=_envelope("ok"),
+        auth_stdout=_auth_status("oauth_token"),
+        auth_stdout_without_token=without_token,
+    )
+    client = eval_suite.ClaudeCode(timeout_s=42.0, run=fake)
+    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
+    status = (["claude", "auth", "status", "--json"], subprocess.DEVNULL, 42.0)
+    assert fake.auth_calls == [status, status]
+    with_token, without, answer = fake.envs
+    assert with_token == answer and with_token["CLAUDE_CODE_OAUTH_TOKEN"] == "synthetic-oauth"
+    assert without == {k: v for k, v in with_token.items() if k != "CLAUDE_CODE_OAUTH_TOKEN"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("oauth_token_env", "auth_calls", "match"),
+    [(None, 1, "with no CLAUDE_CODE_OAUTH_TOKEN"), ("synthetic-oauth", 2, "still says")],
+    ids=["settings-bearer-alone", "settings-bearer-over-oauth-token"],
+)
+def test_a_settings_bearer_token_cannot_pass_for_oauth(
+    monkeypatch: pytest.MonkeyPatch, oauth_token_env: str | None, auth_calls: int, match: str
+) -> None:
+    """A settings file's `env` ANTHROPIC_AUTH_TOKEN outranks every OAuth credential, and
+    CLI 2.1.293 reports it exactly as it reports an OAuth token (status shape below)."""
+    if oauth_token_env is None:
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    else:
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", oauth_token_env)
+    bearer = json.dumps(
+        {
+            "loggedIn": True,
+            "authMethod": "oauth_token",
+            "apiProvider": "firstParty",
+            "analyticsDisabled": False,
+        }
+    )
+    # With the variable set, taking it away leaves the settings token in place.
+    fake = _FakeClaude(
+        stdout=_envelope("ok"),
+        auth_stdout=bearer,
+        auth_stdout_without_token=None if oauth_token_env is None else bearer,
+    )
+    with pytest.raises(eval_suite.ClaudeCodeNotOAuthError, match=match):
+        eval_suite.ClaudeCode(run=fake).complete(
+            model=eval_suite.JUDGE_MODEL, system="s", prompt="p"
+        )
+    assert len(fake.auth_calls) == auth_calls
+    assert fake.calls == []
 
 
 @pytest.mark.unit

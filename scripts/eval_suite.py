@@ -1200,7 +1200,12 @@ ahead of the OAuth login (`claude -p` prefers an API key whenever one is set). N
 passed to the CLI."""
 
 CLAUDE_CODE_OAUTH_METHODS = frozenset({"claude.ai", "oauth_token"})
-"""`authMethod` values of `claude auth status` that are the OAuth login."""
+"""`authMethod` values of `claude auth status` that can be the OAuth login. `claude.ai`
+is the stored login; `oauth_token` is also what any bearer token reports, so it is
+accepted only once `CLAUDE_CODE_OAUTH_TOKEN_ENV` is shown to be its source."""
+
+CLAUDE_CODE_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
+"""The variable that carries an OAuth token from `claude setup-token`."""
 
 JUDGE_TIMEOUT_S = 300.0
 """Per-call ceiling on one `claude -p` answer, after which the call is an error."""
@@ -1215,7 +1220,10 @@ class ClaudeCode:
     before each answer `claude auth status`, run with that same environment, must name
     a first-party OAuth method (`CLAUDE_CODE_OAUTH_METHODS`) and no API key source, or
     the call raises `ClaudeCodeNotOAuthError`. That catches what the environment alone
-    cannot, such as an ``apiKeyHelper`` or ``env`` key in a settings file. Never add
+    cannot, such as an ``apiKeyHelper`` or ``env`` key in a settings file. A status of
+    ``oauth_token`` must also come from `CLAUDE_CODE_OAUTH_TOKEN_ENV`: a second status
+    without that variable must stop saying ``oauth_token``, or the token is a settings
+    file's ``ANTHROPIC_AUTH_TOKEN``. Never add
     ``--bare``, which skips that login for an API key. Each call is
     one non-interactive session with stdin closed, tools disabled, nothing persisted,
     the model pinned to the exact allowed id (`require_judge_model`) and effort pinned
@@ -1245,8 +1253,8 @@ class ClaudeCode:
             "--no-session-persistence",
         ]
 
-    def _require_oauth(self, env: Mapping[str, str]) -> None:
-        """Raise unless a call with `env` would run on the OAuth login."""
+    def _auth_status(self, env: Mapping[str, str]) -> tuple[int, _ClaudeAuthStatus]:
+        """`claude auth status` run with `env`: its exit code and the status it printed."""
         try:
             done = self.run(
                 [self.executable, "auth", "status", "--json"],
@@ -1261,14 +1269,18 @@ class ClaudeCode:
                 f"claude auth status gave no answer within {self.timeout_s:g}s"
             ) from exc
         try:
-            status = _ClaudeAuthStatus.model_validate_json(done.stdout)
+            return done.returncode, _ClaudeAuthStatus.model_validate_json(done.stdout)
         except ValidationError as exc:
             raise ClaudeCodeUnreadableOutputError(
                 f"claude auth status exited {done.returncode} with no readable status: "
                 f"{done.stdout[:500]!r} {done.stderr.strip()[-500:]}"
             ) from exc
+
+    def _require_oauth(self, env: Mapping[str, str]) -> None:
+        """Raise unless a call with `env` would run on the OAuth login."""
+        returncode, status = self._auth_status(env)
         if (
-            done.returncode != 0
+            returncode != 0
             or not status.logged_in
             or status.api_provider != "firstParty"
             or status.auth_method not in CLAUDE_CODE_OAUTH_METHODS
@@ -1279,6 +1291,33 @@ class ClaudeCode:
                 f"says loggedIn={status.logged_in} authMethod={status.auth_method} "
                 f"apiProvider={status.api_provider} apiKeySource={status.api_key_source}: "
                 "run `claude auth login`, and remove any apiKeyHelper or key from its settings"
+            )
+        if status.auth_method == "oauth_token":
+            self._require_oauth_token_source(env)
+
+    def _require_oauth_token_source(self, env: Mapping[str, str]) -> None:
+        """Raise unless an `oauth_token` status comes from `CLAUDE_CODE_OAUTH_TOKEN_ENV`.
+
+        The CLI reports every bearer token as `oauth_token`, including an
+        ``ANTHROPIC_AUTH_TOKEN`` from a settings file's ``env``, which outranks both the
+        OAuth token and the stored login. Asked again without the variable, a status
+        that still says `oauth_token` has its token from somewhere else.
+        """
+        fix = "remove ANTHROPIC_AUTH_TOKEN from the env of every Claude Code settings file"
+        if CLAUDE_CODE_OAUTH_TOKEN_ENV not in env:
+            raise ClaudeCodeNotOAuthError(
+                f"claude auth status says authMethod=oauth_token with no "
+                f"{CLAUDE_CODE_OAUTH_TOKEN_ENV} set, so its token is a bearer token from a "
+                f"settings file: {fix}"
+            )
+        _, without = self._auth_status(
+            {k: v for k, v in env.items() if k != CLAUDE_CODE_OAUTH_TOKEN_ENV}
+        )
+        if without.auth_method == "oauth_token":
+            raise ClaudeCodeNotOAuthError(
+                f"claude auth status still says authMethod=oauth_token without "
+                f"{CLAUDE_CODE_OAUTH_TOKEN_ENV}, so a bearer token from a settings file "
+                f"outranks the OAuth token: {fix}"
             )
 
     def complete(self, *, model: str, system: str, prompt: str) -> str:
