@@ -982,11 +982,6 @@ def _get_recoverable(state: LifecycleState) -> list[DegradedReason]:
     return [r for r in state.degraded_reasons if _is_recoverable(r)]
 
 
-def _all_recovered(state: LifecycleState) -> bool:
-    """Check whether all recoverable subsystems have been restored."""
-    return not any(_is_recoverable(r) for r in state.degraded_reasons)
-
-
 async def _try_recover_reason(state: LifecycleState, reason: DegradedReason) -> None:
     """Attempt recovery for a single degraded reason. Raises on failure."""
     entry = next((e for e in _SERVICE_REGISTRY if e.reason == reason), None)
@@ -1023,7 +1018,7 @@ async def _recovery_loop(state: LifecycleState) -> None:
     while not state._shutting_down and _get_recoverable(state):
         await _attempt_recovery_pass(state, delay)
 
-        if _all_recovered(state):
+        if not _get_recoverable(state):
             logger.info("All recoverable subsystems healthy — recovery loop exiting")
             return
 
