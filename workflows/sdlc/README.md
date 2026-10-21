@@ -137,6 +137,21 @@ repair round is spent on it. Its design note and preregistered A/B are in
 from v3 in anything else. **Change a shared prompt in `implement-v3/phases/`
 and copy it here too.**
 
+## Experiment arm: `implement-v5`
+
+`sdlc-implement-v5` is `sdlc-implement-v4-precheck` with one change (#2060):
+evidence declarations and capability gaps. A review or fix that needs a tool
+the workspace lacks and cannot install records a capability gap
+(`nested_docker`, `database`, `event_store`, `live_api`, `other`) instead of
+spending or refusing a round; integration and mutation evidence is declared in
+`TASK_RESULT.evidence` for the platform evidence gate; `finalize_pr` reads the
+gate's manifest and lists open gaps under `## Needs a capable workspace` for the
+orchestrator to route. Design note and A/B:
+[`implement-v5/EXPERIMENT.md`](implement-v5/EXPERIMENT.md).
+`scripts/tests/test_implement_v5_variant.py` fails if it differs from
+v4-precheck in anything else. `reverify-pr` mirrors implement-v3 and is
+unchanged.
+
 ## Verification gates
 
 `sdlc-implement-v3` and `sdlc-reverify-pr-v1` verify a change by running the
