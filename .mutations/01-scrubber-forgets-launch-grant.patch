@@ -1,0 +1,14 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/credentials.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/credentials.py
+index 53e273c7b..49d2c3382 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/credentials.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/credentials.py
+@@ -93,8 +93,7 @@ class WorkspaceCredentials:
+ 
+         Call before `release`, which forgets the parked values.
+         """
+-        launch = tuple(self._launch[name] for name in names if name in self._launch)
+-        return (self._session_store.auth_value, *launch)
++        return (self._session_store.auth_value,)
+ 
+     def release(self, names: tuple[str, ...]) -> None:
+         """Forget launch-scoped values; the provider resolved them at start."""
