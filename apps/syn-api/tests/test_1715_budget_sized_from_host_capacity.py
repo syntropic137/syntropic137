@@ -137,7 +137,7 @@ async def test_the_workspace_caps_do_not_change_the_budget(
     settings = Settings(app_environment=AppEnvironment.DEVELOPMENT)
     assert settings.workspace.cpu_limit == float(cpu_limit)
 
-    await lifecycle._size_execution_budget(settings)
+    await execution_capacity.size_execution_budget_at_startup(settings)
 
     assert admission.get_execution_budget().limit == 2
 

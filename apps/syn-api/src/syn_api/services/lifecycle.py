@@ -16,7 +16,7 @@ import contextlib
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from syn_api._wiring import (
@@ -28,7 +28,7 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.build_info import get_build_info
-from syn_api.services import cpu_throttling, inventory_lifecycle
+from syn_api.services import cpu_throttling, execution_capacity, inventory_lifecycle
 from syn_api.services.admission_announcement import (
     announce_admission_if_open,
     start_disk_recovery_watch,
@@ -40,14 +40,7 @@ from syn_api.services.disk_pressure import (
     start_disk_pressure_monitor,
     stop_disk_pressure_monitor,
 )
-from syn_api.services.execution_capacity import (
-    apply_host_sized_budget,
-    describe_execution_budget,
-)
-from syn_api.services.execution_host_runner import (
-    start_execution_host,
-    stop_execution_host,
-)
+from syn_api.services.execution_host_runner import start_execution_host, stop_execution_host
 from syn_api.services.execution_posture import (
     api_memory_limit_mib,
     log_execution_concurrency_posture,
@@ -87,12 +80,10 @@ if TYPE_CHECKING:
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api._wiring_admission import BackgroundWorkflowDispatcher
-    from syn_domain.contexts._shared.host_capacity import RunDemand
     from syn_domain.contexts.github.services import (
         CheckRunIngestionService,
         GitHubEventIngestionScheduler,
     )
-    from syn_shared.settings.config import Settings
 
 logger = logging.getLogger(__name__)
 SubscriptionHealthResult = tuple[SubscriptionHealth | None, tuple[DegradedReason, ...]]
@@ -293,8 +284,7 @@ async def startup(
     except Exception:
         logger.warning("Could not determine execution concurrency posture at startup.")
 
-    await _size_execution_budget(settings)
-
+    await execution_capacity.size_execution_budget_at_startup(settings)
     if settings.is_test:
         return Ok({"mode": "full"})
 
@@ -391,33 +381,12 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             disk=disk,
             db_pools=db_pools,
             cpu_throttling=cpu_throttling.read_cpu_throttling(),
-            execution_budget=describe_execution_budget(),
+            execution_budget=execution_capacity.describe_execution_budget(),
         )
     )
 
 
 # ── Private helpers ─────────────────────────────────────────────────
-
-
-async def _size_execution_budget(settings: Settings) -> None:
-    """Size the budget from host capacity before any start can claim from it (#1715).
-
-    Before the critical path, so the claim loop joins the Run Queue with the
-    sized capacity, and in every mode, so /health always reports a budget.
-    There is no profile store to read in test and offline modes.
-    """
-    from syn_adapters.host_capacity import build_host_capacity
-
-    async def measured_demand(window: timedelta) -> RunDemand | None:
-        from syn_api._wiring import get_phase_profile_query
-
-        return await get_phase_profile_query().run_demand(window)
-
-    await apply_host_sized_budget(
-        build_host_capacity(),
-        None if settings.uses_in_memory_stores else measured_demand,
-        settings.execution,
-    )
 
 
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
