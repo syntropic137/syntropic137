@@ -30,6 +30,11 @@ Firing on noise wastes runs, and two agents on one branch fight over it.
 | CI failed on a draft | none; the owning run handles it | the workflow that opened it still owns the branch |
 | `/syn` comment | `comment-command` | explicit request |
 
+State on 2026-10-21: triggers are effectively unused on the owner's
+deployment (two rules ever, zero fires). Every run was dispatched by hand or by
+the orchestrator. Enable them one at a time, on the transitions above, and
+measure each before adding the next.
+
 Known gap (2026-10-21): the `self-healing` preset fires on any failed check of
 any PR, drafts included (`packages/syn-domain/src/syn_domain/contexts/github/_shared/trigger_presets.py`).
 The `check_run` payload carries no draft flag, so the fix needs a PR lookup or a

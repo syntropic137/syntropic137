@@ -139,6 +139,18 @@ Observed in this repo:
   failed check of any PR, drafts included, while implement-v3 still owns that
   branch. `review-fix` filters drafts out; self-healing does not
   (`trigger_presets.py`).
+- **A verdict that does not gate.** 2026-10-01 to 10-21: 17 of 23 v3 PRs
+  left draft as blocked merged anyway, most likely after a later reverify. If
+  draft-blocked can merge, ready means nothing. Every merge of a blocked PR
+  should trace to a later certified verdict.
+- **Verify as the first quality check.** v3's first verify blocked 92% of runs
+  (n=105), and 2+ fix rounds cost about 2.3x a clean run. Quality found in
+  verify is quality the implement phase did not build in.
+- **Fix rounds on evidence a workspace cannot produce.** 39 fix-round refusals
+  in the same window needed Docker, integration or live-API evidence. Route
+  that to the orchestrator; do not spend a round on it.
+- **Installed probes nobody archives.** 61 workflows installed, many stale
+  probes not in the repo. An agent picking from `workflow list` can choose one.
 - **Shared prompts edited in one place.** `reverify-pr/phases/` copies
   implement-v3's prompts, and a test fails when they diverge. Change both.
 
