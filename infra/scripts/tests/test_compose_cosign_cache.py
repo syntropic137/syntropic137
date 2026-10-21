@@ -122,3 +122,7 @@ def test_user_tmpfs_is_owned_by_the_api_user(path: Path, api: dict, mount: str) 
         f"(the syn user in {_DOCKERFILE.name}). After a host reboot Docker restores it "
         "root:root 755 and the api cannot write it"
     )
+    assert options.get("mode") == "0700", (
+        f"{path.name}: {mount} tmpfs is {matches[0]!r}; it must set mode=0700 so the "
+        "owner can write it and no other user can read the cache"
+    )
