@@ -331,16 +331,18 @@ class TestBlankLinesDoNotMoveOwnership:
     def test_an_executor_label_named_api_never_owns_the_api_pin(self, tmp_path: Path) -> None:
         source = self._release()
         target = "    image: ghcr.io/syntropic137/syn-api:v1"
-        first, middle, last = source.split(target)
+        # Other services pin the same image (docker-create-guard), so find
+        # each pin by the service that owns it.
+        api_at = source.index(target, source.index("\n  api:\n"))
+        executor_at = source.index(target, source.index("\n  executor:\n"))
+        assert api_at < executor_at
         deployed = tmp_path / "deployed.yaml"
         deployed.write_text(
-            first
+            source[:api_at]
             + "\n"
-            + target
-            + middle
+            + source[api_at:executor_at]
             + "    labels:\n      api: same-image\n        \n"
-            + target
-            + last
+            + source[executor_at:]
         )
         before = self._services(deployed)
         assert before["executor"]["labels"] == {"api": "same-image"}

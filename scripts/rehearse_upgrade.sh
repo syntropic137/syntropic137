@@ -285,6 +285,22 @@ rehearse_executor() {  # $1 the staged compose file
     echo "    container_name: PROJECT-executor"
     echo "    profiles: [\"rehearsal-disabled\"]"
 }
+# docker-create-guard (#1806) holds the real socket and exists only from the
+# release that adds it. Like docker-socket-proxy, which depends on it: named
+# under this project and replaced by an inert stand-in.
+rehearse_create_guard() {  # $1 the staged compose file
+    grep -q '^  docker-create-guard:$' "$1" || return 0
+    cat <<'EOF'
+  docker-create-guard:
+    container_name: PROJECT-docker-create-guard
+    image: alpine:3.20
+    entrypoint: !override ["sleep", "infinity"]
+    command: !reset []
+    volumes: !reset []
+    environment: !reset {}
+    healthcheck: {disable: true}
+EOF
+}
 write_override() {  # $1 out dir, $2 api image, $3 collector image, $4 event-store image ("" = keep)
     local out="$1"; shift
     {
@@ -300,6 +316,7 @@ write_override() {  # $1 out dir, $2 api image, $3 collector image, $4 event-sto
             esac
         done
         rehearse_executor "$out/docker-compose.syntropic137.yaml"
+        rehearse_create_guard "$out/docker-compose.syntropic137.yaml"
         cat <<'EOF'
   docker-socket-proxy:
     container_name: PROJECT-docker-socket-proxy
