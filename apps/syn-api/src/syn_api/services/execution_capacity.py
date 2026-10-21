@@ -7,8 +7,10 @@ to the ONE `ExecutionBudget` every start path claims from. With the Run Queue
 on, `ExecutionHost` registers that same budget's limit as its capacity, so the
 sized number is enforced on both claim paths.
 
-Sized once, at startup, before the claim loop joins: the Run Queue records a
-host's capacity when it joins, and re-sizing a live host is follow-up work.
+Sized once, at startup, after the event store opens the pool the profiles are
+read through and before any start path or the claim loop can claim: the Run
+Queue records a host's capacity when it joins, and re-sizing a live host is
+follow-up work.
 
 Nothing here is durable, on purpose: a restart re-reads the host and the
 profiles, which is the only correct source after a restart anyway.
@@ -16,6 +18,7 @@ profiles, which is the only correct source after a restart anyway.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
@@ -42,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 MIB = 2**20
 GIB = 2**30
+#: Bound on the Run Queue read behind /health, inside the probes' 5s timeout.
+_QUEUE_READ_TIMEOUT_S = 2.0
 
 #: The measured demand over a window, None when too few phases were measured.
 DemandReader = Callable[[timedelta], Awaitable[RunDemand | None]]
@@ -60,9 +65,18 @@ class ExecutionBudgetHealth(BaseModel):
         "'operator_max_profiles_unreadable' or 'operator_max_host_unreadable' when a read "
         "failed and the budget fell back to SYN_EXECUTION_MAX_CONCURRENT.",
     )
-    admitted: int = Field(description="Starts accepted into the budget since this process began.")
-    running: int = Field(description="Starts holding a slot now.")
-    queued: int = Field(description="Starts waiting for a slot now.")
+    admitted: int = Field(
+        description="Starts accepted into the budget: since this process began with the "
+        "Run Queue off; every run the Run Queue has admitted, across the pool, with it on."
+    )
+    running: int = Field(
+        description="Starts holding a slot now: in this process with the Run Queue off; "
+        "Run Queue runs claimed, fencing or reaped, across the pool, with it on."
+    )
+    queued: int = Field(
+        description="Starts waiting for a slot now: in this process with the Run Queue off; "
+        "Run Queue runs admitted and not yet claimed, across the pool, with it on."
+    )
     cpu_pressure_avg60: float | None = Field(
         default=None,
         description="Percent of the last 60s some task on this host waited for CPU (PSI "
@@ -77,9 +91,10 @@ _host: HostCapacityPort | None = None
 async def size_execution_budget_at_startup(settings: Settings) -> ExecutionBudgetSizing:
     """Size the budget from this host before any start can claim from it.
 
-    Called before the critical path, so the claim loop joins the Run Queue
-    with the sized capacity. Called in every mode, so /health always reports
-    a budget. Test and offline modes have no profile store to read.
+    Called once the event store is open, before degradable services start, so
+    the claim loop joins the Run Queue with the sized capacity. Called in every
+    mode, so /health always reports a budget. Test and offline modes have no
+    profile store to read.
     """
     from syn_adapters.host_capacity import build_host_capacity
 
@@ -134,19 +149,42 @@ async def apply_host_sized_budget(
     return sizing
 
 
-def describe_execution_budget() -> ExecutionBudgetHealth | None:
-    """The budget block for /health; None before startup sized it. Never raises on the host."""
+async def describe_execution_budget() -> ExecutionBudgetHealth | None:
+    """The budget block for /health; None before startup sized it, or if the Run Queue is unreadable.
+
+    The counters come from whichever claim path starts actually take. With the
+    Run Queue on, starts bypass the in-process budget entirely, so its counters
+    would read zero beside a full queue: they are read from the queue instead.
+    """
     if _sizing is None:
         return None
-    budget = get_execution_budget()
+    try:
+        admitted, running, queued = await asyncio.wait_for(_start_counts(), _QUEUE_READ_TIMEOUT_S)
+    except Exception:
+        logger.warning("Could not read the Run Queue for /health", exc_info=True)
+        return None
     return ExecutionBudgetHealth(
-        budget=budget.limit,
+        budget=get_execution_budget().limit,
         binding_term=_sizing.binding_term,
-        admitted=budget.admitted,
-        running=budget.running,
-        queued=budget.waiting,
+        admitted=admitted,
+        running=running,
+        queued=queued,
         cpu_pressure_avg60=_cpu_pressure(),
     )
+
+
+async def _start_counts() -> tuple[int, int, int]:
+    """(admitted, running, queued) from the claim path in use."""
+    from syn_api._wiring import get_execution_run_queue
+
+    queue = await get_execution_run_queue()
+    if queue is None:
+        budget = get_execution_budget()
+        return budget.admitted, budget.running, budget.waiting
+    rows = await queue.in_use()
+    # A slot is held from claim until the run is done or interrupted.
+    running = rows.claimed + rows.fencing + rows.reaped
+    return rows.admitted + running + rows.done + rows.interrupted, running, rows.admitted
 
 
 async def _read_demand(

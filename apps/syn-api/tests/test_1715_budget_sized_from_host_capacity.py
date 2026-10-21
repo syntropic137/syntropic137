@@ -268,3 +268,96 @@ async def test_the_run_queue_host_registers_the_sized_budget(
         monkeypatch.setattr(runner, "_executor", None)
 
     assert registered == [2]
+
+
+async def test_startup_sizes_from_profiles_read_through_the_pool_the_event_store_opens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sizing runs after the event store opens its pool, through the real profile wiring.
+
+    Sized before it, the real `get_phase_profile_query()` raises on a pool that
+    is still None, and every fresh process falls back to the operator maximum.
+    Only the store's connection and the SQL are doubled here.
+    """
+    import syn_adapters.host_capacity as host_capacity
+    import syn_api._wiring as wiring
+    import syn_shared.settings as shared_settings
+    from syn_domain.contexts.orchestration import PhaseProfileQueryService
+
+    opened = object()
+
+    class EventStore:
+        pool: object | None = None
+
+        async def initialize(self) -> None:
+            self.pool = opened
+
+    store = EventStore()
+
+    async def connected() -> None:
+        return None
+
+    async def measured(self: PhaseProfileQueryService, _window: timedelta) -> RunDemand | None:
+        assert self._pool is opened
+        return MEMORY_BOUND_DEMAND
+
+    settings = Settings(app_environment=AppEnvironment.DEVELOPMENT)
+    monkeypatch.setattr(shared_settings, "get_settings", lambda: settings)
+    monkeypatch.setattr(wiring, "get_event_store_instance", lambda: store)
+    monkeypatch.setattr(lifecycle, "get_event_store_instance", lambda: store)
+    monkeypatch.setattr(lifecycle, "ensure_connected", connected)
+    monkeypatch.setattr(lifecycle, "_validate_workspace_settings", lambda: Ok(None))
+    monkeypatch.setattr(PhaseProfileQueryService, "run_demand", measured)
+    monkeypatch.setattr(host_capacity, "build_host_capacity", lambda: HostDouble(BIG_HOST))
+
+    assert isinstance(await lifecycle._init_critical_path(), Ok)
+
+    health = await execution_capacity.describe_execution_budget()
+    assert health is not None
+    assert (health.budget, health.binding_term) == (2, BindingTerm.MEMORY)
+    assert admission.get_execution_budget().limit == 2
+
+
+async def test_health_counts_the_run_queue_when_starts_go_through_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the Run Queue on, starts never touch the in-process budget: /health reads the queue."""
+    import syn_api._wiring as wiring
+    from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
+    from syn_domain.contexts.orchestration.ports import ExecutorHost
+
+    await execution_capacity.apply_host_sized_budget(
+        HostDouble(BIG_HOST), _demand(MEMORY_BOUND_DEMAND), _execution()
+    )
+    queue = InMemoryExecutionRunQueue()
+
+    async def run_queue() -> InMemoryExecutionRunQueue:
+        return queue
+
+    monkeypatch.setattr(wiring, "get_execution_run_queue", run_queue)
+    host = ExecutorHost(host_id="h", container_id="c", generation="g", epoch=1)
+    await queue.register(host, admission.get_execution_budget().limit)
+    await queue.heartbeat(host.host_id)
+    for i in range(3):
+        assert await queue.reserve(f"exec-{i}", 1, is_resume=False)
+        await queue.mark_admitted(f"exec-{i}")
+    claimed = [run for _ in range(3) if (run := await queue.claim("h")) is not None]
+    assert len(claimed) == 2
+
+    async def counts() -> tuple[int, int, int, int, str]:
+        result = await lifecycle.health_check()
+        assert isinstance(result, Ok)
+        block = result.value.execution_budget
+        assert block is not None
+        return block.budget, block.admitted, block.running, block.queued, block.binding_term
+
+    assert await counts() == (2, 3, 2, 1, "memory")
+
+    await queue.close(claimed[0])
+    third = await queue.claim("h")
+    assert third is not None
+    assert await counts() == (2, 3, 2, 0, "memory")
+
+    for run in (claimed[1], third):
+        await queue.close(run)
+    assert await counts() == (2, 3, 0, 0, "memory")

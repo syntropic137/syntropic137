@@ -189,7 +189,14 @@ async def _init_critical_path() -> Result[None, LifecycleError]:
     workspace_result = _validate_workspace_settings()
     if isinstance(workspace_result, Err):
         return workspace_result
-    return await _init_event_store()
+    from syn_shared.settings import get_settings
+
+    result = await _init_event_store()
+    if isinstance(result, Ok):
+        # The profiles are read through the pool the event store just opened, and
+        # sized before any start path or the claim loop can claim (#1715).
+        await execution_capacity.size_execution_budget_at_startup(get_settings())
+    return result
 
 
 async def _init_degradable_services(state: LifecycleState) -> None:
@@ -284,11 +291,11 @@ async def startup(
     except Exception:
         logger.warning("Could not determine execution concurrency posture at startup.")
 
-    if settings.is_test:
-        return Ok({"mode": "full"})
-
-    if settings.is_offline:
-        await seed_offline_data()
+    if settings.uses_in_memory_stores:
+        # No profile store to read: sized for /health from the operator maximum.
+        await execution_capacity.size_execution_budget_at_startup(settings)
+        if settings.is_offline:
+            await seed_offline_data()
         return Ok({"mode": "full"})
 
     # Critical path — abort on failure
@@ -380,7 +387,7 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             disk=disk,
             db_pools=db_pools,
             cpu_throttling=cpu_throttling.read_cpu_throttling(),
-            execution_budget=execution_capacity.describe_execution_budget(),
+            execution_budget=await execution_capacity.describe_execution_budget(),
         )
     )
 

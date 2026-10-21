@@ -3299,7 +3299,8 @@ class HealthResponse(_OmitsAbsentFields):
         default=None,
         description="The execution budget sized from host capacity and measured per-run "
         "demand, the term that bound it, and the starts admitted, running and queued in "
-        "this process (#1715). Omitted only before startup has sized it.",
+        "this process or the Run Queue (#1715). Omitted before startup has sized it, "
+        "and when the Run Queue cannot be read.",
     )
 
 

@@ -79,14 +79,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         - Disconnect from event store
     """
     import syn_api.services.lifecycle as lifecycle
-    from syn_api.services import execution_capacity, shipped_ledger
+    from syn_api.services import shipped_ledger
     from syn_shared.settings import get_settings
 
     logger.info("Starting Syntropic137 API...")
 
     async def start() -> None:
-        # Before startup, so the claim loop joins with the sized capacity (#1715).
-        await execution_capacity.size_execution_budget_at_startup(get_settings())
         result = await lifecycle.startup()
         if isinstance(result, Err):
             logger.error("Startup failed: %s — refusing to serve traffic", result.message)
