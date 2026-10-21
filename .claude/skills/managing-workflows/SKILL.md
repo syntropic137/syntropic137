@@ -77,11 +77,20 @@ Only once Outcomes 1 and 2 hold.
    failed on a ready PR), not on every push. Every rule carries attempts,
    cooldown and a daily limit, because a trigger has no spend limit.
 
-7. **Judge by the stored record.** Status `completed` describes the harness,
+7. **A workspace says what it cannot do; the orchestrator routes it.** A
+   verify or fix phase that needs a tool the workspace lacks and cannot
+   install (Docker, a database, a live API) records a capability gap with the
+   exact command, instead of spending a round. The orchestrator sends that
+   evidence to a workspace that has the capability (CI evidence today; a
+   capable pool such as E2B once capability matching lands, #2060). The
+   workspace abstraction is plug and play, so a workflow never assumes one
+   runtime.
+
+8. **Judge by the stored record.** Status `completed` describes the harness,
    not the outcome. Read the PR, the phase reports and the stored error before
    classifying a run, and never judge a past run by today's code.
 
-8. **Write down what you learn where it lasts.** Findings go to the ledger,
+9. **Write down what you learn where it lasts.** Findings go to the ledger,
    defaults to CURRENT-BESTS, escapes to eval cases, and recurring friction to
    an issue. A lesson that lives only in a chat is lost.
 
@@ -146,7 +155,7 @@ Observed in this repo:
 - **Verify as the first quality check.** v3's first verify blocked 92% of runs
   (n=105), and 2+ fix rounds cost about 2.3x a clean run. Quality found in
   verify is quality the implement phase did not build in.
-- **Fix rounds on evidence a workspace cannot produce.** 39 fix-round refusals
+- **Fix rounds on evidence a workspace cannot produce (#2060).** 39 fix-round refusals
   in the same window needed Docker, integration or live-API evidence. Route
   that to the orchestrator; do not spend a round on it.
 - **Installed probes nobody archives.** 61 workflows installed, many stale
