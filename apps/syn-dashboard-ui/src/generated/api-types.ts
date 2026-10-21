@@ -4297,17 +4297,17 @@ export interface components {
             binding_term: components["schemas"]["BindingTerm"];
             /**
              * Admitted
-             * @description Starts accepted into the budget since this process began.
+             * @description Starts accepted into the budget: since this process began with the Run Queue off; every run the Run Queue has admitted, across the pool, with it on.
              */
             admitted: number;
             /**
              * Running
-             * @description Starts holding a slot now.
+             * @description Starts holding a slot now: in this process with the Run Queue off; Run Queue runs claimed, fencing or reaped, across the pool, with it on.
              */
             running: number;
             /**
              * Queued
-             * @description Starts waiting for a slot now.
+             * @description Starts waiting for a slot now: in this process with the Run Queue off; Run Queue runs admitted and not yet claimed, across the pool, with it on.
              */
             queued: number;
             /**
@@ -5696,7 +5696,7 @@ export interface components {
             db_pools?: components["schemas"]["DbPoolHealth"][] | null;
             /** @description How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API. */
             cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
-            /** @description The execution budget sized from host capacity and measured per-run demand, the term that bound it, and the starts admitted, running and queued in this process (#1715). Omitted only before startup has sized it. */
+            /** @description The execution budget sized from host capacity and measured per-run demand, the term that bound it, and the starts admitted, running and queued in this process or the Run Queue (#1715). Omitted before startup has sized it, and when the Run Queue cannot be read. */
             execution_budget?: components["schemas"]["ExecutionBudgetHealth"] | null;
         };
         /**
