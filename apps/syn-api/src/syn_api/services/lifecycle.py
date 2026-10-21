@@ -285,8 +285,6 @@ async def startup(
         logger.warning("Could not determine execution concurrency posture at startup.")
 
     if settings.uses_in_memory_stores:
-        # No profile store to read: sized for /health from the operator maximum.
-        await execution_capacity.size_execution_budget_at_startup()
         if settings.is_offline:
             await seed_offline_data()
         return Ok({"mode": "full"})
