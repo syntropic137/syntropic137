@@ -11,6 +11,9 @@ The main checkout is often a stale branch. Read `origin/main`:
 `origin/main`.
 
 - `docs/experiments/CURRENT-BESTS.md`: the declared default per task class.
+  Check its "Last updated" date first. If it predates the newest finding in
+  the ledger or in open experiment PRs, the defaults it names are stale, and
+  refreshing it is your first job.
 - `docs/experiments/FINDINGS-LEDGER.md`: the most recent findings.
 - `workflows/sdlc/README.md`: the families and the rules they follow.
 - Any `EXPERIMENT.md` under `workflows/sdlc/*/`: open A/B arms and their

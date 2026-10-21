@@ -13,7 +13,7 @@ differ by kind.
 | verifier | does verify block a known bug and certify a clean change? | blocked and names the defect; certified on controls | `verifier-seed-v1`, `verifier-seed-aw-v1` |
 | implementer | given the problem, does the agent fix it? | hidden tests from the real fix | `implementer-seed-v1` |
 | screening | is a cheaper component good enough? | per-suite | `feedback-screening-v1` |
-| end-to-end | does the whole workflow, from commit and issue, produce a mergeable correct PR? | hidden tests plus graded verify outcome, cost and time | none complete yet: the gap to close |
+| end-to-end | does the whole workflow, from commit and issue, produce a mergeable correct PR? | hidden tests at the final head, plus verify outcome, cost and time | none yet: E4 (`docs/experiments/2026-10-20-end-to-end-replay.md`, PR #2019) is preregistered but blocked because the implement prompts merge and read `origin/main`, which carries the fix |
 
 Single-phase kinds are screening. They can rule an arm out cheaply; they cannot
 promote one alone.
@@ -79,6 +79,17 @@ Read `--help` before launching. Launches cost real quota.
   task that states the interface the tests use without stating the fix.
 
 ## Traps
+
+- **Leakage.** A workspace gets a full clone, GitHub credentials and network,
+  so an agent can find the real fix in later history or the fix PR. Treat an
+  implementer or replay PASS as suspect until the run had a pinned shallow
+  clone and no route to the fix (`evals/implementer-seed-v1/README.md`).
+- **A keyword judge is not a judge.** Verifier scores match keywords in the
+  report. Check the LLM judge's model is current and calibrated before
+  trusting its score.
+- **Scores off main.** Results that live only on an open branch, or launches
+  missing from `launches.jsonl`, cannot be reproduced. Land the record with
+  the finding.
 
 - A dirty tree or shared config leaking between cases measures the harness.
 - Inputs passed as prompt text instead of declared inputs change the task.
