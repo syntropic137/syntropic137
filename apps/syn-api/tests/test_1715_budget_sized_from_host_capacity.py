@@ -109,6 +109,36 @@ async def test_a_budget_of_two_queues_the_third_run_on_the_real_claim() -> None:
     assert entered == ["exec-0", "exec-1", "exec-2"]
 
 
+async def test_a_host_that_fits_no_run_queues_every_start_on_the_real_claim() -> None:
+    """A budget of 0 is enforced as 0: the start queues rather than being let in."""
+    all_reserved = HostCapacity(cpu_cores=2.0, memory_bytes=64 * GIB, disk_free_bytes=500 * GIB)
+    sizing = await execution_capacity.apply_host_sized_budget(
+        HostDouble(all_reserved), _demand(MEMORY_BOUND_DEMAND), _execution()
+    )
+    assert (sizing.budget, sizing.binding_term) == (0, BindingTerm.CPU)
+
+    budget = admission.get_execution_budget()
+    claim = budget.claim("exec-0", workflow_id="wf", path=StartPath.DIRECT)
+    entered: list[str] = []
+
+    async def run() -> None:
+        async with budget.held(claim):
+            entered.append(claim.execution_id)
+
+    task = asyncio.create_task(run())
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert entered == []
+    position = budget.position("exec-0")
+    assert position is not None and position.queued and position.limit == 0
+
+    # Capacity that fits runs again grants the queued start.
+    budget.resize(1)
+    await task
+    assert entered == ["exec-0"]
+
+
 @pytest.mark.parametrize(
     ("cpu_limit", "memory_limit_mb"), [("2.0", "4096"), ("8.0", "16384"), ("0.5", "512")]
 )

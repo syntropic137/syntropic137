@@ -123,10 +123,11 @@ class ExecutionBudget:
 
         A larger limit hands its new slots to the oldest waiters at once. A
         smaller one takes no slot back: running starts finish, and the queue
-        waits until running falls below the new limit.
+        waits until running falls below the new limit. A limit of 0 is a host
+        that fits no run: every start queues.
         """
-        if limit < 1:
-            msg = f"An execution budget needs a limit of at least 1, not {limit}"
+        if limit < 0:
+            msg = f"An execution budget cannot have a negative limit, not {limit}"
             raise ValueError(msg)
         self._limit = limit
         self._grant()

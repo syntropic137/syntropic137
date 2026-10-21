@@ -98,11 +98,12 @@ def size_execution_budget(
     *,
     no_demand: BindingTerm = BindingTerm.OPERATOR_MAX_NO_PROFILE,
 ) -> ExecutionBudgetSizing:
-    """The budget for ``capacity`` running runs that use ``demand``, at least 1.
+    """The budget for ``capacity`` running runs that use ``demand``.
 
-    The floor of 1 is deliberate: a host too small for one run still runs one
-    at a time rather than refusing every start, and the binding term shows it
-    is the host that is short.
+    It may be 0. A host whose reserves leave less than one measured run's
+    worth of CPU, memory or disk fits no run, and admitting one anyway would
+    break the bound this formula exists to keep. Starts queue instead, and
+    the binding term names the resource that is short.
     """
     if demand is None:
         return ExecutionBudgetSizing(budget=operator_max, binding_term=no_demand)
@@ -129,7 +130,7 @@ def size_execution_budget(
     ]
     # min() keeps the first of equal terms, so a tie names the operator first.
     runs, term = min(terms, key=lambda t: t[0])
-    return ExecutionBudgetSizing(budget=max(1, math.floor(runs)), binding_term=term)
+    return ExecutionBudgetSizing(budget=math.floor(runs), binding_term=term)
 
 
 def _per_run(available: float, per_run: float) -> float:

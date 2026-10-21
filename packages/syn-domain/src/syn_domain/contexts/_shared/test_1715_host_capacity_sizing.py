@@ -62,13 +62,52 @@ def test_no_demand_is_the_operator_max() -> None:
     assert (sizing.budget, sizing.binding_term) == (13, BindingTerm.OPERATOR_MAX_NO_PROFILE)
 
 
-def test_a_host_smaller_than_its_reserve_still_runs_one() -> None:
-    tiny = HostCapacity(cpu_cores=1.0, memory_bytes=2 * GIB, disk_free_bytes=5 * GIB)
+def _fits(capacity: HostCapacity, demand: RunDemand) -> list[float]:
+    """Runs each measured resource holds after its reserve, computed independently."""
+    return [
+        (capacity.cpu_cores - RESERVES.platform_reserve_cores)
+        * RESERVES.target_utilisation
+        / demand.cpu_cores_p50,
+        (capacity.memory_bytes - RESERVES.memory_reserve_bytes) / demand.memory_bytes_p95,
+        (capacity.disk_free_bytes - RESERVES.disk_floor_bytes) / demand.disk_bytes_p95,
+    ]
 
-    sizing = size_execution_budget(tiny, _demand(), RESERVES, operator_max=50)
 
-    assert sizing.budget == 1
-    assert sizing.binding_term is BindingTerm.CPU
+@pytest.mark.parametrize(
+    ("capacity", "budget", "term"),
+    [
+        # every core is the platform's: (2 - 2) x 0.5 / 0.1 = 0
+        (
+            HostCapacity(cpu_cores=2.0, memory_bytes=132 * GIB, disk_free_bytes=1010 * GIB),
+            0,
+            BindingTerm.CPU,
+        ),
+        # less than one run's memory after the reserve: (4.5 - 4) / 1 = 0.5
+        (
+            HostCapacity(cpu_cores=34.0, memory_bytes=int(4.5 * GIB), disk_free_bytes=1010 * GIB),
+            0,
+            BindingTerm.MEMORY,
+        ),
+        # disk below its floor
+        (
+            HostCapacity(cpu_cores=34.0, memory_bytes=132 * GIB, disk_free_bytes=5 * GIB),
+            0,
+            BindingTerm.DISK,
+        ),
+        # a normal host still grants runs
+        (HOST, 50, BindingTerm.OPERATOR_MAX),
+    ],
+)
+def test_the_budget_never_exceeds_any_measured_term(
+    capacity: HostCapacity, budget: int, term: BindingTerm
+) -> None:
+    """A host that fits no run gets a budget of 0, not 1: admitting one breaks the bound."""
+    demand = _demand()
+
+    sizing = size_execution_budget(capacity, demand, RESERVES, operator_max=50)
+
+    assert (sizing.budget, sizing.binding_term) == (budget, term)
+    assert all(sizing.budget <= max(0.0, fits) for fits in _fits(capacity, demand))
 
 
 @dataclass(frozen=True)
