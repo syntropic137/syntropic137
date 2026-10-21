@@ -8,3 +8,4 @@ All patches touch `scripts/eval_suite.py` (`ClaudeCode`). Tests that should kill
 | 02-stdin-left-open | `test_claude_code_closes_stdin_and_passes_its_timeout`, `test_the_llm_judge_end_to_end_runs_through_claude_code` |
 | 03-nonzero-exit-swallowed | `test_every_claude_code_failure_raises_its_own_error[exit]`, `test_a_failed_claude_code_call_fails_the_judgement_rather_than_voting` |
 | 04-is-error-swallowed | `test_every_claude_code_failure_raises_its_own_error[is-error]` |
+| 09-project-settings-loaded | `test_claude_code_runs_the_cli_headless_with_the_exact_pinned_model`, `test_no_settings_file_routes_the_real_cli_off_the_oauth_token[project]`, `test_no_settings_file_routes_the_real_cli_off_the_oauth_token[local]` (both skip where no `claude` CLI is installed) |

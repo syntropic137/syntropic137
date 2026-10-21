@@ -1207,6 +1207,12 @@ accepted only once `CLAUDE_CODE_OAUTH_TOKEN_ENV` is shown to be its source."""
 CLAUDE_CODE_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 """The variable that carries an OAuth token from `claude setup-token`."""
 
+CLAUDE_CODE_SETTING_SOURCES = "user"
+"""The only settings files `claude -p` loads for a judge answer. `claude auth status`
+reads user settings but not project or local ones, which `claude -p` loads by default
+from its working directory (CLI 2.1.293): a project's ``env`` ANTHROPIC_AUTH_TOKEN would
+reach the answer unseen by the OAuth check. Managed settings apply to both regardless."""
+
 JUDGE_TIMEOUT_S = 300.0
 """Per-call ceiling on one `claude -p` answer, after which the call is an error."""
 
@@ -1223,7 +1229,9 @@ class ClaudeCode:
     cannot, such as an ``apiKeyHelper`` or ``env`` key in a settings file. A status of
     ``oauth_token`` must also come from `CLAUDE_CODE_OAUTH_TOKEN_ENV`: a second status
     without that variable must stop saying ``oauth_token``, or the token is a settings
-    file's ``ANTHROPIC_AUTH_TOKEN``. Never add
+    file's ``ANTHROPIC_AUTH_TOKEN``. The answer loads only the settings that status
+    reads (`CLAUDE_CODE_SETTING_SOURCES`), so no settings file can change the
+    credential after the check. Never add
     ``--bare``, which skips that login for an API key. Each call is
     one non-interactive session with stdin closed, tools disabled, nothing persisted,
     the model pinned to the exact allowed id (`require_judge_model`) and effort pinned
@@ -1251,6 +1259,8 @@ class ClaudeCode:
             "--tools",
             "",
             "--no-session-persistence",
+            "--setting-sources",
+            CLAUDE_CODE_SETTING_SOURCES,
         ]
 
     def _auth_status(self, env: Mapping[str, str]) -> tuple[int, _ClaudeAuthStatus]:

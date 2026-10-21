@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import http.server
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
@@ -3563,6 +3565,8 @@ def test_claude_code_runs_the_cli_headless_with_the_exact_pinned_model() -> None
         "--tools",
         "",
         "--no-session-persistence",
+        "--setting-sources",
+        "user",
     ]
     assert "--bare" not in argv
 
@@ -3682,6 +3686,119 @@ def test_a_settings_bearer_token_cannot_pass_for_oauth(
         )
     assert len(fake.auth_calls) == auth_calls
     assert fake.calls == []
+
+
+class _MessagesEndpoint(http.server.ThreadingHTTPServer):
+    """A local Messages API that answers every request with one streamed "ok" and records
+    the credential each request carried, so the real CLI can be run with no real login."""
+
+    def __init__(self) -> None:
+        super().__init__(("127.0.0.1", 0), _MessagesHandler)
+        self.authorizations: list[str | None] = []
+
+
+class _MessagesHandler(http.server.BaseHTTPRequestHandler):
+    server: _MessagesEndpoint
+
+    def do_POST(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+        self.server.authorizations.append(self.headers.get("authorization"))
+        events = [
+            {
+                "type": "message_start",
+                "message": {
+                    "id": "msg_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": body["model"],
+                    "content": [],
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                },
+            },
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "ok"},
+            },
+            {"type": "content_block_stop", "index": 0},
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+                "usage": {"output_tokens": 1},
+            },
+            {"type": "message_stop"},
+        ]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        self.wfile.write(
+            "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
+        )
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(shutil.which("claude") is None, reason="needs the real claude CLI")
+@pytest.mark.parametrize(
+    ("scope", "settings_file"),
+    [
+        ("none", None),
+        ("project", "project/.claude/settings.json"),
+        ("local", "project/.claude/settings.local.json"),
+        ("user", "home/.claude/settings.json"),
+    ],
+    ids=["none", "project", "local", "user"],
+)
+def test_no_settings_file_routes_the_real_cli_off_the_oauth_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, scope: str, settings_file: str | None
+) -> None:
+    """The real CLI, against a local endpoint with synthetic credentials: a settings
+    ``env`` bearer token either never reaches the answer or stops the call before it.
+
+    `claude auth status` ignores project and local settings while `claude -p` loads
+    them by default, so only what the answer is run with closes those two; user
+    settings are seen by the status and refused there.
+    """
+    for name in list(os.environ):
+        if name.startswith(("ANTHROPIC_", "CLAUDE_CODE_", "CLAUDE_CONFIG_DIR")):
+            monkeypatch.delenv(name)
+    home, project = tmp_path / "home", tmp_path / "project"
+    (home / ".claude").mkdir(parents=True)
+    (project / ".claude").mkdir(parents=True)
+    if settings_file is not None:
+        (tmp_path / settings_file).write_text(
+            json.dumps({"env": {"ANTHROPIC_AUTH_TOKEN": "synthetic-settings-bearer"}})
+        )
+    endpoint = _MessagesEndpoint()
+    threading.Thread(target=endpoint.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".claude"))
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-oauth")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", f"http://127.0.0.1:{endpoint.server_port}")
+        monkeypatch.setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+        monkeypatch.chdir(project)
+        client = eval_suite.ClaudeCode(timeout_s=60.0)
+        if scope == "user":
+            with pytest.raises(eval_suite.ClaudeCodeNotOAuthError, match="still says"):
+                client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
+            assert endpoint.authorizations == []
+        else:
+            assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
+            assert endpoint.authorizations
+            assert set(endpoint.authorizations) == {"Bearer synthetic-oauth"}
+    finally:
+        endpoint.shutdown()
+        endpoint.server_close()
 
 
 @pytest.mark.unit
