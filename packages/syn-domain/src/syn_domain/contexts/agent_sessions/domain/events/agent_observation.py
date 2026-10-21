@@ -94,6 +94,12 @@ class ObservationType(StrEnum):
     # it sizes the platform (docs/north-star.md) and decides nothing.
     WORKSPACE_RESOURCE_USAGE = "workspace_resource_usage"
 
+    # The OCI runtime one phase workspace runs under, as agentic-workspace's
+    # resolver chose it (SYN-1): requested (or auto) and effective. Lane 2:
+    # recorded when the agent launches, so a phase that later fails keeps it,
+    # and it decides nothing.
+    WORKSPACE_RUNTIME = "workspace_runtime"
+
     # One in-phase retry of a busy upstream (#1882): provider, model, and the
     # transient kind that earned it. Lane 2: it makes quota pressure visible
     # per provider and decides nothing - the retry itself is decided, and

@@ -10,6 +10,8 @@ Environment Variables:
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,6 +35,26 @@ DEFAULT_WORKSPACE_MEMORY_LIMIT_MB = 4096
 
 DEFAULT_WORKSPACE_CPU_LIMIT = 2.0
 """CPU ceiling for one workspace container, in cores."""
+
+
+#: What `WorkspaceSettings.runtime` reads (env_prefix + field name). Named so
+#: the doctor reports the same variable the settings parse.
+ENV_SYN_WORKSPACE_RUNTIME = "SYN_WORKSPACE_RUNTIME"
+
+
+class WorkspaceRuntime(StrEnum):
+    """The OCI runtime an operator asks workspace containers to run under.
+
+    Mirrors agentic-workspace's ``WorkspaceRuntime`` value for value; the
+    adapter maps one to the other. Whether a runtime is actually registered,
+    and which one auto mode picks, is decided by agentic-workspace's resolver,
+    never here.
+    """
+
+    RUNC = "runc"
+    GVISOR = "gvisor"
+    KATA = "kata"
+    SYSBOX = "sysbox"
 
 
 class WorkspaceSettings(BaseSettings):
@@ -95,3 +117,21 @@ class WorkspaceSettings(BaseSettings):
         gt=0,
         description="CPU limit applied to each workspace container, in cores.",
     )
+
+    runtime: WorkspaceRuntime | None = Field(
+        default=None,
+        description=(
+            "OCI runtime for workspace containers: runc, gvisor, kata or sysbox. "
+            "Unset means auto (gVisor when Docker has it registered, else runc). "
+            "An explicit runtime Docker does not have fails the workspace; it "
+            "never falls back to runc."
+        ),
+    )
+
+    @field_validator("runtime", mode="before")
+    @classmethod
+    def _empty_runtime_is_auto(cls, v: object) -> object:
+        """An empty SYN_WORKSPACE_RUNTIME means auto; any other unknown value is refused."""
+        if v == "":
+            return None
+        return v
