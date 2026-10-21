@@ -106,6 +106,22 @@ does not compute it, or a reported total for a model with no rate, which has
 no proportions to apportion by. Unpriced work is in neither the total nor the
 split, the same rule as cost by model.
 
+## Turn Cost and the Unreported Summary
+
+**Turn cost** (`TurnCost`) is what a Session's `token_usage` turns priced to,
+each at its own model: a total, the cost by model, and the unpriced count.
+
+An **unreported summary** is a `session_summary` whose `total_cost_usd` is
+null: the run was killed or timed out before the harness could say (#1164).
+Its Session costs exactly its turn cost; the summary's totals are never
+re-priced under its single model (#1420). Its tokens are still the summary's,
+so for such a Session tokens and cost come from different sources, on purpose.
+A summary with tokens and no turns at all is unpriced, never $0.00. Replay and
+every SQL read path apply this one rule (`cost_under_unreported_summary`).
+When a Session has more than one summary the newest decides, and an earlier
+reported total is not turn cost: replay keeps the turn cost apart from what a
+summary settled, so a later unreported summary still costs the turns.
+
 ## Inventory Reconciliation
 
 Rebuilding one run's session inventory snapshot from host evidence, one durable

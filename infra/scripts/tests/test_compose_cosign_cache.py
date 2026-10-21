@@ -14,6 +14,7 @@ nothing failed until a real selfhost-profile stack tried to run a workflow.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -34,19 +35,26 @@ _COMPOSE = [
 _COSIGN_CACHE = "/home/syn/.sigstore"
 
 
-def _api_services() -> list[tuple[Path, dict]]:
+#: Services that run the syn-api image as its syn user. The executor is the
+#: same image in another role (ADR-072 D1, #1310 1.6) and verifies workspace
+#: image signatures the same way, so every rule below binds it too.
+_API_IMAGE_SERVICES = ("api", "executor")
+
+
+def _api_services() -> list[pytest.ParameterSet]:
     found = []
     for path in _COMPOSE:
         if not path.exists():
             continue
         doc = yaml.safe_load(path.read_text()) or {}
-        api = (doc.get("services") or {}).get("api")
-        if api:
-            found.append((path, api))
+        for name in _API_IMAGE_SERVICES:
+            api = (doc.get("services") or {}).get(name)
+            if api:
+                found.append(pytest.param(path, api, id=f"{path.name}-{name}"))
     return found
 
 
-@pytest.mark.parametrize("path,api", _api_services(), ids=lambda v: getattr(v, "name", ""))
+@pytest.mark.parametrize("path,api", _api_services())
 def test_readonly_api_can_still_write_the_cosign_cache(path: Path, api: dict) -> None:
     if not api.get("read_only"):
         pytest.skip(f"{path.name}: api is not read_only, cosign can write anywhere")
@@ -60,7 +68,7 @@ def test_readonly_api_can_still_write_the_cosign_cache(path: Path, api: dict) ->
     )
 
 
-@pytest.mark.parametrize("path,api", _api_services(), ids=lambda v: getattr(v, "name", ""))
+@pytest.mark.parametrize("path,api", _api_services())
 def test_the_cosign_cache_tmpfs_is_size_bounded(path: Path, api: dict) -> None:
     """An unbounded tmpfs may consume up to half of host RAM.
 
@@ -81,4 +89,47 @@ def test_the_cosign_cache_tmpfs_is_size_bounded(path: Path, api: dict) -> None:
         f"{path.name}: {_COSIGN_CACHE} is mounted without a size limit "
         f"({cosign[0]!r}), so it may grow to half of host RAM and OOM-kill "
         "the api container"
+    )
+
+
+_DOCKERFILE = _ROOT / "infra" / "docker" / "images" / "syn-api" / "Dockerfile"
+
+#: tmpfs mounts the api user must own. Docker restores a tmpfs after a host
+#: reboot as root:root 755 (a fresh one is 1777), so without uid/gid the
+#: non-root api cannot write them and every run fails at bootstrap (2026-10-20).
+_USER_OWNED_TMPFS = ("/home/syn/.sigstore", "/home/syn/.config")
+
+
+def _api_uid() -> str:
+    match = re.search(r"useradd\b[^\n]*?-u\s+(\d+)\s+syn\b", _DOCKERFILE.read_text())
+    assert match, f"{_DOCKERFILE}: no `useradd ... -u <uid> syn` line to read the api uid from"
+    return match.group(1)
+
+
+def _tmpfs_options(entry: str) -> dict[str, str]:
+    _, _, raw = entry.partition(":")
+    pairs = (opt.partition("=") for opt in raw.split(",") if opt)
+    return {key: value for key, _, value in pairs}
+
+
+@pytest.mark.parametrize("path,api", _api_services())
+@pytest.mark.parametrize("mount", _USER_OWNED_TMPFS)
+def test_user_tmpfs_is_owned_by_the_api_user(path: Path, api: dict, mount: str) -> None:
+    if not api.get("read_only"):
+        pytest.skip(f"{path.name}: api is not read_only")
+
+    entries = [str(m) for m in (api.get("tmpfs") or [])]
+    matches = [m for m in entries if m.split(":")[0] == mount]
+    assert matches, f"{path.name}: no {mount} tmpfs"
+
+    uid = _api_uid()
+    options = _tmpfs_options(matches[0])
+    assert options.get("uid") == uid and options.get("gid") == uid, (
+        f"{path.name}: {mount} tmpfs is {matches[0]!r}; it must set uid={uid},gid={uid} "
+        f"(the syn user in {_DOCKERFILE.name}). After a host reboot Docker restores it "
+        "root:root 755 and the api cannot write it"
+    )
+    assert options.get("mode") == "0700", (
+        f"{path.name}: {mount} tmpfs is {matches[0]!r}; it must set mode=0700 so the "
+        "owner can write it and no other user can read the cache"
     )

@@ -36,7 +36,10 @@ from syn_api.services.admission_announcement import (
 )
 from syn_api.services.credentials import validate_credentials
 from syn_api.services.degraded_reasons import DegradedReason
-from syn_api.services.disk_pager import start_disk_pager, stop_disk_pager
+from syn_api.services.disk_pressure import (
+    start_disk_pressure_monitor,
+    stop_disk_pressure_monitor,
+)
 from syn_api.services.execution_host_runner import (
     start_execution_host,
     stop_execution_host,
@@ -756,15 +759,16 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     start_disk_recovery_watch()
     # PC-130: and a directory whose container is gone is reclaimed on a clock too.
     start_workspace_reclaim(lambda: state.subscription_service)
-    # PC-130: and a low disk pages someone rather than waiting to be looked at.
-    start_disk_pager()
+    # #1983: low disk wakes that reclaim at once, webhook or not, and pages
+    # someone when a webhook is set.
+    start_disk_pressure_monitor()
 
 
 async def _shutdown_subscriptions(state: LifecycleState) -> None:
     """Stop subscription coordinator and workflow dispatcher."""
     await stop_disk_recovery_watch()
     await stop_workspace_reclaim()
-    await stop_disk_pager()
+    await stop_disk_pressure_monitor()
     await inventory_lifecycle.stop_session_inventory()
     if state.workflow_dispatcher is not None:
         await state.workflow_dispatcher.shutdown()

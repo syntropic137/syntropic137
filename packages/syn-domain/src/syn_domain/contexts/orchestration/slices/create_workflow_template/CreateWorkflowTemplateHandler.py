@@ -170,9 +170,17 @@ def _with_default_models(
     one) becomes the configured default and is marked ``model_defaulted``; a
     usable declared model is kept and marked declared. A caller cannot set the
     flag - it is overwritten here either way.
+
+    A ``fallback_agent`` is judged by the same rule and stored as declared: its
+    retired model raises ``RetiredModelError`` here, before any save, rather
+    than when provisioning builds its command.
     """
     normalised: list[PhaseDefinition] = []
     for phase in phases:
+        if phase.fallback_agent is not None:
+            normalize_phase_model(
+                phase.fallback_agent.provider, phase.fallback_agent.model, defaults
+            )
         model, was_defaulted = normalize_phase_model(phase.provider, phase.model, defaults)
         normalised.append(
             phase.model_copy(update={"model": model, "model_defaulted": was_defaulted})

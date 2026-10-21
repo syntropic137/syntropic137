@@ -484,7 +484,13 @@ PRs - with ~10 agent PRs open at once, a file each of them appended to would
 conflict on every merge. How it is built:
 
 - **Membership and sections come from git** (`git log --merges`, every merge
-  subject `Merge pull request #N from ...`, not only first-parent). A release is
+  subject `Merge pull request #N from ...`, not only first-parent). A
+  `Merge #N: title` subject (from `gh pr merge --subject`) counts only when
+  its commit is listed in `CUSTOM_SUBJECT_MERGES` in `scripts/changelog.py`,
+  each checked with `gh pr view N --json mergeCommit`: the subtree's and forks'
+  `Merge #28:` commits are another repository's PRs (#1878), and ancestry
+  cannot tell them apart. Merge with the default subject and nothing is needed.
+  A release is
   `vPREV..vX` between stable tags; tags live on `release`, so nothing assumes a
   tag is an ancestor of `main`. Prerelease tags are not sections. The main ->
   release PR is skipped.

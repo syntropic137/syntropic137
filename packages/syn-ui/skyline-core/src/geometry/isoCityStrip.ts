@@ -10,7 +10,7 @@
  * `coverage.from` are `unknown`, labelled not loaded, loading or did not
  * load (codex review of #1856).
  */
-import { MONTHS, dayMs } from './skyline'
+import { DAY_ZONE_SUFFIX, MONTHS, dayMs } from './skyline'
 import { isFailing, type IsoCityWeek } from './isoCityFloor'
 
 export type IsoStripTone = 'lit' | 'dim' | 'fail' | 'unknown'
@@ -92,7 +92,7 @@ function stripTone(t: WeekTotals, status: IsoLoadStatus, lit: boolean): IsoStrip
 
 function barLabel(start: string, t: WeekTotals, status: IsoLoadStatus): string {
   const d = new Date(dayMs(start))
-  const head = `Week of ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}: `
+  const head = `Week of ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}${DAY_ZONE_SUFFIX}: `
   if (status !== 'loaded') return head + STATUS_TEXT[status]
   return head + `${t.sessions} ${t.sessions === 1 ? 'session' : 'sessions'}`
 }
@@ -135,10 +135,10 @@ export function isoCityStrip(weeks: readonly IsoCityWeek[], first: number, windo
   return { bars, ticks: ticks(weeks, tickEvery), windowLeft: pct(first, n), windowWidth: pct(Math.min(window, n), n) }
 }
 
-/** "Jul 6 – Oct 9, 2026", the year on both ends when they differ. */
+/** "Jul 6 – Oct 9, 2026 (UTC)", the year on both ends when they differ. */
 export function isoRangeLabel(start: string, end: string): string {
   const a = new Date(dayMs(start))
   const b = new Date(dayMs(end))
   const ay = a.getUTCFullYear() !== b.getUTCFullYear() ? `, ${a.getUTCFullYear()}` : ''
-  return `${MONTHS[a.getUTCMonth()]} ${a.getUTCDate()}${ay} – ${MONTHS[b.getUTCMonth()]} ${b.getUTCDate()}, ${b.getUTCFullYear()}`
+  return `${MONTHS[a.getUTCMonth()]} ${a.getUTCDate()}${ay} – ${MONTHS[b.getUTCMonth()]} ${b.getUTCDate()}, ${b.getUTCFullYear()}${DAY_ZONE_SUFFIX}`
 }

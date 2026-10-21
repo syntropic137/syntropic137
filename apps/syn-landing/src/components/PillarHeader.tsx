@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import ArrowRight from "./ArrowRight";
+import type { SiteLink } from "../data/copy";
 import "./PillarHeader.css";
 
 export interface PillarPoint {
@@ -36,6 +38,8 @@ interface PillarHeaderProps extends Omit<SectionIntroProps, "align"> {
   /** "01" to "04", set in the wordmark face with a short rule. */
   num: string;
   points: readonly PillarPoint[];
+  /** An outlined link under the points, to a guide or a repo; opens in a new tab. */
+  cta?: SiteLink;
 }
 
 /** A pillar's number ("01" to "04") in the wordmark face, with a short rule. */
@@ -49,7 +53,7 @@ export function PillarNumber({ num }: { num: string }) {
 }
 
 /** A pillar's text column: number, intro and a checked list of points. */
-export default function PillarHeader({ num, points, ...intro }: PillarHeaderProps) {
+export default function PillarHeader({ num, points, cta, ...intro }: PillarHeaderProps) {
   return (
     <div className="pillar-header">
       <PillarNumber num={num} />
@@ -67,6 +71,11 @@ export default function PillarHeader({ num, points, ...intro }: PillarHeaderProp
           </li>
         ))}
       </ul>
+      {cta ? (
+        <a className="pillar-header__cta guide-link" href={cta.href} target="_blank" rel="noopener noreferrer">
+          {cta.label} <ArrowRight />
+        </a>
+      ) : null}
     </div>
   );
 }

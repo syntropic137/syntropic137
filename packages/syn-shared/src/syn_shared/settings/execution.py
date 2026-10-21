@@ -68,6 +68,28 @@ class ProcessRole(StrEnum):
         return self is not ProcessRole.API
 
 
+#: The fewest executions the API memory default is sized for, whatever the
+#: budget: the north star's current tier (docs/north-star.md). It is the floor
+#: under `api_memory_limit_for`. Without it the default concurrency of 4 would
+#: derive 128 + 4 x 96 = 512MiB, the limit #1552 was OOM-killed at. With it, an
+#: operator who raises SYN_EXECUTION_MAX_CONCURRENT up to this tier does not
+#: also have to remember API_MEMORY_LIMIT.
+API_MEMORY_FLOOR_EXECUTIONS = 20
+
+
+def api_memory_limit_for(max_concurrent: int) -> str:
+    """The API memory limit, in Docker notation, that holds `max_concurrent` executions.
+
+    This is the inverse of `executions_that_fit`, using the same baseline and
+    per-run allowance, and never sized below `API_MEMORY_FLOOR_EXECUTIONS`.
+    It is written in whole gigabytes when it divides evenly, because that is
+    how the compose fallback spells it.
+    """
+    executions = max(max_concurrent, API_MEMORY_FLOOR_EXECUTIONS)
+    mib = API_BASELINE_MEMORY_MIB + executions * EXECUTION_API_MEMORY_MIB
+    return f"{mib // 1024}g" if mib % 1024 == 0 else f"{mib}m"
+
+
 class ExecutionSettings(BaseSettings):
     """The execution concurrency budget. Override via ``SYN_EXECUTION_*``."""
 
@@ -120,10 +142,10 @@ class ExecutionSettings(BaseSettings):
         default=False,
         description=(
             "Admit executions into the Postgres run queue instead of running them "
-            "in the admitting process (ADR-072, #1310 1.3). Off by default and NOT "
-            "safe to turn on yet: nothing claims an admitted run until the "
-            "ExecutionHost lands (#1310 1.5), so with this on every execution is "
-            "admitted and never runs. Requires SYN_OBSERVABILITY_DB_URL; the API "
+            "in the admitting process (ADR-072, #1310 1.3). Off by default. With it "
+            "on, this process registers an ExecutionHost (#1310 1.5) that claims "
+            "admitted runs within SYN_EXECUTION_MAX_CONCURRENT, in the Executor Pool "
+            "named by SYN_EXECUTOR_POOL_ID. Requires SYN_OBSERVABILITY_DB_URL; the API "
             "refuses to start an execution without it rather than queue in memory. "
             "On a compose install, also set COMPOSE_PROFILES=run-queue in .env: the "
             "executor service that claims runs is behind that profile and does not "
@@ -141,5 +163,67 @@ class ExecutionSettings(BaseSettings):
             "the Run Queue claim loop, and is idle while "
             "SYN_EXECUTION_RUN_QUEUE_ENABLED is off; 'all' runs both in one "
             "process. Pinned per service by the compose files, not an operator knob."
+        ),
+    )
+
+
+#: The slug every Executor Pool, provider and region name must match (ADR-072 D13).
+POOL_SLUG_PATTERN = r"^[a-z][a-z0-9-]{0,62}$"
+
+
+class ExecutorPoolSettings(BaseSettings):
+    """The Executor Pool this process's ExecutionHost joins (ADR-072 D13).
+
+    Only the operator facts nothing can derive. The provider and isolation level
+    come from the workspace backend, never from here, so a declaration cannot
+    disagree with what actually runs the workspaces. Read only with
+    SYN_EXECUTION_RUN_QUEUE_ENABLED on.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="SYN_EXECUTOR_POOL_",
+        env_file=".env",
+        extra="ignore",
+        # .env.example writes unset values as empty; empty means the default.
+        env_ignore_empty=True,
+    )
+
+    id: str = Field(
+        default="default",
+        pattern=POOL_SLUG_PATTERN,
+        description=(
+            "The Executor Pool this executor joins. Every executor naming one pool "
+            "must declare the same priority, region, capabilities and overflow delay: "
+            "a differing declaration is refused at startup while another member is "
+            "live and not draining. To redefine a pool, drain its other members first."
+        ),
+    )
+    priority: int = Field(
+        default=0,
+        ge=0,
+        le=32767,
+        description=(
+            "The pool's priority; 0 is tried first. Placement does not read it yet: "
+            "every executor still claims the oldest admitted run (ADR-072 D13)."
+        ),
+    )
+    region: str | None = Field(
+        default=None,
+        pattern=POOL_SLUG_PATTERN,
+        description="Where the pool's executors run, as a slug. Unset: no region stated.",
+    )
+    capabilities: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            'Features of this pool\'s hosts, as a JSON list, e.g. ["nested_docker"]. '
+            "An unknown capability refuses startup."
+        ),
+    )
+    overflow_delay_s: int = Field(
+        default=60,
+        ge=0,
+        description=(
+            "Seconds this pool's executors wait on a full higher-priority pool before "
+            "overflowing to it. Recorded with the pool; placement does not use it yet."
         ),
     )

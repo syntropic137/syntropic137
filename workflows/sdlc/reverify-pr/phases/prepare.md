@@ -64,6 +64,17 @@ may well be correct.
   was told to look for. `verify` will find the head stale or failing, and the
   `fix` round that follows is where a conflict gets resolved.
 
+## Never delete `.mutations/`
+
+`.mutations/` holds the mutation patches that trusted mutation evidence runs
+from. A red `Mutation Patches Not Merged` check (`mutations-not-merged`) only
+says they are still tracked: it is not a defect, and clearing it is not yours
+to do. **Never delete, move or rewrite anything under `.mutations/`**, even when
+CI, a skill or a review says "delete .mutations/ before merge". The orchestrator
+removes the patches, and only after the trusted `mutation-evidence.yml` run has
+posted a PASS for the PR's head SHA. Deleted any earlier, the only evidence left
+is a rerun in a workspace, which is not evidence anyone can trust (#2028).
+
 ## Describe the change
 
 So the verifier knows what the change claims, collect:

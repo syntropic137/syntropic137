@@ -4,7 +4,9 @@ The release-sectioning tests run the generator against a real throwaway git
 repository built to the shape this one has: PRs merged into ``main``, release
 tags on a separate ``release`` branch (never an ancestor of main), a beta tag,
 the main -> release PR, a hand-written ``Merge #N (...)`` merge and a PR that
-reached main through another branch. No network: PR bodies are passed in.
+reached main through another branch. A second repository adds ``Merge #N: ...``
+merges, both this repository's and a subtree's (#1878). No network: PR bodies
+are passed in.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import changelog
 from changelog import (
     Category,
     IncompleteHistoryError,
@@ -149,25 +152,25 @@ T0 = 1_790_000_000  # 2026-09-21 UTC
 
 
 def _merge_pr(
-    repo: Path, number: int, branch: str, title: str, when: int, into: str = "main"
+    repo: Path,
+    number: int,
+    branch: str,
+    title: str,
+    when: int,
+    into: str = "main",
+    subject: str | None = None,
+    body: str | None = None,
 ) -> None:
+    """Merge a one-commit branch; GitHub's default subject and body unless given."""
     _git(repo, "checkout", "-q", "-b", branch, into)
     (repo / f"{number}.txt").write_text(title)
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", title, when=when)
     _git(repo, "checkout", "-q", into)
-    _git(
-        repo,
-        "merge",
-        "-q",
-        "--no-ff",
-        branch,
-        "-m",
-        f"Merge pull request #{number} from org/{branch}",
-        "-m",
-        title,
-        when=when,
-    )
+    message = ["-m", subject or f"Merge pull request #{number} from org/{branch}"]
+    if body != "":
+        message += ["-m", body or title]
+    _git(repo, "merge", "-q", "--no-ff", branch, *message, when=when)
 
 
 def _release(repo: Path, tag: str, when: int, release_pr: int) -> None:
@@ -288,6 +291,180 @@ def test_first_version_floor_and_pending_release(repo: Path) -> None:
 def test_output_is_deterministic(repo: Path) -> None:
     first = build_changelog(repo, repo_url=URL, first_version=(0, 0, 0))
     assert first == build_changelog(repo, repo_url=URL, first_version=(0, 0, 0))
+
+
+@pytest.fixture(scope="module")
+def named_merges_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Main with ``Merge #N: ...`` merges, and a subtree that brought its own."""
+    path = tmp_path_factory.mktemp("named")
+    _git(path, "init", "-q", "-b", "main")
+    (path / "README").write_text("x")
+    _git(path, "add", ".")
+    _git(path, "commit", "-q", "-m", "root", when=T0)
+    _git(path, "branch", "release")
+    _merge_pr(path, 1, "feat/one", "feat: first feature", T0 + DAY)
+    _release(path, "v0.1.0", T0 + DAY + 60, release_pr=2)
+
+    # `gh pr merge --subject "Merge #N: ..."`: the body is the PR title...
+    _merge_pr(
+        path,
+        11,
+        "feat/eleven",
+        "feat(landing): rebuilt landing page",
+        T0 + 2 * DAY,
+        subject="Merge #11: rebuilt landing page",
+    )
+    # ...or empty, when only the subject carries the title.
+    _merge_pr(
+        path,
+        12,
+        "fix/twelve",
+        "fix: unused commit title",
+        T0 + 3 * DAY,
+        subject="Merge #12: fix: deploy docs from release only",
+        body="",
+    )
+
+    # Another repository's history, with its own root and its own PR numbers,
+    # joined in the way `git subtree add` joins it.
+    _git(path, "checkout", "-q", "--orphan", "landing")
+    _git(path, "rm", "-rfq", ".")
+    (path / "index.html").write_text("landing")
+    _git(path, "add", ".")
+    _git(path, "commit", "-q", "-m", "landing root", when=T0)
+    _merge_pr(
+        path,
+        28,
+        "lp-twenty-eight",
+        "feat: name the supported harnesses",
+        T0 + 4 * DAY,
+        into="landing",
+        subject="Merge #28: name the supported harnesses",
+    )
+    _git(path, "checkout", "-q", "main")
+    _git(
+        path,
+        "merge",
+        "-q",
+        "--allow-unrelated-histories",
+        "-s",
+        "ours",
+        "landing",
+        "-m",
+        "Add 'apps/syn-landing/' from commit landing",
+        when=T0 + 5 * DAY,
+    )
+    return path
+
+
+def _sha(repo: Path, rev: str) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", rev], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+@pytest.mark.unit
+def test_named_merge_subjects_count_only_when_confirmed(
+    named_merges_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    merges = {
+        int(number): _sha(named_merges_repo, f":/^Merge #{number}:") for number in (11, 12, 28)
+    }
+    # #28 is the subtree's PR, and is deliberately not confirmed.
+    monkeypatch.setattr(
+        changelog,
+        "CUSTOM_SUBJECT_MERGES",
+        {merges[11]: 11, merges[12]: 12},
+    )
+    text = build_changelog(
+        named_merges_repo,
+        {11: "## Release notes\n- syntropic137.com rebuilt.\n"},
+        repo_url=URL,
+        first_version=(0, 0, 0),
+    )
+    unreleased = text.split("## [Unreleased]", 1)[1].split("## [0.1.0]", 1)[0]
+    assert unreleased == (
+        "\n\n### Added\n\n- syntropic137.com rebuilt. (#11)\n"
+        "\n### Fixed\n\n- fix: deploy docs from release only (#12)\n\n"
+    )
+    assert "(#28)" not in text
+    # Offline lists the same PRs; only the release-note wording differs.
+    offline = build_changelog(named_merges_repo, repo_url=URL, first_version=(0, 0, 0))
+    assert "- feat(landing): rebuilt landing page (#11)" in offline
+    assert "(#12)" in offline and "(#28)" not in offline
+
+
+@pytest.mark.unit
+def test_named_merge_with_a_confirmed_sha_but_another_number_is_dropped(
+    named_merges_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sha = _sha(named_merges_repo, ":/^Merge #11:")
+    monkeypatch.setattr(changelog, "CUSTOM_SUBJECT_MERGES", {sha: 99})
+    text = build_changelog(named_merges_repo, repo_url=URL, first_version=(0, 0, 0))
+    assert "(#11)" not in text and "(#99)" not in text
+
+
+@pytest.mark.unit
+def test_shared_root_fork_pr_number_cannot_replace_upstream_pr(tmp_path: Path) -> None:
+    upstream, fork = tmp_path / "upstream", tmp_path / "fork"
+    upstream.mkdir()
+    _git(upstream, "init", "-q", "-b", "main")
+    (upstream / "README").write_text("x")
+    _git(upstream, "add", ".")
+    _git(upstream, "commit", "-q", "-m", "root", when=T0)
+    subprocess.run(["git", "clone", "-q", str(upstream), str(fork)], check=True)
+    _merge_pr(
+        fork, 28, "fork-feature", "feat: fork-only", T0 + 2 * DAY, subject="Merge #28: fork-only"
+    )
+    _merge_pr(upstream, 28, "up-feature", "fix: real upstream PR", T0 + DAY)
+    _git(upstream, "fetch", "-q", str(fork), "main:fork-import")
+    _git(
+        upstream,
+        "merge",
+        "-q",
+        "--no-ff",
+        "-X",
+        "ours",
+        "fork-import",
+        "-m",
+        "Merge pull request #99 from contributor/fork-import",
+        "-m",
+        "feat: import fork work",
+        when=T0 + 3 * DAY,
+    )
+    _git(upstream, "tag", "v0.1.0")
+    text = build_changelog(upstream, repo_url=URL, first_version=(0, 0, 0))
+    assert "- fix: real upstream PR (#28)" in text
+    assert "fork-only" not in text
+    assert "(#99)" in text
+
+
+@pytest.mark.unit
+def test_custom_subject_release_merge_is_not_listed(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "README").write_text("x")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "root", when=T0)
+    _git(repo, "branch", "release")
+    _merge_pr(repo, 11, "feature", "feat: shipped", T0 + DAY, subject="Merge #11: shipped")
+    _git(repo, "checkout", "-q", "release")
+    _git(
+        repo,
+        "merge",
+        "-q",
+        "--no-ff",
+        "main",
+        "-m",
+        "Merge #12: Release v0.1.0",
+        "-m",
+        "Release v0.1.0",
+        when=T0 + 2 * DAY,
+    )
+    _git(repo, "tag", "v0.1.0")
+    text = build_changelog(repo, repo_url=URL, first_version=(0, 0, 0))
+    assert "(#12)" not in text
 
 
 # --- incomplete clones --------------------------------------------------------

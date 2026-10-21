@@ -16,7 +16,7 @@ A condition has three parts:
 |------|-------------|---------|
 | **field** | Dot-notation path into the webhook payload | `sender.login` |
 | **operator** | Comparison to perform | `eq`, `in`, `not_empty` |
-| **value** | Expected value (omitted for unary operators) | `alice` |
+| **value** | Expected value (ignored by unary operators; the API still requires a string, e.g. `""`) | `alice` |
 
 ## Operators
 
@@ -163,7 +163,7 @@ To allow multiple users, use the API directly with the `in` operator:
 ```json
 {
   "conditions": [
-    { "field": "sender.login", "operator": "in", "value": ["alice", "bob", "charlie"] }
+    { "field": "sender.login", "operator": "in", "value": "alice,bob,charlie" }
   ]
 }
 ```
@@ -261,11 +261,13 @@ Condition 3: pull_request.base.ref eq main ← must match
 
 ## Combining with Safety Limits
 
-Conditions work alongside the trigger safety limits (daily limit, cooldown,
-budget). The evaluation order is:
+Conditions work alongside the trigger safety guards. The evaluation order is:
 
 1. **Event type match** -- does the webhook event match the trigger's event?
 2. **Condition evaluation** -- do all conditions pass against the payload?
-3. **Safety limits** -- has the trigger exceeded its daily limit, cooldown, or budget?
+3. **Safety guards** -- concurrency, max attempts, cooldown, cross-trigger cooldown, daily limit,
+   idempotency, and the global dispatch rate limit.
 
-Only if all three gates pass does the trigger fire a workflow execution.
+Only if all three gates pass does the trigger fire. The budget is checked
+later, at dispatch: a fired trigger that is over budget is recorded as a failed
+dispatch with reason `budget_exceeded` and no execution starts.

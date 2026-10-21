@@ -33,7 +33,7 @@ export async function synGetSession(
   if (s.error_message) rows.push(["Error", s.error_message]);
 
   const sections = [...buildMarkdownTable(`Session: ${s.id}`, rows)];
-  sections.push(...formatOperations(s.operations));
+  sections.push(...formatOperations(s.operations ?? []));
 
   return { content: sections.join("\n") };
 }
