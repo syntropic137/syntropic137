@@ -55,9 +55,12 @@ reviewer or a verify phase asks "does this test kill the bug?".
      XPASSED: evidence void,
      nothing else was run. A skip would pass under every mutant; it usually
      means a Docker-backed test was run with `docker=false`.
-5. Before merge, delete `.mutations/` in a final commit. CI job
-   `mutations-not-merged` fails any PR into main that still tracks it ("delete
-   .mutations/ before merge; evidence is in the mutation-evidence comment").
+5. Before merge, the orchestrator deletes `.mutations/` in a final commit,
+   only after the comment reports PASS for the PR's current head SHA. CI job
+   `mutations-not-merged` fails any PR into main that still tracks it. That red
+   check is not a defect for a workflow phase to fix: a phase that deletes the
+   patches before the PASS leaves nothing but a workspace rerun, which is not
+   trusted evidence (#2028).
    The comment, which names the head SHA, is the record; with merge commits the
    patches also stay reachable in that SHA's history.
 

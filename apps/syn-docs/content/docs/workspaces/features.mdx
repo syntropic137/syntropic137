@@ -4,9 +4,9 @@ description: RTK token compression, OpenTelemetry observability, LSP code intell
 ---
 
 <Callout type="info">
-Everything on this page is consumed by the **claude** harness. A phase running on `agent.provider: codex` does not use it, on either image.
+Apart from RTK's codex instructions, everything on this page is consumed by the **claude** harness. A phase running on `agent.provider: codex` does not use it, on any image.
 
-Both images carry the Claude Code plugins and native OTel export. The manifest scopes `otel_native` to claude deliberately, because codex OTel is unverified here. What the default `omni-agent` image does **not** carry is the LSP servers and the Rust toolchain, which its manifest omits on purpose rather than declaring something the image lacks. See [Workspace Images](/docs/workspaces).
+Both images carry the Claude Code plugins and native OTel export. The manifest scopes `otel_native` to claude deliberately, because codex OTel is unverified here. What the `omni-agent` image, and the default `toolchain` image built on it, do **not** carry is the LSP servers and the Rust toolchain, which their manifests omit on purpose rather than declaring something the image lacks. See [Workspace Images](/docs/workspaces).
 </Callout>
 
 ## RTK Token Compression
@@ -15,13 +15,15 @@ Both images carry the Claude Code plugins and native OTel export. The manifest s
 
 ### How It Works
 
-RTK is installed in the `omni-agent` image at a pinned, checksum-verified
-version and initialized via `rtk init -g` in the container entrypoint, after
-the entrypoint writes `~/.claude/settings.json`. It installs a hook that
-intercepts Bash tool calls and rewrites them to compressed equivalents.
+RTK is built from source at a pinned release tag (`cargo install --locked`)
+into the `omni-agent` image and initialized via `rtk init -g` in the container
+entrypoint, after the entrypoint writes `~/.claude/settings.json`. For Claude
+it installs a hook that intercepts Bash tool calls and rewrites them to
+compressed equivalents.
 
-`rtk init` targets Claude Code and has no codex target, so this is Claude-only.
-A codex phase never consults the hook.
+The entrypoint also runs `rtk init -g --codex`, which writes instructions to
+`~/.codex/RTK.md` instead of a hook. A codex phase never consults the Claude
+hook.
 
 ### Measured Impact
 
@@ -60,20 +62,15 @@ Workspace images export standard OTel metrics via OTLP, providing real-time toke
 
 ### Configuration
 
-OTel export is enabled by default in the image. The orchestrator auto-injects the collector endpoint when `COLLECTOR_URL` is configured:
+The image sets no OTel variables. The orchestrator injects them only when `COLLECTOR_URL` is configured:
 
 ```bash
-# Set by the image (defaults, no user action needed)
+# Injected by the orchestrator when COLLECTOR_URL is set
 CLAUDE_CODE_ENABLE_TELEMETRY=1
-OTEL_METRICS_EXPORTER=otlp
-OTEL_LOGS_EXPORTER=otlp
-OTEL_METRIC_EXPORT_INTERVAL=5000  # 5s granularity
-
-# Auto-injected by orchestrator when COLLECTOR_URL is set
 OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:8080
 ```
 
-If no endpoint is provided, OTel export silently no-ops (no crash, no side effects).
+If `COLLECTOR_URL` is not set, neither is injected and there is no OTel export.
 
 ### Two-Channel Observability
 

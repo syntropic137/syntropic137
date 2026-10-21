@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from syn_shared.agents import claude_model_pin_env
 from syn_shared.env_constants import (
     ENV_ANTHROPIC_API_KEY,
     ENV_ANTHROPIC_BASE_URL,
@@ -54,6 +55,9 @@ async def build_agent_env(
     env: dict[str, str] = {
         ENV_CLAUDE_SESSION_ID: session_id,
         ENV_ANTHROPIC_BASE_URL: proxy_url,
+        # Subagents and `syn-delegate claude` sessions run a model the platform
+        # chose, not the CLI's default (claude_model_pin_env).
+        **claude_model_pin_env(),
     }
 
     # Prefer OAuth token; fall back to API key. Claude Code CLI v2.1.76+

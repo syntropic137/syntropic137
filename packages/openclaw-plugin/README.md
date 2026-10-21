@@ -128,7 +128,9 @@ npm run dev
 src/
 ├── index.ts          # Plugin entry point — registers all tools
 ├── client.ts         # SyntropicClient: typed fetch() wrapper
-├── types.ts          # Response types (mirrors syn-api models)
+├── types.ts          # Plugin names for the generated syn-api schemas
+├── generated/
+│   └── api-types.ts  # @generated from the OpenAPI spec by `just codegen`
 ├── errors.ts         # Error formatting
 └── tools/
     ├── workflows.ts      # List + execute workflows

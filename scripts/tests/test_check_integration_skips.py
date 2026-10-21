@@ -10,6 +10,7 @@ positive pushes people to put ``may_skip`` on tests that cannot skip.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -972,3 +973,226 @@ class Root:
 """
     _write(tmp_path, "test_x.py", root + "".join(order))
     assert _census(tmp_path) == [("TestSkipping::test_store", "undeclared")]
+
+
+def test_a_skip_in_a_helper_imported_from_another_module_counts(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = ["src"]\n')
+    _write(
+        tmp_path,
+        "src/helpers/__init__.py",
+        "from .docker import require_docker as require_docker\n",
+    )
+    _write(
+        tmp_path,
+        "src/helpers/docker.py",
+        """
+        from pytest import skip as _skip
+
+        def require_docker():
+            _check()
+
+        def _check():
+            _skip("no docker")
+        """,
+    )
+    _write(
+        tmp_path,
+        "tests/test_a.py",
+        """
+        import pytest
+        from helpers import require_docker as docker
+
+        class TestReap:
+            pytestmark = [pytest.mark.integration]
+
+            def test_reaps(self):
+                docker()
+        """,
+    )
+    assert _census(tmp_path) == [("TestReap::test_reaps", "undeclared")]
+
+
+# ---------------------------------------------------------------- parity with real pytest
+
+_PYTEST_INI = "[pytest]\nmarkers =\n    integration: i\n    may_skip(reason, issue): m\n"
+
+#: Fixture override chains, imported fixtures and mixed parameter legs, each
+#: with the outcome a real ``pytest -m integration`` run gives it.
+_PARITY: dict[str, tuple[dict[str, str], str, bool]] = {
+    "conftest_dependency_override": (
+        {
+            "tests/conftest.py": """
+            import pytest
+            @pytest.fixture
+            def transport():
+                return 1
+            @pytest.fixture
+            def store(transport):
+                return transport
+            """,
+            "tests/test_x.py": """
+            import pytest
+            @pytest.fixture
+            def transport():
+                pytest.skip("no transport")
+            @pytest.mark.integration
+            def test_x(store):
+                pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "fixture_override_requests_parent": (
+        {
+            "tests/conftest.py": """
+            import pytest
+            @pytest.fixture
+            def store():
+                pytest.skip("no store")
+            """,
+            "tests/test_x.py": """
+            import pytest
+            @pytest.fixture
+            def store(store):
+                return store
+            @pytest.mark.integration
+            def test_x(store):
+                pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "imported_autouse": (
+        {
+            "tests/__init__.py": "",
+            "tests/helpers.py": """
+            import pytest
+            @pytest.fixture(autouse=True)
+            def need_store():
+                pytest.skip("no store")
+            """,
+            "tests/test_x.py": """
+            import pytest
+            from tests.helpers import need_store
+            @pytest.mark.integration
+            def test_x():
+                pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "imported_fixture_under_an_alias": (
+        {
+            "tests/__init__.py": "",
+            "tests/support/__init__.py": "from .stores import backend\n",
+            "tests/support/stores.py": """
+            import pytest
+            @pytest.fixture
+            def backend():
+                pytest.skip("no store")
+            """,
+            "tests/test_x.py": """
+            import pytest
+            from tests.support import backend as store
+            @pytest.mark.integration
+            def test_x(store):
+                pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "imported_fixture_keeps_an_explicit_name": (
+        {
+            "tests/__init__.py": "",
+            "tests/helpers.py": """
+            import pytest
+            @pytest.fixture(name="backend")
+            def backend():
+                pytest.skip("no backend")
+            """,
+            "tests/test_x.py": """
+            import pytest
+            from tests.helpers import backend as alias
+            @pytest.mark.integration
+            def test_x(backend):
+                pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "overridden_autouse_no_longer_skips": (
+        {
+            "tests/conftest.py": """
+            import pytest
+            @pytest.fixture(autouse=True)
+            def need_store():
+                pytest.skip("no store")
+            """,
+            "tests/test_x.py": """
+            import pytest
+            @pytest.fixture
+            def need_store():
+                return 1
+            @pytest.mark.integration
+            def test_x():
+                pass
+            """,
+        },
+        "1 passed",
+        False,
+    ),
+    "declared_parameter": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.parametrize("n", [pytest.param(1, marks=[
+                pytest.mark.integration,
+                pytest.mark.skip(reason="no store"),
+                pytest.mark.may_skip(reason="no store", issue="#1984"),
+            ])])
+            def test_x(n):
+                pass
+            """,
+        },
+        "1 skipped",
+        False,
+    ),
+    "unit_skip_and_integration_pass": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.parametrize("n", [
+                pytest.param(1, marks=pytest.mark.skip(reason="unit only")),
+                pytest.param(2, marks=pytest.mark.integration),
+            ])
+            def test_x(n):
+                pass
+            """,
+        },
+        "1 passed, 1 deselected",
+        False,
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_PARITY))
+def test_the_census_agrees_with_pytest(tmp_path: Path, shape: str) -> None:
+    files, outcome, undeclared = _PARITY[shape]
+    (tmp_path / "pytest.ini").write_text(_PYTEST_INI)
+    for rel, source in files.items():
+        _write(tmp_path, rel, source)
+    run = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-m", "integration", "-p", "no:cacheprovider"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.stdout.strip().splitlines()[-1].startswith(outcome), run.stdout
+    expected = [("test_x", "undeclared")] if undeclared else []
+    assert _census(tmp_path) == expected

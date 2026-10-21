@@ -7,23 +7,23 @@ Syntropic137 integrates with GitHub through a GitHub App. This enables webhook-d
 
 ## Setting Up the GitHub App
 
-The setup wizard handles GitHub App creation:
+The setup wizard's `init` command offers to create the GitHub App:
 
 ```bash
-npx @syntropic137/setup github-app
+npx @syntropic137/setup init
 ```
 
-This opens your browser to GitHub's App manifest flow:
+If you accept, it opens your browser to GitHub's App manifest flow:
 
 1. You confirm the app creation on GitHub
 2. GitHub redirects back with credentials
-3. The CLI saves the App ID, private key (PEM), and webhook secret to `~/.syntropic137/secrets/`
+3. The CLI saves the private key (PEM), webhook secret and client secret to `~/.syntropic137/secrets/`, and writes the App ID, App name, org and webhook secret to `.env`
 4. You choose which repositories the app can access
 
 The entire flow takes about 30 seconds.
 
 <Callout type="info">
-If you already ran `npx @syntropic137/setup init`, the GitHub App step was offered during initial setup. You can re-run it anytime with `npx @syntropic137/setup github-app`.
+To change an existing App's settings or installations, run `npx @syntropic137/setup github-app`. It opens the App's settings, permissions or installations page on GitHub; it does not create an App.
 </Callout>
 
 ## Trigger Rules
@@ -94,7 +94,7 @@ is retried:
 | --- | --- | --- |
 | Retried on | A dropped or timed-out response, `429`, any `5xx` | A connection that dropped or timed out, `502`, `503`, `504` |
 | Attempts | 5, waiting about 5, 10, 20, 40 s (plus up to 10% jitter), or GitHub's `Retry-After` when sent | 3, with short jittered waits |
-| Deadline | 3/4 of the setup phase timeout (90 s of the default 120 s), waits and requests included | - |
+| Deadline | 3/4 of the setup phase timeout (180 s of the default 240 s), waits and requests included | - |
 | Never retried | `4xx` other than `429` (for example 401, 403, 404, 422): GitHub's answer about the request | Any `4xx` |
 
 A non-idempotent call other than the mint is sent again only when the
@@ -120,6 +120,6 @@ syn github repos
 syn github repos --installation <id>    # filter by a specific installation
 ```
 
-This queries the GitHub API through your App's installation tokens and returns repository metadata (name, owner, visibility, default branch). Use it to verify that the App can see the repos you expect before setting up trigger rules.
+With `--installation`, this queries the GitHub API through that installation's token; without it, it reads the cached listing described below. Either way it returns repository metadata (name, owner, visibility, default branch). Use it to verify that the App can see the repos you expect before setting up trigger rules.
 
-Syntropic137 asks GitHub for the App's installations each time repository information is requested across all of them, and keeps a local copy to fall back on if GitHub cannot be reached. No webhook or tunnel is required for this to work. A newly added installation, and the repositories it grants, appear in `syn github repos` the next time the command runs.
+Listing repositories across all installations is served from a cached listing and never waits on GitHub. A listing older than 30 seconds triggers a background refresh; one older than 60 seconds is marked partial, since a repository added since may be missing. With no cached listing (first use, or just after a webhook invalidated it) the answer is empty and marked unavailable while a refresh runs, so retry shortly. No webhook or tunnel is required for this to work.
