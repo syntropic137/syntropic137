@@ -42,8 +42,14 @@ if TYPE_CHECKING:
     from syn_adapters.dedup.redis_dedup import RedisDedupAdapter
     from syn_adapters.disk_space import StatvfsDiskSpace
     from syn_adapters.events.store import AgentEventStore
+    from syn_adapters.evidence.memory import (
+        InMemoryEvidenceFiling,
+        InMemoryEvidenceRunner,
+        InMemoryRemoteBranchWriter,
+    )
     from syn_adapters.execution_runs import PostgresExecutionRunQueue
     from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
+    from syn_adapters.feedback_screening import AnthropicScreener, HeuristicScreener
     from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
@@ -202,6 +208,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
         ArtifactContentStoragePort as ArtifactsArtifactContentStoragePort,
     )
+    from syn_domain.contexts.feedback.ports import NonceLedgerPort, ScreeningPort
     from syn_domain.contexts.github.ports.ChecksApiPort import GitHubChecksAPIPort
     from syn_domain.contexts.github.ports.EventsApiPort import GitHubEventsAPIPort
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
@@ -232,6 +239,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
         DelegationEvidencePort,
     )
+    from syn_domain.contexts.orchestration.ports.EvidenceFilingPort import EvidenceFilingPort
+    from syn_domain.contexts.orchestration.ports.EvidenceRunnerPort import EvidenceRunnerPort
     from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
         ExecutionRunQueue,
     )
@@ -242,6 +251,9 @@ if TYPE_CHECKING:
         ObservabilityServicePort,
     )
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
+    from syn_domain.contexts.orchestration.ports.RemoteBranchWriterPort import (
+        RemoteBranchWriterPort,
+    )
     from syn_domain.contexts.orchestration.ports.RevisionResolverPort import (
         RevisionResolverPort,
     )
@@ -393,6 +405,8 @@ if TYPE_CHECKING:
         _memory_dedup: DedupPort = memory_dedup
         _redis_signals: SignalQueuePort = redis_signals
         _memory_signals: SignalQueuePort = memory_signals
+        # feedback's replay ledger (ADR-076-feedback-ticketing): its own port, the same adapter.
+        _nonce_ledger: NonceLedgerPort = redis_dedup
         _postgres_pending: PendingSHAStore = postgres_pending
         _memory_pending: PendingSHAStore = memory_pending
 
@@ -469,6 +483,16 @@ if TYPE_CHECKING:
         _history_queue: HistoryBackfillQueuePort = history_queue
         _settlements: SessionSettlementPort = settlements
 
+    def _evidence_gate(
+        runner: InMemoryEvidenceRunner,
+        writer: InMemoryRemoteBranchWriter,
+        filing: InMemoryEvidenceFiling,
+    ) -> None:
+        """The evidence gate's ports (plan §A.5). The GitHub adapters land in PR 6."""
+        _runner: EvidenceRunnerPort = runner
+        _writer: RemoteBranchWriterPort = writer
+        _filing: EvidenceFilingPort = filing
+
     def _run_queue(
         postgres: PostgresExecutionRunQueue,
         memory: InMemoryExecutionRunQueue,
@@ -476,3 +500,8 @@ if TYPE_CHECKING:
         """The Run Queue (ADR-072). The double must keep the port, not just Postgres."""
         _postgres: ExecutionRunQueue = postgres
         _memory: ExecutionRunQueue = memory
+
+    def _feedback_screening(heuristic: HeuristicScreener, anthropic: AnthropicScreener) -> None:
+        """feedback's classifiers (ADR-076-feedback-ticketing): the floor and the model."""
+        _heuristic: ScreeningPort = heuristic
+        _anthropic: ScreeningPort = anthropic

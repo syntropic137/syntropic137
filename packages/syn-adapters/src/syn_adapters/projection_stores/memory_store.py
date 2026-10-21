@@ -21,6 +21,7 @@ from syn_adapters.projection_stores.memory_store_helpers import (
     apply_pagination,
     apply_sorting,
     filter_values,
+    matches,
 )
 from syn_adapters.projection_stores.memory_store_helpers import (
     clear_projection as _clear_projection,
@@ -125,14 +126,8 @@ class InMemoryProjectionStore:
             return 0
         if not filters:
             return len(records)
-        return sum(
-            1
-            for record in records.values()
-            if all(
-                str(record.get(key)) in {str(v) for v in filter_values(value)}
-                for key, value in filters.items()
-            )
-        )
+        accepted = [(k, filter_values(v)) for k, v in filters.items()]
+        return sum(1 for record in records.values() if matches(record, accepted))
 
     async def delete(self, projection: str, key: str) -> None:
         """Delete a projection record."""

@@ -31,6 +31,7 @@ _FAST = HostTiming(
     loop_interval=timedelta(milliseconds=5),
     lease_ttl=timedelta(milliseconds=30),
     opening_older_than=timedelta(minutes=2),
+    turn_budget=timedelta(milliseconds=4),
 )
 
 
@@ -72,10 +73,13 @@ class _Queue:
     async def close(self, run: ClaimedRun) -> None:
         self.closed.append(run.execution_id)
 
-    async def fence_expired(self, reconciler: str) -> list[FencedRun]:
-        fenced, self.fenced = self.fenced, []
+    async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        fenced, self.fenced = self.fenced[:limit], self.fenced[limit:]
         self.rows.update({run.execution_id: run for run in fenced})
         return fenced
+
+    async def take_over(self, reconciler: str, *, limit: int) -> list[FencedRun]:
+        return []
 
     async def reconciling(self, reconciler: str) -> list[FencedRun]:
         return list(self.rows.values())
@@ -157,6 +161,16 @@ def _host(queue: _Queue, drainer: _Drainer, reaper: _Reaper | None = None) -> Ex
     )
 
 
+async def _turn(reconciler: Reconciler) -> None:
+    """One acquiring turn, then yield until the tasks it started have finished."""
+    await reconciler.turn(acquire=True)
+    for _ in range(100):
+        if reconciler.idle:
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("reconciliation tasks did not settle")
+
+
 async def _until(predicate: object, budget: float = 2.0) -> None:
     async with asyncio.timeout(budget):
         while not predicate():  # type: ignore[operator]
@@ -216,10 +230,10 @@ async def test_an_incomplete_reap_keeps_the_run_fencing_until_a_later_turn_compl
     queue.fenced = [fenced]
     reaper, interrupter = _Reaper(complete=False), _Interrupter()
     reconciler = Reconciler(queue, _HOST.host_id, reaper, interrupter)  # type: ignore[arg-type]
-    await reconciler.turn()
+    await _turn(reconciler)
     assert (queue.reaped, interrupter.calls, queue.interrupted) == ([], [], [])
     reaper.complete = True
-    await reconciler.turn()
+    await _turn(reconciler)
     assert reaper.calls == [("dead", "e9"), ("dead", "e9")]
     assert queue.reaped == ["e9"]
     assert interrupter.calls == ["e9"]
@@ -236,12 +250,12 @@ async def test_a_failed_reconciliation_write_is_resumed_from_the_row(write: str,
     queue.fail = {write: when}
     reaper, interrupter = _Reaper(complete=True), _Interrupter()
     reconciler = Reconciler(queue, _HOST.host_id, reaper, interrupter)  # type: ignore[arg-type]
-    await reconciler.turn()
-    await reconciler.turn()
+    await _turn(reconciler)
+    await _turn(reconciler)
     assert queue.interrupted == ["e9"]
     assert queue.reaped == ["e9"]
     assert queue.rows == {}
-    await reconciler.turn()
+    await _turn(reconciler)
     assert queue.interrupted == ["e9"]
 
 
@@ -253,7 +267,38 @@ async def test_a_fresh_reconciler_finishes_a_row_its_predecessor_left_reaped() -
         )
     }
     reaper, interrupter = _Reaper(complete=True), _Interrupter()
-    await Reconciler(queue, _HOST.host_id, reaper, interrupter).turn()  # type: ignore[arg-type]
+    await _turn(Reconciler(queue, _HOST.host_id, reaper, interrupter))  # type: ignore[arg-type]
     assert reaper.calls == []  # already reaped: the row says so
     assert interrupter.calls == ["e9"]
     assert queue.interrupted == ["e9"]
+
+
+class _FailingFirstReaper:
+    """Reaps of ``failing`` rows never complete; every other row's does."""
+
+    def __init__(self, failing: set[str]) -> None:
+        self.failing = failing
+        self.calls: list[str] = []
+
+    async def reap(self, run: FencedRun) -> bool:
+        self.calls.append(run.execution_id)
+        return run.execution_id not in self.failing
+
+
+async def test_rows_whose_reaps_keep_failing_do_not_starve_the_rows_behind_them() -> None:
+    queue = _Queue([])
+    ids = [f"e{n}" for n in range(1, 7)]
+    queue.rows = {
+        row: FencedRun(execution_id=row, executor_id="dead", reconciler=_HOST.host_id, token=2)
+        for row in ids
+    }
+    reaper = _FailingFirstReaper(failing=set(ids[:4]))
+    reconciler = Reconciler(  # type: ignore[arg-type]
+        queue, _HOST.host_id, reaper, _Interrupter(), concurrency=4
+    )
+    for _ in range(2):
+        await _turn(reconciler)
+    assert sorted(queue.interrupted) == ["e5", "e6"]
+    for _ in range(2):
+        await _turn(reconciler)
+    assert all(reaper.calls.count(row) >= 2 for row in ids[:4])

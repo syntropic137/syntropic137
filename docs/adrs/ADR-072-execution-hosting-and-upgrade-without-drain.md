@@ -1,8 +1,8 @@
 # ADR-072: Execution Hosting, Executors, the Run Queue and Upgrade Without Drain
 
-- **Status**: Accepted (decision recorded; implementation lands in #1310 Phase 1, items 1.2-1.7, and Phase 2)
+- **Status**: Accepted (decision recorded; implementation lands in #1310 Phase 1, items 1.2-1.7, and Phase 2). D2, D4 and D10 revised in place 2026-10-15 for #1944.
 - **Date**: 2026-10-05 (first drafted in parked PR #1597; resumed 2026-10-08 against #1574 and #1651 as merged)
-- **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511, #1734 (implementation of multi-host placement, heartbeat and fencing, moved out of #1310 on 2026-10-07). #1734 also carries pools, priority and overflow (D13, amended 2026-10-14)
+- **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511, #1734 (implementation of multi-host placement, heartbeat and fencing, moved out of #1310 on 2026-10-07). #1734 also carries pools, priority and overflow (D13, amended 2026-10-14), #1944
 - **Related**: ADR-014 (section 7, resume; section 9, who runs an execution), ADR-025, ADR-055, ADR-057, ADR-060 (section 8, dispatch concurrency), ADR-070 (D4/D5, drain-aware rotation)
 - **Vocabulary**: `docs/architecture/orchestration-ubiquitous-language.md` (Executor, Run Queue, Claim, Lease, Heartbeat, Fencing, Drain (of an executor), Event Epoch, Queued, Execution Budget, Executor Pool, Pool Priority, Overflow, Overflow Delay, Claim Check, Capability, Isolation Level, Run Requirements, Unplaceable, Placement, Reap Scope; reserved: Adopt / Reattach, Router)
 
@@ -134,14 +134,14 @@ stranding a start:
   older than two minutes. Stream present → `admitted` (a crash between
   the two writes). Stream **confirmed** absent → `abandoned`, reason
   `start not recorded`. A failed or timed-out read changes nothing; the row stays
-  `opening` and is read again next turn.
+  `opening` and is read again by the next sweep.
 - **`abandoned` is provisional, not terminal.** A late `journal.open` that
   succeeds after the sweep abandoned the row is followed by `mark_admitted`,
   which promotes `abandoned → admitted`. Admission calls `mark_admitted` only
   after its own open succeeded, so a promoted row always has a stream. If the
   admitter crashes between that late open and `mark_admitted`, the sweep
-  also re-reads the stream of every `abandoned` row on each turn and
-  promotes any whose stream now exists. An `abandoned` row holds no slot, and
+  also re-reads the stream of every `abandoned` row on each sweep (the loop
+  starts a sweep whenever the previous one has finished, D4) and promotes any whose stream now exists. An `abandoned` row holds no slot, and
   `reserve` still refuses a second row for its execution id.
 
 So every durable start has a row, and every row with a stream reaches the queue,
@@ -261,19 +261,48 @@ route, because every start reaches an executor only through a claim.
 
 ### D4. Lease timing
 
-Lease TTL **90 s**, renewed every **30 s** (TTL/3), as a setting. The TTL
-bounds **detection**, not effect: provided the database clock and at least one
+Lease TTL **90 s**, renewed every **30 s** (TTL/3). The TTL, the heartbeat
+staleness window (**90 s**), the loop interval (**5 s**), the turn budget
+(**15 s**) and the reconciliation concurrency (**4**) are one group of executor
+timings. The turn budget and the concurrency are provisional, not measured
+(#1944). Today they are `HostTiming`'s fields, which refuse a loop interval plus
+turn budget longer than a third of the TTL; making them one settings group that
+both the Run Queue and the claim loop are built from is required before
+`SYN_EXECUTION_RUN_QUEUE_ENABLED` is turned on anywhere. The TTL bounds
+**detection**, not effect: provided the database clock and at least one
 executor's reconciliation loop are working, a host that stops renewing is seen
 as expired within the TTL. It does not bound the expiry-to-reap window in D5,
 which ends only when a reap succeeds.
 
 **Heartbeat** is separate from the lease. **The claim loop itself writes it**,
 as the first step of every loop turn, setting `heartbeat_at` on the executor's
-own `execution_budget` row (D3) at the same 30 s cadence, including while the
-executor is idle and holds no claim. It is never written by a side task or an
-independent timer: a claim loop that is wedged must stop looking alive, and a
-timer beside it would keep advertising a host that can no longer claim,
-reconcile or drain. Per-run lease renewal is a different write with a
+own `execution_budget` row (D3) once per loop turn, including while the
+executor is idle and holds no claim. Its cadence is the loop's (5 s), not the
+lease's: the loop interval is also how long an admitted run waits to be
+claimed, so it is kept short, and one write per host per interval is cheap.
+It is never written by a side task or an independent timer: a claim loop that
+is wedged must stop looking alive, and a timer beside it would keep advertising
+a host that can no longer claim, reconcile or drain.
+
+**A loop turn is bounded, so a stale heartbeat means only that the loop
+stopped.** A turn awaits the heartbeat, then reconciliation store calls and
+claims, and starts none of them once the turn budget is spent; it never awaits
+a reap or the opening sweep. A budget counts elapsed time, not calls: several
+calls that each return can still add up past the staleness window, so the
+budget is checked before every one. Reconciliation (D5) runs in tasks the loop starts and tracks, at
+most the reconciliation concurrency at once and least recently attempted first,
+as it holds claimed runs; the opening sweep (D2) runs as one such task. A turn
+checks on them and starts more; it does not wait for them. So the time between
+two heartbeats is at most the loop interval plus the turn budget plus one store
+call, however many rows exist and however slowly Docker answers. Only a store
+call that does not return can push it past the staleness window, and a loop
+stuck in one cannot claim, so it is right that it reads stale. A reap or sweep
+that hangs leaves its rows unfinished and is logged once, when it has run
+longer than the TTL; it is neither cancelled nor started again beside itself.
+The reap-window alert (D5) reports the rows. It does not make a loop that
+can still claim look dead.
+
+Per-run lease renewal is a different write with a
 different meaning: a lease says that one run's claim is still held, while a
 heartbeat says only that the executor's claim loop turned recently. Its uses:
 the claim predicate (D3: an executor whose own heartbeat is stale does not
@@ -294,7 +323,11 @@ D13's claim signals.)
 
 **An expired lease is never claimed to run.** The only way out of an expired
 `claimed` row is reconciliation. Any live executor may **fence** an expired
-row on any loop turn; from then on the row has exactly one **reconciler**, and
+row on any loop turn, though no more rows per turn than it has free
+reconciliation slots (D4). The same limit applies to takeover, so a dead or
+departed host's rows are shared among live executors, not taken by whichever
+turns first. Each owned row gets a new attempt in least-recently-attempted
+order, so a row whose reap keeps failing never holds up the others. From then on the row has exactly one **reconciler**, and
 only that host takes turns on it:
 
 | Step | Action | Guard |
@@ -411,7 +444,9 @@ expiring to the first **successful** reap. Detection is bounded by the TTL
 and a reap that fails (Docker unreachable, a container that will not stop)
 leaves the row in `fencing` to retry, exactly as `reconciliation.py` treats an
 incomplete cleanup today. Because the window has no bound, it is watched
-instead: a row in `fencing` for longer than one TTL, or with no executor
+instead: a row whose lease expired more than one TTL ago and that is not yet
+`interrupted` (with bounded acquisition it may still be waiting in `claimed`),
+or with no executor
 heartbeat able to reap it, raises an operator alert naming the execution and
 the dead host. Removing that host's containers by hand ends the window.
 
@@ -627,8 +662,10 @@ while it is the only reader that is the row's `reader_epoch`.
 **Drain (of an executor)** is: `executor_hosts.draining` is set
 (`PUT /executors/{host_id}/drain`, optionally naming a successor executor that
 then receives its capacity, D3), the host checks it every loop turn between
-claims, stops claiming, finishes what it holds (runs and reconciliation
-turns), deletes its own `executor_hosts` row as its last act (D5) and exits 0. The processor
+claims, stops claiming, finishes what it holds (its runs, and the reconciliation and
+sweep tasks it has already started), fences and adopts no new rows and starts
+no new reconciliation attempt, leaving rows it still owns to be taken over once
+it has left (D5), deletes its own `executor_hosts` row as its last act (D5) and exits 0. The processor
 receives no new signal; this is a property of the host, not of an execution,
 which avoids repeating the Pause mistake (an event nothing in the execution
 path observed). It is not the pit-stop drain, which closes admission and waits

@@ -74,11 +74,8 @@ from syn_shared.settings.storage import (
     StorageSettings,
 )
 from syn_shared.settings.workspace import (
-    CloudProvider,
-    IsolationBackend,
     WorkspaceRuntime,
     WorkspaceSettings,
-    get_default_isolation_backend,
 )
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_IMAGE,
@@ -98,7 +95,6 @@ __all__ = [
     "SESHMAGIC_PROVIDER",
     "WORKSPACE_IMAGE_IDENTITY_REGEXP",
     "AppEnvironment",
-    "CloudProvider",
     "ContainerLoggingSettings",
     "GitCredentialType",
     "GitHubAppSettings",
@@ -106,7 +102,6 @@ __all__ = [
     "GitIdentitySettings",
     "ImageVerificationSettings",
     "InfraSettings",
-    "IsolationBackend",
     "SessionStoreSettings",
     "Settings",
     "StorageProvider",
@@ -114,7 +109,6 @@ __all__ = [
     "WorkspaceImageProvider",
     "WorkspaceRuntime",
     "WorkspaceSettings",
-    "get_default_isolation_backend",
     "get_github_settings",
     "get_settings",
     "reset_github_settings",

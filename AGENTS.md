@@ -629,7 +629,7 @@ never to CI alone (#931).
 `just qa` remains the broader local sweep (it runs non-unit tests too), but it is
 not CI-shaped: some of its targets are deliberately more lenient than CI's.
 
-**Git hooks:** `.githooks/pre-push` runs the fast checks automatically. Wire it up once with `just setup-hooks` after cloning.
+**Git hooks:** `.githooks/pre-push` runs `just preflight` on the commit being pushed, not the working tree: a clean checkout at that commit is checked in place, anything else (`git push origin <sha>:branch`, uncommitted edits) in a temporary worktree at that commit (#1632). Wire it up once with `just setup-hooks` after cloning.
 
 **For small fixes on already-merged PRs** (formatting nits, Copilot review comments): push directly to `main` with `git push origin <branch>:main` rather than opening a new PR. Keeps the release chain unblocked.
 

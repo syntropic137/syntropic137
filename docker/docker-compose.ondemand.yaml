@@ -36,6 +36,14 @@ services:
   docker-socket-proxy:
     container_name: syn-env-${SYN_ENV_NAME}-docker-socket-proxy
 
+  docker-create-guard:
+    # The API's workspaces root, read-only, so the guard resolves symlinks in
+    # bind sources the way the daemon will (#1806).
+    environment:
+      SYN_WORKSPACE_CONTAINER_DIR: /workspaces
+    volumes:
+      - ../workspaces:/workspaces:ro
+
   api:
     container_name: syn-env-${SYN_ENV_NAME}-api
     build:

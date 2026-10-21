@@ -47,11 +47,11 @@ from syn_adapters.workspace_backends.service.pinned_checkout import (
     PINNED_COMMIT_UNREACHABLE_EXIT_CODE,
 )
 from syn_adapters.workspace_backends.service.setup_phase_secrets import (
-    DEFAULT_SETUP_SCRIPT,
     GitHubAppNotConfiguredError,
     RepoNameCollisionError,
     SetupPhaseSecrets,
 )
+from syn_adapters.workspace_backends.service.setup_script_header import DEFAULT_SETUP_SCRIPT
 from syn_adapters.workspace_backends.service.workspace_service import (
     WorkspaceBackend,
     WorkspaceService,

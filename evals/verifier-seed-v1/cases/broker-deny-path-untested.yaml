@@ -1,0 +1,31 @@
+id: broker-deny-path-untested
+polarity: defect
+source_pr: 1929
+escape_class: deny path untested
+# Escaped on 2026-10-14: verification judged #1929 at bb8edd7 and blocked only
+# on an execution gap (B1, Docker tests not run). The orchestrator's Docker run
+# at the same head then found that mutating the broker to allow an ungranted
+# repository left all 10 integration and 17 unit tests passing. A merge of
+# main (38ff868) sits between the head and the test-only fix d3d8b14, so the
+# pin is the judged head, cited in `certified_in`.
+commit: bb8edd735fff70de1a197905d106a36ccc89265c
+certified_in: https://github.com/syntropic137/syntropic137/pull/1929#issuecomment-6177208614
+fix_commit: d3d8b1406b4ca2a184f4f65afb637568f75fbb16
+task: >
+  The change under review routes the workspace image's real git and gh
+  through a credential broker, with integration tests against real Envoy, a
+  fake GitHub and the workspace image. Review whether the tests show the
+  broker grants exactly the repositories it should and nothing else.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    No test sends a valid capability for an ungranted repository to the
+    broker. test_an_ungranted_repository_is_offered_nothing only checks the
+    sandbox is offered nothing, so the broker's deny (the git_tokens lookup
+    in the authorizer) can grant any repository and every test still passes.
+  files:
+    - packages/syn-adapters/tests/integration/github_broker/test_git_gh_through_broker.py
+  keywords:
+    - [deny, refuse, refused, refusal, reject, ungranted, unlisted, not granted, unauthori]
+    - [test, tests, tested, untested, exercised, never sent, no case, mutation]
+split: train

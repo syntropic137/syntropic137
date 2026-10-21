@@ -16,6 +16,7 @@ import {
   type IsoCityBlock,
   type SkylineDay,
 } from '@syn137/skyline-core/geometry'
+import { heatmapToSkylineDays, type HeatmapBucketInput } from '@syn137/skyline-core/screens/overview'
 import IsoCity from './IsoCity.svelte'
 
 const TODAY = '2026-10-09'
@@ -207,7 +208,7 @@ describe('IsoCity coverage (codex review of #1856: unloaded history is not zero)
     const from = addDays(hist.start, 26 * 7)
     const { container } = render(IsoCity, { days: busy.filter((d) => d.date >= from), today: TODAY, coverage: { from, state: 'error' }, onretry })
     const first = container.querySelector<HTMLButtonElement>('.sky-iso__bar')!
-    expect(first.getAttribute('aria-label')).toBe('Week of Oct 13: did not load')
+    expect(first.getAttribute('aria-label')).toBe('Week of Oct 13 (UTC): did not load')
     expect(first.dataset.status).toBe('error')
     await fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(onretry).toHaveBeenCalledOnce()
@@ -367,5 +368,68 @@ describe('IsoCity, codex review 2 of #1856', () => {
     expect(floorGroup(container).dataset.gliding).toBeUndefined()
     expect(floorGroup(container).style.transform).toBe('translate(0px, 0px)')
     expect(anchorOf(container)).toBe(FIRST)
+  })
+})
+
+describe('IsoCity "Now" (feedback 9b433949: current week, but not the current day)', () => {
+  it('returns to the current week AND selects today, replacing an older selection', async () => {
+    const onselect = vi.fn()
+    const { container } = render(IsoCity, { days: busy, today: TODAY, selected: '2026-07-14', onselect })
+    await back()
+    await fireEvent.click(screen.getByRole('button', { name: 'Now' }))
+    // The selection is painted once the glide home lands.
+    await fireEvent.transitionEnd(floorGroup(container), { propertyName: 'transform' })
+    expect(anchorOf(container)).toBe(FIRST)
+    expect(container.querySelector(`[data-date-block="${TODAY}"]`)?.hasAttribute('data-selected')).toBe(true)
+    expect(container.querySelector('[data-date-block="2026-07-14"]')?.hasAttribute('data-selected') ?? false).toBe(false)
+    expect(onselect).toHaveBeenLastCalledWith(expect.objectContaining({ date: TODAY }))
+  })
+})
+
+describe('IsoCity "Now" when no session started today (verify B1 on #2009)', () => {
+  const OLDER = '2026-07-14'
+  const olderBucket: HeatmapBucketInput = { date: OLDER, count: 2, breakdown: { sessions: 2, executions: 2 } }
+  // The heatmap producer counts executions on every day they emit events but sessions on their start day,
+  // and zero-fills the range: both shapes reach the city as today with sessions 0.
+  it.each([
+    ['zero-filled today', { date: TODAY, count: 0, breakdown: { sessions: 0, executions: 0 } }, '0'],
+    ['an execution continuing from yesterday', { date: TODAY, count: 1, breakdown: { sessions: 0, executions: 1 } }, '1'],
+  ] satisfies [string, HeatmapBucketInput, string][])('%s: selects today and the readout shows it, not an older day', async (_name, bucket, executions) => {
+    const onselect = vi.fn()
+    const { container } = render(IsoCity, { days: heatmapToSkylineDays([olderBucket, bucket]), today: TODAY, selected: OLDER, offset: 2, onselect })
+    await fireEvent.click(screen.getByRole('button', { name: 'Now' }))
+    await fireEvent.transitionEnd(floorGroup(container), { propertyName: 'transform' })
+    expect(anchorOf(container)).toBe(FIRST)
+    expect(onselect).toHaveBeenCalledTimes(1)
+    expect(onselect).toHaveBeenLastCalledWith(expect.objectContaining({ date: TODAY, sessions: 0 }))
+    expect(container.querySelector('.sky-readout__date')?.textContent).toContain('Fri, Oct 9')
+    const stat = (dt: string) => [...container.querySelectorAll('.sky-readout__stats div')].find((d) => d.querySelector('dt')?.textContent === dt)?.querySelector('dd')?.textContent
+    expect(stat('Sessions')).toBe('0')
+    expect(stat('Executions')).toBe(executions)
+    expect(container.querySelector(`[data-date-block="${OLDER}"]`)?.hasAttribute('data-selected') ?? false).toBe(false)
+    // The active-day stepper still walks: back from a quiet today is the newest active day.
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Previous active day' })[0]!)
+    expect(onselect).toHaveBeenLastCalledWith(expect.objectContaining({ date: OLDER }))
+  })
+
+  it('selects an empty today when the producer sent no row for it at all', async () => {
+    const onselect = vi.fn()
+    render(IsoCity, { days: heatmapToSkylineDays([olderBucket]), today: TODAY, selected: OLDER, onselect })
+    await fireEvent.click(screen.getByRole('button', { name: 'Now' }))
+    expect(onselect).toHaveBeenLastCalledWith({ date: TODAY, sessions: 0 })
+  })
+})
+
+describe('IsoCity says its days are UTC days (#1939 interim)', () => {
+  // The rollup cuts days with utc_day(time), so a run at 23:30 in New York lands on tomorrow's block.
+  // Until the local-day decision, every place that names a day says which day it means.
+  it('labels the range, the week strip, the day blocks and the readout as UTC', () => {
+    const { container } = render(IsoCity, { days: busy, today: TODAY, selected: TODAY })
+    expect(container.querySelector('.sky-iso__range')?.textContent).toMatch(/, 2026 \(UTC\)$/)
+    const bars = [...container.querySelectorAll<HTMLButtonElement>('.sky-iso__bar')]
+    expect(bars.length).toBeGreaterThan(0)
+    expect(bars.every((b) => /^Week of \w{3} \d{1,2} \(UTC\): /.test(b.getAttribute('aria-label') ?? ''))).toBe(true)
+    expect(screen.getByRole('button', { name: /^Fri, Oct 9 \(UTC\): \d+ sessions?/ })).toBeTruthy()
+    expect(container.querySelector('.sky-readout__date')?.textContent).toBe('Fri, Oct 9, 2026 (UTC)')
   })
 })

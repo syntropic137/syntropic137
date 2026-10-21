@@ -18,6 +18,7 @@ class TodoAction(StrEnum):
         PROVISION_WORKSPACE → RUN_AGENT → COLLECT_ARTIFACTS → COMPLETE_PHASE
             ↓ (NextPhaseReady? → back to PROVISION_WORKSPACE)
             ↓ (No more phases? → COMPLETE_EXECUTION)
+            ↓ (EvidenceRequested? → RUN_EVIDENCE_STEP per step, then NextPhaseReady)
     """
 
     PROVISION_WORKSPACE = "provision_workspace"
@@ -25,6 +26,8 @@ class TodoAction(StrEnum):
     COLLECT_ARTIFACTS = "collect_artifacts"
     COMPLETE_PHASE = "complete_phase"
     COMPLETE_EXECUTION = "complete_execution"
+    #: Drive one step of an evidence gate held after ``phase_id`` (plan §A.5).
+    RUN_EVIDENCE_STEP = "run_evidence_step"
 
 
 @dataclass(frozen=True)
@@ -40,3 +43,6 @@ class TodoItem:
     phase_id: str | None = None
     workspace_id: str | None = None
     session_id: str | None = None
+    #: Set on RUN_EVIDENCE_STEP only: which gate, and which of its steps.
+    evidence_gate_id: str | None = None
+    evidence_step: int | None = None

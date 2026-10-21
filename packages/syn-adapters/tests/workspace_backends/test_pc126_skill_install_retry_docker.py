@@ -162,7 +162,7 @@ async def live(
     # The supply-chain gate refuses an unpinned public image; it is not what
     # is under test here (tests/workspace_backends/test_image_verification.py).
     with patch(
-        "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+        "syn_adapters.workspace_backends.backend_kit.verify_image_async",
         side_effect=_passthrough,
     ):
         handle = await adapter.create(

@@ -63,6 +63,23 @@ def recorded_model_group_by(data: str = "data") -> str:
     )
 
 
+def zero_usage_group_by(data: str = "data") -> str:
+    """A GROUP BY term that keeps observations reporting no tokens apart.
+
+    Replay prices each ``token_usage`` observation alone, and one with no
+    tokens is a priced zero at any rate (issue #890). Summed into a group with
+    a positive observation on an unrated model, it would be priced as that
+    group: unpriced, and counted in ``unpriced_observation_count``. Grouping on
+    this term keeps SQL pricing what replay prices (#1420).
+    """
+    return (
+        f"((COALESCE(({data}->>'input_tokens')::int, 0) "
+        f"+ COALESCE(({data}->>'output_tokens')::int, 0) "
+        f"+ COALESCE(({data}->>'cache_creation_tokens')::int, 0) "
+        f"+ COALESCE(({data}->>'cache_read_tokens')::int, 0)) = 0)"
+    )
+
+
 class ModelRow(Protocol):
     """What a row must offer: ``asyncpg.Record`` and a plain mapping both do."""
 
@@ -103,4 +120,5 @@ __all__ = [
     "recorded_model_from_row",
     "recorded_model_group_by",
     "recorded_model_select",
+    "zero_usage_group_by",
 ]

@@ -1,0 +1,10 @@
+name: feedback-sources
+type: query
+projection: FeedbackSourcesProjection
+subscribes_to:
+  - SourceEnrolledEvent
+  - SourceKeyRotatedEvent
+  - SourceThrottledEvent
+  - SourceThrottleLiftedEvent
+  - SourceRevokedEvent
+returns: FeedbackSource

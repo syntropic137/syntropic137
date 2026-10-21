@@ -30,7 +30,7 @@ async def test_workflow_launch_mounts_local_spool_without_remote_settings(
     )
     monkeypatch.setattr(adapter, "_provider", provider)
     monkeypatch.setattr(
-        "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+        "syn_adapters.workspace_backends.backend_kit.verify_image_async",
         AsyncMock(return_value="verified-image"),
     )
     config = IsolationConfig(

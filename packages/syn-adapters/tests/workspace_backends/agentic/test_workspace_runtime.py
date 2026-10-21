@@ -91,7 +91,7 @@ async def _security_runtime_reaching_provider(env_value: str | None) -> AwRuntim
     with (
         patch.object(adapter, "_provider", provider),
         patch(
-            "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+            "syn_adapters.workspace_backends.backend_kit.verify_image_async",
             side_effect=_passthrough,
         ),
     ):
@@ -173,7 +173,7 @@ async def test_adapter_handle_carries_what_the_provider_resolved() -> None:
     with (
         patch.object(adapter, "_provider", provider),
         patch(
-            "syn_adapters.workspace_backends.agentic.adapter.verify_image_async",
+            "syn_adapters.workspace_backends.backend_kit.verify_image_async",
             side_effect=_passthrough,
         ),
     ):

@@ -1,0 +1,32 @@
+{
+  "source": {
+    "repo": "syntropic137/syntropic137-setup",
+    "commit": "8651262",
+    "version": "1.0.2",
+    "tracking": "syntropic137/syntropic137-setup#89",
+    "files": ["src/cli.ts (CLI.parseArgs and the opts each command reads)", "src/constants.ts (COMMANDS)"],
+    "why_vendored": "The setup CLI exports no machine-readable manifest. Its parser accepts every flag on every command and ignores the ones a command does not read, so a documented flag that does nothing never errors. This file lists, per command, only the flags that command reads. Replace it with the setup repo's own export once that exists."
+  },
+  "global_flags": ["--help", "-h", "--version", "-v"],
+  "menu_flags": ["--dir"],
+  "value_flags": ["--org", "--name", "--dir", "--webhook-url"],
+  "commands": [
+    {
+      "name": "init",
+      "flags": ["--org", "--name", "--dir", "--skip-github", "--install-cli", "--no-install-cli", "--skip-docker", "--webhook-url", "--yes", "-y"]
+    },
+    { "name": "status", "flags": ["--dir", "--yes", "-y"] },
+    { "name": "start", "flags": ["--dir"] },
+    { "name": "stop", "flags": ["--dir"] },
+    { "name": "logs", "flags": ["--dir"] },
+    { "name": "update", "flags": ["--dir"] },
+    { "name": "cli", "flags": [] },
+    { "name": "skills", "flags": ["--yes", "-y"], "actions": ["install", "update", "status"] },
+    { "name": "plugin", "flags": ["--yes", "-y"] },
+    { "name": "github-app", "flags": ["--dir", "--org"] },
+    { "name": "tunnel", "flags": ["--dir"] },
+    { "name": "credentials", "flags": ["--dir"], "actions": ["show", "rotate", "rollback"] },
+    { "name": "help", "flags": [] },
+    { "name": "reset", "flags": ["--dir", "--yes", "-y", "--no-backup", "--images", "--cli", "--skills", "--all"] }
+  ]
+}

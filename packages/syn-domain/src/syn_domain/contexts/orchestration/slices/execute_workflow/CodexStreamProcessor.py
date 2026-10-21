@@ -50,6 +50,7 @@ which assumed ``item.item.id``): ``item`` fields live directly under the
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import time
@@ -62,6 +63,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
     CancelSignalPoller,
+    StreamRead,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults import (
     codex_fault_reason,
@@ -462,18 +464,16 @@ class CodexStreamProcessor:
         """Process the JSONL event stream from ``codex exec --json``."""
         started_at = time.monotonic()
         conversation_lines: list[str] = []
-        line_count = 0
-        interrupt_requested = False
-        interrupt_reason: str | None = None
 
-        async for line in stream:
-            line_count += 1
-            if line.strip():
-                conversation_lines.append(line)
-
-            interrupt_requested, interrupt_reason = await self._step(line, line_count, workspace)
-            if interrupt_requested:
-                break
+        read = StreamRead(self._cancel_poller, workspace)
+        async with contextlib.aclosing(read.lines(stream)) as lines:
+            async for line in lines:
+                if line.strip():
+                    conversation_lines.append(line)
+                stop, reason = await self._step(line, read.line_count, workspace)
+                if stop:
+                    read.stop(reason)
+                    break
 
         if not self._totals.saw_terminal_turn:
             # THE single place `_error_reason` is decided. Nothing mid-stream
@@ -522,7 +522,7 @@ class CodexStreamProcessor:
 
         logger.info(
             "Codex runner streaming complete: %d lines, %d turns, cost=$%s (%d in, %d out)",
-            line_count,
+            read.line_count,
             self._totals.turns,
             total_cost_usd,
             self._totals.input_tokens,
@@ -530,9 +530,9 @@ class CodexStreamProcessor:
         )
 
         return StreamResult(
-            line_count=line_count,
-            interrupt_requested=interrupt_requested,
-            interrupt_reason=interrupt_reason,
+            line_count=read.line_count,
+            interrupt_requested=read.interrupt_requested,
+            interrupt_reason=read.interrupt_reason,
             # The same reader as the claude path, and now the same TIMING
             # too: TASK_RESULT is this platform's contract with its agents,
             # not a harness format, so a codex phase that reports failure is
