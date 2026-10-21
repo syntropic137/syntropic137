@@ -93,9 +93,12 @@ whose section is the single word `None.` has no open handoffs.
 
 The reports declare integration and mutation evidence in `TASK_RESULT`, and
 the platform's evidence gate (when enabled on the deployment) runs it and
-files a manifest. Read the newest
-`artifacts/input/<final-review-phase>/platform-evidence/<gate-id>/manifest.json`,
-where the final review phase is the one whose report you read above.
+files a manifest beside the phase that declared it:
+`artifacts/input/<declaring-phase>/platform-evidence/<gate-id>/manifest.json`.
+Read the newest one under the final review phase (the one whose report you
+read above); it governs that report's rows. A manifest under an earlier phase
+(for example `implement`'s mutation declaration) covers only the rows that
+phase declared, and only if its `required_check` passed on the current head.
 
 - **No manifest:** nothing was declared, or the gate is off. Every handoff row
   stays as the report wrote it. Write `Platform evidence: none`.
