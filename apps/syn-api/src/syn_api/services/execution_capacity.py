@@ -113,7 +113,10 @@ async def apply_host_sized_budget(
     try:
         capacity = host.read()
     except OSError:
-        logger.warning("Could not read host capacity; execution budget is the operator maximum")
+        logger.warning(
+            "Could not read host capacity; execution budget is the operator maximum",
+            exc_info=True,
+        )
         sizing = ExecutionBudgetSizing(operator_max, BindingTerm.OPERATOR_MAX_HOST_UNREADABLE)
     else:
         measured, no_demand = await _read_demand(demand, settings)
@@ -157,7 +160,10 @@ async def _read_demand(
     except Exception:
         # Any failure of the profile store: the budget must still be set, and
         # the binding term carries the fact that it was not sized.
-        logger.warning("Could not read phase profiles; execution budget is the operator maximum")
+        logger.warning(
+            "Could not read phase profiles; execution budget is the operator maximum",
+            exc_info=True,
+        )
         return None, BindingTerm.OPERATOR_MAX_PROFILES_UNREADABLE
     return measured, BindingTerm.OPERATOR_MAX_NO_PROFILE
 
