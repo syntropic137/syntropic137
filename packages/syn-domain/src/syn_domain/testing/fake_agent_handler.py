@@ -256,6 +256,7 @@ class FakeAgentExecutionHandler:
             # records about the phase's write-backs.
             reported_side_effects=stream_result.verdict.reported_side_effects,
             reported_review_verdict=stream_result.verdict.reported_review_verdict,
+            reported_evidence=stream_result.verdict.reported_evidence,
         )
         return AgentExecutionResult(
             stream_result=stream_result,

@@ -94,7 +94,7 @@ function unknownKeys(value: unknown, known: Record<string, true>): string[] {
   return Object.keys(value as object).filter(key => !(key in known));
 }
 
-it("handwritten types know every field the API emits (#1182)", () => {
+it("generated types know every field the API emits (#1182)", () => {
   const status = fixture.exchanges[0]!.body;
   expect(unknownKeys(status, inventoryFieldKeys.SessionInventoryResponse)).toEqual([]);
   const summary = status["summary"] as Record<string, unknown>;

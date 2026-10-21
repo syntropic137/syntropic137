@@ -1,0 +1,155 @@
+"""The guard's HTTP front: a refused create never reaches the daemon, an allowed one is replayed."""
+
+from __future__ import annotations
+
+import http.client
+import json
+import threading
+from http.server import ThreadingHTTPServer
+from typing import TYPE_CHECKING
+
+import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
+from syn_adapters.docker_create_guard.policy import CreatePolicy, JsonObject
+from syn_adapters.docker_create_guard.server import DockerSocket, GuardHost, make_handler
+
+from .test_policy import ROOT, sidecar_body, workspace_body
+
+pytestmark = pytest.mark.unit
+
+
+class _FakeDaemon(DockerSocket):
+    """Records forwarded POSTs; answers container inspects from ``containers``."""
+
+    def __init__(self) -> None:
+        super().__init__("/nonexistent")
+        self.creates: list[tuple[str, bytes]] = []
+        self.containers: dict[str, JsonObject] = {}
+
+    def request(
+        self, method: str, path: str, body: bytes | None, headers: dict[str, str]
+    ) -> tuple[int, list[tuple[str, str]], bytes]:
+        if method == "GET":
+            name = path.removeprefix("/containers/").removesuffix("/json")
+            found = self.containers.get(name)
+            return (200, [], json.dumps(found).encode()) if found else (404, [], b"{}")
+        self.creates.append((path, body or b""))
+        return (
+            201,
+            [("Content-Type", "application/json"), ("Api-Version", "1.47")],
+            b'{"Id":"abc","Warnings":[]}',
+        )
+
+
+@pytest.fixture
+def guard() -> Iterator[tuple[int, _FakeDaemon]]:
+    daemon = _FakeDaemon()
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        make_handler(CreatePolicy(workspace_root=ROOT), GuardHost(daemon, ROOT, None)),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server.server_address[1], daemon
+    server.shutdown()
+
+
+def _post(port: int, path: str, body: object) -> tuple[int, JsonObject]:
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("POST", path, body=json.dumps(body), headers={"Content-Type": "application/json"})
+    response = conn.getresponse()
+    return response.status, json.loads(response.read())
+
+
+def test_allowed_create_is_replayed_with_its_query(guard: tuple[int, _FakeDaemon]) -> None:
+    port, daemon = guard
+    status, payload = _post(port, "/v1.47/containers/create?name=syn-sidecar-1", sidecar_body())
+    assert status == 201 and payload["Id"] == "abc"
+    assert daemon.creates == [
+        ("/v1.47/containers/create?name=syn-sidecar-1", json.dumps(sidecar_body()).encode())
+    ]
+
+
+@pytest.mark.parametrize(
+    "host_config",
+    [
+        {"Privileged": True},
+        {"Binds": ["/:/host"]},
+        {"NetworkMode": "host"},
+        {"Binds": ["/var/run/docker.sock:/s"]},
+    ],
+)
+def test_refused_create_never_reaches_the_daemon(
+    guard: tuple[int, _FakeDaemon], host_config: JsonObject
+) -> None:
+    port, daemon = guard
+    body = workspace_body()
+    hc = body["HostConfig"]
+    assert isinstance(hc, dict)
+    hc.update(host_config)
+    status, payload = _post(port, "/v1.47/containers/create", body)
+    assert status == 403
+    assert str(payload["message"]).startswith("refused by the Syntropic137 container-create guard")
+    assert daemon.creates == []
+
+
+@pytest.mark.parametrize("path", ["/v1.47/containers/abc/start", "/v1.47/swarm/init"])
+def test_only_create_is_served(guard: tuple[int, _FakeDaemon], path: str) -> None:
+    # A body the policy allows, so only the path check can refuse it.
+    port, daemon = guard
+    status, payload = _post(port, path, sidecar_body())
+    assert status == 403 and "only serves container create and exec" in str(payload["message"])
+    assert daemon.creates == []
+
+
+class TestGuardHostResolvesThroughTheMount:
+    def test_paths_translate_and_symlinks_resolve(self, tmp_path: Path) -> None:
+        (tmp_path / "ws-1").mkdir()
+        (tmp_path / "escape").symlink_to("/")
+        host = GuardHost(DockerSocket("/nonexistent"), "/srv/ws", str(tmp_path))
+        assert host.real_path("/srv/ws/ws-1") == "/srv/ws/ws-1"
+        assert host.real_path("/srv/ws/escape") == "/"
+        assert host.real_path("/srv/ws/missing") is None
+        assert host.real_path("/elsewhere") is None
+
+    def test_unmounted_root_sees_nothing(self) -> None:
+        host = GuardHost(DockerSocket("/nonexistent"), "/srv/ws", None)
+        assert host.real_path("/srv/ws/ws-1") is None
+
+
+def _inspect(labels: JsonObject, container_id: str = "a" * 64) -> JsonObject:
+    return {
+        "Id": container_id,
+        "Config": {"Image": workspace_body()["Image"], "Labels": labels},
+        "Mounts": [],
+    }
+
+
+class TestExec:
+    def test_exec_into_a_workspace_is_forwarded(self, guard: tuple[int, _FakeDaemon]) -> None:
+        port, daemon = guard
+        daemon.containers["ws-1"] = _inspect({"syn.workspace_id": "ws-1"})
+        status, _ = _post(port, "/v1.47/containers/ws-1/exec", {"Cmd": ["true"]})
+        assert status == 201
+        # Forwarded by the inspected container's ID, not the name: a name can be
+        # moved onto the guard or the proxy between the inspect and the create.
+        assert [path for path, _ in daemon.creates] == [f"/v1.47/containers/{'a' * 64}/exec"]
+
+    @pytest.mark.parametrize("name", ["syn-docker-create-guard", "missing"])
+    def test_exec_into_the_guard_or_an_unknown_container_never_reaches_the_daemon(
+        self, guard: tuple[int, _FakeDaemon], name: str
+    ) -> None:
+        port, daemon = guard
+        daemon.containers["syn-docker-create-guard"] = _inspect(
+            {"com.docker.compose.service": "docker-create-guard"}
+        )
+        status, payload = _post(port, f"/v1.47/containers/{name}/exec", {"Cmd": ["python"]})
+        assert status == 403
+        assert str(payload["message"]).startswith(
+            "refused by the Syntropic137 container-create guard"
+        )
+        assert daemon.creates == []

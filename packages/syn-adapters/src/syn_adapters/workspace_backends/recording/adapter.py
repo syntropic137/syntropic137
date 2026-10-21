@@ -207,6 +207,10 @@ class RecordingEventStreamAdapter:
                 yield json.dumps(event)
         self._last_exit_code = 0
 
+    async def cancel_running(self, handle: IsolationHandle) -> bool:  # noqa: ARG002
+        """Nothing to cancel: replaying a recording creates no process."""
+        return False
+
     @property
     def last_exit_code(self) -> int | None:
         """Exit code from the most recent stream() call. Always 0 for recordings."""

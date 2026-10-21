@@ -50,13 +50,21 @@ from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
     DelegationEvidenceUnavailableError,
     DelegationOutcome,
 )
+from syn_domain.contexts.orchestration.ports.EvidenceRunnerPort import (
+    EvidenceRunnerPort,
+)
 from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
+    DEFAULT_EXECUTOR_POOL,
+    Capability,
     ClaimedRun,
     ExecutionRunQueue,
     ExecutionStreamProbe,
     ExecutorHost,
+    ExecutorPool,
     FencedRun,
+    IsolationLevel,
     OpeningSweep,
+    PoolDefinitionConflict,
     RunCounts,
     RunLeaseLost,
     StreamPresence,
@@ -71,6 +79,10 @@ from syn_domain.contexts.orchestration.ports.RemoteBranchPort import (
     RemoteBranchPort,
     RemoteBranchReading,
 )
+from syn_domain.contexts.orchestration.ports.RemoteBranchWriterPort import (
+    RemoteBranchWriterPort,
+)
+from syn_domain.contexts.orchestration.ports.RemoteTreePort import RemoteTreePort
 from syn_domain.contexts.orchestration.ports.SessionRepositoryPort import (
     SessionRepositoryPort,
 )
@@ -88,8 +100,10 @@ from syn_domain.contexts.orchestration.ports.WorkspaceServicePort import (
 )
 
 __all__ = [
+    "DEFAULT_EXECUTOR_POOL",
     "ArtifactQueryServicePort",
     "ArtifactRepositoryPort",
+    "Capability",
     "ClaimedRun",
     "ClaudePluginFile",
     "ClaudePluginRegistrationRepositoryPort",
@@ -99,15 +113,21 @@ __all__ = [
     "DelegationEvidencePort",
     "DelegationEvidenceUnavailableError",
     "DelegationOutcome",
+    "EvidenceRunnerPort",
     "ExecutionRunQueue",
     "ExecutionStreamProbe",
     "ExecutorHost",
+    "ExecutorPool",
     "FencedRun",
     "GlobalClaudePluginRegistryRepositoryPort",
+    "IsolationLevel",
     "ObservabilityServicePort",
     "OpeningSweep",
+    "PoolDefinitionConflict",
     "RemoteBranchPort",
     "RemoteBranchReading",
+    "RemoteBranchWriterPort",
+    "RemoteTreePort",
     "RunCounts",
     "RunLeaseLost",
     "SessionRepositoryPort",

@@ -13,6 +13,7 @@ import { style, BOLD, CYAN, DIM, GREEN, YELLOW } from "../../output/ansi.js";
 import { Table } from "../../output/table.js";
 import { resolveWorkflow } from "./resolver.js";
 import { detectFormat, resolvePackage } from "../../packages/resolver.js";
+import { printSkippedFiles } from "./install.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -249,11 +250,14 @@ function renderInputDeclarations(declarations: WorkflowResponse["input_declarati
 function phaseCapabilityNotes(phase: {
   clone_repos?: boolean;
   delivers_repo_changes?: boolean;
+  platform_access?: string;
   sandbox?: string;
 }): string[] {
   const notes: string[] = [];
   if (phase.clone_repos === false) notes.push(style("no repo checkout", DIM));
   if (phase.delivers_repo_changes === false) notes.push(style("no repo deliverable", DIM));
+  // Can start executions (ADR-072, #1744), so never buried with the defaults.
+  if (phase.platform_access === "eval") notes.push(style("platform access: eval", YELLOW));
   if (phase.sandbox && phase.sandbox !== "full-access") {
     notes.push(style(`sandbox: ${phase.sandbox}`, YELLOW));
   }
@@ -375,7 +379,8 @@ type WorkflowValidation = {
 function resolvePackageForValidation(pkgPath: string): { fmt: string; workflows: PackageWorkflows } {
   try {
     const fmt = detectFormat(pkgPath);
-    const { workflows } = resolvePackage(pkgPath);
+    const { workflows, skipped } = resolvePackage(pkgPath);
+    printSkippedFiles(skipped);
     return { fmt, workflows };
   } catch (err) {
     printError(err instanceof Error ? err.message : String(err));

@@ -118,7 +118,10 @@ describe("metrics commands", () => {
   describe("profiles", () => {
     const handler = metricsGroup.getCommand("profiles")!.handler;
 
-    const pct = (n: number) => ({ n, p50: null, p95: null, p50_display: "insufficient", p95_display: "insufficient" });
+    const pct = (n: number) => ({
+      n, p50: null, p90: null, p95: null,
+      p50_display: "insufficient", p90_display: "insufficient", p95_display: "insufficient",
+    });
 
     it("prints every coverage count and each measure's sample size", async () => {
       mockFetch.mockResolvedValue(
@@ -132,10 +135,14 @@ describe("metrics commands", () => {
           resources: [
             {
               phase_id: "plan",
+              cpu_usage_seconds: pct(17),
+              wall_seconds: pct(19),
               cpu_seconds_per_wall_second: pct(23),
               cpu_throttled_seconds: pct(29),
               memory_peak_bytes: pct(31),
               disk_bytes_at_teardown: pct(37),
+              oom: { killed: 0, not_killed: 41, unknown: 0 },
+              oom_killed_phases: [],
               coverage: {
                 phases: 41,
                 phases_without_usage_row: 2,
@@ -156,6 +163,51 @@ describe("metrics commands", () => {
       for (const cell of ["41", "2", "23 / 3", "13", "29 / 5", "31 / 7", "37 / 11"]) {
         expect(row).toContain(cell);
       }
+    });
+
+    it("names an OOM-killed phase with its peak memory and keeps unknown visible", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          workflow_id: "wf-1",
+          since: "2026-10-01T00:00:00Z",
+          until: "2026-10-08T00:00:00Z",
+          window_days: 7,
+          executions: 3,
+          tokens: [],
+          resources: [
+            {
+              phase_id: "build",
+              cpu_usage_seconds: pct(3),
+              wall_seconds: pct(3),
+              cpu_seconds_per_wall_second: pct(3),
+              cpu_throttled_seconds: pct(3),
+              memory_peak_bytes: pct(3),
+              disk_bytes_at_teardown: pct(3),
+              oom: { killed: 1, not_killed: 1, unknown: 1 },
+              oom_killed_phases: [
+                { execution_id: "exec-137", oom_killed: true, memory_peak_bytes: 536870912, oom_kills: null },
+              ],
+              coverage: {
+                phases: 3,
+                phases_without_usage_row: 1,
+                cpu_usage_seconds_missing: 0,
+                cpu_throttled_seconds_missing: 0,
+                memory_peak_bytes_missing: 0,
+                disk_bytes_at_teardown_missing: 0,
+                wall_seconds_missing: 0,
+                coverage_display: "2/3 phases measured",
+              },
+            },
+          ],
+        }),
+      );
+
+      await handler({ positionals: [], values: { workflow: "wf-1" } });
+      const out = stdout();
+      expect(out).toContain("1 (1 unknown)");
+      const killed = out.split("\n").find((l) => l.includes("exec-137")) ?? "";
+      expect(killed).toContain("536870912");
+      expect(killed).toContain("unknown");
     });
   });
 

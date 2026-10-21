@@ -179,22 +179,9 @@ services:
     image: ghcr.io/syntropic137/syn-collector:${SYN_VERSION:-latest}
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
-    entrypoint:
-    - /bin/sh
-    - -ec
-    - |
-      set -eu
-      template=/usr/local/etc/haproxy/haproxy.cfg.template
-      [ "$$(grep -c '^[[:space:]]*http-request deny$$' "$$template")" = 1 ]
-      awk '
-      /^[[:space:]]*http-request deny$$/ {
-          print "    http-request allow if { method GET DELETE } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }"
-      }
-      { print }
-      ' "$$template" > /tmp/capture-haproxy.template
-      cat /tmp/capture-haproxy.template > "$$template"
-      exec /docker-entrypoint.sh "$$@"
-    - capture-policy
+    configs:
+    - source: docker-socket-proxy-haproxy
+      target: /usr/local/etc/haproxy/haproxy.cfg.template
     command:
     - haproxy
     - -f
@@ -222,6 +209,9 @@ services:
     - /tmp
     networks:
     - docker-proxy
+    depends_on:
+      docker-create-guard:
+        condition: service_started
     container_name: syn137-docker-socket-proxy
     restart: always
     deploy:
@@ -234,6 +224,52 @@ services:
       options:
         max-size: 5m
         max-file: "3"
+  docker-create-guard:
+    command:
+    - python
+    - -m
+    - syn_adapters.docker_create_guard
+    user: 0:0
+    environment:
+      SYN_WORKSPACE_HOST_DIR: ${SYN_INSTALL_DIR:-${PWD}}/workspaces
+      SYN_WORKSPACE_DOCKER_IMAGE: null
+      SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES: ${SYN_DOCKER_CREATE_GUARD_IMAGE_PREFIXES:-}
+      SYN_WORKSPACE_CONTAINER_DIR: /workspaces
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ./workspaces:/workspaces:ro
+    read_only: true
+    security_opt:
+    - no-new-privileges:true
+    cap_drop:
+    - ALL
+    tmpfs:
+    - /tmp
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -I
+      - /app/packages/syn-adapters/src/syn_adapters/docker_create_guard/healthcheck.py
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+    - docker-proxy
+    container_name: syn137-docker-create-guard
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 96m
+          cpus: "0.1"
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"
+    image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}
   api:
     stop_grace_period: 200s
     environment:
@@ -273,6 +309,7 @@ services:
       REQUEST_LATENCY_SHUTDOWN_TIMEOUT_S: null
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       CODEX_AUTH_JSON: ${CODEX_AUTH_JSON:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       SYN_DEFAULT_CLAUDE_MODEL: null
       SYN_DEFAULT_CODEX_MODEL: null
       SETUP_PHASE_TIMEOUT_SECONDS: null
@@ -294,17 +331,16 @@ services:
       SYN_GITHUB_WEBHOOK_SECRET: ${SYN_GITHUB_WEBHOOK_SECRET:-}
       DEV__WORKFLOW_FAIL_ON_PLUGIN_NOT_REGISTERED: null
       DEV__WORKFLOW_FAIL_ON_SKILL_NOT_REGISTERED: null
-      SYN_WORKSPACE_ISOLATION_BACKEND: null
-      SYN_WORKSPACE_CLOUD_PROVIDER: null
-      SYN_WORKSPACE_CLOUD_API_KEY: null
-      SYN_WORKSPACE_CLOUD_TEMPLATE: null
       SYN_WORKSPACE_MEMORY_LIMIT_MB: null
       SYN_WORKSPACE_CPU_LIMIT: null
-      SYN_WORKSPACE_DOCKER_RUNTIME: null
-      SYN_WORKSPACE_DOCKER_NETWORK: null
       SYN_EXECUTION_MAX_CONCURRENT: null
       SYN_EXECUTION_INTERRUPT_BUDGET_S: null
       SYN_EXECUTION_RUN_QUEUE_ENABLED: null
+      SYN_EXECUTOR_POOL_ID: null
+      SYN_EXECUTOR_POOL_PRIORITY: null
+      SYN_EXECUTOR_POOL_REGION: null
+      SYN_EXECUTOR_POOL_CAPABILITIES: null
+      SYN_EXECUTOR_POOL_OVERFLOW_DELAY_S: null
       SYN_IMAGE_VERIFY_ENABLED: null
       SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP: null
       SYN_IMAGE_VERIFY_CERTIFICATE_OIDC_ISSUER: null
@@ -312,12 +348,6 @@ services:
       SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES: null
       SYN_IMAGE_VERIFY_COSIGN_PATH: null
       SYN_IMAGE_VERIFY_TIMEOUT_SECONDS: null
-      SYN_SECURITY_ALLOW_NETWORK: null
-      SYN_SECURITY_ALLOWED_HOSTS: null
-      SYN_SECURITY_READ_ONLY_ROOT: null
-      SYN_SECURITY_MAX_WORKSPACE_SIZE: null
-      SYN_SECURITY_MAX_PIDS: null
-      SYN_SECURITY_MAX_EXECUTION_TIME: null
       SYN_GIT_USER_NAME: null
       SYN_GIT_USER_EMAIL: null
       SYN_GIT_TOKEN: null
@@ -331,11 +361,19 @@ services:
       SYN_STORAGE_MAX_FILE_SIZE_MB: null
       SYN_STORAGE_PRESIGNED_URL_EXPIRY_SECONDS: null
       SYN_DISK_PATH: null
+      SYN_DISK_RUN_RESERVE_GIB: null
+      SYN_DISK_REFUSE_ADMISSION_BELOW_GIB: null
+      SYN_DISK_DEGRADED_BELOW_GIB: null
       SYN_DISK_DEGRADED_BELOW_PERCENT: null
       SYN_DISK_REFUSE_ADMISSION_BELOW_PERCENT: null
-      SYN_DISK_RECLAIM_GRACE_HOURS: null
+      SYN_DISK_RECLAIM_SETTLE_MINUTES: null
       SYN_DISK_RECLAIM_INTERVAL_MINUTES: null
+      SYN_DISK_RECLAIM_PASS_BUDGET_MINUTES: null
+      SYN_DISK_RECLAIM_OBSERVER_CONTAINERS: null
+      SYN_DISK_RECLAIM_DRY_RUN: null
       SYN_DISK_PAGE_WEBHOOK_URL: null
+      SYN_DEPENDENCY_SEED_DIR: null
+      SYN_DEPENDENCY_SEED_MAX_BYTES: null
       SYN_SESSION_INVENTORY_SOURCE_INSTANCE_ID: ${SYN_SESSION_INVENTORY_SOURCE_INSTANCE_ID:-}
       SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS: ${SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS:-30}
       SYN_SESSION_INVENTORY_SETTLEMENT_GRACE_SECONDS: ${SYN_SESSION_INVENTORY_SETTLEMENT_GRACE_SECONDS:-1800}
@@ -438,8 +476,8 @@ services:
     - ALL
     tmpfs:
     - /tmp
-    - /home/syn/.config
-    - /home/syn/.sigstore:size=16m
+    - /home/syn/.config:size=16m,uid=1000,gid=1000,mode=0700
+    - /home/syn/.sigstore:size=16m,uid=1000,gid=1000,mode=0700
     deploy:
       resources:
         limits:
@@ -690,3 +728,101 @@ networks:
   agent-net: null
   docker-proxy:
     internal: true
+configs:
+  docker-socket-proxy-haproxy:
+    content: |
+      # =============================================================================
+      # GENERATED by scripts/docker_socket_proxy_config.py -- do not edit by hand.
+      # Regenerate: just gen-compose. Source: docker/docker-socket-proxy/
+      # upstream-haproxy.cfg.template (the pinned proxy image's own template).
+      # Mounted read-only over the image's haproxy.cfg.template; its stock
+      # entrypoint still renders $${BIND_CONFIG} from DISABLE_IPV6 at start.
+      # =============================================================================
+      global
+          log stdout format raw daemon "$${LOG_LEVEL}"
+
+          pidfile /run/haproxy.pid
+          maxconn 4000
+
+          # Turn on stats unix socket
+          server-state-file /var/lib/haproxy/server-state
+
+      defaults
+          mode http
+          log global
+          option httplog
+          option dontlognull
+          option http-server-close
+          option redispatch
+          retries 3
+          timeout http-request 10s
+          timeout queue 1m
+          timeout connect 10s
+          timeout client 10m
+          timeout server 10m
+          timeout http-keep-alive 10s
+          timeout check 10s
+          maxconn 3000
+
+          # Allow seamless reloads
+          load-server-state-from-file global
+
+          # Use provided example error pages
+          errorfile 400 /usr/local/etc/haproxy/errors/400.http
+          errorfile 403 /usr/local/etc/haproxy/errors/403.http
+          errorfile 408 /usr/local/etc/haproxy/errors/408.http
+          errorfile 500 /usr/local/etc/haproxy/errors/500.http
+          errorfile 502 /usr/local/etc/haproxy/errors/502.http
+          errorfile 503 /usr/local/etc/haproxy/errors/503.http
+          errorfile 504 /usr/local/etc/haproxy/errors/504.http
+
+      backend dockerbackend
+          server dockersocket $$SOCKET_PATH
+
+      backend docker-events
+          server dockersocket $$SOCKET_PATH
+          timeout server 0
+
+      frontend dockerfrontend
+          http-request deny if { method POST } { path,url_dec -m reg -i /images/(load|.+/tag)/*$$ }
+          http-request deny if { method POST } { path,url_dec -m reg -i /images/create/*$$ } !{ url_param(fromImage) -m reg . }
+          http-request deny if { method POST } { path,url_dec -m reg -i /images/create/*$$ } { req.hdr(content-type) -m sub -i x-www-form-urlencoded }
+          bind $${BIND_CONFIG}
+          http-request deny unless METH_GET || { env(POST) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers/[a-zA-Z0-9_.-]+/((stop)|(restart)|(kill)) } { env(ALLOW_RESTARTS) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers/[a-zA-Z0-9_.-]+/start } { env(ALLOW_START) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers/[a-zA-Z0-9_.-]+/stop } { env(ALLOW_STOP) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/auth } { env(AUTH) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/build } { env(BUILD) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/commit } { env(COMMIT) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/configs } { env(CONFIGS) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/containers } { env(CONTAINERS) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/distribution } { env(DISTRIBUTION) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/events } { env(EVENTS) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/exec } { env(EXEC) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/grpc } { env(GRPC) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/images } { env(IMAGES) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/info } { env(INFO) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/networks } { env(NETWORKS) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/nodes } { env(NODES) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/_ping } { env(PING) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/plugins } { env(PLUGINS) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/secrets } { env(SECRETS) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/services } { env(SERVICES) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/session } { env(SESSION) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/swarm } { env(SWARM) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/system } { env(SYSTEM) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/tasks } { env(TASKS) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/version } { env(VERSION) -m bool }
+          http-request allow if { path,url_dec -m reg -i ^(/v[\d\.]+)?/volumes } { env(VOLUMES) -m bool }
+          http-request allow if { method GET DELETE } { path -m reg ^(/v[0-9.]+)?/volumes/syn-capture-[a-f0-9]{64}$$ }
+          http-request deny
+          default_backend dockerbackend
+          use_backend docker-create-guard if { method POST } { path,url_dec -m reg -i /containers/create/*$$ }
+          use_backend docker-create-guard if { method POST } { path,url_dec -m reg -i /containers/.+/exec/*$$ }
+
+          use_backend docker-events if { path,url_dec -m reg -i ^(/v[\d\.]+)?/events }
+      resolvers docker
+          parse-resolv-conf
+      backend docker-create-guard
+          server guard docker-create-guard:2375 resolvers docker init-addr last,libc,none

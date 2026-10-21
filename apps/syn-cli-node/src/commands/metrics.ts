@@ -105,16 +105,21 @@ const profilesCommand: CommandDef = {
     if (d.tokens.length > 0) tokens.print();
     else printDim("No token usage recorded for this workflow in the window.");
 
-    const resources = new Table({ title: "Workspace resources per phase (p50 / p95)" });
-    for (const col of ["Phase", "Coverage", "CPU s / wall s", "Throttled", "Memory peak", "Disk at teardown"]) {
+    const resources = new Table({ title: "Workspace resources per phase (p50 / p90)" });
+    for (const col of ["Phase", "Coverage", "OOM killed", "Wall", "CPU s", "CPU s / wall s", "Throttled", "Memory peak", "Disk at teardown"]) {
       resources.addColumn(col, col === "Phase" || col === "Coverage" ? {} : { align: "right" });
     }
     for (const r of d.resources) {
-      const pair = (p: { p50_display: string; p95_display: string }) =>
-        p.p50_display === p.p95_display ? p.p50_display : `${p.p50_display} / ${p.p95_display}`;
+      const pair = (p: { p50_display: string; p90_display: string }) =>
+        p.p50_display === p.p90_display ? p.p50_display : `${p.p50_display} / ${p.p90_display}`;
+      // Unknown is shown, never folded into "not killed".
+      const oom = `${r.oom.killed}` + (r.oom.unknown ? ` (${r.oom.unknown} unknown)` : "");
       resources.addRow(
         r.phase_id,
         r.coverage.coverage_display,
+        oom,
+        pair(r.wall_seconds),
+        pair(r.cpu_usage_seconds),
         pair(r.cpu_seconds_per_wall_second),
         pair(r.cpu_throttled_seconds),
         pair(r.memory_peak_bytes),
@@ -122,6 +127,21 @@ const profilesCommand: CommandDef = {
       );
     }
     if (d.resources.length > 0) resources.print();
+
+    const killed = d.resources.flatMap((r) => r.oom_killed_phases.map((k) => ({ phase: r.phase_id, ...k })));
+    if (killed.length > 0) {
+      const oomTable = new Table({ title: "OOM-killed phases" });
+      for (const col of ["Phase", "Execution", "Memory peak", "OOM kills"]) oomTable.addColumn(col);
+      for (const k of killed) {
+        oomTable.addRow(
+          k.phase,
+          k.execution_id,
+          k.memory_peak_bytes === null ? "unknown" : String(k.memory_peak_bytes),
+          k.oom_kills === null ? "unknown" : String(k.oom_kills),
+        );
+      }
+      oomTable.print();
+    }
 
     // Which phases each resource percentile stands on. Scope: every phase of
     // this type with telemetry in the window. "missing" counts usage rows that

@@ -1,7 +1,8 @@
 """Ratchet: tests that no CI job selects, and disarmed (xfail) guards.
 
 CI runs ``pytest -m unit``, so an unmarked test is collected by nothing and can
-fail on main indefinitely behind a green check. Budgets live in
+fail on main indefinitely behind a green check. ``ci/fitness`` is selected
+separately, by ``-m architecture``, and is censused separately (#1935). Budgets live in
 ``fitness-exceptions.toml`` under ``[test-markers.*]``; both must ratchet to 0.
 
 See docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md
@@ -65,19 +66,78 @@ CI_SELECTED_MARKERS: tuple[str, ...] = ("unit", "integration")
 #: cannot drift apart.
 UNMARKED_SELECTOR = " and ".join(f"not {marker}" for marker in CI_SELECTED_MARKERS)
 
+#: ``ci/fitness`` is not a testpath: the Architectural Fitness job reaches it
+#: by explicit path, ``pytest ci/fitness/ -m architecture`` (justfile
+#: ``fitness-invariants``), and the unit job never sees it. The census above
+#: walks testpaths only, so a fitness module marked ``unit`` was invisible to
+#: it AND to both jobs: 21 tests, one of them red on main behind a green check
+#: (#1935). ``scripts/tests/test_check_test_markers.py`` pins both values to
+#: the recipe so they cannot drift from what CI runs.
+FITNESS_DIR = "ci/fitness"
+FITNESS_SELECTED_MARKER = "architecture"
+FITNESS_UNSELECTED_SELECTOR = f"not {FITNESS_SELECTED_MARKER}"
 
-def is_excluded(path: Path | str) -> bool:
+
+#: The repository this gate guards, for reading its ``.gitmodules``.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_GITMODULES_PATH = re.compile(r"^[ \t]*path[ \t]*=[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
+
+
+def submodule_paths(root: Path) -> tuple[str, ...]:
+    """Every submodule path ``root/.gitmodules`` declares, as posix strings.
+
+    Submodules are other repositories, governed by their own CI and their own
+    budgets. Derived from ``.gitmodules`` rather than listed, so a new
+    submodule is excluded without anyone remembering to add it: the AW pin to
+    be32a683 brought one xfail from AW's own conformance tests and failed this
+    gate over a test in another repo (#1992). No file means no submodules.
+    """
+    gitmodules = root / ".gitmodules"
+    if not gitmodules.is_file():
+        return ()
+    text = gitmodules.read_text(errors="ignore")
+    return tuple(m.strip("/") for m in _GITMODULES_PATH.findall(text))
+
+
+#: This repository's submodules, the default for ``is_excluded``.
+SUBMODULE_PATHS: tuple[str, ...] = submodule_paths(_REPO_ROOT)
+
+
+def is_excluded(path: Path | str, submodules: tuple[str, ...] = SUBMODULE_PATHS) -> bool:
     """True when a path lies under a directory that is not first-party source.
 
+    Matches whole DIRECTORY components, never substrings and never the file
+    name: a substring test excluded ``scripts/test_node_modules_policy.py``,
+    so a first-party test escaped every guard that shares this function.
     Uses ``as_posix`` so the check behaves identically on Windows separators.
+
+    ``submodules`` are matched as a prefix of a repo-relative ``path`` only:
+    ``lib/agentic-workspace`` is a submodule at the root, while a directory
+    of that name elsewhere is first-party and still counted.
     """
-    text = Path(path).as_posix()
-    return any(fragment in text for fragment in EXCLUDED_PATH_FRAGMENTS)
+    parts = Path(path).as_posix().split("/")
+    directories = parts[:-1]
+    for fragment in EXCLUDED_PATH_FRAGMENTS:
+        wanted = fragment.split("/")
+        width = len(wanted)
+        if any(
+            directories[start : start + width] == wanted
+            for start in range(len(directories) - width + 1)
+        ):
+            return True
+    for submodule in submodules:
+        wanted = submodule.split("/")
+        if directories[: len(wanted)] == wanted:
+            return True
+    return False
 
 
 def iter_test_files(root: Path) -> list[Path]:
-    """Every first-party ``test_*.py`` under ``root``, worktrees excluded."""
-    return sorted(p for p in root.rglob("test_*.py") if not is_excluded(p))
+    """Every first-party ``test_*.py`` under ``root``; worktrees and submodules excluded."""
+    submodules = submodule_paths(root)
+    return sorted(
+        p for p in root.rglob("test_*.py") if not is_excluded(p.relative_to(root), submodules)
+    )
 
 
 def count_xfail_markers(root: Path) -> int:
@@ -187,6 +247,16 @@ def evaluate(config: dict[str, dict[str, object]], unmarked: int, xfails: int) -
     return budgets
 
 
+def fitness_budget(unselected: int) -> Budget:
+    """The ci/fitness census. Zero-tolerance with no config entry on purpose.
+
+    A budget in ``fitness-exceptions.toml`` would be a dial for running fewer
+    architectural checks than are written, and there is no ratchet to walk
+    down: the fix for every count is one marker.
+    """
+    return Budget(name="fitness-unselected", actual=unselected, allowed=0, issue="#1935")
+
+
 def main() -> int:
     root = Path.cwd()
     config = tomllib.loads(Path("fitness-exceptions.toml").read_text()).get("test-markers", {})
@@ -194,16 +264,22 @@ def main() -> int:
     total = collect_census()
     unmarked = collect_census("-m", UNMARKED_SELECTOR)
     xfails = count_xfail_markers(root)
+    fitness_unselected = collect_census(FITNESS_DIR, "-m", FITNESS_UNSELECTED_SELECTOR)
 
-    budgets = evaluate(config, unmarked, xfails)
+    budgets = [*evaluate(config, unmarked, xfails), fitness_budget(fitness_unselected)]
     for budget in budgets:
         print(budget.render())
     print(f"  census: {total} tests collected, {unmarked} selected by no CI job")
+    print(
+        f"  census: {fitness_unselected} tests under {FITNESS_DIR} not marked"
+        f" {FITNESS_SELECTED_MARKER}, so the fitness job skips them"
+    )
 
     if any(b.exceeded for b in budgets):
         print(
             "\nA test no job runs is not coverage. Mark it, or lower the budget"
-            " in fitness-exceptions.toml only when the count went DOWN."
+            " in fitness-exceptions.toml only when the count went DOWN. A"
+            f" {FITNESS_DIR} test has no budget: mark it {FITNESS_SELECTED_MARKER}."
         )
         return 1
     return 0

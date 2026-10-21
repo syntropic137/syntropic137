@@ -1,6 +1,11 @@
-"""Security policies for isolated agent workspaces.
+"""Container logging settings for isolated agent workspaces.
 
 See ADR-021: Isolated Workspace Architecture.
+
+This module once also held ``WorkspaceSecuritySettings`` (``SYN_SECURITY_*``).
+Nothing read it (#1805): workspace hardening comes from agentic_isolation's
+``SecurityConfig.production()``, applied in ``WorkspaceService.create``, and the
+live resource limits are ``SYN_WORKSPACE_*`` (#1606).
 """
 
 from __future__ import annotations
@@ -9,84 +14,6 @@ import re
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class WorkspaceSecuritySettings(BaseSettings):
-    """Security policies applied to all isolated workspaces.
-
-    Defaults are maximally restrictive:
-    - No network access
-    - Read-only root filesystem
-    - Strict resource limits
-
-    Override via SYN_SECURITY_* environment variables.
-    """
-
-    model_config = SettingsConfigDict(
-        env_prefix="SYN_SECURITY_",
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
-
-    allow_network: bool = Field(
-        default=False,
-        description=(
-            "Allow network access from workspaces. "
-            "Default: False (full network isolation). "
-            "Enable only if agents need to fetch dependencies or make API calls."
-        ),
-    )
-
-    allowed_hosts: str = Field(
-        default="",
-        description=(
-            "Allowlisted hosts when network is enabled (comma-separated). "
-            "Empty = allow all (not recommended). "
-            "Example: 'pypi.org,api.github.com'"
-        ),
-    )
-
-    read_only_root: bool = Field(
-        default=True,
-        description=(
-            "Mount root filesystem as read-only. "
-            "Workspace directory is always writable via tmpfs. "
-            "Prevents agents from modifying system files."
-        ),
-    )
-
-    max_workspace_size: str = Field(
-        default="1Gi",
-        description=(
-            "Maximum size of workspace tmpfs. "
-            "Format: Kubernetes resource format (1Gi, 512Mi, etc). "
-            "Prevents agents from filling disk."
-        ),
-    )
-
-    max_pids: int = Field(
-        default=100,
-        ge=10,
-        le=10000,
-        description="Maximum number of processes per workspace. Prevents fork bombs and process exhaustion.",
-    )
-
-    max_execution_time: int = Field(
-        default=3600,
-        ge=60,
-        le=86400,
-        description=(
-            "Maximum execution time in seconds (hard limit). "
-            "Default: 1 hour. Workspace is forcibly terminated after this."
-        ),
-    )
-
-    def get_allowed_hosts_list(self) -> list[str]:
-        """Get allowed hosts as a list."""
-        if not self.allowed_hosts:
-            return []
-        return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
 
 
 class ContainerLoggingSettings(BaseSettings):
@@ -130,8 +57,10 @@ class ContainerLoggingSettings(BaseSettings):
 
     redaction_patterns: list[str] = Field(
         default_factory=lambda: [
-            r"sk-ant-[a-zA-Z0-9-]+",
-            r"sk-[a-zA-Z0-9-]+",
+            # `_` belongs in the body: without it an OpenAI project key
+            # (sk-proj-..._...) was cut at its first underscore, leaving the
+            # rest in the log (#1971 review).
+            r"sk-[a-zA-Z0-9_-]+",
             r"ghp_[a-zA-Z0-9]+",
             r"github_pat_[a-zA-Z0-9_]+",
             r"gho_[a-zA-Z0-9]+",

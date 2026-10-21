@@ -85,6 +85,22 @@ describe("synCreateTrigger", () => {
     expect(result.content).not.toContain("100.114.86.77");
   });
 
+  it("names the trigger it asked for when the API omits the name (#1182)", async () => {
+    // TriggerActionResponse.name is nullable; the hand-written mirror said it
+    // was always a string, so the row read "null".
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ...triggerCreated, name: null }));
+
+    const result = await synCreateTrigger(client, {
+      name: "Nightly sweep",
+      event: "pull_request.opened",
+      repository: "org/repo",
+      workflow_id: "wf-review-001",
+    });
+
+    expect(result.content).toContain("**Name:** Nightly sweep");
+    expect(result.content).not.toContain("null");
+  });
+
   it("returns created trigger info", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(triggerCreated));
 

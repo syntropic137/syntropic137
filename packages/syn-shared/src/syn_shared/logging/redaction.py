@@ -15,8 +15,12 @@ list of handlers that happens to exist at startup:
 * ``sys.stdout`` / ``sys.stderr`` - structlog's ``PrintLogger``, ``print`` and
   uncaught tracebacks bypass logging and write straight to these.
 
-Scope: passwords in ``scheme://user:password@`` URLs. Credentials in query
-strings or bare tokens are not recognised here.
+Scope: passwords in ``scheme://user:password@`` URLs, and agent API keys
+(#1971): any ``sk-`` key (OpenAI ``sk-proj-``/``sk-svcacct-``/``sk-admin-``,
+Anthropic ``sk-ant-``) masked WHOLE, including ``_`` and ``-`` in its body, and
+the value of a named credential assignment (``OPENAI_API_KEY=...``,
+``"OPENAI_API_KEY": "..."``) whatever its shape. Other bare tokens and query
+strings are not recognised here.
 """
 
 from __future__ import annotations
@@ -38,6 +42,22 @@ _URL_USERINFO: Final = re.compile(
 
 MASK: Final = "***"
 
+#: An ``sk-`` API key, masked whole. The body class includes ``_`` and ``-``:
+#: a class without ``_`` stops at the first underscore of an OpenAI project key
+#: and leaves the rest of it in the log (#1971 review). Sixteen characters
+#: minimum so ordinary hyphenated words are not masked.
+_API_KEY: Final = re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{16,}")
+
+#: The value assigned to a named agent credential, in env (``K=v``), YAML
+#: (``K: v``) or JSON (``"K": "v"``) form. Catches a key with no ``sk-`` prefix,
+#: such as the API-key auth.json synthesised for codex echoed back by a script.
+#: Only horizontal whitespace around the separator: ``\s`` would let an empty
+#: assignment (``K=`` then a newline) swallow the next line of output.
+_NAMED_CREDENTIAL: Final = re.compile(
+    r"(?P<name>(?<![A-Za-z0-9_])(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)"
+    r"[\"']?[ \t]*[:=][ \t]*[\"']?)(?!\*\*\*)[^\s\"',}]+"
+)
+
 _INSTALLED_ATTR: Final = "_syn_credential_redaction"
 
 
@@ -46,14 +66,21 @@ def redact_url_credentials(text: str) -> str:
     return _URL_USERINFO.sub(rf"\g<scheme>\g<user>:{MASK}@", text)
 
 
+def redact_credentials(text: str) -> str:
+    """Mask URL passwords, ``sk-`` API keys and named credential values in ``text``."""
+    text = _NAMED_CREDENTIAL.sub(rf"\g<name>{MASK}", text)
+    text = _API_KEY.sub(MASK, text)
+    return redact_url_credentials(text)
+
+
 class RedactingStream:
-    """A text stream that masks URL passwords in everything written to it."""
+    """A text stream that masks credentials in everything written to it."""
 
     def __init__(self, inner: TextIO) -> None:
         self.inner = inner
 
     def write(self, text: str) -> int:
-        self.inner.write(redact_url_credentials(text))
+        self.inner.write(redact_credentials(text))
         return len(text)
 
     def __getattr__(self, name: str) -> object:
@@ -64,7 +91,7 @@ def _redacting_format(
     original: Callable[[logging.Handler, logging.LogRecord], str],
 ) -> Callable[[logging.Handler, logging.LogRecord], str]:
     def format(self: logging.Handler, record: logging.LogRecord) -> str:
-        return redact_url_credentials(original(self, record))
+        return redact_credentials(original(self, record))
 
     setattr(format, _INSTALLED_ATTR, True)
     return format

@@ -1,0 +1,31 @@
+id: fence-bound-fails-on-real-postgres
+polarity: defect
+source_pr: 1975
+escape_class: evidence that cannot run on CI
+# Escaped on 2026-10-15: reverify_2 (Codex) judged #1975 at e4a7b1e BLOCKED
+# only on the tracked .mutations/ (B4) and found "no new production
+# regression". A real-store run then showed fence_expired(limit=2) fencing
+# all 6 expired rows. A merge of main (29807c0) sits between the head and the
+# fix 8b69028, so the pin is the judged head, cited in `certified_in`.
+commit: e4a7b1ee928ed0e9691764e91496c803c45bc92a
+certified_in: https://github.com/syntropic137/syntropic137/pull/1975#issuecomment-6189930344
+fix_commit: 8b69028675ae907c5042cf1b63c992d4a220ca38
+task: >
+  The change under review bounds how many runs a single executor fences and
+  takes over per call in the Postgres execution run queue. Review whether
+  the bound holds for one statement on a real Postgres, not only in the
+  tests' doubles.
+expected:
+  # The root cause, for the LLM judge only; never part of `task`.
+  defect: >
+    fence_expired and take_over pick rows with an IN (SELECT ... FOR UPDATE
+    SKIP LOCKED LIMIT n) subquery. Postgres may plan it on the inner side of
+    a nested-loop semi join and rescan it once per outer row; each rescan
+    skips rows already locked and locks n more, so the LIMIT does not bound
+    the statement: fence_expired(limit=2) fenced 6 rows on real Postgres.
+  files:
+    - packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+  keywords:
+    - [limit, bound, unbounded, more than, all rows, every row]
+    - [subquery, rescan, re-scan, semi join, nested loop, materiali, cte, skip locked]
+split: train

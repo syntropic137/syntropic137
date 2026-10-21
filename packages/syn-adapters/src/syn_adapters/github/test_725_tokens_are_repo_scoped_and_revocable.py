@@ -95,8 +95,9 @@ class TestTheRequestNamesTheRepositories:
         (request,) = http.token_requests
         assert request is not None
         assert request.repositories == ["repo-a", "repo-b"]
-        # WHERE is scoped; WHAT is the installation's own grant (#1477).
-        assert request.permissions is None
+        # WHERE is scoped; WHAT is the installation's own grant (#1477),
+        # which here holds no `actions` for the cap to lower.
+        assert request.permissions == _GRANTED
 
     async def test_it_goes_on_the_wire_under_the_name_github_reads(self) -> None:
         """GitHub ignores a key it does not know - and grants every repository."""
@@ -105,12 +106,15 @@ class TestTheRequestNamesTheRepositories:
         assert body == {"repositories": ["repo-a"]}
 
     async def test_no_repositories_still_means_no_repositories_key(self) -> None:
-        """Callers that pass none - the repo-less gh credential - keep today's request."""
+        """Callers that pass none - the repo-less gh credential - reach every repository."""
         http = _FakeHttp()
 
         await mint_agent_token(_client(http), "42")
 
-        assert http.token_requests == [None]
+        (request,) = http.token_requests
+        assert request is not None
+        assert request.repositories is None
+        assert "repositories" not in request.to_json()
 
 
 class TestTheCacheKeysOnTheRepositorySet:

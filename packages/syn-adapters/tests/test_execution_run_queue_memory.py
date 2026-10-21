@@ -8,7 +8,12 @@ import pytest
 
 from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
 from syn_adapters.in_memory import InMemoryAdapterError
-from syn_domain.contexts.orchestration.ports import ExecutorHost, RunLeaseLost
+from syn_domain.contexts.orchestration.ports import (
+    ExecutorHost,
+    ExecutorPool,
+    PoolDefinitionConflict,
+    RunLeaseLost,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -80,7 +85,7 @@ async def test_fence_leaves_a_live_lease_alone() -> None:
     held = await queue.claim("h1")
     assert held is not None
     clock.now += timedelta(seconds=89)
-    assert await queue.fence_expired("h2") == []
+    assert await queue.fence_expired("h2", limit=10) == []
     await queue.renew(held)
     await queue.close(held)
 
@@ -94,7 +99,7 @@ async def test_expired_lease_is_fenced_never_reclaimed() -> None:
     clock.now += timedelta(seconds=91)
     await queue.heartbeat("h2")
     assert await queue.claim("h2") is None
-    fenced = await queue.fence_expired("h2")
+    fenced = await queue.fence_expired("h2", limit=10)
     assert [(f.execution_id, f.executor_id) for f in fenced] == [("a", "h1")]
     await queue.mark_reaped(fenced[0])
     await queue.close_interrupted(fenced[0])
@@ -112,13 +117,14 @@ async def test_reconciling_adopts_only_from_a_reconciler_that_left_and_a_restart
     assert await queue.others_live("rec-2")
     assert await queue.claim("h1") is not None
     clock.now += timedelta(minutes=5)
-    (fenced,) = await queue.fence_expired("rec-1")
-    assert await queue.reconciling("rec-2") == []
+    (fenced,) = await queue.fence_expired("rec-1", limit=10)
+    assert await queue.take_over("rec-2", limit=10) == []
     # rec-1 restarts in its container: the new process retires it.
     await queue.register(
         ExecutorHost(host_id="rec-1b", container_id="c-rec-1", generation="g1", epoch=1), 1
     )
-    (adopted,) = await queue.reconciling("rec-2")
+    assert await queue.reconciling("rec-2") == []  # reading adopts nothing
+    (adopted,) = await queue.take_over("rec-2", limit=10)
     assert (adopted.reconciler, adopted.token) == ("rec-2", fenced.token + 1)
     with pytest.raises(RunLeaseLost):
         await queue.mark_reaped(fenced)
@@ -127,6 +133,30 @@ async def test_reconciling_adopts_only_from_a_reconciler_that_left_and_a_restart
     assert again.reaped
     await queue.close_interrupted(again)
     assert await queue.reconciling("rec-2") == []
+
+
+async def test_fencing_and_takeover_are_bounded_and_oldest_first() -> None:
+    """D5: a reconciler acquires no more rows than its free slots, oldest lease first."""
+    clock = _Clock()
+    queue = await _queue_with(clock, 5, "e0", "e1", "e2", "e3", "e4")
+    for _ in range(5):
+        assert await queue.claim("h1") is not None  # claimed one second apart
+        clock.now += timedelta(seconds=1)
+    for host in ("rec-1", "rec-2", "rec-3"):
+        await queue.register(_host(host), 1)
+    clock.now += timedelta(minutes=5)
+
+    first = await queue.fence_expired("rec-1", limit=2)
+    assert sorted(run.execution_id for run in first) == ["e0", "e1"]
+    rest = await queue.fence_expired("rec-2", limit=10)
+    assert sorted(run.execution_id for run in rest) == ["e2", "e3", "e4"]
+    assert await queue.reconciling("rec-3") == []
+
+    assert await queue.take_over("rec-3", limit=2) == []  # rec-2 is still registered
+    await queue.deregister("rec-2")
+    taken = await queue.take_over("rec-3", limit=2)
+    assert sorted(run.execution_id for run in taken) == ["e2", "e3"]
+    assert [run.execution_id for run in await queue.reconciling("rec-3")] == ["e2", "e3"]
 
 
 async def test_a_restart_moves_the_machine_budget_one_release_at_a_time() -> None:
@@ -142,7 +172,7 @@ async def test_a_restart_moves_the_machine_budget_one_release_at_a_time() -> Non
 
     clock.now += timedelta(minutes=5)
     await queue.heartbeat("h1.new")
-    (fenced,) = await queue.fence_expired("h1.new")
+    (fenced,) = await queue.fence_expired("h1.new", limit=10)
     await queue.mark_reaped(fenced)
     await queue.close_interrupted(fenced)
     with pytest.raises(RunLeaseLost):
@@ -150,3 +180,47 @@ async def test_a_restart_moves_the_machine_budget_one_release_at_a_time() -> Non
     claimed = await queue.claim("h1.new")
     assert claimed is not None and claimed.execution_id == "waiting"
     assert await queue.claim("h1.new") is None
+
+
+_P1 = ExecutorPool(pool_id="p1", priority=1, provider="docker")
+
+
+def _in_pool(host_id: str, pool: ExecutorPool, container_id: str | None = None) -> ExecutorHost:
+    return ExecutorHost(
+        host_id=host_id,
+        container_id=container_id or f"c-{host_id}",
+        generation="g1",
+        epoch=1,
+        pool=pool,
+    )
+
+
+async def test_a_differing_declaration_is_refused_while_a_member_is_live_and_writes_nothing() -> (
+    None
+):
+    """Mirrors the Postgres D13 rule, including a member that has not yet beaten."""
+    clock = _Clock()
+    queue = await _queue_with(clock, 2, "a")
+    await queue.register(_in_pool("m", _P1), 1)
+    with pytest.raises(PoolDefinitionConflict):
+        # In h1's container: a committed registration would have retired h1.
+        await queue.register(_in_pool("n", _P1.model_copy(update={"priority": 4}), "c-h1"), 1)
+    with pytest.raises(LookupError):
+        await queue.heartbeat("n")
+    await queue.heartbeat("h1")
+    assert await queue.claim("h1") is not None
+
+    # Once m is no longer live the pool may be redefined, and that is what binds next.
+    clock.now += timedelta(minutes=5)
+    await queue.register(_in_pool("n", _P1.model_copy(update={"priority": 4}), "c-h1"), 1)
+    await queue.heartbeat("n")
+    with pytest.raises(PoolDefinitionConflict):
+        await queue.register(_in_pool("o", _P1), 1)
+
+
+async def test_a_sole_member_restarting_in_its_container_may_redefine_its_pool() -> None:
+    queue = InMemoryExecutionRunQueue(clock=_Clock())
+    await queue.register(_in_pool("a.1", _P1, "box"), 1)
+    await queue.heartbeat("a.1")
+    await queue.register(_in_pool("a.2", _P1.model_copy(update={"region": "eu-west"}), "box"), 1)
+    await queue.heartbeat("a.2")

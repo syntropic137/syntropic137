@@ -161,7 +161,6 @@ class SecurityPolicy:
     # Resource limits
     memory_limit_mb: int = 4096
     cpu_limit_cores: float = 2.0
-    disk_limit_gb: int = 10
     timeout_seconds: int = 3600  # Max lifetime
 
     # Filesystem
@@ -271,6 +270,24 @@ class IsolationHandle:
     host_workspace_path: str | None = None  # Path on host mounted into container
 
 
+class WorkspaceDeleteFallback(StrEnum):
+    """How the provider's fallback delete of the workspace directory went.
+
+    Run only when the host process could not delete the directory alone
+    (Docker: files the container wrote under another uid, #1983). `REFUSED`
+    means the fallback was not run, because the directory is not one the
+    provider created under its base directory.
+    """
+
+    DELETED = "deleted"
+    FAILED = "failed"
+    REFUSED = "refused"
+    #: Not a provider outcome: syn records this when the provider reported a
+    #: value outside the three above (a contract mismatch), so the row stays
+    #: distinct from None, which means only "not attempted / not reported".
+    UNRECOGNIZED = "unrecognized"
+
+
 @dataclass(frozen=True)
 class WorkspaceUsage:
     """What one workspace consumed, read once as the isolation was destroyed.
@@ -290,12 +307,20 @@ class WorkspaceUsage:
     nr_throttled: int | None = None
     memory_peak_bytes: int | None = None
     oom_kills: int | None = None
+    #: True when the provider saw an OOM kill from any source: `oom_kills > 0`
+    #: or Docker's `State.OOMKilled`. Kept beside the count because Docker can
+    #: know of a kill when the cgroup counters could not be read. None is
+    #: "not measured", never "not killed"; an exit 137 alone does not set it.
+    oom_killed: bool | None = None
     disk_bytes_at_teardown: int | None = None
     #: Paths the workspace-dir delete could not remove. None when the delete
     #: was not observed; () when it was, and removed everything.
     delete_failures: tuple[str, ...] | None = None
     net_rx_bytes: int | None = None
     net_tx_bytes: int | None = None
+    #: The fallback delete's outcome. None when the host deleted the directory
+    #: alone, or the delete was not observed.
+    delete_fallback: WorkspaceDeleteFallback | None = None
 
 
 @dataclass(frozen=True)

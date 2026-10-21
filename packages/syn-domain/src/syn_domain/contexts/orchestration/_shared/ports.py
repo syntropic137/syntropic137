@@ -235,6 +235,16 @@ class EventStreamPort(Protocol):
         """Exit code from the most recent stream() call."""
         ...
 
+    async def cancel_running(self, handle: IsolationHandle) -> bool:
+        """Stop whatever ``stream()`` is running in ``handle``'s workspace, bounded.
+
+        Must not depend on the workload honouring a signal: an agent that traps
+        SIGINT and SIGTERM still has to end (#918). True once the process is
+        confirmed over; False when nothing was running or it could not be
+        confirmed, which is logged rather than raised.
+        """
+        ...
+
 
 # =============================================================================
 # GIT CONFIGURATION PORT

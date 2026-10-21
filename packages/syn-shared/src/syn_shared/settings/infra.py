@@ -22,6 +22,11 @@ from enum import StrEnum
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from syn_shared.settings.execution import (
+    DEFAULT_MAX_CONCURRENT_EXECUTIONS,
+    api_memory_limit_for,
+)
+
 
 class GatewayUI(StrEnum):
     """Which dashboard the gateway serves at ``/`` (docs/syn-ui-rollout.md)."""
@@ -192,13 +197,17 @@ class InfraSettings(BaseSettings):
     # =========================================================================
 
     api_memory_limit: str = Field(
-        default="2g",
+        default=api_memory_limit_for(DEFAULT_MAX_CONCURRENT_EXECUTIONS),
         description=(
             "API memory limit. The API hosts every execution, so when the kernel"
             " OOM-kills it every in-flight run dies with it (#1552: killed at"
-            " ~443MB anon RSS with 8 runs under the previous default). 2g is the"
-            " value flywheel was mitigated with, not one derived from a"
-            " measured per-run slope. Size SYN_EXECUTION_MAX_CONCURRENT to it."
+            " ~443MB anon RSS with 8 runs under a 512m default). The default is"
+            " derived, not chosen: a 128MiB baseline plus 96MiB per execution,"
+            " for SYN_EXECUTION_MAX_CONCURRENT executions but never fewer than"
+            " 20 (the north star's current tier), which comes to 2g. 96MiB is a"
+            " pessimistic allowance (~40-55MiB was observed in #1552), not a"
+            " measured slope (#1717). If you raise SYN_EXECUTION_MAX_CONCURRENT"
+            " above 20, raise this to 128 + 96 x that many MiB."
         ),
     )
     api_cpu_limit: str = Field(
@@ -332,15 +341,15 @@ class InfraSettings(BaseSettings):
 
     backup_schedule: str = Field(
         default="0 3 * * *",
-        description="Backup cron schedule.",
+        description="Five-field cron schedule, in UTC, for the selfhost db-backup service.",
     )
 
     backup_retention_days: int = Field(
         default=7,
-        description="Number of days to retain backups.",
+        description="Days to keep syn-*.dump backups; older ones are pruned after each successful backup.",
     )
 
     backup_dir: str = Field(
         default="/var/backups/syn",
-        description="Directory for database backups.",
+        description="Host directory the selfhost db-backup service writes backups to.",
     )

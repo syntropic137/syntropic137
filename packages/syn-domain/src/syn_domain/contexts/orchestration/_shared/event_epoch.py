@@ -2,12 +2,15 @@
 
 Admission writes it as a run's ``writer_epoch`` so an Executor claims only work
 whose events it can load. Bump it whenever an orchestration event's schema
-changes. The fitness function that fails an unbumped schema change, and the
-append-side ``reader_epoch`` check, are not built yet (#1310 Phase 1).
+changes: ``ci/fitness/event_sourcing/test_orchestration_event_schema_snapshot.py``
+fails a schema that differs from this epoch's snapshot, and
+``just check-event-compat`` fails a payload the previous release cannot read
+unless this was bumped. The append-side ``reader_epoch`` check is not built yet
+(#1310).
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-ORCHESTRATION_EVENT_EPOCH: Final = 1
+ORCHESTRATION_EVENT_EPOCH: Final = 5

@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration.ports import RunLeaseLost
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from syn_domain.contexts.orchestration.ports import ClaimedRun, ExecutionRunQueue
 
 logger = logging.getLogger(__name__)
@@ -23,15 +25,23 @@ class LeaseKeeper:
     kept alive on the strength of a write that did not happen.
     """
 
-    def __init__(self, queue: ExecutionRunQueue, run: ClaimedRun, every: float) -> None:
+    def __init__(
+        self,
+        queue: ExecutionRunQueue,
+        run: ClaimedRun,
+        every: float,
+        *,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
         self._queue = queue
+        self._sleep = sleep
         self._run = run
         self._every = every
         self.lost = False
 
     async def hold(self, drain: asyncio.Task[object]) -> None:
         while not drain.done():
-            await asyncio.sleep(self._every)
+            await self._sleep(self._every)
             try:
                 await self._queue.renew(self._run)
             except RunLeaseLost:

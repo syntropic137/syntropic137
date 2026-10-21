@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import logging
 import socket
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from syn_adapters.execution_host import AggregateRunInterrupter, ExecutionHost
@@ -36,7 +37,12 @@ from syn_api.services.reconciliation import (
 )
 from syn_api.services.unlabelled_containers import reap_unlabelled_if_alone
 from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH
-from syn_domain.contexts.orchestration.ports import ExecutorHost
+from syn_domain.contexts.orchestration.ports import (
+    Capability,
+    ExecutorHost,
+    ExecutorPool,
+    IsolationLevel,
+)
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
@@ -45,6 +51,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _host_task: asyncio.Task[None] | None = None
+_executor: ExecutionHost | None = None
 
 
 async def resolve_previous_process(*, started_before: datetime) -> None:
@@ -68,12 +75,13 @@ async def resolve_previous_process(*, started_before: datetime) -> None:
 
 
 async def start_execution_host() -> None:
-    """Start the claim loop, once; a no-op with the Run Queue off.
+    """Join the Executor Pool, then start the claim loop, once; a no-op with the Run Queue off.
 
-    The host id is the ``syn.host_id`` label this process stamps on its
+    Raises ``PoolDefinitionConflict`` when live members of the pool declare a
+    different definition, before any loop starts. The host id is the ``syn.host_id`` label this process stamps on its
     containers, so a reconciler's reap of this host finds exactly them.
     """
-    global _host_task
+    global _host_task, _executor
     if _host_task is not None and not _host_task.done():
         return
     queue = await get_execution_run_queue()
@@ -85,6 +93,7 @@ async def start_execution_host() -> None:
         container_id=socket.gethostname(),
         generation=labels[LABEL_HOST_GENERATION],
         epoch=ORCHESTRATION_EVENT_EPOCH,
+        pool=_executor_pool(),
     )
     executor = ExecutionHost(
         queue,
@@ -96,23 +105,51 @@ async def start_execution_host() -> None:
         streams=get_execution_event_stream(),
     )
     await reap_unlabelled_if_alone(queue, host.host_id)
+    # Awaited, not left to the task: a pool this process may not join refuses
+    # startup rather than leaving a healthy-looking API with no claim loop (D13).
+    await executor.join()
+    _executor = executor
     _host_task = asyncio.create_task(executor.run_until_drained(), name="execution-host")
     _host_task.add_done_callback(_report_exit)
     logger.info("ExecutionHost %s claiming from the Run Queue", host.host_id)
 
 
+def _executor_pool() -> ExecutorPool:
+    """The Executor Pool this process declares (ADR-072 D13).
+
+    Provider and isolation are what this process's workspaces actually run on:
+    Docker containers. They move to the backend adapter once it exists
+    (placement plan PR 2); they are never settings.
+    """
+    settings = get_settings().executor_pool
+    return ExecutorPool(
+        pool_id=settings.id,
+        priority=settings.priority,
+        provider="docker",
+        region=settings.region,
+        isolation=IsolationLevel.CONTAINER,
+        capabilities=frozenset(Capability(name) for name in settings.capabilities),
+        overflow_delay=timedelta(seconds=settings.overflow_delay_s),
+    )
+
+
 async def stop_execution_host() -> None:
     """Cancel the loop: held runs take the interruption path, rows await their lease.
 
-    Never raises: a host that already crashed was reported by ``_report_exit``.
+    Then leave the pool, which the loop has done already unless it was
+    cancelled before its first step. Never raises: a host that already crashed
+    was reported by ``_report_exit``.
     """
-    global _host_task
+    global _host_task, _executor
     task, _host_task = _host_task, None
+    executor, _executor = _executor, None
     if task is None:
         return
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError, Exception):
         await task
+    if executor is not None:
+        await executor.leave()
 
 
 def _report_exit(task: asyncio.Task[None]) -> None:

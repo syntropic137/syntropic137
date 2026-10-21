@@ -45,6 +45,7 @@ from syn_adapters.workspace_backends.service.credential_keeper import (
 from syn_adapters.workspace_backends.service.issued_tokens import IssuanceLedger, IssuedToken
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
+from syn_domain.contexts.orchestration import HOST_CREDENTIALS
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
@@ -287,6 +288,8 @@ class _Container:
 class _Service:
     def __init__(self, container: _Container) -> None:
         self._isolation = container
+        # Renewal is refused under NoCredentials (#1914); these are host workspaces.
+        self.credential_policy = HOST_CREDENTIALS
 
 
 def _workspace(container: _Container) -> ManagedWorkspace:
@@ -365,11 +368,12 @@ class TestGhReadsHostsYmlRoutedByTheRepoUnderWork:
 
         ((installation, request),) = github.token_requests
         assert installation == "inst-1"
-        # No body at all: no repository to scope to, and no permission subset
-        # (#1477), so the token carries the installation's grant everywhere.
-        assert request is None, (
-            "a repo-less credential sends no body: no repository scope, no permission subset"
-        )
+        # No repository to scope to, so the token reaches everywhere the
+        # installation does, with the installation's grant (#1477) - `actions`
+        # capped, which this grant does not hold.
+        assert request is not None
+        assert request.repositories is None, "a repo-less credential has no repository scope"
+        assert request.permissions == _GRANTED
         assert github.reaches(container.gh_token(), "org/repo-a")
         assert container.git_token("org/repo-a") is None
 

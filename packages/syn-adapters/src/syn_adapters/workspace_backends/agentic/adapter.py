@@ -50,6 +50,7 @@ from syn_adapters.workspace_backends.agentic.session_store_env import (
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
 from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
+from syn_adapters.workspace_backends.backend_kit import BackendKit
 from syn_adapters.workspace_backends.errors import (
     TeardownFailure,
     WorkspaceProvisionError,
@@ -62,7 +63,6 @@ from syn_adapters.workspace_backends.exec_status_lost import (
 )
 from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_adapters.workspace_backends.host_security import host_security_failure
-from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_shared.env_constants import (
     ENV_SYN_AGENT_NETWORK,
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
@@ -77,6 +77,9 @@ if TYPE_CHECKING:
     from agentic_isolation.contract import FinalizationOutcome
     from agentic_isolation.providers.base import SupportsOperations, Workspace
 
+    from syn_domain.contexts.orchestration import (
+        WorkspaceCredentialPolicy,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationConfig,
@@ -129,6 +132,13 @@ _WORKSPACE_CACHE_ENV: Final[dict[str, str]] = {
     "XDG_CACHE_HOME": "/workspace/.cache",
     "UV_CACHE_DIR": "/workspace/.cache/uv",
     "npm_config_cache": "/workspace/.cache/npm",
+    # pnpm's content-addressable store, where a dependency seed (#1714) is
+    # copied. Unset, pnpm puts it under $HOME (~/.local/share/pnpm/store),
+    # which is the 128 MB tmpfs above, and this repository's store is 1.2 GB.
+    # pnpm 11+ reads only the `pnpm_config_` spelling (12.10.1 verified:
+    # `npm_config_store_dir` is ignored); older pnpm reads only `npm_config_`.
+    "pnpm_config_store_dir": "/workspace/.cache/pnpm",
+    "npm_config_store_dir": "/workspace/.cache/pnpm",
 }
 
 
@@ -190,6 +200,7 @@ class AgenticIsolationAdapter:
         workspace_host_dir: str | None = None,
         session_store: SessionStoreSettings | None = None,
         capture_source_instance_id: str | None = None,
+        kit: BackendKit | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -201,6 +212,11 @@ class AgenticIsolationAdapter:
             session_store: Central session-store settings. Defaults to
                 ``get_settings().session_store``, which is DISABLED unless
                 ``SYN_SESSION_STORE_URL`` is configured.
+            kit: The backend's composition point (#1914). When given it owns the
+                image, capture and credential policy, and ``default_image`` /
+                ``capture_source_instance_id`` must be left at their defaults.
+                Omitted, it is the Docker kit built from those two arguments
+                under ``HostCredentials`` - the behaviour before the kit existed.
 
         When running inside a container, both paths are needed:
         - container_dir: where this process writes files (/workspaces)
@@ -209,7 +225,16 @@ class AgenticIsolationAdapter:
         Uses env vars SYN_WORKSPACE_CONTAINER_DIR and SYN_WORKSPACE_HOST_DIR if not set.
         """
 
-        self._default_image = default_image
+        if kit is None:
+            kit = BackendKit(
+                default_image=default_image,
+                capture_source_instance_id=capture_source_instance_id,
+            )
+        elif default_image != DEFAULT_WORKSPACE_IMAGE or capture_source_instance_id is not None:
+            msg = "pass the image and capture source on the BackendKit, not beside it"
+            raise ValueError(msg)
+        self._kit = kit
+        default_image = kit.default_image
         self._security = security or SecurityConfig.production()
 
         # Central session store (SeshMagic). Resolved from the settings object
@@ -220,8 +245,13 @@ class AgenticIsolationAdapter:
             from syn_shared.settings import get_settings
 
             session_store = get_settings().session_store
+        if not kit.credential_policy.supplies_credentials:
+            # The session-store write token is a host credential, and the URL
+            # alone would point a credential-free workspace at the host's store.
+            session_store = session_store.model_copy(
+                update={"url": None, "auth_token": None, "read_token": None}
+            )
         self._session_store = session_store
-        self._capture_source_instance_id = capture_source_instance_id
 
         # Get paths from env or args
         container_dir = workspace_container_dir or os.environ.get(
@@ -248,6 +278,11 @@ class AgenticIsolationAdapter:
             credentials=self.credentials,
         )
         self._workspaces: dict[str, AgenticWorkspace] = {}
+
+    @property
+    def credential_policy(self) -> WorkspaceCredentialPolicy:
+        """The policy this adapter's kit was built with (#1914)."""
+        return self._kit.credential_policy
 
     @property
     def operations(self) -> SupportsOperations:
@@ -319,13 +354,7 @@ class AgenticIsolationAdapter:
         )
 
         environment = self._build_environment(config)
-        from syn_adapters.session_inventory.workspace_capture import apply_workspace_capture
-
-        capture_mounts = (
-            apply_workspace_capture(config, self._capture_source_instance_id, environment)
-            if self._capture_source_instance_id is not None
-            else []
-        )
+        capture_mounts = self._kit.capture_mounts(config, environment)
 
         # Map Syn137 config to agentic_isolation config
         # ISS-43: Network is set on the provider (default_network in __init__),
@@ -336,7 +365,6 @@ class AgenticIsolationAdapter:
         # credential binding the provider resolves at launch through the
         # `WorkspaceCredentials` it was constructed with, and delivers into
         # the workload environment only - never argv, labels or logs.
-        image = config.image or self._default_image
 
         # Supply-chain gate: verify the cosign signature of the exact image
         # reference we are about to run, before any container exists. Raises
@@ -348,7 +376,7 @@ class AgenticIsolationAdapter:
         # permitted local image the return value is that image's immutable
         # local image ID, so Docker cannot pull or retag something else in
         # between. See image_verification for the full policy.
-        image = await verify_image_async(image)
+        image = await self._kit.resolve_image(config.image)
 
         ws_config = WorkspaceConfig(
             provider="docker",
@@ -398,7 +426,7 @@ class AgenticIsolationAdapter:
 
         return IsolationHandle(
             isolation_id=workspace_obj.id,
-            isolation_type="docker",
+            isolation_type=self._kit.isolation_type,
             proxy_url=None,
             workspace_path="/workspace",
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
