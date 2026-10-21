@@ -300,7 +300,10 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
             assert await gate.fetchval(_PARKED_AT_GATE, conn.get_server_pid()), (
                 "the backfill left the gate while the test held it"
             )
-            assert await gate.fetchval(_WRITER_ROWS, _WRITER_T0) >= writer.committed, (
+            # Read the count first: the writer keeps committing while the query is
+            # in flight, so a count compared with a later read can fall short.
+            committed = writer.committed
+            assert await gate.fetchval(_WRITER_ROWS, _WRITER_T0) >= committed, (
                 "the writer's inserts are not visible to another session: not committed"
             )
 
