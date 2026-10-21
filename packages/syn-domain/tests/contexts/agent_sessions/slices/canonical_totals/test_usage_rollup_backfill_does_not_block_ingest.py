@@ -9,17 +9,20 @@ Now the trigger commits first and the backfill runs afterwards in batches,
 under no lock an insert waits on. Two claims, both tested here against a
 real database with a writer inserting the whole time:
 
-  1. INGEST CARRIES ON. Inserts complete while the backfill is running, at a
-     rate comparable to the writer's own rate before it started, and none of
-     them waits anywhere near as long as the backfill takes. Both bounds are
-     RATIOS (#1860): an absolute insert count measured how fast the runner
-     ran ``ensure_schema``, so a faster runner failed the test.
+  1. INGEST CARRIES ON. The backfill is parked on a gate the test holds,
+     inside a batch's open transaction and after that batch's real work.
+     While it is parked, inserts commit and are visible to another session,
+     and the writer's backend never waits on a lock. A backfill that held
+     agent_events across its batches would show up as that wait, so this is
+     decided by the database's lock table, not by a clock: the measured
+     version (#1860) failed on shared runners (#1952).
   2. EVERY EVENT IS COUNTED EXACTLY ONCE. After the dust settles, the rollup
      equals a fresh aggregation of agent_events: per turn key (every token
      column and the observation count) and per summary row (as a multiset).
      The concurrent writer hits sessions the backfill has already passed,
-     sessions it has not reached yet, and brand-new ones, on the same model
-     keys the backfill writes, so a missed or doubled event shows up.
+     sessions it has not reached yet, the batch it is parked in, and
+     brand-new ones, on the same model keys the backfill writes, so a missed
+     or doubled event shows up.
 
 MARKED ``integration``: CI runs it on push to main, PRs into release and the
 weekly cron, not on PRs into main.
@@ -30,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -46,18 +48,39 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
-# Sized so the backfill outlasts many writer cycles on any runner: the
-# window has to hold enough inserts for a rate measured inside it to mean
-# something. 300 sessions gave 17 inserts on a fast CI runner (#1860).
-HISTORY_SESSIONS = 1200
-TURNS_PER_SESSION = 200
+HISTORY_SESSIONS = 300
+TURNS_PER_SESSION = 50
 BATCH_SESSIONS = 5  # many short transactions, so the writer interleaves with them
-BASELINE_INSERTS = 20  # free-running inserts the writer completes before the backfill
-BASELINE_TIMEOUT_S = 30.0  # generous: connection setup on a slow runner is not the test
-MIN_WINDOW_CYCLES = 20  # the backfill must span this many free-running inserts
-MIN_RATE_FRACTION = 0.25  # of the free-running rate, sustained during the backfill
+LIVE_INSERTS = 20  # the writer is up and committing before the rollup exists
+PARKED_INSERTS = 10  # commits required while the backfill is parked mid-batch
+AFTER_INSERTS = 5  # and after it finishes, before the counts are compared
+POLL_S = 0.01  # how often a wait re-reads its condition; never a bound
+HANG_GUARD_S = 60.0  # a wait that has not ended by now never will: fail, not hang
 _MODELS = ("claude-sonnet-5", "claude-haiku-4-5-20251001")
 _T0 = datetime(2026, 9, 1, tzinfo=UTC)
+# The writer's rows start here, clear of the history's (at most _T0 + 1h + 300 s).
+_WRITER_T0 = _T0 + timedelta(seconds=10_000)
+
+# The gate: appended to every backfill batch, so the batch blocks on it inside
+# its open transaction, after its real statements, while the test holds it.
+# The two-key form shows as objsubid 2 in pg_locks and cannot collide with the
+# bigint keys in syn_adapters.advisory_locks.
+_GATE = (1952, 1860)
+_GATE_SQL = "SELECT pg_advisory_xact_lock(1952, 1860) WHERE $1::text[] IS NOT NULL"
+_PARKED_AT_GATE = """
+SELECT EXISTS (
+    SELECT 1 FROM pg_locks
+    WHERE pid = $1 AND NOT granted AND locktype = 'advisory'
+      AND classid = 1952 AND objid = 1860 AND objsubid = 2
+)
+"""
+# Every heavyweight lock a backend is queued on. Empty for a backend that is
+# working, idle, or between statements.
+_WAITING_ON = """
+SELECT locktype, mode, relation::regclass::text AS relation
+FROM pg_locks WHERE pid = $1 AND NOT granted
+"""
+_WRITER_ROWS = "SELECT COUNT(*) FROM agent_events WHERE time >= $1"
 
 
 def _turn(session: str, n: int, model: str) -> Row:
@@ -95,13 +118,14 @@ def _history() -> list[Row]:
 
 @dataclass
 class Writer:
-    """Inserts one event at a time until told to stop, timing each insert."""
+    """Inserts one event at a time, each committed on its own, until told to stop."""
 
     dsn: str
     stop: asyncio.Event = field(default_factory=asyncio.Event)
-    baseline_ready: asyncio.Event = field(default_factory=asyncio.Event)
-    finished_at: list[float] = field(default_factory=list)
-    latencies: list[float] = field(default_factory=list)
+    live: asyncio.Event = field(default_factory=asyncio.Event)
+    pid: int | None = None
+    """Its backend, so the test can ask pg_locks what it is waiting on."""
+    committed: int = 0
 
     def _next(self, i: int) -> Row:
         # Alternate between sessions early and late in the backfill's order,
@@ -121,16 +145,12 @@ class Writer:
 
         conn = await asyncpg.connect(self.dsn)
         try:
-            i = 0
+            self.pid = conn.get_server_pid()
             while not self.stop.is_set():
-                started = time.perf_counter()
-                await copy_rows(conn, [self._next(i)])
-                now = time.perf_counter()
-                self.latencies.append(now - started)
-                self.finished_at.append(now)
-                if len(self.finished_at) >= BASELINE_INSERTS:
-                    self.baseline_ready.set()
-                i += 1
+                await copy_rows(conn, [self._next(self.committed)])
+                self.committed += 1
+                if self.committed >= LIVE_INSERTS:
+                    self.live.set()
                 await asyncio.sleep(0.002)
         finally:
             await conn.close()
@@ -187,6 +207,61 @@ async def _assert_rollup_equals_raw(conn: asyncpg.Connection) -> tuple[int, int]
     return int(turns["keys"]), int(summaries["rows"])
 
 
+async def _until_committed(writer: Writer, writing: asyncio.Task[None], target: int) -> None:
+    """Wait for the writer to reach ``target`` commits, failing if it dies first."""
+    try:
+        async with asyncio.timeout(HANG_GUARD_S):
+            while writer.committed < target:
+                if writing.done():
+                    writing.result()  # the writer died: raise its error
+                    pytest.fail("the writer stopped before it was told to")
+                await asyncio.sleep(POLL_S)
+    except TimeoutError:
+        pytest.fail(f"the writer committed {writer.committed} of {target} inserts, then hung")
+
+
+async def _until_parked(
+    gate: asyncpg.Connection, backfill_pid: int, migrating: asyncio.Task[None]
+) -> None:
+    """Wait for the backfill to block on the gate, inside its first batch."""
+    try:
+        async with asyncio.timeout(HANG_GUARD_S):
+            while not await gate.fetchval(_PARKED_AT_GATE, backfill_pid):
+                if migrating.done():
+                    migrating.result()
+                    pytest.fail("ensure_schema finished without running a backfill batch")
+                await asyncio.sleep(POLL_S)
+    except TimeoutError:
+        pytest.fail("ensure_schema never reached the backfill")
+
+
+async def _commits_while_parked(
+    gate: asyncpg.Connection, writer: Writer, writing: asyncio.Task[None]
+) -> None:
+    """PARKED_INSERTS more commits, with the writer never queued on a lock.
+
+    A backfill holding a lock that conflicts with INSERT puts the writer's
+    backend in pg_locks as not granted, and keeps it there until the gate
+    opens, so it is seen here however fast or slow the runner is.
+    """
+    assert writer.pid is not None
+    target = writer.committed + PARKED_INSERTS
+    try:
+        async with asyncio.timeout(HANG_GUARD_S):
+            while writer.committed < target:
+                waits = await gate.fetch(_WAITING_ON, writer.pid)
+                assert not waits, (
+                    "an insert is queued behind the backfill, which is parked inside a "
+                    f"batch: {[dict(w) for w in waits]}"
+                )
+                if writing.done():
+                    writing.result()
+                    pytest.fail("the writer stopped before it was told to")
+                await asyncio.sleep(POLL_S)
+    except TimeoutError:
+        pytest.fail(f"the writer committed {writer.committed} of {target} inserts, then hung")
+
+
 async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
     test_infrastructure, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -196,88 +271,45 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
     from syn_adapters.events.schema import EventStoreSchema
 
     monkeypatch.setattr(schema, "USAGE_ROLLUP_BACKFILL_BATCH_SESSIONS", BATCH_SESSIONS)
+    monkeypatch.setattr(
+        schema, "USAGE_ROLLUP_BACKFILL_SQL", (*schema.USAGE_ROLLUP_BACKFILL_SQL, _GATE_SQL)
+    )
 
     async with throwaway_database(test_infrastructure.timescaledb_url) as dsn:
         await prepare_pre_e1_schema(dsn)
         conn = await asyncpg.connect(dsn)
+        gate = await asyncpg.connect(dsn)
+        writer = Writer(dsn)
+        writing: asyncio.Task[None] | None = None
+        migrating: asyncio.Task[None] | None = None
         try:
             await copy_rows(conn, _history())
             await conn.execute("ANALYZE agent_events")
+            await gate.execute("SELECT pg_advisory_lock($1, $2)", *_GATE)
 
-            writer = Writer(dsn)
+            # The writer is live before the rollup exists.
             writing = asyncio.create_task(writer.run())
-            # The writer is live, and has a measured free-running rate, before
-            # the rollup exists. Waiting on completions rather than a fixed
-            # sleep keeps connection setup on a slow runner out of the test.
-            ready = asyncio.create_task(writer.baseline_ready.wait())
-            done, _ = await asyncio.wait(
-                {ready, writing},
-                timeout=BASELINE_TIMEOUT_S,
-                return_when=asyncio.FIRST_COMPLETED,
+            await _until_committed(writer, writing, LIVE_INSERTS)
+
+            migrating = asyncio.create_task(EventStoreSchema().ensure_schema(conn))
+            await _until_parked(gate, conn.get_server_pid(), migrating)
+
+            # 1. Ingest carries on while a backfill batch is open.
+            await _commits_while_parked(gate, writer, writing)
+            assert not migrating.done()
+            assert await gate.fetchval(_PARKED_AT_GATE, conn.get_server_pid()), (
+                "the backfill left the gate while the test held it"
             )
-            if ready not in done:
-                ready.cancel()
-                writer.stop.set()
-                if writing in done:
-                    writing.result()  # the writer died: raise its error
-                # A stuck writer must not outlive the test: give it a bounded
-                # chance to stop, then cancel it.
-                writing.cancel()
-                with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
-                    await asyncio.wait_for(writing, timeout=5)
-                pytest.fail(
-                    f"the writer completed {len(writer.finished_at)} of {BASELINE_INSERTS} "
-                    f"baseline inserts in {BASELINE_TIMEOUT_S:.0f} s"
-                )
+            assert await gate.fetchval(_WRITER_ROWS, _WRITER_T0) >= writer.committed, (
+                "the writer's inserts are not visible to another session: not committed"
+            )
 
-            started = time.perf_counter()
-            await EventStoreSchema().ensure_schema(conn)
-            ended = time.perf_counter()
-
-            await asyncio.sleep(0.2)
+            await gate.execute("SELECT pg_advisory_unlock($1, $2)", *_GATE)
+            async with asyncio.timeout(HANG_GUARD_S):
+                await migrating
+            await _until_committed(writer, writing, writer.committed + AFTER_INSERTS)
             writer.stop.set()
             await writing
-
-            backfill_s = ended - started
-            during = [t for t in writer.finished_at if started < t < ended]
-            # The writer's free-running rate, from its first completed insert
-            # (connection setup excluded) to the moment the backfill began.
-            before = [t for t in writer.finished_at if t <= started]
-            assert len(before) >= BASELINE_INSERTS
-            baseline_rate = (len(before) - 1) / (before[-1] - before[0])
-            during_rate = len(during) / backfill_s
-            window_cycles = baseline_rate * backfill_s
-            worst = max(
-                lat
-                for lat, t in zip(writer.latencies, writer.finished_at, strict=True)
-                if t > started
-            )
-            print(
-                f"\nbackfill {backfill_s * 1000:.0f} ms over {HISTORY_SESSIONS} sessions in "
-                f"batches of {BATCH_SESSIONS}; {len(during)} inserts completed during it "
-                f"({during_rate:.0f}/s against {baseline_rate:.0f}/s free-running, "
-                f"{window_cycles:.0f} free-running cycles); "
-                f"worst insert latency {worst * 1000:.0f} ms"
-            )
-
-            # 0. The window is long enough to measure a rate in. Both sides of
-            # this scale with the runner, so it is a property of the seed, not
-            # of the machine: if it fails, raise HISTORY_SESSIONS.
-            assert window_cycles >= MIN_WINDOW_CYCLES, (
-                f"the backfill took {backfill_s * 1000:.0f} ms, only {window_cycles:.1f} "
-                f"free-running inserts long; the history is too small to measure against"
-            )
-
-            # 1. Ingest carried on. A backfill holding inserts off would let
-            # none complete inside its window, and its last waiter would have
-            # waited about as long as the backfill itself.
-            assert during_rate >= MIN_RATE_FRACTION * baseline_rate, (
-                f"{len(during)} inserts in {backfill_s * 1000:.0f} ms is {during_rate:.0f}/s, "
-                f"under {MIN_RATE_FRACTION:.0%} of the free-running {baseline_rate:.0f}/s"
-            )
-            assert worst < backfill_s / 2, (
-                f"an insert waited {worst * 1000:.0f} ms of a {backfill_s * 1000:.0f} ms backfill"
-            )
 
             # 2. Exactly once, against a fresh aggregation of everything written.
             keys, summaries = await _assert_rollup_equals_raw(conn)
@@ -287,4 +319,11 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
             await EventStoreSchema.backfill_usage_rollup(conn)
             await _assert_rollup_equals_raw(conn)
         finally:
+            writer.stop.set()
+            await gate.close()  # opens the gate, if a failure left it shut
+            for task in (migrating, writing):
+                if task is not None and not task.done():
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await task
             await conn.close()
