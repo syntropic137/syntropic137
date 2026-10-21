@@ -16,7 +16,7 @@ import contextlib
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from syn_api._wiring import (
@@ -39,6 +39,10 @@ from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.disk_pressure import (
     start_disk_pressure_monitor,
     stop_disk_pressure_monitor,
+)
+from syn_api.services.execution_capacity import (
+    apply_host_sized_budget,
+    describe_execution_budget,
 )
 from syn_api.services.execution_host_runner import (
     start_execution_host,
@@ -78,6 +82,8 @@ from syn_shared.settings.session_store import (
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts._shared.host_capacity import RunDemand
+    from syn_shared.settings.config import Settings
     from collections.abc import Awaitable, Callable
 
     from syn_adapters.conversations.minio import MinioConversationStorage
@@ -287,6 +293,8 @@ async def startup(
     except Exception:
         logger.warning("Could not determine execution concurrency posture at startup.")
 
+    await _size_execution_budget(settings)
+
     if settings.is_test:
         return Ok({"mode": "full"})
 
@@ -383,11 +391,33 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             disk=disk,
             db_pools=db_pools,
             cpu_throttling=cpu_throttling.read_cpu_throttling(),
+            execution_budget=describe_execution_budget(),
         )
     )
 
 
 # ── Private helpers ─────────────────────────────────────────────────
+
+
+async def _size_execution_budget(settings: Settings) -> None:
+    """Size the budget from host capacity before any start can claim from it (#1715).
+
+    Before the critical path, so the claim loop joins the Run Queue with the
+    sized capacity, and in every mode, so /health always reports a budget.
+    There is no profile store to read in test and offline modes.
+    """
+    from syn_adapters.host_capacity import build_host_capacity
+
+    demand = None
+    if not settings.uses_in_memory_stores:
+
+        async def demand(window: timedelta) -> RunDemand | None:
+            from syn_api._wiring import get_phase_profile_query
+
+            return await get_phase_profile_query().run_demand(window)
+
+    await apply_host_sized_budget(build_host_capacity(), demand, settings.execution)
+
 
 
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:

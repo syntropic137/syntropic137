@@ -105,12 +105,31 @@ class ExecutionBudget:
             msg = f"An execution budget needs a limit of at least 1, not {limit}"
             raise ValueError(msg)
         self._limit = limit
+        self._admitted = 0
         self._running: dict[str, _Entry] = {}
         self._waiting: dict[str, _Entry] = {}  # insertion order is queue order
 
     @property
     def limit(self) -> int:
         return self._limit
+
+    @property
+    def admitted(self) -> int:
+        """Starts this budget has accepted since the process started."""
+        return self._admitted
+
+    def resize(self, limit: int) -> None:
+        """Change the limit, e.g. to the budget sized from host capacity (#1715).
+
+        A larger limit hands its new slots to the oldest waiters at once. A
+        smaller one takes no slot back: running starts finish, and the queue
+        waits until running falls below the new limit.
+        """
+        if limit < 1:
+            msg = f"An execution budget needs a limit of at least 1, not {limit}"
+            raise ValueError(msg)
+        self._limit = limit
+        self._grant()
 
     @property
     def running(self) -> int:
@@ -149,6 +168,7 @@ class ExecutionBudget:
         self._waiting[execution_id] = _Entry(
             claim=claim, granted=asyncio.get_running_loop().create_future()
         )
+        self._admitted += 1
         self._grant()
         position = self.position(execution_id)
         if position is not None and position.queued:

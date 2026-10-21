@@ -9,6 +9,15 @@ from syn_domain.contexts._shared.disk_space import (
     DiskUsage,
     InsufficientDiskSpaceError,
 )
+from syn_domain.contexts._shared.host_capacity import (
+    BindingTerm,
+    CapacityReserves,
+    ExecutionBudgetSizing,
+    HostCapacity,
+    HostCapacityPort,
+    RunDemand,
+    size_execution_budget,
+)
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import (
     AdmissionAnnouncementFailedError,
@@ -26,6 +35,13 @@ from syn_domain.contexts._shared.maintenance import (
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 
 __all__ = [
+    "size_execution_budget",
+    "RunDemand",
+    "HostCapacityPort",
+    "HostCapacity",
+    "ExecutionBudgetSizing",
+    "CapacityReserves",
+    "BindingTerm",
     "AdmissionAnnouncementFailedError",
     "AdmissionAnnouncer",
     "AdmissionDrainTimeoutError",

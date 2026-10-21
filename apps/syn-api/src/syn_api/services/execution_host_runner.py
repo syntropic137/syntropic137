@@ -30,6 +30,7 @@ from syn_adapters.workspace_backends.host_labels import (
     host_labels,
 )
 from syn_api._wiring import get_execution_processor, get_execution_run_queue
+from syn_api._wiring_admission import get_execution_budget
 from syn_api.services.dead_host_reaper import DockerDeadHostReaper
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -98,7 +99,9 @@ async def start_execution_host() -> None:
     executor = ExecutionHost(
         queue,
         host,
-        capacity=get_settings().execution.max_concurrent,
+        # The budget sized from host capacity at startup (#1715), the same
+        # limit the in-process claim path enforces.
+        capacity=get_execution_budget().limit,
         drainer=await get_execution_processor(),
         reaper=DockerDeadHostReaper(),
         interrupter=AggregateRunInterrupter(get_workflow_execution_repository()),

@@ -40,6 +40,7 @@ from syn_domain.contexts.agent_sessions import (
     recorded_model_from_row,
     rollup_usage_sources,
 )
+from syn_domain.contexts._shared.host_capacity import RunDemand
 from syn_domain.storable_text import pg_safe
 from syn_shared.events import WORKSPACE_RESOURCE_USAGE
 
@@ -106,6 +107,26 @@ WHERE execution_id = ANY($1::text[])
   AND phase_id IS NOT NULL
   AND time >= $2
   AND time < $3
+GROUP BY execution_id, phase_id
+"""
+
+
+# Every phase of every execution in the window, pooled into ONE population for
+# the execution budget (#1715). An execution holds one phase workspace at a
+# time, so each phase sample is what one running execution held while it ran;
+# pooling across workflows is what makes it a per-run figure for this HOST
+# rather than for one workflow. The constant phase_id is what pools them:
+# `_resource_profiles` groups by it. Bounded by the window, not by an id list.
+_POOLED_RESOURCE_QUERY = """
+SELECT
+    execution_id,
+    '*' AS phase_id,
+    ARRAY_AGG(data ORDER BY time DESC) FILTER (WHERE event_type = $3) AS usages
+FROM agent_events
+WHERE execution_id IS NOT NULL
+  AND phase_id IS NOT NULL
+  AND time >= $1
+  AND time < $2
 GROUP BY execution_id, phase_id
 """
 
@@ -307,6 +328,20 @@ class PhaseProfileQueryService:
             resources=_resource_profiles(resource_rows),
         )
 
+    async def run_demand(self, window: timedelta, *, now: datetime | None = None) -> RunDemand | None:
+        """What one running execution uses on this host, or None if not yet measured.
+
+        None when any of the three measures has fewer than ``MIN_SAMPLES``
+        phases: the budget then falls back to the operator maximum rather than
+        dividing by a guess.
+        """
+        until = now or datetime.now(UTC)
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                _POOLED_RESOURCE_QUERY, until - window, until, WORKSPACE_RESOURCE_USAGE
+            )
+        return run_demand_from(_resource_profiles(rows))
+
     def _token_profiles(self, rows: Iterable[asyncpg.Record]) -> list[PhaseTokenProfile]:
         samples: dict[tuple[str, str], dict[str, _TokenSample]] = defaultdict(
             lambda: defaultdict(_TokenSample)
@@ -495,6 +530,19 @@ def _divide_vendor_cost(
     costs = [total * w / whole for w in weights[:-1]]
     costs.append(total - sum(costs, Decimal(0)))
     return costs
+
+
+def run_demand_from(profiles: Sequence[PhaseResourceProfile]) -> RunDemand | None:
+    """The per-run demand in one pooled profile, or None if any measure is short of samples."""
+    if len(profiles) != 1:
+        return None
+    (pooled,) = profiles
+    cpu = pooled.cpu_seconds_per_wall_second.p50
+    memory = pooled.memory_peak_bytes.p95
+    disk = pooled.disk_bytes_at_teardown.p95
+    if cpu is None or memory is None or disk is None:
+        return None
+    return RunDemand(cpu_cores_p50=cpu, memory_bytes_p95=memory, disk_bytes_p95=disk)
 
 
 def _parse_usages(raw: Sequence[str] | None) -> list[_WorkspaceUsageRow]:

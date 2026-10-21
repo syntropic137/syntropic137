@@ -83,6 +83,7 @@ from syn_api.inventory_types import TranscriptIdentityRequest as TranscriptIdent
 from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRevocationResponse
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
+from syn_api.services.execution_capacity import ExecutionBudgetHealth  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
 from syn_domain.contexts.orchestration import (
     DefinitionChangeKind,
@@ -3293,6 +3294,12 @@ class HealthResponse(_OmitsAbsentFields):
         description="How often the API container hit its CPU limit (#1600). Always present "
         "once the gate is ready, with status 'unknown' when the cgroup does not say; "
         "omitted only while the gate is withholding the API.",
+    )
+    execution_budget: ExecutionBudgetHealth | None = Field(
+        default=None,
+        description="The execution budget sized from host capacity and measured per-run "
+        "demand, the term that bound it, and the starts admitted, running and queued in "
+        "this process (#1715). Omitted only before startup has sized it.",
     )
 
 
