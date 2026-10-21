@@ -41,7 +41,6 @@ from syn_api.services.disk_pressure import (
     stop_disk_pressure_monitor,
 )
 from syn_api.services.execution_host_runner import (
-    resolve_previous_process,
     start_execution_host,
     stop_execution_host,
 )
@@ -51,8 +50,8 @@ from syn_api.services.execution_posture import (
 )
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
+from syn_api.services.process_role import current_role, resolve_previous_world, role_services
 from syn_api.services.read_path_health import _judge_read_path
-from syn_api.services.reconciliation import reconcile_orphaned_sessions
 from syn_api.services.request_latency_lifecycle import start_request_latency, stop_request_latency
 from syn_api.services.seeding import seed_offline_data
 from syn_api.services.subscription_health import render_subscription_health
@@ -143,6 +142,9 @@ class _ServiceEntry:
     init_fn: Callable[[LifecycleState], Awaitable[None]]
     recoverable: bool = False
     shutdown_fn: Callable[[LifecycleState], Awaitable[None]] | None = None
+    #: Started only where the process serves the API (ADR-072 D1): the
+    #: subscription and the pollers dispatch work, and an executor must not.
+    api_only: bool = False
 
 
 # Registry is defined after _init_* functions below — see _SERVICE_REGISTRY.
@@ -208,11 +210,10 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # previous process from work this one just started. Resolving the old world
     # before opening the door to a new one removes the race rather than
     # narrowing it; the started_before cutoff below is defence in depth.
-    process_started_at = datetime.now(UTC)
-    await reconcile_orphaned_sessions()
-    await resolve_previous_process(started_before=process_started_at)
+    role = current_role()
+    await resolve_previous_world(role, started_before=datetime.now(UTC))
 
-    for entry in _SERVICE_REGISTRY:
+    for entry in role_services(_SERVICE_REGISTRY, role):
         try:
             await entry.init_fn(state)
         except Exception:
@@ -229,7 +230,8 @@ async def _init_degradable_services(state: LifecycleState) -> None:
         task.add_done_callback(_handle_recovery_task_exception)
         state._recovery_task = task
     # Last: the claim loop drains through the processor wired above (ADR-072).
-    await start_execution_host()
+    if role.hosts_executions:
+        await start_execution_host()
 
 
 async def startup(
@@ -943,24 +945,28 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
         init_fn=init_ui_feedback,
         recoverable=True,
         shutdown_fn=shutdown_ui_feedback,
+        api_only=True,
     ),
     _ServiceEntry(
         reason=DegradedReason.SUBSCRIPTION_COORDINATOR,
         init_fn=_init_subscriptions,
         recoverable=True,
         shutdown_fn=_shutdown_subscriptions,
+        api_only=True,
     ),
     _ServiceEntry(
         reason=DegradedReason.EVENT_POLLER,
         init_fn=_init_event_poller,
         recoverable=False,
         shutdown_fn=_shutdown_event_poller,
+        api_only=True,
     ),
     _ServiceEntry(
         reason=DegradedReason.CHECK_RUN_POLLER,
         init_fn=_init_check_run_poller,
         recoverable=False,
         shutdown_fn=_shutdown_check_run_poller,
+        api_only=True,
     ),
 )
 
