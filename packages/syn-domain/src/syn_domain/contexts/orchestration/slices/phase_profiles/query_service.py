@@ -34,13 +34,13 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.agent_sessions import PricingResolver
 
+from syn_domain.contexts._shared.host_capacity import RunDemand
 from syn_domain.contexts.agent_sessions import (
     CANONICAL_MODEL_COLUMNS,
     price_canonical_row,
     recorded_model_from_row,
     rollup_usage_sources,
 )
-from syn_domain.contexts._shared.host_capacity import RunDemand
 from syn_domain.storable_text import pg_safe
 from syn_shared.events import WORKSPACE_RESOURCE_USAGE
 
@@ -328,7 +328,9 @@ class PhaseProfileQueryService:
             resources=_resource_profiles(resource_rows),
         )
 
-    async def run_demand(self, window: timedelta, *, now: datetime | None = None) -> RunDemand | None:
+    async def run_demand(
+        self, window: timedelta, *, now: datetime | None = None
+    ) -> RunDemand | None:
         """What one running execution uses on this host, or None if not yet measured.
 
         None when any of the three measures has fewer than ``MIN_SAMPLES``

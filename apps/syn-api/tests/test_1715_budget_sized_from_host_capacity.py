@@ -12,6 +12,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
+
+import syn_api._wiring_admission as admission
+from syn_api.execution_budget import ExecutionBudget, StartPath
+from syn_api.services import execution_capacity, lifecycle
+from syn_api.types import Ok
 from syn_domain.contexts._shared.host_capacity import (
     BindingTerm,
     HostCapacity,
@@ -20,11 +25,6 @@ from syn_domain.contexts._shared.host_capacity import (
 from syn_shared.env_constants import ENV_SYN_EXECUTION_MAX_CONCURRENT
 from syn_shared.settings.config import AppEnvironment, Settings
 from syn_shared.settings.execution import ExecutionSettings
-
-import syn_api._wiring_admission as admission
-from syn_api.execution_budget import ExecutionBudget, StartPath
-from syn_api.services import execution_capacity, lifecycle
-from syn_api.types import Ok
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -86,9 +86,7 @@ async def test_a_budget_of_two_queues_the_third_run_on_the_real_claim() -> None:
     assert (sizing.budget, sizing.binding_term) == (2, BindingTerm.MEMORY)
 
     budget = admission.get_execution_budget()
-    claims = [
-        budget.claim(f"exec-{i}", workflow_id="wf", path=StartPath.DIRECT) for i in range(3)
-    ]
+    claims = [budget.claim(f"exec-{i}", workflow_id="wf", path=StartPath.DIRECT) for i in range(3)]
     entered: list[str] = []
     release = asyncio.Event()
 
@@ -132,7 +130,6 @@ async def test_the_workspace_caps_do_not_change_the_budget(
             return MEMORY_BOUND_DEMAND
 
     import syn_adapters.host_capacity as host_capacity
-
     import syn_api._wiring as wiring
 
     monkeypatch.setattr(host_capacity, "build_host_capacity", lambda: HostDouble(BIG_HOST))

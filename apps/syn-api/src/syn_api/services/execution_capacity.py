@@ -19,8 +19,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from syn_api._wiring_admission import get_execution_budget
 from syn_domain.contexts._shared.host_capacity import (
     BindingTerm,
     CapacityReserves,
@@ -30,9 +33,9 @@ from syn_domain.contexts._shared.host_capacity import (
     RunDemand,
     size_execution_budget,
 )
-from syn_shared.settings.execution import ExecutionSettings
 
-from syn_api._wiring_admission import get_execution_budget
+if TYPE_CHECKING:
+    from syn_shared.settings.execution import ExecutionSettings
 
 logger = logging.getLogger(__name__)
 

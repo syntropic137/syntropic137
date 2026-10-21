@@ -83,8 +83,8 @@ from syn_api.inventory_types import TranscriptIdentityRequest as TranscriptIdent
 from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRevocationResponse
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
-from syn_api.services.execution_capacity import ExecutionBudgetHealth  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
+from syn_api.services.execution_capacity import ExecutionBudgetHealth  # noqa: TC001
 from syn_domain.contexts.orchestration import (
     DefinitionChangeKind,
     DelegationFailure,

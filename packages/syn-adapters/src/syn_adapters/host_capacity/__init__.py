@@ -57,5 +57,7 @@ def build_host_capacity() -> ProcHostCapacity:
     from syn_shared.env_constants import ENV_SYN_WORKSPACE_CONTAINER_DIR
     from syn_shared.settings import get_settings
 
-    path = get_settings().disk.path or os.environ.get(ENV_SYN_WORKSPACE_CONTAINER_DIR, "/workspaces")
+    path = get_settings().disk.path or os.environ.get(
+        ENV_SYN_WORKSPACE_CONTAINER_DIR, "/workspaces"
+    )
     return ProcHostCapacity(path)

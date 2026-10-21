@@ -117,7 +117,9 @@ def size_execution_budget(
             BindingTerm.CPU,
         ),
         (
-            _per_run(capacity.memory_bytes - reserves.memory_reserve_bytes, demand.memory_bytes_p95),
+            _per_run(
+                capacity.memory_bytes - reserves.memory_reserve_bytes, demand.memory_bytes_p95
+            ),
             BindingTerm.MEMORY,
         ),
         (

@@ -82,17 +82,17 @@ from syn_shared.settings.session_store import (
 )
 
 if TYPE_CHECKING:
-    from syn_domain.contexts._shared.host_capacity import RunDemand
-    from syn_shared.settings.config import Settings
     from collections.abc import Awaitable, Callable
 
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api._wiring_admission import BackgroundWorkflowDispatcher
+    from syn_domain.contexts._shared.host_capacity import RunDemand
     from syn_domain.contexts.github.services import (
         CheckRunIngestionService,
         GitHubEventIngestionScheduler,
     )
+    from syn_shared.settings.config import Settings
 
 logger = logging.getLogger(__name__)
 SubscriptionHealthResult = tuple[SubscriptionHealth | None, tuple[DegradedReason, ...]]
@@ -417,7 +417,6 @@ async def _size_execution_budget(settings: Settings) -> None:
             return await get_phase_profile_query().run_demand(window)
 
     await apply_host_sized_budget(build_host_capacity(), demand, settings.execution)
-
 
 
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
