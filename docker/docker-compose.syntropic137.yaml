@@ -476,8 +476,8 @@ services:
     - ALL
     tmpfs:
     - /tmp
-    - /home/syn/.config
-    - /home/syn/.sigstore:size=16m
+    - /home/syn/.config:size=16m,uid=1000,gid=1000,mode=0700
+    - /home/syn/.sigstore:size=16m,uid=1000,gid=1000,mode=0700
     deploy:
       resources:
         limits:
