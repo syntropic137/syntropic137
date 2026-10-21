@@ -95,6 +95,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
@@ -106,15 +107,12 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    SecretStr,
     TypeAdapter,
     ValidationError,
     field_validator,
 )
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
-from syn_shared.settings.config import Settings, get_settings
-from syn_shared.settings.constants import ANTHROPIC_MESSAGES_URL, ENV_ANTHROPIC_API_KEY
 from syn_shared.settings.dev_tooling import get_dev_api_url
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -982,7 +980,7 @@ class ModelClient(Protocol):
 
 
 class JudgeError(RuntimeError):
-    """The LLM judge could not answer: no credential, a failed call, or an unreadable reply."""
+    """The LLM judge could not answer: a disallowed model, a failed call, or an unreadable reply."""
 
 
 JUDGE_MODEL = "claude-sonnet-5-5"
@@ -995,19 +993,21 @@ JUDGE_MODELS = frozenset({"claude-sonnet-5-5", "claude-opus-5-5"})
 """The only model ids the judge may call: explicit 5.x ids, no aliases, no pre-5 model.
 
 The one policy, checked by `require_judge_model` both where a judge is built and
-before `AnthropicMessages` sends anything."""
+before `ClaudeCode` starts the CLI."""
 JUDGE_SAMPLES = 3
 """Independent answers per judgement. Odd, so two verdicts cannot tie on a two-way split."""
 JUDGE_EFFORT = "medium"
-"""Pinned `output_config.effort`: the model's default is not part of a stable identity."""
-JUDGE_PROMPT_VERSION = 4
+"""Pinned `claude --effort`: the model's default is not part of a stable identity."""
+JUDGE_PROMPT_VERSION = 5
 """Bump on ANY change to `_JUDGE_SYSTEM`, `_judge_prompt`, what they are given, or how
 the answers become a verdict: it is part of the scorer version. v2: the case's
 `expected.defect` is required, never inferred. v3: the codex-deliverable-phase-failed
 description no longer reads as waiving auth and malformed-stream faults when a
 deliverable exists. v4: `claude-sonnet-5-5` replaces the temperature-0 judge; the
 verdict is the strict majority of `JUDGE_SAMPLES` schema-constrained answers at
-`JUDGE_EFFORT`, `unclear` when there is none."""
+`JUDGE_EFFORT`, `unclear` when there is none. v5: answered through Claude Code
+(`ClaudeCode`, `claude -p` on its own login) instead of the Messages API; the reply is
+held to `_JudgeReply` by the prompt and validation, not by an API-side schema."""
 
 
 def require_judge_model(model: str) -> str:
@@ -1050,10 +1050,6 @@ class _JudgeReply(_Frozen):
     verdict: JudgeVerdict
     quote: str
     reason: str
-
-
-_JUDGE_REPLY_SCHEMA = _JudgeReply.model_json_schema()
-"""The structured-output schema the judge's reply is constrained to."""
 
 
 def _squash(text: str) -> str:
@@ -1128,73 +1124,123 @@ def judge_problems(loaded: LoadedSuite) -> list[str]:
     ]
 
 
-class AnthropicMessages:
-    """`ModelClient` over the Anthropic Messages API with httpx, already a dependency.
+class ProcessRunner(Protocol):
+    """How `ClaudeCode` starts the CLI: `subprocess.run`'s shape, so a fake stands in for it."""
 
-    The key is the platform's `Settings.anthropic_api_key` (``ANTHROPIC_API_KEY``
-    from the environment or ``.env``, ADR-004) and is never written anywhere.
-    No sampling parameter is sent (5.x models reject them); the reply is constrained
-    to the `_JudgeReply` schema, at the pinned `JUDGE_EFFORT`. A reply that stopped
-    for any reason but `end_turn` (a refusal, a truncation) is an error, not a verdict.
+    def __call__(
+        self,
+        args: list[str],
+        *,
+        stdin: int,
+        capture_output: Literal[True],
+        text: Literal[True],
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+
+class ClaudeCodeError(JudgeError):
+    """A `claude -p` call gave no answer. The subclass names why; none is ever a verdict."""
+
+
+class ClaudeCodeExitError(ClaudeCodeError):
+    """The CLI exited non-zero."""
+
+
+class ClaudeCodeTimeoutError(ClaudeCodeError):
+    """The CLI did not finish within `ClaudeCode.timeout_s`."""
+
+
+class ClaudeCodeEmptyOutputError(ClaudeCodeError):
+    """The CLI printed nothing, or a result with no text."""
+
+
+class ClaudeCodeUnreadableOutputError(ClaudeCodeError):
+    """The CLI printed something that is not its JSON result envelope."""
+
+
+class ClaudeCodeReportedError(ClaudeCodeError):
+    """The envelope parsed and says `is_error`: the session failed (auth, a refusal, a limit)."""
+
+
+class _ClaudeCodeResult(BaseModel):
+    """The fields of `claude -p --output-format json` the judge reads."""
+
+    model_config = ConfigDict(extra="ignore")
+    is_error: bool
+    result: str
+
+
+JUDGE_TIMEOUT_S = 300.0
+"""Per-call ceiling on one `claude -p` answer, after which the call is an error."""
+
+
+@dataclass(frozen=True)
+class ClaudeCode:
+    """`ModelClient` over Claude Code run headless (`claude -p`), on the CLI's own login.
+
+    No API key is read or passed: the call runs on whatever the CLI is logged in as
+    (OAuth). Never add ``--bare``, which skips that login for an API key. Each call is
+    one non-interactive session with stdin closed, tools disabled, nothing persisted,
+    the model pinned to the exact allowed id (`require_judge_model`) and effort pinned
+    to `JUDGE_EFFORT`. The reply is the ``result`` of the JSON envelope. Every way that
+    yields no answer raises a `ClaudeCodeError` subclass naming it.
     """
 
-    def __init__(self, api_key: SecretStr, http: httpx.Client | None = None) -> None:
-        self._key = api_key
-        self._http = http or httpx.Client(timeout=120)
+    timeout_s: float = JUDGE_TIMEOUT_S
+    run: ProcessRunner = subprocess.run
+    executable: str = "claude"
 
-    @classmethod
-    def from_settings(cls, settings: Settings | None = None) -> AnthropicMessages:
-        key = (settings or get_settings()).anthropic_api_key
-        if key is None or not key.get_secret_value():
-            raise JudgeError(
-                f"--llm-judge needs {ENV_ANTHROPIC_API_KEY} (environment or .env); "
-                "omit --llm-judge to score by keywords alone (offline)"
-            )
-        return cls(key)
+    def argv(self, *, model: str, system: str, prompt: str) -> list[str]:
+        return [
+            self.executable,
+            "-p",
+            prompt,
+            "--model",
+            require_judge_model(model),
+            "--system-prompt",
+            system,
+            "--effort",
+            JUDGE_EFFORT,
+            "--output-format",
+            "json",
+            "--tools",
+            "",
+            "--no-session-persistence",
+        ]
 
     def complete(self, *, model: str, system: str, prompt: str) -> str:
-        require_judge_model(model)
+        argv = self.argv(model=model, system=system, prompt=prompt)
         try:
-            response = self._http.post(
-                ANTHROPIC_MESSAGES_URL,
-                headers={
-                    "x-api-key": self._key.get_secret_value(),
-                    "anthropic-version": "2023-06-01",
-                },
-                json={
-                    "model": model,
-                    "max_tokens": 16000,
-                    "output_config": {
-                        "effort": JUDGE_EFFORT,
-                        "format": {"type": "json_schema", "schema": _JUDGE_REPLY_SCHEMA},
-                    },
-                    "system": system,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
+            done = self.run(
+                argv,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_s,
             )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise JudgeError(f"LLM judge call to {model} failed: {exc}") from exc
-        reply = _MessagesReply.model_validate(response.json())
-        if reply.stop_reason != "end_turn":
-            raise JudgeError(f"LLM judge call to {model} stopped with {reply.stop_reason!r}")
-        return reply.text
-
-
-class _TextBlock(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    type: str
-    text: str = ""
-
-
-class _MessagesReply(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    content: tuple[_TextBlock, ...]
-    stop_reason: str | None = None
-
-    @property
-    def text(self) -> str:
-        return "".join(b.text for b in self.content if b.type == "text")
+        except subprocess.TimeoutExpired as exc:
+            raise ClaudeCodeTimeoutError(
+                f"claude -p --model {model} gave no answer within {self.timeout_s:g}s"
+            ) from exc
+        if done.returncode != 0:
+            raise ClaudeCodeExitError(
+                f"claude -p --model {model} exited {done.returncode}: {done.stderr.strip()[-500:]}"
+            )
+        if not done.stdout.strip():
+            raise ClaudeCodeEmptyOutputError(f"claude -p --model {model} printed nothing")
+        try:
+            reply = _ClaudeCodeResult.model_validate_json(done.stdout)
+        except ValidationError as exc:
+            raise ClaudeCodeUnreadableOutputError(
+                f"claude -p --model {model} printed no JSON result envelope: {done.stdout[:500]!r}"
+            ) from exc
+        if reply.is_error:
+            raise ClaudeCodeReportedError(
+                f"claude -p --model {model} reported an error: {reply.result[:500]!r}"
+            )
+        if not reply.result.strip():
+            raise ClaudeCodeEmptyOutputError(f"claude -p --model {model} returned an empty result")
+        return reply.result
 
 
 def scorer_version(loaded: LoadedSuite, llm: Judge | None) -> str:
@@ -1973,7 +2019,7 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             f"score: also ask the LLM judge ({JUDGE_MODEL}, majority of {JUDGE_SAMPLES}, "
             f"prompt v{JUDGE_PROMPT_VERSION}); "
-            f"needs {ENV_ANTHROPIC_API_KEY}. Recorded under a scorer_version naming the judge. "
+            "runs through the logged-in `claude` CLI (claude -p). Recorded under a scorer_version naming the judge. "
             "Omit to score offline by keywords alone"
         ),
     )
@@ -2023,11 +2069,7 @@ def main(argv: list[str] | None = None) -> int:
         if problems := [p for v in to_score for p in judge_problems(v)]:
             print("❌ the LLM judge cannot score:\n  " + "\n  ".join(problems), file=sys.stderr)
             return 1
-        try:
-            llm = LlmJudge(AnthropicMessages.from_settings())
-        except JudgeError as exc:
-            print(f"❌ {exc}", file=sys.stderr)
-            return 1
+        llm = LlmJudge(ClaudeCode())
     ledger: Path = args.launches or launches_path(args.suite)
     with httpx.Client(
         base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()

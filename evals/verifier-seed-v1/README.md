@@ -44,12 +44,12 @@ Two judges answer one question: does a blocking finding identify THIS defect?
 
 - **Keyword judge** (always; deterministic, offline): one blocking finding
   names an expected file and has a word from every `expected.keywords` group.
-- **LLM judge** (`score --llm-judge`; needs the platform's `ANTHROPIC_API_KEY`
-  setting, from the environment or `.env`): a pinned model (`claude-sonnet-5-5`,
+- **LLM judge** (`score --llm-judge`; runs through Claude Code, `claude -p`, on
+  the CLI's own login, so `claude` must be on PATH and logged in): a pinned model (`claude-sonnet-5-5`,
   at a pinned effort) is given the case's root cause (`expected.defect`,
   required: the judge refuses a case without it), the expected files and
   keyword concepts, and the blocking findings, and answers `match`, `no_match`
-  or `unclear` in a schema-constrained reply, quoting the finding it matched.
+  or `unclear` as one JSON object, quoting the finding it matched.
   The 5.x models reject temperature 0, so the judge is asked three times and
   the verdict is the majority; no majority is `unclear`. A `match` whose quote
   is not in any finding counts as an `unclear` answer before the vote. Scores

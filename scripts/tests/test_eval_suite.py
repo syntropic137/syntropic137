@@ -25,7 +25,6 @@ from typing import get_args
 
 import httpx
 import pytest
-from pydantic import SecretStr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -76,7 +75,6 @@ from syn_shared.agents import (
     resolve_model_alias,
 )
 from syn_shared.pricing import resolve_model_pricing
-from syn_shared.settings.config import Settings
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -3460,97 +3458,163 @@ def test_keyword_only_scoring_records_the_plain_suite_version(
     assert "LLM judge" not in str(body["evidence"])
 
 
-@pytest.mark.unit
-def test_llm_judge_flag_without_a_key_fails_before_any_call(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(eval_suite, "get_settings", lambda: Settings(_env_file=None))
-    assert eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"]) == 1
-    assert "needs ANTHROPIC_API_KEY" in capsys.readouterr().err
+@dataclass
+class _FakeClaude:
+    """Stands in for `subprocess.run` under `ClaudeCode`: records each call, never runs `claude`."""
+
+    stdout: str = ""
+    returncode: int = 0
+    stderr: str = ""
+    timeout: bool = False
+    calls: list[tuple[list[str], int, float]] = field(default_factory=list)
+
+    def __call__(
+        self,
+        args: list[str],
+        *,
+        stdin: int,
+        capture_output: bool,
+        text: bool,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        self.calls.append((list(args), stdin, timeout))
+        if self.timeout:
+            raise subprocess.TimeoutExpired(args, timeout)
+        return subprocess.CompletedProcess(args, self.returncode, self.stdout, self.stderr)
 
 
-@pytest.mark.unit
-def test_the_judge_uses_the_key_configured_in_settings_dotenv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """ADR-004: the credential comes from `Settings` (env or .env), not a parallel env read."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    dotenv = tmp_path / ".env"
-    dotenv.write_text("ANTHROPIC_API_KEY=fake-dotenv-key\n")
-    sent: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        sent.append(request)
-        return httpx.Response(200, json=_ok_reply())
-
-    client = eval_suite.AnthropicMessages.from_settings(Settings(_env_file=dotenv))
-    client._http = httpx.Client(transport=httpx.MockTransport(handle))
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    [request] = sent
-    assert request.headers["x-api-key"] == "fake-dotenv-key"
-    assert "fake-dotenv-key" not in repr(vars(client)) + capsys.readouterr().out
-
-
-def _ok_reply(text: str = "ok", stop_reason: str = "end_turn") -> dict[str, object]:
-    return {"content": [{"type": "text", "text": text}], "stop_reason": stop_reason}
-
-
-_SAMPLING_PARAMETERS = ("temperature", "top_p", "top_k")
-
-
-def _five_x_provider(sent: list[httpx.Request]) -> httpx.MockTransport:
-    """Plays the 5.x Messages contract: a sampling parameter or a pre-5 model is a 400."""
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        sent.append(request)
-        body = json.loads(request.content)
-        if any(k in body for k in _SAMPLING_PARAMETERS):
-            return httpx.Response(400, json={"error": {"message": "temperature not supported"}})
-        if not re.fullmatch(r"claude-(opus|sonnet|haiku)-5(-\d+)?", body["model"]):
-            return httpx.Response(400, json={"error": {"message": "pre-5 model"}})
-        return httpx.Response(200, json=_ok_reply())
-
-    return httpx.MockTransport(handle)
-
-
-@pytest.mark.unit
-def test_anthropic_client_sends_the_pinned_5x_model_with_no_sampling_parameter() -> None:
-    """The pinned judge is a 5.x model and the request is one the 5.x API accepts."""
-    sent: list[httpx.Request] = []
-    client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=_five_x_provider(sent))
+def _envelope(result: str, *, is_error: bool = False) -> str:
+    """What `claude -p --output-format json` prints, with the fields the judge ignores."""
+    return json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": is_error,
+            "result": result,
+            "session_id": "s",
+            "total_cost_usd": 0.01,
+        }
     )
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    [request] = sent
-    assert request.headers["x-api-key"] == "test-key"
-    body = json.loads(request.content)
-    assert body["model"] == eval_suite.JUDGE_MODEL
-    assert body["output_config"]["effort"] == eval_suite.JUDGE_EFFORT
-    schema = body["output_config"]["format"]["schema"]
-    assert body["output_config"]["format"]["type"] == "json_schema"
-    assert schema["properties"]["verdict"]["enum"] == ["match", "no_match", "unclear"]
-    assert schema["additionalProperties"] is False
 
 
 @pytest.mark.unit
-def test_the_llm_judge_end_to_end_runs_on_the_5x_api() -> None:
-    """Judge through client: every sample reaches a provider that refuses pre-5 requests."""
-    sent: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        response = _five_x_provider(sent).handle_request(request)
-        if response.status_code != 200:
-            return response
-        return httpx.Response(200, json=_ok_reply(_reply("match", _PARAPHRASE_QUOTE)))
-
-    client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(handle))
+def test_claude_code_runs_the_cli_headless_with_the_exact_pinned_model() -> None:
+    fake = _FakeClaude(stdout=_envelope("ok"))
+    client = eval_suite.ClaudeCode(timeout_s=42.0, run=fake)
+    assert (
+        client.complete(model="claude-opus-5-5", system="the system", prompt="the prompt") == "ok"
     )
-    judgement = eval_suite.LlmJudge(client).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    [(argv, _, _)] = fake.calls
+    assert argv == [
+        "claude",
+        "-p",
+        "the prompt",
+        "--model",
+        "claude-opus-5-5",
+        "--system-prompt",
+        "the system",
+        "--effort",
+        eval_suite.JUDGE_EFFORT,
+        "--output-format",
+        "json",
+        "--tools",
+        "",
+        "--no-session-persistence",
+    ]
+    assert "--bare" not in argv
+
+
+@pytest.mark.unit
+def test_claude_code_closes_stdin_and_passes_its_timeout() -> None:
+    fake = _FakeClaude(stdout=_envelope("ok"))
+    eval_suite.ClaudeCode(timeout_s=42.0, run=fake).complete(
+        model=eval_suite.JUDGE_MODEL, system="s", prompt="p"
+    )
+    [(_, stdin, timeout)] = fake.calls
+    assert stdin == subprocess.DEVNULL
+    assert timeout == 42.0
+
+
+@pytest.mark.unit
+def test_the_judge_reads_no_api_key() -> None:
+    """Owner decision 2026-10-20: the judge never calls the API with a key."""
+    source = Path(eval_suite.__file__).read_text()
+    assert "anthropic_api_key" not in source and "x-api-key" not in source
+    assert not hasattr(eval_suite, "AnthropicMessages")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("fake", "error", "match"),
+    [
+        (
+            _FakeClaude(returncode=1, stderr="not logged in"),
+            "ClaudeCodeExitError",
+            "exited 1: not logged in",
+        ),
+        (_FakeClaude(timeout=True), "ClaudeCodeTimeoutError", "within 42s"),
+        (_FakeClaude(stdout=""), "ClaudeCodeEmptyOutputError", "printed nothing"),
+        (_FakeClaude(stdout=" \n"), "ClaudeCodeEmptyOutputError", "printed nothing"),
+        (_FakeClaude(stdout=_envelope("")), "ClaudeCodeEmptyOutputError", "empty result"),
+        (
+            _FakeClaude(stdout="not json"),
+            "ClaudeCodeUnreadableOutputError",
+            "no JSON result envelope",
+        ),
+        (_FakeClaude(stdout='{"is_error": false}'), "ClaudeCodeUnreadableOutputError", "no JSON"),
+        (
+            _FakeClaude(stdout=_envelope("usage limit reached", is_error=True)),
+            "ClaudeCodeReportedError",
+            "usage limit reached",
+        ),
+    ],
+    ids=["exit", "timeout", "empty", "blank", "empty-result", "not-json", "no-result", "is-error"],
+)
+def test_every_claude_code_failure_raises_its_own_error(
+    fake: _FakeClaude, error: str, match: str
+) -> None:
+    client = eval_suite.ClaudeCode(timeout_s=42.0, run=fake)
+    with pytest.raises(getattr(eval_suite, error), match=match) as raised:
+        client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
+    assert isinstance(raised.value, eval_suite.JudgeError)
+
+
+@pytest.mark.unit
+def test_a_failed_claude_code_call_fails_the_judgement_rather_than_voting() -> None:
+    """A failure is never an empty verdict: the judge raises instead of counting it."""
+    client = eval_suite.ClaudeCode(run=_FakeClaude(returncode=2, stderr="boom"))
+    with pytest.raises(eval_suite.ClaudeCodeExitError):
+        eval_suite.LlmJudge(client).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+
+
+@pytest.mark.unit
+def test_the_llm_judge_end_to_end_runs_through_claude_code() -> None:
+    """Judge through the transport: every sample is one `claude -p` with the pinned model."""
+    fake = _FakeClaude(stdout=_envelope(_reply("match", _PARAPHRASE_QUOTE)))
+    judgement = eval_suite.LlmJudge(eval_suite.ClaudeCode(run=fake)).judge(
+        _EXPECTED, blocking_findings(_PARAPHRASED)
+    )
     assert judgement.verdict == "match"
-    assert judgement.judge == "llm:claude-sonnet-5-5@prompt-v4"
-    assert len(sent) == eval_suite.JUDGE_SAMPLES
+    assert judgement.judge == "llm:claude-sonnet-5-5@prompt-v5"
+    assert len(fake.calls) == eval_suite.JUDGE_SAMPLES
+    for argv, stdin, _ in fake.calls:
+        assert argv[argv.index("--model") + 1] == eval_suite.JUDGE_MODEL
+        assert stdin == subprocess.DEVNULL
+
+
+@pytest.mark.unit
+def test_score_llm_judge_runs_on_claude_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The `score --llm-judge` wiring builds the judge on `ClaudeCode`, not an API client."""
+    built: list[object] = []
+
+    def spy(client: eval_suite.ModelClient, model: str = eval_suite.JUDGE_MODEL) -> object:
+        built.append(client)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(eval_suite, "LlmJudge", spy)
+    with pytest.raises(SystemExit):
+        eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"])
+    assert [type(c) for c in built] == [eval_suite.ClaudeCode]
 
 
 _PRE5_MODELS = (
@@ -3560,6 +3624,7 @@ _PRE5_MODELS = (
     "claude-3-7-sonnet-20250219",
     "claude-sonnet-4-5-20250929",
     "claude-sonnet-latest",
+    "sonnet",
 )
 
 
@@ -3572,49 +3637,24 @@ def test_the_pinned_judge_model_is_an_allowed_5x_model() -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("model", _PRE5_MODELS)
-def test_a_pre5_model_passed_to_the_client_is_refused_before_any_request(model: str) -> None:
-    """The outgoing boundary: a direct `complete` with a pre-5 id never reaches HTTP."""
-    sent: list[httpx.Request] = []
-    client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=_five_x_provider(sent))
-    )
+def test_a_pre5_model_passed_to_the_client_is_refused_before_any_call(model: str) -> None:
+    """The outgoing boundary: a direct `complete` with a pre-5 id or alias never starts the CLI."""
+    fake = _FakeClaude(stdout=_envelope("ok"))
     with pytest.raises(eval_suite.JudgeError, match="never calls"):
-        client.complete(model=model, system="s", prompt="p")
-    assert sent == []
+        eval_suite.ClaudeCode(run=fake).complete(model=model, system="s", prompt="p")
+    assert fake.calls == []
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("model", _PRE5_MODELS)
-def test_a_pre5_judge_override_is_refused_before_any_request(model: str) -> None:
+def test_a_pre5_judge_override_is_refused_before_any_call(model: str) -> None:
     """An explicit `LlmJudge(model=...)` cannot route the judge to a pre-5 model."""
-    sent: list[httpx.Request] = []
-    client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=_five_x_provider(sent))
-    )
+    fake = _FakeClaude(stdout=_envelope("ok"))
     with pytest.raises(eval_suite.JudgeError, match="never calls"):
-        eval_suite.LlmJudge(client, model=model).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
-    assert sent == []
-
-
-@pytest.mark.unit
-def test_an_allowed_5x_override_still_reaches_the_api() -> None:
-    sent: list[httpx.Request] = []
-    client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=_five_x_provider(sent))
-    )
-    assert client.complete(model="claude-opus-5-5", system="s", prompt="p") == "ok"
-    assert [json.loads(r.content)["model"] for r in sent] == ["claude-opus-5-5"]
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("stop_reason", ["refusal", "max_tokens"])
-def test_a_reply_that_did_not_finish_is_an_error_not_a_verdict(stop_reason: str) -> None:
-    transport = httpx.MockTransport(
-        lambda _: httpx.Response(200, json=_ok_reply(_reply("no_match"), stop_reason))
-    )
-    client = eval_suite.AnthropicMessages(SecretStr("test-key"), httpx.Client(transport=transport))
-    with pytest.raises(eval_suite.JudgeError, match=f"stopped with '{stop_reason}'"):
-        client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
+        eval_suite.LlmJudge(eval_suite.ClaudeCode(run=fake), model=model).judge(
+            _EXPECTED, blocking_findings(_PARAPHRASED)
+        )
+    assert fake.calls == []
 
 
 @pytest.mark.unit
