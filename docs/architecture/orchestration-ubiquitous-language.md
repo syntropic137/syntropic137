@@ -599,8 +599,9 @@ successful API response reports the first.
 
 ## Execution Budget
 
-How many Executions one Executor runs at once (`SYN_EXECUTION_MAX_CONCURRENT`);
-with the Run Queue off, that Executor is the API process itself.
+How many Executions one Executor runs at once. It is sized at startup from
+[Host Capacity](#host-capacity) and [Run Demand](#run-demand), and is never
+more than `SYN_EXECUTION_MAX_CONCURRENT`; see [Binding Term](#binding-term). With the Run Queue off, that Executor is the API process itself.
 ONE budget bounds every start path: a direct start, a trigger dispatch and the
 start of a resumed Execution all claim a slot from it. Sized against memory,
 not isolation: each running Execution costs the API memory, and an API killed
@@ -625,6 +626,34 @@ free one early. (ADR-072 D3, D12.)
 Every budget row names its Executor Pool (`execution_budget.pool_id`). A
 pool's capacity is the sum of its members' rows, reported and never claimed
 against, exactly as global capacity is the sum of every row. (ADR-072 D13.)
+
+## Host Capacity
+
+What the host an Executor runs on has: CPU cores, physical memory and free
+disk on the workspace volume, plus its CPU pressure (PSI `some avg60`). It is
+read through `HostCapacityPort` at startup. It is NOT the workspace container limits
+(`SYN_WORKSPACE_CPU_LIMIT`, `SYN_WORKSPACE_MEMORY_LIMIT_MB`). Those are ceilings
+on one run, not facts about the host. (#1715.)
+
+## Run Demand
+
+What one running Execution uses, measured: the median CPU cores and the p95
+peak memory and teardown disk, pooled over every phase that ended inside
+`SYN_EXECUTION_PROFILE_WINDOW_DAYS` (the [Phase Profile](#phase-profile) data,
+#1716). Each phase sample counts because an Execution holds one phase workspace at a time.
+Below 10 measured phases there is no Run Demand. A small number is never
+substituted for it. (#1715.)
+
+## Binding Term
+
+The term that set the [Execution Budget](#execution-budget) when it was sized
+from [Host Capacity](#host-capacity) and [Run Demand](#run-demand). The budget is
+`min(operator max, cpu, memory, disk)`, and the binding term names whichever
+is smallest: `cpu`, `memory`, `disk` or `operator_max`. When no budget could
+be computed, the budget is the operator max (`SYN_EXECUTION_MAX_CONCURRENT`),
+and the binding term records the reason: `operator_max_no_profile`,
+`operator_max_profiles_unreadable` or `operator_max_host_unreadable`. /health
+reports it. (#1715.)
 
 ## Queued Start
 
