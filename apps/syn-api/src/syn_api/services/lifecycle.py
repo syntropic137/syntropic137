@@ -284,7 +284,6 @@ async def startup(
     except Exception:
         logger.warning("Could not determine execution concurrency posture at startup.")
 
-    await execution_capacity.size_execution_budget_at_startup(settings)
     if settings.is_test:
         return Ok({"mode": "full"})
 
