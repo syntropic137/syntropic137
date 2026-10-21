@@ -25,6 +25,7 @@ _START = "# ONE SWAPPER AT A TIME"
 _CLAIM = 'if [ "$DRY" = 0 ]; then claim_the_swap; fi'
 _GATE = 'maintenance true "pit stop $VERSION"'
 _SWAP = "if ! swap_up; then"
+_UNGATE = 'step "gate: resuming execution admission"'
 
 
 def _lines() -> list[str]:
@@ -51,6 +52,13 @@ def _abort_drain() -> str:
     lines = _lines()
     start = lines.index("abort_drain() {")
     return "\n".join(lines[start : lines.index("}", start) + 1])
+
+
+def _ungate() -> str:
+    """The script's own ungate after verify: the step, the clear and the disarm."""
+    lines = _lines()
+    start = lines.index(_UNGATE)
+    return "\n".join(lines[start : lines.index("", start)])
 
 
 def _swap_begins() -> str:
@@ -165,9 +173,14 @@ def test_a_failed_pause_put_is_still_undone(tmp_path: Path) -> None:
 
 
 def test_the_ungate_disarms_the_trap(tmp_path: Path) -> None:
-    proc, maintenance, _ = _run(tmp_path, 'maintenance false ""\nGATED=0\nexit 0')
+    """The real ungate, run after the swap began as it is in a pit stop: its
+    clear is the only one, and the exit trap neither clears again nor reports
+    admission paused."""
+    proc, maintenance, _ = _run(tmp_path, f"{_swap_begins()}\n{_ungate()}\nexit 0")
     assert proc.returncode == 0, proc.stderr
     assert maintenance == ["maintenance true", "maintenance false"]
+    assert "admission is OPEN again" not in proc.stderr
+    assert "PAUSED" not in proc.stderr
     assert not (tmp_path / "host" / ".pit-stop.lock").exists()
 
 
