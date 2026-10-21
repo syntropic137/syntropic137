@@ -63,6 +63,10 @@ unchanged, and there is no new execution status for upgrades.
 `SYN_PROCESS_ROLE = api | executor | all` (default `all`, so dev and tests
 keep one process).
 
+Implemented (#1310 1.6) as `SYN_EXECUTION_PROCESS_ROLE`: the `SYN_EXECUTION_`
+prefix is kept because `.env.example` and the compose forwarding are generated
+from prefix + field name. The compose files pin it per service.
+
 | Role | Runs | Does not run |
 |---|---|---|
 | `api` | routes, admission, the read path, the projection coordinator and ProcessManagers, pollers | any execution; it has no Docker access |

@@ -38,17 +38,20 @@ from syn_adapters.workspace_backends.agentic.credential_scrubber import (
     scrub_bytes,
 )
 from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
-from syn_adapters.workspace_backends.agentic.session_store_env import (
-    apply_session_store_env,
-    deployment_identity,
-    session_store_credential_bindings,
-)
 
 # Re-exported for backward compatibility (issue #771 item 7): the canonical
 # definition lives in `syn_adapters.workspace_backends.errors` so it can be
 # raised/imported without depending on this Docker-specific module. Existing
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
+from syn_adapters.workspace_backends.agentic.runtime_mapping import (
+    isolation_runtime_from_metadata,
+)
+from syn_adapters.workspace_backends.agentic.session_store_env import (
+    apply_session_store_env,
+    deployment_identity,
+    session_store_credential_bindings,
+)
 from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
 from syn_adapters.workspace_backends.backend_kit import BackendKit
 from syn_adapters.workspace_backends.errors import (
@@ -430,6 +433,7 @@ class AgenticIsolationAdapter:
             proxy_url=None,
             workspace_path="/workspace",
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
+            runtime=isolation_runtime_from_metadata(workspace_obj.metadata),
         )
 
     async def _ensure_tmpdir(

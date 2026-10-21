@@ -40,6 +40,8 @@ SERVICE_IMAGES: dict[str, str] = {
     "event-store": "ghcr.io/syntropic137/event-store",
     "collector": "ghcr.io/syntropic137/syn-collector",
     "api": "ghcr.io/syntropic137/syn-api",
+    # The same image as api: one pin, one build identity (ADR-072 D1).
+    "executor": "ghcr.io/syntropic137/syn-api",
     "docker-create-guard": "ghcr.io/syntropic137/syn-api",
     "gateway": "ghcr.io/syntropic137/syn-gateway",
     "envoy-proxy": "ghcr.io/syntropic137/sidecar-proxy",
@@ -68,6 +70,7 @@ SERVICE_ORDER = [
     "docker-socket-proxy",
     "docker-create-guard",
     "api",
+    "executor",
     "gateway",
     "cloudflared",
     "minio",
@@ -126,7 +129,8 @@ def _env_to_dict(env: dict | list | None) -> dict[str, str | None]:
             k, _, v = s.partition("=")
             result[k] = v
         else:
-            result[s] = ""
+            # A bare list item is compose's pass-through too, so the same rule.
+            result[s] = None
     return result
 
 
@@ -276,22 +280,29 @@ def _apply_api_overrides(services: dict) -> None:
     - APP_ENVIRONMENT defaults to 'selfhost' (not 'production')
     - SYN_AGENT_NETWORK is hardcoded (project name is fixed)
     - GitHub App PEM uses file-based Docker secret (not env var)
+
+    The executor gets the same: it is the api image in another role, and a
+    claimed run needs exactly what an in-process one does (ADR-072 D1).
     """
-    if "api" not in services:
-        return
-    env = services["api"].get("environment", {})
+    for name in ("api", "executor"):
+        if name in services:
+            _apply_runtime_overrides(services[name])
+
+
+def _apply_runtime_overrides(service: dict) -> None:
+    env = service.get("environment", {})
     env["APP_ENVIRONMENT"] = "${APP_ENVIRONMENT:-selfhost}"
     env["SYN_AGENT_NETWORK"] = "syntropic137_selfhost_agent-net"
     # File-based secret replaces direct env var for PEM
     env["SYN_GITHUB_APP_PRIVATE_KEY_FILE"] = "/run/secrets/github_app_private_key"
     env.pop("SYN_GITHUB_PRIVATE_KEY", None)
-    services["api"]["environment"] = env
+    service["environment"] = env
 
     # Ensure github_app_private_key in secrets list
-    secrets = services["api"].get("secrets", [])
+    secrets = service.get("secrets", [])
     if "github_app_private_key" not in secrets:
         secrets.append("github_app_private_key")
-    services["api"]["secrets"] = secrets
+    service["secrets"] = secrets
 
 
 def _apply_envoy_overrides(services: dict) -> None:
@@ -451,6 +462,8 @@ def generate() -> dict:
     base_svcs = base.get("services", {})
     _resolve_extends(base_svcs, BASE_COMPOSE.parent)
     selfhost_svcs = selfhost.get("services", {})
+    # The executor has no base service and extends the passthrough directly.
+    _resolve_extends(selfhost_svcs, SELFHOST_COMPOSE.parent)
 
     # Merge services (base + selfhost overlay)
     all_names = (set(base_svcs) | set(selfhost_svcs)) - REPO_ONLY_SERVICES

@@ -89,6 +89,11 @@ NOT_FORWARDED: dict[str, str] = {
     ),
     "DEV__SMEE_URL": "host-only: `just dev` starts the smee webhook proxy on the host, not in a container.",
     # -- Pinned by the deployment: the container needs a specific value --------
+    "SYN_EXECUTION_PROCESS_ROLE": (
+        "pinned per service: docker-compose.yaml sets 'api' on the api service "
+        "and 'executor' on the executor service (ADR-072 D1). One value forwarded "
+        "into both would collapse the split."
+    ),
     "SYN_OBSERVABILITY_DB_URL": (
         "pinned: points at the bundled timescaledb service, and the selfhost "
         "entrypoint rebuilds it from the db_password Docker secret. Change the "

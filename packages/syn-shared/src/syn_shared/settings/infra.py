@@ -224,6 +224,19 @@ class InfraSettings(BaseSettings):
         ),
     )
 
+    executor_memory_limit: str = Field(
+        default="2g",
+        description=(
+            "Executor memory limit (ADR-072 D1). Idle while"
+            " SYN_EXECUTION_RUN_QUEUE_ENABLED is off; with it on, the runs it"
+            " claims are parsed and collected here instead of in the API, so"
+            " size it as API_MEMORY_LIMIT was sized (#1552)."
+        ),
+    )
+    executor_cpu_limit: str = Field(
+        default="2.0", description="Executor CPU limit, in cores (ADR-072 D1)."
+    )
+
     ui_memory_limit: str = Field(default="256m", description="UI (nginx) memory limit.")
     ui_cpu_limit: str = Field(default="0.25", description="UI (nginx) CPU limit.")
 

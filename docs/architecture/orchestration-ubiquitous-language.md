@@ -209,6 +209,19 @@ never run at once. The setup script is not retried, because a clone killed
 mid-transfer would be skipped by the re-run. Resuming provisions a fresh
 workspace instead. Each deadline is a Setting.
 
+## Workspace Runtime
+
+The OCI runtime a workspace container runs under: `runc`, `gvisor`, `kata` (a
+Kata Containers VM, run through Docker's runtime seam) or `sysbox`. An operator
+**requests** one with the `SYN_WORKSPACE_RUNTIME` Setting. Unset means
+**auto**: agentic-workspace picks gVisor when Docker has it registered and runc
+otherwise. The **effective** runtime is what agentic-workspace's resolver
+actually launched the container with. Syntropic137 never decides or detects it,
+it only reads the answer back (`IsolationRuntime` on the `IsolationHandle`). An
+explicit request Docker cannot honour fails the workspace; it never falls back
+to runc. The effective runtime is Lane 2 telemetry, one `Workspace runtime` log
+line per workspace, and does not reach an aggregate.
+
 ## Workspace Credential Policy
 
 Whether a workspace may hold the host's credentials (`WorkspaceCredentialPolicy`,
@@ -688,7 +701,8 @@ the same reason `queued` is not: there is no Execution.
 
 ## Executor
 
-The process role that runs Executions (`SYN_PROCESS_ROLE=executor`; `all`
+The process role that runs Executions (`SYN_EXECUTION_PROCESS_ROLE=executor`,
+which ADR-072 spells `SYN_PROCESS_ROLE`; `all`
 runs it beside the API in one process). It Claims admitted Executions from the
 Run Queue and runs each to a terminal status. The API process admits
 Executions and never runs one. Implemented by `ExecutionHost`. One host has a
