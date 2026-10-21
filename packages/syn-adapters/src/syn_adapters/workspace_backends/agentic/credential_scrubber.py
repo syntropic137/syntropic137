@@ -23,7 +23,13 @@ a value in:
   the edge bits it shares never leak;
 * base64 wrapped at 64 or 76 columns (``openssl``, ``base64``): the whole
   wrapped text when it arrives in one line with escaped newlines, and each
-  wrapped chunk when it arrives as a line of its own;
+  wrapped chunk wherever it stands as a base64 token of its own - a line, a
+  JSON string, a word in a line. That holds for a larger value the
+  credential is part of too: the wrap can fall anywhere in it, so a token is
+  a fragment when it is a full-width line lying inside the value's encoding
+  or touching it at an edge, or any shorter token that opens with the end of
+  it (the last line). At most ``_FRAGMENT_MIN_CHARS - 1`` characters of the
+  value can stand at either edge of a wrapped blob unmatched;
 * URL-encoded (``%XX`` in either case, and ``+`` for space);
 * JSON-escaped, so a value inside a JSON string matches as it is written.
 
@@ -31,8 +37,8 @@ EVERY NONEMPTY VALUE IS SCRUBBED, however short: the resolver accepts a short
 value, so a short value can be a real credential.
 
 JSON STAYS JSON. A line that matches and parses as JSON is scrubbed inside its
-string values and re-serialized, so a number that happens to equal a value is
-never replaced by bare text. Any other line is scrubbed as text; the marker is
+string values and re-serialized. A number that carries a value becomes the
+marker as a JSON string, never bare text, so the line still parses. Any other line is scrubbed as text; the marker is
 plain ASCII with no quote or backslash, so that is safe inside a string too.
 A line nothing matches is returned unchanged, byte for byte, after one search.
 
@@ -101,11 +107,16 @@ def _sextet_class(alphabet: str, fixed: int, fixed_bits: int, high: bool) -> str
     return "[" + "".join(re.escape(c) for c in chars) + "]"
 
 
-def _embedded_base64_patterns(value: bytes) -> set[str]:
-    """Patterns for ``value`` encoded at any byte offset inside a larger value."""
+def _aligned_encodings(value: bytes) -> list[tuple[str, str, str]]:
+    """``value`` encoded at each byte offset inside a larger value.
+
+    Each is ``(head, body, tail)``: the body is the characters that carry only
+    the value's bits, the head and tail are patterns of the edge characters it
+    shares with its neighbours.
+    """
     if len(value) < _EMBEDDED_MIN_BYTES:
-        return set()
-    patterns: set[str] = set()
+        return []
+    aligned: list[tuple[str, str, str]] = []
     for alphabet in _ALPHABETS:
         for offset in range(3):
             bits = "".join(f"{b:08b}" for b in value)
@@ -123,8 +134,37 @@ def _embedded_base64_patterns(value: bytes) -> set[str]:
                 if tail_bits
                 else ""
             )
-            patterns.add(head + re.escape(body) + tail)
-    return patterns
+            aligned.append((head, body, tail))
+    return aligned
+
+
+#: Shortest run of an encoded value that marks a wrapped token as a fragment
+#: of it: six bytes, the same floor as ``_EMBEDDED_MIN_BYTES``.
+_FRAGMENT_MIN_CHARS = 8
+
+#: A base64 token, either alphabet, with its padding.
+_BASE64_TOKEN = re.compile(rf"[A-Za-z0-9+/_-]{{{_FRAGMENT_MIN_CHARS},}}=*")
+
+
+def _is_wrapped_fragment(token: str, body: str) -> bool:
+    """Whether ``token`` is one line of a wrapped blob that carries ``body``.
+
+    A full-width line lies inside the body, or ends with its start (the first
+    line) or opens with its end (the last line). A shorter token can only be
+    the last line, so only its opening counts: a near miss, which shares the
+    body's start but not its end, is left alone. Only part of the body counts
+    at an edge: the whole of it there is not a wrap, and the complete
+    embedded pattern, edge characters included, decides it.
+    """
+    reach = min(len(token), len(body) - 1)
+    opens_with_end = any(token.startswith(body[-n:]) for n in range(_FRAGMENT_MIN_CHARS, reach + 1))
+    if len(token.rstrip("=")) not in _WRAP_WIDTHS:
+        return opens_with_end
+    return (
+        opens_with_end
+        or token in body
+        or any(token.endswith(body[:n]) for n in range(_FRAGMENT_MIN_CHARS, reach + 1))
+    )
 
 
 def _pattern_of(form: str) -> str:
@@ -145,18 +185,22 @@ def _encodings(value: str) -> tuple[set[str], set[str]]:
 class CredentialScrubber:
     """Replaces every known credential value in a line with ``REDACTED_MARKER``."""
 
-    __slots__ = ("_chunks", "_pattern", "_values")
+    __slots__ = ("_bodies", "_chunks", "_pattern", "_values")
 
     def __init__(self, values: Iterable[str] = ()) -> None:
         self._values = frozenset(v for v in values if v)
         forms: set[str] = set()
         embedded: set[str] = set()
+        bodies: set[str] = set()
         self._chunks: frozenset[str] = frozenset()
         for value in self._values:
             whole, chunks = _encodings(value)
             forms |= whole
-            embedded |= _embedded_base64_patterns(value.encode("utf-8"))
+            aligned = _aligned_encodings(value.encode("utf-8"))
+            embedded |= {head + re.escape(body) + tail for head, body, tail in aligned}
+            bodies |= {body for _, body, _ in aligned if len(body) >= _FRAGMENT_MIN_CHARS}
             self._chunks |= chunks
+        self._bodies = tuple(bodies)
         # Longest first, so a value is never half-replaced by a shorter form
         # that happens to be its prefix. Every form is escaped: a secret is
         # matched as text, never interpreted as a pattern. Embedded base64
@@ -175,28 +219,56 @@ class CredentialScrubber:
             return line
         if line.strip() in self._chunks:
             return REDACTED_MARKER
-        if self._pattern.search(line) is None:
+        # Escaped newlines unescaped, so a wrapped blob inside one JSON string
+        # splits into its lines here as it does once the string is decoded.
+        if (
+            self._pattern.search(line) is None
+            and not any(
+                self._is_fragment(m.group())
+                for m in _BASE64_TOKEN.finditer(line.replace("\\n", "\n"))
+            )
+            and not any(f'"{chunk}"' in line for chunk in self._chunks)
+        ):
             return line
         try:
             document = json.loads(line)
         except ValueError:
-            return self._pattern.sub(REDACTED_MARKER, line)
+            return self._scrub_text(line)
         if not isinstance(document, dict | list):
-            return self._pattern.sub(REDACTED_MARKER, line)
+            return self._scrub_text(line)
         return json.dumps(self._scrub_json(document), ensure_ascii=False, separators=(",", ":"))
 
+    def _is_fragment(self, token: str) -> bool:
+        """Whether ``token`` is one wrapped line of a value's base64."""
+        return token in self._chunks or any(
+            _is_wrapped_fragment(token, body) for body in self._bodies
+        )
+
+    def _scrub_text(self, text: str) -> str:
+        """``text`` with every value and every wrapped fragment of one replaced."""
+        assert self._pattern is not None
+        return _BASE64_TOKEN.sub(
+            lambda m: REDACTED_MARKER if self._is_fragment(m.group()) else m.group(),
+            self._pattern.sub(REDACTED_MARKER, text),
+        )
+
     def _scrub_json(self, node: object) -> object:
-        """``node`` with every string in it, keys included, scrubbed as text."""
+        """``node`` with every string in it, keys included, scrubbed as text.
+
+        A number is scrubbed as the text JSON writes it, and becomes the
+        marker as a string when that text carries a value.
+        """
         assert self._pattern is not None
         if isinstance(node, str):
-            return self._pattern.sub(REDACTED_MARKER, node)
+            # A chunk too short to be a token on its own still is one when it
+            # is the whole string, as it is the whole line above.
+            return REDACTED_MARKER if node.strip() in self._chunks else self._scrub_text(node)
         if isinstance(node, list):
             return [self._scrub_json(item) for item in node]
         if isinstance(node, dict):
-            return {
-                self._pattern.sub(REDACTED_MARKER, key): self._scrub_json(item)
-                for key, item in node.items()
-            }
+            return {self._scrub_text(key): self._scrub_json(item) for key, item in node.items()}
+        if isinstance(node, int | float) and not isinstance(node, bool):
+            return REDACTED_MARKER if self._pattern.search(json.dumps(node)) else node
         return node
 
     def __repr__(self) -> str:

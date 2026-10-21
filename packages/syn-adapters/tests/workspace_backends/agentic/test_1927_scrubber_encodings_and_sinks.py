@@ -326,3 +326,43 @@ async def test_a_short_value_inside_the_launch_marker_leaves_it_byte_identical()
         )
     ]
     assert lines == [marker, f"{REDACTED_MARKER} 1927"], "byte-identical (#1879)"
+
+
+def _wrapped(text: str, width: int) -> list[str]:
+    encoded = base64.b64encode(text.encode()).decode()
+    return [encoded[i : i + width] for i in range(0, len(encoded), width)]
+
+
+@pytest.mark.parametrize("width", [64, 76])
+async def test_wrapped_chunks_each_in_its_own_json_envelope_are_redacted(width):
+    secret = "sk-ant-CANARY_1927_" + "0123456789abcdef" * 6
+    chunks = _wrapped(secret, width)
+    raw = "\n".join(
+        json.dumps(
+            {"type": "user", "message": {"content": [{"type": "tool_result", "content": c}]}}
+        )
+        for c in chunks
+    ).encode()
+    adapter, _, _ = _stream([raw[i : i + 11] for i in range(0, len(raw), 11)])
+    lines = await _lines(adapter, environment={"ANTHROPIC_API_KEY": secret})
+    values = [json.loads(line)["message"]["content"][0]["content"] for line in lines]
+    assert values == [REDACTED_MARKER] * len(chunks)
+
+
+@pytest.mark.parametrize("width", [64, 76])
+async def test_wrapped_base64_of_a_value_inside_a_larger_one_is_redacted(width):
+    secret = "sk-ant-CANARY_1927_" + "0123456789abcdef" * 6
+    chunks = _wrapped("user:" + secret + ":tail", width)
+    raw = ("\n".join(chunks) + "\n").encode()
+    adapter, _, _ = _stream([raw[i : i + 11] for i in range(0, len(raw), 11)])
+    lines = await _lines(adapter, environment={"ANTHROPIC_API_KEY": secret})
+    # Every line of this blob carries bits of the value, the last one included.
+    assert lines == [REDACTED_MARKER] * len(chunks)
+
+
+async def test_a_json_number_carrying_a_value_becomes_the_marker():
+    secret = "12345678"
+    line = json.dumps({"type": "result", "num_turns": int(secret), "duration_ms": 7})
+    adapter, _, _ = _stream([(line + "\n").encode()])
+    (out,) = await _lines(adapter, environment={"SYN_API_TOKEN": secret})
+    assert json.loads(out) == {"type": "result", "num_turns": REDACTED_MARKER, "duration_ms": 7}
