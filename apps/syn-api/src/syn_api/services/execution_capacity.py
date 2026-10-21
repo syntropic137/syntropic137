@@ -38,7 +38,6 @@ from syn_domain.contexts._shared.host_capacity import (
 )
 
 if TYPE_CHECKING:
-    from syn_shared.settings.config import Settings
     from syn_shared.settings.execution import ExecutionSettings
 
 logger = logging.getLogger(__name__)
@@ -88,7 +87,7 @@ _sizing: ExecutionBudgetSizing | None = None
 _host: HostCapacityPort | None = None
 
 
-async def size_execution_budget_at_startup(settings: Settings) -> ExecutionBudgetSizing:
+async def size_execution_budget_at_startup() -> ExecutionBudgetSizing:
     """Size the budget from this host before any start can claim from it.
 
     Called once the event store is open, before degradable services start, so
@@ -97,6 +96,9 @@ async def size_execution_budget_at_startup(settings: Settings) -> ExecutionBudge
     profile store to read.
     """
     from syn_adapters.host_capacity import build_host_capacity
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
 
     async def measured_demand(window: timedelta) -> RunDemand | None:
         from syn_api._wiring import get_phase_profile_query

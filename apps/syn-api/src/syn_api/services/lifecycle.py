@@ -189,14 +189,7 @@ async def _init_critical_path() -> Result[None, LifecycleError]:
     workspace_result = _validate_workspace_settings()
     if isinstance(workspace_result, Err):
         return workspace_result
-    from syn_shared.settings import get_settings
-
-    result = await _init_event_store()
-    if isinstance(result, Ok):
-        # The profiles are read through the pool the event store just opened, and
-        # sized before any start path or the claim loop can claim (#1715).
-        await execution_capacity.size_execution_budget_at_startup(get_settings())
-    return result
+    return await _init_event_store()
 
 
 async def _init_degradable_services(state: LifecycleState) -> None:
@@ -293,7 +286,7 @@ async def startup(
 
     if settings.uses_in_memory_stores:
         # No profile store to read: sized for /health from the operator maximum.
-        await execution_capacity.size_execution_budget_at_startup(settings)
+        await execution_capacity.size_execution_budget_at_startup()
         if settings.is_offline:
             await seed_offline_data()
         return Ok({"mode": "full"})
@@ -572,6 +565,9 @@ async def _init_event_store() -> Result[None, LifecycleError]:
             message=f"Event store connection failed: {e}",
         )
 
+    # Sized through the pool just opened, before any start path or the claim
+    # loop can claim (#1715): sized earlier, the profiles are always unreadable.
+    await execution_capacity.size_execution_budget_at_startup()
     return Ok(None)
 
 

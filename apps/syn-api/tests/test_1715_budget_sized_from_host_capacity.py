@@ -167,7 +167,10 @@ async def test_the_workspace_caps_do_not_change_the_budget(
     settings = Settings(app_environment=AppEnvironment.DEVELOPMENT)
     assert settings.workspace.cpu_limit == float(cpu_limit)
 
-    await execution_capacity.size_execution_budget_at_startup(settings)
+    import syn_shared.settings as shared_settings
+
+    monkeypatch.setattr(shared_settings, "get_settings", lambda: settings)
+    await execution_capacity.size_execution_budget_at_startup()
 
     assert admission.get_execution_budget().limit == 2
 
