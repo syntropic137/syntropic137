@@ -408,15 +408,16 @@ async def _size_execution_budget(settings: Settings) -> None:
     """
     from syn_adapters.host_capacity import build_host_capacity
 
-    demand = None
-    if not settings.uses_in_memory_stores:
+    async def measured_demand(window: timedelta) -> RunDemand | None:
+        from syn_api._wiring import get_phase_profile_query
 
-        async def demand(window: timedelta) -> RunDemand | None:
-            from syn_api._wiring import get_phase_profile_query
+        return await get_phase_profile_query().run_demand(window)
 
-            return await get_phase_profile_query().run_demand(window)
-
-    await apply_host_sized_budget(build_host_capacity(), demand, settings.execution)
+    await apply_host_sized_budget(
+        build_host_capacity(),
+        None if settings.uses_in_memory_stores else measured_demand,
+        settings.execution,
+    )
 
 
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
