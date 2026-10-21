@@ -48,6 +48,7 @@ _SSH = """#!/usr/bin/env bash
 echo "$*" >> "$PIT_LOG/ssh"
 case "$*" in
     *"cat /root/.syntropic137/docker-compose.syntropic137.yaml"*) cat "$PIT_COMPOSE" ;;
+    *"ps -eo args"*) echo 0 ;;
 esac
 """
 

@@ -77,6 +77,8 @@ else:
 
 _SSH = r"""#!/usr/bin/env python3
 import os, subprocess, sys
+if sys.argv[-1].startswith("ps -eo args"):  # this machine's processes are not the host's
+    print(0); sys.exit(0)
 sys.exit(subprocess.call(["bash", "-c", sys.argv[-1].replace("/root/.syntropic137", os.environ["HAZARD_HOST"])]))
 """
 
@@ -245,9 +247,11 @@ def test_a_gateway_that_will_not_start_aborts_with_the_recovery(
         assert "admission was never paused" in run.proc.stderr
     else:
         assert "admission is still PAUSED" in run.proc.stderr
-        # Never resumed over a gateway that is down.
+        # The swap began, so the exit trap leaves admission paused: a build
+        # that failed verify never takes traffic (#1575, narrowed by #1310 1.6).
         assert [c for c in run.calls if '"active": true' in c]
         assert not [c for c in run.calls if '"active": false' in c]
+        assert "admission is still PAUSED on purpose (code 1)" in run.proc.stderr
 
 
 @pytest.mark.parametrize("service", ["gateway", "all"])

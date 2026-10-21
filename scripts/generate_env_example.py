@@ -747,6 +747,8 @@ def generate_infra_env_example() -> str:
         "RESOURCE LIMITS": [
             "api_memory_limit",
             "api_cpu_limit",
+            "executor_memory_limit",
+            "executor_cpu_limit",
             "ui_memory_limit",
             "ui_cpu_limit",
             "postgres_memory_limit",

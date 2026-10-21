@@ -688,7 +688,8 @@ the same reason `queued` is not: there is no Execution.
 
 ## Executor
 
-The process role that runs Executions (`SYN_PROCESS_ROLE=executor`; `all`
+The process role that runs Executions (`SYN_EXECUTION_PROCESS_ROLE=executor`,
+which ADR-072 spells `SYN_PROCESS_ROLE`; `all`
 runs it beside the API in one process). It Claims admitted Executions from the
 Run Queue and runs each to a terminal status. The API process admits
 Executions and never runs one. Implemented by `ExecutionHost`. One host has a
