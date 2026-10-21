@@ -14,6 +14,7 @@ nothing failed until a real selfhost-profile stack tried to run a workflow.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -81,4 +82,43 @@ def test_the_cosign_cache_tmpfs_is_size_bounded(path: Path, api: dict) -> None:
         f"{path.name}: {_COSIGN_CACHE} is mounted without a size limit "
         f"({cosign[0]!r}), so it may grow to half of host RAM and OOM-kill "
         "the api container"
+    )
+
+
+_DOCKERFILE = _ROOT / "infra" / "docker" / "images" / "syn-api" / "Dockerfile"
+
+#: tmpfs mounts the api user must own. Docker restores a tmpfs after a host
+#: reboot as root:root 755 (a fresh one is 1777), so without uid/gid the
+#: non-root api cannot write them and every run fails at bootstrap (2026-10-20).
+_USER_OWNED_TMPFS = ("/home/syn/.sigstore", "/home/syn/.config")
+
+
+def _api_uid() -> str:
+    match = re.search(r"useradd\b[^\n]*?-u\s+(\d+)\s+syn\b", _DOCKERFILE.read_text())
+    assert match, f"{_DOCKERFILE}: no `useradd ... -u <uid> syn` line to read the api uid from"
+    return match.group(1)
+
+
+def _tmpfs_options(entry: str) -> dict[str, str]:
+    _, _, raw = entry.partition(":")
+    pairs = (opt.partition("=") for opt in raw.split(",") if opt)
+    return {key: value for key, _, value in pairs}
+
+
+@pytest.mark.parametrize("path,api", _api_services(), ids=lambda v: getattr(v, "name", ""))
+@pytest.mark.parametrize("mount", _USER_OWNED_TMPFS)
+def test_user_tmpfs_is_owned_by_the_api_user(path: Path, api: dict, mount: str) -> None:
+    if not api.get("read_only"):
+        pytest.skip(f"{path.name}: api is not read_only")
+
+    entries = [str(m) for m in (api.get("tmpfs") or [])]
+    matches = [m for m in entries if m.split(":")[0] == mount]
+    assert matches, f"{path.name}: no {mount} tmpfs"
+
+    uid = _api_uid()
+    options = _tmpfs_options(matches[0])
+    assert options.get("uid") == uid and options.get("gid") == uid, (
+        f"{path.name}: {mount} tmpfs is {matches[0]!r}; it must set uid={uid},gid={uid} "
+        f"(the syn user in {_DOCKERFILE.name}). After a host reboot Docker restores it "
+        "root:root 755 and the api cannot write it"
     )
