@@ -209,6 +209,19 @@ never run at once. The setup script is not retried, because a clone killed
 mid-transfer would be skipped by the re-run. Resuming provisions a fresh
 workspace instead. Each deadline is a Setting.
 
+## Workspace Runtime
+
+The OCI runtime a workspace container runs under: `runc`, `gvisor`, `kata` (a
+Kata Containers VM, run through Docker's runtime seam) or `sysbox`. An operator
+**requests** one with the `SYN_WORKSPACE_RUNTIME` Setting. Unset means
+**auto**: agentic-workspace picks gVisor when Docker has it registered and runc
+otherwise. The **effective** runtime is what agentic-workspace's resolver
+actually launched the container with. Syntropic137 never decides or detects it,
+it only reads the answer back (`IsolationRuntime` on the `IsolationHandle`). An
+explicit request Docker cannot honour fails the workspace; it never falls back
+to runc. The effective runtime is Lane 2 telemetry, one `Workspace runtime` log
+line per workspace, and does not reach an aggregate.
+
 ## Workspace Credential Policy
 
 Whether a workspace may hold the host's credentials (`WorkspaceCredentialPolicy`,
