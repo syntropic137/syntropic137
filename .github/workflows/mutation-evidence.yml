@@ -218,6 +218,9 @@ jobs:
           TEST_TIMESCALEDB_PORT: "15432"
           TEST_EVENTSTORE_HOST: localhost
           TEST_EVENTSTORE_PORT: "55051"
+          # Any image with sh, for the Docker operation contract tests. Reaches them
+          # only in docker mode (--host); the sandbox forwards FORWARDED_ENV alone.
+          SYN_CONTRACT_TEST_IMAGE: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
         # evidence.json goes in its own directory: the `evidence` artifact
         # uploads exactly that directory and nothing else from RUNNER_TEMP.
         run: |

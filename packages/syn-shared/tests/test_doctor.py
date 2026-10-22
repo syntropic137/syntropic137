@@ -15,6 +15,8 @@ from pydantic import ValidationError
 
 from syn_shared.doctor import (
     CaptureVerdict,
+    DoctorReport,
+    EffectiveRuntime,
     EnvSources,
     Source,
     _load_vault,
@@ -24,6 +26,7 @@ from syn_shared.doctor import (
     render,
     resolve_variable,
     resolver_tier,
+    with_effective_runtime,
 )
 from syn_shared.settings.session_store import (
     ENV_SYN_SESSION_STORE_AUTH_TOKEN,
@@ -32,6 +35,7 @@ from syn_shared.settings.session_store import (
     SessionStoreSettings,
     usable_label,
 )
+from syn_shared.settings.workspace import WorkspaceRuntime
 from syn_shared.settings.workspace_images import (
     DEFAULT_WORKSPACE_PROVIDER,
     PINNED_DIGESTS,
@@ -766,3 +770,119 @@ def test_the_label_rule_has_one_definition() -> None:
     for candidate in ("mac-mini", "prod:west", "", "a" * 65, "  spaced  "):
         settings = SessionStoreSettings(label=candidate, _env_file=None)  # pyright: ignore[reportCallIssue]
         assert settings.display_label == usable_label(candidate)
+
+
+# ---------------------------------------------------------------------------
+# Workspace runtime (SYN_WORKSPACE_RUNTIME)
+# ---------------------------------------------------------------------------
+
+
+def test_unset_runtime_is_reported_as_auto() -> None:
+    report = build_report(_sources())
+    text = render(report, show_values=False)
+    assert "Workspace runtime" in text
+    assert "SYN_WORKSPACE_RUNTIME" in text
+    assert "auto" in text
+    assert report.exit_code == 0
+
+
+def _runtime_section(report: DoctorReport) -> str:
+    text = render(report, show_values=False)
+    return text.split("Workspace runtime\n", 1)[1].split("\n\n", 1)[0]
+
+
+class _Probe:
+    """Stands in for agentic-workspace's resolver: records what it was asked."""
+
+    def __init__(self, answer: EffectiveRuntime) -> None:
+        self.answer = answer
+        self.asked: list[WorkspaceRuntime | None] = []
+
+    def __call__(self, requested: WorkspaceRuntime | None) -> EffectiveRuntime:
+        self.asked.append(requested)
+        return self.answer
+
+
+def test_auto_reports_the_runtime_the_resolver_chose() -> None:
+    probe = _Probe(EffectiveRuntime(effective=WorkspaceRuntime.GVISOR, alias="runsc", error=None))
+
+    report = with_effective_runtime(build_report(_sources()), probe)
+
+    assert probe.asked == [None]
+    section = _runtime_section(report)
+    assert "effective" in section
+    assert "gvisor (Docker alias 'runsc'" in section
+    assert report.exit_code == 0
+
+
+def test_an_explicit_runtime_is_asked_for_and_its_answer_reported() -> None:
+    probe = _Probe(EffectiveRuntime(effective=WorkspaceRuntime.KATA, alias="kata", error=None))
+
+    report = with_effective_runtime(
+        build_report(_sources(dotenv={"SYN_WORKSPACE_RUNTIME": "kata"})), probe
+    )
+
+    assert probe.asked == [WorkspaceRuntime.KATA]
+    assert report.workspace_runtime.value == "kata"
+    assert "kata (Docker alias 'kata'" in _runtime_section(report)
+    assert report.exit_code == 0
+
+
+def test_a_runtime_the_resolver_refuses_fails_the_doctor() -> None:
+    probe = _Probe(EffectiveRuntime(effective=None, alias=None, error="no kata registered"))
+
+    report = with_effective_runtime(
+        build_report(_sources(environ={"SYN_WORKSPACE_RUNTIME": "kata"})), probe
+    )
+
+    assert report.exit_code == 1
+    section = _runtime_section(report)
+    assert "unresolved" in section
+    assert "cannot resolve runtime kata" in section
+    assert "no kata registered" in section
+
+
+def test_without_a_resolver_the_effective_runtime_is_not_claimed() -> None:
+    report = with_effective_runtime(build_report(_sources()), None)
+
+    assert report.effective_runtime is None
+    assert "not resolved" in _runtime_section(report)
+
+
+def test_an_invalid_request_is_never_sent_to_the_resolver() -> None:
+    probe = _Probe(EffectiveRuntime(effective=WorkspaceRuntime.RUNC, alias="runc", error=None))
+
+    report = with_effective_runtime(
+        build_report(_sources(environ={"SYN_WORKSPACE_RUNTIME": "runsc"})), probe
+    )
+
+    assert probe.asked == []
+    assert report.exit_code == 1
+
+
+def test_main_reports_what_the_supplied_resolver_answered(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SYN_WORKSPACE_RUNTIME", raising=False)
+    probe = _Probe(EffectiveRuntime(effective=WorkspaceRuntime.GVISOR, alias="runsc", error=None))
+
+    main(["--no-1password", "--repo-root", str(tmp_path)], runtime_probe=probe)
+
+    assert probe.asked == [None]
+    assert "gvisor (Docker alias 'runsc'" in capsys.readouterr().out
+
+
+def test_a_runtime_settings_would_refuse_fails_the_doctor() -> None:
+    """`runsc` is Docker's alias, not the runtime: the likeliest typo, refused at startup."""
+    report = build_report(_sources(environ={"SYN_WORKSPACE_RUNTIME": "runsc"}))
+    assert report.exit_code == 1
+    text = render(report, show_values=False)
+    assert "'runsc' is not a known runtime" in text
+    assert "gvisor" in text
+
+
+def test_the_doctor_reports_the_variable_settings_read() -> None:
+    from syn_shared.settings.workspace import ENV_SYN_WORKSPACE_RUNTIME, WorkspaceSettings
+
+    prefix = WorkspaceSettings.model_config.get("env_prefix")
+    assert f"{prefix}runtime".upper() == ENV_SYN_WORKSPACE_RUNTIME

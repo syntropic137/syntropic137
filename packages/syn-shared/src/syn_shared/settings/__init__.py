@@ -74,6 +74,7 @@ from syn_shared.settings.storage import (
     StorageSettings,
 )
 from syn_shared.settings.workspace import (
+    WorkspaceRuntime,
     WorkspaceSettings,
 )
 from syn_shared.settings.workspace_images import (
@@ -106,6 +107,7 @@ __all__ = [
     "StorageProvider",
     "StorageSettings",
     "WorkspaceImageProvider",
+    "WorkspaceRuntime",
     "WorkspaceSettings",
     "get_github_settings",
     "get_settings",

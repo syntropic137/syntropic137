@@ -104,9 +104,12 @@ class ExecutionSettings(BaseSettings):
         ge=1,
         validation_alias=ENV_SYN_EXECUTION_MAX_CONCURRENT,
         description=(
-            "How many workflow executions this API process runs at once, across "
+            "The most workflow executions this process runs at once, across "
             "EVERY start path: POST /workflows/{id}/execute, trigger dispatch and "
-            "resume. Further starts wait in a FIFO queue and show as status "
+            "resume. The budget actually applied is this or less: it is sized at "
+            "startup from host cores, memory and free disk against the measured "
+            "per-run demand (#1715), and /health reports it with the term that "
+            "bound it. Further starts wait in a FIFO queue and show as status "
             "'queued' with their position (syn execution show). Per process, not "
             "per cluster. "
             "What high concurrency costs is CAPACITY: every running execution "
@@ -121,6 +124,58 @@ class ExecutionSettings(BaseSettings):
             "per-run processor state (#865), which is why this was 1; #1311 gave "
             "each execution its own state. Replaces "
             "SYN_POLLING_MAX_CONCURRENT_DISPATCHES, which is now ignored."
+        ),
+    )
+
+    # Sizing the budget from host capacity (#1715). The budget is
+    # min(max_concurrent, cpu, memory, disk terms); see
+    # syn_domain.contexts._shared.host_capacity for the formula.
+    platform_reserve_cores: float = Field(
+        default=2.0,
+        ge=0,
+        description=(
+            "CPU cores kept back from executions for the platform itself (API, "
+            "Postgres, event store, Redis) when the execution budget is sized from "
+            "host capacity (#1715). The CPU term is (host cores - this) x "
+            "SYN_EXECUTION_TARGET_UTILISATION / the measured median cores one run uses."
+        ),
+    )
+    target_utilisation: float = Field(
+        default=0.8,
+        gt=0,
+        le=1,
+        description=(
+            "Share of the CPU left after SYN_EXECUTION_PLATFORM_RESERVE_CORES that "
+            "executions may use, between 0 and 1 (#1715). Headroom for bursts above "
+            "the median."
+        ),
+    )
+    memory_reserve_mb: int = Field(
+        default=4096,
+        ge=0,
+        description=(
+            "Host memory in MB kept back from executions for the platform (#1715). "
+            "The memory term is (host memory - this) / the measured p95 peak memory "
+            "of one run's workspace, never the SYN_WORKSPACE_MEMORY_LIMIT_MB cap."
+        ),
+    )
+    disk_floor_gib: float = Field(
+        default=10.0,
+        ge=0,
+        description=(
+            "Free disk in GiB on the workspace volume kept back from executions "
+            "(#1715). The disk term is (free disk - this) / the measured p95 disk "
+            "one run's workspace leaves at teardown."
+        ),
+    )
+    profile_window_days: float = Field(
+        default=7.0,
+        gt=0,
+        description=(
+            "How many days of phase resource profiles (#1716) the per-run demand is "
+            "measured over when sizing the budget. With fewer than 10 measured "
+            "phases in the window the budget is SYN_EXECUTION_MAX_CONCURRENT and "
+            "/health says operator_max_no_profile."
         ),
     )
 

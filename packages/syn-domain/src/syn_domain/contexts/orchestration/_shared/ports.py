@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable, Iterable
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         Artifact,
@@ -209,6 +209,7 @@ class EventStreamPort(Protocol):
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
         wrapper_name: str | None = None,
+        withheld: Callable[[], Iterable[str]] | None = None,
     ) -> AsyncIterator[str]:
         """Stream stdout lines from command execution.
 
@@ -220,6 +221,12 @@ class EventStreamPort(Protocol):
         stream existed. None means the caller is not collecting launch
         evidence, and a transport that creates no process ignores it either
         way.
+
+        ``withheld`` returns credential values the workload holds beyond the
+        ones in ``environment`` (its GitHub tokens, renewed while it runs). A
+        transport that runs a workload must replace every credential value it
+        knows of in the lines it yields (#1927); one that replays or invents
+        output has none to replace and ignores it.
         """
         ...
 

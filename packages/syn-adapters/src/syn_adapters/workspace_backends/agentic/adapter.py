@@ -33,18 +33,25 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_to_workspace,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
-from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
-from syn_adapters.workspace_backends.agentic.session_store_env import (
-    apply_session_store_env,
-    deployment_identity,
-    session_store_credential_bindings,
+from syn_adapters.workspace_backends.agentic.credential_scrubber import (
+    CredentialScrubber,
+    scrub_bytes,
 )
+from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 
 # Re-exported for backward compatibility (issue #771 item 7): the canonical
 # definition lives in `syn_adapters.workspace_backends.errors` so it can be
 # raised/imported without depending on this Docker-specific module. Existing
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
+from syn_adapters.workspace_backends.agentic.runtime_mapping import (
+    isolation_runtime_from_metadata,
+)
+from syn_adapters.workspace_backends.agentic.session_store_env import (
+    apply_session_store_env,
+    deployment_identity,
+    session_store_credential_bindings,
+)
 from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
 from syn_adapters.workspace_backends.backend_kit import BackendKit
 from syn_adapters.workspace_backends.errors import (
@@ -426,6 +433,7 @@ class AgenticIsolationAdapter:
             proxy_url=None,
             workspace_path="/workspace",
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
+            runtime=isolation_runtime_from_metadata(workspace_obj.metadata),
         )
 
     async def _ensure_tmpdir(
@@ -670,8 +678,14 @@ class AgenticIsolationAdapter:
         patterns: list[str],
         base_path: str = "/workspace",
     ) -> list[tuple[str, bytes]]:
-        """Copy files from workspace via mounted volume."""
-        return await copy_files_from_workspace(handle, patterns, base_path)
+        """Copy files from workspace via mounted volume.
+
+        Every workspace holds the session-store token, and only this adapter
+        knows it, so a file the workload wrote leaves with it replaced (#1927).
+        """
+        collected = await copy_files_from_workspace(handle, patterns, base_path)
+        scrubber = CredentialScrubber(self.credentials.withheld(()))
+        return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
 
 
 def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:

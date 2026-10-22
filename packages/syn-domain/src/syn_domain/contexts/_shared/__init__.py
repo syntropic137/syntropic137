@@ -9,6 +9,15 @@ from syn_domain.contexts._shared.disk_space import (
     DiskUsage,
     InsufficientDiskSpaceError,
 )
+from syn_domain.contexts._shared.host_capacity import (
+    BindingTerm,
+    CapacityReserves,
+    ExecutionBudgetSizing,
+    HostCapacity,
+    HostCapacityPort,
+    RunDemand,
+    size_execution_budget,
+)
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.maintenance import (
     AdmissionAnnouncementFailedError,
@@ -33,17 +42,24 @@ __all__ = [
     "AdmissionOpenEvent",
     "AdmissionRefusedError",
     "AdmissionTicket",
+    "BindingTerm",
+    "CapacityReserves",
     "DiskCheck",
     "DiskSpaceGuard",
     "DiskSpacePort",
     "DiskState",
     "DiskUsage",
+    "ExecutionBudgetSizing",
+    "HostCapacity",
+    "HostCapacityPort",
     "InsufficientDiskSpaceError",
     "MaintenanceMode",
     "MaintenancePausedError",
     "MaintenancePort",
     "RepositoryRef",
+    "RunDemand",
     "carrying",
     "guarantee_settled",
     "refuse_if_paused",
+    "size_execution_budget",
 ]
