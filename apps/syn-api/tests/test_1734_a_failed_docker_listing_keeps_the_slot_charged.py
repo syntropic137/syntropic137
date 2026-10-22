@@ -12,7 +12,7 @@ pinned in test_host_scoped_reap_guards_unpushed_work_first.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,6 +22,9 @@ from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
 from syn_api.services.dead_host_reaper import DockerDeadHostReaper
 from syn_domain.contexts.orchestration.ports import ClaimedRun, ExecutorHost
 from syn_shared.settings import reset_settings
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
