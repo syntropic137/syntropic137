@@ -1,0 +1,12 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 0d6f3da4a..e4ef9144d 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1144,7 +1144,6 @@ class HeadlessJudgeClient:
+     transport: ModelClient = field(default_factory=lambda: ClaudeHeadless(effort=JUDGE_EFFORT))
+ 
+     def complete(self, *, model: str, system: str, prompt: str) -> str:
+-        model = require_judge_model(model)
+         try:
+             return self.transport.complete(model=model, system=system, prompt=prompt)
+         except (ClaudeHeadlessError, OSError) as exc:

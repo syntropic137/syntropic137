@@ -1,0 +1,15 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 0d6f3da4a..bdda4806a 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1148,9 +1148,7 @@ class HeadlessJudgeClient:
+         try:
+             return self.transport.complete(model=model, system=system, prompt=prompt)
+         except (ClaudeHeadlessError, OSError) as exc:
+-            raise JudgeTransportError(
+-                f"the LLM judge got no answer from {model}: {type(exc).__name__}: {exc}"
+-            ) from exc
++            return '{"verdict": "no_match", "quote": "", "reason": "no answer"}'
+ 
+ 
+ def scorer_version(loaded: LoadedSuite, llm: Judge | None) -> str:

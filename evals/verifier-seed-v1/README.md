@@ -44,9 +44,18 @@ Two judges answer one question: does a blocking finding identify THIS defect?
 
 - **Keyword judge** (always; deterministic, offline): one blocking finding
   names an expected file and has a word from every `expected.keywords` group.
-- **LLM judge** (`score --llm-judge`; runs through Claude Code, `claude -p`, on
-  the CLI's own login, so `claude` must be on PATH and logged in): a pinned model (`claude-sonnet-5-5`,
-  at a pinned effort) is given the case's root cause (`expected.defect`,
+- **LLM judge** (`score --llm-judge`; runs through Claude Code headless,
+  `claude -p`, on the CLI's own OAuth login, so `claude` must be on PATH and
+  logged in with `claude auth login`): the transport is agentic-workspace's
+  `ClaudeHeadless` (`lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/harnesses/claude/headless.py`),
+  which strips API-key and cloud-provider variables from the CLI's environment,
+  refuses to answer unless `claude auth status` reports a first-party OAuth
+  login with no API key source, and never calls the Messages API with a key.
+  This repo's `HeadlessJudgeClient` (`scripts/eval_suite.py`) refuses any model
+  outside `JUDGE_MODELS` before the CLI starts and turns every transport
+  failure into a `JudgeTransportError`, which fails the judgement: a failed
+  call is never a verdict. A pinned model (`claude-sonnet-5-5`,
+  at a pinned effort, `medium`) is given the case's root cause (`expected.defect`,
   required: the judge refuses a case without it), the expected files and
   keyword concepts, and the blocking findings, and answers `match`, `no_match`
   or `unclear` as one JSON object, quoting the finding it matched.
