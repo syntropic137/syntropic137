@@ -330,16 +330,12 @@ def build_workspace_service(
 
     A function of its own so a test can build exactly what production runs.
     No credential policy is passed, deliberately: the executor this wiring
-    serves runs real agents, which need the host's credentials.
-
-    E2B replaces Docker only when SYN_E2B_ENABLED is set (#1915, dark); loading
-    its settings fails when it is enabled without a key or template.
+    serves runs real agents, which need the host's credentials. E2B only when SYN_E2B_ENABLED (#1915).
     """
     from syn_shared.settings import get_settings
 
-    e2b = get_settings().e2b
     return WorkspaceService.create(
-        backend=WorkspaceBackend.selected(e2b),
+        backend=WorkspaceBackend.selected(e2b := get_settings().e2b),
         e2b=e2b,
         config=ws_config,
         environment=_build_workspace_env(),
