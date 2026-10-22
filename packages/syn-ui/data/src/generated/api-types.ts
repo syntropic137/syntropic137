@@ -25,6 +25,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workflow Trends Endpoint
+         * @description Several workflows' latest runs as trend points in one request; unknown ids are left out (#1872).
+         */
+        get: operations["list_workflow_trends_endpoint_workflows_trends_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows/{workflow_id}": {
         parameters: {
             query?: never;
@@ -720,7 +740,11 @@ export interface paths {
         put?: never;
         /**
          * Create Eval Endpoint
-         * @description Create an eval, pinning each baseline ref to a commit SHA. The id is minted here.
+         * @description Create an eval, pinning each baseline ref to a commit SHA.
+         *
+         *     The id is minted here, or derived from `stable_key`. A derived id is one
+         *     stream however many creators race for it: the store admits the first and
+         *     the rest answer with that eval (#1920).
          */
         post: operations["create_eval_endpoint_evals_post"];
         delete?: never;
@@ -2806,6 +2830,12 @@ export interface components {
             eval_id: components["schemas"]["EvalId"];
         };
         /**
+         * BindingTerm
+         * @description Which term of the formula set the budget.
+         * @enum {string}
+         */
+        BindingTerm: "operator_max" | "cpu" | "memory" | "disk" | "operator_max_no_profile" | "operator_max_profiles_unreadable" | "operator_max_host_unreadable";
+        /**
          * BodyAvailability
          * @enum {string}
          */
@@ -3338,9 +3368,14 @@ export interface components {
         };
         /**
          * CreateEvalRequest
-         * @description A new eval (#967). The server mints its id; see `EvalCreatedResponse`.
+         * @description A new eval (#967). The server mints its id unless `stable_key` names one.
          */
         CreateEvalRequest: {
+            /**
+             * Stable Key
+             * @description Makes the create idempotent (#1920): the eval id is derived from this key, so every create with the same key, concurrent ones included, answers with the one eval. A create that differs from the one that made it is refused.
+             */
+            stable_key?: string | null;
             /** Name */
             name: string;
             /**
@@ -3566,7 +3601,7 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space" | "workspace_reclaim";
         /**
          * DelegationAttempt
          * @description One delegate the phase's agent launched, as the platform observed it.
@@ -3675,6 +3710,32 @@ export interface components {
              * @description One line for an operator: free space, the floors and where they came from.
              */
             detail: string;
+            /** @description The workspace directory reclaimer's last pass (#1983); null when its state could not be read. */
+            reclaim?: components["schemas"]["WorkspaceReclaimHealth"] | null;
+        };
+        /**
+         * DurationTrendSummaryResponse
+         * @description A workflow card's duration trend label, formatted here so the UI only renders it (#1872).
+         *
+         *     Fitted over the latest ``runs`` measured durations (at most 12): a change
+         *     under 5% is steady, fewer than 3 measured runs is too few to tell.
+         */
+        DurationTrendSummaryResponse: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "none" | "few" | "faster" | "slower" | "steady";
+            /** Pct */
+            pct: number;
+            /** Runs */
+            runs: number;
+            /** Word Display */
+            word_display: string;
+            /** Sub Display */
+            sub_display: string;
+            /** Label Display */
+            label_display: string;
         };
         /**
          * EvalArchivedResponse
@@ -4221,6 +4282,39 @@ export interface components {
              * @default Workflow execution started
              */
             message: string;
+        };
+        /**
+         * ExecutionBudgetHealth
+         * @description The execution budget this process enforces, and what it is doing right now (#1715).
+         */
+        ExecutionBudgetHealth: {
+            /**
+             * Budget
+             * @description Most executions this process runs at once.
+             */
+            budget: number;
+            /** @description Which term set the budget: 'cpu', 'memory' or 'disk' when the host is the limit; 'operator_max' when SYN_EXECUTION_MAX_CONCURRENT is; 'operator_max_no_profile' when too few phases have been measured to size from; 'operator_max_profiles_unreadable' or 'operator_max_host_unreadable' when a read failed and the budget fell back to SYN_EXECUTION_MAX_CONCURRENT. */
+            binding_term: components["schemas"]["BindingTerm"];
+            /**
+             * Admitted
+             * @description Starts accepted into the budget: since this process began with the Run Queue off; every run the Run Queue has admitted, across the pool, with it on.
+             */
+            admitted: number;
+            /**
+             * Running
+             * @description Starts holding a slot now: in this process with the Run Queue off; Run Queue runs claimed, fencing or reaped, across the pool, with it on.
+             */
+            running: number;
+            /**
+             * Queued
+             * @description Starts waiting for a slot now: in this process with the Run Queue off; Run Queue runs admitted and not yet claimed, across the pool, with it on.
+             */
+            queued: number;
+            /**
+             * Cpu Pressure Avg60
+             * @description Percent of the last 60s some task on this host waited for CPU (PSI 'some avg60'). Null where the kernel does not report it.
+             */
+            cpu_pressure_avg60?: number | null;
         };
         /**
          * ExecutionBudgetInfo
@@ -5602,6 +5696,8 @@ export interface components {
             db_pools?: components["schemas"]["DbPoolHealth"][] | null;
             /** @description How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API. */
             cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
+            /** @description The execution budget sized from host capacity and measured per-run demand, the term that bound it, and the starts admitted, running and queued in this process or the Run Queue (#1715). Omitted before startup has sized it, and when the Run Queue cannot be read. */
+            execution_budget?: components["schemas"]["ExecutionBudgetHealth"] | null;
         };
         /**
          * HeatmapDayBucketResponse
@@ -6089,6 +6185,42 @@ export interface components {
             cost_usd: string;
         };
         /**
+         * OomKilledPhaseResponse
+         * @description One phase whose workspace was OOM-killed, as the provider measured it.
+         *
+         *     Set from the provider's ``oom_killed`` (cgroup ``oom_kill`` count or
+         *     Docker's ``State.OOMKilled``), never inferred from an exit code: an exit
+         *     137 is any SIGKILL.
+         */
+        OomKilledPhaseResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /**
+             * Oom Killed
+             * @constant
+             */
+            oom_killed: true;
+            /** Memory Peak Bytes */
+            memory_peak_bytes: number | null;
+            /** Oom Kills */
+            oom_kills: number | null;
+        };
+        /**
+         * OomKillsResponse
+         * @description Every phase of this type in exactly one bucket.
+         *
+         *     ``unknown`` is a phase nothing measured: no usage row, or a row with no
+         *     OOM signal. It is never folded into ``not_killed``.
+         */
+        OomKillsResponse: {
+            /** Killed */
+            killed: number;
+            /** Not Killed */
+            not_killed: number;
+            /** Unknown */
+            unknown: number;
+        };
+        /**
          * OperationInfo
          * @description Information about a session operation.
          */
@@ -6311,6 +6443,8 @@ export interface components {
              * @default true
              */
             delivers_repo_changes: boolean;
+            /** @default read */
+            platform_access: components["schemas"]["PlatformScope"];
             /**
              * Requires Verdict
              * @default false
@@ -6591,10 +6725,15 @@ export interface components {
         PhaseResourceProfileResponse: {
             /** Phase Id */
             phase_id: string;
+            cpu_usage_seconds: components["schemas"]["ResourcePercentilesResponse"];
+            wall_seconds: components["schemas"]["ResourcePercentilesResponse"];
             cpu_seconds_per_wall_second: components["schemas"]["ResourcePercentilesResponse"];
             cpu_throttled_seconds: components["schemas"]["ResourcePercentilesResponse"];
             memory_peak_bytes: components["schemas"]["ResourcePercentilesResponse"];
             disk_bytes_at_teardown: components["schemas"]["ResourcePercentilesResponse"];
+            oom: components["schemas"]["OomKillsResponse"];
+            /** Oom Killed Phases */
+            oom_killed_phases: components["schemas"]["OomKilledPhaseResponse"][];
             coverage: components["schemas"]["ResourceCoverageResponse"];
         };
         /**
@@ -6703,6 +6842,18 @@ export interface components {
             /** Status Display */
             status_display: string;
         };
+        /**
+         * PlatformScope
+         * @description The one scope a workspace's platform token carries.
+         *
+         *     ``READ`` is every phase's default: GET/HEAD on the read-only resources.
+         *     ``EVAL`` is READ plus exactly two writes - launching a workflow run INTO a
+         *     named eval, and scoring a run of an eval - and only a phase that declares
+         *     ``platform_access: eval`` is given it. ADR-072 is the authority for what
+         *     each scope reaches; ``syn_adapters.platform_access`` is the enforcement.
+         * @enum {string}
+         */
+        PlatformScope: "read" | "eval";
         /**
          * Priority
          * @description Feedback priority level.
@@ -7470,17 +7621,21 @@ export interface components {
         };
         /**
          * ResourcePercentilesResponse
-         * @description p50/p95 of one measure over ``n`` measured phases; null below ten.
+         * @description p50/p90/p95 of one measure over ``n`` measured phases; null below ten.
          */
         ResourcePercentilesResponse: {
             /** N */
             n: number;
             /** P50 */
             p50: number | null;
+            /** P90 */
+            p90: number | null;
             /** P95 */
             p95: number | null;
             /** P50 Display */
             p50_display: string;
+            /** P90 Display */
+            p90_display: string;
             /** P95 Display */
             p95_display: string;
         };
@@ -7565,6 +7720,33 @@ export interface components {
             parent_execution_id: string;
             /** Resume Phase Id */
             resume_phase_id: string;
+        };
+        /**
+         * RetainedReason
+         * @description Why a stale workspace directory was kept (#1983). Kept is not failed.
+         *
+         *     Each names the one proof that could not be made. /health counts them, so
+         *     an operator sees what the disk is holding and why, not one opaque number.
+         * @enum {string}
+         */
+        RetainedReason: "unowned" | "not_terminal" | "mounted" | "unreadable" | "dirty" | "unversioned" | "stash" | "unpushed_unproven" | "submodule_store_unproven" | "unreachable_objects" | "capture_unknown" | "identity_changed" | "delete_failed";
+        /**
+         * RetainedWorkspaceDirs
+         * @description Workspace directories the reclaimer kept for one reason, at its last pass (#1983).
+         */
+        RetainedWorkspaceDirs: {
+            /** @description The proof that could not be made. */
+            reason: components["schemas"]["RetainedReason"];
+            /**
+             * Count
+             * @description Directories kept for this reason.
+             */
+            count: number;
+            /**
+             * Size Bytes
+             * @description Bytes those directories hold, as measured.
+             */
+            size_bytes: number;
         };
         /**
          * ReviewVerdict
@@ -9870,6 +10052,29 @@ export interface components {
          */
         Verdict: "PASS" | "FAIL" | "ERROR";
         /**
+         * WorkflowCardTrendResponse
+         * @description A workflow's trend points plus the card's formatted duration trend (#1872).
+         */
+        WorkflowCardTrendResponse: {
+            /** Definition Version */
+            definition_version: string | null;
+            /** Definition Changed At */
+            definition_changed_at: string | null;
+            /** Definition Changes */
+            definition_changes: components["schemas"]["DefinitionChangeResponse"][];
+            /** Workflow Id */
+            workflow_id: string;
+            /** Items */
+            items: components["schemas"]["WorkflowTrendPointResponse"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            duration_trend: components["schemas"]["DurationTrendSummaryResponse"];
+        };
+        /**
          * WorkflowDefaultEvalResponse
          * @description A workflow's default eval after an edit, read from the aggregate (#967).
          */
@@ -10039,6 +10244,69 @@ export interface components {
             page_size: number;
         };
         /**
+         * WorkflowTrendsResponse
+         * @description The latest runs of several workflows as trend points, in one response (#1872).
+         *
+         *     The Workflows page reads every card on screen from this, so the page costs
+         *     one request however many workflows it shows. Each entry is what
+         *     ``GET /workflows/{id}/trend`` answers for page 1 at the same page size.
+         */
+        WorkflowTrendsResponse: {
+            /** Trends */
+            trends: components["schemas"]["WorkflowCardTrendResponse"][];
+        };
+        /**
+         * WorkspaceReclaimHealth
+         * @description What the workspace directory reclaimer last did (#1983).
+         */
+        WorkspaceReclaimHealth: {
+            /**
+             * Last Pass At
+             * @description When its last pass ended, UTC; null before the first.
+             */
+            last_pass_at: string | null;
+            /**
+             * Paused
+             * @description Why the last pass stopped before deleting anything, e.g. 'maintenance'.
+             */
+            paused: string | null;
+            /**
+             * Last Pass Skipped
+             * @description Why the last pass did not look at all (docker or a read model unreadable).
+             */
+            last_pass_skipped: string | null;
+            /**
+             * Reclaimed Bytes 24H
+             * @description Bytes this process reclaimed in the last 24 hours (resets on restart).
+             */
+            reclaimed_bytes_24h: number;
+            /**
+             * Dry Run Reclaimable
+             * @description Directories the last pass found reclaimable and left, in dry-run mode.
+             */
+            dry_run_reclaimable: number;
+            /**
+             * Deletes In Progress
+             * @description Proven directories whose delete ran out of the last pass's time budget; the next pass, or the first after a restart, finishes them.
+             */
+            deletes_in_progress: number;
+            /**
+             * Out Of Time
+             * @description Whether the last pass stopped at SYN_DISK_RECLAIM_PASS_BUDGET_MINUTES.
+             */
+            out_of_time: boolean;
+            /**
+             * Retained
+             * @description Directories kept at the last pass, per reason.
+             */
+            retained: components["schemas"]["RetainedWorkspaceDirs"][];
+            /**
+             * Delete Failed Passes
+             * @description Consecutive passes with a failed delete; 2 or more degrades /health.
+             */
+            delete_failed_passes: number;
+        };
+        /**
          * CostSummaryResponse
          * @description Summary of all costs across sessions/executions.
          */
@@ -10179,6 +10447,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CreateWorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workflow_trends_endpoint_workflows_trends_get: {
+        parameters: {
+            query: {
+                /** @description Comma-separated exact workflow ids, at most 200 */
+                ids: string;
+                /** @description Latest runs per workflow */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTrendsResponse"];
                 };
             };
             /** @description Validation Error */

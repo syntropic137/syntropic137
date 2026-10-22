@@ -29,17 +29,13 @@ SYN_IMAGE_VERIFY_ALLOW_LOCAL_IMAGES=true
 
 ### Set by the Image (Defaults)
 
-These are baked into the image and generally should not be overridden:
+This is baked into the image and generally should not be overridden:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `ANTHROPIC_NO_ATTRIBUTION` | `1` | Disable Claude attribution in commits |
-| `DISABLE_TELEMETRY` | `1` | Disable vendor usage metrics |
-| `DISABLE_ERROR_REPORTING` | `1` | Disable vendor error reporting |
-| `RTK_TELEMETRY_DISABLED` | `1` | Disable RTK analytics |
-| `CLAUDE_CODE_ENABLE_TELEMETRY` | `1` | Enable OTel metric export |
-| `OTEL_METRICS_EXPORTER` | `otlp` | Export metrics via OTLP |
-| `OTEL_METRIC_EXPORT_INTERVAL` | `5000` | 5s export interval |
+
+The entrypoint also runs `rtk init` with `RTK_TELEMETRY_DISABLED=1`. That applies to the `rtk init` commands only; it is not set in the container environment.
 
 ### Set by Orchestrator at Runtime
 
@@ -47,32 +43,35 @@ These are injected automatically by syn137 when creating workspaces:
 
 | Variable | Purpose |
 |----------|---------|
-| `ANTHROPIC_API_KEY` | Claude API key, for claude phases (injected via sidecar) |
-| `CODEX_AUTH_JSON` | Deployment variable, not injected into the workspace. Provisioning stages its contents to `~/.codex/auth.json` at mode 0600 and deletes the staged copy. A codex phase runs with an empty agent environment |
+| `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | Claude credential, for claude phases. Placed directly in the agent environment; the OAuth token is used when both are configured |
+| `CODEX_AUTH_JSON` | Deployment variable, not injected into the workspace. Provisioning stages its contents to `~/.codex/auth.json` at mode 0600 and deletes the staged copy. A codex phase's agent environment carries no Claude credential unless the phase sets `allow_delegation: true` |
 | `OPENAI_API_KEY` | Deployment variable, not injected into the workspace. Used only when `CODEX_AUTH_JSON` is unset: provisioning writes it as Codex's API-key `auth.json` and stages that the same way |
 | `CLAUDE_CODE_ENABLE_TELEMETRY` | Activates OTel export (set to `1` when collector is configured) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint, auto-set to `COLLECTOR_URL` from syn-api config |
-| `GITHUB_TOKEN` | GitHub access (injected via sidecar) |
 | `GH_REPO` | The primary repo as `owner/repo`, so `gh` resolves a repository without a working tree to infer one from. Absent when the workflow configures no repo, or when the primary one does not parse. See [Workspace Hydration](/docs/workspaces/hydration). |
 | `CLAUDE_SESSION_ID` | The session this phase's events are keyed by |
 
 You do not need to set these manually. The orchestrator injects them when workspace containers are provisioned.
 
+There is no `GITHUB_TOKEN`. The setup phase writes the GitHub App installation token to `~/.git-credentials` and `~/.config/gh/hosts.yml`, and rewrites both when the token is renewed.
+
 <Callout type="info">
 **Container environment is not the agent environment.** The table above is what
 the workspace *container* receives. The environment handed to the *agent
 process* is built separately and is narrower. A claude phase gets its Anthropic
-credential there. A codex phase gets an empty agent environment, which is
-precisely what keeps `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` out of
-reach of a codex run, and its own credential arrives as the staged
-`~/.codex/auth.json` file rather than as a variable.
+credential there. A codex phase's agent environment carries no Anthropic
+credential, and its own credential arrives as the staged `~/.codex/auth.json`
+file rather than as a variable. The exception is `allow_delegation: true`,
+which stages both providers' credentials so the agent can call the other CLI.
+A claude phase that declares a codex fallback also has `~/.codex/auth.json`
+staged for the whole phase.
 </Callout>
 
 ## OTel Configuration
 
 ### How OTel connects to syn-collector
 
-OTel export is a claude harness feature. Codex phases emit no OTel metrics or logs. `CLAUDE_CODE_ENABLE_TELEMETRY=1` is baked into the workspace image as a default. When syn-api has `COLLECTOR_URL` set, it also injects `OTEL_EXPORTER_OTLP_ENDPOINT` pointing at the collector. If no `COLLECTOR_URL` is configured, OTel export silently no-ops, no crash, no side effects.
+OTel export is a claude harness feature. Codex phases emit no OTel metrics or logs. Nothing OTel-related is baked into the workspace image. When syn-api has `COLLECTOR_URL` set, it injects `CLAUDE_CODE_ENABLE_TELEMETRY=1` and `OTEL_EXPORTER_OTLP_ENDPOINT` pointing at the collector. If no `COLLECTOR_URL` is configured, neither is set and there is no OTel export.
 
 syn-collector's internal port is **8080** (service name `collector` inside Docker). The dev stack maps it to `localhost:8080`.
 
@@ -109,7 +108,7 @@ Plugins can declare required environment variables in their `plugin.json`. The o
 
 ```
 /workspace/
-  AGENTS.md              # Synthesized - imports each repo's AGENTS.md (when repos configured)
+  AGENTS.md              # Synthesized; a pointer to ~/.codex/AGENTS.md when codex may run
   CLAUDE.md              # Synthesized - imports each repo's CLAUDE.md (when repos configured)
   artifacts/
     input/               # Previous phase outputs (read-only)
@@ -120,7 +119,6 @@ Plugins can declare required environment variables in their `plugin.json`. The o
 /opt/agentic/
   plugins/               # Pre-bundled plugins
   config/                # Runtime configuration
-  version.json           # Image version manifest
   entrypoint.sh
 ```
 

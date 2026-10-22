@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from syn_shared.diagnostics import SignalDeath
+    from syn_shared.settings.workspace import WorkspaceRuntime
 
 # Register MappingProxyType for copy/pickle support — required because
 # Pydantic model_copy() and event sourcing deepcopy individual fields.
@@ -268,6 +269,47 @@ class IsolationHandle:
     proxy_url: str | None = None  # Sidecar proxy URL if applicable
     workspace_path: str | None = None  # Path to workspace inside isolation
     host_workspace_path: str | None = None  # Path on host mounted into container
+    #: The OCI runtime the provider resolved for this container. None when the
+    #: backend has no OCI runtime (memory, local) or the provider recorded none.
+    runtime: IsolationRuntime | None = None
+
+
+@dataclass(frozen=True)
+class IsolationRuntime:
+    """Which OCI runtime one workspace runs under, as the provider resolved it.
+
+    Read from agentic-workspace's resolver, never derived here: `effective` is
+    what the container was launched with, `requested` is what was asked for
+    (None = auto). Lane 2 telemetry only - this never reaches an aggregate.
+    """
+
+    requested: WorkspaceRuntime | None
+    effective: WorkspaceRuntime
+
+    def telemetry(self) -> dict[str, str]:
+        """The one payload every sink writes: the log line and the observation."""
+        return {
+            "runtime_requested": str(self.requested or "auto"),
+            "runtime_effective": str(self.effective),
+        }
+
+
+class WorkspaceDeleteFallback(StrEnum):
+    """How the provider's fallback delete of the workspace directory went.
+
+    Run only when the host process could not delete the directory alone
+    (Docker: files the container wrote under another uid, #1983). `REFUSED`
+    means the fallback was not run, because the directory is not one the
+    provider created under its base directory.
+    """
+
+    DELETED = "deleted"
+    FAILED = "failed"
+    REFUSED = "refused"
+    #: Not a provider outcome: syn records this when the provider reported a
+    #: value outside the three above (a contract mismatch), so the row stays
+    #: distinct from None, which means only "not attempted / not reported".
+    UNRECOGNIZED = "unrecognized"
 
 
 @dataclass(frozen=True)
@@ -300,6 +342,9 @@ class WorkspaceUsage:
     delete_failures: tuple[str, ...] | None = None
     net_rx_bytes: int | None = None
     net_tx_bytes: int | None = None
+    #: The fallback delete's outcome. None when the host deleted the directory
+    #: alone, or the delete was not observed.
+    delete_fallback: WorkspaceDeleteFallback | None = None
 
 
 @dataclass(frozen=True)

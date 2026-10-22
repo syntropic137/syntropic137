@@ -1,6 +1,6 @@
 """Regression tests: SessionCostQueryService prices non-Sonnet models correctly.
 
-Issue #788 found that ``_resolve_cost``/``_build_from_summary``/
+Issue #788 found that ``_build_from_summary``/
 ``_build_from_token_usage`` never passed ``agent_model`` (already selected in
 the row as ``agent_model``) into ``calculate_token_cost``, so every session
 priced from raw token counts (no SDK-reported ``total_cost_usd``) fell
@@ -79,43 +79,58 @@ def _token_usage_row(agent_model: str | None) -> _FakeRow:
 
 
 @pytest.mark.unit
-class TestBuildFromSummaryPricesByModel:
-    def test_opus_session_prices_as_opus_not_sonnet(self) -> None:
+class TestBuildFromSummaryWithNoReportedCost:
+    """A summary with ``sdk_cost`` NULL is costed by its turns, never re-priced (#1420).
+
+    The turns here are Opus while the summary names Sonnet, so re-pricing the
+    summary under its one model would answer $18.00 where the turns cost $90.00.
+    """
+
+    def test_cost_is_what_the_turns_priced_to_at_their_own_model(self) -> None:
+        service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
+
+        result = service._build_from_summary(
+            _summary_row(_SONNET_MODEL),
+            tool_counts={},
+            started_map={},
+            turn_rows=[_token_usage_row(_OPUS_MODEL)],
+        )
+
+        assert result.total_cost_usd == _OPUS_COST_1M_1M
+        assert result.total_cost_usd != _SONNET_COST_1M_1M
+        assert result.cost_by_model == {_OPUS_MODEL: _OPUS_COST_1M_1M}
+        assert result.unpriced_observation_count == 0
+        # Tokens and attribution are still the summary's.
+        assert result.agent_model == _SONNET_MODEL
+        assert result.input_tokens == 1_000_000
+
+    def test_unpriced_turns_mark_the_zero_as_unpriced(self) -> None:
+        """The zero must arrive labelled, or it reads as "this was free" (#890)."""
+        service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
+
+        result = service._build_from_summary(
+            _summary_row(_OPUS_MODEL),
+            tool_counts={},
+            started_map={},
+            turn_rows=[_token_usage_row(_UNPRICED_REAL_MODEL)],
+        )
+
+        assert result.total_cost_usd == Decimal("0")
+        assert result.unpriced_observation_count == 7
+        assert result.cost_by_model == {}
+
+    def test_no_turns_at_all_is_unpriced_not_free(self) -> None:
+        """Nothing priced the summary's tokens, so its zero is labelled (#1164)."""
         service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
 
         result = service._build_from_summary(
             _summary_row(_OPUS_MODEL), tool_counts={}, started_map={}
         )
 
-        assert result.total_cost_usd == _OPUS_COST_1M_1M
-        assert result.total_cost_usd != _SONNET_COST_1M_1M
-        assert result.cost_by_model == {_OPUS_MODEL: _OPUS_COST_1M_1M}
+        assert result.total_cost_usd == Decimal("0")
+        assert result.cost_by_model == {}
+        assert result.unpriced_observation_count == 1
         assert result.agent_model == _OPUS_MODEL
-        assert result.unpriced_observation_count == 0
-
-    def test_unknown_model_contributes_zero_not_a_guess(self) -> None:
-        service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
-
-        result = service._build_from_summary(_summary_row(None), tool_counts={}, started_map={})
-
-        assert result.total_cost_usd == Decimal("0")
-        assert result.cost_by_model == {}
-        assert result.agent_model is None
-
-    def test_unpriced_model_marks_the_zero_as_unpriced(self) -> None:
-        """The zero must arrive labelled, or it reads as "this was free" (#890)."""
-        service = SessionCostQueryService(pool=None)  # type: ignore[arg-type]
-
-        result = service._build_from_summary(
-            _summary_row(_UNPRICED_REAL_MODEL), tool_counts={}, started_map={}
-        )
-
-        assert result.total_cost_usd == Decimal("0")
-        assert result.unpriced_observation_count > 0
-        # The model is still reported - we know WHAT ran, just not its rate.
-        assert result.agent_model == _UNPRICED_REAL_MODEL
-        # ...but it must not appear in the breakdown claiming to have cost $0.
-        assert result.cost_by_model == {}
 
 
 @pytest.mark.unit
@@ -335,12 +350,17 @@ class TestListAllRegroupsRowsPerSession:
         assert mixed.input_tokens == 2_000_000
 
     @pytest.mark.asyncio
-    async def test_summarized_session_ignores_its_live_token_rows(self) -> None:
-        """The summary is authoritative; its token_usage rows must be excluded."""
+    async def test_summarized_session_is_costed_by_its_turns(self) -> None:
+        """A summary with no reported cost takes its cost from its token rows (#1420).
+
+        They still never surface as a second record for the session.
+        """
         results = await self._service().list_all()
         summarized = [r for r in results if r.session_id == "session-summarized"]
 
         assert len(summarized) == 1
-        # Priced as Sonnet from the summary, not as Opus from the token row.
-        assert summarized[0].total_cost_usd == _SONNET_COST_1M_1M
+        # Priced as Opus from the token row, not re-priced as the summary's Sonnet.
+        assert summarized[0].total_cost_usd == _OPUS_COST_1M_1M
+        assert summarized[0].cost_by_model == {_OPUS_MODEL: _OPUS_COST_1M_1M}
+        assert summarized[0].agent_model == _SONNET_MODEL
         assert summarized[0].is_finalized is True

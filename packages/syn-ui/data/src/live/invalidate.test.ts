@@ -26,6 +26,8 @@ describe('invalidationsFor (real API event names)', () => {
         'listWorkflowRuns:wf',
         'getWorkflowHistory:wf',
         'getWorkflowTrend:wf',
+        // The batch key is every id it asked for, so a run stales every batch (#1872).
+        'getWorkflowTrends',
         'listExecutionCosts',
         'getCostSummary',
         'getShippedMetrics',
@@ -40,6 +42,10 @@ describe('invalidationsFor (real API event names)', () => {
     for (const n of ['getExecution:ex', 'getWorkflowHistory:wf', 'getWorkflowTrend:wf', 'listWorkflows', 'getWorkflow:wf', 'listEvalRuns', 'getEvalTrend', 'getContributionHeatmap']) {
       expect(got).toContain(n)
     }
+  })
+  it('a cancelled run refreshes the execution list and its own page (#1924)', () => {
+    const got = names(invalidationsFor(frame('ExecutionCancelled', { workflow_id: 'wf', execution_id: 'ex' })))
+    for (const n of ['listExecutions', 'getExecution:ex', 'getWorkflowHistory:wf', 'getContributionHeatmap']) expect(got).toContain(n)
   })
   it('a run event with no workflow id refreshes every workflow run list', () => {
     expect(invalidationsFor(frame('WorkflowFailed', {}, 'ex'))).toContainEqual({ name: 'listWorkflowRuns' })

@@ -42,6 +42,17 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d:ro
+      - db_identity:/syn-db-identity
+      - ./db-backup/syn-db-backup.sh:/usr/local/bin/syn-db-backup:ro
+    # Base healthcheck, plus a handoff for scheduled backups: the user and
+    # database name this container runs with (never the password), so
+    # db-backup connects as the running database says, not as infra/.env
+    # says now. The handoff is syn-db-backup's `identity` subcommand, which
+    # never fails the healthcheck; the backup reports a missing identity.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-syn} -d ${POSTGRES_DB:-syn} && sh /usr/local/bin/syn-db-backup identity /syn-db-identity
     restart: always
     read_only: true
     security_opt:
@@ -193,6 +204,26 @@ services:
         max-size: "5m"
         max-file: "3"
 
+  docker-create-guard:
+    container_name: syn137-docker-create-guard
+    restart: always
+    # The API's workspaces root, read-only, so the guard resolves symlinks in
+    # bind sources the way the daemon will (#1806).
+    environment:
+      SYN_WORKSPACE_CONTAINER_DIR: /workspaces
+    volumes:
+      - ../workspaces:/workspaces:ro
+    deploy:
+      resources:
+        limits:
+          memory: 96m
+          cpus: "0.1"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
   # ===========================================================================
   # API
   # ===========================================================================
@@ -212,6 +243,7 @@ services:
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     command: ["sh", "-c", "uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1 --timeout-graceful-shutdown 30"]
     environment:
+      - SYN_EXECUTION_PROCESS_ROLE=api
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - SYN_GITHUB_APP_ID=${SYN_GITHUB_APP_ID:-}
@@ -272,16 +304,154 @@ services:
       - ALL
     tmpfs:
       - /tmp
-      - /home/syn/.config  # 1Password CLI needs writable config dir on read-only FS
+      - /home/syn/.config:size=16m,uid=1000,gid=1000,mode=0700  # 1Password CLI needs writable config dir on read-only FS
       # size= is REQUIRED, not tidiness: an unbounded tmpfs may use up to half of
       # host RAM, so cache growth could OOM-kill the API on a small box like the
       # Mini. The sigstore TUF root is a few hundred KB; 16m is generous.
-      - /home/syn/.sigstore:size=16m  # cosign writes a TUF trust cache here BEFORE it can verify anything
+      # uid/gid/mode are REQUIRED too: the api runs as syn (uid 1000, see
+      # infra/docker/images/syn-api/Dockerfile). A fresh tmpfs is 1777, but the
+      # one Docker restores after a host reboot came back root:root 755, cosign
+      # could not write its cache and every run failed at bootstrap (2026-10-20).
+      - /home/syn/.sigstore:size=16m,uid=1000,gid=1000,mode=0700  # cosign writes a TUF trust cache here BEFORE it can verify anything
     deploy:
       resources:
         limits:
           memory: ${API_MEMORY_LIMIT:-2g}
           cpus: "${API_CPU_LIMIT:-2.0}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - syn-internal
+      - docker-proxy
+
+  # ===========================================================================
+  # EXECUTOR - the same syn-api image in the executor role (ADR-072 D1, #1310 1.6)
+  # ===========================================================================
+  # Hosts the Run Queue claim loop and nothing else: no HTTP routes are
+  # published through the gateway, no subscription, no pollers. With
+  # SYN_EXECUTION_RUN_QUEUE_ENABLED off (the default) it starts, reports
+  # healthy and runs IDLE: executions still run inside api, which is why api
+  # keeps DOCKER_HOST, SYN_AGENT_NETWORK and the workspaces mount until the
+  # flag is on everywhere (#1310 1.6 moves them; that move is the flag flip).
+  #
+  # Its environment mirrors api's on purpose, because a claimed run needs the
+  # same credentials an in-process one does. Only SYN_EXECUTION_PROCESS_ROLE
+  # differs; infra/scripts/tests/test_1310_executor_compose_service.py fails
+  # when the two drift.
+  #
+  # Behind the `run-queue` profile, so a default install starts NO executor:
+  # an idle container holding docker-proxy access, /workspaces and every
+  # credential is attack surface for nothing. Enabling the run queue is two
+  # lines in .env, together:
+  #   COMPOSE_PROFILES=run-queue
+  #   SYN_EXECUTION_RUN_QUEUE_ENABLED=true
+  executor:
+    profiles: ["run-queue"]
+    container_name: syn137-executor
+    extends:
+      file: generated/api.env.yaml
+      service: api-env
+    # Same budget as api: with the queue on, the runs are drained here (#1381).
+    stop_grace_period: 200s
+    cpu_shares: ${CONTROL_PLANE_CPU_SHARES:-4096}
+    build:
+      context: ..
+      dockerfile: infra/docker/images/syn-api/Dockerfile
+      args:
+        INCLUDE_OP_CLI: "${INCLUDE_OP_CLI:-0}"
+        INCLUDE_DOCKER_CLI: "1"
+    volumes:
+      - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
+      - executor_logs:/app/logs
+      - ../workspaces:/workspaces
+      - session_inventory_data:/app/data/session-inventory
+    entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
+    command: ["sh", "-c", "uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1 --timeout-graceful-shutdown 30"]
+    environment:
+      - SYN_EXECUTION_PROCESS_ROLE=executor
+      # The pins docker-compose.yaml gives api, restated: this service has no base.
+      - SYN_API_PORT=8000
+      - SYN_API_HOST=0.0.0.0
+      - SYN_OBSERVABILITY_DB_URL=postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
+      - EVENT_STORE_HOST=event-store
+      - EVENT_STORE_PORT=50051
+      - REDIS_URL=redis://redis:6379/0
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+      - SYN_SESSION_INVENTORY_ARCHIVE_DIR=/app/data/session-inventory
+      - SYN_WORKSPACE_DOCKER_IMAGE
+      # api's selfhost environment, unchanged.
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SYN_GITHUB_APP_ID=${SYN_GITHUB_APP_ID:-}
+      - SYN_GITHUB_APP_NAME=${SYN_GITHUB_APP_NAME:-}
+      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-selfhost}
+      - OP_SERVICE_ACCOUNT_TOKEN=${OP_SERVICE_ACCOUNT_TOKEN:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYNTROPIC137=${OP_SERVICE_ACCOUNT_TOKEN_SYNTROPIC137:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_BETA:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_STAGING:-}
+      - OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD=${OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD:-}
+      - SYN_STORAGE_PROVIDER=minio
+      - SYN_STORAGE_MINIO_ENDPOINT=minio:9000
+      - SYN_STORAGE_MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - SYN_STORAGE_MINIO_SECURE=false
+      - SYN_GITHUB_PRIVATE_KEY=${SYN_GITHUB_PRIVATE_KEY:-}
+      - SYN_GITHUB_WEBHOOK_SECRET=${SYN_GITHUB_WEBHOOK_SECRET:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CODEX_AUTH_JSON=${CODEX_AUTH_JSON:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
+      - SYN_WORKSPACE_HOST_DIR=${SYN_INSTALL_DIR:-${PWD}}/workspaces
+      - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-selfhost}_agent-net
+      - SYN_PROXY_URL=http://envoy-proxy:8081
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      event-store:
+        condition: service_healthy
+      collector:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import http.client; c=http.client.HTTPConnection(''localhost'',8000); c.request(''GET'',''/health''); exit(0 if c.getresponse().status==200 else 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    secrets:
+      - db_password
+      - redis_password
+      - minio_password
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+      # uid/gid/mode as on api: the image user must own these after a host
+      # reboot too (see api's tmpfs above and infra/docker/images/syn-api/Dockerfile).
+      - /home/syn/.config:size=16m,uid=1000,gid=1000,mode=0700
+      - /home/syn/.sigstore:size=16m,uid=1000,gid=1000,mode=0700
+    deploy:
+      resources:
+        limits:
+          # Its own limit, not api's: with the queue on, per-run memory lands here.
+          memory: ${EXECUTOR_MEMORY_LIMIT:-2g}
+          cpus: "${EXECUTOR_CPU_LIMIT:-2.0}"
     logging:
       driver: "json-file"
       options:
@@ -429,6 +599,52 @@ services:
     networks:
       - syn-internal
 
+  # ===========================================================================
+  # DB BACKUP - scheduled pg_dump of the whole syn database
+  # ===========================================================================
+  # Same image as timescaledb (pinned equal by a unit test) so pg_dump and
+  # pg_restore always match the server. Also what `just selfhost-backup` and
+  # `just selfhost-restore` run, via `compose run`: docker/db-backup/.
+  db-backup:
+    container_name: syn137-db-backup
+    image: timescale/timescaledb:2.29.2-pg16
+    entrypoint: ["sh", "/usr/local/bin/syn-db-backup"]
+    command: ["schedule", "/backups", "${BACKUP_SCHEDULE:-0 3 * * *}", "${BACKUP_RETENTION_DAYS:-7}"]
+    environment:
+      PGHOST: timescaledb
+      # PGUSER/PGDATABASE: from the running timescaledb, never interpolated.
+      SYN_DB_IDENTITY_FILE: /syn-db-identity/identity
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - ./db-backup/syn-db-backup.sh:/usr/local/bin/syn-db-backup:ro
+      - ${BACKUP_DIR:-/var/backups/syn}:/backups
+      - db_identity:/syn-db-identity:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - syn-internal
+
 # =============================================================================
 # SECRETS (file-based)
 # =============================================================================
@@ -446,8 +662,12 @@ secrets:
 volumes:
   db_data:
     name: syn137_db_data
+  db_identity:
+    name: syn137_db_identity
   api_logs:
     name: syn137_api_logs
+  executor_logs:
+    name: syn137_executor_logs
   minio_data:
     name: syn137_minio_data
   redis_data:

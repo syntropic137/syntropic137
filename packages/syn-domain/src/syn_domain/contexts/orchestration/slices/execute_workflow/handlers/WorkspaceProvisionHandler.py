@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -36,6 +36,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     ProvisionStep,
     ProvisionStepTimeoutError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.agent_env import (
+    build_agent_env,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.codex_sandbox_probe import (
     require_codex_sandbox,
 )
@@ -46,6 +49,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.instruct
     install_codex_instructions,
     repo_instruction_imports,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.repo_identity import (
+    cloned_pins,
+    repo_identity_env,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.skill_install import (
     install_skill,
 )
@@ -55,11 +62,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 from syn_shared.agents import AgentProvider, require_executable_provider
 from syn_shared.env_constants import (
-    ENV_ANTHROPIC_API_KEY,
-    ENV_ANTHROPIC_BASE_URL,
-    ENV_CLAUDE_CODE_OAUTH_TOKEN,
-    ENV_CLAUDE_SESSION_ID,
-    ENV_GH_REPO,
     ENV_SYN_PHASE_DEADLINE,
 )
 from syn_shared.process_exit import describe_process_failure
@@ -68,7 +70,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
     from typing import Protocol
 
-    from syn_adapters.workspace_backends.service import WorkspaceService
+    from syn_adapters.workspace_backends.service import SetupPhaseSecrets, WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
         ResolvedClaudePlugin,
@@ -76,6 +78,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.resolved_skill import ResolvedSkill
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
         TodoItem,
+    )
+    from syn_domain.contexts.orchestration._shared.workspace_credential_policy import (
+        WorkspaceCredentialPolicy,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
@@ -110,10 +115,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-#: `owner` and `repo`: the two trailing path segments every accepted repo shape
-#: ends with, whatever prefix it carries.
-_OWNER_REPO_SEGMENTS: Final[int] = 2
 
 # Maps our phase provider values onto the vercel skills-cli --agent keys.
 # The skills CLI (pinned 1.5.14 in the workspace images) owns the per-harness
@@ -233,121 +234,35 @@ _DEADLINE_NOTICE = (
 )
 
 
-async def _build_agent_env(workspace: ManagedWorkspace, session_id: str) -> dict[str, str]:
-    """Build agent environment for workspace execution.
+async def _setup_secrets(
+    workspace: ManagedWorkspace,
+    effective_repos: list[str],
+    *,
+    clone_repos: bool,
+    pinned_commits: Sequence[SourceCommit],
+    continued_branches: Mapping[str, str] | None,
+    include_codex_auth: bool,
+    credential_policy: WorkspaceCredentialPolicy,
+) -> SetupPhaseSecrets:
+    """The ADR-024 setup secrets, or none at all under NoCredentials (#1914).
 
-    Injects Claude credentials directly into agent env. ANTHROPIC_BASE_URL
-    routes SDK traffic through the Envoy sidecar for observability, but auth
-    is carried by the credential env var rather than sidecar substitution.
-
-    See ADR-024 (2026-05-01 update) for why the original "proxy-managed"
-    placeholder approach was abandoned and this direct injection was adopted.
+    NoCredentials resolves no GitHub, Claude or Codex credential, so nothing is
+    minted for teardown to revoke. Repos were refused by `admit` before the
+    workspace existed.
     """
-    proxy_url = workspace.proxy_url
-    if not proxy_url:
-        msg = (
-            "Shared Envoy proxy not available. "
-            "Ensure envoy-proxy service is running and sidecar is enabled."
-        )
-        raise RuntimeError(msg)
+    from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
-    env: dict[str, str] = {
-        ENV_CLAUDE_SESSION_ID: session_id,
-        ENV_ANTHROPIC_BASE_URL: proxy_url,
-    }
-
-    # Prefer OAuth token; fall back to API key. Claude Code CLI v2.1.76+
-    # validates credential format locally before sending any HTTP request, so
-    # the sidecar-substitution pattern ("proxy-managed" placeholder) no longer
-    # works — the CLI rejects it before the proxy gets a chance. ADR-024 updated.
-    #
-    # TODO(#724): For the API key path specifically, spike whether a syntactically
-    # valid placeholder (e.g. "sk-ant-DEADBEEF...") passes the local format check
-    # so the Envoy sidecar can substitute the real value on egress. If it works,
-    # restore ADR-022/024's "agent never sees raw secrets" invariant for API keys.
-    # OAuth is out of scope (ToS gray area for header proxying).
-    if settings.claude_code_oauth_token:
-        env[ENV_CLAUDE_CODE_OAUTH_TOKEN] = settings.claude_code_oauth_token.get_secret_value()
-    elif settings.anthropic_api_key:
-        env[ENV_ANTHROPIC_API_KEY] = settings.anthropic_api_key.get_secret_value()
-    # No fail-fast here. If neither credential is configured, the workspace
-    # agent will exit with "Not logged in" — acceptable for now. A startup-time
-    # check that fails the API container with a clear operator message would
-    # be cleaner; tracked separately. (Copilot suggested fail-fast in this
-    # function, but that breaks smoke tests that exercise the processor loop
-    # without configured credentials.)
-
-    # NO GITHUB CREDENTIAL HERE (#725). `gh` used to get an installation token
-    # as $GITHUB_TOKEN, which it prefers over hosts.yml - and an environment
-    # variable fixed at launch cannot be renewed, so every `gh` call past
-    # minute sixty failed. The same credential, chosen by the same
-    # repo-under-work routing (#1129), now lives in hosts.yml, written by the
-    # setup phase and rewritten by every renewal: see `setup_phase_secrets`.
-    # TODO(#725): Tier 1 - a per-workspace credential sidecar that mints on
-    # demand, so the agent never holds a raw GitHub token at all.
-    return env
-
-
-def _repo_full_names(repos: Sequence[str]) -> list[str]:
-    """`owner/repo` for each entry, first occurrence first, unparseable ones dropped.
-
-    Accepts the shapes the platform stores: a full URL with or without `.git`,
-    an `owner/repo` shorthand, and `git@` / `ssh://` remotes.
-    """
-    names: list[str] = []
-    for repo in repos:
-        text = repo.strip().removesuffix(".git")
-        if "github.com" in text:
-            _, _, tail = text.partition("github.com")
-            text = tail.lstrip(":/")
-        parts = [part for part in text.split("/") if part]
-        if len(parts) >= _OWNER_REPO_SEGMENTS:
-            name = f"{parts[-2]}/{parts[-1]}"
-            if name not in names:
-                names.append(name)
-    return names
-
-
-def _repo_identity_env(repos: Sequence[str]) -> dict[str, str]:
-    """The environment that tells `gh` WHICH repository this phase acts on.
-
-    Empty when the phase has no repository to name, so the caller adds it
-    unconditionally rather than branching on the answer.
-
-    WHY THIS IS PROVISIONED RATHER THAN INFERRED (#1187). `gh` resolves the
-    repository a command targets from the git remotes of the surrounding
-    working tree, and fails there - before it makes any API call - when there
-    is no tree::
-
-        $ gh pr list --limit 1
-        failed to run git: fatal: not a git repository
-
-    The clone used to supply that tree, so repository identity was never
-    provisioned; it was a by-product of the checkout. A `clone_repos: false`
-    phase still calls `gh pr create`, and after the checkout went there was
-    nothing left to infer from. `GH_REPO` states the answer instead of leaving
-    the agent to reconstruct it, which is why it is here and not in a prompt.
-
-    KEYED ON THE PRIMARY REPO - the same `effective_repos[0]` that becomes
-    `{{repo_url}}` in the prompt - so what the agent is told to work on and
-    what `gh` acts on cannot disagree. An unparseable primary therefore yields
-    no variable at all rather than falling through to the next repo's name:
-    silently retargeting `gh pr create` at a different repository is a worse
-    failure than the resolution error it would replace.
-    """
-    primary = _repo_full_names(repos[:1])
-    return {ENV_GH_REPO: primary[0]} if primary else {}
-
-
-def _cloned_pins(repos: Sequence[str], pinned_commits: Sequence[SourceCommit]) -> dict[str, str]:
-    """``owner/name`` -> pinned commit, for the pinned repositories this phase clones."""
-    cloned = set(_repo_full_names(repos))
-    return {
-        c.repository: c.sha for c in pinned_commits if c.sha is not None and c.repository in cloned
-    }
+    if not credential_policy.supplies_credentials:
+        return SetupPhaseSecrets(clone_repos=clone_repos)
+    return await SetupPhaseSecrets.create(
+        repositories=effective_repos,
+        clone_repos=clone_repos,
+        pinned_commits={c.repository: c.sha for c in pinned_commits if c.sha is not None},
+        continued_branches=continued_branches,
+        require_github=bool(effective_repos),
+        include_codex_auth=include_codex_auth,
+        ledger=workspace.issuance_ledger,
+    )
 
 
 class ProvisionResult:
@@ -425,6 +340,7 @@ class WorkspaceProvisionHandler:
         inputs: dict[str, object] | None = None,
         pinned_commits: Sequence[SourceCommit] = (),
         continued_branches: Mapping[str, str] | None = None,
+        eval_id: str | None = None,
     ) -> ProvisionResult:
         """Provision workspace for a phase.
 
@@ -446,18 +362,27 @@ class WorkspaceProvisionHandler:
             continued_branches: ``owner/name`` -> the branch to check a pinned
                 repository out ON, at its head, for a phase that continues it
                 (`StartPins.checkout_for`, #1513).
+            eval_id: The eval the execution belongs to, which bounds what an
+                ``eval`` phase's platform token can write (#1744).
         """
         assert todo.phase_id is not None
 
         outputs = phase_outputs if phase_outputs is not None else PhaseOutputCache()
         effective_repos = repos or []
+        # The backend's policy, not the phase, decides whether credentials
+        # reach the workspace (#1914). A phase it cannot run is refused here,
+        # before any workspace or token exists.
+        policy = self._workspace_service.credential_policy
+        policy.admit(phase_name=phase.name, repositories=effective_repos)
         workspace_cm = self._workspace_service.create_workspace(
             execution_id=todo.execution_id,
             workflow_id=workflow_id,
             phase_id=todo.phase_id,
-            with_sidecar=True,
-            inject_tokens=True,
+            with_sidecar=policy.supplies_credentials,
+            inject_tokens=policy.supplies_credentials,
             capture_session_id=session_id,
+            platform_access=phase.platform_access,
+            eval_id=eval_id,
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
@@ -472,6 +397,7 @@ class WorkspaceProvisionHandler:
                 pinned_commits=pinned_commits,
                 continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
+                credential_policy=policy,
                 inline_instructions=not all(
                     agent.expands_at_imports for agent in _agents_that_may_run(phase)
                 ),
@@ -481,7 +407,7 @@ class WorkspaceProvisionHandler:
             checked_out = (
                 await verify_provisioned_checkout(
                     workspace,
-                    _cloned_pins(effective_repos, pinned_commits),
+                    cloned_pins(effective_repos, pinned_commits),
                     continued_branches=continued_branches or {},
                     phase_name=phase.name,
                 )
@@ -522,6 +448,7 @@ class WorkspaceProvisionHandler:
         pinned_commits: Sequence[SourceCommit] = (),
         continued_branches: Mapping[str, str] | None = None,
         include_codex_auth: bool,
+        credential_policy: WorkspaceCredentialPolicy,
         inline_instructions: bool,
     ) -> None:
         """Run the secret-injection setup and inject synthetic context files (ADR-058).
@@ -545,17 +472,16 @@ class WorkspaceProvisionHandler:
         """
         from syn_adapters.workspace_backends.service import (
             PINNED_COMMIT_UNREACHABLE_EXIT_CODE,
-            SetupPhaseSecrets,
         )
 
-        secrets = await SetupPhaseSecrets.create(
-            repositories=effective_repos,
+        secrets = await _setup_secrets(
+            workspace,
+            effective_repos,
             clone_repos=clone_repos,
-            pinned_commits={c.repository: c.sha for c in pinned_commits if c.sha is not None},
+            pinned_commits=pinned_commits,
             continued_branches=continued_branches,
-            require_github=bool(effective_repos),
             include_codex_auth=include_codex_auth,
-            ledger=workspace.issuance_ledger,
+            credential_policy=credential_policy,
         )
         setup_result = await workspace.run_setup_phase(secrets)
         if setup_result.exit_code != 0:
@@ -801,15 +727,19 @@ class WorkspaceProvisionHandler:
         _, needs_claude_env = _auth_staging_for(
             phase.agent_config.provider, phase.agent_config.allow_delegation
         )
-        agent_env = await _build_agent_env(workspace, session_id) if needs_claude_env else {}
+        agent_env = (
+            await build_agent_env(workspace, session_id, self._workspace_service.credential_policy)
+            if needs_claude_env
+            else {}
+        )
         # OUTSIDE the branch above, deliberately. A codex phase gets an empty
         # agent env by design - it authenticates from ~/.codex/auth.json and
-        # must not see claude credentials - so `_build_agent_env` is the one
+        # must not see claude credentials - so `build_agent_env` is the one
         # place repository identity must NOT live: put it there and it reaches
         # claude phases only, leaving every codex phase with the defect this
         # fixes. It is provider-independent, and this is the single point both
         # providers pass through on their way to `workspace.stream(...)`.
-        agent_env.update(_repo_identity_env(effective_repos))
+        agent_env.update(repo_identity_env(effective_repos))
         return claude_cmd, agent_env
 
     @staticmethod

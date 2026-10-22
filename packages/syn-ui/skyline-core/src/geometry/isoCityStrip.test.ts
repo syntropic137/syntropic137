@@ -36,8 +36,8 @@ describe('unloaded history is not zero (codex review of #1856)', () => {
 
   it('labels weeks before the loaded range not loaded, loading or did not load', () => {
     const ready = isoCityStrip(weeks, 38, 14, 1, { from, state: 'ready' })
-    expect(ready.bars[0]).toMatchObject({ status: 'unloaded', tone: 'unknown', height: 0, label: 'Week of Oct 13: not loaded' })
-    expect(ready.bars[26]).toMatchObject({ status: 'loaded', label: `Week of ${'Apr 13'}: 0 sessions` })
+    expect(ready.bars[0]).toMatchObject({ status: 'unloaded', tone: 'unknown', height: 0, label: 'Week of Oct 13 (UTC): not loaded' })
+    expect(ready.bars[26]).toMatchObject({ status: 'loaded', label: `Week of ${'Apr 13'} (UTC): 0 sessions` })
     expect(isoCityStrip(weeks, 38, 14, 1, { from, state: 'loading' }).bars[25]!.label).toMatch(/: loading$/)
     expect(isoCityStrip(weeks, 38, 14, 1, { from, state: 'error' }).bars[25]).toMatchObject({ status: 'error', label: expect.stringMatching(/: did not load$/) })
     expect(isoCityStrip(weeks, 38, 14, 1, { from: null, state: 'loading' }).bars.every((b) => b.status === 'loading')).toBe(true)
@@ -46,7 +46,7 @@ describe('unloaded history is not zero (codex review of #1856)', () => {
   it('says 0 sessions only for a loaded, quiet week; no coverage means all loaded', () => {
     const s = isoCityStrip(weeks, 38, 14)
     expect(s.bars.every((b) => b.status === 'loaded')).toBe(true)
-    expect(s.bars[0]!.label).toBe('Week of Oct 13: 0 sessions')
+    expect(s.bars[0]!.label).toBe('Week of Oct 13 (UTC): 0 sessions')
     expect(weekLoadStatus('2026-01-05', { from: '2026-01-05', state: 'error' })).toBe('loaded')
     expect(weekLoadStatus('2025-12-29', { from: '2026-01-05', state: 'error' })).toBe('error')
   })

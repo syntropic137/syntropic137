@@ -61,6 +61,7 @@ __all__ = [
     "DelegateUsageRecorder",
     "capture_and_import_phase",
     "close_phase_workspaces",
+    "record_workspace_runtime",
     "record_workspace_usage",
     "remember_leader_native_id",
 ]
@@ -473,6 +474,55 @@ async def record_workspace_usage(
     except Exception:
         logger.warning(
             "Failed to record workspace usage for phase %s (workspace %s)",
+            phase_id,
+            workspace.workspace_id,
+            exc_info=True,
+        )
+
+
+async def record_workspace_runtime(
+    writer: ObservabilityRecorder | None,
+    workspace: ManagedWorkspace | None,
+    *,
+    session_id: str,
+    phase_id: str,
+) -> None:
+    """Record the OCI runtime this phase's workspace runs under (SYN-1).
+
+    The value is agentic-workspace's resolver's answer, carried on the
+    isolation handle from the provider's metadata; nothing here derives it.
+    Called as the agent launches, the first frame that knows the session, so
+    the row exists before the phase can fail.
+
+    Lane 2 only, and best-effort like `record_workspace_usage`: no domain
+    event, and a failed write is logged and dropped. Nothing is written for a
+    backend that recorded no runtime.
+    """
+    if writer is None or workspace is None:
+        return
+    runtime = workspace.isolation_handle.runtime
+    if runtime is None:
+        return
+    if not session_id:
+        logger.info(
+            "Workspace runtime for phase %s not recorded: the phase has no session id",
+            phase_id,
+        )
+        return
+    try:
+        await writer.record_observation(
+            session_id=session_id,
+            observation_type=ObservationType.WORKSPACE_RUNTIME,
+            data={**runtime.telemetry()},
+            execution_id=workspace.execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace.workspace_id,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.warning(
+            "Failed to record workspace runtime for phase %s (workspace %s)",
             phase_id,
             workspace.workspace_id,
             exc_info=True,

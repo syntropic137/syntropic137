@@ -82,6 +82,9 @@ GIT_CREDENTIAL_LAPSED = "git_credential_lapsed"
 # Capacity telemetry (#1310), produced by Syn137 itself: what a phase
 # workspace consumed, measured at teardown.
 WORKSPACE_RESOURCE_USAGE = "workspace_resource_usage"
+#: The OCI runtime agentic-workspace resolved for one phase workspace (SYN-1),
+#: produced by Syn137 itself from the provider's answer, recorded at launch.
+WORKSPACE_RUNTIME = "workspace_runtime"
 #: One in-phase retry of a busy upstream (#1882): which provider and model, and
 #: which transient kind earned it. Lane 2: counted for quota pressure, never
 #: replayed for state.
@@ -132,6 +135,8 @@ EventType = Literal[
     "git_credential_lapsed",
     # Capacity telemetry (#1310), produced by Syn137 for the same gating reason.
     "workspace_resource_usage",
+    # Workspace runtime telemetry (SYN-1), produced by Syn137 for the same gating reason.
+    "workspace_runtime",
     # Upstream retry telemetry (#1882), produced by Syn137 for the same gating reason.
     "upstream_retry",
 ]
@@ -181,6 +186,7 @@ __all__ = [
     "USER_PROMPT_SUBMITTED",
     "VALID_EVENT_TYPES",
     "WORKSPACE_RESOURCE_USAGE",
+    "WORKSPACE_RUNTIME",
     "EventType",
     "is_valid_event_type",
 ]

@@ -1,0 +1,74 @@
+"""Reads this host's cores, memory, free disk and CPU pressure for the execution budget (#1715)."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+from syn_domain.contexts._shared.host_capacity import HostCapacity
+
+_CPU_PRESSURE = Path("/proc/pressure/cpu")
+
+
+class ProcHostCapacity:
+    """`HostCapacityPort` over ``os`` and ``/proc``. Raises ``OSError`` if a read fails.
+
+    Cores are the CPUs this process may be scheduled on, which a cgroup cpuset
+    narrows (all CPUs on macOS, which has no affinity call); memory is
+    physical RAM. CPU pressure is Linux PSI and reads None elsewhere. Workspaces run as sibling containers on
+    the same host, so this is the capacity they share.
+    """
+
+    def __init__(self, disk_path: str, pressure_file: Path = _CPU_PRESSURE) -> None:
+        self._disk_path = disk_path
+        self._pressure_file = pressure_file
+
+    def read(self) -> HostCapacity:
+        stat = os.statvfs(self._disk_path)
+        return HostCapacity(
+            cpu_cores=float(_schedulable_cpus()),
+            memory_bytes=os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"),
+            disk_free_bytes=stat.f_bavail * stat.f_frsize,
+            cpu_pressure_avg60=self._cpu_pressure_avg60(),
+        )
+
+    def _cpu_pressure_avg60(self) -> float | None:
+        """The ``some avg60`` of PSI, or None on a kernel without it."""
+        try:
+            text = self._pressure_file.read_text()
+        except OSError:
+            return None
+        return parse_cpu_pressure_avg60(text)
+
+
+def _schedulable_cpus() -> int:
+    """CPUs this process may run on; every CPU where affinity is not exposed (macOS)."""
+    # sys.platform, not hasattr: pyright narrows on it, so a macOS typecheck
+    # does not flag the Linux-only call.
+    if sys.platform == "linux":
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 1
+
+
+def parse_cpu_pressure_avg60(text: str) -> float | None:
+    """``some avg10=0.00 avg60=1.25 ...`` -> 1.25; None if the line is not there."""
+    for line in text.splitlines():
+        fields = line.split()
+        if fields and fields[0] == "some":
+            for field in fields[1:]:
+                key, _, value = field.partition("=")
+                if key == "avg60":
+                    return float(value)
+    return None
+
+
+def build_host_capacity() -> ProcHostCapacity:
+    """The reader over the configured workspace volume, the same one the disk guard reads."""
+    from syn_shared.env_constants import ENV_SYN_WORKSPACE_CONTAINER_DIR
+    from syn_shared.settings import get_settings
+
+    path = get_settings().disk.path or os.environ.get(
+        ENV_SYN_WORKSPACE_CONTAINER_DIR, "/workspaces"
+    )
+    return ProcHostCapacity(path)

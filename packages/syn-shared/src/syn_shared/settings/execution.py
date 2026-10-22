@@ -5,6 +5,8 @@ See ADR-004 (settings) and ADR-060 (admission and dispatch limits).
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -44,6 +46,28 @@ def executions_that_fit(memory_limit_mib: int) -> int:
     return max(1, (memory_limit_mib - API_BASELINE_MEMORY_MIB) // EXECUTION_API_MEMORY_MIB)
 
 
+class ProcessRole(StrEnum):
+    """Which half of the platform this process runs (ADR-072 D1, #1310 1.6).
+
+    One image, two roles. ``api`` serves HTTP and owns the subscription, the
+    pollers and, with the Run Queue off, every in-process execution. ``executor``
+    only hosts the claim loop, so with the Run Queue off it runs idle. ``all`` is
+    both, the single-process topology dev and tests keep.
+    """
+
+    API = "api"
+    EXECUTOR = "executor"
+    ALL = "all"
+
+    @property
+    def serves_api(self) -> bool:
+        return self is not ProcessRole.EXECUTOR
+
+    @property
+    def hosts_executions(self) -> bool:
+        return self is not ProcessRole.API
+
+
 #: The fewest executions the API memory default is sized for, whatever the
 #: budget: the north star's current tier (docs/north-star.md). It is the floor
 #: under `api_memory_limit_for`. Without it the default concurrency of 4 would
@@ -80,9 +104,12 @@ class ExecutionSettings(BaseSettings):
         ge=1,
         validation_alias=ENV_SYN_EXECUTION_MAX_CONCURRENT,
         description=(
-            "How many workflow executions this API process runs at once, across "
+            "The most workflow executions this process runs at once, across "
             "EVERY start path: POST /workflows/{id}/execute, trigger dispatch and "
-            "resume. Further starts wait in a FIFO queue and show as status "
+            "resume. The budget actually applied is this or less: it is sized at "
+            "startup from host cores, memory and free disk against the measured "
+            "per-run demand (#1715), and /health reports it with the term that "
+            "bound it. Further starts wait in a FIFO queue and show as status "
             "'queued' with their position (syn execution show). Per process, not "
             "per cluster. "
             "What high concurrency costs is CAPACITY: every running execution "
@@ -97,6 +124,58 @@ class ExecutionSettings(BaseSettings):
             "per-run processor state (#865), which is why this was 1; #1311 gave "
             "each execution its own state. Replaces "
             "SYN_POLLING_MAX_CONCURRENT_DISPATCHES, which is now ignored."
+        ),
+    )
+
+    # Sizing the budget from host capacity (#1715). The budget is
+    # min(max_concurrent, cpu, memory, disk terms); see
+    # syn_domain.contexts._shared.host_capacity for the formula.
+    platform_reserve_cores: float = Field(
+        default=2.0,
+        ge=0,
+        description=(
+            "CPU cores kept back from executions for the platform itself (API, "
+            "Postgres, event store, Redis) when the execution budget is sized from "
+            "host capacity (#1715). The CPU term is (host cores - this) x "
+            "SYN_EXECUTION_TARGET_UTILISATION / the measured median cores one run uses."
+        ),
+    )
+    target_utilisation: float = Field(
+        default=0.8,
+        gt=0,
+        le=1,
+        description=(
+            "Share of the CPU left after SYN_EXECUTION_PLATFORM_RESERVE_CORES that "
+            "executions may use, between 0 and 1 (#1715). Headroom for bursts above "
+            "the median."
+        ),
+    )
+    memory_reserve_mb: int = Field(
+        default=4096,
+        ge=0,
+        description=(
+            "Host memory in MB kept back from executions for the platform (#1715). "
+            "The memory term is (host memory - this) / the measured p95 peak memory "
+            "of one run's workspace, never the SYN_WORKSPACE_MEMORY_LIMIT_MB cap."
+        ),
+    )
+    disk_floor_gib: float = Field(
+        default=10.0,
+        ge=0,
+        description=(
+            "Free disk in GiB on the workspace volume kept back from executions "
+            "(#1715). The disk term is (free disk - this) / the measured p95 disk "
+            "one run's workspace leaves at teardown."
+        ),
+    )
+    profile_window_days: float = Field(
+        default=7.0,
+        gt=0,
+        description=(
+            "How many days of phase resource profiles (#1716) the per-run demand is "
+            "measured over when sizing the budget. With fewer than 10 measured "
+            "phases in the window the budget is SYN_EXECUTION_MAX_CONCURRENT and "
+            "/health says operator_max_no_profile."
         ),
     )
 
@@ -122,7 +201,23 @@ class ExecutionSettings(BaseSettings):
             "on, this process registers an ExecutionHost (#1310 1.5) that claims "
             "admitted runs within SYN_EXECUTION_MAX_CONCURRENT, in the Executor Pool "
             "named by SYN_EXECUTOR_POOL_ID. Requires SYN_OBSERVABILITY_DB_URL; the API "
-            "refuses to start an execution without it rather than queue in memory."
+            "refuses to start an execution without it rather than queue in memory. "
+            "On a compose install, also set COMPOSE_PROFILES=run-queue in .env: the "
+            "executor service that claims runs is behind that profile and does not "
+            "start without it (#1310 1.6)."
+        ),
+    )
+
+    #: Read as SYN_EXECUTION_PROCESS_ROLE. ADR-072 spells it SYN_PROCESS_ROLE;
+    #: the prefix is kept for the reason given at DEFAULT_INTERRUPT_BUDGET_SECONDS.
+    process_role: ProcessRole = Field(
+        default=ProcessRole.ALL,
+        description=(
+            "Which half of the platform this process runs (ADR-072 D1): 'api' "
+            "serves HTTP, the subscription and the pollers; 'executor' only hosts "
+            "the Run Queue claim loop, and is idle while "
+            "SYN_EXECUTION_RUN_QUEUE_ENABLED is off; 'all' runs both in one "
+            "process. Pinned per service by the compose files, not an operator knob."
         ),
     )
 

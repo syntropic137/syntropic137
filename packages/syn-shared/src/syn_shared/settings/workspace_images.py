@@ -607,23 +607,73 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 # media type application/vnd.oci.image.index.v1+json (the INDEX, not a
 # per-arch manifest). This release carries AW #57: the provider operation
 # contract (OperationSpec start/observe, CredentialBinding resolved by an
-# injected CredentialResolver, WorkspaceRuntime replacing use_gvisor,
+# injected CredentialResolver, WorkspaceRuntime replacing the boolean gVisor flag,
 # teardown(target=) returning TeardownReport). Image contents are rebuilt from
 # the same manifests; the harness CLIs are unchanged from 5c4e5595.
 #
 # omni-agent       a5146248, the build's OMNI_IMAGE.
 # toolchain        70033400, built FROM omni a5146248 in the same run.
 # claude-cli       b3f39a35.
+# AGENTIC-WORKSPACE CROSS-UID WORKSPACE DELETE, 2026-10-16. Taken from
+# release-branch run 38827980325 ("Release Workspace Images", push to release,
+# success) of agentic-workspace be32a683 (release PR #80), the commit
+# lib/agentic-workspace pins. Each digest below is what `docker buildx
+# imagetools inspect --format '{{.Manifest.Digest}}'` returns for the
+# full-commit tag be32a683d2b0daf550adeea6719a5309903eb48f, media type
+# application/vnd.oci.image.index.v1+json (the INDEX, amd64 + arm64), and the
+# digest the run's sign-and-verify step signed. Every image carries
+# agentic.image.channel=release and revision be32a683, and `cosign verify`
+# (v3.1.3) passes for each against the release-images.yml@refs/heads/release
+# identity with the GitHub Actions OIDC issuer. This release carries AW #67:
+# Docker teardown deletes workspace files the container wrote under another
+# uid (TeardownReport.delete_fallback), the host disk leak behind #1983. Also
+# #60 (Rust operation contract), #66 (harness credential presentation), #74
+# (spool credential redaction, `start(redact=)`), #76 (contained files), #79
+# (always pass --runtime, runc included). No image manifest change: the
+# harness CLIs and exporter are unchanged from 914129db (labels: Claude Code
+# 2.1.293, codex-cli 0.160.1).
+#
+# omni-agent       01e3c15f, omni-agent manifest 1.16.0.
+# toolchain        885be5de, built FROM omni 01e3c15f in the same run (label
+#                  org.opencontainers.image.base.digest).
+# claude-cli       14eeb7c5, claude-cli manifest 2.4.0.
+#
+#                  Previous pins, for the record: claude-cli b3f39a35,
+#                  omni-agent a5146248, toolchain 70033400, all from
+#                  agentic-workspace 914129db (release PR #57).
+# AGENTIC-WORKSPACE CLAUDE HEADLESS TRANSPORT + E2B PROVIDER, 2026-10-21. Taken
+# from release-branch run 39657783365 ("Release Workspace Images", push to
+# release, success) of agentic-workspace c621d819 (release PR #90), the commit
+# lib/agentic-workspace pins. Each digest below is what `docker buildx
+# imagetools inspect --format '{{.Manifest.Digest}}'` returns for the
+# full-commit tag c621d819a4c8f05b3f7d30358cc0b6159c8a64d7, media type
+# application/vnd.oci.image.index.v1+json (the INDEX, amd64 + arm64). Every
+# image carries agentic.image.channel=release and revision c621d819, and
+# `cosign verify` (v3.1.3) passes for each against the
+# release-images.yml@refs/heads/release identity with the GitHub Actions OIDC
+# issuer. This release carries AW #89 (ClaudeHeadless one-shot transport,
+# `claude -p` on the OAuth login) and #87 (E2B workspace provider). No image
+# manifest change: the harness CLIs and exporter are unchanged from be32a683
+# (labels: Claude Code 2.1.293, codex-cli 0.160.1).
+#
+# omni-agent       45aa9b89, omni-agent manifest 1.16.0.
+# toolchain        5ba2b2ac, built FROM omni 45aa9b89 in the same run (label
+#                  org.opencontainers.image.base.digest).
+# claude-cli       6aec8e2d, claude-cli manifest 2.4.0.
+#
+#                  Previous pins, for the record: claude-cli 14eeb7c5,
+#                  omni-agent 01e3c15f, toolchain 885be5de, all from
+#                  agentic-workspace be32a683 (release PR #80).
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:b3f39a3577a46dee75347ce0db7803014ab4569083c7aa353be63643df810231"
+            "sha256:6aec8e2de1d42018e5c38c7b78fe8c3d944f5e3ebdc350176c3e21f3b47e6315"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:a5146248dadd474623f6fe1f6f0d1c6939f2ae6a619ed27a728135461e48f735"
+            "sha256:45aa9b890f027f7b34d9a6cf06b899ad3420f595591337bef48230974ef7fb8b"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:70033400c2e8489c905eb808bbd27cc44bb656d752c88c6891759257f6c407a5"
+            "sha256:5ba2b2ac8e9a4af525decabd5205b7ca841921642328ca7397fa8dc8ac1d481c"
         ),
     }
 )
@@ -758,4 +808,6 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:41d85bdb8d623b6005898f0f1595dc0ee3ff48bc02257eedeabcaee060e3ba5d",  # a4665941
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:7eb278fda8ef8f574ab340b3177a169939eac8c92f6eb034b73178efae477c7a",  # 29d7dec3
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:4a76c184a8d36b8663a0f0191842410304ea1e10b0e719516817949ae8c862f8",  # 3f917632
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:70033400c2e8489c905eb808bbd27cc44bb656d752c88c6891759257f6c407a5",  # cf5fdc77
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:885be5de3793dc838a391fb7338695f3acc2693b4c196e39e182f05765a2a1fd",  # 87fec3c8
 )

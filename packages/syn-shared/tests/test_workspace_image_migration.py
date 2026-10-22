@@ -25,7 +25,7 @@ pytestmark = pytest.mark.unit
 _REPO = Path(__file__).resolve().parents[3]
 OLD = (
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:"
-    "4a76c184a8d36b8663a0f0191842410304ea1e10b0e719516817949ae8c862f8"
+    "885be5de3793dc838a391fb7338695f3acc2693b4c196e39e182f05765a2a1fd"
 )
 CUSTOM = "ghcr.io/example/my-omni@sha256:" + "ab" * 32
 

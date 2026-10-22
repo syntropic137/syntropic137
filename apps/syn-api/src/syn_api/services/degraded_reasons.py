@@ -37,3 +37,5 @@ class DegradedReason(StrEnum):
     ANTHROPIC_API_KEY = "anthropic_api_key"
     GITHUB_APP = "github_app"
     DISK_SPACE = "disk_space"
+    #: The workspace reclaimer failed a delete two passes running (#1983).
+    WORKSPACE_RECLAIM = "workspace_reclaim"

@@ -10,11 +10,12 @@ and customize as needed.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_ENVIRONMENT` | `development` | Runtime environment (`development`, `staging`, `production`) |
-| `DATABASE_URL` | | PostgreSQL connection string |
+| `APP_ENVIRONMENT` | `development` | Runtime environment (`development`, `beta`, `staging`, `production`, `selfhost`, `test`, `offline`) |
+| `SYN_OBSERVABILITY_DB_URL` | | PostgreSQL connection string the API uses for observability data and projections |
+| `DATABASE_URL` | | PostgreSQL connection string for the event store container (set in Docker Compose) |
 | `REDIS_URL` | | Redis connection string |
-| `API_HOST` | `0.0.0.0` | API server bind address |
-| `API_PORT` | `8000` | API server port |
+| `SYN_API_HOST` | `0.0.0.0` | API server bind address |
+| `SYN_API_PORT` | `8000` | API server port |
 
 ## GitHub App
 
@@ -23,11 +24,14 @@ and managing repositories.
 
 ### Setup
 
-Run the GitHub App setup via the CLI:
+The GitHub App is created during setup:
 
 ```bash
-npx @syntropic137/setup github-app
+npx @syntropic137/setup init
 ```
+
+To open an existing App's settings, permissions or installations page later, run
+`npx @syntropic137/setup github-app`.
 
 See [GitHub Integration](/docs/guide/github-integration) for the full setup guide including trigger rules and webhook configuration. For secret storage details, see [Secrets Management](/docs/guide/secrets).
 
@@ -35,16 +39,10 @@ See [GitHub Integration](/docs/guide/github-integration) for the full setup guid
 
 | Variable | Description |
 |----------|-------------|
-| `GITHUB_APP_ID` | GitHub App ID |
-| `GITHUB_APP_PRIVATE_KEY` | PEM-encoded private key |
-| `GITHUB_WEBHOOK_SECRET` | Webhook verification secret |
-
-## Agent Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AGENT_WORKSPACE_DIR` | `/tmp/syn-workspaces` | Base directory for agent workspaces |
-| `AGENT_TIMEOUT` | `3600` | Maximum agent execution time (seconds) |
+| `SYN_GITHUB_APP_ID` | GitHub App ID |
+| `SYN_GITHUB_APP_PRIVATE_KEY_FILE` | Path to the PEM private key file (preferred; takes priority) |
+| `SYN_GITHUB_PRIVATE_KEY` | Private key as `file:<path>`, raw PEM, or base64 PEM (fallback) |
+| `SYN_GITHUB_WEBHOOK_SECRET` | Webhook verification secret |
 
 ## Execution Concurrency
 
@@ -76,7 +74,7 @@ See [Event Ingestion](/docs/guide/event-ingestion) for how the hybrid approach w
 | `SYN_POLLING_POLL_INTERVAL_SECONDS` | `60.0` | Active polling interval (seconds) |
 | `SYN_POLLING_SAFETY_NET_INTERVAL_SECONDS` | `300.0` | Safety net polling interval (seconds) |
 | `SYN_POLLING_WEBHOOK_STALE_THRESHOLD_SECONDS` | `1800.0` | Seconds before switching to active polling |
-| `SYN_POLLING_DEDUP_TTL_SECONDS` | `86400` | Redis dedup key TTL (seconds) |
+| `SYN_POLLING_DEDUP_TTL_SECONDS` | `86400` | Dedup key TTL (seconds). Stored in Postgres when available, rounded up to whole days; Redis is the fallback |
 
 See `.env.example` in the repository for the complete list of configuration
 options.

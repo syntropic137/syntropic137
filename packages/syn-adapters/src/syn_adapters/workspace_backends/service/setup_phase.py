@@ -23,16 +23,10 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from syn_adapters.workspace_backends.exec_status_lost import is_status_lost
+from syn_adapters.workspace_backends.service.setup_phase_credentials import credential_values
 from syn_domain.contexts.orchestration import ProvisionStep, ProvisionStepTimeoutError
 from syn_shared.display import format_exit_code
-from syn_shared.env_constants import (
-    ENV_ANTHROPIC_API_KEY,
-    ENV_CLAUDE_CODE_OAUTH_TOKEN,
-    ENV_GIT_AUTHOR_EMAIL,
-    ENV_GIT_AUTHOR_NAME,
-    ENV_GIT_COMMITTER_EMAIL,
-    ENV_GIT_COMMITTER_NAME,
-)
+from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY, ENV_CLAUDE_CODE_OAUTH_TOKEN
 from syn_shared.logging.redaction import redact_credentials
 from syn_shared.settings import get_settings
 
@@ -66,16 +60,12 @@ def _build_setup_env(secrets: SetupPhaseSecrets) -> dict[str, str]:
     if secrets.anthropic_api_key:
         setup_env[ENV_ANTHROPIC_API_KEY] = secrets.anthropic_api_key
 
-    # Git identity from GitHub App bot configuration.
-    # Both author and committer are set explicitly -- entrypoint.sh would derive
-    # committer from author if omitted, but we set both for clarity.
-    if secrets.git_author_name:
-        setup_env[ENV_GIT_AUTHOR_NAME] = secrets.git_author_name
-        setup_env[ENV_GIT_COMMITTER_NAME] = secrets.git_author_name
-    if secrets.git_author_email:
-        setup_env[ENV_GIT_AUTHOR_EMAIL] = secrets.git_author_email
-        setup_env[ENV_GIT_COMMITTER_EMAIL] = secrets.git_author_email
-
+    # CREDENTIALS ONLY. Every value here is registered for redaction by the
+    # provider, and agentic-workspace refuses any registered value holding a
+    # `[` or `]` - the ends of its `[REDACTED]` marker. The GitHub App git
+    # identity is `<app>[bot]`, so passing it here failed every setup run
+    # (1.0.4-beta.1). It is not a secret: build_setup_script() writes it into
+    # the script instead.
     return setup_env
 
 
@@ -109,6 +99,9 @@ async def run_setup_phase(
         raise TypeError(f"Expected ManagedWorkspace, got {type(ws).__name__}")
 
     setup_env = _build_setup_env(secrets)
+    # Before anything is injected: from here on the workspace holds these
+    # values, and its stream must withhold them (#1927).
+    ws.withhold(credential_values(secrets))
 
     # Write setup script to container
     script = setup_script or secrets.build_setup_script()

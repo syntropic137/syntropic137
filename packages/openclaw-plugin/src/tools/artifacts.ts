@@ -33,7 +33,7 @@ export async function synListArtifacts(
   const result = await client.get<ArtifactListResponse>("/artifacts", params);
   if (!result.ok) return formatError(result.error);
 
-  const { artifacts, total, page, page_size } = result.data;
+  const { artifacts = [], total, page, page_size } = result.data;
   if (artifacts.length === 0) {
     return { content: "No artifacts found." };
   }

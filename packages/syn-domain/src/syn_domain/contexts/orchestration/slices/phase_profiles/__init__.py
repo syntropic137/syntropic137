@@ -9,6 +9,7 @@ from syn_domain.contexts.orchestration.slices.phase_profiles.query_service impor
     PhaseResourceProfile,
     PhaseTokenProfile,
     ResourceCoverage,
+    run_demand_from,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "PhaseResourceProfile",
     "PhaseTokenProfile",
     "ResourceCoverage",
+    "run_demand_from",
 ]

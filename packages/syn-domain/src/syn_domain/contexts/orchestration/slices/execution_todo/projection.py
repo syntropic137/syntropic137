@@ -41,6 +41,7 @@ highwater mark, so a resurrected stale todo is never served.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
 from event_sourcing import AutoDispatchProjection
@@ -52,11 +53,20 @@ if TYPE_CHECKING:
         ResumeOrigin,
     )
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
+    phase_definitions_conflict,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     read_resume_origin,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     INHERITED_PHASE_OWNERS,
+)
+from syn_domain.contexts.orchestration.domain.events.EvidenceRequestedEvent import (
+    EvidenceRequestedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.EvidenceStepSettledEvent import (
+    EvidenceStepSettledEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
     PhaseRetryScheduledEvent,
@@ -74,6 +84,8 @@ def _item_to_dict(item: TodoItem) -> dict:
         "phase_id": item.phase_id,
         "workspace_id": item.workspace_id,
         "session_id": item.session_id,
+        "evidence_gate_id": item.evidence_gate_id,
+        "evidence_step": item.evidence_step,
     }
 
 
@@ -84,6 +96,8 @@ def _item_from_dict(data: dict) -> TodoItem:
         phase_id=data.get("phase_id"),
         workspace_id=data.get("workspace_id"),
         session_id=data.get("session_id"),
+        evidence_gate_id=data.get("evidence_gate_id"),
+        evidence_step=data.get("evidence_step"),
     )
 
 
@@ -100,6 +114,43 @@ _ACTION_RANK: dict[TodoAction, int] = {
 # strictly greater than any TodoAction rank, so subsequent advance-
 # direction handlers for the same phase become no-ops.
 _RANK_PHASE_DONE = 99
+# Sentinel cursor for a gate whose last step has settled. Strictly greater
+# than any step index, so every later delivery for that gate is a no-op.
+_GATE_CLOSED = 1_000_000
+
+
+@dataclass
+class _GateCursors:
+    """Each evidence gate's cursor: its lowest unsettled step, or `_GATE_CLOSED`."""
+
+    by_gate: dict[str, int] = field(default_factory=dict)
+
+
+def _is_current_evidence_step(item: TodoItem, gates: _GateCursors) -> bool:
+    """An evidence to-do is served only at its gate's cursor; others are stale."""
+    if item.action != TodoAction.RUN_EVIDENCE_STEP or item.evidence_gate_id is None:
+        return True
+    cursor = gates.by_gate.get(item.evidence_gate_id)
+    return cursor is None or item.evidence_step == cursor
+
+
+def _moves_cursor(cursor: int | None, settled: int | None) -> bool:
+    """Whether a request (``settled`` None) or a settlement advances a gate's cursor.
+
+    A request applies only to a gate not yet on record; a settlement only at or
+    past the cursor. Anything else was already applied.
+    """
+    if cursor is None:
+        return True
+    return settled is not None and settled >= cursor
+
+
+def _is_step(item: TodoItem, gate_id: str, step: int | None) -> bool:
+    return (
+        item.action == TodoAction.RUN_EVIDENCE_STEP
+        and item.evidence_gate_id == gate_id
+        and item.evidence_step == step
+    )
 
 
 def _merge_progress(existing: dict[str, int], updates: dict[str, int]) -> dict[str, int]:
@@ -188,12 +239,17 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         items = [_item_from_dict(d) for d in data.get("items", [])]
         raw_progress = data.get("phase_progress")
         progress: dict[str, int] = raw_progress if isinstance(raw_progress, dict) else {}
+        raw_gates = data.get("evidence_progress")
+        gates = _GateCursors(dict(raw_gates) if isinstance(raw_gates, dict) else {})
         return [
             item
             for item in items
-            if item.phase_id is None
-            or item.action not in _ACTION_RANK
-            or progress.get(item.phase_id, 0) <= _ACTION_RANK[item.action]
+            if _is_current_evidence_step(item, gates)
+            and (
+                item.phase_id is None
+                or item.action not in _ACTION_RANK
+                or progress.get(item.phase_id, 0) <= _ACTION_RANK[item.action]
+            )
         ]
 
     # =========================================================================
@@ -209,6 +265,11 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         phase_defs = event_data.get("phase_definitions") or []
         if not phase_defs:
             return  # Legacy mode — no to-do list management
+        if phase_definitions_conflict(phase_defs) is not None:
+            # Not a total order (#1455): the aggregate sequences nothing from
+            # it, so nothing is queued here either. The empty list drains to a
+            # completion the aggregate refuses, and the run is failed unrun.
+            return
 
         origin = read_resume_origin(
             event_data.get("resumed_from"), event_data.get(INHERITED_PHASE_OWNERS)
@@ -322,7 +383,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
             return
 
         async with self._lock_for(execution_id):
-            current, progress = await self._read_state(execution_id)
+            current, progress, gates = await self._read_state(execution_id)
             remaining = [t for t in current if t.phase_id != phase_id]
             remaining.append(
                 TodoItem(
@@ -332,7 +393,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 )
             )
             progress[phase_id] = _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]
-            await self._save_state(execution_id, remaining, progress)
+            await self._save_state(execution_id, remaining, progress, gates)
 
     async def on_phase_completed(self, event_data: dict) -> None:
         """Phase completed → remove COMPLETE_PHASE to-do for this phase only.
@@ -350,7 +411,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         if not isinstance(phase_id, str):
             return
         async with self._lock_for(execution_id):
-            current, progress = await self._read_state(execution_id)
+            current, progress, gates = await self._read_state(execution_id)
             remaining = [
                 t
                 for t in current
@@ -360,6 +421,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 execution_id,
                 remaining,
                 _merge_progress(progress, {phase_id: _RANK_PHASE_DONE}),
+                gates,
             )
 
     async def on_next_phase_ready(self, event_data: dict) -> None:
@@ -381,7 +443,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
 
         next_phase_id = event_data.get("next_phase_id")
         async with self._lock_for(execution_id):
-            current, progress = await self._read_state(execution_id)
+            current, progress, gates = await self._read_state(execution_id)
             current.append(
                 TodoItem(
                     execution_id=execution_id,
@@ -394,7 +456,67 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                     progress,
                     {next_phase_id: _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]},
                 )
-            await self._save_state(execution_id, current, progress)
+            await self._save_state(execution_id, current, progress, gates)
+
+    async def on_evidence_requested(self, event_data: EvidenceRequestedEvent) -> None:
+        """A gate held the transition after a phase → run its first step (plan §A.5).
+
+        Appends, like `on_next_phase_ready`: it arrives in the same save as
+        ArtifactsCollectedForPhase, whose COMPLETE_PHASE must survive.
+        """
+        event = EvidenceRequestedEvent.model_validate(event_data)
+        if not event.execution_id or not event.steps:
+            return
+        await self._replace_evidence_step(
+            event.execution_id, event.after_phase_id, event.gate_id, None, 0
+        )
+
+    async def on_evidence_step_settled(self, event_data: EvidenceStepSettledEvent) -> None:
+        """A step settled → drop its to-do and add the next one the aggregate named.
+
+        None next means the gate opened; its `NextPhaseReady` adds the phase.
+        """
+        event = EvidenceStepSettledEvent.model_validate(event_data)
+        if not event.execution_id:
+            return
+        await self._replace_evidence_step(
+            event.execution_id, event.after_phase_id, event.gate_id, event.step, event.next_step
+        )
+
+    async def _replace_evidence_step(
+        self,
+        execution_id: str,
+        phase_id: str,
+        gate_id: str,
+        settled: int | None,
+        following: int | None,
+    ) -> None:
+        """Move a gate's cursor forward, never back (the gate's D1 guard).
+
+        `evidence_progress` holds each gate's cursor: the lowest step not yet
+        settled, or `_GATE_CLOSED`. A request for a gate already on record and
+        a settlement below the cursor are duplicates or late deliveries from
+        the other writer sharing this store, and change nothing.
+        """
+        async with self._lock_for(execution_id):
+            current, progress, gates = await self._read_state(execution_id)
+            if not _moves_cursor(gates.by_gate.get(gate_id), settled):
+                return  # A duplicate or a late delivery: the gate has moved on.
+            gates.by_gate[gate_id] = _GATE_CLOSED if following is None else following
+            remaining = [t for t in current if not _is_step(t, gate_id, settled)]
+            if following is not None and not any(
+                _is_step(t, gate_id, following) for t in remaining
+            ):
+                remaining.append(
+                    TodoItem(
+                        execution_id=execution_id,
+                        action=TodoAction.RUN_EVIDENCE_STEP,
+                        phase_id=phase_id,
+                        evidence_gate_id=gate_id,
+                        evidence_step=following,
+                    )
+                )
+            await self._save_state(execution_id, remaining, progress, gates)
 
     async def on_workflow_completed(self, event_data: dict) -> None:
         """Workflow completed → clear all todos."""
@@ -416,19 +538,30 @@ class ExecutionTodoProjection(AutoDispatchProjection):
     # Internal
     # =========================================================================
 
-    async def _read_state(self, execution_id: str) -> tuple[list[TodoItem], dict[str, int]]:
-        """Read (items, phase_progress) from the record. Empty when absent."""
+    async def _read_state(
+        self, execution_id: str
+    ) -> tuple[list[TodoItem], dict[str, int], _GateCursors]:
+        """Read (items, phase_progress, evidence_progress). Empty when absent."""
         data = await self._store.get(self.PROJECTION_NAME, execution_id)
         if not data:
-            return [], {}
+            return [], {}, _GateCursors()
         items = [_item_from_dict(d) for d in data.get("items", [])]
         progress = data.get("phase_progress")
-        return items, dict(progress) if isinstance(progress, dict) else {}
+        gates = data.get("evidence_progress")
+        return (
+            items,
+            dict(progress) if isinstance(progress, dict) else {},
+            _GateCursors(dict(gates) if isinstance(gates, dict) else {}),
+        )
 
     async def _save_state(
-        self, execution_id: str, items: list[TodoItem], progress: dict[str, int]
+        self,
+        execution_id: str,
+        items: list[TodoItem],
+        progress: dict[str, int],
+        gates: _GateCursors,
     ) -> None:
-        """Persist (items, phase_progress) for an execution."""
+        """Persist (items, phase_progress, evidence_progress) for an execution."""
         await self._store.save(
             self.PROJECTION_NAME,
             execution_id,
@@ -436,6 +569,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 "execution_id": execution_id,
                 "items": [_item_to_dict(t) for t in items],
                 "phase_progress": progress,
+                "evidence_progress": dict(gates.by_gate),
             },
         )
 
@@ -451,7 +585,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         second line of defense (see module docstring).
         """
         async with self._lock_for(execution_id):
-            _items, progress = await self._read_state(execution_id)
+            _items, progress, gates = await self._read_state(execution_id)
             new_rank = _ACTION_RANK[new_todo.action]
             if progress.get(phase_id, 0) >= new_rank:
                 return  # A more recent writer is ahead; no-op.
@@ -459,6 +593,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 execution_id,
                 [new_todo],
                 _merge_progress(progress, {phase_id: new_rank}),
+                gates,
             )
 
     async def _start_resume(self, execution_id: str, origin: ResumeOrigin) -> None:
@@ -472,8 +607,32 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         resume = origin.resume_phase_id
         provision = _ACTION_RANK[TodoAction.PROVISION_WORKSPACE]
         inherited = {p.phase_id: _RANK_PHASE_DONE for p in origin.inherited_phases}
+        gate = origin.inherited_evidence_gate
         async with self._lock_for(execution_id):
-            _items, progress = await self._read_state(execution_id)
+            _items, progress, gates = await self._read_state(execution_id)
+            if gate is not None:
+                # The parent stopped inside a gate (plan §A.7): its unsettled
+                # steps come first, and the gate's last settle releases the
+                # held phase through `NextPhaseReady`, as on a fresh run.
+                if gate.gate_id in gates.by_gate:
+                    return  # Replayed, and the run has moved on; leave it.
+                step = gate.first_unsettled
+                gates.by_gate[gate.gate_id] = step
+                await self._save_state(
+                    execution_id,
+                    [
+                        TodoItem(
+                            execution_id=execution_id,
+                            action=TodoAction.RUN_EVIDENCE_STEP,
+                            phase_id=gate.after_phase_id,
+                            evidence_gate_id=gate.gate_id,
+                            evidence_step=step,
+                        )
+                    ],
+                    _merge_progress(progress, inherited),
+                    gates,
+                )
+                return
             if progress.get(resume, 0) >= provision:
                 return  # Replayed, and the run has moved on; leave it.
             await self._save_state(
@@ -486,6 +645,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                     )
                 ],
                 _merge_progress(progress, {**inherited, resume: provision}),
+                gates,
             )
 
     async def _clear_execution(self, execution_id: str) -> None:

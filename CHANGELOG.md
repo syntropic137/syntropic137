@@ -11,15 +11,95 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ## [Unreleased]
 
-## [1.0.3] - 2026-10-15
+## [1.0.4] - 2026-10-22
 
 ### Added
 
-- feat(codex): accept OPENAI_API_KEY as a fallback to CODEX_AUTH_JSON (#1971) (#1972)
-- feat(broker): S2 spike - git and gh through the broker (#1735) (#1929)
+- The execution budget is now sized at startup from host cores, memory, and free disk against the measured per-run demand. `SYN_EXECUTION_MAX_CONCURRENT` is now the upper bound. Until 10 phases have been measured, the budget equals that maximum. (#2050)
+- New `SYN_WORKSPACE_RUNTIME` (`runc` | `gvisor` | `kata` | `sysbox`) selects the OCI runtime for agent workspaces. Unset keeps today's behaviour (gVisor when Docker has it, else runc). An unknown value stops startup with a clear error. An explicit runtime Docker doesn't have fails the workspace rather than falling back to runc. (#1968)
+- New `executor` service in the self-host compose, behind the `run-queue` compose profile. A default install does not start it. Enabling the run queue means setting both `COMPOSE_PROFILES=run-queue` and `SYN_EXECUTION_RUN_QUEUE_ENABLED=true` in `.env`. Size it with `EXECUTOR_MEMORY_LIMIT` / `EXECUTOR_CPU_LIMIT`. (#1922)
+- The integration-skip fitness gate now follows `from x import name` imports into first-party code. A skip hidden in an imported or re-exported helper, or in a fixture imported into a test module or `conftest.py`, now needs `@pytest.mark.may_skip(reason="...", issue="#N")` like any other skippable integration test. (#1982)
+- Workflow phases can now declare `platform_access: eval`. When platform access is enabled, that phase's `SYN_API_TOKEN` can do two things beyond read access, and only inside the eval its own run belongs to: launch workflow runs into that eval, and record scores for that eval's runs. Any other write, or any attempt to touch a different eval, is refused with 403. (#1758)
+- New `just selfhost-backup` and `just selfhost-restore <file> [--force]` for self-hosted deployments from a repository checkout. Backups are compressed `pg_dump` custom-format archives, verified before they are reported as written. (#1790)
+- **Docs: removed false claims.** The docs now match what the software does, especially on credential exposure in workspaces (the agent can read the GitHub installation token and its model credential), trigger history and limits, configuration variable names, self-hosting secrets, tunnels and the setup CLI. Every `syn` command, API route and `npx @syntropic137/setup` command in the docs and README now names a subcommand, flag or route that exists. (#1964)
+- The OpenClaw plugin's API types are now generated from the API's OpenAPI spec and checked by `just codegen-check`, so the plugin can no longer fall behind the API without anyone noticing. (#2039)
+- Adds two feedback screening adapters: a heuristic screener that needs no model, and a Claude screener that uses an explicit model id and a closed output schema. Any malformed model reply is quarantined, never accepted. (#2015)
+- Agent workspace GitHub tokens are now capped at `actions: read`, whatever the GitHub App is granted. An agent can no longer dispatch or re-run workflows. It keeps every other permission the installation grants. (#1998)
+- Internal groundwork for remote workspaces. Added a credential-free workspace mode (`NoCredentials`) and a per-backend composition point (`BackendKit`). (#2006)
+- The feedback context can now enrol feedback Sources, rotate their signing keys with an overlap window, and throttle or revoke them. (#2013)
+- **Tickets:** feedback is grouped into tickets that store only ids and content hashes, never the reporter's text. (#2011)
+- feat(orchestration): resume inherits an open evidence gate (evidence PR 5c) (#2004)
+- feat(orchestration): evidence gate (PR 5b) (#2001)
+- Workflow executions now record the evidence each phase declares in its `TASK_RESULT`. Malformed entries are kept and marked unreadable instead of being dropped. (#1999)
+- The mutation evidence runner can now write a machine-readable `evidence.json` (`--evidence FILE`) next to its markdown report. Killed maps to `passed`, survived to `failed`, and a void baseline to `void`. (#1997)
+- Eval suites: a defect case can now be pinned at the head its PR's verify record judged (`certified_in`), not only at the fix's first parent. PRs that merged `main` before their fix can now become cases. The old first-parent pins are still accepted. (#1980)
+- Adds versioned JSON Schemas for the three documents an evidence gate exchanges: a phase's **evidence request**, a repository's **`evidence.json`**, and the platform's **evidence manifest**. They live under `schemas/evidence/`, so evidence workflows in other repositories can validate against them. (#1987)
+- New architectural fitness check: an integration test that can skip must declare it with `@pytest.mark.may_skip(reason="...", issue="#N")`. The check covers skip markers, `pytest.skip`/`importorskip`, and helpers or fixtures that skip, including fixtures in `conftest.py`. The 104 existing undeclared tests form a ratcheted budget that can only go down. A `may_skip` without a reason or a `#N` issue always fails. (#1985)
+
+### Changed
+
+- chore(deps): pin agentic-workspace c621d819 (release #90) and its image digests (#2054)
+- test: prove usage backfill does not block ingest by lock state, not throughput (#1952) (#2051)
+- ci(evidence): set SYN_CONTRACT_TEST_IMAGE for the Docker contract tests (#2047)
+- docs(research): provider-neutral workspace runtime research (Harbor, OpenSandbox, Substrate) (#1874)
+- docs(plans): feedback ticketing server plan (#1970) (#2010)
+- test(export): pin the exported inputs block round-trip (#1055) (#2038)
+- ci(evidence): per-dispatch concurrency + evidence artifact for mutation evidence; dispatch-only integration-evidence (plan PR 3) (#2002)
+- chore(deps): pin agentic-workspace release be32a683 (workspace dir cross-uid delete #67, fixes #1983 leak) (#1992)
+- docs(evals): v4-precheck A/B result: provisional adopt, pending escape window (#1996)
+- test(adapters): fake-vs-real contract suites, batch 1 (#1675) (#1990)
 
 ### Fixed
 
+- fix(security): pin certifi 2026.10.19 (GHSA-6q48-6c7w-9gw2, critical) (#2067)
+- When an agent prints a credential value, it is now replaced with `[REDACTED:credential]` in agent output, logs and tool-event telemetry. This covers the platform API token, model API keys, the session-store token and GitHub installation tokens, including tokens renewed mid-run. It also applies when the value is printed base64-, URL- or JSON-encoded. (#1928)
+- fix(deps): vitest 4.1.12 for @vitest/mocker advisories (main OSV red) (#2061)
+- fix(compose): api tmpfs owned by syn so cosign survives a host reboot (#2046)
+- fix(deps): certifi + vite security patches (OSV/pip-audit red on every PR) (#2045)
+- Container creation from the API now goes through a guard service (`docker-create-guard`). It refuses privileged containers, host namespaces, device mappings, host paths outside the workspaces directory, and unknown images. Platform workspaces and sidecars are unaffected. (#1833)
+- fix(disk): explicit, verified observer exemption so node-exporter's / bind stops blocking every reclaim (refs #1983) (#2003)
+- Claude phases now launch with an explicit model id instead of letting the Claude Code CLI choose: `sonnet` becomes `claude-sonnet-5-5`, `opus` becomes `claude-opus-5-5`, and `haiku` becomes `claude-haiku-5-5`. Aliases are matched in any letter case. On some API providers, the CLI's own catalog could send `sonnet` to Sonnet 4.5. (#1854)
+- Security: removed the vulnerable `braces` (GHSA-vfj7-8cjw-p6xm) and `sprintf-js` (GHSA-hp3w-g68c-fv3c) packages from the dashboard and ui-feedback dev toolchain by upgrading typescript-eslint to 8.71.1 and vite-plugin-dts to 5.1.2. Neither package was in a shipped bundle. (#1898)
+- **Triggers:** registering a trigger with a non-zero `config.debounce_seconds` now fails with HTTP 400. Before, the value was accepted and silently ignored: debouncing was never applied. To space out fires for the same PR, use `cooldown_seconds`. Existing triggers stored with a non-zero value still load, and they keep firing immediately as before. (#2041)
+- fix(scripts): api_shape exits 2, not 1, on truncated or too-deep responses (#2030) (#2040)
+- Internal CI hardening. The fitness suite now accounts for every `just` recipe: a new recipe fails CI until `preflight`/`preflight-agent` runs it or it is classified with a written reason. That holds whatever the recipe is called, whatever parameters it takes and whichever imported file defines it. (#2037)
+- Agent workflow phases (implement, fix, prepare and the bake-* implement phases) no longer delete `.mutations/` to clear the "Mutation Patches Not Merged" check. (#2035)
+- A session that was killed or timed out before it reported a cost now shows the same cost everywhere: in the session list, the session detail, the execution and phase totals, and a replay. That cost is what its turns cost, model by model. Before this change, some views re-priced the run's totals under a single model. (#2034)
+- Creating or updating a workflow whose phases repeat a phase id or share an `order` is now rejected with a validation error. The JSON `POST /workflows` path (`syn workflow create`) used to accept these, and a run would then skip a tied phase without any error. (#2033)
+- The repository's pre-push hook now checks the commit you are pushing instead of your working tree. If you push a SHA that is not checked out, or your checkout may not match the commit, preflight runs in a temporary worktree at that commit and the worktree is removed afterwards. "May not match" covers uncommitted or untracked changes, files flagged `assume-unchanged`/`skip-worktree` (in submodules too), and a `git status` that fails. The worktree path initialises submodules, so it is slower than a clean in-place push. Pushes that only delete a branch skip preflight. (#2032)
+- CHANGELOG.md now lists pull requests that were merged with a custom `Merge #N: title` subject. Five entries had been missing: #1858 in 1.0.0, and #1834, #1869, #1873 and #1875 in 1.0.2. They return the next time the changelog is regenerated. (#2031)
+- `syn workflow install`, `syn workflow update` and `syn workflow validate` now treat a YAML file as a workflow only if it has at least one phase. Other top-level YAML files, such as `pnpm-lock.yaml` or `.pre-commit-config.yaml`, are skipped with a warning that says why. (#2029)
+- List pages now handle timestamps the same way on every supported Python version. A stored timestamp at hour `24:00` (for example `2026-10-01T24:00:00Z`) is treated as undated on Python 3.12, 3.13 and 3.14, the same as in the database-side filter. Before this, Python 3.14 read it as midnight of the next day, so filters and counts could differ between the database and the application. (#2014)
+- The harness-format boundary fitness check no longer fails on vendor transcript keys (e.g. `` `sessionId` ``) that appear only in TypeScript `//` or `/* */` comments. (#2016)
+- The Overview activity city now marks its days as UTC days. The range title, the week strip, each day's label, and the day card and dock all carry the suffix, e.g. "Wed, Oct 14 (UTC)". A run late in your local evening can land on the next day, and the label now explains why. The "Runs →" filter it links to already read "Started <day> UTC", so the two now agree. (#2018)
+- fix(settings): delete six unused SYN_WORKSPACE_* settings (#1827) (#2008)
+- **Skyline "Now" selects today.** On the Overview Skyline, **Now** now goes back to the current week and selects today, replacing any older selected day. The readout shows today's figures. (#2009)
+- Executions: the Skyline's "Runs →" now opens exactly that day's runs (UTC), shown as a removable "Started <day> UTC" filter. (#1940)
+- fix(landing): hash deep links scroll to their section; YouTube, social icons, agent docs card (#2005)
+- **Fixed:** with a GitHub App configured, every run on 1.0.4-beta.1 failed at secret-injection setup with `rejected_policy: a registered redaction value overlaps the redaction marker`. The bot's git identity (`<app>[bot]`) was being registered as a redacted credential. It is now set in git config by the setup script instead. Commits keep the bot as author and committer, and the OAuth token and API key are still redacted. (#2000)
+- fix(disk): just vps-reclaim, root backlog reclaim under enforced quiescence (refs #1983) (#1988)
+- fix(disk): fail-closed workspace reclaimer + unconditional low-disk monitor (refs #1983) (#1986)
+- The Workflows page now loads with two API requests, however many workflows you have. It used to send one or two requests per workflow, which hit the gateway's rate limit (HTTP 429) on larger catalogues. (#1991)
+- An artifact can be read by id (`GET /artifacts/{id}`, `/content`, `/raw`, and the CLI commands built on them) as soon as it is created, even while the artifact list is still catching up. Before this change those reads returned 404 until the list caught up. (#1981)
+
+## [1.0.3] - 2026-10-16
+
+### Added
+
+- `GET /metrics/phase-profiles` and `syn metrics profiles` now show, per phase type, how many phases were OOM-killed (and how many could not be measured), name each OOM-killed execution with its peak memory, and add p90, CPU-seconds and wall-time percentiles. (#1936)
+- feat(codex): accept OPENAI_API_KEY as a fallback to CODEX_AUTH_JSON (#1971) (#1972)
+- feat(broker): S2 spike - git and gh through the broker (#1735) (#1929)
+
+### Changed
+
+- chore: bump version to v1.0.3 (#1977)
+
+### Fixed
+
+- The default for `API_MEMORY_LIMIT` is now derived from the execution budget: 128 MiB plus 96 MiB per concurrent execution, counting at least 20 executions. The default value is still **`2g`**, so existing deployments see no change. (#1979)
+- Experimental run queue (`SYN_EXECUTION_RUN_QUEUE_ENABLED`, off by default): an executor that is reconciling many slow containers no longer looks dead to its peers or stops claiming new work. Reconciliation runs at most 4 at a time beside the claim loop, and a draining executor no longer picks up new reconciliation work. Nothing changes with the flag off. (#1975)
+- Cancelling an execution now stops the running agent within a bounded time, even if the agent ignores SIGINT/SIGTERM. Before this, the cancel was recorded but the agent kept working, and its container kept running, until it finished on its own. (#1974)
+- `POST /evals` accepts `stable_key`: creates with the same key are idempotent, concurrent ones included. (#1976)
 - The Run Queue schema is now applied under a Postgres advisory lock, so the api and executor processes can start together safely. (#1967)
 - fix(ui): live stream reopens after the browser gives up, and resyncs on reconnect (#1924) (#1951)
 
@@ -39,6 +119,8 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - New setting **`SYN_EXECUTION_RUN_QUEUE_ENABLED`** (default `false`). **Leave it off.** With it off, nothing changes. (#1808)
 - Eval suites: `verifier-seed-v1` v7 adds the #1808 escape (`start-clock-read-before-settle`). (#1884)
 - **`GET /sessions/{id}` now reports `agent_launch`** (`unknown`, `launched` or `not_launched`). It says whether the session's agent process has actually started. A `running` session that still reads `unknown` may be provisioning. The field turns `launched` as soon as the agent produces its first output, not when it exits. (#1879)
+- feat(brand): X header with the wordmark and install command (#1875)
+- feat(brand): share image from the Blender render with the wordmark (#1873)
 
 ### Changed
 
@@ -61,6 +143,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - Docs: betas are test deploys (tag + pit stop), never GitHub prereleases; version-bump commits stage files by name. (#1886)
 - Internal: `scripts/rehearse_upgrade.sh` rehearses an in-place upgrade against a production backup before each release. (#1769)
 - chore: bump version to v1.0.1 (#1877)
+- chore(docs): deploy docs only from the release branch (#1834)
 
 ### Fixed
 
@@ -69,11 +152,13 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - **Removed `SYN_SECURITY_*` settings** (`ALLOW_NETWORK`, `ALLOWED_HOSTS`, `READ_ONLY_ROOT`, `MAX_WORKSPACE_SIZE`, `MAX_PIDS`, `MAX_EXECUTION_TIME`). They were never applied. Setting them changed nothing before this release and changes nothing now, so you can delete these lines from your `.env`. (#1821)
 - fix(events): one startup lock across the day rollup and its CONCURRENTLY build (#1906) (#1934)
 - A phase that fails because the model provider is at capacity or rate limited now retries in place after about 30-60s, then 60-120s, with jitter. Before, it waited 5s then 10s. More of these blips now finish without a resume or a new execution. (#1883)
+- fix(syn-ui): stable /dev/patterns screenshots and refreshed baselines (#1869)
 
 ## [1.0.0] - 2026-10-10
 
 ### Added
 
+- feat(landing): syntropic137.com rebuilt on Skyline, docs theme, dashboard harness chips (#1858)
 - feat(syn-ui): Skyline Svelte 5 UI, packages, Tauri shell (#1764)
 - feat(metrics): GET /metrics/shipped (Shipped by agents) + failed runs per heatmap day (#1857)
 - `eval_suite.py score --llm-judge` asks a pinned LLM judge (`claude-sonnet-4-6`, temperature 0) whether a blocking finding identifies the seeded defect. The judge must quote the finding it matched. (#1850)
@@ -290,7 +375,8 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 - fix(#1519): pin the event-store INDEX digest, not a child manifest (#1522)
 
-[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.3...HEAD
+[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/syntropic137/syntropic137/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/syntropic137/syntropic137/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/syntropic137/syntropic137/compare/v1.0.0...v1.0.2
 [1.0.0]: https://github.com/syntropic137/syntropic137/compare/v0.33.1...v1.0.0

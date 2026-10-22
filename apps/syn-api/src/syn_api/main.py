@@ -79,18 +79,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         - Disconnect from event store
     """
     import syn_api.services.lifecycle as lifecycle
-    from syn_api.services import shipped_ledger
+    from syn_api.services import execution_capacity, shipped_ledger
+    from syn_shared.settings import get_settings
 
     logger.info("Starting Syntropic137 API...")
 
     async def start() -> None:
+        if get_settings().uses_in_memory_stores:
+            # No profile store, so no pool to wait for: the operator maximum, for
+            # /health. Otherwise sized once the event store is open (#1715).
+            await execution_capacity.size_execution_budget_at_startup()
         result = await lifecycle.startup()
         if isinstance(result, Err):
             logger.error("Startup failed: %s — refusing to serve traffic", result.message)
             raise RuntimeError(f"Startup aborted: {result.message}")
         logger.info("Startup complete (mode=%s)", result.value.get("mode", "full"))
         # Lane 2: the shipped ledger's merge recorder and one-time backfill.
-        shipped_ledger.start_shipped_ledger()
+        # API work, so an executor never starts it (ADR-072 D1).
+        if get_settings().execution.process_role.serves_api:
+            shipped_ledger.start_shipped_ledger()
 
     gate: StartupGate = app.state.startup_gate
     await gate.open(start)
@@ -124,6 +131,62 @@ class _TimedFastAPI(FastAPI):
 
         return RequestTimingMiddleware(
             super().build_middleware_stack(), slow_request_ms=self.slow_request_ms
+        )
+
+
+def _include_api_routers(app: FastAPI) -> None:
+    """Every business router, and the UI feedback one where it is installed."""
+    for router in (
+        workflows_router,
+        executions_router,
+        tags_router,
+        evals_router,
+        sessions_router,
+        artifacts_router,
+        claude_plugins_router,
+        skills_router,
+        metrics_router,
+        capture_router,
+        observability_router,
+        costs_router,
+        events_router,
+        github_router,
+        conversations_router,
+        triggers_router,
+        webhooks_router,
+        sse_router,
+        organizations_router,
+        systems_router,
+        repos_router,
+        insights_router,
+        maintenance_router,
+        features_router,
+    ):
+        app.include_router(router)
+
+    # ── UI feedback (ADR-016, #105) ────────────────────────────────────
+    # The standard API install stays independent of the feedback package.
+    # Images built with the feedback extra keep stable routes across flag changes.
+    from importlib.util import find_spec
+
+    from syn_shared.settings.config import get_settings
+
+    feedback_installed = find_spec("ui_feedback") is not None
+    if get_settings().syn_ui_feedback_enabled and not feedback_installed:
+        raise RuntimeError("UI feedback is enabled; install syn-api[feedback]")
+    if feedback_installed:
+        from ui_feedback.router import create_feedback_router
+
+        from syn_api.services import ui_feedback as ui_feedback_service
+
+        feedback_router, feedback_overrides = create_feedback_router(
+            ui_feedback_service.get_feedback_storage,
+            max_upload_bytes=ui_feedback_service.MAX_UPLOAD_BYTES,
+        )
+        app.dependency_overrides.update(feedback_overrides)
+        app.include_router(
+            feedback_router,
+            responses={404: {"model": FeatureDisabledResponse}},
         )
 
 
@@ -208,55 +271,10 @@ def create_app() -> FastAPI:
     # No prefix here — versioning is handled at the routing layer (nginx).
     # nginx: location /api/v1/ → proxy_pass http://api:8000/
     # So /api/v1/workflows → strips to /workflows → matches these routes.
-    app.include_router(workflows_router)
-    app.include_router(executions_router)
-    app.include_router(tags_router)
-    app.include_router(evals_router)
-    app.include_router(sessions_router)
-    app.include_router(artifacts_router)
-    app.include_router(claude_plugins_router)
-    app.include_router(skills_router)
-    app.include_router(metrics_router)
-    app.include_router(capture_router)
-    app.include_router(observability_router)
-    app.include_router(costs_router)
-    app.include_router(events_router)
-    app.include_router(github_router)
-    app.include_router(conversations_router)
-    app.include_router(triggers_router)
-    app.include_router(webhooks_router)
-    app.include_router(sse_router)
-    app.include_router(organizations_router)
-    app.include_router(systems_router)
-    app.include_router(repos_router)
-    app.include_router(insights_router)
-    app.include_router(maintenance_router)
-    app.include_router(features_router)
-
-    # ── UI feedback (ADR-016, #105) ────────────────────────────────────
-    # The standard API install stays independent of the feedback package.
-    # Images built with the feedback extra keep stable routes across flag changes.
-    from importlib.util import find_spec
-
-    from syn_shared.settings.config import get_settings
-
-    feedback_installed = find_spec("ui_feedback") is not None
-    if get_settings().syn_ui_feedback_enabled and not feedback_installed:
-        raise RuntimeError("UI feedback is enabled; install syn-api[feedback]")
-    if feedback_installed:
-        from ui_feedback.router import create_feedback_router
-
-        from syn_api.services import ui_feedback as ui_feedback_service
-
-        feedback_router, feedback_overrides = create_feedback_router(
-            ui_feedback_service.get_feedback_storage,
-            max_upload_bytes=ui_feedback_service.MAX_UPLOAD_BYTES,
-        )
-        app.dependency_overrides.update(feedback_overrides)
-        app.include_router(
-            feedback_router,
-            responses={404: {"model": FeatureDisabledResponse}},
-        )
+    # An executor (ADR-072 D1) serves only the liveness routes below: it is the
+    # same image, but admission, workflows and every read model are the API's.
+    if get_settings().execution.process_role.serves_api:
+        _include_api_routers(app)
 
     @app.get("/")
     async def root() -> RootResponse:
