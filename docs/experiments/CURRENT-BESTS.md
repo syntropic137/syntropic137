@@ -1,107 +1,126 @@
 # Current bests
 
-**Living document.** Names the current recommended workflow / pattern / setting for each common task. Updated when a finding from any cycle promotes a new default or supersedes an existing one. The dogfooding runbook reads from here — it does NOT hardcode workflow IDs.
+**Living document.** For each common task it names the workflow, model or
+setting to use today, and the evidence behind it. Skills and runbooks point
+here instead of hardcoding workflow ids. A workflow being installed on a
+deployment does not make it recommended: `syn workflow list` is what is
+available, this file is what is best.
 
-**How to read this:** each section names one task class, the current recommendation, the finding that justifies it, and any override conditions. If a recommendation is missing, default to "no current best — pick a shape and add the finding to the ledger."
+**Last updated:** 2026-10-21 (#2059). The previous edit was 2026-05-02, and
+both workflows it recommended are absent from this repository.
 
-**Workflow lifecycle — important:**
+## How to read and update this
 
-The IDs listed here are **starting points**, not a closed allowlist. Sessions running the dogfood loop can and should:
+Each entry names a default, its evidence, and when to override it. Evidence is
+one of:
 
-1. **Reuse** an existing workflow if it fits the task. This is the default. Existing workflow IDs are listed below per task class.
-2. **Extend** by creating a sibling variant (`-v2`, `-routed-X`, etc.) when the existing shape is close but the experiment wants to vary one dimension. Document the dimension being varied in the new workflow's `description` field.
-3. **Create** a new workflow when no existing shape fits the hypothesis. Examples: a probe that needs a different tool allowlist, a new phase shape under test, a one-off feasibility experiment.
+- **eval:** a scored experiment on an eval suite, linked.
+- **production:** a preregistered A/B on real tasks, linked.
+- **no eval evidence yet:** a default by design, not by measurement. Treat it
+  as the next thing to measure.
 
-After running, a finding lands in `FINDINGS-LEDGER.md`. If the finding shows the new shape beats the current best on the priority order (quality → time → cost), promote it: update this doc, mark the old recommendation `superseded`, link to the finding.
+To change an entry: link the finding that drove it, add a row to
+`FINDINGS-LEDGER.md`, mark the old entry superseded, and add a changelog row.
+Promote only on the priority order quality, then time, then cost. A result on
+a one-phase suite screens; it does not promote a workflow by itself.
 
-**Workflows ≠ best practices.** A workflow being defined on the platform doesn't make it recommended. Only entries in this doc carry the recommendation. The platform's full workflow inventory is observable via `GET /api/v1/workflows`; treat that list as "what's currently available," not "what's currently best."
+Two caveats apply to the 2026-10 experiments below:
 
-**Don't proliferate without purpose.** If a probe creates `xxx-feasibility-v3-experimental-take-7`, prune it after the finding lands — either by superseding it cleanly in this doc or by removing the workflow record once the result is captured. The cycle's `BOTTLENECKS.md` is the right place to flag "we have N stale workflows we should clean up."
-
-**How to update this:**
-- A finding promotes a new default → add it here, mark the old one as `superseded`
-- A finding invalidates a recommendation without replacing it → remove the recommendation, leave a stub explaining why
-- Every change to this doc references the finding that drove it
-- Append the change to the changelog at the bottom
-
-**Last updated:** 2026-05-02 (cycle 4)
+- E1-E4 live on PR #2019, **not yet on `main`**. Their paths below are paths
+  on that PR's branch. When it lands, add their ledger rows and link them here
+  (#2059 acceptance).
+- Every experiment so far ran 2-15 tasks per arm. At those sizes a result can
+  rule out a large effect at best. Read "ADOPT" as "no evidence of harm", not
+  "proven better".
 
 ---
 
-## Plan workflow
+## Workflow per kind of work
 
-**Recommended:** `plan-multiphase-routed-haiku-opus-v1` — cheap models for explore/test/ship phases, frontier model on synthesis.
-**Why:** F8 (cycle 3). Opus reasoning depth only earns its 5x cost premium on cross-perspective synthesis. The other phases tolerate Haiku without measurable quality loss. Validated on 2 different targets, cost ~$1.50/plan with quality matching all-Opus baseline.
-**Override:**
-- Highest-stakes design where every phase needs depth → all-Opus
-- Tight budget, OK with shallower synthesis → all-Haiku
-- Sonnet synthesis instead of Opus → ~40% cheaper but real quality drop on micro-conflict detection (F8 round 16)
+| Work | Default | Evidence | Override |
+|---|---|---|---|
+| Behaviour change from an issue | `sdlc-implement-v3` | **no eval evidence yet** against an alternative end to end. Design rationale: `workflows/sdlc/README.md`, and `workflows/sdlc/implement/workflow.yaml` (why implement and verify are separate phases) | `sdlc-implement-v4-precheck`, see Under experiment |
+| Change whose diff is its own proof (pins, typos, dead links) | `sdlc-quickfix-v1` | **no eval evidence yet**; the routing test is in `workflows/sdlc/README.md` ("is there anything to prove?") | when in doubt, `implement` |
+| Second verification of a ready PR, or rescue of a run that died in verify | `sdlc-reverify-pr-v1 -t "#N"` | **no eval evidence yet** as a workflow; its review prompts are implement-v3's, held identical by `scripts/tests/test_reverify_pr_workflow.py` | verifier on Opus while codex quota is out (README, "Switching the verifier model"); say it is no longer cross-family |
+| Research and plan | `sdlc-research-plan-v3` | **no eval evidence yet** | `sdlc-research-experiment-plan-v1` when the plan needs an experiment first |
+| PR review | `sdlc-pr-review-v1` | **no eval evidence yet** | `sdlc-pr-review-slp-v1`, unmeasured |
+| Decision record, refactor plan, retrospective | `sdlc-decision-record-v1`, `sdlc-refactor-plan-v2`, `sdlc-retrospective-v1` | **no eval evidence yet** | none |
 
-## Implementation workflow
+Superseded: `implement-from-plan-v1` and `plan-multiphase-routed-haiku-opus-v1`
+(the 2026-05-02 entries). Neither is in this repository; the first existed
+only as database state (`workflows/sdlc/implement/workflow.yaml`, "WHY THIS
+EXISTS").
 
-**Recommended:** `implement-from-plan-v1`
-**Why:** Cell 13b validated end-to-end at $4.06 producing PR #752 (9/9 tests pass, pyright clean). Workflow shape covers bootstrap → implementation → tests → PR cleanly.
-**Override:** none currently. Refinements pending: bake QA-aware test-fixture typing into the implementation prompt so output passes `just fitness-check` first try.
+### Under experiment
 
-## Phase shape for multi-output tasks
+- **`sdlc-implement-v4-precheck`: provisional ADOPT, not final.** Production,
+  n=3 per arm: `workflows/sdlc/implement-v4-precheck/EXPERIMENT.md`, Results.
+  4 `fix*` phases vs 6, median time to READY ~6.7h vs ~12h (one control
+  censored, three slots confounded by incidents), 0 misclassified handoffs, no
+  escaped findings so far. The escape window closes **2026-10-30**: re-score
+  then, and if it holds, promote it over v3 here in a separate PR. The
+  cross-arm finding matters more: in 3 of 6 slots verify certified a head
+  whose real-service tests had never run, and orchestrator-run evidence found
+  a real defect each time.
+- **`sdlc-implement-v5`: built, never run.** Draft PR #2063 (#2060):
+  v4-precheck plus declared evidence and structured capability gaps, per
+  decision 4 of `docs/plans/20261015_platform-dispatched-evidence.md`. Not on
+  `main`, not installed, no runs. **no eval evidence yet.**
+- **End-to-end replay (E4):** preregistered on PR #2019
+  (`docs/experiments/2026-10-20-end-to-end-replay.md`), not dispatched, blocked
+  on the replay target (#2055). Until it runs, no workflow default here has
+  end-to-end eval evidence.
 
-**Recommended:** phase-per-artifact (one phase per intended output file, plus one synthesis phase).
-**Why:** Cycle-4 tick-loop experiment. The platform captures only one primary artifact per phase (a regression against original design intent). N phases give N artifact slots; single-phase shapes lose all but one file regardless of how many the agent writes. P shape produced 7 captured artifacts at $0.075 per surfaced artifact vs F shape's 1 captured artifact at $0.43.
-**Override:** if the workflow produces a single deliverable (one plan, one report), single-phase is fine. Multi-output is where the rule applies.
-**Will be superseded by:** the per-phase artifact-capture fix (top priority on artifacts handoff). Once shipped, single-phase shapes can again surface multiple files and this recommendation drops.
+## Model per phase
 
-## Orchestrator pattern (when N parallel workers needed inside one phase)
+Aliases resolve in `packages/syn-shared/src/syn_shared/agents.py`
+(`CLAUDE_MODEL_ALIAS_TARGETS`, `CODEX_MODEL_ALIAS_TARGETS`): `opus` is
+`claude-opus-5-5`, `sonnet` is `claude-sonnet-5-5`, `gpt-sol` is
+`gpt-6.1-sol`. Record a run's observed model, not the alias.
 
-**Recommended:** `claude -p` children spawned with shell `&`, awaited with `wait`, captured via file redirect.
-**Why:** Cycle-4 claude-p-feasibility v2. All seven tests passed: sync recursion, file capture, background+wait, parallel+wait with real concurrency (3 in 5s vs 3s for one), 2-level recursion, structured JSON output. ~$0.013/child on sonnet with cache warmup.
-**Skeleton:** See `cycle-004/claude-p-feasibility/RESULTS-v2.md`.
-**Mandatory gotchas:**
-- Extract `CLAUDE_CODE_OAUTH_TOKEN` from `/proc/<parent>/environ` and pass as `ANTHROPIC_API_KEY` (not exported to child bash today; platform fix queued)
-- Always `--output-format json`, NEVER `--output-format stream-json` (produces null bytes that crash event ingestion)
-- Pipe child output through `tr -d '\000' | iconv -f utf-8 -t utf-8 -c` before any read
+| Phase role | Default | Evidence | Override |
+|---|---|---|---|
+| Premise, implement, fix, finalize | `opus` | **no eval evidence yet** that Opus beats Sonnet 5.5 here. E2 (PR #2019, `docs/experiments/2026-10-17-implementer-sonnet-vs-opus.md`, `implementer-seed-v1`, n=10 per arm): Sonnet 5/10 vs Opus 6/10, verdict "proceed", meaning no evidence of a large drop, not equivalence | Sonnet 5.5 on `fix`/`fix_2` only as E3's arm, below |
+| Verify, reverify, cross-model review | codex `gpt-sol`, fallback `opus` | **eval:** E1 (PR #2019, `docs/experiments/2026-10-17-verifier-gpt-6-luna-vs-sol.md`, `verifier-seed-v1` train): Sol blocked all 26 defect cases; `gpt-6-luna` REJECTED (b - c = 6, and a false block on a clean control Sol certified) | a run that fell back to Opus is not cross-family; report it as such |
+| Fix phases on Sonnet 5.5 | experiment arm only (`sdlc-implement-v4-precheck-sonnet-fix`, on PR #2019) | **production, interim:** E3 (PR #2019, `docs/experiments/2026-10-17-fix-phase-sonnet.md`): provisional ADOPT, rounds and cost clauses met, 0 escapes so far, control n=2 of a planned 6. Final after **2026-11-02** | not a default before the final score |
+| Mechanical phases (`quickfix`, `report`, `gather`, `file`) | `sonnet` | **no eval evidence yet** | `opus` when the phase needs judgement |
 
-## Watching live execution
+Not recommended: a verifier on the implementer's model family (it is not
+independent), and any retired Claude model (`is_retired_claude_model` in the
+same file refuses them).
 
-**Recommended:** SSE streaming via `GET /api/v1/sse/executions/{execution_id}` and `GET /api/v1/sse/activity`.
-**Why:** Polling `/executions/{id}` works but is heavy (full execution doc each poll, no live progress). SSE was always there; just wasn't being used.
-**Override:** none.
+## Eval suites
 
-## Watching for execution completion (one-shot)
+| Suite | Version | Measures |
+|---|---|---|
+| `evals/verifier-seed-v1` | v8 (40 cases, 11 holdout) | verify's catch rate on defects and false-block rate on clean controls, syntropic137 |
+| `evals/verifier-seed-aw-v1` | v4 | the same for agentic-workspace |
+| `evals/implementer-seed-v1` | v1 | whether an implementer's patch passes hidden tests. Leakage is **not prevented** (its README; #2056) |
+| `evals/feedback-screening-v1` | v1 | which feedback screening port keeps injected feedback out (#1970) |
 
-**Recommended:** SSE with a short script that reads stream events and exits when status reaches a terminal state.
-**Override:** if SSE is unavailable, poll at 30s with backoff.
+Compare only runs on the same suite version and the same judge: a changed
+model, prompt or workflow bumps the version (`evals/verifier-seed-v1/suite.yaml`).
+The verifier LLM judge is pinned to `claude-sonnet-4-6`
+(`evals/verifier-seed-v1/README.md`); its replacement is #2036 / #2048. Every
+suite here screens one phase; none is end-to-end.
 
-## Browser / E2E testing inside a workspace
+## Still believed valid, not re-measured since 2026-05-02
 
-**Recommended:** Playwright (Node or Python) with the 27 system libs workaround until the base image bakes them in.
-**Why:** Cycle-4 playwright-feasibility. Confirmed working end-to-end. 40s cold-start today (1s npm + 9s chromium download + 30s lib download). Drops to ~10s with one Dockerfile change.
-**Override:** none. Once the base image bakes the libs, the workaround drops.
+- **Watch an execution with SSE** (`GET /api/v1/sse/executions/{execution_id}`,
+  `GET /api/v1/sse/activity`) instead of polling `/executions/{id}`.
+- **One phase per deliverable** when a workflow must produce several files.
+  Whether a phase still captures only one primary artifact has not been
+  re-checked.
 
-## Workspace SDLC defaults
-
-**Recommended cache redirection** (mandatory until base image is fixed):
-- `UV_CACHE_DIR=/workspace/uv-cache`
-- `UV_PROJECT_ENVIRONMENT=/workspace/.venv`
-- `pnpm install --store-dir /workspace/pnpm-store`
-
-**Why:** Cycle-4 SDLC probe. `/home/agent` is 128 MB tmpfs; default cache locations OOM during `uv sync` (pyright download alone fails). All workarounds eliminated by the three platform asks in #750.
-
-## What's currently NOT recommended
-
-- `--output-format stream-json` from `claude -p` children (null bytes crash event ingestion)
-- Single-phase fan-out via parallel `Task` subagents for multi-artifact tasks (only the primary deliverable surfaces; the rest are silently dropped at the platform layer)
-- Polling `/executions/{id}` when SSE is available
-- Hardcoding workflow IDs in skills, runbooks, or external docs — they should reference this file
-
-## What's pending (under experiment)
-
-- Skill injection (#726) — once shipped, the orchestrator pattern can be encoded as an installable skill instead of inlined in every workflow prompt
-- Artifact-capture fix — once shipped, "phase shape for multi-output" recommendation drops
-- Browser-libs in base image — once shipped, browser-test recommendation simplifies to "just use Playwright"
-- All three above are queued in `docs/handoffs/20260502_platform.md`
+The other 2026-05-02 entries (the `claude -p` orchestrator pattern, Playwright
+system libraries, workspace cache redirection) depended on workspace image and
+platform gaps that have since changed, and their evidence files (`cycle-003/`,
+`cycle-004/tick-loop-shape/` and others) are not in this repository. They are
+dropped rather than carried forward unverified; git history has the old text.
 
 ## Changelog
 
 | Date | Change | Driving finding |
 |---|---|---|
-| 2026-05-02 | Initial population from cycle 3 + cycle 4 results | F8 (cycle 3), tick-loop / cron / claude-p-v1 / claude-p-v2 / playwright / sdlc (cycle 4) |
+| 2026-05-02 | Initial population from cycle 3 + cycle 4 results | F8 (cycle 3), cycle 4 probes |
+| 2026-10-21 | Rewritten for the SDLC suite: workflow per kind of work, model per phase, suite versions, each with its evidence or "no eval evidence yet". v4-precheck provisional ADOPT, v5 unrun. Cycle 3/4 workflow entries superseded. | #2059; `implement-v4-precheck/EXPERIMENT.md`; E1-E4 on PR #2019 |
