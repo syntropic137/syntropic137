@@ -36,7 +36,7 @@ from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     InterruptExecutionCommand,
 )
-from syn_domain.contexts.orchestration.ports import ExecutorHost, FencedRun, RunLeaseLost
+from syn_domain.contexts.orchestration.ports import ExecutorHost, RunLeaseLost
 from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 
 from .test_1310_a_claimed_three_phase_run_succeeds_on_real_stores import (  # noqa: F401  # fixtures

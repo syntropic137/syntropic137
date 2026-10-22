@@ -44,7 +44,7 @@ from syn_domain.contexts.orchestration.ports import RunLeaseLost
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from syn_adapters.execution_host.ports import ClaimedRunDrainer, RunReaper, RunInterrupter
+    from syn_adapters.execution_host.ports import ClaimedRunDrainer, RunInterrupter, RunReaper
     from syn_domain.contexts.orchestration.ports import (
         ClaimedRun,
         ExecutionRunQueue,

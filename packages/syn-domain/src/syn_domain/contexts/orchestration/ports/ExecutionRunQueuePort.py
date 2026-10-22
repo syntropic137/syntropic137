@@ -48,6 +48,11 @@ PoolId = Annotated[str, StringConstraints(pattern=_SLUG)]
 ProviderId = Annotated[str, StringConstraints(pattern=_SLUG)]
 """What runs a pool's workspaces: ``docker`` today."""
 RegionId = Annotated[str, StringConstraints(pattern=_SLUG)]
+ReapScope = Annotated[str, StringConstraints(min_length=1, max_length=256)]
+"""What one reaper can reach: a Docker engine ID, a provider account (D5, D13).
+
+Derived from the backend, never configured. Opaque: compared for equality only.
+"""
 
 
 class Capability(StrEnum):
@@ -108,7 +113,7 @@ class ExecutorHost(BaseModel):
     generation: str = Field(min_length=1)
     epoch: int = Field(ge=0)
     """The ``ORCHESTRATION_EVENT_EPOCH`` this host reads (D9)."""
-    reap_scope: str = Field(min_length=1)
+    reap_scope: ReapScope
     """What this host's reaper can reach, from the reaper and never configured (D5, D13).
 
     A Docker engine ID today. This host fences and takes over only runs claimed

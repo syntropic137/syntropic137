@@ -27,7 +27,7 @@ from syn_domain.contexts.orchestration.ports import RunLeaseLost
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from syn_adapters.execution_host.ports import RunReaper, RunInterrupter
+    from syn_adapters.execution_host.ports import RunInterrupter, RunReaper
     from syn_domain.contexts.orchestration.ports import ExecutionRunQueue, FencedRun
 
 logger = logging.getLogger(__name__)

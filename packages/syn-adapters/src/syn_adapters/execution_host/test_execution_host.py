@@ -26,7 +26,9 @@ from syn_domain.contexts.orchestration.ports import (
 
 pytestmark = pytest.mark.unit
 
-_HOST = ExecutorHost(reap_scope="daemon-1", host_id="h-unit", container_id="c", generation="g", epoch=0)
+_HOST = ExecutorHost(
+    reap_scope="daemon-1", host_id="h-unit", container_id="c", generation="g", epoch=0
+)
 _FAST = HostTiming(
     loop_interval=timedelta(milliseconds=5),
     lease_ttl=timedelta(milliseconds=30),

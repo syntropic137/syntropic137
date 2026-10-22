@@ -68,7 +68,10 @@ _WORKFLOW = (
 )
 _HOST = ExecutorHost(
     reap_scope="daemon-1",
-    host_id="host-1", container_id="c-1", generation="g1", epoch=ORCHESTRATION_EVENT_EPOCH
+    host_id="host-1",
+    container_id="c-1",
+    generation="g1",
+    epoch=ORCHESTRATION_EVENT_EPOCH,
 )
 
 

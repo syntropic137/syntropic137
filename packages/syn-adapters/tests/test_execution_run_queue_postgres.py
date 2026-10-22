@@ -14,12 +14,16 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
+from syn_adapters.execution_host import ExecutionHost, HostTiming
+from syn_adapters.execution_host.reconciler import Reconciler
 from syn_adapters.execution_runs import PostgresExecutionRunQueue
 from syn_domain.contexts.orchestration.ports import (
     Capability,
     ClaimedRun,
     ExecutorHost,
     ExecutorPool,
+    FencedRun,
+    IsolationLevel,
     PoolDefinitionConflict,
     RunLeaseLost,
     StreamPresence,
@@ -59,8 +63,16 @@ async def pools(test_infrastructure: TestInfrastructure) -> AsyncIterator[list[a
         await admin.close()
 
 
-def _host(host_id: str, epoch: int = 1) -> ExecutorHost:
-    return ExecutorHost(reap_scope="daemon-1", host_id=host_id, container_id=f"c-{host_id}", generation="g1", epoch=epoch)
+def _host(
+    host_id: str, epoch: int = 1, *, reap_scope: str = "daemon-1", container_id: str | None = None
+) -> ExecutorHost:
+    return ExecutorHost(
+        host_id=host_id,
+        container_id=container_id or f"c-{host_id}",
+        generation="g1",
+        epoch=epoch,
+        reap_scope=reap_scope,
+    )
 
 
 async def _online(queue: PostgresExecutionRunQueue, host_id: str, capacity: int) -> None:
@@ -481,7 +493,10 @@ async def test_a_restart_in_the_same_container_retires_the_predecessor_not_its_w
     new = PostgresExecutionRunQueue(pools[1])
     box = "container-1"
     await old.register(
-        ExecutorHost(reap_scope="daemon-1", host_id="box.aaa", container_id=box, generation="g", epoch=1), 1
+        ExecutorHost(
+            reap_scope="daemon-1", host_id="box.aaa", container_id=box, generation="g", epoch=1
+        ),
+        1,
     )
     await old.heartbeat("box.aaa")
     await _admit(old, "exec-before-restart")
@@ -489,7 +504,10 @@ async def test_a_restart_in_the_same_container_retires_the_predecessor_not_its_w
     await asyncio.sleep(0.5)
 
     await new.register(
-        ExecutorHost(reap_scope="daemon-1", host_id="box.bbb", container_id=box, generation="g", epoch=1), 1
+        ExecutorHost(
+            reap_scope="daemon-1", host_id="box.bbb", container_id=box, generation="g", epoch=1
+        ),
+        1,
     )
     await new.heartbeat("box.bbb")
     async with pools[0].acquire() as conn:
@@ -521,13 +539,23 @@ async def test_a_restart_transfers_the_machine_budget_and_never_doubles_it(
     old = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=300))
     new = PostgresExecutionRunQueue(pools[1], lease_ttl=timedelta(milliseconds=300))
     box = "container-r1"
-    await old.register(ExecutorHost(reap_scope="daemon-1", host_id="r1.aaa", container_id=box, generation="g", epoch=1), 1)
+    await old.register(
+        ExecutorHost(
+            reap_scope="daemon-1", host_id="r1.aaa", container_id=box, generation="g", epoch=1
+        ),
+        1,
+    )
     await old.heartbeat("r1.aaa")
     await _admit(old, "exec-held", "exec-waiting")
     held = await old.claim("r1.aaa")
     assert held is not None
 
-    await new.register(ExecutorHost(reap_scope="daemon-1", host_id="r1.bbb", container_id=box, generation="g", epoch=1), 1)
+    await new.register(
+        ExecutorHost(
+            reap_scope="daemon-1", host_id="r1.bbb", container_id=box, generation="g", epoch=1
+        ),
+        1,
+    )
     await new.heartbeat("r1.bbb")
     assert await _machine(pools, box) == (1, {"r1.aaa": (1, 1), "r1.bbb": (0, 0)})
     assert await new.claim("r1.bbb") is None
@@ -730,7 +758,12 @@ async def test_a_restart_that_changes_pool_moves_the_machines_free_capacity_to_t
 ) -> None:
     queue = PostgresExecutionRunQueue(pools[0])
     box = "container-move"
-    await queue.register(ExecutorHost(reap_scope="daemon-1", host_id="m.1", container_id=box, generation="g", epoch=1), 3)
+    await queue.register(
+        ExecutorHost(
+            reap_scope="daemon-1", host_id="m.1", container_id=box, generation="g", epoch=1
+        ),
+        3,
+    )
     await queue.heartbeat("m.1")
     await _admit(queue, "exec-held")
     assert await queue.claim("m.1") is not None
@@ -808,6 +841,11 @@ async def test_upgrading_a_pre_pool_schema_keeps_rows_assigns_default_and_drops_
             WHERE conrelid='execution_budget'::regclass AND contype='f'"""
             )
             == 1
+        )
+        # The scope column is added and the old row kept unscoped: nothing is
+        # inferred, so nobody fences it until a same-container successor (D13).
+        assert await conn.fetchval(
+            """SELECT reap_scope IS NULL FROM execution_budget WHERE executor_id='old'"""
         )
     await queue.close(
         ClaimedRun(execution_id="exec-held", executor_id="old", token=1, is_resume=False)
@@ -895,3 +933,264 @@ async def test_takeover_is_bounded_and_concurrent_adopters_never_share_a_row(
     assert (len(a), len(b)) == (2, 2)
     assert not {r.execution_id for r in a} & {r.execution_id for r in b}
     assert len(await first.reconciling("rec-1")) == 2
+
+
+# --- Reap scope and reap-before-close (ADR-072 D3, D5, D13; placement plan PR 2) ---
+
+
+async def _budget(pool: asyncpg.Pool, executor_id: str) -> int:
+    async with pool.acquire() as conn:
+        in_use = await conn.fetchval(
+            "SELECT in_use FROM execution_budget WHERE executor_id=$1", executor_id
+        )
+    assert isinstance(in_use, int)
+    return in_use
+
+
+async def _state(pool: asyncpg.Pool, execution_id: str) -> str:
+    async with pool.acquire() as conn:
+        state = await conn.fetchval(
+            "SELECT state FROM execution_runs WHERE execution_id=$1", execution_id
+        )
+    assert isinstance(state, str)
+    return state
+
+
+class _Reaper:
+    """Answers ``reap`` from a script, then from ``complete``; a scripted exception is raised."""
+
+    def __init__(self, scope: str, *script: bool | Exception, complete: bool = True) -> None:
+        self._scope, self._script, self.complete = scope, list(script), complete
+        self.calls: list[tuple[str, str]] = []
+
+    def scope(self) -> str:
+        return self._scope
+
+    def provider(self) -> str:
+        return "docker"
+
+    def isolation(self) -> IsolationLevel:
+        return IsolationLevel.CONTAINER
+
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        self.calls.append((executor_id, execution_id))
+        answer = self._script.pop(0) if self._script else self.complete
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+class _Interrupter:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def interrupt(self, run: FencedRun) -> None:
+        self.calls.append(run.execution_id)
+
+
+async def _reconcile(reconciler: Reconciler) -> None:
+    """One acquiring turn, then wait for every attempt it started to end."""
+    await reconciler.turn(acquire=True)
+    while not reconciler.idle:
+        await asyncio.sleep(0.01)
+
+
+async def test_an_executor_in_another_reap_scope_never_fences_an_expired_run(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """Reverted (no scope predicate in fence_expired): B fences A's run."""
+    queue = PostgresExecutionRunQueue(pools[0])
+    for host_id, scope in (("a", "s1"), ("b", "s2"), ("c", "s1")):
+        await queue.register(_host(host_id, reap_scope=scope), 1)
+        await queue.heartbeat(host_id)
+    await _admit(queue, "exec-scoped")
+    assert await queue.claim("a") is not None
+    await _expire_claims(pools[0], "a", expected=1)
+
+    assert await queue.fence_expired("b", limit=10) == []
+    assert await _state(pools[0], "exec-scoped") == "claimed"
+
+    (fenced,) = await queue.fence_expired("c", limit=10)
+    assert (fenced.execution_id, fenced.executor_id, fenced.reconciler) == ("exec-scoped", "a", "c")
+
+
+async def test_takeover_requires_the_same_reap_scope(pools: list[asyncpg.Pool]) -> None:
+    """Reverted (no scope predicate in take_over): the other-scope host adopts the row."""
+    queue = PostgresExecutionRunQueue(pools[0])
+    for host_id, scope in (("a", "s1"), ("rec", "s1"), ("other", "s2"), ("same", "s1")):
+        await queue.register(_host(host_id, reap_scope=scope), 1)
+        await queue.heartbeat(host_id)
+    await _admit(queue, "exec-orphan")
+    assert await queue.claim("a") is not None
+    await _expire_claims(pools[0], "a", expected=1)
+    (fenced,) = await queue.fence_expired("rec", limit=10)
+    await queue.deregister("rec")  # the reconciler has left
+
+    assert await queue.take_over("other", limit=10) == []
+    assert await _state(pools[0], "exec-orphan") == "fencing"
+    (adopted,) = await queue.take_over("same", limit=10)
+    assert (adopted.reconciler, adopted.token) == ("same", fenced.token + 1)
+
+
+async def test_a_run_with_no_live_executor_in_its_scope_stays_charged(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """A full reconciliation turn by an other-scope host frees nothing and reaps nothing.
+
+    Reverted (no scope predicate): B fences, its reaper "reaps" a daemon that
+    never had A's containers, and A's slot is freed (in_use 0).
+    """
+    queue = PostgresExecutionRunQueue(pools[0])
+    await queue.register(_host("a", reap_scope="s1"), 1)
+    await queue.heartbeat("a")
+    await queue.register(_host("b", reap_scope="s2"), 1)
+    await queue.heartbeat("b")
+    await _admit(queue, "exec-stranded")
+    assert await queue.claim("a") is not None
+    await queue.deregister("a")
+    await _expire_claims(pools[0], "a", expected=1)
+    reaper, interrupter = _Reaper("s2"), _Interrupter()
+
+    await _reconcile(Reconciler(queue, "b", reaper, interrupter))
+
+    assert await _budget(pools[0], "a") == 1
+    assert await _state(pools[0], "exec-stranded") == "claimed"
+    assert (reaper.calls, interrupter.calls) == ([], [])
+
+
+async def test_a_pre_scope_expired_claim_is_scoped_only_by_a_successor_in_its_own_container(
+    pre_pool: asyncpg.Pool,
+) -> None:
+    """Review I3. Reverted (no same-container backfill): E never fences the row."""
+    async with pre_pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO executor_hosts (host_id,container_id,generation,epoch)
+            VALUES ('old','c-old','g0',1)"""
+        )
+        await conn.execute(
+            """INSERT INTO execution_budget (executor_id,container_id,capacity,in_use,heartbeat_at)
+            VALUES ('old','c-old',2,1,now())"""
+        )
+        await conn.execute(
+            """INSERT INTO execution_runs (execution_id,state,is_resume,writer_epoch,
+                executor_id,lease_token,leased_until,admitted_at)
+            VALUES ('exec-pre','claimed',FALSE,1,'old',1,now()-interval '1 hour',now())"""
+        )
+    queue = PostgresExecutionRunQueue(pre_pool)
+    await queue.ensure_ready()
+
+    # D is in the scope the row will turn out to have, but in another
+    # container: nothing proves that, so it fences nothing.
+    await queue.register(_host("d", reap_scope="s1"), 1)
+    await queue.heartbeat("d")
+    await _reconcile(Reconciler(queue, "d", _Reaper("s1"), _Interrupter()))
+    assert await _budget(pre_pool, "old") == 1
+    assert await _state(pre_pool, "exec-pre") == "claimed"
+
+    await queue.register(_host("e", reap_scope="s1", container_id="c-old"), 1)
+    await queue.heartbeat("e")
+    async with pre_pool.acquire() as conn:
+        assert (
+            await conn.fetchval("SELECT reap_scope FROM execution_budget WHERE executor_id='old'")
+            == "s1"
+        )
+    reaper = _Reaper("s1")
+    await _reconcile(Reconciler(queue, "e", reaper, _Interrupter()))
+    assert reaper.calls == [("old", "exec-pre")]
+    assert await _state(pre_pool, "exec-pre") == "interrupted"
+    assert await _budget(pre_pool, "old") == 0
+
+
+class _FailedDrain:
+    """Returns normally, as ``_drain`` does after turning a provider error into a failed workflow."""
+
+    def __init__(self) -> None:
+        self.drained: list[str] = []
+
+    async def run_claimed(self, claimed: ClaimedRun) -> object:
+        self.drained.append(claimed.execution_id)
+        return "failed"
+
+
+class _NoStreams:
+    async def presence(self, execution_id: str) -> StreamPresence:
+        return StreamPresence.UNKNOWN
+
+
+async def _drive_one_run(
+    queue: PostgresExecutionRunQueue, reaper: _Reaper, execution_id: str
+) -> _FailedDrain:
+    """Host ``a`` claims and drains one run through its real loop, then drains and leaves."""
+    drainer = _FailedDrain()
+    host = ExecutionHost(
+        queue,
+        _host("a", reap_scope="s1"),
+        capacity=1,
+        drainer=drainer,
+        reaper=reaper,
+        interrupter=_Interrupter(),
+        streams=_NoStreams(),
+        timing=HostTiming(loop_interval=timedelta(milliseconds=10)),
+    )
+    loop = asyncio.create_task(host.run_until_drained())
+    await _admit(queue, execution_id)
+    async with asyncio.timeout(10):
+        while not drainer.drained or len(reaper.calls) < 1:
+            await asyncio.sleep(0.01)
+        host.drain()
+        await loop
+    return drainer
+
+
+async def _released_after_reconciliation(
+    pool: asyncpg.Pool, queue: PostgresExecutionRunQueue, reaper: _Reaper, execution_id: str
+) -> None:
+    """A same-scope reconciler fences the expired run; it frees the slot only once reap is True."""
+    await queue.register(_host("b", reap_scope="s1"), 1)
+    await queue.heartbeat("b")
+    await _expire_claims(pool, "a", expected=1)
+    reconciler = Reconciler(queue, "b", reaper, _Interrupter())
+
+    await _reconcile(reconciler)
+    assert await _state(pool, execution_id) == "fencing"
+    assert await _budget(pool, "a") == 1
+
+    reaper.complete = True
+    await _reconcile(reconciler)
+    assert await _state(pool, execution_id) == "interrupted"
+    assert await _budget(pool, "a") == 0
+
+
+async def test_a_drain_that_returns_normally_over_unreleased_resources_leaves_the_slot_charged(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """Review B2. Reverted (host closes without the gate): in_use is 0 at once, state done."""
+    queue = PostgresExecutionRunQueue(pools[0])
+    reaper = _Reaper("s1", complete=False)
+
+    await _drive_one_run(queue, reaper, "exec-lost-create")
+
+    assert reaper.calls == [("a", "exec-lost-create")]
+    assert await _state(pools[0], "exec-lost-create") == "claimed"
+    assert await _budget(pools[0], "a") == 1
+    assert (await queue.in_use()).done == 0
+    await _released_after_reconciliation(pools[0], queue, reaper, "exec-lost-create")
+
+
+async def test_uncertain_delete_keeps_the_slot_until_reap_confirms(
+    pools: list[asyncpg.Pool],
+) -> None:
+    """A reap that raises is not shown gone: neither the host nor the reconciler frees the slot.
+
+    Reverted (host closes without the gate): in_use is 0 at once, state done.
+    """
+    queue = PostgresExecutionRunQueue(pools[0])
+    uncertain = TimeoutError("docker rm did not answer")
+    reaper = _Reaper("s1", uncertain, uncertain, complete=False)
+
+    await _drive_one_run(queue, reaper, "exec-uncertain")
+
+    assert await _state(pools[0], "exec-uncertain") == "claimed"
+    assert await _budget(pools[0], "a") == 1
+    await _released_after_reconciliation(pools[0], queue, reaper, "exec-uncertain")
+    assert len(reaper.calls) >= 3  # the host's, the reconciler's raise, its success

@@ -32,10 +32,18 @@ pytestmark = pytest.mark.unit
 
 _WINDOW = 90.0
 _TIMING = HostTiming()  # the production defaults: 5 s loop, 15 s budget, 4 concurrent, 90 s TTL
-_LIVE = ExecutorHost(reap_scope="daemon-1", host_id="live", container_id="c-live", generation="g", epoch=1)
-_DEAD = ExecutorHost(reap_scope="daemon-1", host_id="dead", container_id="c-dead", generation="g", epoch=1)
-_PEER_B = ExecutorHost(reap_scope="daemon-1", host_id="b", container_id="c-b", generation="g", epoch=1)
-_PEER_C = ExecutorHost(reap_scope="daemon-1", host_id="c", container_id="c-c", generation="g", epoch=1)
+_LIVE = ExecutorHost(
+    reap_scope="daemon-1", host_id="live", container_id="c-live", generation="g", epoch=1
+)
+_DEAD = ExecutorHost(
+    reap_scope="daemon-1", host_id="dead", container_id="c-dead", generation="g", epoch=1
+)
+_PEER_B = ExecutorHost(
+    reap_scope="daemon-1", host_id="b", container_id="c-b", generation="g", epoch=1
+)
+_PEER_C = ExecutorHost(
+    reap_scope="daemon-1", host_id="c", container_id="c-c", generation="g", epoch=1
+)
 
 
 class _FakeTime:
@@ -499,7 +507,9 @@ async def test_a_departed_reconcilers_backlog_is_shared() -> None:
     time = _FakeTime()
     queue, reaper = _Queue(time), _GatedReaper()
     await _a_dead_peer_holding(queue, time, 10)
-    gone = ExecutorHost(reap_scope="daemon-1", host_id="gone", container_id="c-gone", generation="g", epoch=1)
+    gone = ExecutorHost(
+        reap_scope="daemon-1", host_id="gone", container_id="c-gone", generation="g", epoch=1
+    )
     await queue.register(gone, 1)
     assert len(await queue.fence_expired(gone.host_id, limit=10)) == 10
     await queue.deregister(gone.host_id)

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
         FencedRun,
         IsolationLevel,
         ProviderId,
+        ReapScope,
     )
 
 
@@ -36,7 +37,7 @@ class RunReaper(Protocol):
     create whose response was lost is still found.
     """
 
-    def scope(self) -> str:
+    def scope(self) -> ReapScope:
         """What this backend can reach: one Docker daemon, one provider account.
 
         Derived from the backend, never configured; raises when it cannot be read.

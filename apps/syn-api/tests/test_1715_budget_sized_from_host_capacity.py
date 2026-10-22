@@ -352,7 +352,9 @@ async def test_health_counts_the_run_queue_when_starts_go_through_it(
         return queue
 
     monkeypatch.setattr(wiring, "get_execution_run_queue", run_queue)
-    host = ExecutorHost(reap_scope="daemon-1", host_id="h", container_id="c", generation="g", epoch=1)
+    host = ExecutorHost(
+        reap_scope="daemon-1", host_id="h", container_id="c", generation="g", epoch=1
+    )
     await queue.register(host, admission.get_execution_budget().limit)
     await queue.heartbeat(host.host_id)
     for i in range(3):

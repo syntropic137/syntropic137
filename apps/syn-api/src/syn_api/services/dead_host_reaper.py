@@ -16,7 +16,6 @@ import asyncio
 import subprocess
 from functools import cache
 
-
 from syn_adapters.workspace_backends.host_labels import LABEL_HOST_ID
 from syn_api.services.reconciliation import (
     _docker_rm,
@@ -47,7 +46,9 @@ def _engine_id() -> str:
         timeout=_DOCKER_INFO_TIMEOUT_S,
     ).stdout.strip()
     if not engine_id:
-        raise RuntimeError("docker info returned no engine ID; this executor's reap scope is unknown")
+        raise RuntimeError(
+            "docker info returned no engine ID; this executor's reap scope is unknown"
+        )
     return engine_id
 
 

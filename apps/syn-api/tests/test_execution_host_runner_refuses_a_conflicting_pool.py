@@ -28,7 +28,6 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 _LIVE = "live-member"
 
 
-
 class _Reaper:
     """The backend as the runner reads it; ``docker info`` is not called in a unit test."""
 
@@ -43,6 +42,7 @@ class _Reaper:
 
     async def reap(self, executor_id: str, execution_id: str) -> bool:
         return True
+
 
 async def _queue_with_a_live_member(monkeypatch: pytest.MonkeyPatch) -> InMemoryExecutionRunQueue:
     queue = InMemoryExecutionRunQueue()
