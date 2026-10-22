@@ -92,22 +92,3 @@ async def test_a_matching_declaration_starts_and_stop_leaves_the_pool(
     finally:
         await runner.stop_execution_host()
         reset_settings()
-
-
-async def test_the_registered_scope_is_the_one_docker_reported(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The scope the queue fences by is the reaper's, never a setting or a constant (D13)."""
-    queue = await _queue_with_a_live_member(monkeypatch)
-    monkeypatch.setattr(
-        runner.DockerDeadHostReaper, "scope", lambda _self: "engine-from-docker-info"
-    )
-    monkeypatch.setenv("SYN_EXECUTOR_POOL_PRIORITY", "1")
-    reset_settings()
-    try:
-        await runner.start_execution_host()
-        mine = queue._hosts[host_labels()[LABEL_HOST_ID]].host  # pyright: ignore[reportPrivateUsage]
-        assert mine.reap_scope == "engine-from-docker-info"
-    finally:
-        await runner.stop_execution_host()
-        reset_settings()

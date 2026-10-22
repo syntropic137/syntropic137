@@ -36,6 +36,9 @@ async def _started_host(monkeypatch: pytest.MonkeyPatch) -> ExecutorHost:
     monkeypatch.setattr(runner, "get_execution_event_stream", MagicMock())
     monkeypatch.setattr(runner, "ExecutionHost", built)
     monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())
+    monkeypatch.setattr(
+        runner.DockerDeadHostReaper, "scope", lambda _self: "engine-from-docker-info"
+    )
     reset_settings()
     try:
         await runner.start_execution_host()
@@ -67,6 +70,8 @@ async def test_the_host_declares_the_pool_its_settings_name(
         capabilities=frozenset({Capability.NESTED_DOCKER}),
         overflow_delay=timedelta(seconds=45),
     )
+    # The scope fence and takeover compare is the reaper's, never a setting (D13).
+    assert host.reap_scope == "engine-from-docker-info"
 
 
 async def test_unset_pool_settings_join_the_seeded_default_pool(
