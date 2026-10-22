@@ -88,6 +88,14 @@ class WorkspaceCredentials:
             )
         return plain, tuple(bindings), tuple(b.ref.name for b in bindings)
 
+    def withheld(self, names: tuple[str, ...]) -> tuple[str, ...]:
+        """Every value a launch's output must not carry: the parked ones and the store token.
+
+        Call before `release`, which forgets the parked values.
+        """
+        launch = tuple(self._launch[name] for name in names if name in self._launch)
+        return (self._session_store.auth_value, *launch)
+
     def release(self, names: tuple[str, ...]) -> None:
         """Forget launch-scoped values; the provider resolved them at start."""
         for name in names:

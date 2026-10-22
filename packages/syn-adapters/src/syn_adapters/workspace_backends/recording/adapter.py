@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable, Iterable
 
     from agentic_events import Recording, SessionPlayer
     from agentic_events.player import RecordingMetadata
@@ -176,6 +176,7 @@ class RecordingEventStreamAdapter:
         working_directory: str | None = None,  # noqa: ARG002
         environment: dict[str, str] | None = None,  # noqa: ARG002
         wrapper_name: str | None = None,  # noqa: ARG002
+        withheld: Callable[[], Iterable[str]] | None = None,  # noqa: ARG002
     ) -> AsyncIterator[str]:
         """Stream events from recording.
 
