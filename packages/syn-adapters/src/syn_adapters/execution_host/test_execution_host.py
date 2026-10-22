@@ -26,7 +26,7 @@ from syn_domain.contexts.orchestration.ports import (
 
 pytestmark = pytest.mark.unit
 
-_HOST = ExecutorHost(host_id="h-unit", container_id="c", generation="g", epoch=0)
+_HOST = ExecutorHost(reap_scope="daemon-1", host_id="h-unit", container_id="c", generation="g", epoch=0)
 _FAST = HostTiming(
     loop_interval=timedelta(milliseconds=5),
     lease_ttl=timedelta(milliseconds=30),
@@ -124,8 +124,8 @@ class _Reaper:
         self.complete = complete
         self.calls: list[tuple[str, str]] = []
 
-    async def reap(self, run: FencedRun) -> bool:
-        self.calls.append((run.executor_id, run.execution_id))
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        self.calls.append((executor_id, execution_id))
         return self.complete
 
 
@@ -280,9 +280,9 @@ class _FailingFirstReaper:
         self.failing = failing
         self.calls: list[str] = []
 
-    async def reap(self, run: FencedRun) -> bool:
-        self.calls.append(run.execution_id)
-        return run.execution_id not in self.failing
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        self.calls.append(execution_id)
+        return execution_id not in self.failing
 
 
 async def test_rows_whose_reaps_keep_failing_do_not_starve_the_rows_behind_them() -> None:

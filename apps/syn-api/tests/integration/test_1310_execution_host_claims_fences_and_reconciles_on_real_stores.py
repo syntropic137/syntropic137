@@ -60,6 +60,7 @@ _FAST = HostTiming(loop_interval=timedelta(milliseconds=50))
 
 def _host(host_id: str) -> ExecutorHost:
     return ExecutorHost(
+        reap_scope="daemon-1",
         host_id=f"{host_id}-{uuid4().hex[:6]}",
         container_id=f"c-{host_id}",
         generation="g1",
@@ -74,9 +75,9 @@ class _Reaper:
         self._infra = world
         self.reaps: list[tuple[str, str, list[str]]] = []
 
-    async def reap(self, run: FencedRun) -> bool:
-        seen = await self._infra.event_types(run.execution_id)
-        self.reaps.append((run.executor_id, run.execution_id, seen))
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        seen = await self._infra.event_types(execution_id)
+        self.reaps.append((executor_id, execution_id, seen))
         return True
 
 

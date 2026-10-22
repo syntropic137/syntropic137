@@ -108,6 +108,12 @@ class ExecutorHost(BaseModel):
     generation: str = Field(min_length=1)
     epoch: int = Field(ge=0)
     """The ``ORCHESTRATION_EVENT_EPOCH`` this host reads (D9)."""
+    reap_scope: str = Field(min_length=1)
+    """What this host's reaper can reach, from the reaper and never configured (D5, D13).
+
+    A Docker engine ID today. This host fences and takes over only runs claimed
+    in the same scope, so it never reports a reap of containers it cannot see.
+    """
     pool: ExecutorPool = DEFAULT_EXECUTOR_POOL
     """The Executor Pool this host joins on ``register`` (D13)."""
 
@@ -167,7 +173,9 @@ class ExecutionRunQueue(Protocol):
 
         First deletes any other host's row in the same ``container_id``: the
         restart is the proof that process stopped, so it has **left** (D5).
-        Idempotent for the same host. ``capacity`` is seeded from
+        Idempotent for the same host. Records ``host.reap_scope`` on the
+        budget, and on any scope-less budget row in the same container (D13).
+        ``capacity`` is seeded from
         ``SYN_EXECUTION_MAX_CONCURRENT`` by the caller (D12).
 
         Joins ``host.pool`` (D13): defines it if new. A declaration that differs
@@ -216,7 +224,10 @@ class ExecutionRunQueue(Protocol):
         ...
 
     async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
-        """At most ``limit`` expired ``claimed`` runs this host can read -> ``fencing``.
+        """At most ``limit`` expired ``claimed`` runs this host can read and reap -> ``fencing``.
+
+        Only runs whose claimer has this host's ``reap_scope``; a claimer with no
+        scope, or another, is never fenced here and stays charged (D5, D13).
 
         Oldest ``leased_until`` first, owned by ``reconciler``. Two fencers never
         take the same row; the rest stay ``claimed`` for a later turn or another
@@ -230,6 +241,7 @@ class ExecutionRunQueue(Protocol):
         Each is taken under a new token, oldest ``leased_until`` first. Leaving
         means its ``executor_hosts`` row is gone: a stale heartbeat alone is not
         leaving, so a stalled reconciler is never taken over while registered.
+        Only rows whose claimer has this host's ``reap_scope`` (D5, D13).
         """
         ...
 

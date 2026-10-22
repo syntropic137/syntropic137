@@ -147,6 +147,7 @@ async def main(
         )
     )
     host = ExecutorHost(
+        reap_scope="daemon-1",
         host_id=host_id,
         container_id=f"c-{host_id}",
         generation="g1",

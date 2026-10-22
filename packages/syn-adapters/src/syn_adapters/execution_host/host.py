@@ -44,7 +44,7 @@ from syn_domain.contexts.orchestration.ports import RunLeaseLost
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from syn_adapters.execution_host.ports import ClaimedRunDrainer, DeadHostReaper, RunInterrupter
+    from syn_adapters.execution_host.ports import ClaimedRunDrainer, RunReaper, RunInterrupter
     from syn_domain.contexts.orchestration.ports import (
         ClaimedRun,
         ExecutionRunQueue,
@@ -93,7 +93,7 @@ class ExecutionHost:
         *,
         capacity: int,
         drainer: ClaimedRunDrainer,
-        reaper: DeadHostReaper,
+        reaper: RunReaper,
         interrupter: RunInterrupter,
         streams: ExecutionStreamProbe,
         timing: HostTiming | None = None,
@@ -104,6 +104,7 @@ class ExecutionHost:
         self._host = host
         self._capacity = capacity
         self._drainer = drainer
+        self._reaper = reaper
         self._streams = streams
         self._timing = timing or HostTiming()
         self._sleep = sleep
@@ -255,7 +256,25 @@ class ExecutionHost:
             keeper.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await keeper
+        if not await self._released(claimed):
+            # A drain can return normally over resources it could not remove, a
+            # failed delete or a create whose response was lost. Closing would
+            # free a slot that may still be running, so the lease expires and a
+            # same-scope reconciler reaps before it frees (D3, D5).
+            logger.warning(
+                "Run %s: resources not shown gone; leaving it charged for reconciliation",
+                claimed.execution_id,
+            )
+            return
         try:
             await self._queue.close(claimed)
         except RunLeaseLost:
             logger.warning("Close of %s refused: this host no longer owns it", claimed.execution_id)
+
+    async def _released(self, claimed: ClaimedRun) -> bool:
+        """Whether the backend shows the run's resources gone; a raise is not shown gone."""
+        try:
+            return await self._reaper.reap(self._host.host_id, claimed.execution_id)
+        except Exception:
+            logger.exception("Reap of %s before close raised", claimed.execution_id)
+            return False

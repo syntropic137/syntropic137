@@ -67,6 +67,7 @@ _WORKFLOW = (
     Path(__file__).resolve().parents[8] / "workflows" / "sdlc" / "quickfix" / "workflow.yaml"
 )
 _HOST = ExecutorHost(
+    reap_scope="daemon-1",
     host_id="host-1", container_id="c-1", generation="g1", epoch=ORCHESTRATION_EVENT_EPOCH
 )
 

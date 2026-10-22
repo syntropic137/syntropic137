@@ -67,6 +67,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _HOST = ExecutorHost(
+    reap_scope="daemon-1",
     host_id="host-1-4", container_id="c-1-4", generation="g1", epoch=ORCHESTRATION_EVENT_EPOCH
 )
 _WORKFLOW_ID = "wf-1310-three-phase"

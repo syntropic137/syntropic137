@@ -105,8 +105,8 @@ class _Ordered:
         self._reaper, self._interrupter, self._a = DockerDeadHostReaper(), interrupter, a_host
         self.log: list[str] = []
 
-    async def reap(self, run: FencedRun) -> bool:
-        done = await self._reaper.reap(run)
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        done = await self._reaper.reap(executor_id, execution_id)
         self.log.append(f"reaped:{done}:left={len(await _containers(self._a))}")
         return done
 
@@ -149,6 +149,7 @@ async def test_v12_a_stalled_executor_is_fenced_and_its_stale_commit_refused(
         os.kill(child.pid, signal.SIGSTOP)
         await asyncio.sleep(_LEASE_S * 2)
         b = ExecutorHost(
+            reap_scope="daemon-1",
             host_id=f"v12-b-{uuid4().hex[:6]}",
             container_id="c-v12-b",
             generation="g1",
