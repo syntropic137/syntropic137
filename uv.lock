@@ -1557,6 +1557,7 @@ name = "syn-shared"
 version = "1.0.3"
 source = { editable = "packages/syn-shared" }
 dependencies = [
+    { name = "certifi" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
@@ -1565,6 +1566,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi", specifier = "==2026.10.19" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
