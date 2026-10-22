@@ -27,7 +27,7 @@ from syn_domain.contexts.orchestration.ports import RunLeaseLost
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from syn_adapters.execution_host.ports import DeadHostReaper, RunInterrupter
+    from syn_adapters.execution_host.ports import RunInterrupter, RunReaper
     from syn_domain.contexts.orchestration.ports import ExecutionRunQueue, FencedRun
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ class Reconciler:
         self,
         queue: ExecutionRunQueue,
         host_id: str,
-        reaper: DeadHostReaper,
+        reaper: RunReaper,
         interrupter: RunInterrupter,
         *,
         concurrency: int = 4,
@@ -176,7 +176,7 @@ class Reconciler:
 
     async def _advance(self, run: FencedRun) -> None:
         if not run.reaped:
-            if not await self._reaper.reap(run):
+            if not await self._reaper.reap(run.executor_id, run.execution_id):
                 logger.warning(
                     "Reap of %s on dead executor %s not shown complete; staying fencing",
                     run.execution_id,
