@@ -14,7 +14,7 @@ import logging
 import os
 import shlex
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast, get_args
 
 from agentic_isolation import (
     AppArmorProfileNotLoadedError,
@@ -25,6 +25,7 @@ from agentic_isolation import (
 )
 from agentic_isolation.contract import OperationError
 from agentic_isolation.providers.base import SupportsOperations
+from agentic_isolation.providers.capabilities import SupportsFileTransfer, TransferRoot
 from agentic_isolation.providers.operation_spool import OperationFailure
 
 from syn_adapters.diagnostics import capture_signal_death
@@ -700,9 +701,28 @@ class AgenticIsolationAdapter:
         Every workspace holds the session-store token, and only this adapter
         knows it, so a file the workload wrote leaves with it replaced (#1927).
         """
-        collected = await copy_files_from_workspace(handle, patterns, base_path)
+        if self._kit.reads_through_provider:
+            collected = await self._read_through_provider(handle, patterns, base_path)
+        else:
+            collected = await copy_files_from_workspace(handle, patterns, base_path)
         scrubber = CredentialScrubber(self.credentials.withheld(()))
         return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
+
+    async def _read_through_provider(
+        self, handle: IsolationHandle, patterns: list[str], base_path: str
+    ) -> list[tuple[str, bytes]]:
+        """A remote workspace's files, read by the provider (its disk is not on this host)."""
+        workspace = self._workspaces.get(handle.isolation_id)
+        if workspace is None:
+            raise RuntimeError(f"Workspace not found: {handle.isolation_id}")
+        if not isinstance(self._provider, SupportsFileTransfer):
+            msg = f"the {self._kit.isolation_type} provider cannot transfer files"
+            raise TypeError(msg)
+        if base_path not in get_args(TransferRoot):
+            msg = f"cannot read files from {base_path!r}: not a transfer root"
+            raise ValueError(msg)
+        root = cast("TransferRoot", base_path)
+        return await self._provider.read_files(workspace, patterns, base_path=root)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
 
 
 def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:

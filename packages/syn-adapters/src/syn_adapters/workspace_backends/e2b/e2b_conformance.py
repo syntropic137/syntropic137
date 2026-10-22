@@ -8,16 +8,19 @@ E2B (``test_e2b_live.py``, marker ``e2b``, never in CI).
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 
-from agentic_isolation.providers.capabilities import SupportsOwnership
-
-from syn_adapters.workspace_backends.agentic import AgenticIsolationAdapter
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationBackendType,
     IsolationConfig,
     IsolationHandle,
     SecurityPolicy,
 )
+
+if TYPE_CHECKING:
+    from agentic_isolation.providers.capabilities import SupportsOwnership
+
+    from syn_adapters.workspace_backends.agentic import AgenticIsolationAdapter
 
 #: Writes to stdout and stderr in a known order, then fails with a known code.
 MERGED_COMMAND = ["sh", "-c", "echo out-1; echo err-1 >&2; echo out-2; exit 3"]

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import shlex
-from collections.abc import AsyncIterator, Mapping
+from typing import TYPE_CHECKING
 
 import pytest
 from agentic_isolation import E2BWorkspaceProvider
@@ -27,6 +27,9 @@ from syn_adapters.workspace_backends.errors import (
 )
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_shared.settings.e2b import E2BSettings
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Mapping
 
 pytestmark = pytest.mark.unit
 
@@ -264,14 +267,6 @@ def _adapter(double: SandboxDouble) -> tuple[AgenticIsolationAdapter, E2BWorkspa
     return AgenticIsolationAdapter(kit=kit, provider=provider), provider
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN GAP (#1915): AgenticIsolationAdapter.copy_from reads the Docker host "
-        "mount, which an E2B workspace does not have, so the binary round trip "
-        "returns nothing. It must read through the provider's read_files instead."
-    ),
-)
 async def test_conformance_suite_over_the_double() -> None:
     adapter, provider = _adapter(SandboxDouble())
     config = suite.isolation_config(_TEMPLATE)
