@@ -304,3 +304,34 @@ async def test_rows_whose_reaps_keep_failing_do_not_starve_the_rows_behind_them(
     for _ in range(2):
         await _turn(reconciler)
     assert all(reaper.calls.count(row) >= 2 for row in ids[:4])
+
+
+class _RaisingReaper(_Reaper):
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        self.calls.append((executor_id, execution_id))
+        raise TimeoutError("delete outcome unknown")
+
+
+@pytest.mark.parametrize("reaper", [_Reaper(complete=False), _RaisingReaper(complete=True)])
+async def test_a_drained_run_whose_resources_are_not_shown_released_is_never_closed(
+    reaper: _Reaper,
+) -> None:
+    """D3: the owner asks its own reaper before it frees the slot; no is not a close."""
+    queue, drainer = _Queue([_claimed("e1")]), _Drainer()
+    host = _host(queue, drainer, reaper)
+    loop = asyncio.create_task(host.run_until_drained())
+    await _until(lambda: reaper.calls == [(_HOST.host_id, "e1")])
+    host.drain()
+    await asyncio.wait_for(loop, 2)
+    assert drainer.drained == ["e1"]
+    assert queue.closed == []
+
+
+async def test_a_drained_run_is_reaped_by_its_owner_before_it_is_closed() -> None:
+    queue, drainer, reaper = _Queue([_claimed("e1")]), _Drainer(), _Reaper(complete=True)
+    host = _host(queue, drainer, reaper)
+    loop = asyncio.create_task(host.run_until_drained())
+    await _until(lambda: queue.closed == ["e1"])
+    host.drain()
+    await asyncio.wait_for(loop, 2)
+    assert reaper.calls == [(_HOST.host_id, "e1")]

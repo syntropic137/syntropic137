@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/host.py b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+index 2b2772d00..35ca8e249 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/host.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+@@ -259,7 +259,7 @@ class ExecutionHost:
+             keeper.cancel()
+             with contextlib.suppress(asyncio.CancelledError):
+                 await keeper
+-        if not await self._released(claimed):
++        if False:
+             # The keeper is cancelled, so the Lease expires and a reconciler
+             # retries the reap before it frees the slot (D3, D5 A).
+             logger.warning(

@@ -1,0 +1,24 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 24ad509a5..f842da25d 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -262,9 +262,6 @@ class PostgresExecutionRunQueue:
+                     SELECT c.execution_id FROM execution_runs c
+                     WHERE c.state='claimed' AND c.leased_until<now()
+                     AND c.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
+-                    AND EXISTS (SELECT 1 FROM execution_budget cb, execution_budget mb
+-                        WHERE cb.executor_id=c.executor_id AND mb.executor_id=$1
+-                        AND cb.reap_scope=mb.reap_scope)
+                     ORDER BY c.leased_until, c.execution_id
+                     FOR UPDATE OF c SKIP LOCKED LIMIT $2
+                 ) UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
+@@ -272,9 +269,6 @@ class PostgresExecutionRunQueue:
+                 FROM executor_hosts h, picked p
+                 WHERE h.host_id=$1 AND r.execution_id=p.execution_id
+                 AND r.state='claimed' AND r.leased_until<now() AND r.writer_epoch<=h.epoch
+-                AND EXISTS (SELECT 1 FROM execution_budget cb, execution_budget mb
+-                    WHERE cb.executor_id=r.executor_id AND mb.executor_id=h.host_id
+-                    AND cb.reap_scope=mb.reap_scope)
+                 RETURNING jsonb_build_object('execution_id',r.execution_id,
+                     'executor_id',r.executor_id,'reconciler',r.reconciler,
+                     'token',r.lease_token)::text AS run""",

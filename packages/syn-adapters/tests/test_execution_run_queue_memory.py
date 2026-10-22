@@ -240,3 +240,29 @@ async def test_a_sole_member_restarting_in_its_container_may_redefine_its_pool()
     await queue.heartbeat("a.1")
     await queue.register(_in_pool("a.2", _P1.model_copy(update={"region": "eu-west"}), "box"), 1)
     await queue.heartbeat("a.2")
+
+
+def _scoped(host_id: str, scope: str) -> ExecutorHost:
+    return ExecutorHost(
+        host_id=host_id, container_id=f"c-{host_id}", generation="g1", epoch=1, reap_scope=scope
+    )
+
+
+async def test_fencing_and_takeover_stay_inside_the_claimers_reap_scope() -> None:
+    """Mirrors the Postgres Reap Scope predicate (ADR-072 D13)."""
+    clock = _Clock()
+    queue = InMemoryExecutionRunQueue(clock=clock)
+    for host_id, scope in (("a", "s1"), ("b", "s2"), ("c", "s1"), ("d", "s2"), ("e", "s1")):
+        await queue.register(_scoped(host_id, scope), 1)
+        await queue.heartbeat(host_id)
+    assert await queue.reserve("x", 1, is_resume=False)
+    await queue.mark_admitted("x")
+    assert await queue.claim("a") is not None
+    clock.now += timedelta(minutes=5)
+
+    assert await queue.fence_expired("b", limit=10) == []
+    (fenced,) = await queue.fence_expired("c", limit=10)
+    await queue.deregister("c")
+    assert await queue.take_over("d", limit=10) == []
+    (adopted,) = await queue.take_over("e", limit=10)
+    assert (adopted.reconciler, adopted.token) == ("e", fenced.token + 1)
