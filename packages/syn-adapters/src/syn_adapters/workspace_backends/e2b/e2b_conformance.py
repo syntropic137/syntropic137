@@ -10,17 +10,15 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
-    IsolationBackendType,
-    IsolationConfig,
-    IsolationHandle,
-    SecurityPolicy,
-)
+from syn_domain.contexts.orchestration import IsolationConfig, SecurityPolicy
 
 if TYPE_CHECKING:
     from agentic_isolation.providers.capabilities import SupportsOwnership
 
     from syn_adapters.workspace_backends.agentic import AgenticIsolationAdapter
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationHandle,
+    )
 
 #: Writes to stdout and stderr in a known order, then fails with a known code.
 MERGED_COMMAND = ["sh", "-c", "echo out-1; echo err-1 >&2; echo out-2; exit 3"]
@@ -41,7 +39,6 @@ def isolation_config(template: str, *, cpu: float = 1.0, memory_mb: int = 1024) 
         execution_id=f"e2b-conf-{run}",
         workspace_id=f"ws-{run}",
         workflow_id="wf-e2b-conformance",
-        backend=IsolationBackendType.DOCKER_HARDENED,
         image=template,
         security_policy=SecurityPolicy(cpu_limit_cores=cpu, memory_limit_mb=memory_mb),
     )
