@@ -102,9 +102,8 @@ executor: its pool, capacity, slots in use, heartbeat, last claim check,
 full-since and reap scope; D3, D13), `executor_pools` (one row per Executor
 Pool: priority, provider, region, isolation, capabilities and overflow delay;
 D13) and `executor_hosts` (one row per registered host: its container,
-generation, epoch and drain flag, D5, D9, D10). The last claim check,
-full-since and reap scope columns land with D13's later steps (see D13,
-Status). Production fails fast
+generation, epoch and drain flag, D5, D9, D10). The last claim check and
+full-since columns land with D13's later steps (see D13, Status). Production fails fast
 without Postgres (ADR-060); the test double inherits `InMemoryAdapter`.
 
 **Row states.**
@@ -221,9 +220,12 @@ a leaked or double-freed slot. A deferred row is unowned: its next claim
 charges whichever executor takes it, from step 3 above.
 
 A claimer closes a run only once its backend shows the run's resources gone
-(D13). Otherwise it leaves the run charged for reconciliation. (This gate lands
-with D13's reach-and-release step; until then a claimer closes when its drain
-returns.)
+(D13): after the drain returns, `ExecutionHost` asks its `RunReaper` to reap
+the run under its own host id, and an answer of no, or an error, counts as not
+released. Otherwise it leaves the run charged for reconciliation: its Lease
+expires, a reconciler in the same reap scope fences it, and `close_interrupted`
+frees the slot only after that reap succeeds (D5). An uncertain delete keeps
+the slot charged.
 
 **Closing a row that holds no charge changes no counter.** A row that is
 `opening`, `abandoned` or `admitted` has `executor_id = NULL`, whether it has
@@ -458,11 +460,13 @@ A reconciler can reap only what its backend reaches: a Docker reaper one
 daemon, a provider reaper one account. `execution_budget.reap_scope` records
 that reach. It is derived from the backend and never configured. A run whose
 scope has no live executor stays charged and raises this alert. Rows from
-before the column are given a scope only by a successor in the same container.
-(The scope guards on fencing and takeover land with D13's reach-and-release
-step, before any second machine overflows; until then a reconciler on another
-machine could report a reap it cannot perform, which is why no second machine
-is supported yet.)
+before the column are given a scope only by a successor in the same container:
+`register` sets it on NULL-scope rows with its own `container_id`, because one
+container runs on one Docker daemon. A NULL scope equals nothing, so until then
+such a row is fenced by nobody and stays charged. Fencing and takeover both
+require the claimer's `reap_scope` to equal the reconciler's, joined through
+`execution_budget`. For Docker the scope is the `docker info` engine ID, read
+at startup; an executor that cannot read it refuses to start.
 
 Visibility-timeout redelivery (Sidekiq, Celery, SQS) is deliberately not
 adopted: redelivering an hour-long agent phase is exactly the duplicate-effects
@@ -753,9 +757,12 @@ decides placement); and claim-then-defer (churns tokens and penalises the run).
 dropped `backend` column, the port values, the registration conflict rule and
 `SYN_EXECUTOR_POOL_*`. Placement is not yet in the claim: every executor still
 takes the oldest admitted run. The reach-and-release gate and reap scope (D3,
-D5), the claim signals `claim_checked_at` and `full_since` (D3, D4), priority
-and overflow in the claim, run requirements, and the placement read follow in
-that order, as the plan sets out.
+D5) have landed too: `execution_budget.reap_scope`, scope-restricted fencing
+and takeover, and the `RunReaper` port (`scope`, `provider`, `isolation`,
+`reap`) whose provider and isolation the pool now declares. The claim signals
+`claim_checked_at` and `full_since` (D3, D4), priority and overflow in the
+claim, run requirements, and the placement read follow in that order, as the
+plan sets out.
 
 **Applying the schema (#1965).** The api and every executor apply the Run Queue
 schema as they start, so they apply it concurrently. `ensure_ready` therefore

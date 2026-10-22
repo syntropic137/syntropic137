@@ -839,8 +839,10 @@ What an Executor's reconciler can actually reap: one Docker daemon, one
 provider account. Recorded on its budget row (`reap_scope`), derived from the
 backend and never configured. A reconciler fences, takes over and reaps only
 runs claimed in its own Reap Scope, so a reconciler on another machine can
-never free a slot whose workspace may still be running. (ADR-072 D5, D13;
-lands before any Overflow to a second machine.)
+never free a slot whose workspace may still be running. For Docker it is the
+engine ID `docker info` reports. A row from before the column has none, and is
+given one only by a successor registering in the same container. (ADR-072 D3,
+D5, D13.)
 
 ## Run Queue
 
