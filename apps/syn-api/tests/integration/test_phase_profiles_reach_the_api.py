@@ -404,3 +404,62 @@ async def test_a_retry_after_an_oom_kill_does_not_erase_it(
     ]
     # The resource sample is still each phase's newest attempt.
     assert after.memory_peak_bytes.n == 1
+
+
+async def test_run_demand_pools_every_phase_in_the_window(e2_database: str) -> None:
+    """The execution budget's demand (#1715), read by the real pooled SQL.
+
+    Six executions each measure a ``plan`` and a ``build`` workspace: twelve
+    samples only if the two phases of one execution stay separate rows, six
+    (short of ``MIN_SAMPLES``, so None) if they were merged. Sample 12 sits
+    exactly on the window's lower edge and must count; a row exactly at
+    ``now`` and one a second before the window, both enormous, must not.
+    """
+    from syn_adapters.events import AgentEventStore
+    from syn_domain.contexts.agent_sessions import CostCalculator
+    from syn_domain.contexts.orchestration.slices.phase_profiles.query_service import (
+        PhaseProfileQueryService,
+    )
+
+    store = AgentEventStore(e2_database)
+    await store.initialize()
+    pool = store.pool
+    assert pool is not None
+    now = datetime.now(UTC).replace(microsecond=0)
+    window = timedelta(days=7)
+
+    def usage(execution: str, phase: str, at: datetime, scale: int) -> list[_Row]:
+        data = {
+            "cpu_usage_seconds": 6.0 * scale,
+            "memory_peak_bytes": scale * MIB,
+            "disk_bytes_at_teardown": 2 * scale * MIB,
+            "workspace_lifetime_seconds": 60.0,
+        }
+        session = f"{execution}-{phase}"
+        return [
+            (at - timedelta(seconds=1), "session_started", session, execution, phase, "{}"),
+            (at, "workspace_resource_usage", session, execution, phase, json.dumps(data)),
+        ]
+
+    rows: list[_Row] = []
+    for i in range(6):
+        execution = f"exec-{i:02d}"
+        rows += usage(execution, "plan", now - timedelta(hours=i + 1), 2 * i + 1)
+        # Sample 12 lands exactly at ``now - window``: inclusive.
+        at = now - window if i == 5 else now - timedelta(minutes=i + 1)
+        rows += usage(execution, "build", at, 2 * i + 2)
+    rows += usage("exec-at-until", "plan", now, 1_000_000)
+    rows += usage("exec-before-since", "plan", now - window - timedelta(seconds=1), 1_000_000)
+    try:
+        async with pool.acquire() as conn:
+            await conn.copy_records_to_table("agent_events", records=rows, columns=_COLUMNS)
+        service = PhaseProfileQueryService(pool=pool, cost_calculator=CostCalculator())
+        demand = await service.run_demand(window, now=now)
+    finally:
+        await store.close()
+
+    assert demand is not None
+    # Samples 1..12: 0.1..1.2 cores, 1..12 MiB peak, 2..24 MiB disk.
+    assert demand.cpu_cores_p50 == pytest.approx(0.65)
+    assert demand.memory_bytes_p95 == pytest.approx(11.45 * MIB)
+    assert demand.disk_bytes_p95 == pytest.approx(22.9 * MIB)

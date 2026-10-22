@@ -33,6 +33,10 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_to_workspace,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
+from syn_adapters.workspace_backends.agentic.credential_scrubber import (
+    CredentialScrubber,
+    scrub_bytes,
+)
 from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 
 # Re-exported for backward compatibility (issue #771 item 7): the canonical
@@ -674,8 +678,14 @@ class AgenticIsolationAdapter:
         patterns: list[str],
         base_path: str = "/workspace",
     ) -> list[tuple[str, bytes]]:
-        """Copy files from workspace via mounted volume."""
-        return await copy_files_from_workspace(handle, patterns, base_path)
+        """Copy files from workspace via mounted volume.
+
+        Every workspace holds the session-store token, and only this adapter
+        knows it, so a file the workload wrote leaves with it replaced (#1927).
+        """
+        collected = await copy_files_from_workspace(handle, patterns, base_path)
+        scrubber = CredentialScrubber(self.credentials.withheld(()))
+        return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
 
 
 def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:
