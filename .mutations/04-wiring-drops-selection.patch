@@ -1,13 +1,13 @@
 diff --git a/apps/syn-api/src/syn_api/_wiring.py b/apps/syn-api/src/syn_api/_wiring.py
-index 2caabdf23..ca1df0890 100644
+index 4148ef126..8ff8ad364 100644
 --- a/apps/syn-api/src/syn_api/_wiring.py
 +++ b/apps/syn-api/src/syn_api/_wiring.py
-@@ -339,7 +339,7 @@ def build_workspace_service(
- 
-     e2b = get_settings().e2b
+@@ -331,7 +331,7 @@ def build_workspace_service(
+     serves runs real agents, which need the host's credentials. E2B only when SYN_E2B_ENABLED (#1915).
+     """
      return WorkspaceService.create(
--        backend=WorkspaceBackend.selected(e2b),
-+        backend=WorkspaceBackend.DOCKER,
+-        backend=WorkspaceBackend.selected(e2b := shared_settings.get_settings().e2b),
++        backend=WorkspaceBackend.DOCKER if (e2b := shared_settings.get_settings().e2b) else WorkspaceBackend.DOCKER,
          e2b=e2b,
          config=ws_config,
          environment=_build_workspace_env(),
