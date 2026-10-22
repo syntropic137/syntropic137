@@ -71,8 +71,9 @@ async def throwaway_database(admin_url: str) -> AsyncIterator[str]:
 
 # ensure_schema adds a compression policy, and every row these tests write is
 # dated weeks back, so its chunk qualifies at once. The TimescaleDB scheduler
-# would compress it whenever it next woke, under a lock that queues every
-# INSERT (#1952). Unscheduled before any row exists, it never runs here.
+# would compress it whenever it next woke, and compressing a chunk locks it
+# against INSERT: the suspected, not observed, blocker in #1952. Unscheduled
+# before any row exists, it never runs here.
 _PAUSE_COMPRESSION_SQL = """
 SELECT alter_job(job_id, scheduled => false)
 FROM timescaledb_information.jobs

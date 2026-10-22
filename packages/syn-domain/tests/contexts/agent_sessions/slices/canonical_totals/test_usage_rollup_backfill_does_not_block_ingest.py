@@ -17,8 +17,14 @@ real database with a writer inserting the whole time:
      is decided by the database's lock table, not by a clock: the measured
      version (#1860) failed on shared runners (#1952). A wait on someone
      else is not the backfill's doing and is not counted: the first
-     lock-table version counted every wait, and failed on a runner whose
-     TimescaleDB compression job reached the writer's chunk first (#1952).
+     lock-table version counted every wait, and failed on an Ubuntu runner
+     with the writer waiting for RowExclusiveLock on a chunk. It recorded
+     neither the blocker nor what the backfill held, and the batch takes no
+     lock that conflicts with an INSERT's, so the blocker was some other
+     backend. The compression policy is the suspect, not a proven one: that
+     run's logs show it compressing a chunk in another of these databases.
+     A wait on another backend is reported as a warning naming the blocker,
+     so the next run that hits one records who it was.
   2. EVERY EVENT IS COUNTED EXACTLY ONCE. After the dust settles, the rollup
      equals a fresh aggregation of agent_events: per turn key (every token
      column and the observation count) and per summary row (as a multiset).
@@ -36,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import warnings
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -107,6 +114,12 @@ _HELD = """
 SELECT locktype, mode, relation::regclass::text AS relation
 FROM pg_locks WHERE pid = $1 AND granted
 """
+# The writer's waits that the backfill has no part in: reported, not failed.
+_WAITING_ON_OTHERS = """
+SELECT 1 FROM pg_locks
+WHERE pid = $1 AND NOT granted AND NOT $2 = ANY(pg_blocking_pids($1))
+LIMIT 1
+"""
 _WRITER_ROWS = "SELECT COUNT(*) FROM agent_events WHERE time >= $1"
 
 
@@ -141,6 +154,10 @@ def _history() -> list[Row]:
         if s % 2:
             rows.append(_summary(session, s))
     return rows
+
+
+class OtherBackendBlockedWriter(UserWarning):
+    """The writer waited on a lock the backfill has no part in (#1952)."""
 
 
 @dataclass
@@ -281,6 +298,7 @@ async def _commits_while_parked(
     A backfill holding a lock that conflicts with INSERT keeps it until the
     gate opens, so the conflict is in pg_locks however fast or slow the
     runner is: checked once up front, then on every wait the writer is in.
+    A wait on any other backend is warned about once the commits are in.
     """
     assert writer.pid is not None
     conflicts = await gate.fetch(_CONFLICTS_WITH_INSERT, backfill_pid)
@@ -289,6 +307,7 @@ async def _commits_while_parked(
         f"{[dict(c) for c in conflicts]}; {await _lock_report(gate, writer.pid, backfill_pid)}"
     )
     target = writer.committed + PARKED_INSERTS
+    others: list[str] = []
     try:
         async with asyncio.timeout(HANG_GUARD_S):
             while writer.committed < target:
@@ -298,6 +317,8 @@ async def _commits_while_parked(
                     f"batch: {[dict(w) for w in waits]}; "
                     f"{await _lock_report(gate, writer.pid, backfill_pid)}"
                 )
+                if await gate.fetchval(_WAITING_ON_OTHERS, writer.pid, backfill_pid):
+                    others.append(await _lock_report(gate, writer.pid, backfill_pid))
                 if writing.done():
                     writing.result()
                     pytest.fail("the writer stopped before it was told to")
@@ -306,6 +327,12 @@ async def _commits_while_parked(
         pytest.fail(
             f"the writer committed {writer.committed} of {target} inserts, then hung: "
             f"{await _lock_report(gate, writer.pid, backfill_pid)}"
+        )
+    for report in others:
+        warnings.warn(
+            f"the writer waited on a backend other than the backfill: {report}",
+            OtherBackendBlockedWriter,
+            stacklevel=1,
         )
 
 
