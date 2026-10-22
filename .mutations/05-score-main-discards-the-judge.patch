@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 0d6f3da4a..13c8d6655 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1989,7 +1989,7 @@ def main(argv: list[str] | None = None) -> int:
+             print(f"recorded in {ledger}: commit it, `score` reads only the runs it names")
+             return 0
+         launches = read_launches(ledger)
+-        tables = [(v, *score_suite(v, client, launches, llm)) for v in to_score]
++        tables = [(v, *score_suite(v, client, launches, None)) for v in to_score]
+     print("\n\n".join(render(v, rows, unrecorded) for v, rows, unrecorded in tables))
+     return (
+         0

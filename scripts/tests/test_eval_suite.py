@@ -3578,6 +3578,127 @@ def test_one_failed_sample_fails_the_judgement_rather_than_voting(failing_sample
     assert len(transport.models) == failing_sample + 1
 
 
+@dataclass
+class _EntryPoint:
+    """The real `score --llm-judge` and `eval_judge_calibrate` entry points with only
+    their two outside edges replaced: AW's `ClaudeHeadless` by `transport` and the API
+    by `server`. The adapter, judge, vote, report extraction and scorer all run.
+
+    `server.scores` is what was POSTed, `transport.models` the calls made, and `built`
+    the keyword arguments every `ClaudeHeadless` was constructed with.
+    """
+
+    server: _Server
+    transport: _FakeTransport
+    ledger: Path
+    built: list[dict[str, object]] = field(default_factory=list)
+
+    def run(self, command: str) -> int:
+        import eval_judge_calibrate
+
+        args = ["--launches", str(self.ledger), "--version", "8", "--api-url", "http://api.invalid"]
+        if command == "score":
+            return eval_suite.main(["score", "--llm-judge", *args])
+        return eval_judge_calibrate.main(["--suite-tag", _LAUNCHED.suite, *args])
+
+
+def _entry_point(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, replies: list[str | Exception]
+) -> _EntryPoint:
+    monkeypatch.setitem(globals(), "_FINDING", _PARAPHRASED)
+    server = _Server(load_suite(DEFAULT_SUITE))
+    http = server.client()
+    ledger = tmp_path / "launches.jsonl"
+    ledger.write_text(_LAUNCHED.model_dump_json() + "\n")
+    edges = _EntryPoint(server, _FakeTransport(replies), ledger)
+
+    def claude_headless(**kwargs: object) -> _FakeTransport:
+        edges.built.append(kwargs)
+        return edges.transport
+
+    monkeypatch.setattr(eval_suite, "ClaudeHeadless", claude_headless)
+    monkeypatch.setattr(httpx, "Client", lambda **_: http)
+    return edges
+
+
+@pytest.mark.unit
+def test_score_main_posts_the_llm_judges_majority_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Through `eval_suite.main`: three pinned samples reach AW's client, and the POSTed
+    score carries the LLM judge's identity and its majority `match`. The keyword judge
+    alone misses this paraphrase, so the PASS can only be the LLM's.
+
+    Mutation check: score with `llm=None` in `main` and this fails.
+    """
+    edges = _entry_point(
+        monkeypatch,
+        tmp_path,
+        [
+            _reply("match", _PARAPHRASE_QUOTE),
+            _reply("no_match"),
+            _reply("match", _PARAPHRASE_QUOTE),
+        ],
+    )
+
+    edges.run("score")  # exits 1: the suite's other cases were never launched
+
+    assert edges.built == [{"effort": eval_suite.JUDGE_EFFORT}]
+    assert edges.transport.models == [eval_suite.JUDGE_MODEL] * eval_suite.JUDGE_SAMPLES
+    [(_, body)] = edges.server.scores
+    assert body["scorer_version"] == "8+llm:claude-sonnet-5-5@prompt-v5"
+    assert body["verdict"] == "PASS"
+    assert "LLM judge (`llm:claude-sonnet-5-5@prompt-v5`): `match`" in str(body["evidence"])
+
+
+@pytest.mark.unit
+def test_calibration_main_reports_the_llm_judges_majority_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Through `eval_judge_calibrate.main`: the row's LLM column is the majority vote of
+    three pinned samples on AW's client, here `no_match` over one `match`."""
+    edges = _entry_point(
+        monkeypatch,
+        tmp_path,
+        [_reply("no_match"), _reply("match", _PARAPHRASE_QUOTE), _reply("no_match")],
+    )
+
+    assert edges.run("calibrate") == 0
+
+    assert edges.built == [{"effort": eval_suite.JUDGE_EFFORT}]
+    assert edges.transport.models == [eval_suite.JUDGE_MODEL] * eval_suite.JUDGE_SAMPLES
+    out = capsys.readouterr().out
+    assert "judge: llm:claude-sonnet-5-5@prompt-v5" in out
+    assert f"| {_LAUNCHED.case} | {_LAUNCHED.run_id} | no_match | no_match |" in out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("command", ["score", "calibrate"])
+@pytest.mark.parametrize("failing_sample", range(3))
+def test_a_transport_failure_aborts_the_entry_point_without_a_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    failing_sample: int,
+) -> None:
+    """An AW error on any sample, including after valid ones, aborts the real entry
+    point as a `JudgeTransportError` chained to it: no score is POSTed and no
+    calibration table is printed. A failure is never a vote."""
+    failure = ClaudeHeadlessReportedError("usage limit reached")
+    replies: list[str | Exception] = [_reply("match", _PARAPHRASE_QUOTE)] * 3
+    replies[failing_sample] = failure
+    edges = _entry_point(monkeypatch, tmp_path, replies)
+
+    with pytest.raises(eval_suite.JudgeTransportError) as raised:
+        edges.run(command)
+
+    assert raised.value.__cause__ is failure
+    assert len(edges.transport.models) == failing_sample + 1
+    assert edges.server.scores == []
+    assert "| case | run |" not in capsys.readouterr().out
+
+
 @pytest.mark.unit
 def test_the_judge_reads_no_api_key() -> None:
     """Owner decision 2026-10-20: the judge never calls the API with a key."""
