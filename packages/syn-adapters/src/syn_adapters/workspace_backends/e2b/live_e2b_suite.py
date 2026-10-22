@@ -45,7 +45,7 @@ class _NoopKill:
     def __getattr__(self, name: str) -> object:
         return getattr(self._client, name)
 
-    async def kill(self, sandbox_id: str) -> bool:
+    async def kill(self, sandbox_id: str) -> bool:  # noqa: ARG002 - the no-op is the point
         return True
 
 
