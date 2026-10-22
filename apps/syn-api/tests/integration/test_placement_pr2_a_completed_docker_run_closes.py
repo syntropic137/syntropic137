@@ -34,6 +34,8 @@ if TYPE_CHECKING:
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(shutil.which("docker") is None, reason="requires Docker"),
+    # Real Docker only exists on the integration-evidence runner, like V7's (#1310).
+    pytest.mark.may_skip(reason="skips when no Docker CLI is on PATH", issue="#1984"),
 ]
 
 IMAGE = os.environ.get("SYN_SPOOL_RELEASE_TEST_IMAGE", "alpine:3")

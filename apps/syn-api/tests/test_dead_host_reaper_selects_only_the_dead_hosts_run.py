@@ -29,9 +29,10 @@ def _no_guard() -> object:
         yield guard
 
 
-def _ps(stdout: bytes) -> MagicMock:
+def _ps(stdout: bytes, returncode: int = 0) -> MagicMock:
     proc = MagicMock()
     proc.communicate = AsyncMock(return_value=(stdout, b""))
+    proc.returncode = returncode
     return proc
 
 
@@ -58,5 +59,16 @@ async def test_an_unfinished_reap_is_not_reported_complete() -> None:
     timed_out.communicate = AsyncMock(side_effect=TimeoutError)
     timed_out.wait = AsyncMock()
     spawn = AsyncMock(side_effect=[timed_out, _ps(b"")])
+    with patch("syn_api.services.reconciliation.asyncio.create_subprocess_exec", new=spawn):
+        assert await DockerDeadHostReaper().reap(_RUN.executor_id, _RUN.execution_id) is False
+
+
+async def test_a_failed_listing_is_not_an_empty_one() -> None:
+    """A ``docker ps`` that exits non-zero with no output shows nothing, not "none left".
+
+    Read as an empty listing, the host's reap-before-close would free the slot
+    of a run whose containers it never saw (ADR-072 D3).
+    """
+    spawn = AsyncMock(side_effect=[_ps(b"", returncode=1), _ps(b"")])
     with patch("syn_api.services.reconciliation.asyncio.create_subprocess_exec", new=spawn):
         assert await DockerDeadHostReaper().reap(_RUN.executor_id, _RUN.execution_id) is False
