@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.ports import ClaimedRun, FencedRun
+    from syn_domain.contexts.orchestration.ports import ClaimedRun, FencedRun, IsolationLevel
 
 
 class ClaimedRunDrainer(Protocol):
@@ -22,16 +22,27 @@ class ClaimedRunDrainer(Protocol):
     async def run_claimed(self, claimed: ClaimedRun) -> object: ...
 
 
-class DeadHostReaper(Protocol):
-    """Removes the containers a dead executor left for one execution (ADR-072 D5, D6).
+class RunReaper(Protocol):
+    """The workspace backend, as reach and release (ADR-072 D3, D5, D6, D13).
 
-    Selects by ``syn.host_id=<run.executor_id>`` and ``syn.execution_id``, never
-    by name alone, so a live host's containers are never touched. Returns
-    whether the reap is shown complete; False keeps the run ``fencing`` and the
-    reconciler retries it, the same rule as the startup reap's ``fully_reaped``.
+    ``provider`` and ``isolation`` are what the backend actually runs, so
+    the pool declares them from here and never from a setting. ``scope`` is
+    what this backend can reach, derived from it and never
+    configured: a reconciler fences only runs claimed in its own scope.
+    ``reap`` removes every resource labelled ``syn.host_id=<executor_id>`` and
+    ``syn.execution_id``, found by label and never by a handle a create call
+    returned, so a create whose response was lost is still found. It returns
+    True only when a listing shows none left. Nothing frees a slot until it
+    does: not the owner's close, not the reconciler's ``close_interrupted``.
     """
 
-    async def reap(self, run: FencedRun) -> bool: ...
+    def scope(self) -> str: ...
+
+    def provider(self) -> str: ...
+
+    def isolation(self) -> IsolationLevel: ...
+
+    async def reap(self, executor_id: str, execution_id: str) -> bool: ...
 
 
 class RunInterrupter(Protocol):

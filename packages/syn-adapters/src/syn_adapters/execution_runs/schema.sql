@@ -77,3 +77,8 @@ CREATE TABLE IF NOT EXISTS execution_runs (
 );
 CREATE INDEX IF NOT EXISTS execution_runs_state_admitted_idx
     ON execution_runs (state, admitted_at);
+-- step: execution_budget_reap_scope
+-- D13 Reap Scope: what the claimer's reaper can reach. Fencing and takeover
+-- require the reconciler's scope to equal it. A pre-scope row stays NULL, and
+-- so is fenced by nobody, until a successor in its own container adopts it.
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS reap_scope TEXT;

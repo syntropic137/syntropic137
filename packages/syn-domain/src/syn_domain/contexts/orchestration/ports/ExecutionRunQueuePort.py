@@ -110,6 +110,13 @@ class ExecutorHost(BaseModel):
     """The ``ORCHESTRATION_EVENT_EPOCH`` this host reads (D9)."""
     pool: ExecutorPool = DEFAULT_EXECUTOR_POOL
     """The Executor Pool this host joins on ``register`` (D13)."""
+    reap_scope: str = Field(min_length=1)
+    """What this host's reaper can reach: the Docker engine ID (D13 Reap Scope).
+
+    Derived from the backend, never configured. A reconciler fences, takes over
+    and reaps only runs claimed in its own scope, so a reap it cannot see is
+    never reported as done.
+    """
 
 
 class ClaimedRun(BaseModel):
