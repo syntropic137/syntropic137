@@ -60,7 +60,13 @@ async def pools(test_infrastructure: TestInfrastructure) -> AsyncIterator[list[a
 
 
 def _host(host_id: str, epoch: int = 1) -> ExecutorHost:
-    return ExecutorHost(host_id=host_id, container_id=f"c-{host_id}", generation="g1", epoch=epoch)
+    return ExecutorHost(
+        reap_scope="engine-test",
+        host_id=host_id,
+        container_id=f"c-{host_id}",
+        generation="g1",
+        epoch=epoch,
+    )
 
 
 async def _online(queue: PostgresExecutionRunQueue, host_id: str, capacity: int) -> None:
@@ -481,7 +487,10 @@ async def test_a_restart_in_the_same_container_retires_the_predecessor_not_its_w
     new = PostgresExecutionRunQueue(pools[1])
     box = "container-1"
     await old.register(
-        ExecutorHost(host_id="box.aaa", container_id=box, generation="g", epoch=1), 1
+        ExecutorHost(
+            reap_scope="engine-test", host_id="box.aaa", container_id=box, generation="g", epoch=1
+        ),
+        1,
     )
     await old.heartbeat("box.aaa")
     await _admit(old, "exec-before-restart")
@@ -489,7 +498,10 @@ async def test_a_restart_in_the_same_container_retires_the_predecessor_not_its_w
     await asyncio.sleep(0.5)
 
     await new.register(
-        ExecutorHost(host_id="box.bbb", container_id=box, generation="g", epoch=1), 1
+        ExecutorHost(
+            reap_scope="engine-test", host_id="box.bbb", container_id=box, generation="g", epoch=1
+        ),
+        1,
     )
     await new.heartbeat("box.bbb")
     async with pools[0].acquire() as conn:
@@ -521,13 +533,23 @@ async def test_a_restart_transfers_the_machine_budget_and_never_doubles_it(
     old = PostgresExecutionRunQueue(pools[0], lease_ttl=timedelta(milliseconds=300))
     new = PostgresExecutionRunQueue(pools[1], lease_ttl=timedelta(milliseconds=300))
     box = "container-r1"
-    await old.register(ExecutorHost(host_id="r1.aaa", container_id=box, generation="g", epoch=1), 1)
+    await old.register(
+        ExecutorHost(
+            reap_scope="engine-test", host_id="r1.aaa", container_id=box, generation="g", epoch=1
+        ),
+        1,
+    )
     await old.heartbeat("r1.aaa")
     await _admit(old, "exec-held", "exec-waiting")
     held = await old.claim("r1.aaa")
     assert held is not None
 
-    await new.register(ExecutorHost(host_id="r1.bbb", container_id=box, generation="g", epoch=1), 1)
+    await new.register(
+        ExecutorHost(
+            reap_scope="engine-test", host_id="r1.bbb", container_id=box, generation="g", epoch=1
+        ),
+        1,
+    )
     await new.heartbeat("r1.bbb")
     assert await _machine(pools, box) == (1, {"r1.aaa": (1, 1), "r1.bbb": (0, 0)})
     assert await new.claim("r1.bbb") is None
@@ -558,6 +580,7 @@ _P1 = ExecutorPool(pool_id="p1", priority=1, provider="docker", region="eu-west"
 
 def _in_pool(host_id: str, pool: ExecutorPool, *, container_id: str | None = None) -> ExecutorHost:
     return ExecutorHost(
+        reap_scope="engine-test",
         host_id=host_id,
         container_id=container_id or f"c-{host_id}",
         generation="g1",
@@ -729,7 +752,12 @@ async def test_a_restart_that_changes_pool_moves_the_machines_free_capacity_to_t
 ) -> None:
     queue = PostgresExecutionRunQueue(pools[0])
     box = "container-move"
-    await queue.register(ExecutorHost(host_id="m.1", container_id=box, generation="g", epoch=1), 3)
+    await queue.register(
+        ExecutorHost(
+            reap_scope="engine-test", host_id="m.1", container_id=box, generation="g", epoch=1
+        ),
+        3,
+    )
     await queue.heartbeat("m.1")
     await _admit(queue, "exec-held")
     assert await queue.claim("m.1") is not None

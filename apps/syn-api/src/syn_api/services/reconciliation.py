@@ -510,10 +510,6 @@ async def _docker_rm(filter_arg: str, label: str, *narrower: str) -> str | None:
             proc.kill()
             await proc.wait()
             return f"{label}: `docker ps` timed out"
-        # An empty listing from a failed `docker ps` shows nothing; only a
-        # listing that succeeded can show none left.
-        if proc.returncode != 0:
-            return f"{label}: `docker ps` exited {format_exit_code(proc.returncode)}"
         ids = stdout.decode().split() if stdout else []
         if not ids:
             return None

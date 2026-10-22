@@ -30,6 +30,7 @@ _LIVE = "live-member"
 async def _queue_with_a_live_member(monkeypatch: pytest.MonkeyPatch) -> InMemoryExecutionRunQueue:
     queue = InMemoryExecutionRunQueue()
     member = ExecutorHost(
+        reap_scope="engine-test",
         host_id=_LIVE,
         container_id="another-box",
         generation="g1",
@@ -44,6 +45,7 @@ async def _queue_with_a_live_member(monkeypatch: pytest.MonkeyPatch) -> InMemory
     monkeypatch.setattr(runner, "get_workflow_execution_repository", MagicMock())
     monkeypatch.setattr(runner, "get_execution_event_stream", MagicMock())
     monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())
+    monkeypatch.setattr(runner.DockerDeadHostReaper, "scope", lambda _self: "engine-test")
     return queue
 
 

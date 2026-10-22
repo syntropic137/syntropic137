@@ -38,7 +38,7 @@ def _ps(stdout: bytes) -> MagicMock:
 async def test_both_selectors_are_narrowed_to_the_dead_host_and_the_run() -> None:
     spawn = AsyncMock(side_effect=[_ps(b""), _ps(b"")])
     with patch("syn_api.services.reconciliation.asyncio.create_subprocess_exec", new=spawn):
-        assert await DockerDeadHostReaper().reap(_RUN) is True
+        assert await DockerDeadHostReaper().reap(_RUN.executor_id, _RUN.execution_id) is True
 
     calls = [call.args for call in spawn.await_args_list]
     assert len(calls) == 2
@@ -59,4 +59,4 @@ async def test_an_unfinished_reap_is_not_reported_complete() -> None:
     timed_out.wait = AsyncMock()
     spawn = AsyncMock(side_effect=[timed_out, _ps(b"")])
     with patch("syn_api.services.reconciliation.asyncio.create_subprocess_exec", new=spawn):
-        assert await DockerDeadHostReaper().reap(_RUN) is False
+        assert await DockerDeadHostReaper().reap(_RUN.executor_id, _RUN.execution_id) is False
