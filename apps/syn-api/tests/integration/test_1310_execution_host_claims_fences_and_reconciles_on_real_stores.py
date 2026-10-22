@@ -36,7 +36,7 @@ from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     InterruptExecutionCommand,
 )
-from syn_domain.contexts.orchestration.ports import ExecutorHost, FencedRun, RunLeaseLost
+from syn_domain.contexts.orchestration.ports import ExecutorHost, RunLeaseLost
 from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 
 from .test_1310_a_claimed_three_phase_run_succeeds_on_real_stores import (  # noqa: F401  # fixtures
@@ -64,6 +64,7 @@ def _host(host_id: str) -> ExecutorHost:
         container_id=f"c-{host_id}",
         generation="g1",
         epoch=ORCHESTRATION_EVENT_EPOCH,
+        reap_scope="engine-1",
     )
 
 
@@ -74,9 +75,9 @@ class _Reaper:
         self._infra = world
         self.reaps: list[tuple[str, str, list[str]]] = []
 
-    async def reap(self, run: FencedRun) -> bool:
-        seen = await self._infra.event_types(run.execution_id)
-        self.reaps.append((run.executor_id, run.execution_id, seen))
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        seen = await self._infra.event_types(execution_id)
+        self.reaps.append((executor_id, execution_id, seen))
         return True
 
 

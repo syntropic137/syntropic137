@@ -23,7 +23,9 @@ TTL is warned about once.
 A run whose Lease is lost is cancelled, so it takes the shutdown interruption
 path (#1381) and its later appends meet the reconciler's at the stream version
 (D5 B). A finished run's row is closed under its token, so a stale owner's
-close is refused rather than releasing a slot twice.
+close is refused rather than releasing a slot twice. A finished run is closed
+only once the reaper shows its resources gone; otherwise it is left charged for
+reconciliation, so a lost create or an uncertain delete never frees a slot (D3).
 """
 
 from __future__ import annotations
@@ -44,7 +46,7 @@ from syn_domain.contexts.orchestration.ports import RunLeaseLost
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from syn_adapters.execution_host.ports import ClaimedRunDrainer, DeadHostReaper, RunInterrupter
+    from syn_adapters.execution_host.ports import ClaimedRunDrainer, RunInterrupter, RunReaper
     from syn_domain.contexts.orchestration.ports import (
         ClaimedRun,
         ExecutionRunQueue,
@@ -93,7 +95,7 @@ class ExecutionHost:
         *,
         capacity: int,
         drainer: ClaimedRunDrainer,
-        reaper: DeadHostReaper,
+        reaper: RunReaper,
         interrupter: RunInterrupter,
         streams: ExecutionStreamProbe,
         timing: HostTiming | None = None,
@@ -105,6 +107,7 @@ class ExecutionHost:
         self._capacity = capacity
         self._drainer = drainer
         self._streams = streams
+        self._reaper = reaper
         self._timing = timing or HostTiming()
         self._sleep = sleep
         self._clock = clock
@@ -255,7 +258,24 @@ class ExecutionHost:
             keeper.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await keeper
+        if not await self._released(claimed):
+            # A drain can return normally over a workspace whose create or delete
+            # outcome was lost. The slot stays charged; the Lease expires and a
+            # same-scope reconciler reaps before it frees it (D3).
+            logger.warning(
+                "Run %s: resources not shown released; leaving it charged for reconciliation",
+                claimed.execution_id,
+            )
+            return
         try:
             await self._queue.close(claimed)
         except RunLeaseLost:
             logger.warning("Close of %s refused: this host no longer owns it", claimed.execution_id)
+
+    async def _released(self, claimed: ClaimedRun) -> bool:
+        """Whether the backend shows nothing of this run left; any error is "not shown"."""
+        try:
+            return await self._reaper.reap(self._host.host_id, claimed.execution_id)
+        except Exception:
+            logger.exception("Reap of finished run %s failed", claimed.execution_id)
+            return False

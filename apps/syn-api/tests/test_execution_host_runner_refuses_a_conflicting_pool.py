@@ -25,6 +25,7 @@ from syn_shared.settings import reset_settings
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 _LIVE = "live-member"
+_ENGINE = "engine-1"
 
 
 async def _queue_with_a_live_member(monkeypatch: pytest.MonkeyPatch) -> InMemoryExecutionRunQueue:
@@ -34,6 +35,7 @@ async def _queue_with_a_live_member(monkeypatch: pytest.MonkeyPatch) -> InMemory
         container_id="another-box",
         generation="g1",
         epoch=1,
+        reap_scope="engine-1",
         pool=ExecutorPool(pool_id="review", priority=1, provider="docker"),
     )
     await queue.register(member, 1)
@@ -44,6 +46,11 @@ async def _queue_with_a_live_member(monkeypatch: pytest.MonkeyPatch) -> InMemory
     monkeypatch.setattr(runner, "get_workflow_execution_repository", MagicMock())
     monkeypatch.setattr(runner, "get_execution_event_stream", MagicMock())
     monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())
+    monkeypatch.setattr(
+        runner.DockerDeadHostReaper,
+        "for_local_engine",
+        AsyncMock(return_value=runner.DockerDeadHostReaper(_ENGINE)),
+    )
     return queue
 
 
@@ -87,6 +94,27 @@ async def test_a_matching_declaration_starts_and_stop_leaves_the_pool(
         await runner.stop_execution_host()
         assert task.cancelled()
         assert not await _registered(queue)  # left on shutdown
+    finally:
+        await runner.stop_execution_host()
+        reset_settings()
+
+
+async def test_the_registered_scope_is_the_local_engines_never_a_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scope the queue fences by is the one ``docker info`` reported (D13)."""
+    queue = await _queue_with_a_live_member(monkeypatch)
+    monkeypatch.setattr(
+        runner.DockerDeadHostReaper,
+        "for_local_engine",
+        AsyncMock(return_value=runner.DockerDeadHostReaper("engine-from-docker-info")),
+    )
+    monkeypatch.setenv("SYN_EXECUTOR_POOL_PRIORITY", "1")
+    reset_settings()
+    try:
+        await runner.start_execution_host()
+        mine = queue._hosts[host_labels()[LABEL_HOST_ID]].host  # pyright: ignore[reportPrivateUsage]
+        assert mine.reap_scope == "engine-from-docker-info"
     finally:
         await runner.stop_execution_host()
         reset_settings()

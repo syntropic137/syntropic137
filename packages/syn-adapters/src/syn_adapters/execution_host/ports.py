@@ -2,7 +2,7 @@
 
 Each is a Protocol so the loop is testable against doubles and so the real
 implementations stay where their knowledge lives: the processor drains, the
-container backend reaps, the aggregate decides whether a run can be interrupted.
+workspace backend reaps, the aggregate decides whether a run can be interrupted.
 """
 
 from __future__ import annotations
@@ -10,7 +10,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.ports import ClaimedRun, FencedRun
+    from syn_domain.contexts.orchestration.ports import (
+        ClaimedRun,
+        FencedRun,
+        IsolationLevel,
+        ProviderId,
+    )
 
 
 class ClaimedRunDrainer(Protocol):
@@ -22,16 +27,27 @@ class ClaimedRunDrainer(Protocol):
     async def run_claimed(self, claimed: ClaimedRun) -> object: ...
 
 
-class DeadHostReaper(Protocol):
-    """Removes the containers a dead executor left for one execution (ADR-072 D5, D6).
+class RunReaper(Protocol):
+    """The workspace backend's reach and release for one executor's run (ADR-072 D3, D5, D13).
 
-    Selects by ``syn.host_id=<run.executor_id>`` and ``syn.execution_id``, never
-    by name alone, so a live host's containers are never touched. Returns
-    whether the reap is shown complete; False keeps the run ``fencing`` and the
-    reconciler retries it, the same rule as the startup reap's ``fully_reaped``.
+    ``reap`` selects by ``syn.host_id=<executor_id>`` and ``syn.execution_id``,
+    labels every resource carries from creation, never by a handle a create
+    returned, so a create whose response was lost is still found, and a live
+    host's resources are never touched. True only when a listing shows none
+    left; False, or an exception, keeps the slot charged: the host leaves a
+    finished run ``claimed`` for reconciliation, and a reconciler keeps a run
+    ``fencing`` and retries it.
     """
 
-    async def reap(self, run: FencedRun) -> bool: ...
+    def scope(self) -> str:
+        """What this backend can reach (the Docker engine ID); derived, never configured."""
+        ...
+
+    def provider(self) -> ProviderId: ...
+
+    def isolation(self) -> IsolationLevel: ...
+
+    async def reap(self, executor_id: str, execution_id: str) -> bool: ...
 
 
 class RunInterrupter(Protocol):

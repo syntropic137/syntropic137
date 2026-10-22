@@ -110,6 +110,13 @@ class ExecutorHost(BaseModel):
     """The ``ORCHESTRATION_EVENT_EPOCH`` this host reads (D9)."""
     pool: ExecutorPool = DEFAULT_EXECUTOR_POOL
     """The Executor Pool this host joins on ``register`` (D13)."""
+    reap_scope: str = Field(min_length=1)
+    """What this host's ``RunReaper`` can reach: the Docker engine ID today (D13).
+
+    Derived from the backend, never configured. A host fences and takes over
+    only runs claimed in its own scope, because a reap anywhere else would
+    find nothing and report it gone (D3).
+    """
 
 
 class ClaimedRun(BaseModel):
@@ -174,6 +181,10 @@ class ExecutionRunQueue(Protocol):
         from the stored definition overwrites it only when every other member
         is draining or no longer live; otherwise raises
         ``PoolDefinitionConflict`` and writes nothing.
+
+        Records ``host.reap_scope`` on the budget row, and on any row in the
+        same ``container_id`` that predates scopes: one container runs on one
+        backend, so the same container proves the same scope (D13).
         """
         ...
 
@@ -216,7 +227,11 @@ class ExecutionRunQueue(Protocol):
         ...
 
     async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
-        """At most ``limit`` expired ``claimed`` runs this host can read -> ``fencing``.
+        """At most ``limit`` expired ``claimed`` runs this host can read and reap -> ``fencing``.
+
+        Only runs whose claimer registered the same ``reap_scope`` as
+        ``reconciler``; a run with none, or another, stays ``claimed`` and
+        charged (D3, D13).
 
         Oldest ``leased_until`` first, owned by ``reconciler``. Two fencers never
         take the same row; the rest stay ``claimed`` for a later turn or another
@@ -230,6 +245,7 @@ class ExecutionRunQueue(Protocol):
         Each is taken under a new token, oldest ``leased_until`` first. Leaving
         means its ``executor_hosts`` row is gone: a stale heartbeat alone is not
         leaving, so a stalled reconciler is never taken over while registered.
+        Only rows whose claimer shares ``reconciler``'s ``reap_scope`` (D13).
         """
         ...
 

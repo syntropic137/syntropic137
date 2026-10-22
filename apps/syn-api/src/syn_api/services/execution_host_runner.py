@@ -42,12 +42,13 @@ from syn_domain.contexts.orchestration.ports import (
     Capability,
     ExecutorHost,
     ExecutorPool,
-    IsolationLevel,
 )
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from datetime import datetime
+
+    from syn_adapters.execution_host import RunReaper
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +90,14 @@ async def start_execution_host() -> None:
     if queue is None:
         return
     labels = host_labels()
+    reaper = await DockerDeadHostReaper.for_local_engine()
     host = ExecutorHost(
         host_id=labels[LABEL_HOST_ID],  # per process with the flag on (D5)
         container_id=socket.gethostname(),
         generation=labels[LABEL_HOST_GENERATION],
         epoch=ORCHESTRATION_EVENT_EPOCH,
-        pool=_executor_pool(),
+        pool=_executor_pool(reaper),
+        reap_scope=reaper.scope(),
     )
     executor = ExecutionHost(
         queue,
@@ -103,7 +106,7 @@ async def start_execution_host() -> None:
         # limit the in-process claim path enforces.
         capacity=get_execution_budget().limit,
         drainer=await get_execution_processor(),
-        reaper=DockerDeadHostReaper(),
+        reaper=reaper,
         interrupter=AggregateRunInterrupter(get_workflow_execution_repository()),
         streams=get_execution_event_stream(),
     )
@@ -117,20 +120,19 @@ async def start_execution_host() -> None:
     logger.info("ExecutionHost %s claiming from the Run Queue", host.host_id)
 
 
-def _executor_pool() -> ExecutorPool:
+def _executor_pool(reaper: RunReaper) -> ExecutorPool:
     """The Executor Pool this process declares (ADR-072 D13).
 
-    Provider and isolation are what this process's workspaces actually run on:
-    Docker containers. They move to the backend adapter once it exists
-    (placement plan PR 2); they are never settings.
+    Provider and isolation are what this process's workspaces actually run on,
+    so the backend's reaper reports them; they are never settings.
     """
     settings = get_settings().executor_pool
     return ExecutorPool(
         pool_id=settings.id,
         priority=settings.priority,
-        provider="docker",
+        provider=reaper.provider(),
         region=settings.region,
-        isolation=IsolationLevel.CONTAINER,
+        isolation=reaper.isolation(),
         capabilities=frozenset(Capability(name) for name in settings.capabilities),
         overflow_delay=timedelta(seconds=settings.overflow_delay_s),
     )

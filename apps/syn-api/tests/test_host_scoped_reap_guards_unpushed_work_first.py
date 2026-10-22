@@ -72,7 +72,12 @@ async def test_the_dead_hosts_orphan_is_guarded_before_removal_and_b_is_untouche
     _patch(monkeypatch, log)
     run = FencedRun(execution_id="exec-a", executor_id="host-a", reconciler="host-b", token=2)
 
-    assert await dead_host_reaper.DockerDeadHostReaper().reap(run) is True
+    assert (
+        await dead_host_reaper.DockerDeadHostReaper("engine-1").reap(
+            run.executor_id, run.execution_id
+        )
+        is True
+    )
 
     assert log == ["guard:ws-a", "rm:ws-a", "remove:/workspaces/ws-a"]
 

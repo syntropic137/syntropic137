@@ -49,6 +49,7 @@ def _host(name: str) -> ExecutorHost:
         container_id=f"c-{name}-{uuid4().hex[:6]}",
         generation="g1",
         epoch=ORCHESTRATION_EVENT_EPOCH,
+        reap_scope="engine-1",
     )
 
 
@@ -56,8 +57,8 @@ class _Reaper:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def reap(self, run: FencedRun) -> bool:
-        self.calls.append(run.execution_id)
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        self.calls.append(execution_id)
         return True
 
 

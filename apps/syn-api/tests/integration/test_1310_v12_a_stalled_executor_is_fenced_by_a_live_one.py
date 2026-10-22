@@ -101,12 +101,14 @@ async def _containers(host_id: str) -> list[str]:
 class _Ordered:
     """The production reaper and interrupter, recording what each saw, in order."""
 
-    def __init__(self, interrupter: AggregateRunInterrupter, a_host: str) -> None:
-        self._reaper, self._interrupter, self._a = DockerDeadHostReaper(), interrupter, a_host
+    def __init__(
+        self, reaper: DockerDeadHostReaper, interrupter: AggregateRunInterrupter, a_host: str
+    ) -> None:
+        self._reaper, self._interrupter, self._a = reaper, interrupter, a_host
         self.log: list[str] = []
 
-    async def reap(self, run: FencedRun) -> bool:
-        done = await self._reaper.reap(run)
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        done = await self._reaper.reap(executor_id, execution_id)
         self.log.append(f"reaped:{done}:left={len(await _containers(self._a))}")
         return done
 
@@ -148,15 +150,17 @@ async def test_v12_a_stalled_executor_is_fenced_and_its_stale_commit_refused(
 
         os.kill(child.pid, signal.SIGSTOP)
         await asyncio.sleep(_LEASE_S * 2)
+        reaper = await DockerDeadHostReaper.for_local_engine()
         b = ExecutorHost(
             host_id=f"v12-b-{uuid4().hex[:6]}",
             container_id="c-v12-b",
             generation="g1",
             epoch=ORCHESTRATION_EVENT_EPOCH,
+            reap_scope=reaper.scope(),  # the same engine as A's, so B may fence it
         )
         await infra.queue.register(b, capacity=1)
         await infra.queue.heartbeat(b.host_id)
-        ordered = _Ordered(AggregateRunInterrupter(await infra.executions()), a_host)
+        ordered = _Ordered(reaper, AggregateRunInterrupter(await infra.executions()), a_host)
         await _reconcile_turn(Reconciler(infra.queue, b.host_id, ordered, ordered))
         assert ordered.log == ["reaped:True:left=0", "interrupt:left=0"]
         assert (await infra.queue.in_use()).interrupted == 1

@@ -55,6 +55,11 @@ END $$;
 -- Never written or read, before or since #1931, so an older image runs against
 -- the table without it (#1965). A pool's provider replaces it (D3, D13).
 ALTER TABLE execution_budget DROP COLUMN IF EXISTS backend;
+-- step: execution_budget_reap_scope
+-- D13 reach: what the claimer's reaper can reach. NULL on rows that predate it,
+-- and NULL equals nothing, so such a run is fenced by no one until a successor
+-- in its own container backfills it at register.
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS reap_scope TEXT;
 
 -- step: execution_runs
 CREATE TABLE IF NOT EXISTS execution_runs (

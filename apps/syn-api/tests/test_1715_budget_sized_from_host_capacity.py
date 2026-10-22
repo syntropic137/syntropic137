@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -259,7 +260,11 @@ async def test_the_run_queue_host_registers_the_sized_budget(
     monkeypatch.setattr(runner, "get_execution_run_queue", queue)
     monkeypatch.setattr(runner, "get_execution_processor", nothing)
     monkeypatch.setattr(runner, "reap_unlabelled_if_alone", nothing)
-    monkeypatch.setattr(runner, "DockerDeadHostReaper", lambda: None)
+    monkeypatch.setattr(
+        runner.DockerDeadHostReaper,
+        "for_local_engine",
+        AsyncMock(return_value=runner.DockerDeadHostReaper("engine-1")),
+    )
     monkeypatch.setattr(runner, "get_execution_event_stream", lambda: None, raising=False)
     monkeypatch.setattr(runner, "_host_task", None)
     try:
@@ -338,7 +343,9 @@ async def test_health_counts_the_run_queue_when_starts_go_through_it(
         return queue
 
     monkeypatch.setattr(wiring, "get_execution_run_queue", run_queue)
-    host = ExecutorHost(host_id="h", container_id="c", generation="g", epoch=1)
+    host = ExecutorHost(
+        host_id="h", container_id="c", generation="g", epoch=1, reap_scope="engine-1"
+    )
     await queue.register(host, admission.get_execution_budget().limit)
     await queue.heartbeat(host.host_id)
     for i in range(3):

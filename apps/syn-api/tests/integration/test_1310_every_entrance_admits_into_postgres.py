@@ -88,7 +88,11 @@ _WORKFLOW = (
 )
 _REPO = RepositoryRef.from_slug("acme/widgets")
 _HOST = ExecutorHost(
-    host_id="host-b2", container_id="c-b2", generation="g1", epoch=ORCHESTRATION_EVENT_EPOCH
+    host_id="host-b2",
+    container_id="c-b2",
+    generation="g1",
+    epoch=ORCHESTRATION_EVENT_EPOCH,
+    reap_scope="engine-1",
 )
 
 

@@ -146,18 +146,20 @@ async def main(
             "WorkflowExecution",
         )
     )
+    reaper = await DockerDeadHostReaper.for_local_engine()
     host = ExecutorHost(
         host_id=host_id,
         container_id=f"c-{host_id}",
         generation="g1",
         epoch=ORCHESTRATION_EVENT_EPOCH,
+        reap_scope=reaper.scope(),
     )
     await ExecutionHost(
         PostgresExecutionRunQueue(pool, lease_ttl=ttl),  # type: ignore[arg-type]  # asyncpg.Pool vs Pool
         host,
         capacity=1,
         drainer=_StallingDrainer(executions, Path(out)),
-        reaper=DockerDeadHostReaper(),
+        reaper=reaper,
         interrupter=AggregateRunInterrupter(executions),
         streams=EventStoreExecutionEventStream(clients[1]),
         timing=HostTiming(

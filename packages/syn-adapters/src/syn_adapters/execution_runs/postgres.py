@@ -250,6 +250,9 @@ class PostgresExecutionRunQueue:
         if limit < 1:
             return []
         async with self._pool.acquire() as conn:
+            # Only the claimer's own reap scope: a reaper elsewhere would find
+            # nothing and call it gone, freeing a slot early (D3, D13). NULL
+            # (a row from before scopes) equals nothing, so it waits, charged.
             # SKIP LOCKED keeps two fencers from blocking on, or sharing, a row;
             # the outer predicate is re-checked once the row is locked. The
             # pick is a MATERIALIZED CTE because an IN (... LIMIT) subquery may
@@ -257,15 +260,20 @@ class PostgresExecutionRunQueue:
             rows = await conn.fetch(
                 """WITH picked AS MATERIALIZED (
                     SELECT c.execution_id FROM execution_runs c
+                    JOIN execution_budget claimer ON claimer.executor_id=c.executor_id
                     WHERE c.state='claimed' AND c.leased_until<now()
                     AND c.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
+                    AND claimer.reap_scope=(SELECT reap_scope FROM execution_budget
+                        WHERE executor_id=$1)
                     ORDER BY c.leased_until, c.execution_id
                     FOR UPDATE OF c SKIP LOCKED LIMIT $2
                 ) UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
                     reconciler=h.host_id, reader_epoch=LEAST(r.reader_epoch,h.epoch)
-                FROM executor_hosts h, picked p
+                FROM executor_hosts h, picked p, execution_budget mine, execution_budget claimer
                 WHERE h.host_id=$1 AND r.execution_id=p.execution_id
                 AND r.state='claimed' AND r.leased_until<now() AND r.writer_epoch<=h.epoch
+                AND mine.executor_id=h.host_id AND claimer.executor_id=r.executor_id
+                AND claimer.reap_scope=mine.reap_scope
                 RETURNING jsonb_build_object('execution_id',r.execution_id,
                     'executor_id',r.executor_id,'reconciler',r.reconciler,
                     'token',r.lease_token)::text AS run""",
@@ -278,22 +286,28 @@ class PostgresExecutionRunQueue:
         if limit < 1:
             return []
         async with self._pool.acquire() as conn:
-            # Take over rows whose reconciler has left. SKIP LOCKED keeps two
+            # Take over rows whose reconciler has left, in this host's reap
+            # scope only (as fence_expired). SKIP LOCKED keeps two
             # adopters apart; the outer predicate is re-checked after the lock,
             # so a second adopter finds a live owner and takes nothing. The pick
             # is a MATERIALIZED CTE for the same reason as fence_expired's.
             rows = await conn.fetch(
                 """WITH picked AS MATERIALIZED (
                     SELECT o.execution_id FROM execution_runs o
+                    JOIN execution_budget claimer ON claimer.executor_id=o.executor_id
                     WHERE o.state IN ('fencing','reaped') AND o.reconciler IS DISTINCT FROM $1
                     AND o.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
+                    AND claimer.reap_scope=(SELECT reap_scope FROM execution_budget
+                        WHERE executor_id=$1)
                     AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=o.reconciler)
                     ORDER BY o.leased_until, o.execution_id
                     FOR UPDATE OF o SKIP LOCKED LIMIT $2
                 ) UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
-                FROM executor_hosts me, picked p
+                FROM executor_hosts me, picked p, execution_budget mine, execution_budget claimer
                 WHERE me.host_id=$1 AND r.execution_id=p.execution_id
                 AND r.state IN ('fencing','reaped')
+                AND mine.executor_id=me.host_id AND claimer.executor_id=r.executor_id
+                AND claimer.reap_scope=mine.reap_scope
                 AND r.reconciler IS DISTINCT FROM me.host_id AND r.writer_epoch<=me.epoch
                 AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=r.reconciler)
                 RETURNING jsonb_build_object('execution_id',r.execution_id,
@@ -447,12 +461,21 @@ class PostgresExecutionRunQueue:
             host.host_id,
         )
         inserted = await conn.fetchval(
-            """INSERT INTO execution_budget (executor_id,container_id,capacity,pool_id)
-            VALUES ($1,$2,$3,$4) ON CONFLICT (executor_id) DO NOTHING RETURNING executor_id""",
+            """INSERT INTO execution_budget (executor_id,container_id,capacity,pool_id,reap_scope)
+            VALUES ($1,$2,$3,$4,$5) ON CONFLICT (executor_id) DO NOTHING RETURNING executor_id""",
             host.host_id,
             host.container_id,
             int(free or 0) if held else capacity,
             host.pool.pool_id,
+            host.reap_scope,
+        )
+        # Rows from before scopes existed: the same container is the same
+        # backend, so this host's scope is theirs. Never inferred otherwise (D13).
+        await conn.execute(
+            """UPDATE execution_budget SET reap_scope=$2
+            WHERE container_id=$1 AND reap_scope IS NULL""",
+            host.container_id,
+            host.reap_scope,
         )
         if inserted is not None and held:
             await conn.execute(
