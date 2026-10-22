@@ -12,8 +12,18 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from syn_api.services import execution_host_runner as runner
+from syn_domain.contexts.orchestration.ports import IsolationLevel
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+
+
+def _reaper() -> MagicMock:
+    """The Docker reaper as the runner reads it; ``docker info`` is not called in a unit test."""
+    reaper = MagicMock()
+    reaper.scope.return_value = "engine-under-test"
+    reaper.provider.return_value = "docker"
+    reaper.isolation.return_value = IsolationLevel.CONTAINER
+    return reaper
 
 
 async def test_flag_off_starts_nothing_and_builds_no_processor(
@@ -48,6 +58,7 @@ async def test_flag_on_starts_one_host_and_stop_cancels_it(
     monkeypatch.setattr(runner, "get_execution_event_stream", MagicMock())
     monkeypatch.setattr(runner, "ExecutionHost", built)
     monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())
+    monkeypatch.setattr(runner, "DockerDeadHostReaper", _reaper)
     await runner.start_execution_host()
     await runner.start_execution_host()  # idempotent while running
     await asyncio.wait_for(started.wait(), 1)
@@ -87,6 +98,7 @@ async def test_the_production_startup_and_shutdown_drive_the_host_only_with_the_
     built.return_value.run_until_drained = lambda: asyncio.Event().wait()
     monkeypatch.setattr(runner, "ExecutionHost", built)
     monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())
+    monkeypatch.setattr(runner, "DockerDeadHostReaper", _reaper)
     try:
         await lifecycle._init_degradable_services(lifecycle.LifecycleState())
         assert (reaped.await_count, reconciled.await_count) == ((0, 0) if queue_on else (1, 1))
