@@ -53,6 +53,9 @@ jobs:
           pnpm --filter @syntropic137/cli install --frozen-lockfile
           pnpm --filter syn-docs install --frozen-lockfile
           pnpm --filter syn-dashboard-ui install --frozen-lockfile
+          # just codegen regenerates the OpenClaw plugin's API types too (#2039),
+          # with openapi-typescript from that package's own dependencies.
+          pnpm --filter @syntropic137/openclaw-plugin install --frozen-lockfile
 
       - name: Regenerate all artifacts
         run: just codegen
