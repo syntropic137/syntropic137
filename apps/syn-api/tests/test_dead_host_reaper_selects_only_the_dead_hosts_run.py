@@ -31,9 +31,10 @@ def _no_guard() -> object:
         yield guard
 
 
-def _ps(stdout: bytes) -> MagicMock:
+def _ps(stdout: bytes, returncode: int = 0) -> MagicMock:
     proc = MagicMock()
     proc.communicate = AsyncMock(return_value=(stdout, b""))
+    proc.returncode = returncode
     return proc
 
 
