@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.github.revision_resolver import GitHubRevisionResolver
     from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
+    from syn_adapters.host_capacity import ProcHostCapacity
     from syn_adapters.maintenance import (
         InMemoryMaintenanceAdapter,
         PostgresMaintenanceAdapter,
@@ -148,6 +149,7 @@ if TYPE_CHECKING:
         TokenVendingServiceAdapter,
     )
     from syn_domain.contexts._shared.disk_space import DiskSpacePort
+    from syn_domain.contexts._shared.host_capacity import HostCapacityPort
     from syn_domain.contexts._shared.maintenance import MaintenancePort
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
@@ -423,6 +425,10 @@ if TYPE_CHECKING:
     def _disk_space(statvfs: StatvfsDiskSpace) -> None:
         """The workspace-volume probe /health and admission both judge (#1560)."""
         _statvfs: DiskSpacePort = statvfs
+
+    def _host_capacity(proc: ProcHostCapacity) -> None:
+        """The host the execution budget is sized against (#1715)."""
+        _proc: HostCapacityPort = proc
 
     def _codex_credential_file(codex: CodexAuthFileFormat) -> None:
         """codex's auth.json format, until it moves to agentic-workspace (#1973)."""

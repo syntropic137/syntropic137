@@ -28,7 +28,7 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.build_info import get_build_info
-from syn_api.services import cpu_throttling, inventory_lifecycle
+from syn_api.services import cpu_throttling, execution_capacity, inventory_lifecycle
 from syn_api.services.admission_announcement import (
     announce_admission_if_open,
     start_disk_recovery_watch,
@@ -40,10 +40,7 @@ from syn_api.services.disk_pressure import (
     start_disk_pressure_monitor,
     stop_disk_pressure_monitor,
 )
-from syn_api.services.execution_host_runner import (
-    start_execution_host,
-    stop_execution_host,
-)
+from syn_api.services.execution_host_runner import start_execution_host, stop_execution_host
 from syn_api.services.execution_posture import (
     api_memory_limit_mib,
     log_execution_concurrency_posture,
@@ -287,11 +284,9 @@ async def startup(
     except Exception:
         logger.warning("Could not determine execution concurrency posture at startup.")
 
-    if settings.is_test:
-        return Ok({"mode": "full"})
-
-    if settings.is_offline:
-        await seed_offline_data()
+    if settings.uses_in_memory_stores:
+        if settings.is_offline:
+            await seed_offline_data()
         return Ok({"mode": "full"})
 
     # Critical path — abort on failure
@@ -383,6 +378,7 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             disk=disk,
             db_pools=db_pools,
             cpu_throttling=cpu_throttling.read_cpu_throttling(),
+            execution_budget=await execution_capacity.describe_execution_budget(),
         )
     )
 
@@ -567,6 +563,9 @@ async def _init_event_store() -> Result[None, LifecycleError]:
             message=f"Event store connection failed: {e}",
         )
 
+    # Sized through the pool just opened, before any start path or the claim
+    # loop can claim (#1715): sized earlier, the profiles are always unreadable.
+    await execution_capacity.size_execution_budget_at_startup()
     return Ok(None)
 
 
@@ -984,11 +983,6 @@ def _get_recoverable(state: LifecycleState) -> list[DegradedReason]:
     return [r for r in state.degraded_reasons if _is_recoverable(r)]
 
 
-def _all_recovered(state: LifecycleState) -> bool:
-    """Check whether all recoverable subsystems have been restored."""
-    return not any(_is_recoverable(r) for r in state.degraded_reasons)
-
-
 async def _try_recover_reason(state: LifecycleState, reason: DegradedReason) -> None:
     """Attempt recovery for a single degraded reason. Raises on failure."""
     entry = next((e for e in _SERVICE_REGISTRY if e.reason == reason), None)
@@ -1025,7 +1019,7 @@ async def _recovery_loop(state: LifecycleState) -> None:
     while not state._shutting_down and _get_recoverable(state):
         await _attempt_recovery_pass(state, delay)
 
-        if _all_recovered(state):
+        if not _get_recoverable(state):
             logger.info("All recoverable subsystems healthy — recovery loop exiting")
             return
 
