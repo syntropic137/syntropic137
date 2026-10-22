@@ -246,9 +246,25 @@ The one composition point for a workspace backend (`BackendKit`, #1914). Built
 once at wiring, it owns every decision that differs between backends: which
 image may run and how it is verified, whether sessions are captured, the
 [Workspace Credential Policy](#workspace-credential-policy), and the isolation
-type reported on the handle. Only the Docker kit exists. A NoCredentials kit
-starts only with an image approved for credential-free runs, and no such image
-is pinned yet, so today none can start.
+type reported on the handle. A NoCredentials kit starts only with an image
+approved for credential-free runs. Two kits exist:
+
+- **Docker kit**: the default. No credential-free image is pinned yet, so a
+  NoCredentials Docker kit cannot start.
+- **E2B kit** (#1915, experimental, off unless `SYN_E2B_ENABLED`): always
+  NoCredentials, never captures, and its one approved image is its
+  [E2B Template](#e2b-template). It also carries the template's CPU and memory,
+  refusing a workspace that asks for more, and reads files back through the
+  provider because the workspace disk is not on this host.
+
+## E2B Template
+
+The pre-built E2B image every E2B workspace starts from (`SYN_E2B_TEMPLATE`,
+#1915), built from the pinned workspace image by agentic-workspace's
+`build_template`, which verifies the image digest at build time. E2B sizes a
+sandbox by its template, not per request, so the template's CPU and memory are
+a ceiling, not a request. Not an OCI image reference: nothing is
+cosign-verified when a workspace starts from it.
 
 ## Fallback Agent
 

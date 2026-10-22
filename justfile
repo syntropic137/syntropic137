@@ -767,6 +767,16 @@ test-unit:
     @echo "Running unit tests (parallel)..."
     uv run pytest -m unit -n auto --tb=short
 
+# The E2B conformance suite against REAL E2B (#1915). Local only, never CI:
+# needs SYN_E2B_API_KEY and SYN_E2B_TEMPLATE from your environment or keychain
+# (docs/deployment/e2b.md). Without them every test SKIPS, which is not a pass.
+# The e2b SDK is not in the lock (it is agentic-isolation's optional extra), so
+# it is added for this run only, at the version agentic-isolation pins. It is
+# newer than the project cutoff, so this run resolves it with a later cutoff;
+# --frozen keeps that from rewriting uv.lock.
+test-e2b:
+    uv run --frozen --with e2b==2.52.0 --exclude-newer 2026-10-02T00:00:00Z pytest -m e2b -rA --tb=short packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/live_e2b_suite.py
+
 # Integration tests (uses test-stack if running, else testcontainers)
 test-integration:
     @echo "🧪 Running integration tests..."

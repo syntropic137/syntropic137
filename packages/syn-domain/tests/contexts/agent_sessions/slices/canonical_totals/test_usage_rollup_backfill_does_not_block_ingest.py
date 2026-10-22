@@ -12,10 +12,19 @@ real database with a writer inserting the whole time:
   1. INGEST CARRIES ON. The backfill is parked on a gate the test holds,
      inside a batch's open transaction and after that batch's real work.
      While it is parked, inserts commit and are visible to another session,
-     and the writer's backend never waits on a lock. A backfill that held
-     agent_events across its batches would show up as that wait, so this is
-     decided by the database's lock table, not by a clock: the measured
-     version (#1860) failed on shared runners (#1952).
+     the backfill holds no relation lock that conflicts with an INSERT's,
+     and the writer's backend is never queued behind the backfill's. This
+     is decided by the database's lock table, not by a clock: the measured
+     version (#1860) failed on shared runners (#1952). A wait on someone
+     else is not the backfill's doing and is not counted: the first
+     lock-table version counted every wait, and failed on an Ubuntu runner
+     with the writer waiting for RowExclusiveLock on a chunk. It recorded
+     neither the blocker nor what the backfill held, and the batch takes no
+     lock that conflicts with an INSERT's, so the blocker was some other
+     backend. The compression policy is the suspect, not a proven one: that
+     run's logs show it compressing a chunk in another of these databases.
+     A wait on another backend is reported as a warning naming the blocker,
+     so the next run that hits one records who it was.
   2. EVERY EVENT IS COUNTED EXACTLY ONCE. After the dust settles, the rollup
      equals a fresh aggregation of agent_events: per turn key (every token
      column and the observation count) and per summary row (as a multiset).
@@ -33,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import warnings
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -74,11 +84,41 @@ SELECT EXISTS (
       AND classid = 1952 AND objid = 1860 AND objsubid = 2
 )
 """
-# Every heavyweight lock a backend is queued on. Empty for a backend that is
-# working, idle, or between statements.
-_WAITING_ON = """
+# Every lock the writer ($1) is queued on while the backfill ($2) is one of
+# the backends it waits for. pg_blocking_pids counts holders and the waiters
+# queued ahead, so a lock the backfill holds, or one a third party wants and
+# cannot get past the backfill, both show here.
+_WAITING_ON_BACKFILL = """
+SELECT locktype, mode, relation::regclass::text AS relation
+FROM pg_locks WHERE pid = $1 AND NOT granted AND $2 = ANY(pg_blocking_pids($1))
+"""
+# The relation locks a backend holds that an INSERT's RowExclusiveLock waits
+# for (the PostgreSQL conflict table). The backfill must hold none of them.
+_CONFLICTS_WITH_INSERT = """
+SELECT mode, relation::regclass::text AS relation
+FROM pg_locks
+WHERE pid = $1 AND granted AND locktype = 'relation'
+  AND mode IN ('ShareLock', 'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock')
+"""
+# What a failure needs to name the culprit: everything the writer is queued
+# on, who it waits for and what they are, and what the backfill holds.
+_WRITER_WAITS = """
 SELECT locktype, mode, relation::regclass::text AS relation
 FROM pg_locks WHERE pid = $1 AND NOT granted
+"""
+_BLOCKERS = """
+SELECT pid, backend_type, application_name, left(query, 200) AS query
+FROM pg_stat_activity WHERE pid = ANY(pg_blocking_pids($1))
+"""
+_HELD = """
+SELECT locktype, mode, relation::regclass::text AS relation
+FROM pg_locks WHERE pid = $1 AND granted
+"""
+# The writer's waits that the backfill has no part in: reported, not failed.
+_WAITING_ON_OTHERS = """
+SELECT 1 FROM pg_locks
+WHERE pid = $1 AND NOT granted AND NOT $2 = ANY(pg_blocking_pids($1))
+LIMIT 1
 """
 _WRITER_ROWS = "SELECT COUNT(*) FROM agent_events WHERE time >= $1"
 
@@ -114,6 +154,10 @@ def _history() -> list[Row]:
         if s % 2:
             rows.append(_summary(session, s))
     return rows
+
+
+class OtherBackendBlockedWriter(UserWarning):
+    """The writer waited on a lock the backfill has no part in (#1952)."""
 
 
 @dataclass
@@ -235,31 +279,61 @@ async def _until_parked(
         pytest.fail("ensure_schema never reached the backfill")
 
 
-async def _commits_while_parked(
-    gate: asyncpg.Connection, writer: Writer, writing: asyncio.Task[None]
-) -> None:
-    """PARKED_INSERTS more commits, with the writer never queued on a lock.
+async def _lock_report(gate: asyncpg.Connection, writer_pid: int, backfill_pid: int) -> str:
+    """Who the writer waits on and what the backfill holds, for a failure message."""
+    waits = [dict(r) for r in await gate.fetch(_WRITER_WAITS, writer_pid)]
+    blockers = [dict(r) for r in await gate.fetch(_BLOCKERS, writer_pid)]
+    held = [dict(r) for r in await gate.fetch(_HELD, backfill_pid)]
+    return (
+        f"writer {writer_pid} waits on {waits}, blocked by {blockers}; "
+        f"backfill {backfill_pid} holds {held}"
+    )
 
-    A backfill holding a lock that conflicts with INSERT puts the writer's
-    backend in pg_locks as not granted, and keeps it there until the gate
-    opens, so it is seen here however fast or slow the runner is.
+
+async def _commits_while_parked(
+    gate: asyncpg.Connection, writer: Writer, writing: asyncio.Task[None], backfill_pid: int
+) -> None:
+    """PARKED_INSERTS more commits, with the writer never queued behind the backfill.
+
+    A backfill holding a lock that conflicts with INSERT keeps it until the
+    gate opens, so the conflict is in pg_locks however fast or slow the
+    runner is: checked once up front, then on every wait the writer is in.
+    A wait on any other backend is warned about once the commits are in.
     """
     assert writer.pid is not None
+    conflicts = await gate.fetch(_CONFLICTS_WITH_INSERT, backfill_pid)
+    assert not conflicts, (
+        "the backfill, parked inside a batch, holds a lock every insert waits for: "
+        f"{[dict(c) for c in conflicts]}; {await _lock_report(gate, writer.pid, backfill_pid)}"
+    )
     target = writer.committed + PARKED_INSERTS
+    others: list[str] = []
     try:
         async with asyncio.timeout(HANG_GUARD_S):
             while writer.committed < target:
-                waits = await gate.fetch(_WAITING_ON, writer.pid)
+                waits = await gate.fetch(_WAITING_ON_BACKFILL, writer.pid, backfill_pid)
                 assert not waits, (
                     "an insert is queued behind the backfill, which is parked inside a "
-                    f"batch: {[dict(w) for w in waits]}"
+                    f"batch: {[dict(w) for w in waits]}; "
+                    f"{await _lock_report(gate, writer.pid, backfill_pid)}"
                 )
+                if await gate.fetchval(_WAITING_ON_OTHERS, writer.pid, backfill_pid):
+                    others.append(await _lock_report(gate, writer.pid, backfill_pid))
                 if writing.done():
                     writing.result()
                     pytest.fail("the writer stopped before it was told to")
                 await asyncio.sleep(POLL_S)
     except TimeoutError:
-        pytest.fail(f"the writer committed {writer.committed} of {target} inserts, then hung")
+        pytest.fail(
+            f"the writer committed {writer.committed} of {target} inserts, then hung: "
+            f"{await _lock_report(gate, writer.pid, backfill_pid)}"
+        )
+    for report in others:
+        warnings.warn(
+            f"the writer waited on a backend other than the backfill: {report}",
+            OtherBackendBlockedWriter,
+            stacklevel=1,
+        )
 
 
 async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
@@ -295,7 +369,7 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
             await _until_parked(gate, conn.get_server_pid(), migrating)
 
             # 1. Ingest carries on while a backfill batch is open.
-            await _commits_while_parked(gate, writer, writing)
+            await _commits_while_parked(gate, writer, writing, conn.get_server_pid())
             assert not migrating.done()
             assert await gate.fetchval(_PARKED_AT_GATE, conn.get_server_pid()), (
                 "the backfill left the gate while the test held it"
