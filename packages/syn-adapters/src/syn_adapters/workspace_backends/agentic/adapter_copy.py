@@ -22,7 +22,8 @@ from syn_adapters.workspace_backends.agentic.workspace_walk import (
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
-    from agentic_isolation import AgenticWorkspace, WorkspaceDockerProvider
+    from agentic_isolation import AgenticWorkspace
+    from agentic_isolation.providers.base import WorkspaceProvider
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
@@ -216,14 +217,14 @@ def collect_matching_files(
 
 
 async def copy_to_workspace(
-    provider: WorkspaceDockerProvider,
+    provider: WorkspaceProvider,
     workspace: object,
     files: list[tuple[str, bytes]],
 ) -> None:
     """Copy files into workspace via the provider.
 
     Args:
-        provider: The workspace docker provider
+        provider: The workspace provider (Docker or E2B)
         workspace: The workspace object
         files: List of (path, content) tuples
     """
@@ -306,7 +307,7 @@ def check_workspace_health(
 
 async def copy_files_to_workspace(
     workspaces: dict[str, AgenticWorkspace],
-    provider: WorkspaceDockerProvider,
+    provider: WorkspaceProvider,
     handle: IsolationHandle,
     files: list[tuple[str, bytes]],
     base_path: str = "/workspace",  # noqa: ARG001 - interface param
@@ -315,7 +316,7 @@ async def copy_files_to_workspace(
 
     Args:
         workspaces: Active workspaces keyed by isolation_id
-        provider: The workspace docker provider
+        provider: The workspace provider (Docker or E2B)
         handle: Handle from create()
         files: List of (path, content) tuples
         base_path: Base path (interface param, docker uses mounted volume)

@@ -6,10 +6,11 @@ whether sessions are captured, which credential policy applies, and the
 isolation type reported on the handle. See
 docs/research/2026-10-08-remote-executor-e2b.md, decision 3.
 
-Only the Docker kit exists today, and under ``HostCredentials`` it is exactly
-the behaviour the Docker adapter had before the kit: capture only when a
-capture source instance is configured, cosign verification of every image,
-and ``isolation_type="docker"``.
+Under ``HostCredentials`` the Docker kit is exactly the behaviour the Docker
+adapter had before the kit: capture only when a capture source instance is
+configured, cosign verification of every image, and ``isolation_type="docker"``.
+
+The E2B kit (#1915, :meth:`BackendKit.e2b`) is the second, and is shipped dark.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from syn_adapters.workspace_backends.errors import WorkspaceProvisionError
 from syn_adapters.workspace_backends.image_verification import verify_image_async
 from syn_domain.contexts.orchestration import (
     HOST_CREDENTIALS,
+    NO_CREDENTIALS,
     WorkspaceCredentialPolicy,
 )
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
@@ -35,6 +37,10 @@ if TYPE_CHECKING:
 
 class CredentialFreeImageError(WorkspaceProvisionError):
     """A credential-free kit was asked to run an image not approved for it."""
+
+
+class WorkspaceCapacityError(WorkspaceProvisionError):
+    """A workspace asked for more CPU or memory than its backend can give it."""
 
 
 @dataclass(frozen=True)
@@ -52,9 +58,46 @@ class BackendKit:
     capture_source_instance_id: str | None = None
     isolation_type: str = "docker"
     credential_free_images: frozenset[str] = field(default_factory=frozenset[str])
+    #: Whether an image is cosign-verified before it runs. Only a backend whose
+    #: "image" is not an OCI reference turns this off (see :meth:`e2b`).
+    verifies_images: bool = True
+    #: The most CPU and memory one workspace may get, when the backend sizes
+    #: workspaces itself rather than per request. None: no ceiling.
+    max_cpu_cores: float | None = None
+    max_memory_mb: int | None = None
+    #: Whether files are read back through the provider rather than from the
+    #: workspace directory on this host. A remote workspace has no host
+    #: directory; Docker keeps its bounded host-mount read.
+    reads_through_provider: bool = False
 
     def __post_init__(self) -> None:
         self._require_permitted(self.default_image)
+
+    @classmethod
+    def e2b(cls, template: str, *, cpu_count: int, memory_mb: int) -> BackendKit:
+        """The E2B kit: one template, no host credentials, no capture (#1915).
+
+        The E2B provider refuses credential bindings and host mounts, so this
+        kit is ``NoCredentials`` and never captures. Its one approved
+        "image" is the template, which is the credential-free allowlist the
+        Docker kit leaves empty; a per-run image is therefore refused rather
+        than silently ignored. A template is not an OCI reference, so there is
+        nothing to cosign-verify here: the image was verified when the
+        template was built (agentic-workspace ``build_template`` takes the
+        verified digest). E2B sizes a sandbox by its template, so a workspace
+        asking for more than the template has is refused. The sandbox's disk
+        is not on this host, so files come back through the provider.
+        """
+        return cls(
+            default_image=template,
+            credential_policy=NO_CREDENTIALS,
+            isolation_type="e2b",
+            credential_free_images=frozenset({template}),
+            verifies_images=False,
+            max_cpu_cores=float(cpu_count),
+            max_memory_mb=memory_mb,
+            reads_through_provider=True,
+        )
 
     @property
     def captures_sessions(self) -> bool:
@@ -83,7 +126,24 @@ class BackendKit:
         """
         image = requested or self.default_image
         self._require_permitted(image)
-        return await verify_image_async(image)
+        return await verify_image_async(image) if self.verifies_images else image
+
+    def require_fits(self, cpu_cores: float, memory_mb: int) -> None:
+        """Refuse a workspace this backend could only run smaller than asked."""
+        too_much = [
+            f"{asked} {unit} (at most {ceiling})"
+            for asked, ceiling, unit in (
+                (cpu_cores, self.max_cpu_cores, "CPU cores"),
+                (memory_mb, self.max_memory_mb, "MB of memory"),
+            )
+            if ceiling is not None and asked > ceiling
+        ]
+        if too_much:
+            msg = (
+                f"The {self.isolation_type} workspace backend cannot give a workspace "
+                + " and ".join(too_much)
+            )
+            raise WorkspaceCapacityError(msg)
 
     def _require_permitted(self, image: str) -> None:
         if self.credential_policy.supplies_credentials:
