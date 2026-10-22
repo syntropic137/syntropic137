@@ -1,0 +1,17 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 153e689ee..bf882d407 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -467,12 +467,6 @@ class PostgresExecutionRunQueue:
+         # daemon, so a successor in the same container proves the same scope.
+         # Never inferred any other way; rows with no such successor stay NULL,
+         # unfenceable and charged, for the D5 alert.
+-        await conn.execute(
+-            """UPDATE execution_budget SET reap_scope=$2
+-            WHERE container_id=$1 AND reap_scope IS NULL""",
+-            host.container_id,
+-            host.reap_scope,
+-        )
+         if inserted is not None and held:
+             await conn.execute(
+                 """UPDATE execution_budget SET capacity=in_use,successor_id=$2

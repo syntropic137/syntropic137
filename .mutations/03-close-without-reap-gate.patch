@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/host.py b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+index 976fc47b3..7ef65ef11 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/host.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+@@ -256,7 +256,7 @@ class ExecutionHost:
+             keeper.cancel()
+             with contextlib.suppress(asyncio.CancelledError):
+                 await keeper
+-        if not await self._released(claimed):
++        if False:
+             # A drain can return normally over resources it could not remove, a
+             # failed delete or a create whose response was lost. Closing would
+             # free a slot that may still be running, so the lease expires and a

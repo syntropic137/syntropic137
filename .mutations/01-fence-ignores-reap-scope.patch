@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 153e689ee..2a932c420 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -262,8 +262,6 @@ class PostgresExecutionRunQueue:
+                     SELECT c.execution_id FROM execution_runs c
+                     WHERE c.state='claimed' AND c.leased_until<now()
+                     AND c.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
+-                    AND (SELECT reap_scope FROM execution_budget WHERE executor_id=c.executor_id)
+-                        =(SELECT reap_scope FROM execution_budget WHERE executor_id=$1)
+                     ORDER BY c.leased_until, c.execution_id
+                     FOR UPDATE OF c SKIP LOCKED LIMIT $2
+                 ) UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
