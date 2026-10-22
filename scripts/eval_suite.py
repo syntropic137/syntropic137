@@ -54,7 +54,7 @@ eval's current score and the history stays in its events.
 
 TWO JUDGES. A blocked defect run is credited by the keyword judge (one
 blocking finding names an expected file and every keyword group) and, with
-``score --llm-judge``, by an LLM judge too (a pinned model at temperature 0,
+``score --llm-judge``, by an LLM judge too (a pinned 5.x model, majority of three answers,
 given the case's ``expected.defect`` root cause, asked whether a finding
 identifies THIS defect: match / no_match / unclear, with the finding it quotes). The headline catch rate counts a run caught when
 the keyword judge OR the LLM judge says ``match``; ``unclear`` is not caught.
@@ -94,26 +94,26 @@ import re
 import subprocess
 import sys
 import time
+from collections import Counter
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
 
 import httpx
 import yaml
+from agentic_isolation.harnesses.claude import ClaudeHeadless, ClaudeHeadlessError
 from pydantic import (
     AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
-    SecretStr,
     TypeAdapter,
     ValidationError,
     field_validator,
 )
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
-from syn_shared.settings.config import Settings, get_settings
-from syn_shared.settings.constants import ANTHROPIC_MESSAGES_URL, ENV_ANTHROPIC_API_KEY
 from syn_shared.settings.dev_tooling import get_dev_api_url
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -981,22 +981,45 @@ class ModelClient(Protocol):
 
 
 class JudgeError(RuntimeError):
-    """The LLM judge could not answer: no credential, a failed call, or an unreadable reply."""
+    """The LLM judge could not answer: a disallowed model, a failed call, or an unreadable reply."""
 
 
-JUDGE_MODEL = "claude-sonnet-4-6"
+JUDGE_MODEL = "claude-sonnet-5-5"
 """Pinned explicit model id, never an alias: the judge is part of the eval's identity.
 
-It must be in `TEMPERATURE_ZERO_MODELS`: the 4.7+/5.x models reject a non-default
-temperature with HTTP 400, so they cannot be this judge."""
-TEMPERATURE_ZERO_MODELS = frozenset({"claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"})
-"""Models the Messages API accepts `temperature: 0` for. `AnthropicMessages` refuses
-any other model before sending, rather than letting the provider 400 mid-scoring."""
-JUDGE_PROMPT_VERSION = 3
-"""Bump on ANY change to `_JUDGE_SYSTEM`, `_judge_prompt` or what they are given: it is
-part of the scorer version. v2: the case's `expected.defect` is required, never inferred.
-v3: the codex-deliverable-phase-failed description no longer reads as waiving auth and
-malformed-stream faults when a deliverable exists."""
+The 5.x models reject a non-default temperature with HTTP 400, so the judge is not
+made repeatable by sampling settings: it asks `JUDGE_SAMPLES` times and takes the
+majority (`LlmJudge`)."""
+JUDGE_MODELS = frozenset({"claude-sonnet-5-5", "claude-opus-5-5"})
+"""The only model ids the judge may call: explicit 5.x ids, no aliases, no pre-5 model.
+
+The one policy, checked by `require_judge_model` both where a judge is built and
+in `HeadlessJudgeClient` before any call reaches the transport."""
+JUDGE_SAMPLES = 3
+"""Independent answers per judgement. Odd, so two verdicts cannot tie on a two-way split."""
+JUDGE_EFFORT = "medium"
+"""Pinned `claude --effort`: the model's default is not part of a stable identity."""
+JUDGE_PROMPT_VERSION = 5
+"""Bump on ANY change to `_JUDGE_SYSTEM`, `_judge_prompt`, what they are given, or how
+the answers become a verdict: it is part of the scorer version. v2: the case's
+`expected.defect` is required, never inferred. v3: the codex-deliverable-phase-failed
+description no longer reads as waiving auth and malformed-stream faults when a
+deliverable exists. v4: `claude-sonnet-5-5` replaces the temperature-0 judge; the
+verdict is the strict majority of `JUDGE_SAMPLES` schema-constrained answers at
+`JUDGE_EFFORT`, `unclear` when there is none. v5: answered through Claude Code
+(`claude -p` on its own login) instead of the Messages API; the reply is held to
+`_JudgeReply` by the prompt and validation, not by an API-side schema. The transport
+moving to agentic-workspace's `ClaudeHeadless` (#2036) changed no prompt or vote."""
+
+
+def require_judge_model(model: str) -> str:
+    """`model` if it is in `JUDGE_MODELS`; a `JudgeError` before any call otherwise."""
+    if model not in JUDGE_MODELS:
+        raise JudgeError(
+            f"the LLM judge never calls {model!r}: allowed models are {sorted(JUDGE_MODELS)}"
+        )
+    return model
+
 
 _JUDGE_SYSTEM = """You grade a code reviewer. You are given ONE known defect and the \
 reviewer's blocking findings. Answer whether any single finding identifies THIS defect: \
@@ -1036,15 +1059,18 @@ def _squash(text: str) -> str:
 
 
 class LlmJudge:
-    """Asks a pinned model, at temperature 0, whether a finding identifies the defect.
+    """Asks a pinned model whether a finding identifies the defect, by majority vote.
 
-    A `match` whose quote is not in any finding is answered `unclear`: the judge
-    must point at what the reviewer wrote, not at what it imagines they meant.
+    The model is asked `JUDGE_SAMPLES` times. A verdict more than half the answers
+    give is the judgement; no majority is `unclear`, so a judge that disagrees with
+    itself never credits a catch. A `match` whose quote is not in any finding counts
+    as an `unclear` answer: the judge must point at what the reviewer wrote, not at
+    what it imagines they meant.
     """
 
     def __init__(self, client: ModelClient, model: str = JUDGE_MODEL) -> None:
         self._client = client
-        self._model = model
+        self._model = require_judge_model(model)
 
     @property
     def identity(self) -> str:
@@ -1055,25 +1081,40 @@ class LlmJudge:
             return Judgement(
                 judge=self.identity, verdict="no_match", quote="", reason="no blocking findings"
             )
-        raw = self._client.complete(
-            model=self._model, system=_JUDGE_SYSTEM, prompt=_judge_prompt(expected, findings)
+        prompt = _judge_prompt(expected, findings)
+        answers = [self._answer(prompt, findings) for _ in range(JUDGE_SAMPLES)]
+        votes = Counter(a.verdict for a in answers)
+        tally = ", ".join(f"{v} {n}/{JUDGE_SAMPLES}" for v, n in votes.most_common())
+        verdict, count = votes.most_common(1)[0]
+        if count * 2 <= JUDGE_SAMPLES:
+            return Judgement(
+                judge=self.identity, verdict="unclear", quote="", reason=f"no majority: {tally}"
+            )
+        chosen = next(a for a in answers if a.verdict == verdict)
+        return Judgement(
+            judge=self.identity,
+            verdict=verdict,
+            quote=chosen.quote if verdict == "match" else "",
+            reason=f"{chosen.reason} ({tally})",
         )
+
+    def _answer(self, prompt: str, findings: list[str]) -> _JudgeReply:
+        """One sample, with a `match` that quotes no finding turned into `unclear`."""
+        raw = self._client.complete(model=self._model, system=_JUDGE_SYSTEM, prompt=prompt)
         body = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
         try:
             reply = _JudgeReply.model_validate_json(body)
         except ValidationError as exc:
             raise JudgeError(f"{self.identity} replied with no readable verdict: {raw!r}") from exc
-        verdict, reason = reply.verdict, reply.reason
-        if verdict == "match" and (
+        if reply.verdict == "match" and (
             not reply.quote.strip() or not any(_squash(reply.quote) in _squash(f) for f in findings)
         ):
-            verdict, reason = "unclear", f"quote not found in any finding; judge said: {reason}"
-        return Judgement(
-            judge=self.identity,
-            verdict=verdict,
-            quote=reply.quote if verdict == "match" else "",
-            reason=reason,
-        )
+            return _JudgeReply(
+                verdict="unclear",
+                quote="",
+                reason=f"quote not found in any finding; judge said: {reply.reason}",
+            )
+        return reply
 
 
 def judge_problems(loaded: LoadedSuite) -> list[str]:
@@ -1085,68 +1126,31 @@ def judge_problems(loaded: LoadedSuite) -> list[str]:
     ]
 
 
-class AnthropicMessages:
-    """`ModelClient` over the Anthropic Messages API with httpx, already a dependency.
+class JudgeTransportError(JudgeError):
+    """The judge's model call gave no answer. The cause is the transport's own error."""
 
-    The key is the platform's `Settings.anthropic_api_key` (``ANTHROPIC_API_KEY``
-    from the environment or ``.env``, ADR-004) and is never written anywhere.
-    Temperature is 0, so only `TEMPERATURE_ZERO_MODELS` are sent.
+
+@dataclass(frozen=True)
+class HeadlessJudgeClient:
+    """`ModelClient` for the judge over agentic-workspace's `ClaudeHeadless` (`claude -p`).
+
+    The judge's policy is enforced here, before the transport sees the call: the model
+    must be an allowed id (`require_judge_model`), and every way the transport gives
+    no answer becomes a `JudgeTransportError` with the transport's error as its cause,
+    never a reply. How the CLI is run on its OAuth login, and never on an API key, is
+    `ClaudeHeadless`'s to keep (lib/agentic-workspace, `harnesses/claude/headless.py`).
     """
 
-    def __init__(self, api_key: SecretStr, http: httpx.Client | None = None) -> None:
-        self._key = api_key
-        self._http = http or httpx.Client(timeout=120)
-
-    @classmethod
-    def from_settings(cls, settings: Settings | None = None) -> AnthropicMessages:
-        key = (settings or get_settings()).anthropic_api_key
-        if key is None or not key.get_secret_value():
-            raise JudgeError(
-                f"--llm-judge needs {ENV_ANTHROPIC_API_KEY} (environment or .env); "
-                "omit --llm-judge to score by keywords alone (offline)"
-            )
-        return cls(key)
+    transport: ModelClient = field(default_factory=lambda: ClaudeHeadless(effort=JUDGE_EFFORT))
 
     def complete(self, *, model: str, system: str, prompt: str) -> str:
-        if model not in TEMPERATURE_ZERO_MODELS:
-            raise JudgeError(
-                f"{model} does not accept temperature 0; the judge needs one of "
-                f"{', '.join(sorted(TEMPERATURE_ZERO_MODELS))}"
-            )
+        model = require_judge_model(model)
         try:
-            response = self._http.post(
-                ANTHROPIC_MESSAGES_URL,
-                headers={
-                    "x-api-key": self._key.get_secret_value(),
-                    "anthropic-version": "2023-06-01",
-                },
-                json={
-                    "model": model,
-                    "max_tokens": 1024,
-                    "temperature": 0,
-                    "system": system,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise JudgeError(f"LLM judge call to {model} failed: {exc}") from exc
-        return _MessagesReply.model_validate(response.json()).text
-
-
-class _TextBlock(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    type: str
-    text: str = ""
-
-
-class _MessagesReply(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    content: tuple[_TextBlock, ...]
-
-    @property
-    def text(self) -> str:
-        return "".join(b.text for b in self.content if b.type == "text")
+            return self.transport.complete(model=model, system=system, prompt=prompt)
+        except (ClaudeHeadlessError, OSError) as exc:
+            raise JudgeTransportError(
+                f"the LLM judge got no answer from {model}: {type(exc).__name__}: {exc}"
+            ) from exc
 
 
 def scorer_version(loaded: LoadedSuite, llm: Judge | None) -> str:
@@ -1923,8 +1927,9 @@ def main(argv: list[str] | None = None) -> int:
         "--llm-judge",
         action="store_true",
         help=(
-            f"score: also ask the LLM judge ({JUDGE_MODEL}, prompt v{JUDGE_PROMPT_VERSION}); "
-            f"needs {ENV_ANTHROPIC_API_KEY}. Recorded under a scorer_version naming the judge. "
+            f"score: also ask the LLM judge ({JUDGE_MODEL}, majority of {JUDGE_SAMPLES}, "
+            f"prompt v{JUDGE_PROMPT_VERSION}); "
+            "runs through the logged-in `claude` CLI (claude -p). Recorded under a scorer_version naming the judge. "
             "Omit to score offline by keywords alone"
         ),
     )
@@ -1974,11 +1979,7 @@ def main(argv: list[str] | None = None) -> int:
         if problems := [p for v in to_score for p in judge_problems(v)]:
             print("❌ the LLM judge cannot score:\n  " + "\n  ".join(problems), file=sys.stderr)
             return 1
-        try:
-            llm = LlmJudge(AnthropicMessages.from_settings())
-        except JudgeError as exc:
-            print(f"❌ {exc}", file=sys.stderr)
-            return 1
+        llm = LlmJudge(HeadlessJudgeClient())
     ledger: Path = args.launches or launches_path(args.suite)
     with httpx.Client(
         base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
