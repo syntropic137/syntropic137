@@ -197,8 +197,12 @@ def test_production_wiring_selects_from_settings(monkeypatch: pytest.MonkeyPatch
     """The consumer: syn-api's build_workspace_service, not the enum alone."""
     from syn_api import _wiring
 
-    calls: list[dict[str, object]] = []
-    monkeypatch.setattr(WorkspaceService, "create", classmethod(lambda _c, **kw: calls.append(kw)))
+    chosen: list[WorkspaceBackend] = []
+
+    def record(_cls: type[WorkspaceService], *, backend: WorkspaceBackend, **_: object) -> None:
+        chosen.append(backend)
+
+    monkeypatch.setattr(WorkspaceService, "create", classmethod(record))
     monkeypatch.setattr(_wiring, "get_platform_token_service", lambda: None)
     from syn_adapters.workspace_backends.service import WorkspaceServiceConfig
 
@@ -206,7 +210,7 @@ def test_production_wiring_selects_from_settings(monkeypatch: pytest.MonkeyPatch
     _wiring.build_workspace_service(WorkspaceServiceConfig(), None)
     _enabled(monkeypatch)
     _wiring.build_workspace_service(WorkspaceServiceConfig(), None)
-    assert [c["backend"] for c in calls] == [WorkspaceBackend.DOCKER, WorkspaceBackend.E2B]
+    assert chosen == [WorkspaceBackend.DOCKER, WorkspaceBackend.E2B]
 
 
 # --- wiring ---------------------------------------------------------------
