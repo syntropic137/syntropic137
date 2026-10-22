@@ -12,18 +12,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import http.server
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-import threading
 from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, get_args
+from typing import get_args
 
 import httpx
 import pytest
@@ -32,6 +30,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import eval_suite
 import yaml
+from agentic_isolation.harnesses.claude import ClaudeHeadless
+from agentic_isolation.harnesses.claude.headless import (
+    ClaudeHeadlessEmptyOutputError,
+    ClaudeHeadlessExitError,
+    ClaudeHeadlessModelError,
+    ClaudeHeadlessNotOAuthError,
+    ClaudeHeadlessReportedError,
+    ClaudeHeadlessTimeoutError,
+    ClaudeHeadlessUnreadableOutputError,
+)
 from eval_suite import (
     DEFAULT_SUITE,
     ROOT,
@@ -77,9 +85,6 @@ from syn_shared.agents import (
     resolve_model_alias,
 )
 from syn_shared.pricing import resolve_model_pricing
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -3463,402 +3468,114 @@ def test_keyword_only_scoring_records_the_plain_suite_version(
     assert "LLM judge" not in str(body["evidence"])
 
 
-def _auth_status(
-    method: str = "claude.ai",
-    *,
-    logged_in: bool = True,
-    provider: str = "firstParty",
-    key_source: str | None = None,
-) -> str:
-    """What `claude auth status --json` prints (shape read from CLI 2.1.293)."""
-    status = {
-        "loggedIn": logged_in,
-        "authMethod": method,
-        "apiProvider": provider,
-        "analyticsDisabled": False,
-        "configDirectory": "/home/u/.claude",
-    }
-    if key_source is not None:
-        status["apiKeySource"] = key_source
-    return json.dumps(status)
-
-
 @dataclass
-class _FakeClaude:
-    """Stands in for `subprocess.run` under `ClaudeCode`: records each call, never runs `claude`.
+class _FakeTransport:
+    """Stands in for `ClaudeHeadless` behind `HeadlessJudgeClient`: answers `replies` in
+    turn, raising any that is an exception, and records the model of every call."""
 
-    `claude auth status` is answered from `auth_stdout` and recorded in `auth_calls`;
-    every other call is an answer, recorded in `calls`. `envs` holds each call's `env`.
-    A status asked without CLAUDE_CODE_OAUTH_TOKEN is `auth_stdout_without_token` when set.
-    """
+    replies: list[str | Exception]
+    models: list[str] = field(default_factory=list)
 
-    stdout: str = ""
-    returncode: int = 0
-    stderr: str = ""
-    timeout: bool = False
-    auth_stdout: str = field(default_factory=_auth_status)
-    auth_returncode: int = 0
-    auth_timeout: bool = False
-    auth_stdout_without_token: str | None = None
-    calls: list[tuple[list[str], int, float]] = field(default_factory=list)
-    auth_calls: list[tuple[list[str], int, float]] = field(default_factory=list)
-    envs: list[dict[str, str]] = field(default_factory=list)
-
-    def __call__(
-        self,
-        args: list[str],
-        *,
-        stdin: int,
-        capture_output: bool,
-        text: bool,
-        timeout: float,
-        env: Mapping[str, str],
-    ) -> subprocess.CompletedProcess[str]:
-        self.envs.append(dict(env))
-        if args[1:3] == ["auth", "status"]:
-            self.auth_calls.append((list(args), stdin, timeout))
-            if self.auth_timeout:
-                raise subprocess.TimeoutExpired(args, timeout)
-            if self.auth_stdout_without_token is not None and "CLAUDE_CODE_OAUTH_TOKEN" not in env:
-                return subprocess.CompletedProcess(args, 1, self.auth_stdout_without_token, "")
-            return subprocess.CompletedProcess(args, self.auth_returncode, self.auth_stdout, "")
-        self.calls.append((list(args), stdin, timeout))
-        if self.timeout:
-            raise subprocess.TimeoutExpired(args, timeout)
-        return subprocess.CompletedProcess(args, self.returncode, self.stdout, self.stderr)
+    def complete(self, *, model: str, system: str, prompt: str) -> str:
+        self.models.append(model)
+        reply = self.replies[(len(self.models) - 1) % len(self.replies)]
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
 
 
-def _envelope(result: str, *, is_error: bool = False) -> str:
-    """What `claude -p --output-format json` prints, with the fields the judge ignores."""
-    return json.dumps(
-        {
-            "type": "result",
-            "subtype": "success",
-            "is_error": is_error,
-            "result": result,
-            "session_id": "s",
-            "total_cost_usd": 0.01,
-        }
-    )
+def _wired_judge(transport: _FakeTransport) -> eval_suite.LlmJudge:
+    """The judge exactly as `score --llm-judge` builds it, on a fake transport."""
+    return eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient(transport=transport))
 
 
 @pytest.mark.unit
-def test_claude_code_runs_the_cli_headless_with_the_exact_pinned_model() -> None:
-    fake = _FakeClaude(stdout=_envelope("ok"))
-    client = eval_suite.ClaudeCode(timeout_s=42.0, run=fake)
-    assert (
-        client.complete(model="claude-opus-5-5", system="the system", prompt="the prompt") == "ok"
-    )
-    [(argv, _, _)] = fake.calls
-    assert argv == [
-        "claude",
-        "-p",
-        "the prompt",
-        "--model",
-        "claude-opus-5-5",
-        "--system-prompt",
-        "the system",
-        "--effort",
-        eval_suite.JUDGE_EFFORT,
-        "--output-format",
-        "json",
-        "--tools",
-        "",
-        "--no-session-persistence",
-        "--setting-sources",
-        "user",
-    ]
-    assert "--bare" not in argv
-
-
-@pytest.mark.unit
-def test_claude_code_closes_stdin_and_passes_its_timeout() -> None:
-    fake = _FakeClaude(stdout=_envelope("ok"))
-    eval_suite.ClaudeCode(timeout_s=42.0, run=fake).complete(
-        model=eval_suite.JUDGE_MODEL, system="s", prompt="p"
-    )
-    [(_, stdin, timeout)] = fake.calls
-    assert stdin == subprocess.DEVNULL
-    assert timeout == 42.0
-
-
-@pytest.mark.unit
-def test_no_credential_in_the_parent_environment_reaches_the_cli(
+def test_score_llm_judge_runs_on_agentic_workspaces_claude_headless(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`claude -p` prefers an exported key to the OAuth login, so the child never sees one."""
-    for name in eval_suite.CLAUDE_CODE_CREDENTIAL_ENV:
-        monkeypatch.setenv(name, "synthetic-not-a-credential")
-    monkeypatch.setenv("HOME", "/home/u")
-    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-oauth")
-    fake = _FakeClaude(stdout=_envelope("ok"))
-    eval_suite.ClaudeCode(run=fake).complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
-    assert len(fake.envs) == 2 and len(fake.auth_calls) == 1 and len(fake.calls) == 1
-    for env in fake.envs:
-        assert not set(env) & {
-            "ANTHROPIC_API_KEY",
-            "ANTHROPIC_AUTH_TOKEN",
-            "CLAUDE_CODE_USE_BEDROCK",
-            "CLAUDE_CODE_USE_VERTEX",
-            "CLAUDE_CODE_USE_FOUNDRY",
-        }
-        # The rest of the environment, the OAuth login's included, is kept.
-        assert env["HOME"] == "/home/u" and env["CLAUDE_CODE_OAUTH_TOKEN"] == "synthetic-oauth"
+    """The `score --llm-judge` wiring builds the judge on AW's `ClaudeHeadless` at the
+    pinned effort, behind `HeadlessJudgeClient`: no local transport, no API client."""
+    built: list[eval_suite.ModelClient] = []
+
+    def spy(client: eval_suite.ModelClient, model: str = eval_suite.JUDGE_MODEL) -> object:
+        built.append(client)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(eval_suite, "LlmJudge", spy)
+    with pytest.raises(SystemExit):
+        eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"])
+    [client] = built
+    assert isinstance(client, eval_suite.HeadlessJudgeClient)
+    assert type(client.transport) is ClaudeHeadless
+    assert client.transport.effort == eval_suite.JUDGE_EFFORT
 
 
 @pytest.mark.unit
-def test_the_login_is_checked_with_the_answers_own_environment_before_it() -> None:
-    fake = _FakeClaude(stdout=_envelope("ok"))
-    eval_suite.ClaudeCode(timeout_s=42.0, run=fake).complete(
-        model=eval_suite.JUDGE_MODEL, system="s", prompt="p"
-    )
-    assert fake.auth_calls == [(["claude", "auth", "status", "--json"], subprocess.DEVNULL, 42.0)]
-    assert fake.envs[0] == fake.envs[1]
-
-
-@pytest.mark.unit
-def test_the_stored_oauth_login_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`claude.ai` is the stored login, which every other credential outranks."""
-    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-    fake = _FakeClaude(stdout=_envelope("ok"), auth_stdout=_auth_status("claude.ai"))
-    client = eval_suite.ClaudeCode(run=fake)
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    assert len(fake.auth_calls) == 1
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "without_token",
-    [_auth_status("none", logged_in=False), _auth_status("claude.ai")],
-    ids=["token-only", "token-over-stored-login"],
-)
-def test_an_oauth_token_shown_to_come_from_its_variable_is_accepted(
-    monkeypatch: pytest.MonkeyPatch, without_token: str
+def test_calibration_wiring_runs_on_agentic_workspaces_claude_headless(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Asked again without CLAUDE_CODE_OAUTH_TOKEN, the status stops saying `oauth_token`."""
-    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-oauth")
-    fake = _FakeClaude(
-        stdout=_envelope("ok"),
-        auth_stdout=_auth_status("oauth_token"),
-        auth_stdout_without_token=without_token,
-    )
-    client = eval_suite.ClaudeCode(timeout_s=42.0, run=fake)
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    status = (["claude", "auth", "status", "--json"], subprocess.DEVNULL, 42.0)
-    assert fake.auth_calls == [status, status]
-    with_token, without, answer = fake.envs
-    assert with_token == answer and with_token["CLAUDE_CODE_OAUTH_TOKEN"] == "synthetic-oauth"
-    assert without == {k: v for k, v in with_token.items() if k != "CLAUDE_CODE_OAUTH_TOKEN"}
+    """`eval_judge_calibrate` builds the same judge as `score --llm-judge`."""
+    import eval_judge_calibrate
+
+    built: list[eval_suite.ModelClient] = []
+
+    def spy(client: eval_suite.ModelClient, model: str = eval_suite.JUDGE_MODEL) -> object:
+        built.append(client)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(eval_judge_calibrate, "LlmJudge", spy)
+    with pytest.raises(SystemExit):
+        eval_judge_calibrate.main(["--suite-tag", "", "--api-url", "http://unreachable.invalid"])
+    [client] = built
+    assert isinstance(client, eval_suite.HeadlessJudgeClient)
+    assert type(client.transport) is ClaudeHeadless
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    ("oauth_token_env", "auth_calls", "match"),
-    [(None, 1, "with no CLAUDE_CODE_OAUTH_TOKEN"), ("synthetic-oauth", 2, "still says")],
-    ids=["settings-bearer-alone", "settings-bearer-over-oauth-token"],
-)
-def test_a_settings_bearer_token_cannot_pass_for_oauth(
-    monkeypatch: pytest.MonkeyPatch, oauth_token_env: str | None, auth_calls: int, match: str
-) -> None:
-    """A settings file's `env` ANTHROPIC_AUTH_TOKEN outranks every OAuth credential, and
-    CLI 2.1.293 reports it exactly as it reports an OAuth token (status shape below)."""
-    if oauth_token_env is None:
-        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-    else:
-        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", oauth_token_env)
-    bearer = json.dumps(
-        {
-            "loggedIn": True,
-            "authMethod": "oauth_token",
-            "apiProvider": "firstParty",
-            "analyticsDisabled": False,
-        }
-    )
-    # With the variable set, taking it away leaves the settings token in place.
-    fake = _FakeClaude(
-        stdout=_envelope("ok"),
-        auth_stdout=bearer,
-        auth_stdout_without_token=None if oauth_token_env is None else bearer,
-    )
-    with pytest.raises(eval_suite.ClaudeCodeNotOAuthError, match=match):
-        eval_suite.ClaudeCode(run=fake).complete(
-            model=eval_suite.JUDGE_MODEL, system="s", prompt="p"
-        )
-    assert len(fake.auth_calls) == auth_calls
-    assert fake.calls == []
+def test_the_judge_runs_every_sample_through_the_transport_with_the_pinned_model() -> None:
+    transport = _FakeTransport([_reply("match", _PARAPHRASE_QUOTE)])
+    judgement = _wired_judge(transport).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert judgement.verdict == "match"
+    assert judgement.judge == "llm:claude-sonnet-5-5@prompt-v5"
+    assert transport.models == [eval_suite.JUDGE_MODEL] * eval_suite.JUDGE_SAMPLES
 
 
-class _MessagesEndpoint(http.server.ThreadingHTTPServer):
-    """A local Messages API that answers every request with one streamed "ok" and records
-    the credential each request carried, so the real CLI can be run with no real login."""
-
-    def __init__(self) -> None:
-        super().__init__(("127.0.0.1", 0), _MessagesHandler)
-        self.authorizations: list[str | None] = []
-
-
-class _MessagesHandler(http.server.BaseHTTPRequestHandler):
-    server: _MessagesEndpoint
-
-    def do_POST(self) -> None:
-        body = json.loads(self.rfile.read(int(self.headers["content-length"])))
-        self.server.authorizations.append(self.headers.get("authorization"))
-        events = [
-            {
-                "type": "message_start",
-                "message": {
-                    "id": "msg_1",
-                    "type": "message",
-                    "role": "assistant",
-                    "model": body["model"],
-                    "content": [],
-                    "stop_reason": None,
-                    "stop_sequence": None,
-                    "usage": {"input_tokens": 1, "output_tokens": 1},
-                },
-            },
-            {
-                "type": "content_block_start",
-                "index": 0,
-                "content_block": {"type": "text", "text": ""},
-            },
-            {
-                "type": "content_block_delta",
-                "index": 0,
-                "delta": {"type": "text_delta", "text": "ok"},
-            },
-            {"type": "content_block_stop", "index": 0},
-            {
-                "type": "message_delta",
-                "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-                "usage": {"output_tokens": 1},
-            },
-            {"type": "message_stop"},
-        ]
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.end_headers()
-        self.wfile.write(
-            "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
-        )
-
-    def log_message(self, format: str, *args: object) -> None:
-        pass
+_TRANSPORT_FAILURES = [
+    ClaudeHeadlessExitError("claude -p --model claude-sonnet-5-5 exited 1: not logged in"),
+    ClaudeHeadlessTimeoutError("gave no answer within 300s"),
+    ClaudeHeadlessEmptyOutputError("printed nothing"),
+    ClaudeHeadlessUnreadableOutputError("printed no JSON result envelope"),
+    ClaudeHeadlessReportedError("reported an error: 'usage limit reached'"),
+    ClaudeHeadlessNotOAuthError("runs only on its OAuth login"),
+    ClaudeHeadlessModelError("needs an exact model id"),
+    FileNotFoundError(2, "No such file or directory", "claude"),
+]
 
 
 @pytest.mark.unit
-@pytest.mark.skipif(shutil.which("claude") is None, reason="needs the real claude CLI")
-@pytest.mark.parametrize(
-    ("scope", "settings_file"),
-    [
-        ("none", None),
-        ("project", "project/.claude/settings.json"),
-        ("local", "project/.claude/settings.local.json"),
-        ("user", "home/.claude/settings.json"),
-    ],
-    ids=["none", "project", "local", "user"],
-)
-def test_no_settings_file_routes_the_real_cli_off_the_oauth_token(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, scope: str, settings_file: str | None
-) -> None:
-    """The real CLI, against a local endpoint with synthetic credentials: a settings
-    ``env`` bearer token either never reaches the answer or stops the call before it.
-
-    `claude auth status` ignores project and local settings while `claude -p` loads
-    them by default, so only what the answer is run with closes those two; user
-    settings are seen by the status and refused there.
-    """
-    for name in list(os.environ):
-        if name.startswith(("ANTHROPIC_", "CLAUDE_CODE_", "CLAUDE_CONFIG_DIR")):
-            monkeypatch.delenv(name)
-    home, project = tmp_path / "home", tmp_path / "project"
-    (home / ".claude").mkdir(parents=True)
-    (project / ".claude").mkdir(parents=True)
-    if settings_file is not None:
-        (tmp_path / settings_file).write_text(
-            json.dumps({"env": {"ANTHROPIC_AUTH_TOKEN": "synthetic-settings-bearer"}})
-        )
-    endpoint = _MessagesEndpoint()
-    threading.Thread(target=endpoint.serve_forever, daemon=True).start()
-    try:
-        monkeypatch.setenv("HOME", str(home))
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".claude"))
-        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-oauth")
-        monkeypatch.setenv("ANTHROPIC_BASE_URL", f"http://127.0.0.1:{endpoint.server_port}")
-        monkeypatch.setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-        monkeypatch.chdir(project)
-        client = eval_suite.ClaudeCode(timeout_s=60.0)
-        if scope == "user":
-            with pytest.raises(eval_suite.ClaudeCodeNotOAuthError, match="still says"):
-                client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
-            assert endpoint.authorizations == []
-        else:
-            assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-            assert endpoint.authorizations
-            assert set(endpoint.authorizations) == {"Bearer synthetic-oauth"}
-    finally:
-        endpoint.shutdown()
-        endpoint.server_close()
+@pytest.mark.parametrize("failure", _TRANSPORT_FAILURES, ids=lambda e: type(e).__name__)
+def test_every_transport_failure_is_a_judge_error_with_its_cause(failure: Exception) -> None:
+    """Each AW error, and the CLI missing altogether, reaches the caller as a
+    `JudgeTransportError` chained to it: never a reply, never a raw transport type."""
+    client = eval_suite.HeadlessJudgeClient(transport=_FakeTransport([failure]))
+    with pytest.raises(eval_suite.JudgeTransportError) as raised:
+        client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
+    assert raised.value.__cause__ is failure
+    assert type(failure).__name__ in str(raised.value)
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    ("fake", "error", "match"),
-    [
-        (
-            _FakeClaude(auth_stdout=_auth_status("api_key", key_source="ANTHROPIC_API_KEY")),
-            "ClaudeCodeNotOAuthError",
-            "authMethod=api_key",
-        ),
-        (
-            _FakeClaude(auth_stdout=_auth_status("api_key_helper", key_source="apiKeyHelper")),
-            "ClaudeCodeNotOAuthError",
-            "apiKeySource=apiKeyHelper",
-        ),
-        (
-            _FakeClaude(auth_stdout=_auth_status("claude.ai", key_source="apiKeyHelper")),
-            "ClaudeCodeNotOAuthError",
-            "apiKeySource=apiKeyHelper",
-        ),
-        (
-            _FakeClaude(auth_stdout=_auth_status("third_party", provider="bedrock")),
-            "ClaudeCodeNotOAuthError",
-            "apiProvider=bedrock",
-        ),
-        (
-            _FakeClaude(auth_stdout=_auth_status("none", logged_in=False), auth_returncode=1),
-            "ClaudeCodeNotOAuthError",
-            "loggedIn=False",
-        ),
-        (
-            _FakeClaude(auth_stdout=_auth_status(), auth_returncode=1),
-            "ClaudeCodeNotOAuthError",
-            "claude auth login",
-        ),
-        (_FakeClaude(auth_stdout="not json"), "ClaudeCodeUnreadableOutputError", "auth status"),
-        (_FakeClaude(auth_timeout=True), "ClaudeCodeTimeoutError", "auth status"),
-    ],
-    ids=[
-        "api-key",
-        "api-key-helper",
-        "oauth-but-key-source",
-        "bedrock",
-        "logged-out",
-        "status-exit",
-        "status-unreadable",
-        "status-timeout",
-    ],
-)
-def test_a_call_that_would_not_run_on_oauth_is_refused_before_any_answer(
-    fake: _FakeClaude, error: str, match: str
-) -> None:
-    """Settings can bring a key back (apiKeyHelper, `env`), so the CLI is asked, not assumed."""
-    with pytest.raises(getattr(eval_suite, error), match=match) as raised:
-        eval_suite.ClaudeCode(timeout_s=42.0, run=fake).complete(
-            model=eval_suite.JUDGE_MODEL, system="s", prompt="p"
-        )
-    assert isinstance(raised.value, eval_suite.JudgeError)
-    assert fake.calls == []
+@pytest.mark.parametrize("failing_sample", range(3))
+def test_one_failed_sample_fails_the_judgement_rather_than_voting(failing_sample: int) -> None:
+    """Two samples agree on `match`; the third fails. A failure is never a vote and never
+    an abstention: the judgement fails, whichever sample it was."""
+    assert eval_suite.JUDGE_SAMPLES == 3
+    replies: list[str | Exception] = [_reply("match", _PARAPHRASE_QUOTE)] * 3
+    replies[failing_sample] = ClaudeHeadlessReportedError("usage limit reached")
+    transport = _FakeTransport(replies)
+    with pytest.raises(eval_suite.JudgeTransportError, match="usage limit reached"):
+        _wired_judge(transport).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert len(transport.models) == failing_sample + 1
 
 
 @pytest.mark.unit
@@ -3870,77 +3587,12 @@ def test_the_judge_reads_no_api_key() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    ("fake", "error", "match"),
-    [
-        (
-            _FakeClaude(returncode=1, stderr="not logged in"),
-            "ClaudeCodeExitError",
-            "exited 1: not logged in",
-        ),
-        (_FakeClaude(timeout=True), "ClaudeCodeTimeoutError", "within 42s"),
-        (_FakeClaude(stdout=""), "ClaudeCodeEmptyOutputError", "printed nothing"),
-        (_FakeClaude(stdout=" \n"), "ClaudeCodeEmptyOutputError", "printed nothing"),
-        (_FakeClaude(stdout=_envelope("")), "ClaudeCodeEmptyOutputError", "empty result"),
-        (
-            _FakeClaude(stdout="not json"),
-            "ClaudeCodeUnreadableOutputError",
-            "no JSON result envelope",
-        ),
-        (_FakeClaude(stdout='{"is_error": false}'), "ClaudeCodeUnreadableOutputError", "no JSON"),
-        (
-            _FakeClaude(stdout=_envelope("usage limit reached", is_error=True)),
-            "ClaudeCodeReportedError",
-            "usage limit reached",
-        ),
-    ],
-    ids=["exit", "timeout", "empty", "blank", "empty-result", "not-json", "no-result", "is-error"],
-)
-def test_every_claude_code_failure_raises_its_own_error(
-    fake: _FakeClaude, error: str, match: str
-) -> None:
-    client = eval_suite.ClaudeCode(timeout_s=42.0, run=fake)
-    with pytest.raises(getattr(eval_suite, error), match=match) as raised:
-        client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
-    assert isinstance(raised.value, eval_suite.JudgeError)
-
-
-@pytest.mark.unit
-def test_a_failed_claude_code_call_fails_the_judgement_rather_than_voting() -> None:
-    """A failure is never an empty verdict: the judge raises instead of counting it."""
-    client = eval_suite.ClaudeCode(run=_FakeClaude(returncode=2, stderr="boom"))
-    with pytest.raises(eval_suite.ClaudeCodeExitError):
-        eval_suite.LlmJudge(client).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
-
-
-@pytest.mark.unit
-def test_the_llm_judge_end_to_end_runs_through_claude_code() -> None:
-    """Judge through the transport: every sample is one `claude -p` with the pinned model."""
-    fake = _FakeClaude(stdout=_envelope(_reply("match", _PARAPHRASE_QUOTE)))
-    judgement = eval_suite.LlmJudge(eval_suite.ClaudeCode(run=fake)).judge(
-        _EXPECTED, blocking_findings(_PARAPHRASED)
-    )
-    assert judgement.verdict == "match"
-    assert judgement.judge == "llm:claude-sonnet-5-5@prompt-v5"
-    assert len(fake.calls) == eval_suite.JUDGE_SAMPLES
-    for argv, stdin, _ in fake.calls:
-        assert argv[argv.index("--model") + 1] == eval_suite.JUDGE_MODEL
-        assert stdin == subprocess.DEVNULL
-
-
-@pytest.mark.unit
-def test_score_llm_judge_runs_on_claude_code(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The `score --llm-judge` wiring builds the judge on `ClaudeCode`, not an API client."""
-    built: list[object] = []
-
-    def spy(client: eval_suite.ModelClient, model: str = eval_suite.JUDGE_MODEL) -> object:
-        built.append(client)
-        raise SystemExit(0)
-
-    monkeypatch.setattr(eval_suite, "LlmJudge", spy)
-    with pytest.raises(SystemExit):
-        eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"])
-    assert [type(c) for c in built] == [eval_suite.ClaudeCode]
+def test_no_claude_code_transport_is_left_in_this_repo() -> None:
+    """The headless transport is agentic-workspace's (#2036): no argv, envelope or
+    auth-status parsing here, and nothing here starts a `claude` process."""
+    source = Path(eval_suite.__file__).read_text()
+    for marker in ('"--output-format"', '"--system-prompt"', '"auth", "status"', "ClaudeCode"):
+        assert marker not in source, marker
 
 
 _PRE5_MODELS = (
@@ -3964,23 +3616,26 @@ def test_the_pinned_judge_model_is_an_allowed_5x_model() -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize("model", _PRE5_MODELS)
 def test_a_pre5_model_passed_to_the_client_is_refused_before_any_call(model: str) -> None:
-    """The outgoing boundary: a direct `complete` with a pre-5 id or alias never starts the CLI."""
-    fake = _FakeClaude(stdout=_envelope("ok"))
+    """The outgoing boundary: a direct `complete` with a pre-5 id or alias never reaches
+    the transport, so `ClaudeHeadless`'s looser `claude-` prefix check is not the policy."""
+    transport = _FakeTransport(["ok"])
     with pytest.raises(eval_suite.JudgeError, match="never calls"):
-        eval_suite.ClaudeCode(run=fake).complete(model=model, system="s", prompt="p")
-    assert fake.calls == []
+        eval_suite.HeadlessJudgeClient(transport=transport).complete(
+            model=model, system="s", prompt="p"
+        )
+    assert transport.models == []
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("model", _PRE5_MODELS)
 def test_a_pre5_judge_override_is_refused_before_any_call(model: str) -> None:
     """An explicit `LlmJudge(model=...)` cannot route the judge to a pre-5 model."""
-    fake = _FakeClaude(stdout=_envelope("ok"))
+    transport = _FakeTransport(["ok"])
     with pytest.raises(eval_suite.JudgeError, match="never calls"):
-        eval_suite.LlmJudge(eval_suite.ClaudeCode(run=fake), model=model).judge(
+        eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient(transport=transport), model=model).judge(
             _EXPECTED, blocking_findings(_PARAPHRASED)
         )
-    assert fake.calls == []
+    assert transport.models == []
 
 
 @pytest.mark.unit

@@ -32,8 +32,8 @@ from pathlib import Path
 import httpx
 from eval_suite import (
     DEFAULT_SUITE,
-    ClaudeCode,
     DefectCase,
+    HeadlessJudgeClient,
     KeywordJudge,
     LlmJudge,
     _basic_auth,
@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         print("❌ the LLM judge cannot score:\n  " + "\n  ".join(problems), file=sys.stderr)
         return 1
     cases = {c.id: c for c in loaded.cases}
-    llm = LlmJudge(ClaudeCode())
+    llm = LlmJudge(HeadlessJudgeClient())
     keyword = KeywordJudge()
 
     missed: list[str] = []

@@ -95,13 +95,14 @@ import subprocess
 import sys
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol
+from typing import Annotated, Literal, Protocol
 
 import httpx
 import yaml
+from agentic_isolation.harnesses.claude import ClaudeHeadless, ClaudeHeadlessError
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -114,9 +115,6 @@ from pydantic import (
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_shared.settings.dev_tooling import get_dev_api_url
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUITE = ROOT / "evals" / "verifier-seed-v1"
@@ -996,7 +994,7 @@ JUDGE_MODELS = frozenset({"claude-sonnet-5-5", "claude-opus-5-5"})
 """The only model ids the judge may call: explicit 5.x ids, no aliases, no pre-5 model.
 
 The one policy, checked by `require_judge_model` both where a judge is built and
-before `ClaudeCode` starts the CLI."""
+in `HeadlessJudgeClient` before any call reaches the transport."""
 JUDGE_SAMPLES = 3
 """Independent answers per judgement. Odd, so two verdicts cannot tie on a two-way split."""
 JUDGE_EFFORT = "medium"
@@ -1009,8 +1007,9 @@ description no longer reads as waiving auth and malformed-stream faults when a
 deliverable exists. v4: `claude-sonnet-5-5` replaces the temperature-0 judge; the
 verdict is the strict majority of `JUDGE_SAMPLES` schema-constrained answers at
 `JUDGE_EFFORT`, `unclear` when there is none. v5: answered through Claude Code
-(`ClaudeCode`, `claude -p` on its own login) instead of the Messages API; the reply is
-held to `_JudgeReply` by the prompt and validation, not by an API-side schema."""
+(`claude -p` on its own login) instead of the Messages API; the reply is held to
+`_JudgeReply` by the prompt and validation, not by an API-side schema. The transport
+moving to agentic-workspace's `ClaudeHeadless` (#2036) changed no prompt or vote."""
 
 
 def require_judge_model(model: str) -> str:
@@ -1127,245 +1126,31 @@ def judge_problems(loaded: LoadedSuite) -> list[str]:
     ]
 
 
-class ProcessRunner(Protocol):
-    """How `ClaudeCode` starts the CLI: `subprocess.run`'s shape, so a fake stands in for it."""
-
-    def __call__(
-        self,
-        args: list[str],
-        *,
-        stdin: int,
-        capture_output: Literal[True],
-        text: Literal[True],
-        timeout: float,
-        env: Mapping[str, str],
-    ) -> subprocess.CompletedProcess[str]: ...
-
-
-class ClaudeCodeError(JudgeError):
-    """A `claude -p` call gave no answer. The subclass names why; none is ever a verdict."""
-
-
-class ClaudeCodeExitError(ClaudeCodeError):
-    """The CLI exited non-zero."""
-
-
-class ClaudeCodeTimeoutError(ClaudeCodeError):
-    """The CLI did not finish within `ClaudeCode.timeout_s`."""
-
-
-class ClaudeCodeEmptyOutputError(ClaudeCodeError):
-    """The CLI printed nothing, or a result with no text."""
-
-
-class ClaudeCodeUnreadableOutputError(ClaudeCodeError):
-    """The CLI printed something that is not its JSON result envelope."""
-
-
-class ClaudeCodeReportedError(ClaudeCodeError):
-    """The envelope parsed and says `is_error`: the session failed (auth, a refusal, a limit)."""
-
-
-class ClaudeCodeNotOAuthError(ClaudeCodeError):
-    """`claude auth status` says the CLI would not run on its OAuth login, so nothing is asked."""
-
-
-class _ClaudeCodeResult(BaseModel):
-    """The fields of `claude -p --output-format json` the judge reads."""
-
-    model_config = ConfigDict(extra="ignore")
-    is_error: bool
-    result: str
-
-
-class _ClaudeAuthStatus(BaseModel):
-    """The fields of `claude auth status --json` that say which credential a call would use."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-    logged_in: bool = Field(alias="loggedIn")
-    auth_method: str = Field(alias="authMethod")
-    api_provider: str = Field(alias="apiProvider")
-    api_key_source: str | None = Field(default=None, alias="apiKeySource")
-
-
-CLAUDE_CODE_CREDENTIAL_ENV = (
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_VERTEX",
-    "CLAUDE_CODE_USE_FOUNDRY",
-)
-"""Variables that would put a judge call on a key, a bearer token or a cloud provider,
-ahead of the OAuth login (`claude -p` prefers an API key whenever one is set). Never
-passed to the CLI."""
-
-CLAUDE_CODE_OAUTH_METHODS = frozenset({"claude.ai", "oauth_token"})
-"""`authMethod` values of `claude auth status` that can be the OAuth login. `claude.ai`
-is the stored login; `oauth_token` is also what any bearer token reports, so it is
-accepted only once `CLAUDE_CODE_OAUTH_TOKEN_ENV` is shown to be its source."""
-
-CLAUDE_CODE_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
-"""The variable that carries an OAuth token from `claude setup-token`."""
-
-CLAUDE_CODE_SETTING_SOURCES = "user"
-"""The only settings files `claude -p` loads for a judge answer. `claude auth status`
-reads user settings but not project or local ones, which `claude -p` loads by default
-from its working directory (CLI 2.1.293): a project's ``env`` ANTHROPIC_AUTH_TOKEN would
-reach the answer unseen by the OAuth check. Managed settings apply to both regardless."""
-
-JUDGE_TIMEOUT_S = 300.0
-"""Per-call ceiling on one `claude -p` answer, after which the call is an error."""
+class JudgeTransportError(JudgeError):
+    """The judge's model call gave no answer. The cause is the transport's own error."""
 
 
 @dataclass(frozen=True)
-class ClaudeCode:
-    """`ModelClient` over Claude Code run headless (`claude -p`), on the CLI's own login.
+class HeadlessJudgeClient:
+    """`ModelClient` for the judge over agentic-workspace's `ClaudeHeadless` (`claude -p`).
 
-    No API key is read or passed: the call runs on the CLI's OAuth login, and only on
-    it. The child gets the parent environment minus `CLAUDE_CODE_CREDENTIAL_ENV`, and
-    before each answer `claude auth status`, run with that same environment, must name
-    a first-party OAuth method (`CLAUDE_CODE_OAUTH_METHODS`) and no API key source, or
-    the call raises `ClaudeCodeNotOAuthError`. That catches what the environment alone
-    cannot, such as an ``apiKeyHelper`` or ``env`` key in a settings file. A status of
-    ``oauth_token`` must also come from `CLAUDE_CODE_OAUTH_TOKEN_ENV`: a second status
-    without that variable must stop saying ``oauth_token``, or the token is a settings
-    file's ``ANTHROPIC_AUTH_TOKEN``. The answer loads only the settings that status
-    reads (`CLAUDE_CODE_SETTING_SOURCES`), so no settings file can change the
-    credential after the check. Never add
-    ``--bare``, which skips that login for an API key. Each call is
-    one non-interactive session with stdin closed, tools disabled, nothing persisted,
-    the model pinned to the exact allowed id (`require_judge_model`) and effort pinned
-    to `JUDGE_EFFORT`. The reply is the ``result`` of the JSON envelope. Every way that
-    yields no answer raises a `ClaudeCodeError` subclass naming it.
+    The judge's policy is enforced here, before the transport sees the call: the model
+    must be an allowed id (`require_judge_model`), and every way the transport gives
+    no answer becomes a `JudgeTransportError` with the transport's error as its cause,
+    never a reply. How the CLI is run on its OAuth login, and never on an API key, is
+    `ClaudeHeadless`'s to keep (lib/agentic-workspace, `harnesses/claude/headless.py`).
     """
 
-    timeout_s: float = JUDGE_TIMEOUT_S
-    run: ProcessRunner = subprocess.run
-    executable: str = "claude"
-
-    def argv(self, *, model: str, system: str, prompt: str) -> list[str]:
-        return [
-            self.executable,
-            "-p",
-            prompt,
-            "--model",
-            require_judge_model(model),
-            "--system-prompt",
-            system,
-            "--effort",
-            JUDGE_EFFORT,
-            "--output-format",
-            "json",
-            "--tools",
-            "",
-            "--no-session-persistence",
-            "--setting-sources",
-            CLAUDE_CODE_SETTING_SOURCES,
-        ]
-
-    def _auth_status(self, env: Mapping[str, str]) -> tuple[int, _ClaudeAuthStatus]:
-        """`claude auth status` run with `env`: its exit code and the status it printed."""
-        try:
-            done = self.run(
-                [self.executable, "auth", "status", "--json"],
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_s,
-                env=env,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise ClaudeCodeTimeoutError(
-                f"claude auth status gave no answer within {self.timeout_s:g}s"
-            ) from exc
-        try:
-            return done.returncode, _ClaudeAuthStatus.model_validate_json(done.stdout)
-        except ValidationError as exc:
-            raise ClaudeCodeUnreadableOutputError(
-                f"claude auth status exited {done.returncode} with no readable status: "
-                f"{done.stdout[:500]!r} {done.stderr.strip()[-500:]}"
-            ) from exc
-
-    def _require_oauth(self, env: Mapping[str, str]) -> None:
-        """Raise unless a call with `env` would run on the OAuth login."""
-        returncode, status = self._auth_status(env)
-        if (
-            returncode != 0
-            or not status.logged_in
-            or status.api_provider != "firstParty"
-            or status.auth_method not in CLAUDE_CODE_OAUTH_METHODS
-            or status.api_key_source is not None
-        ):
-            raise ClaudeCodeNotOAuthError(
-                f"the judge runs only on Claude Code's OAuth login, but claude auth status "
-                f"says loggedIn={status.logged_in} authMethod={status.auth_method} "
-                f"apiProvider={status.api_provider} apiKeySource={status.api_key_source}: "
-                "run `claude auth login`, and remove any apiKeyHelper or key from its settings"
-            )
-        if status.auth_method == "oauth_token":
-            self._require_oauth_token_source(env)
-
-    def _require_oauth_token_source(self, env: Mapping[str, str]) -> None:
-        """Raise unless an `oauth_token` status comes from `CLAUDE_CODE_OAUTH_TOKEN_ENV`.
-
-        The CLI reports every bearer token as `oauth_token`, including an
-        ``ANTHROPIC_AUTH_TOKEN`` from a settings file's ``env``, which outranks both the
-        OAuth token and the stored login. Asked again without the variable, a status
-        that still says `oauth_token` has its token from somewhere else.
-        """
-        fix = "remove ANTHROPIC_AUTH_TOKEN from the env of every Claude Code settings file"
-        if CLAUDE_CODE_OAUTH_TOKEN_ENV not in env:
-            raise ClaudeCodeNotOAuthError(
-                f"claude auth status says authMethod=oauth_token with no "
-                f"{CLAUDE_CODE_OAUTH_TOKEN_ENV} set, so its token is a bearer token from a "
-                f"settings file: {fix}"
-            )
-        _, without = self._auth_status(
-            {k: v for k, v in env.items() if k != CLAUDE_CODE_OAUTH_TOKEN_ENV}
-        )
-        if without.auth_method == "oauth_token":
-            raise ClaudeCodeNotOAuthError(
-                f"claude auth status still says authMethod=oauth_token without "
-                f"{CLAUDE_CODE_OAUTH_TOKEN_ENV}, so a bearer token from a settings file "
-                f"outranks the OAuth token: {fix}"
-            )
+    transport: ModelClient = field(default_factory=lambda: ClaudeHeadless(effort=JUDGE_EFFORT))
 
     def complete(self, *, model: str, system: str, prompt: str) -> str:
-        argv = self.argv(model=model, system=system, prompt=prompt)
-        env = {k: v for k, v in os.environ.items() if k not in CLAUDE_CODE_CREDENTIAL_ENV}
-        self._require_oauth(env)
+        model = require_judge_model(model)
         try:
-            done = self.run(
-                argv,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_s,
-                env=env,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise ClaudeCodeTimeoutError(
-                f"claude -p --model {model} gave no answer within {self.timeout_s:g}s"
+            return self.transport.complete(model=model, system=system, prompt=prompt)
+        except (ClaudeHeadlessError, OSError) as exc:
+            raise JudgeTransportError(
+                f"the LLM judge got no answer from {model}: {type(exc).__name__}: {exc}"
             ) from exc
-        if done.returncode != 0:
-            raise ClaudeCodeExitError(
-                f"claude -p --model {model} exited {done.returncode}: {done.stderr.strip()[-500:]}"
-            )
-        if not done.stdout.strip():
-            raise ClaudeCodeEmptyOutputError(f"claude -p --model {model} printed nothing")
-        try:
-            reply = _ClaudeCodeResult.model_validate_json(done.stdout)
-        except ValidationError as exc:
-            raise ClaudeCodeUnreadableOutputError(
-                f"claude -p --model {model} printed no JSON result envelope: {done.stdout[:500]!r}"
-            ) from exc
-        if reply.is_error:
-            raise ClaudeCodeReportedError(
-                f"claude -p --model {model} reported an error: {reply.result[:500]!r}"
-            )
-        if not reply.result.strip():
-            raise ClaudeCodeEmptyOutputError(f"claude -p --model {model} returned an empty result")
-        return reply.result
 
 
 def scorer_version(loaded: LoadedSuite, llm: Judge | None) -> str:
@@ -2194,7 +1979,7 @@ def main(argv: list[str] | None = None) -> int:
         if problems := [p for v in to_score for p in judge_problems(v)]:
             print("❌ the LLM judge cannot score:\n  " + "\n  ".join(problems), file=sys.stderr)
             return 1
-        llm = LlmJudge(ClaudeCode())
+        llm = LlmJudge(HeadlessJudgeClient())
     ledger: Path = args.launches or launches_path(args.suite)
     with httpx.Client(
         base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
