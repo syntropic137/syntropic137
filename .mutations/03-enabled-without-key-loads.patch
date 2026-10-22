@@ -1,0 +1,13 @@
+diff --git a/packages/syn-shared/src/syn_shared/settings/e2b.py b/packages/syn-shared/src/syn_shared/settings/e2b.py
+index aa745ed5e..d07fcbd5a 100644
+--- a/packages/syn-shared/src/syn_shared/settings/e2b.py
++++ b/packages/syn-shared/src/syn_shared/settings/e2b.py
+@@ -81,7 +81,7 @@ class E2BSettings(BaseSettings):
+             )
+             if not present
+         ]
+-        if missing:
++        if False:
+             msg = (
+                 f"SYN_E2B_ENABLED is true but {' and '.join(missing)} is unset. "
+                 "E2B workspaces cannot start without them, and Syn137 does not fall "

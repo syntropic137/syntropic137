@@ -45,8 +45,8 @@ writes it into an event.
 ## Running the real-E2B suite
 
 CI has no E2B key and never will. The suite that proves the backend against
-real E2B is marked `e2b`, excluded from every default and CI selection, and
-run by hand:
+real E2B (`live_e2b_suite.py`) is not named `test_*.py`, so no default or CI
+collection picks it up; it is marked `e2b` as well, and run by hand:
 
 ```bash
 export SYN_E2B_API_KEY=...      # from your environment or keychain; never commit it

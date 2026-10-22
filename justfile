@@ -775,7 +775,7 @@ test-unit:
 # newer than the project cutoff, so this run resolves it with a later cutoff;
 # --frozen keeps that from rewriting uv.lock.
 test-e2b:
-    uv run --frozen --with e2b==2.52.0 --exclude-newer 2026-10-02T00:00:00Z pytest -m e2b -rA --tb=short packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/
+    uv run --frozen --with e2b==2.52.0 --exclude-newer 2026-10-02T00:00:00Z pytest -m e2b -rA --tb=short packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/live_e2b_suite.py
 
 # Integration tests (uses test-stack if running, else testcontainers)
 test-integration:

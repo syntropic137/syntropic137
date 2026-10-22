@@ -1,6 +1,9 @@
 """The E2B conformance suite against REAL E2B (#1915). Never runs in CI.
 
-Marker ``e2b``, excluded from every default and CI selection. Without
+Not named ``test_*.py`` on purpose: no default or CI collection picks it up,
+so it is excluded from CI rather than collected there and skipped. pytest
+collects it only when named, which ``just test-e2b`` does. Marker ``e2b``,
+also deselected by default, as a second guard. Without
 SYN_E2B_API_KEY and SYN_E2B_TEMPLATE each test SKIPS with that reason; a skip
 is not a pass. Nothing here has been run yet: no E2B key existed when it was
 written. Run it locally with ``just test-e2b`` (docs/deployment/e2b.md).

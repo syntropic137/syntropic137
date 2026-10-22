@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/_wiring.py b/apps/syn-api/src/syn_api/_wiring.py
+index 2caabdf23..ca1df0890 100644
+--- a/apps/syn-api/src/syn_api/_wiring.py
++++ b/apps/syn-api/src/syn_api/_wiring.py
+@@ -339,7 +339,7 @@ def build_workspace_service(
+ 
+     e2b = get_settings().e2b
+     return WorkspaceService.create(
+-        backend=WorkspaceBackend.selected(e2b),
++        backend=WorkspaceBackend.DOCKER,
+         e2b=e2b,
+         config=ws_config,
+         environment=_build_workspace_env(),

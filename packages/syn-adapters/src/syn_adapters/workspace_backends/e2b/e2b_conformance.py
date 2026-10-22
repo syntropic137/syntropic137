@@ -2,7 +2,7 @@
 
 Each check drives a WorkspaceService's isolation port, so it runs unchanged
 against a sandbox double (``test_e2b_backend.py``, in CI) and against real
-E2B (``test_e2b_live.py``, marker ``e2b``, never in CI).
+E2B (``live_e2b_suite.py``, marker ``e2b``, never in CI).
 """
 
 from __future__ import annotations

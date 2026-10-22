@@ -3,7 +3,7 @@
 Runs in CI with no E2B account: the real ``E2BWorkspaceProvider`` from
 agentic-workspace is driven over ``SandboxDouble``, an in-memory
 ``E2BSandboxClient``. That proves Syn137's wiring and the suite, not E2B;
-``test_e2b_live.py`` runs the same suite against real E2B.
+``live_e2b_suite.py`` runs the same suite against real E2B.
 """
 
 from __future__ import annotations

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+index ee4aaea0c..058274b20 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+@@ -101,7 +101,7 @@ class WorkspaceBackend(Enum):
+         ``E2BSettings`` refuses to load when enabled without a key or template,
+         so an enabled flag here always has what E2B needs; there is no fallback.
+         """
+-        return cls.E2B if e2b.enabled else cls.DOCKER
++        return cls.DOCKER
+ 
+ 
+ @dataclass
