@@ -149,7 +149,7 @@ async def test_v12_a_stalled_executor_is_fenced_and_its_stale_commit_refused(
         os.kill(child.pid, signal.SIGSTOP)
         await asyncio.sleep(_LEASE_S * 2)
         b = ExecutorHost(
-            reap_scope="daemon-1",
+            reap_scope=DockerDeadHostReaper().scope(),  # A's daemon, so B may fence A
             host_id=f"v12-b-{uuid4().hex[:6]}",
             container_id="c-v12-b",
             generation="g1",
