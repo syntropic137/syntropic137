@@ -35,6 +35,12 @@ _SELECTORS = (
 class ReapScopeUnknown(RuntimeError):
     """The Docker engine ID could not be read, so this process cannot reconcile (D13)."""
 
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            f"Reap Scope unknown: {detail}. The executor refuses to start; check that "
+            "this process can reach the Docker daemon (DOCKER_HOST, the mounted socket)."
+        )
+
 
 def _engine_id() -> str:
     """The ``docker info`` engine ID; raises rather than returning a scope that matches nothing."""
