@@ -110,6 +110,10 @@ async def _one_run(
     return queue
 
 
+@pytest.mark.may_skip(
+    reason="needs a Docker daemon and the alpine stand-in image; integration-evidence has both",
+    issue="#1734",
+)
 @pytest.mark.parametrize("tear_down", [True, False], ids=["torn-down", "left-running"])
 async def test_a_completed_docker_run_is_shown_released_and_closes(
     pool: asyncpg.Pool,  # noqa: F811  # the fixture imported above
