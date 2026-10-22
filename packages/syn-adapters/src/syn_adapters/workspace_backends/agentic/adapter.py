@@ -24,6 +24,7 @@ from agentic_isolation import (
     WorkspaceDockerProvider,
 )
 from agentic_isolation.contract import OperationError
+from agentic_isolation.providers.base import SupportsOperations
 from agentic_isolation.providers.operation_spool import OperationFailure
 
 from syn_adapters.diagnostics import capture_signal_death
@@ -78,7 +79,7 @@ if TYPE_CHECKING:
 
     from agentic_isolation import AgenticWorkspace
     from agentic_isolation.contract import FinalizationOutcome
-    from agentic_isolation.providers.base import SupportsOperations, Workspace
+    from agentic_isolation.providers.base import Workspace, WorkspaceProvider
 
     from syn_domain.contexts.orchestration import (
         WorkspaceCredentialPolicy,
@@ -204,6 +205,7 @@ class AgenticIsolationAdapter:
         session_store: SessionStoreSettings | None = None,
         capture_source_instance_id: str | None = None,
         kit: BackendKit | None = None,
+        provider: WorkspaceProvider | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -272,7 +274,7 @@ class AgenticIsolationAdapter:
         #: Shared with the event stream, which binds launch-scoped credentials
         #: (the platform grant) through it.
         self.credentials = WorkspaceCredentials(session_store)
-        self._provider = WorkspaceDockerProvider(
+        self._provider: WorkspaceProvider = provider or WorkspaceDockerProvider(
             default_image=default_image,
             security=self._security,
             workspace_base_dir=container_dir,
@@ -289,7 +291,19 @@ class AgenticIsolationAdapter:
 
     @property
     def operations(self) -> SupportsOperations:
-        """The provider's operation contract, which the event stream launches through."""
+        """The provider's operation contract, which the event stream launches through.
+
+        Raises WorkspaceProvisionError for a provider without one: E2B has no
+        operation contract in agentic-workspace yet (#1915), so an agent cannot
+        launch on it, and saying so beats an AttributeError mid-launch.
+        """
+        if not isinstance(self._provider, SupportsOperations):
+            msg = (
+                f"The {self._kit.isolation_type} workspace backend cannot launch agent "
+                "operations yet: its agentic-workspace provider does not implement "
+                "SupportsOperations (#1915)."
+            )
+            raise WorkspaceProvisionError(msg)
         return self._provider
 
     def workspace(self, isolation_id: str) -> Workspace | None:
@@ -356,6 +370,9 @@ class AgenticIsolationAdapter:
             IsolationHandle,
         )
 
+        self._kit.require_fits(
+            config.security_policy.cpu_limit_cores, config.security_policy.memory_limit_mb
+        )
         environment = self._build_environment(config)
         capture_mounts = self._kit.capture_mounts(config, environment)
 
@@ -382,7 +399,7 @@ class AgenticIsolationAdapter:
         image = await self._kit.resolve_image(config.image)
 
         ws_config = WorkspaceConfig(
-            provider="docker",
+            provider=self._kit.isolation_type,
             image=image,
             working_dir="/workspace",
             environment=environment,

@@ -104,7 +104,7 @@ from syn_adapters.storage.repositories import (
     get_trigger_repository,
     get_workflow_execution_repository,
 )
-from syn_adapters.workspace_backends.service import WorkspaceService
+from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api._wiring_admission import (
     BackgroundWorkflowDispatcher,
     admitted_launch_eval,
@@ -331,8 +331,16 @@ def build_workspace_service(
     A function of its own so a test can build exactly what production runs.
     No credential policy is passed, deliberately: the executor this wiring
     serves runs real agents, which need the host's credentials.
+
+    E2B replaces Docker only when SYN_E2B_ENABLED is set (#1915, dark); loading
+    its settings fails when it is enabled without a key or template.
     """
+    from syn_shared.settings import get_settings
+
+    e2b = get_settings().e2b
     return WorkspaceService.create(
+        backend=WorkspaceBackend.selected(e2b),
+        e2b=e2b,
         config=ws_config,
         environment=_build_workspace_env(),
         capture_source_instance_id=capture_source_instance_id,
