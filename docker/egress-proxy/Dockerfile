@@ -18,7 +18,9 @@ FROM mitmproxy/mitmproxy:10.1.1
 
 # Install Python dependencies for the addon
 USER root
-RUN pip install --no-cache-dir pyyaml
+# certifi pinned: mitmproxy verifies upstream TLS with it, and the base image's
+# copy predates GHSA-6q48-6c7w-9gw2 (compromised emSign intermediates).
+RUN pip install --no-cache-dir pyyaml certifi==2026.10.19
 
 # Copy the allowlist addon script
 COPY allowlist_addon.py /app/allowlist_addon.py
