@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from syn_shared.diagnostics import SignalDeath
+    from syn_shared.settings.workspace import WorkspaceRuntime
 
 # Register MappingProxyType for copy/pickle support — required because
 # Pydantic model_copy() and event sourcing deepcopy individual fields.
@@ -268,6 +269,29 @@ class IsolationHandle:
     proxy_url: str | None = None  # Sidecar proxy URL if applicable
     workspace_path: str | None = None  # Path to workspace inside isolation
     host_workspace_path: str | None = None  # Path on host mounted into container
+    #: The OCI runtime the provider resolved for this container. None when the
+    #: backend has no OCI runtime (memory, local) or the provider recorded none.
+    runtime: IsolationRuntime | None = None
+
+
+@dataclass(frozen=True)
+class IsolationRuntime:
+    """Which OCI runtime one workspace runs under, as the provider resolved it.
+
+    Read from agentic-workspace's resolver, never derived here: `effective` is
+    what the container was launched with, `requested` is what was asked for
+    (None = auto). Lane 2 telemetry only - this never reaches an aggregate.
+    """
+
+    requested: WorkspaceRuntime | None
+    effective: WorkspaceRuntime
+
+    def telemetry(self) -> dict[str, str]:
+        """The one payload every sink writes: the log line and the observation."""
+        return {
+            "runtime_requested": str(self.requested or "auto"),
+            "runtime_effective": str(self.effective),
+        }
 
 
 class WorkspaceDeleteFallback(StrEnum):

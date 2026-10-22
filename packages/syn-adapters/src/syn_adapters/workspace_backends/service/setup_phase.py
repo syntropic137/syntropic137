@@ -23,6 +23,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from syn_adapters.workspace_backends.exec_status_lost import is_status_lost
+from syn_adapters.workspace_backends.service.setup_phase_credentials import credential_values
 from syn_domain.contexts.orchestration import ProvisionStep, ProvisionStepTimeoutError
 from syn_shared.display import format_exit_code
 from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY, ENV_CLAUDE_CODE_OAUTH_TOKEN
@@ -98,6 +99,9 @@ async def run_setup_phase(
         raise TypeError(f"Expected ManagedWorkspace, got {type(ws).__name__}")
 
     setup_env = _build_setup_env(secrets)
+    # Before anything is injected: from here on the workspace holds these
+    # values, and its stream must withhold them (#1927).
+    ws.withhold(credential_values(secrets))
 
     # Write setup script to container
     script = setup_script or secrets.build_setup_script()

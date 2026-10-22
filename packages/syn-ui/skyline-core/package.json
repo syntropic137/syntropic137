@@ -1,6 +1,6 @@
 {
   "name": "@syn137/skyline-core",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "Skyline plain-TypeScript core: upstream contract re-exports, formatters, chart geometry, state machines, pattern prop types. No DOM, no Svelte.",
   "type": "module",
@@ -29,7 +29,7 @@
   "devDependencies": {
     "tsx": "4.21.0",
     "typescript": "5.9.3",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   },
   "dependencies": {
     "@syntropic137/design-contracts": "0.1.1"

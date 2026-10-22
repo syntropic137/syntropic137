@@ -33,6 +33,7 @@ from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dependency_seed import DependencySeedSettings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from syn_shared.settings.disk import DiskSettings  # noqa: E402
+from syn_shared.settings.e2b import E2BSettings  # noqa: E402
 from syn_shared.settings.execution import ExecutionSettings, ExecutorPoolSettings  # noqa: E402
 from syn_shared.settings.git_identity import OperatorSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
@@ -529,6 +530,18 @@ def generate_env_example() -> str:
 
     lines.extend(
         generate_settings_section(
+            E2BSettings,
+            "E2B REMOTE WORKSPACES - EXPERIMENTAL, DEFAULT OFF",
+            prefix="SYN_E2B_",
+            description=(
+                "Run workspaces as E2B cloud sandboxes (#1915). Off: Docker, unchanged. "
+                "On without a key or template: startup fails. See docs/deployment/e2b.md."
+            ),
+        )
+    )
+
+    lines.extend(
+        generate_settings_section(
             PlatformAccessSettings,
             "WORKSPACE ACCESS TO THE API - OPT-IN, DEFAULT OFF",
             prefix="SYN_PLATFORM_ACCESS_",
@@ -747,6 +760,8 @@ def generate_infra_env_example() -> str:
         "RESOURCE LIMITS": [
             "api_memory_limit",
             "api_cpu_limit",
+            "executor_memory_limit",
+            "executor_cpu_limit",
             "ui_memory_limit",
             "ui_cpu_limit",
             "postgres_memory_limit",

@@ -1,6 +1,6 @@
 {
   "name": "@syntropic137/cli",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Syntropic137 CLI - Event-sourced workflow engine for AI agents",
   "type": "module",
   "bin": {
@@ -34,7 +34,7 @@
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
     "typescript": "~5.9.0",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   },
   "engines": {
     "node": ">=22.0.0"

@@ -14,7 +14,7 @@ import logging
 import os
 import shlex
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast, get_args
 
 from agentic_isolation import (
     AppArmorProfileNotLoadedError,
@@ -24,6 +24,8 @@ from agentic_isolation import (
     WorkspaceDockerProvider,
 )
 from agentic_isolation.contract import OperationError
+from agentic_isolation.providers.base import SupportsOperations
+from agentic_isolation.providers.capabilities import SupportsFileTransfer, TransferRoot
 from agentic_isolation.providers.operation_spool import OperationFailure
 
 from syn_adapters.diagnostics import capture_signal_death
@@ -33,18 +35,25 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
     copy_files_to_workspace,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
-from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
-from syn_adapters.workspace_backends.agentic.session_store_env import (
-    apply_session_store_env,
-    deployment_identity,
-    session_store_credential_bindings,
+from syn_adapters.workspace_backends.agentic.credential_scrubber import (
+    CredentialScrubber,
+    scrub_bytes,
 )
+from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 
 # Re-exported for backward compatibility (issue #771 item 7): the canonical
 # definition lives in `syn_adapters.workspace_backends.errors` so it can be
 # raised/imported without depending on this Docker-specific module. Existing
 # `from ...agentic.adapter import WorkspaceProvisionError` call sites keep
 # working unchanged.
+from syn_adapters.workspace_backends.agentic.runtime_mapping import (
+    isolation_runtime_from_metadata,
+)
+from syn_adapters.workspace_backends.agentic.session_store_env import (
+    apply_session_store_env,
+    deployment_identity,
+    session_store_credential_bindings,
+)
 from syn_adapters.workspace_backends.agentic.teardown_usage import usage_from_report
 from syn_adapters.workspace_backends.backend_kit import BackendKit
 from syn_adapters.workspace_backends.errors import (
@@ -71,7 +80,7 @@ if TYPE_CHECKING:
 
     from agentic_isolation import AgenticWorkspace
     from agentic_isolation.contract import FinalizationOutcome
-    from agentic_isolation.providers.base import SupportsOperations, Workspace
+    from agentic_isolation.providers.base import Workspace, WorkspaceProvider
 
     from syn_domain.contexts.orchestration import (
         WorkspaceCredentialPolicy,
@@ -197,6 +206,7 @@ class AgenticIsolationAdapter:
         session_store: SessionStoreSettings | None = None,
         capture_source_instance_id: str | None = None,
         kit: BackendKit | None = None,
+        provider: WorkspaceProvider | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -265,7 +275,7 @@ class AgenticIsolationAdapter:
         #: Shared with the event stream, which binds launch-scoped credentials
         #: (the platform grant) through it.
         self.credentials = WorkspaceCredentials(session_store)
-        self._provider = WorkspaceDockerProvider(
+        self._provider: WorkspaceProvider = provider or WorkspaceDockerProvider(
             default_image=default_image,
             security=self._security,
             workspace_base_dir=container_dir,
@@ -282,7 +292,19 @@ class AgenticIsolationAdapter:
 
     @property
     def operations(self) -> SupportsOperations:
-        """The provider's operation contract, which the event stream launches through."""
+        """The provider's operation contract, which the event stream launches through.
+
+        Raises WorkspaceProvisionError for a provider without one: E2B has no
+        operation contract in agentic-workspace yet (#1915), so an agent cannot
+        launch on it, and saying so beats an AttributeError mid-launch.
+        """
+        if not isinstance(self._provider, SupportsOperations):
+            msg = (
+                f"The {self._kit.isolation_type} workspace backend cannot launch agent "
+                "operations yet: its agentic-workspace provider does not implement "
+                "SupportsOperations (#1915)."
+            )
+            raise WorkspaceProvisionError(msg)
         return self._provider
 
     def workspace(self, isolation_id: str) -> Workspace | None:
@@ -349,6 +371,9 @@ class AgenticIsolationAdapter:
             IsolationHandle,
         )
 
+        self._kit.require_fits(
+            config.security_policy.cpu_limit_cores, config.security_policy.memory_limit_mb
+        )
         environment = self._build_environment(config)
         capture_mounts = self._kit.capture_mounts(config, environment)
 
@@ -375,7 +400,7 @@ class AgenticIsolationAdapter:
         image = await self._kit.resolve_image(config.image)
 
         ws_config = WorkspaceConfig(
-            provider="docker",
+            provider=self._kit.isolation_type,
             image=image,
             working_dir="/workspace",
             environment=environment,
@@ -426,6 +451,7 @@ class AgenticIsolationAdapter:
             proxy_url=None,
             workspace_path="/workspace",
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
+            runtime=isolation_runtime_from_metadata(workspace_obj.metadata),
         )
 
     async def _ensure_tmpdir(
@@ -670,8 +696,33 @@ class AgenticIsolationAdapter:
         patterns: list[str],
         base_path: str = "/workspace",
     ) -> list[tuple[str, bytes]]:
-        """Copy files from workspace via mounted volume."""
-        return await copy_files_from_workspace(handle, patterns, base_path)
+        """Copy files from workspace via mounted volume.
+
+        Every workspace holds the session-store token, and only this adapter
+        knows it, so a file the workload wrote leaves with it replaced (#1927).
+        """
+        if self._kit.reads_through_provider:
+            collected = await self._read_through_provider(handle, patterns, base_path)
+        else:
+            collected = await copy_files_from_workspace(handle, patterns, base_path)
+        scrubber = CredentialScrubber(self.credentials.withheld(()))
+        return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
+
+    async def _read_through_provider(
+        self, handle: IsolationHandle, patterns: list[str], base_path: str
+    ) -> list[tuple[str, bytes]]:
+        """A remote workspace's files, read by the provider (its disk is not on this host)."""
+        workspace = self._workspaces.get(handle.isolation_id)
+        if workspace is None:
+            raise RuntimeError(f"Workspace not found: {handle.isolation_id}")
+        if not isinstance(self._provider, SupportsFileTransfer):
+            msg = f"the {self._kit.isolation_type} provider cannot transfer files"
+            raise TypeError(msg)
+        if base_path not in get_args(TransferRoot):
+            msg = f"cannot read files from {base_path!r}: not a transfer root"
+            raise ValueError(msg)
+        root = cast("TransferRoot", base_path)
+        return await self._provider.read_files(workspace, patterns, base_path=root)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
 
 
 def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:

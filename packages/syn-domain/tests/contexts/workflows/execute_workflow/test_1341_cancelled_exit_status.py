@@ -56,7 +56,7 @@ from .test_processor_smoke import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable, Iterable
 
     from syn_adapters.conversations import SessionContext
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
@@ -91,6 +91,7 @@ class _StreamInterruptedMidRun(MemoryEventStreamAdapter):
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
         wrapper_name: str | None = None,
+        withheld: Callable[[], Iterable[str]] | None = None,
     ) -> AsyncIterator[str]:
         for _ in range(LINES_BEFORE_CANCEL):
             yield '{"type":"assistant","message":{"content":[]}}'

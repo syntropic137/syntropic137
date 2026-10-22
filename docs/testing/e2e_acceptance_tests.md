@@ -2701,7 +2701,7 @@ APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/src/syn_adapters/worksp
 |---|---------------------|--------|
 | 18.4.1 | `create()` starts Docker container | ⬜ |
 | 18.4.2 | Container uses configured image (syn-workspace-claude) | ⬜ |
-| 18.4.3 | gVisor runtime used when `use_gvisor=True` | ⬜ |
+| 18.4.3 | gVisor runtime used when `SYN_WORKSPACE_RUNTIME=gvisor` | ⬜ |
 | 18.4.4 | Network configured per security policy | ⬜ |
 | 18.4.5 | Memory limits applied | ⬜ |
 | 18.4.6 | `execute()` runs docker exec | ⬜ |
