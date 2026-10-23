@@ -14,11 +14,13 @@ import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum, StrEnum, auto
 from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
 from agentic_events.types import ClaudeToolName, EventType
+from agentic_isolation.harnesses.claude import classify_upstream_failure
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model import (
     announced_model_from,
@@ -158,10 +160,32 @@ def _format_anthropic_error(error_obj: dict[str, object], prefix: str) -> str:
     label = api_error_label(error_type)
     http_code = _http_code_from_prefix(prefix)
     if http_code:
-        return api_error_label(error_type, http_code)
+        with_status = api_error_label(error_type, http_code)
+        with_message = f"{with_status}: {message}"
+        return with_message if message and _says_more(with_message, with_status) else with_status
     if message and message.lower() != label.lower():
         return api_error_with_message(error_type, message)
     return label
+
+
+def _says_more(with_message: str, without: str) -> bool:
+    """Whether the API's message changes what kind of fault the reason reads as (#1605).
+
+    The status alone usually says it all, so the message is dropped for a
+    short reason. Not when the message is the fault: a weekly limit arrives as
+    a 429 whose message is the quota sentence and its reset, and dropping it
+    turns a quota into a retried rate limit. Which messages matter is the
+    harness classifier's call, never a string matched here.
+    """
+    observed_at = datetime.now(UTC)
+    kinds = {
+        failure.kind if failure is not None else None
+        for failure in (
+            classify_upstream_failure(reason, observed_at=observed_at)
+            for reason in (with_message, without)
+        )
+    }
+    return len(kinds) > 1
 
 
 def _parse_json_error(text: str) -> str | None:
