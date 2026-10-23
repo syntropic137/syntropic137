@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py
+index 4bdecb183..78283fbfc 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py
+@@ -476,7 +476,7 @@ def _place_symlink(link: Path, destination: Path) -> None:
+     if destination.is_symlink():
+         existing = destination.readlink()
+         if existing == link:
+-            return
++            raise FileExistsError(destination)
+         # Two seeds disagree on one cache entry. The later seed's link wins, so
+         # the seed copied last stays whole; the earlier seed keeps every other
+         # entry. Logged, never silent: uv names its entries by content, so a
