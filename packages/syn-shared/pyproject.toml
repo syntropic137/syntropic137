@@ -1,6 +1,6 @@
 [project]
 name = "syn-shared"
-version = "1.0.3"
+version = "1.0.4"
 description = "Shared utilities for Syntropic137"
 requires-python = ">=3.12"
 
@@ -9,6 +9,11 @@ dependencies = [
     "pydantic-settings>=2.7.0",
     "structlog>=25.4.0",
     "python-dotenv>=1.0.0",
+    # GHSA-6q48-6c7w-9gw2 (critical): certifi < 2026.10.19 trusts emSign roots
+    # whose intermediate CA keys were compromised. Pinned here, not left
+    # transitive, because the images `uv pip install` without uv.lock and so
+    # resolved whatever was newest at build time (v1.0.3 shipped 2026.07.22).
+    "certifi==2026.10.19",
 ]
 
 [build-system]
