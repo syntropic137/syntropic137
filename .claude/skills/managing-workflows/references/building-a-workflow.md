@@ -34,8 +34,9 @@ which one is real.
   inside it.
 - **Name the trap in the prompt.** Each prompt names the prior failure it must
   not repeat and the command that proves it did not.
-- **Skills are invoked by name.** Agents use skills only when the prompt names
-  them, so a phase that needs one names it.
+- **Name the skills a phase needs.** Routing by skill description is
+  unreliable in a workflow phase, so a phase that needs a skill names it
+  explicitly, and you check the archived transcript for the actual Skill call.
 
 ## Before the PR
 

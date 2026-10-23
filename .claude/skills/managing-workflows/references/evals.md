@@ -1,9 +1,12 @@
 # Evals
 
 Evals are how this repo knows a workflow change helped. Each suite lives in
-`evals/<suite-id>/` with a `README.md` (how cases are chosen), `suite.yaml`
-(what it measures, which workflow and models, version history) and `cases/`.
-Read the suite's README before running it, because the rules for a valid case
+`evals/<suite-id>/` with a `suite.yaml` and `cases/`. The verifier and
+implementer suites also have a `README.md` (how cases are chosen), and their
+`suite.yaml` records the eval workflow, each phase's model and the version
+history. `feedback-screening-v1` has no README: its `suite.yaml` records the
+goal, splits and sources, with recorded fixtures under `recorded/`. Read
+whichever the suite has before running it, because the rules for a valid case
 differ by kind.
 
 ## Kinds
@@ -13,7 +16,7 @@ differ by kind.
 | verifier | does verify block a known bug and certify a clean change? | blocked and names the defect; certified on controls | `verifier-seed-v1`, `verifier-seed-aw-v1` |
 | implementer | given the problem, does the agent fix it? | hidden tests from the real fix | `implementer-seed-v1` |
 | screening | is a cheaper component good enough? | per-suite | `feedback-screening-v1` |
-| end-to-end | does the whole workflow, from commit and issue, produce a mergeable correct PR? | hidden tests at the final head, plus verify outcome, cost and time | none yet: E4 (`docs/experiments/2026-10-20-end-to-end-replay.md`, PR #2019) is preregistered but blocked because the implement prompts merge and read `origin/main`, which carries the fix |
+| end-to-end | does the whole workflow, from commit and issue, produce a mergeable correct PR? | hidden tests at the final head, plus verify outcome, cost and time | none yet: E4 is preregistered but blocked. Its doc, `docs/experiments/2026-10-20-end-to-end-replay.md`, is not on `main` yet: it is on draft PR #2019 (branch `research/eval-model-selection`), which this lane has adopted. It is blocked because the implement prompts merge and read `origin/main`, which carries the fix |
 
 Single-phase kinds are screening. They can rule an arm out cheaply; they cannot
 promote one alone.
@@ -21,16 +24,20 @@ promote one alone.
 ## Commands
 
 ```
-uv run python scripts/eval_suite.py check                 # git only: every pin, fix and control re-read
-uv run python scripts/eval_suite.py launch --suite <id>   # dispatches runs; see --help for split/version
-uv run python scripts/eval_suite.py score  --suite <id>   # catch rate over defects, false-block rate over controls
+uv run python scripts/eval_suite.py check  [--suite evals/<suite-id>]  # git only: every pin, fix and control re-read
+uv run python scripts/eval_suite.py launch --suite evals/<suite-id>    # dispatches runs; see --help for split/version
+uv run python scripts/eval_suite.py score  --suite evals/<suite-id>    # catch rate over defects, false-block rate over controls
 
-uv run python scripts/eval_implementer.py check           # git only
-uv run python scripts/eval_implementer.py admit [--case]  # runs hidden tests: empty patch must FAIL, real fix must PASS
+uv run python scripts/eval_implementer.py check  [--suite evals/<suite-id>]  # git only
+uv run python scripts/eval_implementer.py admit [--case <id>]  # runs hidden tests: empty patch must FAIL, real fix must PASS
 uv run python scripts/eval_implementer.py score --case <id> --patch <diff>
 ```
 
-Read `--help` before launching. Launches cost real quota.
+`--suite` takes the suite's directory. Without it, `eval_suite.py` uses
+`evals/verifier-seed-v1` and `eval_implementer.py` uses
+`evals/implementer-seed-v1`, so a bare `check` checks only that one suite.
+`admit` without `--case` admits every case. Read `--help` before launching.
+Launches cost real quota.
 
 ## Rules that keep scores comparable
 
@@ -52,10 +59,12 @@ Read `--help` before launching. Launches cost real quota.
   not neutral.
 - **Cost, wall-clock and tokens are columns of every eval run**, beside the
   score, so one run answers both the quality and the cost question.
-- **Hidden tests can certify wrong fixes.** Public benchmarks pass 15-30% of
-  patches that differ from the reference fix (UTBoost, PatchDiff 2025). Add a
-  differential or adversarial test per implementer case where one test is the
-  only judge.
+- **Hidden tests can certify wrong fixes.** On SWE-bench, UTBoost
+  (arXiv 2506.09289) found patches that passed the original tests but were
+  wrong once the tests were strengthened. PatchDiff (arXiv 2503.15223) found
+  many test-passing patches behave differently from the reference fix; a
+  behavioural difference alone does not make a patch wrong. Add a differential
+  or adversarial test per implementer case where one test is the only judge.
 
 ## Sources (checked 2026-10-21)
 

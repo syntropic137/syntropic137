@@ -19,7 +19,7 @@ Classify it before fixing it:
 | quality: false blocks | verifier blocked a clean change | prompt evidence rules, control review |
 | wasted rounds | fix round spent on a flake | phase precheck, routing evidence to the orchestrator |
 | cost | one phase dominates spend | model routing with eval proof, smaller context, early exit |
-| time | phase waits or retries | timeouts sized to agent work, parallel phases |
+| time | phase waits or retries | timeouts sized to agent work, fan-out inside one phase (parallel phases are not supported: `require_supported_execution_type`) |
 | harness | vendor quota, provisioning | not a workflow change; file an issue |
 
 Harness failures are not workflow problems. Do not tune prompts against them.

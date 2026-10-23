@@ -5,7 +5,7 @@
 | Stage | PR state | Who acts | What moves it on |
 |---|---|---|---|
 | issue prioritised | none | owner or triage | a dispatch, by hand or by trigger |
-| implement | draft, opened on first push by the platform | implement phase | the push |
+| implement | draft, opened by the implement agent right after its first push (`gh pr create --draft`); `finalize_pr` opens it if that failed | implement phase | the push |
 | verify and fix | draft | verify, fix, re-verify phases | a certified verdict, or rounds exhausted |
 | finalize | ready, or left draft with the blocker written down | `finalize_pr` | the certified verdict |
 | second verification | ready | `sdlc-reverify-pr-v1` or a local verifier | certified on another model or context |
@@ -31,8 +31,10 @@ Firing on noise wastes runs, and two agents on one branch fight over it.
 | `/syn` comment | `comment-command` | explicit request |
 
 State on 2026-10-21: triggers are effectively unused on the owner's
-deployment (two rules ever, zero fires). Every run was dispatched by hand or by
-the orchestrator. Enable them one at a time, on the transitions above, and
+deployment: two rules ever, one active (`pull_request.opened` to
+`sdlc-reverify-pr-v1`) and one deleted, both with zero fires
+(`references/audit-2026-10-21.md`). So every run in the window was dispatched
+by hand or by the orchestrator. Enable them one at a time, on the transitions above, and
 measure each before adding the next.
 
 Known gap (2026-10-21): the `self-healing` preset fires on any failed check of
@@ -49,9 +51,10 @@ adopting the numbers.
 ## Measuring the lifecycle
 
 Report delivery metrics split by agent PRs and human PRs: lead time, change
-failure rate, rework, and reverts within 14 days. DORA 2025 found AI raises
-throughput and instability together, so a rise in change failure rate is a
-regression even when throughput rises.
+failure rate, rework, and reverts within 14 days. DORA 2025 found higher AI
+adoption associated with both higher throughput and higher instability
+(https://dora.dev/insights/balancing-ai-tensions/), so a rise in change failure
+rate is a regression even when throughput rises.
 
 ## Limits
 
