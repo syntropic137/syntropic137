@@ -25,6 +25,7 @@ from agentic_isolation.child_journal import ChildChange
 from agentic_isolation.providers.base import ExecuteResult
 from event_sourcing.client.memory import MemoryEventStoreClient
 
+from syn_adapters.session_inventory.native_evidence import AgenticNativeSessionEvidence
 from syn_adapters.session_inventory.recovery_worker import CaptureRecoveryWorker
 from syn_adapters.session_inventory.sandbox_recovery import SandboxSpoolRecovery, SpoolNotSettled
 from syn_adapters.session_inventory.spool_drain import LocalSpoolDrain, SpoolDrainProgress
@@ -128,7 +129,7 @@ class ScriptedSandbox:
                 {
                     "scs_version": "1.0",
                     "origin": {"host": "origin-sandbox", "environment": "container"},
-                    "agent": "codex",
+                    "agent": "Codex",
                     "source_format": "codex-rollout-jsonl",
                     "session_id": "native",
                     "started_at": "2026-10-23T00:00:00Z",
@@ -146,7 +147,7 @@ class ScriptedSandbox:
                 "sequence": sequence,
                 "archive_sha256": hashlib.sha256(body).hexdigest(),
                 "byte_count": len(body),
-                "agent": "codex",
+                "agent": "Codex",
                 "native_session_id": "native",
             }
             for sequence, body in enumerate(self.envelopes[:watermark], start=1)
@@ -232,6 +233,8 @@ class ScriptedSandboxes:
 def _sandboxes(*, alive: bool = True) -> tuple[ScriptedSandboxes, ScriptedSandbox]:
     remote = ScriptedSandboxes()
     sandbox = ScriptedSandbox(owner=EXECUTOR, writer_alive=alive)
+    # A Codex rollout opens with the session_meta header that carries its identity.
+    sandbox.native.append(json.dumps({"type": "session_meta", "payload": {"id": "native"}}) + "\n")
     sandbox.native.append(json.dumps({"type": "user", "text": "before-crash"}) + "\n")
     sandbox.children.append(_child(1))
     remote.sandboxes["sbx-1"] = sandbox
@@ -355,6 +358,11 @@ async def test_live_writer_is_stopped_drained_and_killed_only_after_mark_drained
     # is archived: nothing landed after the traversal.
     assert sandbox.native and all(line in archived for line in sandbox.native)
     assert '"after-resume"' in archived
+    # The archived envelope is real native evidence, not bytes under an unknown harness.
+    captured = capture.handle.await_args_list[-1].args[0]
+    assert captured.harness == "codex"
+    facts = AgenticNativeSessionEvidence().extract_envelope(captured.harness, captured.content)
+    assert facts.supported and facts.native_id == "native" and not facts.issues
     assert order == ["mark_drained", "release"]
     assert remote.order == ["resume:sbx-1", "pause:sbx-1", "kill:sbx-1"]
 
