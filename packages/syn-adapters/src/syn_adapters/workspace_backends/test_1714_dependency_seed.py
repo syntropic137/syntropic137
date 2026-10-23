@@ -1062,4 +1062,4 @@ def test_a_later_seed_that_fails_to_merge_keeps_the_earlier_seed(tmp_path: Path)
     assert outcome.copied == [key_a]
     assert _files_under(cache) == _files_under(first)  # nothing of the failed seed
     assert (cache / "wheel" / "module.py").read_text() == "from a"
-    assert os.listdir(workspace_dir / ".cache") == ["uv"]  # no staging left behind
+    assert [path.name for path in (workspace_dir / ".cache").iterdir()] == ["uv"]  # no staging
