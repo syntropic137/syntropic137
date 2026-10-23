@@ -276,7 +276,6 @@ class PhaseWorkspace:
         phase: ExecutablePhase,
         *,
         workspace: ManagedWorkspace,
-        workflow_id: str,
         last_agent_message: str | None,
         outcome: UnfinishedPhase,
         aggregate: WorkflowExecutionAggregate,
@@ -300,7 +299,7 @@ class PhaseWorkspace:
         assert todo.phase_id is not None
         output = await self._collector().collect_from_unfinished_phase(
             workspace=workspace,
-            workflow_id=workflow_id,
+            workflow_id=aggregate.workflow_id or "",
             phase_id=todo.phase_id,
             execution_id=todo.execution_id,
             session_id=todo.session_id or "",

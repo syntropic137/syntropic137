@@ -238,7 +238,6 @@ async def _keep_unfinished(
             phase_id=PHASE, name="Verify", order=1, output_artifact_types=("markdown",)
         ),
         workspace=cast("ManagedWorkspace", workspace),
-        workflow_id=WORKFLOW,
         last_agent_message=None,
         outcome=UnfinishedPhase.FAILED,
         aggregate=aggregate,
