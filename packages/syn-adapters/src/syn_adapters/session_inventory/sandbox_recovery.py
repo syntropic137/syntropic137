@@ -53,10 +53,11 @@ class RecoverySandbox(Protocol):
     async def stop_writers(self) -> bool:
         """Stop every agent process; True only once the provider confirms none remain.
 
-        Any failure or ambiguity is False. FIXME(#1916): satisfied by
-        agentic-workspace ``SupportsOperations.cancel`` (pinned on #2076); the
-        pin this branch builds on has no E2B implementation, so no production
-        adapter exists yet.
+        Any failure or ambiguity is False. FIXME(#1916): no production
+        adapter yet. The pinned agentic-workspace E2B ``SupportsOperations``
+        (#2076) keeps its operations in the starting process only and has no
+        reattach, so a recovery worker's ``cancel`` of the dead executor's
+        operation is ``unknown_operation``. Needs operation reattach upstream.
         """
         ...
 
@@ -76,7 +77,8 @@ class RecoverySandboxes(Protocol):
         """True only when the provider confirms no agent process remains.
 
         A status query: it never resumes, stops or pauses anything. Unknown is
-        False. FIXME(#1916): ``SupportsOperations.status``, as ``stop_writers``.
+        False. FIXME(#1916): ``SupportsOperations.status`` has the same
+        process-local registry as ``stop_writers``.
         """
         ...
 
