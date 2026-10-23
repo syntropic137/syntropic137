@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import os
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from pydantic import BaseModel
 
 from syn_api.types import (
     ExecutionDetail,
@@ -38,6 +38,9 @@ from syn_domain.contexts.orchestration.slices.execution_cost.query_service impor
     ExecutionCostsForIds,
 )
 from syn_domain.pagination import Page
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 pytestmark = pytest.mark.unit
 
