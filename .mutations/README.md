@@ -56,3 +56,16 @@ applied, the unit module run, and the patch reversed.
 
 The command in the previous section already names every killing test.
 | 14-closing-fence-outage-skips-pause | a store error at the closing fence escapes and the sandbox is left running | `packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_store_outage_at_the_closing_fence_still_pauses_the_sandbox` |
+
+## Fix round 3 (verify of 5035db0e: B3)
+
+11 no longer applies after the closing fence lost its `suppress(...)`; 15 is
+the same bug rebased (the verifier's own rebase, kept verbatim). 16 is the
+regression verification found: `advance` sets `leased_until='-infinity'`, so
+advancing inside the recovery context made the closing fence see the lease
+lost and skip the pause with no replacement worker.
+
+| Patch | Bug | Killing test |
+|---|---|---|
+| 15-stale-worker-pauses-new-owners-sandbox-rebased | 11, rebased | `packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_lease_lost_during_a_slow_attach_stops_nothing` |
+| 16-advance-before-closing-pause | progress is recorded inside the context, relinquishing the lease before the closing pause | `packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_progress_is_recorded_only_after_the_closing_pause[partial_page]` |

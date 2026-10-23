@@ -114,21 +114,20 @@ class CaptureRecoveryWorker:
                 renew=renew,
             )
             children = await self._recover_children(lease, readers)
-            await self._spools.advance(
-                lease,
-                after=progress.next_after
-                if progress.next_after is not None
-                else progress.watermark,
-                watermark=progress.watermark if progress.next_after is not None else None,
-                retry_seconds=0
-                if progress.next_after is not None or children == "more"
-                else self._retry_seconds,
-                staged_bytes=progress.staged_bytes,
-            )
-            complete = progress.next_after is None and children == "complete"
+        # Advance only once the context has closed: advancing gives the lease
+        # up, and a sandbox backend's closing pause needs it still ours.
+        await self._spools.advance(
+            lease,
+            after=progress.next_after if progress.next_after is not None else progress.watermark,
+            watermark=progress.watermark if progress.next_after is not None else None,
+            retry_seconds=0
+            if progress.next_after is not None or children == "more"
+            else self._retry_seconds,
+            staged_bytes=progress.staged_bytes,
+        )
         # Release after the helper container is gone: its mount would block removal.
         # A remote sandbox stays paused until this point; release kills it.
-        if complete:
+        if progress.next_after is None and children == "complete":
             await self._spools.mark_drained(lease)
             release = self._release.get(lease.spool.backend)
             if release is not None:

@@ -417,6 +417,51 @@ async def test_lease_lost_during_a_slow_attach_stops_nothing() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("outcome", ["partial_page", "child_failure", "complete"])
+async def test_progress_is_recorded_only_after_the_closing_pause(outcome: str) -> None:
+    """``advance`` gives the lease up (``leased_until='-infinity'``), so it
+    must follow the closing fence: otherwise that fence finds the lease lost
+    and a sandbox with no replacement worker is left running."""
+    remote, sandbox = _sandboxes(alive=True)
+    spools = AsyncMock()
+    spools.claim.return_value = _lease()
+    owned = True
+
+    async def renew(*_args: object, **_kwargs: object) -> None:
+        if not owned:
+            raise CaptureSpoolLeaseLost("advance relinquished the lease")
+
+    async def advance(*_args: object, **_kwargs: object) -> None:
+        nonlocal owned
+        remote.order.append("advance")
+        owned = False
+
+    spools.renew.side_effect = renew
+    spools.advance.side_effect = advance
+    drain = AsyncMock()
+    drain.page.return_value = SpoolDrainProgress(
+        watermark=2, next_after=1 if outcome == "partial_page" else None, captured=1
+    )
+    children = AsyncMock()
+    if outcome == "child_failure":
+        children.page.side_effect = OSError("child journal unreadable")
+    else:
+        children.page.return_value = SpoolDrainProgress(watermark=0, next_after=None, captured=0)
+    worker = CaptureRecoveryWorker(
+        spools,
+        {"e2b": SandboxSpoolRecovery(remote)},
+        drain,
+        lease_seconds=60,
+        retry_seconds=5,
+        children=children,
+    )
+    assert await worker.step()
+    assert remote.order == ["resume:sbx-1", "pause:sbx-1", "advance"]
+    assert sandbox.paused and not sandbox.killed
+    spools.advance.assert_awaited_once()
+
+
+@pytest.mark.unit
 async def test_store_outage_at_the_closing_fence_still_pauses_the_sandbox() -> None:
     """Ownership unknown is not ownership lost: the last confirmed owner pauses."""
     remote, sandbox = _sandboxes()
