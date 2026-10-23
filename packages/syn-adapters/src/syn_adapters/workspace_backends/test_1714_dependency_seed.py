@@ -1040,3 +1040,26 @@ def test_a_conflicting_symlink_is_logged_and_keeps_the_rest_of_the_destination(
     assert (destination / "wheels-v5" / "a").is_symlink()
     [warning] = [record for record in caplog.records if record.levelname == "WARNING"]
     assert str(common) in warning.getMessage()
+
+
+def test_a_later_seed_that_fails_to_merge_keeps_the_earlier_seed(tmp_path: Path) -> None:
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10**9)
+    lock_a, lock_b = b"lock = 'a'\n", b"lock = 'b'\n"
+    first = tmp_path / "first"
+    (first / "wheel").mkdir(parents=True)
+    (first / "wheel" / "module.py").write_text("from a")
+    second = _uv_like_cache(tmp_path / "second", "b")
+    # A link where the first seed has a real directory: the merge cannot place it.
+    (second / "wheel").symlink_to("archive-v0/b")
+    key_a, key_b = SeedKey("uv", "org/a", _sha(lock_a)), SeedKey("uv", "org/b", _sha(lock_b))
+    store.publish(key_a, first)
+    store.publish(key_b, second)
+    workspace_dir = tmp_path / "ws"
+
+    outcome = store.seed(workspace_dir, _two_clones(workspace_dir, lock_a, lock_b))
+
+    cache = workspace_dir / ".cache" / "uv"
+    assert outcome.copied == [key_a]
+    assert _files_under(cache) == _files_under(first)  # nothing of the failed seed
+    assert (cache / "wheel" / "module.py").read_text() == "from a"
+    assert os.listdir(workspace_dir / ".cache") == ["uv"]  # no staging left behind

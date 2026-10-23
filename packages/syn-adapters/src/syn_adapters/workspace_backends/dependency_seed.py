@@ -223,8 +223,10 @@ class DependencySeedStore:
         ``(repository, host path of its checkout)``. A seed the store does not
         have is reported missing, not raised: that workspace installs cold.
 
-        A copy that fails partway removes the whole of that tool's cache from
-        the workspace, so it installs cold rather than from half a seed.
+        Each seed is merged into a staging copy of that tool's cache and
+        swapped in whole, so a copy that fails partway leaves the cache as the
+        earlier seeds left it: the failed repository installs cold, never from
+        half a seed, and an earlier repository's seed is kept (#1812).
 
         Ends with a `prune`: a cache hit is the only event a store that is
         over budget may ever see again.
@@ -243,6 +245,7 @@ class DependencySeedStore:
         self, key: SeedKey, clone_dir: Path, destination: Path, outcome: SeedOutcome
     ) -> None:
         source = self._root / key.relative_path
+        staging = destination.parent / f".{destination.name}-staging-{uuid.uuid4().hex}"
         try:
             with _seed_lease(source, exclusive=False):
                 # Checked under the lease: a prune may have deleted the seed
@@ -250,16 +253,22 @@ class DependencySeedStore:
                 if not source.is_dir():
                     outcome.missing.append((key, clone_dir))
                     return
+                if destination.exists():
+                    # Hardlinks, so staging costs no copy of the earlier seeds.
+                    # `_merge_tree` unlinks before it writes a file, so nothing
+                    # written to staging reaches the destination's inodes.
+                    shutil.copytree(destination, staging, symlinks=True, copy_function=os.link)
                 # Touched under the lease, so a prune waiting on it re-reads
                 # this as the seed's LRU clock before deciding.
                 os.utime(source)
-                _copy_writable(source, destination)
+                _copy_writable(source, staging)
+            _swap_in(staging, destination)
         except OSError:
-            logger.exception("Could not copy dependency seed %s; installing cold", _label(key))
-            # The destination is fresh (no agent has run yet), so all of it
-            # goes, including any earlier clone's seed for the same tool.
-            shutil.rmtree(destination, ignore_errors=True)
-            outcome.copied = [copied for copied in outcome.copied if copied.tool != key.tool]
+            logger.exception(
+                "Could not copy dependency seed %s; installing cold, earlier seeds kept",
+                _label(key),
+            )
+            shutil.rmtree(staging, ignore_errors=True)
             return
         outcome.copied.append(key)
 
@@ -467,9 +476,25 @@ def _merge_tree(source: Path, destination: Path) -> None:
             if src.is_symlink():
                 _place_symlink(src.readlink(), dst)
                 continue
-            if dst.is_symlink():
+            # Unlinked, never written through: the destination may be a
+            # hardlinked staging copy of a cache `_swap_in` has yet to replace.
+            if dst.is_symlink() or dst.is_file():
                 dst.unlink()
             shutil.copy2(src, dst, follow_symlinks=False)
+
+
+def _swap_in(staging: Path, destination: Path) -> None:
+    """Replace ``destination`` with ``staging``; on failure ``destination`` is as it was."""
+    retired = destination.parent / f".{destination.name}-retired-{uuid.uuid4().hex}"
+    if destination.exists():
+        destination.rename(retired)
+    try:
+        staging.rename(destination)
+    except OSError:
+        if retired.exists():
+            retired.rename(destination)
+        raise
+    shutil.rmtree(retired, ignore_errors=True)
 
 
 def _place_symlink(link: Path, destination: Path) -> None:
