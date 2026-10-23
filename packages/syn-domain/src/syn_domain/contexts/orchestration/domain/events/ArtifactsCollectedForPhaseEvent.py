@@ -7,7 +7,7 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from event_sourcing import DomainEvent, event
 from pydantic import Field
 
-from syn_domain.contexts.orchestration._shared.file_transfer import (
+from syn_domain.contexts.orchestration._shared.FileRefusalValueObjects import (
     FileRefusal,  # noqa: TC001 - needed at runtime for Pydantic
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (

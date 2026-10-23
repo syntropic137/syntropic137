@@ -37,10 +37,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
-    OutputCollectionIncompleteError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.output_refusals import (
+    OutputCollectionIncompleteError,
 )
 
 if TYPE_CHECKING:
