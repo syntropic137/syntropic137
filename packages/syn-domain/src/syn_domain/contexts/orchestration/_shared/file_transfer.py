@@ -45,6 +45,13 @@ class FileRefusal(BaseModel):
         return f"{self.path} ({self.reason})"
 
 
+def read_refusals(raw: object) -> tuple[FileRefusal, ...]:
+    """The refusals on a replayed event, typed whether stored as models or as dicts."""
+    if not isinstance(raw, list | tuple):
+        return ()
+    return tuple(r if isinstance(r, FileRefusal) else FileRefusal.model_validate(r) for r in raw)
+
+
 class FilesRefusedError(RuntimeError):
     """A read refused entries it was asked for, so its result is not whole.
 

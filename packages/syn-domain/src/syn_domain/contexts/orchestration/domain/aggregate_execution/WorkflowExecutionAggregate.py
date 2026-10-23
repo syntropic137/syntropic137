@@ -18,6 +18,7 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts.orchestration._shared.file_transfer import FileRefusal, read_refusals
 from syn_domain.contexts.orchestration._shared.phase_order import refuse_phase_order_conflict
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     LeftBranches,
@@ -336,6 +337,7 @@ class WorkflowExecutionAggregate(
         #: The first workspace's verified checkout (#967); None until it is applied.
         self._starting_checkout: list[SourceCommit] | None = None
         self._image_manifests: dict[str, ImageManifestReading] = {}
+        self._refused_files: dict[str, tuple[FileRefusal, ...]] = {}
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -503,6 +505,10 @@ class WorkflowExecutionAggregate(
     def starting_checkout(self) -> list[SourceCommit]:
         """Each pinned repository's verified commit when the run's first workspace began."""
         return self._starting_checkout or []
+
+    def refused_files_for(self, phase_id: str) -> tuple[FileRefusal, ...]:
+        """The output files the phase's collection was refused, by path and reason (#1913)."""
+        return self._refused_files.get(phase_id, ())
 
     def image_manifest_for(self, phase_id: str) -> ImageManifestReading | None:
         """The image manifest of the phase's latest workspace; None if none was recorded."""
@@ -1007,6 +1013,9 @@ class WorkflowExecutionAggregate(
         self._phase_artifact_ids.setdefault(phase_id, []).extend(evt(event, "artifact_ids", []))
         if evt(event, "deliverable_recovered", False):
             self._recovered_phases.add(phase_id)
+        refused = read_refusals(evt(event, "refused_files", []))
+        if refused:
+            self._refused_files[phase_id] = refused
         # The salvage input has done its job for this phase and stops being
         # replayed state: a later to-do item for the same phase must re-read
         # the deliverable, never re-salvage from a stale message. Dropping it

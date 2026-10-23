@@ -92,4 +92,5 @@ def artifacts_collected_event(
         session_id=command.session_id,
         deliverable_recovered=command.deliverable_recovered,
         observed_heads=list(command.observed_heads),
+        refused_files=list(command.refused_files),
     )

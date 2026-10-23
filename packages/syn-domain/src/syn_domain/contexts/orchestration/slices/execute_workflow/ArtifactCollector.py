@@ -22,6 +22,10 @@ from syn_domain.contexts.artifacts import (
     PhaseOutputFile,
     primary_text,
 )
+from syn_domain.contexts.orchestration._shared.file_transfer import (
+    FileRefusal,
+    FilesRefusedError,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_SOURCE_PATH,
     DescribeWork,
@@ -179,6 +183,44 @@ class CollectedArtifacts:
     #: reading the artifact; this tells the execution record (#1195, #1300),
     #: which is what anyone counting salvages across many runs reads.
     deliverable_recovered: bool = False
+    #: Output files the provider would not read, by path and reason (#1913).
+    #: Collection went on without them; the execution record says so.
+    refused: tuple[FileRefusal, ...] = ()
+
+
+class OutputCollectionIncompleteError(RuntimeError):
+    """The walk of the phase's output stopped early, so nobody knows what it held.
+
+    The refusal policy (#1913): a refused FILE is named and recorded, and the
+    rest of the output is collected; a walk that stopped (too many entries,
+    too deep) cannot say which files it missed, so the phase's output is not
+    collected as if it were whole.
+    """
+
+    def __init__(self, refused: tuple[FileRefusal, ...]) -> None:
+        self.refused = refused
+        super().__init__(
+            "the phase's output could not be listed in full: "
+            + ", ".join(r.describe() for r in refused)
+            + ". Reduce the files under artifacts/output, or raise the collection limits."
+        )
+
+
+async def collect_output_files(
+    workspace: ArtifactWorkspace, patterns: list[str]
+) -> tuple[list[tuple[str, bytes]], tuple[FileRefusal, ...]]:
+    """The phase's output files and what was refused, under the refusal policy.
+
+    Raises:
+        OutputCollectionIncompleteError: the walk stopped before listing it all.
+    """
+    try:
+        return await workspace.collect_files(patterns=patterns), ()
+    except FilesRefusedError as e:
+        if not e.complete:
+            raise OutputCollectionIncompleteError(e.refused) from e
+        logger.warning("Output files refused at collection: %s", e)
+        return list(e.files), e.refused
 
 
 @dataclass(frozen=True)
@@ -614,9 +656,7 @@ class ArtifactCollector:
         Returns:
             CollectedArtifacts with IDs and first artifact content for injection.
         """
-        collected = await workspace.collect_files(
-            patterns=[_OUTPUT_GLOB],
-        )
+        collected, refused = await collect_output_files(workspace, [_OUTPUT_GLOB])
         artifacts = [(path, body) for path, body in collected if _is_collectable(path)]
 
         deliverables = await self._deliverables(
@@ -645,6 +685,7 @@ class ArtifactCollector:
             first_content=primary_text(files),
             files=files,
             deliverable_recovered=any(d.recovered for d in deliverables),
+            refused=refused,
         )
 
     async def _store(
@@ -810,7 +851,7 @@ class ArtifactCollector:
             # when it will not complete, and it shares the pattern, so fixing
             # only the other site would leave every such run sweeping junk
             # (issue #919).
-            partial_collected = await workspace.collect_files(patterns=[_OUTPUT_GLOB])
+            partial_collected, _ = await collect_output_files(workspace, [_OUTPUT_GLOB])
             kept: list[_Deliverable] = []
             for artifact_path, artifact_content in partial_collected:
                 if not _is_collectable(artifact_path):

@@ -18,7 +18,9 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-from syn_domain.contexts.orchestration._shared.file_transfer import FileRefusal
+from syn_domain.contexts.orchestration._shared.file_transfer import (
+    FileRefusal,  # noqa: TC001 - needed at runtime for Pydantic
+)
 
 IMAGE_MANIFEST_ROOT = "/opt/agentic"
 """The transfer root the manifest lives under, inside every workspace image."""
