@@ -1,0 +1,22 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/upstream_failure.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/upstream_failure.py
+index 4d1f0087a..1313a39f3 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/upstream_failure.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/upstream_failure.py
+@@ -71,8 +71,6 @@ def _domain_kind(kind: HarnessFailureKind) -> UpstreamFailureKind:
+             return UpstreamFailureKind.CAPACITY
+         case HarnessFailureKind.RATE_LIMITED:
+             return UpstreamFailureKind.RATE_LIMITED
+-        case HarnessFailureKind.QUOTA:
+-            return UpstreamFailureKind.QUOTA
+         case HarnessFailureKind.AUTH:
+             return UpstreamFailureKind.AUTH
+         case HarnessFailureKind.REFUSAL:
+@@ -80,7 +78,7 @@ def _domain_kind(kind: HarnessFailureKind) -> UpstreamFailureKind:
+         case HarnessFailureKind.UNKNOWN:
+             return UpstreamFailureKind.UNKNOWN
+         case _:
+-            assert_never(kind)
++            return UpstreamFailureKind.UNKNOWN
+ 
+ 
+ def _now() -> datetime:

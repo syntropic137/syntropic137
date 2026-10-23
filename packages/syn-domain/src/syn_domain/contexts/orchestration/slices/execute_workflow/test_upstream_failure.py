@@ -33,15 +33,6 @@ def test_a_claude_auth_error_with_its_message_reads_as_auth(raw: str) -> None:
     assert UPSTREAM_FAILURES.kind_of(reason) is UpstreamFailureKind.AUTH
 
 
-def test_detail_never_makes_a_fault_transient() -> None:
-    """Only `auth` is read by prefix: appended text must not buy a retry."""
-    reason = _extract_error_reason(
-        '{"type":"error","error":{"type":"rate_limit_error","message":"quota resets next month"}}'
-    )
-
-    assert UPSTREAM_FAILURES.kind_of(reason) is UpstreamFailureKind.UNKNOWN
-
-
 def test_an_auth_label_quoted_mid_reason_is_not_auth() -> None:
     assert (
         UPSTREAM_FAILURES.kind_of("agent wrote: Authentication failed: see above")

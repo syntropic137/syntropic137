@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/upstream_failure.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/upstream_failure.py
+index 4d1f0087a..aef253807 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/upstream_failure.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/upstream_failure.py
+@@ -124,7 +124,7 @@ class HarnessUpstreamFailureReader:
+         provider, failure = self._classify(reason)
+         if failure is None or failure.kind is not HarnessFailureKind.QUOTA:
+             return None
+-        return QuotaExhaustion(provider=provider, resets_at=failure.resets_at)
++        return QuotaExhaustion(provider=provider)
+ 
+ 
+ #: The reader production uses: the one place the port is bound.
