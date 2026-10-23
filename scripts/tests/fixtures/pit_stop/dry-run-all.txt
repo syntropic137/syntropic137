@@ -6,10 +6,10 @@
    disk: not reported by this API (predates #1560)
 
 ==> [T] precheck: the deployed compose is origin/main's published compose, image pins aside
+   (dry-run) git -C <PARENT>/syntropic137 fetch -q origin
    no drift
 
 ==> [T] prepare: worktree at origin/main, bump to 0.0.0-beta.1310
-   (dry-run) git -C <PARENT>/syntropic137 fetch -q origin
    (dry-run) git -C <PARENT>/syntropic137 worktree add -b chore/bump-0.0.0-beta.1310 <PARENT>/syntropic137_worktrees/pit-stop-0.0.0-beta.1310 origin/main
 
 ==> [T] build: syn-api + syn-gateway v0.0.0-beta.1310 for linux/amd64 (commit <the bump commit on origin/main>)

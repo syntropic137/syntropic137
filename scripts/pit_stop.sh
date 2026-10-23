@@ -507,6 +507,8 @@ if [ "$MODE" != "swap" ]; then
     # host. beta.6 aborted on every start for want of the session-inventory
     # archive dir it carried (#1511). Read-only, so it runs under --dry-run too.
     step "precheck: the deployed compose is $REF's published compose, image pins aside"
+    # Fetched here, not at prepare, so $REF is the ref that ships, not a stale one.
+    run git -C "$REPO_TOP" fetch -q origin
     # SYN_PIT_PUBLISHED_COMPOSE names a file to compare against instead, e.g.
     # the release asset a host was installed from.
     if [ -n "${SYN_PIT_PUBLISHED_COMPOSE:-}" ]; then
@@ -525,7 +527,6 @@ if [ "$MODE" != "swap" ]; then
     step "prepare: worktree at $REF, bump to $VERSION"
     WT="$WT_BASE/pit-stop-$VERSION"
     [ -e "$WT" ] && die "$WT already exists; remove it or pick another version"
-    run git -C "$REPO_TOP" fetch -q origin
     run git -C "$REPO_TOP" worktree add -b "chore/bump-$VERSION" "$WT" "$REF"
     if [ "$DRY" = 0 ]; then
         git -C "$WT" submodule update --init --recursive --quiet

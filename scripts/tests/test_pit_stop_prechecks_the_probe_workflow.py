@@ -245,13 +245,16 @@ def test_an_active_probe_workflow_lets_the_pit_stop_go_on(
     tmp_path: Path, fake_api: tuple[_Api, str]
 ) -> None:
     """Dry run: the precheck passes and the stages after it start. The fake
-    ssh then refuses to read the compose file, which is where this one ends."""
+    git then refuses to show the published compose, the next precheck's read
+    (#1511), which is where this one ends."""
     state, api = fake_api
     state.workflows = [_summary(f"{_PROBE}0", archived=True), _summary(_PROBE, archived=False)]
     run = _run(tmp_path, api, "--dry-run")
     assert f"probe workflow {_PROBE}: active" in run.proc.stdout
-    assert "prepare:" in run.proc.stdout
-    assert "could not read the deployed compose file" in run.proc.stderr
+    assert "precheck: the deployed compose is origin/main's published compose" in run.proc.stdout
+    assert (
+        "could not read docker/docker-compose.syntropic137.yaml at origin/main" in run.proc.stderr
+    )
     assert "probe workflow" not in run.proc.stderr
     assert all(method == "GET" for method, _ in state.requests)
     _password_stayed_secret(run, state)
@@ -282,5 +285,5 @@ def test_a_run_that_dispatches_no_probe_does_not_check_for_one(
     state, api = fake_api
     state.workflows = [_summary(_PROBE, archived=True)]
     run = _run(tmp_path, api, "--dry-run", flag)
-    assert "prepare:" in run.proc.stdout
+    assert "precheck: the deployed compose is origin/main's published compose" in run.proc.stdout
     assert not any(path.startswith("/api/v1/workflows") for _, path in state.requests)
