@@ -41,8 +41,9 @@ money?" an answerable question rather than a guess.
 
 ## Which implementation workflow: `implement` or `quickfix`?
 
-Two workflows produce a PR. `sdlc-implement-v2` runs four phases with an
-independent cross-model verify. `sdlc-quickfix-v1` runs one phase and has no
+Two workflows produce a PR. `sdlc-implement-v3` (the default; `sdlc-implement-v2`
+in `implement/` is its predecessor) runs premise, implement, an independent
+cross-model verify and up to two fix rounds. `sdlc-quickfix-v1` runs one phase and has no
 verification behind it at all.
 
 **The test is not size. It is: is there anything to prove?**

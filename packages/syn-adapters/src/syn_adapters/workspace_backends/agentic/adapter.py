@@ -721,7 +721,15 @@ class AgenticIsolationAdapter:
             msg = f"cannot read files from {base_path!r}: not a transfer root"
             raise ValueError(msg)
         root = cast("TransferRoot", base_path)
-        return await self._provider.read_files(workspace, patterns, base_path=root)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        result = await self._provider.read_files(workspace, patterns, base_path=root)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
+        if result.refused:
+            # A refused entry (a link, a special file, or past a read limit) is
+            # a file the caller asked for and would not get; fail closed rather
+            # than return a partial set as if it were whole.
+            refused = ", ".join(f"{r.path} ({r.reason})" for r in result.refused)
+            msg = f"the {self._kit.isolation_type} provider refused to read: {refused}"
+            raise RuntimeError(msg)
+        return list(result.files)
 
 
 def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:

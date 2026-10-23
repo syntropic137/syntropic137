@@ -50,8 +50,10 @@ leakage the platform does not yet prevent.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -79,6 +81,7 @@ _RECORDER_SOURCE = '''\
 """Loaded by scripts/eval_implementer.py from outside the tree: how each hidden test ended."""
 import json
 import os
+import re
 
 _ended = {}
 
@@ -203,6 +206,267 @@ def check_commits(loaded: ImplementerSuite, repo: Path) -> list[str]:
         for path in case.hidden_tests:
             if _git(repo, "cat-file", "-e", f"{case.fix_commit}:{path}").returncode != 0:
                 problems.append(f"{case.id}: hidden test {path} is not in fix_commit")
+        problems.extend(unstated_contract_problems(case, repo))
+    return problems
+
+
+class Contracts(_Frozen):
+    """What a hidden test relies on by exact spelling. A correct fix that spells any
+    of them differently fails, so each must be visible to the agent (#2023)."""
+
+    names: frozenset[str]
+    """Names imported from a `syn_*` package, and attribute names monkeypatched by string."""
+    literals: frozenset[str]
+    """Text in `assert "<text>" in ...` and `raises(match=...)` (`not in` needs no statement)."""
+    attributes: frozenset[str]
+    """Attributes the test reads that the test itself does not define."""
+    patched: frozenset[tuple[str, str]]
+    """(dotted `syn_*` target, attribute) pairs a test monkeypatches. The attribute
+    must exist on that target at the pin: a fixture that patches a name only the
+    fix adds errors every test that uses it, whatever the patch does."""
+
+
+def asserted_contracts(source: str) -> Contracts:
+    """Read a hidden test's exact spellings from its AST."""
+    tree = ast.parse(source)
+    imported = _syn_imports(tree)
+    patched: set[tuple[str, str]] = set()
+    names: set[str] = set()
+    literals: set[str] = set()
+    read: set[str] = set()
+    defined: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("syn_"):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "setattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                names.add(node.args[1].value)
+                target = _dotted(node.args[0], imported)
+                if target is not None:
+                    patched.add((target, node.args[1].value))
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "setattr"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+                and node.args[0].value.startswith("syn_")
+                and "." in node.args[0].value
+            ):
+                owner, _, attribute = node.args[0].value.rpartition(".")
+                patched.add((owner, attribute))
+            for keyword in node.keywords:
+                if (
+                    keyword.arg == "match"
+                    and isinstance(keyword.value, ast.Constant)
+                    and isinstance(keyword.value.value, str)
+                ):
+                    literals.add(re.sub(r"\\(.)", r"\1", keyword.value.value))
+        elif (
+            isinstance(node, ast.Compare)
+            and isinstance(node.left, ast.Constant)
+            and isinstance(node.left.value, str)
+            and any(isinstance(op, ast.In) for op in node.ops)
+        ):
+            literals.add(node.left.value)
+        if isinstance(node, ast.Attribute):
+            (read if isinstance(node.ctx, ast.Load) else defined).add(node.attr)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+        elif isinstance(node, ast.arg) or (isinstance(node, ast.keyword) and node.arg):
+            defined.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            defined.add(node.id)
+    attributes = {a for a in read - defined if not a.startswith("__")}
+    return Contracts(
+        names=frozenset(names),
+        literals=frozenset(literals),
+        attributes=frozenset(attributes),
+        patched=frozenset(patched),
+    )
+
+
+def _syn_imports(tree: ast.Module) -> dict[str, str]:
+    """Local name -> dotted path, for every name the test imports from a `syn_*` package."""
+    imported: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("syn_"):
+            for alias in node.names:
+                imported[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if not alias.name.startswith("syn_"):
+                    continue
+                if alias.asname:
+                    imported[alias.asname] = alias.name
+                else:
+                    # `import syn_a.b.c` binds `syn_a`; the rest is reached by attribute.
+                    root = alias.name.split(".")[0]
+                    imported[root] = root
+    return imported
+
+
+def _dotted(expr: ast.expr, imported: dict[str, str]) -> str | None:
+    """The dotted `syn_*` path an expression names, through attribute chains.
+
+    `client_retry` (from-imported), `cr` (`import ... as cr`) and
+    `syn_adapters.github.client_retry` (plain `import`) all resolve to
+    `syn_adapters.github.client_retry`. Anything rooted elsewhere is None.
+    """
+    attributes: list[str] = []
+    while isinstance(expr, ast.Attribute):
+        attributes.append(expr.attr)
+        expr = expr.value
+    if not isinstance(expr, ast.Name) or expr.id not in imported:
+        return None
+    return ".".join([imported[expr.id], *reversed(attributes)])
+
+
+def _module_names(body: list[ast.stmt]) -> set[str]:
+    """Names a module or class body binds, through `if` and `try` blocks."""
+    bound: set[str] = set()
+    for node in body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.Assign):
+            bound.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            bound.add(node.target.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound.update((a.asname or a.name).split(".")[0] for a in node.names)
+        elif isinstance(node, ast.If):
+            bound |= _module_names(node.body) | _module_names(node.orelse)
+        elif isinstance(node, ast.Try):
+            for block in (node.body, node.orelse, node.finalbody):
+                bound |= _module_names(block)
+            for handler in node.handlers:
+                bound |= _module_names(handler.body)
+    return bound
+
+
+def _patched_absent_at_pin(
+    repo: Path, commit: str, patched: frozenset[tuple[str, str]]
+) -> frozenset[tuple[str, str]]:
+    """The monkeypatch targets whose attribute the pin does not define.
+
+    A target is a module (`client_retry`) or a class in one
+    (`syn_adapters.github.client.GitHubAppClient`). A target whose module the pin
+    does not have at all is new in the fix, so its interface is the task's to
+    state and the import check covers it; it is not reported here.
+    """
+    if not patched:
+        return frozenset()
+    files = set(_git(repo, "ls-tree", "-r", "--name-only", commit).stdout.splitlines())
+
+    def source_of(dotted: str) -> str | None:
+        rel = dotted.replace(".", "/")
+        for path in sorted(files):
+            if path.endswith((f"/src/{rel}.py", f"/src/{rel}/__init__.py")):
+                return _git(repo, "show", f"{commit}:{path}").stdout
+        return None
+
+    absent: set[tuple[str, str]] = set()
+    for target, attribute in patched:
+        module = source_of(target)
+        if module is not None:
+            body = ast.parse(module).body
+        else:
+            owner, _, cls = target.rpartition(".")
+            parent = source_of(owner) if owner else None
+            if parent is None:
+                continue
+            classes = [
+                n for n in ast.parse(parent).body if isinstance(n, ast.ClassDef) and n.name == cls
+            ]
+            if not classes:
+                continue
+            body = classes[0].body
+        if attribute not in _module_names(body):
+            absent.add((target, attribute))
+    return frozenset(absent)
+
+
+def _attributes_at_pin(
+    repo: Path, commit: str, attributes: frozenset[str]
+) -> tuple[frozenset[str], tuple[str, ...]]:
+    """Which of `attributes` code at the pin defines or reads, and what went unsearched.
+
+    A bare word is not enough: `unsettled` existed at a pin only as an unrelated
+    local variable while the hidden test read `error.unsettled`. Submodules are
+    searched at their gitlinks. One with no local clone cannot be searched, so its
+    path is returned and the check reports itself incomplete instead of passing.
+    """
+    if not attributes:
+        return frozenset(), ()
+    names = "|".join(sorted(re.escape(a) for a in attributes))
+    pattern = rf"\.(?:{names})\b|\bdef (?:{names})\b|^\s+(?:{names})\s*:\s*[A-Za-z_\[]"
+    word = re.compile(rf"(?:{names})\b")
+
+    def found_in(at: Path, sha: str) -> set[str]:
+        out = _git(at, "grep", "-h", "-o", "-P", pattern, sha, "--", "*.py").stdout
+        return {m.group(0) for m in word.finditer(out)}
+
+    seen = found_in(repo, commit)
+    unsearched: list[str] = []
+    modules = _git(repo, "config", "--blob", f"{commit}:.gitmodules", "--get-regexp", r"\.path$")
+    for line in modules.stdout.splitlines():
+        _, path = line.split(maxsplit=1)
+        parts = _git(repo, "ls-tree", commit, path).stdout.split()
+        if len(parts) < 3 or parts[1] != "commit":
+            continue
+        sub = repo / path
+        if (sub / ".git").exists():
+            seen |= found_in(sub, parts[2])
+        else:
+            unsearched.append(path)
+    return frozenset(seen & attributes), tuple(unsearched)
+
+
+def unstated_contract_problems(case: ImplementerCase, repo: Path) -> list[str]:
+    """Spellings a hidden test needs that are neither in the task nor at the pin."""
+    problems: list[str] = []
+    for path in case.hidden_tests:
+        shown = _git(repo, "show", f"{case.fix_commit}:{path}")
+        if shown.returncode != 0:
+            continue
+        found = asserted_contracts(shown.stdout)
+        for name in sorted(found.names):
+            seen = _git(repo, "grep", "-q", "-w", "-F", name, case.commit, "--", ".")
+            if name not in case.task and seen.returncode != 0:
+                problems.append(f"{case.id}: {path} needs name {name!r}, absent from task and pin")
+        for literal in sorted(found.literals):
+            seen = _git(repo, "grep", "-q", "-F", literal, case.commit, "--", ".")
+            if literal not in case.task and seen.returncode != 0:
+                problems.append(
+                    f"{case.id}: {path} asserts text {literal!r}, absent from task and pin"
+                )
+        unpatchable = frozenset(p for p in found.patched if p[1] not in case.task)
+        for target, attribute in sorted(_patched_absent_at_pin(repo, case.commit, unpatchable)):
+            problems.append(
+                f"{case.id}: {path} monkeypatches {target}.{attribute}, which the pin does not"
+                " define and the task never states"
+            )
+        unstated = frozenset(a for a in found.attributes if a not in case.task)
+        at_pin, unsearched = _attributes_at_pin(repo, case.commit, unstated)
+        missing = unstated - at_pin
+        if missing and unsearched:
+            problems.append(
+                f"{case.id}: {path} reads {sorted(missing)!r}, not found, and submodule(s)"
+                f" {', '.join(unsearched)} could not be searched (no local clone):"
+                " the contract check is incomplete; run `git submodule update --init`"
+            )
+            continue
+        for attribute in sorted(missing):
+            problems.append(
+                f"{case.id}: {path} reads attribute {attribute!r}, absent from task and pin"
+            )
     return problems
 
 
@@ -232,17 +496,30 @@ def _check_out_submodules(repo: Path, tree: Path) -> None:
     Never from the network: the environment has nothing to fetch, and a
     submodule commit the local clone lacks is an ERROR, not something to go
     and get.
+
+    Never through `git config` or `git submodule` either: `tree` is a worktree
+    of `repo`, so both write the config every worktree and the main checkout
+    share. That once repointed every checkout's submodule URLs at a scratch
+    worktree. Each submodule is a plain `--shared` clone at its gitlink instead,
+    which writes only inside `tree`.
     """
     paths = _git(tree, "config", "--file", ".gitmodules", "--get-regexp", r"submodule\..*\.path")
     for line in paths.stdout.splitlines():
-        key, path = line.split(maxsplit=1)
-        name = key.removeprefix("submodule.").removesuffix(".path")
-        _git(tree, "config", f"submodule.{name}.url", str((repo / path).resolve()))
-    updated = _git(
-        tree, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--quiet"
-    )
-    if updated.returncode != 0:
-        raise _EnvironmentFailure(f"submodules at the pin: {updated.stderr.strip()}")
+        _, path = line.split(maxsplit=1)
+        listed = _git(tree, "ls-tree", "HEAD", path).stdout.split()
+        if len(listed) < 3 or listed[1] != "commit":
+            continue
+        gitlink, source, target = listed[2], (repo / path).resolve(), tree / path
+        cloned = _git(
+            target.parent, "clone", "--quiet", "--shared", "--no-checkout", str(source), str(target)
+        )
+        checked = (
+            cloned.returncode == 0
+            and _git(target, "checkout", "--quiet", "--detach", gitlink).returncode == 0
+        )
+        if not checked:
+            detail = cloned.stderr.strip() or f"{gitlink} is not in {source}"
+            raise _EnvironmentFailure(f"submodule {path} at the pin: {detail}")
 
 
 class _EnvironmentFailure(Exception):
