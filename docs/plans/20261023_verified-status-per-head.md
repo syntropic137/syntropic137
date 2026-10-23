@@ -32,15 +32,22 @@ Two facts make it fixable:
   as `reported_review_verdict` (`domain/events/AgentExecutionCompletedEvent.py:67`).
   `ReviewRecord.report` then folds it into the aggregate
   (`WorkflowExecutionAggregate.py`, `on_agent_execution_completed`).
-- **The reviewed commit is already a domain fact.** Every Phase's
-  provisioning records its Starting Checkout, read back from the workspace
-  and verified against the pin (#967): `WorkspaceProvisionedForPhase.checked_out_commits`
-  (`domain/aggregate_execution/phase_step_events.py`, `workspace_provisioned_event`).
-  For a verify Phase, that is exactly the commit the verifier read. The
-  agent's own text ("Certified SHA: ...") is never used.
+- **The reviewed commit is NOT a domain fact yet.** Every Phase's provisioning
+  records its Starting Checkout, read back and verified against the pin (#967):
+  `WorkspaceProvisionedForPhase.checked_out_commits`. But a verify Phase today
+  is provisioned at the run's pin, and the agent then checks out the
+  implementation SHA it read from an artifact. That is
+  `workflows/sdlc/implement-v4-precheck/phases/verify.md`, "First: check out
+  the code you are verifying", and `reverify-pr`'s `prepare` resolves the PR
+  head the same way. So the commit judged is chosen by an agent, and the
+  platform has not verified it.
 
-What is missing is a record joining the two per commit, and something that
-tells GitHub.
+So three things are missing:
+- a platform-resolved, read-back **review target** (slice S0);
+- a record joining verdict and target per commit;
+- something that tells GitHub.
+
+Until S0 ships, no review counts toward a Head Certification.
 
 ## 2. Outcome
 
@@ -60,9 +67,17 @@ tells GitHub.
 Added to `docs/architecture/orchestration-ubiquitous-language.md` by slice S1
 and S2:
 
-- **Reviewed Head.** The commit, per repository, that a reviewing Phase's
-  Starting Checkout recorded. That is what the Review Verdict is about. It is
-  never taken from the agent's report.
+- **Reviewing Phase.** A Phase that declares `requires_verdict` in its frozen
+  definition (the workflow as pinned at start). Only its Review Verdict can
+  move a Head Certification. A Phase that reports a verdict without declaring
+  `requires_verdict`, such as an implement Phase, is ignored. So an author
+  cannot certify its own change.
+- **Review Target.** The commit, per repository, that the platform resolves
+  for a Reviewing Phase before provisioning it. That is the branch head this
+  Execution's own earlier Phases pushed (Own Push), or, for a PR-targeted run,
+  the PR's head as the forge reports it. The platform checks it out and reads
+  it back, so it is the Phase's Starting Checkout. The agent never chooses it.
+- **Reviewed Head.** A Review Target whose Reviewing Phase reported a verdict.
 - **Head Certification.** The platform's standing judgement of one commit in
   one repository. It is folded from every Review Verdict about that Reviewed
   Head, plus Certification Overrides and Carried Certifications. Its state is
@@ -73,9 +88,12 @@ and S2:
   reason and an evidence link, such as the integration run that settled
   Docker-only evidence.
 - **Carried Certification.** A certification that a later head inherits from
-  an earlier certified head. That happens only when every commit between them
-  is a Base Merge or a Mutation-only Commit, and the required checks are green
-  on the later head (section 6).
+  an earlier certified head (section 6).
+- **Base Merge.** A commit with two parents, the second on the base branch.
+  Its tree equals the tree of a clean merge of the same two parents, computed
+  by the platform. Any conflict resolution or extra edit means it is not one.
+- **Mutation-only Commit.** A commit with one parent whose every changed path
+  is under `.mutations/`.
 - **Verified Status.** The GitHub commit status, context `syn137/verified`,
   that publishes a Head Certification. It is a projection of a Lane 1 fact
   onto the forge, never a source of truth: the aggregate is the truth.
@@ -88,14 +106,15 @@ see that entry).
 
 ### 4.1 WorkflowExecution (existing aggregate) gains one event
 
-`ReviewVerdictRecorded`, emitted when a reviewing Phase completes, meaning a
-Phase that reported a Review Verdict. It carries:
+`ReviewVerdictRecorded`, emitted by the aggregate's own command handler
+(never by an event handler) when a **Reviewing Phase** completes with a verdict
+and a Review Target. It carries:
 
 | Field | Source |
 |---|---|
 | `execution_id`, `phase_id`, `workflow_id` | the aggregate |
 | `verdict` | `ReviewRecord.of(phase_id)` |
-| `reviewed_heads: list[SourceCommit]` | that Phase's own `WorkspaceProvisionedForPhase.checked_out_commits` |
+| `reviewed_heads: list[SourceCommit]` | that Phase's Review Target, as its own `WorkspaceProvisionedForPhase.checked_out_commits` read it back (S0) |
 | `verifier_model` | `AgentExecutionCompleted.agent_model` for that Phase |
 | `pull_requests: list[(repository, number)]` | `ObservedHead.open_pr_number` from that Phase's `ArtifactsCollectedForPhase`, when observed |
 
@@ -105,9 +124,10 @@ the aggregate, not in a ProcessManager. The aggregate keeps only the first
 provisioning's checkout today (`_starting_checkout`), so S1 adds a per-Phase
 map of checkouts.
 
-A Phase with no recorded checkout (an old event, or a Phase with no repo
-checkout) emits `reviewed_heads: []`. Nothing downstream acts on an empty
-list. That is the honest reading: nobody knows which commit it judged.
+A Reviewing Phase with no Review Target (one provisioned before S0, or with no
+repo checkout) emits no event. **No historical backfill.** Streams recorded
+before S1 contain no `ReviewVerdictRecorded`, and replay never creates one:
+past reviews were never platform-targeted, so their SHA is not a fact.
 
 ### 4.2 HeadCertification (new aggregate, orchestration)
 
@@ -119,12 +139,21 @@ stream per `repository@sha`, created with `ExpectedVersion.NoStream`
 |---|---|---|
 | `RecordReviewOfHead` | `HeadReviewed` | Idempotent on `(execution_id, phase_id)`: a duplicate records nothing. |
 | `OverrideCertification` | `CertificationOverridden` | Needs actor, reason and evidence link. Refused for an empty reason. |
-| `CarryCertificationForward` | `CertificationCarried` | Needs the facts in section 6. The aggregate re-checks them; refused unless every commit qualifies and the required checks are green. |
+| `CarryCertificationForward` | `CertificationCarried` | Idempotent on `(source_sha, source_version)`. Refused when this head already has an explicit decision (a review or an override), and refused unless the typed facts in section 6 qualify. |
+| `RevokeCarriedCertification` | `CarriedCertificationRevoked` | Sent when the source head's state leaves `certified` at a later version. |
 
-State: the ordered history plus `state`. **The latest decision wins, by
-stream order.** A blocked review after an override makes the head blocked
-again: new evidence beats an old decision. An override after a block makes it
-certified.
+State: the ordered history plus `state`. **Explicit decisions (reviews and
+overrides) are ordered by stream order, and the latest wins.** A blocked
+review after an override makes the head blocked again: new evidence beats an
+old decision. A carry never overrides an explicit decision, and is revoked if
+its source stops being certified.
+
+**Who may override.** `OverrideCertification` is accepted only from an
+authenticated operator identity holding an explicit override permission. A
+workspace token or an internal request without a person is refused. Today
+`workspace_ingress` passes internal requests without a person, so S5 adds the
+check at the route and records the authenticated identity as the actor, not a
+field the caller supplies.
 
 ## 5. ProcessManagers (Processor To-Do List, ADR-025)
 
@@ -133,9 +162,15 @@ Both live in `slices/publish_verified_status/` and follow
 pure and replay-safe, and `process_pending` does the work, live only.
 
 **`HeadReviewIntakeProcessManager`.**
-- Subscribes to `ReviewVerdictRecorded`.
-- To-do: one per `(execution_id, phase_id, repository, sha)`.
-- Process: dispatch `RecordReviewOfHead` to that head's stream.
+- Subscribes to `ReviewVerdictRecorded`, and to the recovery clock
+  (`InventoryReconciliationSweep`). The coordinator skips `process_pending`
+  during catch-up, so without a clock, a to-do written during replay would
+  wait for the next review.
+- To-do: one per `(execution_id, phase_id, repository, sha)`, in the
+  persistent projection store, written as a replay-safe upsert.
+- Process: dispatch `RecordReviewOfHead` to that head's stream. Mark the to-do
+  done only after the aggregate save succeeds; the aggregate's dedup makes a
+  retry safe.
 - No forge I/O.
 
 **`VerifiedStatusProcessManager`.**
@@ -146,17 +181,28 @@ pure and replay-safe, and `process_pending` does the work, live only.
   the aggregate version it came from.
 - Process: post the status when `posted_version < desired_version`.
 
-**Idempotency, keyed on `(sha, context)`.** A GitHub status is append-only per
-SHA, and the latest one with a given context wins. Re-posting the same state
-is harmless, so a crash between POST and recording the post just posts it
-again. The to-do key makes repeats cheap, not necessary for correctness.
+**Idempotency and ordering, keyed on `(repository, sha, context)`.** A GitHub
+status is append-only per SHA, and the latest one to arrive with a given
+context wins. Arrival order is not version order, so a stale `success` from
+one worker could land after a newer `failure`. Therefore:
+
+- Publishing is serialized per key with a durable lease, the same Postgres
+  row-lock pattern the run queue uses, never an in-memory lock.
+- Under the lease, the publisher re-reads the aggregate's current version and
+  state, posts that, and records `posted_version`.
+- An uncertain write (a timeout or a 5xx) is reconciled on the next pass. The
+  publisher reads `GET /repos/{o}/{r}/commits/{sha}/statuses`, compares, and
+  re-posts if they differ.
 
 **Replay safety.**
 - `handle_event` never calls the forge.
-- A first deploy replays every historical review. Each to-do records the
-  event's `recorded_at`, and `process_pending` marks to-dos older than the
-  flag's enable time as `historical` and posts nothing for them, so history
-  never paints statuses on old SHAs.
+- History cannot produce statuses. Nothing before S1 emits
+  `ReviewVerdictRecorded` (section 4.1).
+- The publisher also has a durable **publication epoch**, an event
+  `VerifiedStatusPublishingEnabled` recorded once when an operator enables
+  it. A to-do whose source event precedes that epoch is marked `historical`
+  and posts nothing. That decision is stored on the to-do, so a restart
+  cannot reclassify it.
 - Restarts resume from the checkpoint as usual.
 
 ## 6. Carry-forward
@@ -165,26 +211,33 @@ The PR head moves past a certified SHA. There is no stored "PR head moved"
 event (`github/domain/events/` holds only installation and trigger events), so
 the clock tick wakes the check, the same way the Quarantine Notice is woken.
 
-For each certified head with an open PR, `process_pending`:
+For each certified head S with an open PR, `process_pending` runs a host-side
+handler (no logic, only reads) that:
 
 1. Asks the forge for the PR's head S′. It stops if S′ equals S.
-2. Lists the commits S..S′ with their parents and the paths each changed, and
-   reads the conclusions of the base branch's required checks on S′. Required
-   checks are the union of the paginated rules API and classic protection; a
-   404 from classic protection means none is configured. These are the same
-   rules the v6 workflow uses.
-3. Dispatches `CarryCertificationForward(from=S, to=S′, facts)` to S′'s stream.
+2. Builds typed `CarryFacts`:
+   - `source=(S, version)`, read from S's stream, which must be `certified` at
+     that version;
+   - whether S is an ancestor of S′;
+   - every commit in S..S′ (all pages), with its parents, and for each
+     two-parent commit, whether its tree equals a clean merge the platform
+     computed in a scratch clone (`git merge-tree --write-tree`);
+   - each one-parent commit's changed paths;
+   - the base branch's required checks: the union of the paginated rules API
+     and classic protection (a 404 from classic protection means none is
+     configured), **minus the `syn137/verified` context itself**, each with
+     its conclusion on S′ and the source app's id.
 
-The aggregate's rule. Every commit in S..S′ must be one of:
+   Any read that fails or is incomplete becomes `unreadable` in the facts. It
+   is never omitted.
+3. Dispatches `CarryCertificationForward(facts)` to S′'s stream.
 
-- **A Base Merge.** It has two parents, and its second parent is on the base
-  branch. Every path it changes relative to its first parent is a path the
-  base branch changed between the two merge-bases. Equivalently: no
-  conflict-resolution edits.
-- **A Mutation-only Commit.** Every path it changes is under `.mutations/`.
-
-And every required check concluded `success` on S′. If any condition fails, S′
-stays unreviewed and gets no status. A real review is what it needs then.
+The aggregate's rule: S is certified at the cited version, S is an ancestor of
+S′, every commit is a Base Merge or a Mutation-only Commit, every
+prerequisite check concluded `success` from its expected app, and nothing is
+`unreadable`. Otherwise it refuses, and S′ stays unreviewed with no status. A
+real review is what it needs then. A carried certification is revoked if S
+later stops being certified.
 
 This covers 33 of the 66 older-head merges in section 1 (22 base merges and 11
 `.mutations/` commits). The other 33 changed code and must be reviewed again.
@@ -211,20 +264,33 @@ This covers 33 of the 66 older-head merges in section 1 (22 base merges and 11
   App gains `statuses: write`, with the same ordering rule the evidence plan
   gave `actions`. A test mints a token from a grant that includes
   `statuses: write` and asserts the phase token has `read`.
+- **A forged verdict.** A Phase cannot move a Head Certification by
+  reporting `certified`, unless it is a Reviewing Phase by the frozen
+  definition, of an execution of a workflow on the
+  `SYN_VERIFIED_STATUS_REVIEW_WORKFLOWS` allowlist (section 8). The target
+  must also be its platform-resolved Review Target. Cross-family verification
+  stays a workflow property; this plan does not check models.
 - Making the status required uses a ruleset rule pinned to the App's
   integration id, so only the App can satisfy it. That is safe only after the
   cap.
 
 ## 8. Feature flag (ADR-004)
 
-`SYN_VERIFIED_STATUS_ENABLED` (default `false`) and
-`SYN_VERIFIED_STATUS_REPOSITORIES` (an allowlist, default empty), in a
-Pydantic settings class, regenerated into `.env.example`.
+`SYN_VERIFIED_STATUS_ENABLED` (default `false`),
+`SYN_VERIFIED_STATUS_REPOSITORIES` (an allowlist, default empty) and
+`SYN_VERIFIED_STATUS_REVIEW_WORKFLOWS` (the workflow ids whose Reviewing
+Phases count, default empty), in a Pydantic settings class, regenerated into
+`.env.example`. Enabling also records the publication epoch event (section 5).
 
 - Recording (`ReviewVerdictRecorded`, `HeadReviewed` and the rest) is always
   on. It is Lane 1 truth, cheap, and it is what section 9 measures.
 - Only `VerifiedStatusProcessManager`'s POST is gated. While the flag is off,
-  its to-dos stay pending and are marked `historical` at enable time.
+  its to-dos stay pending, and those that precede the epoch are marked
+  `historical` when it is recorded.
+- **Review-only success is not published until evidence is integrated (S8)**,
+  because a certified review on a head whose declared evidence failed would
+  otherwise read green. So S4 to S7 can ship and run dark, recording and
+  measuring, but the flag is not turned on until S8.
 - Turning it on is a deploy-time setting on the owner's VPS. Nothing ships
   enabled.
 
@@ -251,26 +317,30 @@ real event and projection-store contracts, not hand-rolled dicts.
 
 | Slice | Change | Key tests |
 |---|---|---|
-| S1 | `ReviewVerdictRecorded` on WorkflowExecution, per-Phase checkout map, vocabulary "Reviewed Head" | a verify Phase emits it with its own checkout, not the run's first; no verdict means no event; a checkout-less Phase gives `reviewed_heads=[]`; replay of old streams is unchanged |
+| S0 | Review Target: before provisioning a Reviewing Phase, the platform resolves the target (Own Push head, or the PR head via `RemoteBranchPort`), checks it out, and reads it back. A new workflow arm drops the agent-side checkout step | target equals the pushed head; a moved branch is a Checkout Mismatch; the agent cannot change the recorded target |
+| S1 | `ReviewVerdictRecorded` on WorkflowExecution, emitted from the command handler for Reviewing Phases with a Review Target; vocabulary | an implement Phase reporting `certified` emits nothing; a verify Phase emits its own target, not the run's first checkout; no target means no event; replay of old streams emits nothing |
 | S2 | HeadCertification aggregate, commands and events, vocabulary | latest decision wins by stream order; duplicate review ignored; override needs a reason; carry rule accepts only Base Merge and Mutation-only Commit, with required checks green |
 | S3 | `HeadReviewIntakeProcessManager` + coordinator wiring | replay writes to-dos with no dispatch; live dispatches once; restart mid-batch does not double-record |
-| S4 | Agent-token cap for `statuses` and `checks`; `CommitStatusPort` + GitHub adapter; `VerifiedStatusProcessManager` behind the flag | cap test; flag off posts nothing; `historical` to-dos never post; a re-post after a crash is harmless; adapter contract test against the real endpoint shape |
-| S5 | Override: API route, CLI command, event; actor taken from the authenticated caller | refused without a reason; a later blocked review supersedes it |
-| S6 | Carry-forward facts handler + clock wake | merge with conflict edits refused; `.mutations/`-only accepted; red required check refused; S′ == S is a no-op |
+| S4 | Agent-token cap for `statuses` and `checks`; `CommitStatusPort` + GitHub adapter; `VerifiedStatusProcessManager` behind the flag, with a durable lease per key | cap test; flag off posts nothing; pre-epoch to-dos never post; two workers cannot post out of order; an uncertain write is reconciled; adapter contract test against the real endpoint shape |
+| S5 | Override: API route, CLI command, event; operator identity and override permission at the route | refused without a reason; refused for a workspace token or an unauthenticated internal call; a later blocked review supersedes it |
+| S6 | Carry-forward facts handler + clock wake + revocation | a merge whose tree differs from the clean merge is refused; non-ancestor refused; `.mutations/`-only accepted; red or unreadable prerequisite refused; `syn137/verified` excluded from prerequisites; a repeated carry is a no-op; a carry never overrides a review; revoked when the source is blocked |
 | S7 | Certification read model, API, measurement script | counts state their scope; a fixture is pinned to a real recorded head |
-| S8 (#2081) | Evidence input: `EvidenceSettled` facts for a head feed HeadCertification; `finalize_pr` reads `GET .../certification` instead of parsing manifests | every fail-open case Codex found on #2063 is a unit test here |
+| S8 (#2081) | Evidence input: the head's `EvidenceRequested` plan (with repository and head per step) and each `EvidenceStepSettled` feed HeadCertification. Certified needs every planned step `passed`; `void` and `unavailable` do not count. `finalize_pr` reads `GET .../certification` instead of parsing manifests | every fail-open case Codex found on #2063 is a unit test here; declared evidence with no plan holds; S to S′ patch-removal provenance holds |
 
-S4's cap must be deployed before the App permission changes. S8 is what lets
-the next SDLC arm's `finalize_pr` shrink back toward v4-precheck's length
-(#2081).
+S4's cap must be deployed before the App permission changes. Publishing is
+not enabled until S8, so success never means "reviewed but evidence unknown".
+S8 is also what lets the next SDLC arm's `finalize_pr` shrink back toward
+v4-precheck's length (#2081).
 
 ### On #2081: one model or two
 
 One. #2081 asks for a per-head evidence verdict computed in code. That is
 another input to the same question this plan answers: is this head good
-enough to merge? So HeadCertification takes evidence settlements as facts,
-and its state becomes certified only when the latest review certified the
-head **and** no evidence declared for that head is unsettled or failed. Two
+enough to merge? So HeadCertification takes the evidence plan and
+step settlements (`EvidenceRequested`, `EvidenceStepSettled`) as facts. Its
+state becomes certified only when the latest explicit review certified the
+head **and** every evidence step planned for that head passed. The gate itself
+still opens on any outcome; this is where the outcome finally counts. Two
 per-head models would disagree on the same SHA and need reconciling. S8
 extends the aggregate; it does not add a second one.
 
@@ -278,12 +348,15 @@ extends the aggregate; it does not add a second one.
 
 1. **App permission.** Grant `statuses: write` once S4's cap is deployed? (It
    must not happen before.)
-2. **Who may override?** Owner only, or the orchestrator agent with the
-   owner's standing approval recorded per override?
+2. **Who may override?** Owner only, or the orchestrator agent too? If it is
+   the agent, each override would need a recorded owner approval tied to that
+   specific SHA.
 3. **Latest decision wins.** Should a later blocked review really undo an
    owner override on the same SHA? Recommended: yes, because new evidence
    beats an old decision.
-4. **Repositories.** syntropic137 only at first, or agentic-workspace too (its
-   CODEOWNERS already gates merges)?
+4. **Repositories and workflows.** syntropic137 only at first, or
+   agentic-workspace too (its CODEOWNERS already gates merges)? And which
+   workflow ids count as reviewers (the current suggestion is
+   `sdlc-reverify-pr-v1` and the active implement arm)?
 5. **Making it required** (after section 9's two weeks) is a ruleset change.
    That is the owner's decision alone.
