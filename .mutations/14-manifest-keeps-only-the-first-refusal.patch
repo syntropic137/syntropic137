@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
+index b69415386..b94271968 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
+@@ -169,7 +169,7 @@ async def _read_image_manifest(
+         logger.warning("The image manifest of %s was refused: %s", handle.isolation_id, e)
+         if not e.refused:
+             return ImageManifestReading.unreadable(str(e))
+-        return ImageManifestReading.refused(e.refused)
++        return ImageManifestReading.refused(e.refused[:1])
+     except Exception as e:
+         logger.warning(
+             "Could not read the image manifest of %s: %s", handle.isolation_id, e, exc_info=True

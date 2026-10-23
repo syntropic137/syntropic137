@@ -33,3 +33,11 @@ Docker `/workspace` collection now goes through the provider's bounded `read_fil
 | `11-type-ignore-restored-on-the-provider-read.patch` | a `type: ignore` is put back on the `read_files` call, so pyright no longer checks its return type (PC-239) | `packages/syn-adapters/tests/workspace_backends/test_1913_image_manifest_through_file_transfer.py::test_no_type_ignore_hides_the_provider_read_contract` |
 | `12-artifact-refusals-not-recorded.patch` | the collector keeps going after a refusal but does not hand the refusals to the execution record | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/test_1913_refused_output_files.py::test_refused_files_are_recorded_on_the_execution_and_the_rest_collected` |
 | `13-incomplete-walk-collected-as-whole.patch` | a walk that stopped at the entry limit is collected as if it were whole | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/test_1913_refused_output_files.py::test_a_walk_that_stopped_fails_the_collection_with_its_refusals` |
+
+## Added in fix round 3 (round 2 of 2 in this run)
+
+The adapter-side event value objects moved to `_shared/FileRefusalValueObjects.py` (VSA028) and the output refusal policy to `slices/execute_workflow/output_refusals.py`. Patches 12 and 13 target `ArtifactCollector.py`, where that code no longer lives, so they no longer apply. They are left in place, unedited, and `15` and `16` are the same defects at the new location.
+
+| Patch | Defect | Killing test(s) |
+|---|---|---|
+| `14-manifest-keeps-only-the-first-refusal.patch` | a refused manifest records only the first refusal; the rest vanish from the reading and the event | `packages/syn-adapters/tests/workspace_backends/test_1913_image_manifest_through_file_transfer.py::test_every_manifest_refusal_is_recorded_and_survives_replay` |
