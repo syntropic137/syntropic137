@@ -254,7 +254,10 @@ class TestFinalizeTrustsOnlyACompletePassedManifest:
     def test_a_failed_manifest_holds_draft_even_when_the_report_has_no_handoff_row(self) -> None:
         """Codex #2063 r1: a failed cleanup gate after a `None.` report could reach ready."""
         rule = _flat(_section(_prompts(_V6)["finalize_pr"], _FINALIZE_SECTION))
-        assert "**A manifest that does not pass holds the PR in draft on its own**" in rule
+        assert (
+            "**A manifest on the current head that does not pass holds the PR in draft on its own**"
+            in rule
+        )
         assert "whether or not the report has any handoff row" in rule
         assert "does not make a failed gate ready" in rule
         assert "a file that does not parse as a manifest" in rule
@@ -322,26 +325,26 @@ _SHA = "a" * 40
 _CLEANED = "c" * 40
 
 
-def _declared(kind: EvidenceKind, test: str) -> DeclaredEvidence:
+def _declared(kind: EvidenceKind, test: str, head: str = _SHA) -> DeclaredEvidence:
     return DeclaredEvidence(
         request=EvidenceRequest(
-            kind=kind, repository=_REPO, branch="feat/x", pr=42, head_sha=_SHA, tests=(test,)
+            kind=kind, repository=_REPO, branch="feat/x", pr=42, head_sha=head, tests=(test,)
         )
     )
 
 
-def _gate(*, patches: bool) -> GateInputs:
+def _gate(*, patches: bool, head: str = _SHA) -> GateInputs:
     return GateInputs(
         declared=(
-            _declared(EvidenceKind.MUTATION, "tests/test_a.py::t"),
-            _declared(EvidenceKind.INTEGRATION, "tests/integration/test_i.py::t"),
+            _declared(EvidenceKind.MUTATION, "tests/test_a.py::t", head),
+            _declared(EvidenceKind.INTEGRATION, "tests/integration/test_i.py::t", head),
         ),
         observed=(
             ObservedHead(
                 repository=_REPO,
                 branch="feat/x",
                 readable=True,
-                head_sha=_SHA,
+                head_sha=head,
                 mutation_patches_present=patches,
                 open_pr_number=42,
             ),
@@ -352,16 +355,22 @@ def _gate(*, patches: bool) -> GateInputs:
     )
 
 
-def _manifest(*, patches: bool, outcome: StepOutcome = StepOutcome.PASSED) -> EvidenceManifest:
-    plan = plan_steps(_gate(patches=patches))
+def _manifest(
+    *, patches: bool, outcome: StepOutcome = StepOutcome.PASSED, head: str = _SHA
+) -> EvidenceManifest:
+    plan = plan_steps(_gate(patches=patches, head=head))
     settled = [
         SettledStep(
-            index=step.index, outcome=outcome, reason=None if outcome is StepOutcome.PASSED else "x"
+            index=step.index,
+            outcome=outcome,
+            reason=None if outcome is StepOutcome.PASSED else "x",
+            # As EvidenceStepHandler records it: the head each step ran on.
+            head_sha_evidenced=step.head_sha,
         )
         for step in plan
     ]
     removed = (
-        PatchRemoval(before_sha=_SHA, after_sha=_CLEANED, author="syntropic137")
+        PatchRemoval(before_sha=head, after_sha=_CLEANED, author="syntropic137")
         if patches and outcome is StepOutcome.PASSED
         else None
     )
@@ -414,6 +423,68 @@ class TestFinalizeOnTheGatesRealPlanShapes:
     def test_any_step_not_passed_never_closes(self, patches: bool, outcome: StepOutcome) -> None:
         manifest = _manifest(patches=patches, outcome=outcome)
         assert not _finalize_closes(manifest, head=_CLEANED, required_green=True)
+
+
+def _evidenced_head(manifest: EvidenceManifest) -> str | None:
+    """`patch_removal.after_sha` when present, else the head its steps ran on."""
+    if manifest.patch_removal is not None:
+        return manifest.patch_removal.after_sha
+    heads = {step.head_sha for step in manifest.steps if step.head_sha is not None}
+    return heads.pop() if len(heads) == 1 else None
+
+
+def _finalize_holds_draft(
+    manifests: list[EvidenceManifest], *, head: str, declared: bool, open_rows: int
+) -> bool:
+    """The finalize_pr rule as written: what holds a certified PR in draft."""
+    if open_rows:
+        return True
+    current = [m for m in manifests if _evidenced_head(m) == head]
+    if declared and not manifests:
+        return True
+    return any(not _finalize_closes(m, head=head, required_green=True) for m in current)
+
+
+_FIXED = "f" * 40
+
+
+class TestFinalizeJudgesTheCurrentHeadAndAMissingManifest:
+    """Codex #2063 r2: a missing manifest failed open; a superseded failure held forever."""
+
+    def test_the_prompt_separates_no_gate_from_a_missing_manifest(self) -> None:
+        rule = _flat(_section(_prompts(_V6)["finalize_pr"], _FINALIZE_SECTION))
+        assert "**No manifest, nothing declared:** there was no gate to run" in rule
+        assert (
+            "**No manifest, but evidence was declared:** the declared evidence is unproven" in rule
+        )
+        assert "A missing manifest is never a pass" in rule
+        assert "even when the report's handoff section is `None.`" in rule
+        assert "Platform evidence: declared, no manifest" in rule
+
+    def test_the_prompt_retires_manifests_on_an_earlier_head(self) -> None:
+        rule = _flat(_section(_prompts(_V6)["finalize_pr"], _FINALIZE_SECTION))
+        assert (
+            "`patch_removal.after_sha` when it has one, otherwise the `head_sha` its steps ran on"
+            in rule
+        )
+        assert (
+            "Only a manifest that evidences the current branch head can pass or hold the PR" in rule
+        )
+        assert "Superseded evidence" in rule
+
+    def test_declared_evidence_with_no_manifest_and_a_none_section_holds_draft(self) -> None:
+        assert _finalize_holds_draft([], head=_SHA, declared=True, open_rows=0)
+        assert not _finalize_holds_draft([], head=_SHA, declared=False, open_rows=0)
+
+    def test_a_failure_on_s_is_superseded_by_a_passed_gate_on_t(self) -> None:
+        failed_on_s = _manifest(patches=False, outcome=StepOutcome.FAILED, head=_SHA)
+        passed_on_t = _manifest(patches=False, head=_FIXED)
+        assert _evidenced_head(failed_on_s) == _SHA
+        assert _evidenced_head(passed_on_t) == _FIXED
+        assert not _finalize_holds_draft(
+            [failed_on_s, passed_on_t], head=_FIXED, declared=True, open_rows=0
+        )
+        assert _finalize_holds_draft([failed_on_s], head=_SHA, declared=True, open_rows=0)
 
 
 class TestRequiredSetIsTheUnionOfEverySource:

@@ -134,8 +134,30 @@ read above); it governs that report's rows. A manifest under an earlier phase
 (for example `implement`'s mutation declaration) covers only the rows that
 phase declared, and is judged by the same rule below.
 
-- **No manifest:** nothing was declared, or the gate is off. Every handoff row
-  stays as the report wrote it. Write `Platform evidence: none`.
+**Which head a manifest evidences:** `patch_removal.after_sha` when it has
+one, otherwise the `head_sha` its steps ran on. Only a manifest that evidences
+the current branch head can pass or hold the PR. One that evidences an earlier
+head is history: a fix moved the branch since, and the final review report
+judged the new head. List each such manifest under `Superseded evidence` with
+its gate id, the head it evidenced and its outcome (quote each failed step's
+`reason`), and let it neither close a row nor hold draft by itself. What
+holds the PR is the final report's open rows and the manifests on the
+current head.
+
+**Was a gate expected?** Yes when any phase report that ran declared a
+non-empty `TASK_RESULT.evidence`, or wrote an integration or mutation
+`ORCHESTRATOR_EVIDENCE` row.
+
+- **No manifest, nothing declared:** there was no gate to run. Every handoff
+  row stays as the report wrote it. Write `Platform evidence: none`.
+- **No manifest, but evidence was declared:** the declared evidence is
+  unproven, whether the gate is off, failed to file, or has not settled. A
+  missing manifest is never a pass. Treat it as one open
+  `ORCHESTRATOR_EVIDENCE` handoff (`capability=other` unless a declared row
+  names one) that names the declaring phase and says the evidence was
+  declared and no manifest was filed. It holds the PR in draft even when the
+  report's handoff section is `None.`. Write
+  `Platform evidence: declared, no manifest`.
 - **A manifest:** the gate plans one of two shapes, and the rule follows the
   shape it actually planned:
   - **With cleanup:** it has a `remove_mutation_patches` step, and therefore a
@@ -149,7 +171,8 @@ phase declared, and is judged by the same rule below.
 
   A manifest that passes closes the `ORCHESTRATOR_EVIDENCE` rows its phase
   declared, and only those. Write `Platform evidence: <gate-id> passed`.
-- **A manifest that does not pass holds the PR in draft on its own**, whether
+- **A manifest on the current head that does not pass holds the PR in draft
+  on its own**, whether
   or not the report has any handoff row. A report whose handoff section is
   `None.` does not make a failed gate ready. Treat it as one open
   `ORCHESTRATOR_EVIDENCE` handoff (`capability=other` unless a declared row
