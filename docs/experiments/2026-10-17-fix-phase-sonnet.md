@@ -195,6 +195,18 @@ defect traced to a Sonnet fix.
 n = 6 per arm cannot detect small differences in escape rate. This is a
 canary, not proof.
 
+**Known confound (recorded 2026-10-23).** The treatment arm was cut from
+v4-precheck at 995b40fd7, and its prompts are what ran on the deployment
+(checked 2026-10-23: the installed definition matches the repo copy byte for
+byte, bar a trailing newline). v4-precheck then gained the #2028 `.mutations/`
+protections (1c6e058b4, 54a2cfd89) in implement, verify, fix, reverify, fix_2
+and reverify_2, and the control installed on the deployment carries them as of
+2026-10-23. So a control run on that definition differs from the treatment in
+more than the fix model. Read an escape involving `.mutations/` or mutation
+evidence as possibly caused by the missing protection, not by Sonnet.
+`scripts/tests/test_implement_v4_precheck_sonnet_fix_arm.py` pins that this is
+the only extra difference.
+
 ## Results (interim, 2026-10-19; final after the escape windows close 2026-11-02)
 
 All 15 briefs ran. The interim verdict is **ADOPT, provisionally**: Sonnet 5.5 on fix

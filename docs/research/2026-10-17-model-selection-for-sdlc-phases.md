@@ -1,7 +1,10 @@
 # Model selection for SDLC phases (research, 2026-10-17)
 
-Status: first draft. Owner: eval researcher session, reporting to the Syn137
-Orchestrator. Experiments that test this doc: `docs/experiments/2026-10-17-*.md`.
+Status: first draft, corrected 2026-10-23. Owner: syn137_workflow-mgmt (the
+eval researcher session that wrote it is gone). Experiments that test this doc:
+`docs/experiments/2026-10-17-*.md`. Sections 1-3 and 5 describe the state on
+2026-10-17 unless a line says otherwise; the E1-E3 updates in section 4 are
+the measured results since.
 
 ## TLDR
 
@@ -9,10 +12,12 @@ Orchestrator. Experiments that test this doc: `docs/experiments/2026-10-17-*.md`
   implementation, and that evidence comes mostly from vendors. Nothing public
   measures either model as a code **verifier** against real escaped bugs. Our
   own suites are the only evidence that can decide a phase.
-- We have almost no measured data of our own. Opus 5.5 caught 4/4 on
-  verifier-seed-v1 v1. gpt-6.1-sol was never scored on verifier-seed-v1. The
-  Sonnet, Luna and Terra eval workflows have never run. implementer-seed-v1 has
-  never run.
+- On 2026-10-17 we had almost no measured data of our own (Opus 5.5 4/4 on
+  verifier-seed-v1 v1; nothing else scored). Since then (section 4): E1 scored
+  gpt-6.1-sol and gpt-6-luna on verifier-seed-v1 v8 train (Sol 18/26 vs Luna
+  12/26 on the keyword judge; Luna rejected). E2 ran implementer-seed-v1 v3
+  (Sonnet 5.5 5/10 vs Opus 5.5 6/10, proceed). E3 is interim. The Terra verifier
+  workflow has still never run; gpt-5.6-luna ran once, unscored.
 - Where the money goes: implement, fix and fix_2 (Opus 5.5) are 51% of
   implement-workflow spend. verify, reverify and reverify_2 (gpt-6.1-sol) are
   35%, and verify takes a median of 37 min.
@@ -122,7 +127,7 @@ model is registered.
 | claude-fable-5-1 | 10 | 0.25 | 50 | not checked |
 | claude-opus-5-5 | 4 | 0.20 | 20 | yes |
 | claude-sonnet-5-5 | 2 | 0.10 | 10 | yes |
-| claude-haiku-5-5 | 0.10 | 0.01 | 0.50 | **no** (`haiku` alias maps to claude-haiku-4-5) |
+| claude-haiku-5-5 | 0.10 | 0.01 | 0.50 | yes since 2026-10-17 (`haiku` alias resolves to it on main; on 2026-10-17 it mapped to claude-haiku-4-5) |
 | gpt-6.1-sol | 2 | 0.10 | 10 | yes |
 | gpt-6-luna | 0.10 | 0.01 | 0.50 | yes |
 | gpt-5.6-terra | 2 | 0.20 | 12 | yes |
@@ -167,22 +172,25 @@ defect left open since implement, in both arms. Details:
 
 ## 5. Defects found while doing this research
 
-1. (#2020) The `haiku` alias resolves to `claude-haiku-4-5-20251001`
-   (`packages/syn-shared/src/syn_shared/agents.py:354`), a pre-5 model.
-   claude-haiku-5-5 is not registered.
-2. (#2021) The eval LLM judge is pinned to `claude-sonnet-4-6`
-   (`evals/verifier-seed-v1/README.md`, `scripts/eval_suite.py`), a pre-5
-   model. Until it is moved, use the keyword judge only.
+1. (#2020, 2026-10-17) The `haiku` alias resolved to
+   `claude-haiku-4-5-20251001`, a pre-5 model, and claude-haiku-5-5 was not
+   registered. **Fixed on main by 2026-10-23:** `ModelId.CLAUDE_HAIKU_5_5` is
+   registered and `ModelAlias.HAIKU` resolves to it
+   (`packages/syn-shared/src/syn_shared/agents.py`).
+2. (#2021, 2026-10-17) The eval LLM judge was pinned to `claude-sonnet-4-6`,
+   a pre-5 model. **Fixed (issue closed):** on main `JUDGE_MODEL` is
+   `claude-sonnet-5-5`, `JUDGE_PROMPT_VERSION` 5 (`scripts/eval_suite.py`).
 3. Pinned CLI 2.1.281 may resolve `sonnet` to Sonnet 5, not 5.5
    (`agents.py:399-403`). Any Sonnet arm must check `phases[].model`.
-4. (finding, no issue) The `launches.jsonl` ledgers hold only v1/v2 runs. The
-   v3 to v8 history in `evals/verifier-seed-v1/suite.yaml` refers to runs that
-   are not recorded anywhere, so no v3-v8 score can be reproduced.
-5. (finding, no issue) gpt-6.1-sol was launched on verifier-seed-v1 v2 (6 runs)
-   and never scored. `eval-verify-pinned-sonnet-v1`, the three cheaper-codex
-   verifier workflows (`gpt-6-luna`, `gpt-5.6-luna`, `gpt-5.6-terra`) and
-   `eval-implement-pinned-v1` have never run. Our cross-family rule and our
-   choice of verifier model rest on n=4 (Opus v1) plus production block rates.
+4. (finding, no issue, 2026-10-17) The `launches.jsonl` ledgers held only
+   v1/v2 runs, so no v3-v7 score could be reproduced. This PR adds E1's v8
+   launches (`evals/verifier-seed-v1/launches.jsonl`); v3-v7 remain unrecorded.
+5. (finding, no issue, 2026-10-17) gpt-6.1-sol had been launched on
+   verifier-seed-v1 v2 (6 runs) and never scored, and the cheaper-codex
+   verifier workflows and `eval-implement-pinned-v1` had never run. Since then
+   E1 ran and scored Sol and `gpt-6-luna` on v8, and E2 ran the
+   implement-pinned workflows. `eval-verify-pinned-sonnet-v1` and `gpt-5.6-terra` still have not run, and
+   `gpt-5.6-luna` was launched once (E1 amendment 1) and never scored.
 
 ## 6. Unknown
 

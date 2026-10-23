@@ -248,9 +248,9 @@ def asserted_contracts(source: str) -> Contracts:
                 and isinstance(node.args[1].value, str)
             ):
                 names.add(node.args[1].value)
-                target = node.args[0]
-                if isinstance(target, ast.Name) and target.id in imported:
-                    patched.add((imported[target.id], node.args[1].value))
+                target = _dotted(node.args[0], imported)
+                if target is not None:
+                    patched.add((target, node.args[1].value))
             if (
                 isinstance(func, ast.Attribute)
                 and func.attr == "setattr"
@@ -302,9 +302,31 @@ def _syn_imports(tree: ast.Module) -> dict[str, str]:
                 imported[alias.asname or alias.name] = f"{node.module}.{alias.name}"
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.startswith("syn_") and alias.asname:
+                if not alias.name.startswith("syn_"):
+                    continue
+                if alias.asname:
                     imported[alias.asname] = alias.name
+                else:
+                    # `import syn_a.b.c` binds `syn_a`; the rest is reached by attribute.
+                    root = alias.name.split(".")[0]
+                    imported[root] = root
     return imported
+
+
+def _dotted(expr: ast.expr, imported: dict[str, str]) -> str | None:
+    """The dotted `syn_*` path an expression names, through attribute chains.
+
+    `client_retry` (from-imported), `cr` (`import ... as cr`) and
+    `syn_adapters.github.client_retry` (plain `import`) all resolve to
+    `syn_adapters.github.client_retry`. Anything rooted elsewhere is None.
+    """
+    attributes: list[str] = []
+    while isinstance(expr, ast.Attribute):
+        attributes.append(expr.attr)
+        expr = expr.value
+    if not isinstance(expr, ast.Name) or expr.id not in imported:
+        return None
+    return ".".join([imported[expr.id], *reversed(attributes)])
 
 
 def _module_names(body: list[ast.stmt]) -> set[str]:

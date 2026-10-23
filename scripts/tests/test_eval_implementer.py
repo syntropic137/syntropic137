@@ -170,6 +170,24 @@ def test_a_monkeypatch_target_is_read_as_the_module_or_object_it_patches() -> No
     }
 
 
+def test_a_monkeypatch_target_reached_by_attribute_chain_is_resolved() -> None:
+    """Codex on #2019: a plain `import a.b.c` target was unresolved, so the check fell
+    back to a tree-wide name match and `_now` in an unrelated module passed it."""
+    found = asserted_contracts(
+        "import syn_adapters.github.client_retry\n"
+        "import syn_adapters.github as gh\n"
+        "import os.path\n"
+        "def test(monkeypatch):\n"
+        "    monkeypatch.setattr(syn_adapters.github.client_retry, '_now', lambda: 0.0)\n"
+        "    monkeypatch.setattr(gh.client.GitHubAppClient, '_generate_jwt', None)\n"
+        "    monkeypatch.setattr(os.path, 'join', None)\n"
+    )
+    assert found.patched == {
+        ("syn_adapters.github.client_retry", "_now"),
+        ("syn_adapters.github.client.GitHubAppClient", "_generate_jwt"),
+    }
+
+
 @needs_history
 def test_a_fixture_that_patches_a_name_only_the_fix_defines_is_reported() -> None:
     """E2: `_now` appeared at the pin only in unrelated apps/syn-api tests, so a tree-wide

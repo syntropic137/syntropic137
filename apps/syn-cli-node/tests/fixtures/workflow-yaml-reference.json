@@ -735,7 +735,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "32bfca41bd67174d62f5462cc8c760e3cb18aa7c4b7b77925758fe2fdb2ad212"
+      "document_sha256": "636c2bf1dca4f1306b4d14b93b340b7f87b08f02056a24d561a34dd69a11f608"
     },
     "workflows/sdlc/pr-review/workflow.yaml": {
       "phases": [

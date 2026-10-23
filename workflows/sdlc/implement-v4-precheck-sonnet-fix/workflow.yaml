@@ -1,9 +1,10 @@
 id: sdlc-implement-v4-precheck-sonnet-fix
 name: "SDLC: Premise, implement + draft PR, verify with evidence precheck, fix, re-verify, mark ready (v4-precheck, Sonnet fix)"
 description: >
-  sdlc-implement-v4-precheck with ONE change: fix and fix_2 run on
-  claude-sonnet-5-5 instead of Opus 5.5. Everything else, prompts included,
-  is identical. The treatment arm of experiment E3, see
+  sdlc-implement-v4-precheck as it was at 995b40fd7, with ONE change: fix and
+  fix_2 run on claude-sonnet-5-5 instead of Opus 5.5. Its prompts are what ran
+  and stay frozen, so it lacks the .mutations/ protections v4-precheck gained
+  later (#2028). The treatment arm of experiment E3, see
   docs/experiments/2026-10-17-fix-phase-sonnet.md.
 type: implementation
 classification: standard
