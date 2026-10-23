@@ -5950,16 +5950,12 @@
               ],
               "default": null
             },
-            "refusal": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/FileRefusal"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
+            "refusals": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/FileRefusal"
+              },
+              "type": "array"
             },
             "state": {
               "$ref": "#/$defs/ImageManifestState"

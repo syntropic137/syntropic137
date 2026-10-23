@@ -63,9 +63,10 @@ class ImageManifestReading(BaseModel):
     manifest: ImageManifestContent | None = None
     #: Why the read failed; set exactly when `state` is UNREADABLE.
     detail: str | None = None
-    #: The provider's refusal of the manifest file (a link, a special file,
-    #: past a limit), by path and reason. Only on an UNREADABLE reading.
-    refusal: FileRefusal | None = None
+    #: Every refusal the provider's read of the manifest returned (a link, a
+    #: special file, past a limit, the walk stopping), each by path and
+    #: reason, in the provider's order. Only on an UNREADABLE reading.
+    refusals: tuple[FileRefusal, ...] = ()
 
     @model_validator(mode="after")
     def _state_matches_fields(self) -> Self:
@@ -76,8 +77,8 @@ class ImageManifestReading(BaseModel):
         if (self.detail is not None) != (self.state is ImageManifestState.UNREADABLE):
             msg = f"a {self.state} image manifest reading carries a detail only when unreadable"
             raise ValueError(msg)
-        if self.refusal is not None and self.state is not ImageManifestState.UNREADABLE:
-            msg = f"a {self.state} image manifest reading cannot carry a refusal"
+        if self.refusals and self.state is not ImageManifestState.UNREADABLE:
+            msg = f"a {self.state} image manifest reading cannot carry refusals"
             raise ValueError(msg)
         return self
 
@@ -90,12 +91,19 @@ class ImageManifestReading(BaseModel):
         return cls(state=ImageManifestState.UNREADABLE, detail=detail)
 
     @classmethod
-    def refused(cls, refusal: FileRefusal) -> ImageManifestReading:
-        """The provider would not read the manifest file: unreadable, never absent."""
+    def refused(cls, refusals: tuple[FileRefusal, ...]) -> ImageManifestReading:
+        """The provider would not read the manifest: unreadable, never absent.
+
+        Every refusal is kept, not the first: the one naming the manifest file
+        may follow one for the walk, and dropping either hides why (#1913).
+        """
+        if not refusals:
+            msg = "a refused image manifest reading names at least one refusal"
+            raise ValueError(msg)
         return cls(
             state=ImageManifestState.UNREADABLE,
-            detail=f"the provider refused to read {refusal.describe()}",
-            refusal=refusal,
+            detail="the provider refused to read " + ", ".join(r.describe() for r in refusals),
+            refusals=refusals,
         )
 
     @classmethod

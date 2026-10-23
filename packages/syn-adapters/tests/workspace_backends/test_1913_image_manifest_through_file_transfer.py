@@ -50,6 +50,9 @@ from syn_domain.contexts.orchestration._shared.file_transfer import (
     FileRefusal,
     FilesRefusedError,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.test_1913_image_manifest_reading import (
+    _replayed,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationHandle,
 )
@@ -118,6 +121,15 @@ class _LinkedManifest(_SeededSandboxes):
     @staticmethod
     def _listing(files: Mapping[str, bytes], root: str) -> bytes:
         return SandboxDouble._listing(files, root) + b"l 1 11 1\0version.json\0/etc/passwd\0"
+
+
+class _DeepAndLinkedManifest(_SeededSandboxes):
+    """version.json is a link out of /opt/agentic, and a directory past the depth limit."""
+
+    @staticmethod
+    def _listing(files: Mapping[str, bytes], root: str) -> bytes:
+        too_deep = adapter_module.collection_read_limits().max_depth + 1
+        return _LinkedManifest._listing(files, root) + f"d 1 0 {too_deep}\0a-deep\0\0".encode()
 
 
 class _LinkedArtifact(_SeededSandboxes):
@@ -274,12 +286,31 @@ async def test_a_refused_manifest_is_recorded_unreadable_with_its_refusal(
     reading = await _read_image_manifest(service, handle)
 
     assert reading == ImageManifestReading.refused(
-        FileRefusal(path="version.json", reason="escaping_symlink")
+        (FileRefusal(path="version.json", reason="escaping_symlink"),)
     )
     assert reading.state is ImageManifestState.UNREADABLE
     assert reading.manifest is None
-    replayed = ImageManifestReading.model_validate_json(reading.model_dump_json())
-    assert replayed.refusal == FileRefusal(path="version.json", reason="escaping_symlink")
+
+
+async def test_every_manifest_refusal_is_recorded_and_survives_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The walk stopping AND the manifest refused: both kept, not the first (#1913)."""
+    service = _e2b(monkeypatch, _DeepAndLinkedManifest({}))
+    handle = await service._isolation.create(suite.isolation_config(service._config.image))
+
+    reading = await _read_image_manifest(service, handle)
+
+    both = (
+        FileRefusal(path="version.json", reason="escaping_symlink"),
+        FileRefusal(path="a-deep", reason="depth_exceeded"),
+    )
+    assert reading.state is ImageManifestState.UNREADABLE
+    assert sorted(reading.refusals, key=lambda r: r.path) == sorted(both, key=lambda r: r.path)
+    assert reading.detail is not None
+    assert "version.json (escaping_symlink)" in reading.detail
+    assert "a-deep (depth_exceeded)" in reading.detail
+    assert _replayed(reading).image_manifest_for("build") == reading
 
 
 async def test_refused_artifacts_are_named_and_the_read_ones_kept(

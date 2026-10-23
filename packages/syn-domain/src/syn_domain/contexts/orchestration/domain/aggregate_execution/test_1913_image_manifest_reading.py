@@ -14,6 +14,7 @@ import pytest
 from event_sourcing import EventEnvelope, GenericDomainEvent, resolve_event_type
 from pydantic import ValidationError
 
+from syn_domain.contexts.orchestration._shared.FileRefusalValueObjects import FileRefusal
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     ProvisionWorkspaceCompletedCommand,
 )
@@ -138,8 +139,14 @@ def test_a_state_and_its_fields_cannot_disagree() -> None:
         ),
         ImageManifestReading.absent(),
         ImageManifestReading.unreadable("RuntimeError: sandbox gone"),
+        ImageManifestReading.refused(
+            (
+                FileRefusal(path="a-deep", reason="depth_exceeded"),
+                FileRefusal(path=IMAGE_MANIFEST_FILE, reason="escaping_symlink"),
+            )
+        ),
     ],
-    ids=["read", "absent", "unreadable"],
+    ids=["read", "absent", "unreadable", "refused"],
 )
 def test_the_reading_survives_replay(reading: ImageManifestReading) -> None:
     assert _replayed(reading).image_manifest_for("build") == reading

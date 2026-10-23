@@ -163,12 +163,13 @@ async def _read_image_manifest(
             handle, [IMAGE_MANIFEST_FILE], IMAGE_MANIFEST_ROOT
         )
     except FilesRefusedError as e:
-        # One file was asked for, so the refusal is that file's (or the walk
-        # stopping before it): recorded with its path and reason, never absent.
+        # Every refusal is recorded with its path and reason, never as absent:
+        # the walk stopping and the manifest itself being refused can both
+        # arrive, and the record keeps them all.
         logger.warning("The image manifest of %s was refused: %s", handle.isolation_id, e)
         if not e.refused:
             return ImageManifestReading.unreadable(str(e))
-        return ImageManifestReading.refused(e.refused[0])
+        return ImageManifestReading.refused(e.refused)
     except Exception as e:
         logger.warning(
             "Could not read the image manifest of %s: %s", handle.isolation_id, e, exc_info=True
