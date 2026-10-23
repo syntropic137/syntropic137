@@ -8,7 +8,9 @@ agentic-workspace is driven over ``SandboxDouble``, an in-memory
 
 from __future__ import annotations
 
+import base64
 import os
+import posixpath
 import shlex
 from typing import TYPE_CHECKING
 
@@ -63,7 +65,9 @@ class SandboxDouble:
     The provider wraps every command as ``sh -c 'exec "$@" 2>&1' sh sh -c CMD``,
     so the script is keyed by the innermost ``CMD``; unknown commands succeed
     silently, which is what the provider's own probes (writable roots,
-    TMPDIR) need.
+    TMPDIR) need. ``read_files`` walks and reads with GNU-only shell scripts,
+    so those two are answered from the stored files in the records the
+    scripts would print (agentic_isolation.providers.file_transfer).
     """
 
     def __init__(self, *, kill_is_noop: bool = False) -> None:
@@ -115,17 +119,47 @@ class SandboxDouble:
         env: Mapping[str, str],
         timeout: float | None,
         user: str,
+        stdin: bytes | None = None,
     ) -> _Command:
         self._pids += 1
         inner = shlex.split(command)[-1]
-        if inner == "find . -type f -print0" and cwd:
-            # How the provider lists files before reading them back.
-            under = cwd.rstrip("/") + "/"
+        if inner.startswith("cd -- ") and ("-printf" in inner or "xargs -0" in inner):
+            root = shlex.split(inner.split(" || ")[0])[2].rstrip("/")
             files = self.sandboxes[sandbox_id][1]
-            text = "".join(f"./{p.removeprefix(under)}\0" for p in files if p.startswith(under))
-            return _Command(self._pids, text, 0)
+            if "-printf" in inner:
+                out = self._listing(files, root)
+            else:
+                out = self._records(files, root, stdin or b"")
+            return _Command(self._pids, base64.b64encode(out).decode(), 0)
         text, code = self.script.get(inner, ("", 0))
         return _Command(self._pids, text, code)
+
+    @staticmethod
+    def _listing(files: Mapping[str, bytes], root: str) -> bytes:
+        """The walk's records, ``%y %n %s %d\\0%P\\0%l\\0``, for each dir and file under root."""
+        under = root + "/"
+        rels = [p.removeprefix(under) for p in files if p.startswith(under)]
+        dirs = {posixpath.dirname(r) for r in rels} - {""}
+        dirs |= {posixpath.dirname(d) for d in dirs} - {""}
+        out = b""
+        for rel in sorted(dirs):
+            out += f"d 2 4096 {rel.count('/') + 1}\0{rel}\0\0".encode()
+        for rel in sorted(rels):
+            size = len(files[under + rel])
+            out += f"f 1 {size} {rel.count('/') + 1}\0{rel}\0\0".encode()
+        return out
+
+    @staticmethod
+    def _records(files: Mapping[str, bytes], root: str, stdin: bytes) -> bytes:
+        """One read record per NUL-separated path on stdin: content, or vanished."""
+        out = b""
+        for rel in stdin.decode().split("\0")[:-1]:
+            content = files.get(f"{root}/{rel}")
+            if content is None:
+                out += f"v 0\0{rel}\0".encode()
+            else:
+                out += f"f {len(content)}\0{rel}\0".encode() + content
+        return out
 
     async def reconnect(self, sandbox_id: str, pid: int) -> _Command:
         return _Command(pid, "", 0)
@@ -263,6 +297,23 @@ async def test_a_per_run_image_is_refused_not_ignored() -> None:
     config = type(config)(**{**config.__dict__, "image": "ghcr.io/other/image:latest"})
     with pytest.raises(WorkspaceProvisionError, match="refuses image"):
         await adapter.create(config)
+
+
+class _LinkedSandboxDouble(SandboxDouble):
+    """The walk also finds a symlink out of the root beside the stored files."""
+
+    @staticmethod
+    def _listing(files: Mapping[str, bytes], root: str) -> bytes:
+        return SandboxDouble._listing(files, root) + b"l 1 11 2\0conformance/link\0/etc/passwd\0"
+
+
+async def test_a_refused_file_fails_the_read_instead_of_going_missing() -> None:
+    adapter, _ = _adapter(_LinkedSandboxDouble())
+    handle = await suite.check_create(adapter, suite.isolation_config(_TEMPLATE))
+    await adapter.copy_to(handle, [("conformance/blob.bin", b"kept")])
+    with pytest.raises(RuntimeError, match=r"conformance/link \(escaping_symlink\)"):
+        await adapter.copy_from(handle, ["conformance/*"])
+    await adapter.destroy(handle)
 
 
 # --- conformance over the double ------------------------------------------
