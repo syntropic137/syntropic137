@@ -223,6 +223,29 @@ def test_an_attribute_the_hidden_tests_read_but_the_task_never_states_is_reporte
 
 
 @needs_history
+def test_an_unsearchable_submodule_makes_the_attribute_check_incomplete_not_a_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing submodule clone once counted every attribute as present (codex, #2019)."""
+    loaded = load_suite(DEFAULT_SUITE)
+    case = loaded.case("pause-not-blocked-by-queue")
+    stated = "That error has an `unsettled` attribute"
+    unstated = loaded.model_copy(
+        update={"cases": (case.model_copy(update={"task": case.task.replace(stated, "It")}),)}
+    )
+    real_exists = Path.exists
+
+    def no_submodule_clone(path: Path) -> bool:
+        if path.name == ".git" and path.parent != ROOT:
+            return False
+        return real_exists(path)
+
+    monkeypatch.setattr(Path, "exists", no_submodule_clone)
+    problems = check_commits(unstated, ROOT)
+    assert any("could not be searched" in p and "unsettled" in p for p in problems), problems
+
+
+@needs_history
 def test_a_name_the_hidden_tests_need_but_the_task_never_states_is_reported() -> None:
     """#2023: exec-status-lost's tests monkeypatch `container_state`, which no pin defines."""
     loaded = load_suite(DEFAULT_SUITE)

@@ -393,16 +393,18 @@ def _patched_absent_at_pin(
     return frozenset(absent)
 
 
-def _attributes_at_pin(repo: Path, commit: str, attributes: frozenset[str]) -> frozenset[str]:
-    """Which of `attributes` code at the pin defines or reads as an attribute.
+def _attributes_at_pin(
+    repo: Path, commit: str, attributes: frozenset[str]
+) -> tuple[frozenset[str], tuple[str, ...]]:
+    """Which of `attributes` code at the pin defines or reads, and what went unsearched.
 
     A bare word is not enough: `unsettled` existed at a pin only as an unrelated
     local variable while the hidden test read `error.unsettled`. Submodules are
-    searched at their gitlinks; one with no local clone is not searched, and its
-    attributes count as present rather than being reported.
+    searched at their gitlinks. One with no local clone cannot be searched, so its
+    path is returned and the check reports itself incomplete instead of passing.
     """
     if not attributes:
-        return frozenset()
+        return frozenset(), ()
     names = "|".join(sorted(re.escape(a) for a in attributes))
     pattern = rf"\.(?:{names})\b|\bdef (?:{names})\b|^\s+(?:{names})\s*:\s*[A-Za-z_\[]"
     word = re.compile(rf"(?:{names})\b")
@@ -412,6 +414,7 @@ def _attributes_at_pin(repo: Path, commit: str, attributes: frozenset[str]) -> f
         return {m.group(0) for m in word.finditer(out)}
 
     seen = found_in(repo, commit)
+    unsearched: list[str] = []
     modules = _git(repo, "config", "--blob", f"{commit}:.gitmodules", "--get-regexp", r"\.path$")
     for line in modules.stdout.splitlines():
         _, path = line.split(maxsplit=1)
@@ -419,8 +422,11 @@ def _attributes_at_pin(repo: Path, commit: str, attributes: frozenset[str]) -> f
         if len(parts) < 3 or parts[1] != "commit":
             continue
         sub = repo / path
-        seen |= found_in(sub, parts[2]) if (sub / ".git").exists() else set(attributes)
-    return frozenset(seen & attributes)
+        if (sub / ".git").exists():
+            seen |= found_in(sub, parts[2])
+        else:
+            unsearched.append(path)
+    return frozenset(seen & attributes), tuple(unsearched)
 
 
 def unstated_contract_problems(case: ImplementerCase, repo: Path) -> list[str]:
@@ -448,8 +454,16 @@ def unstated_contract_problems(case: ImplementerCase, repo: Path) -> list[str]:
                 " define and the task never states"
             )
         unstated = frozenset(a for a in found.attributes if a not in case.task)
-        at_pin = _attributes_at_pin(repo, case.commit, unstated)
-        for attribute in sorted(unstated - at_pin):
+        at_pin, unsearched = _attributes_at_pin(repo, case.commit, unstated)
+        missing = unstated - at_pin
+        if missing and unsearched:
+            problems.append(
+                f"{case.id}: {path} reads {sorted(missing)!r}, not found, and submodule(s)"
+                f" {', '.join(unsearched)} could not be searched (no local clone):"
+                " the contract check is incomplete; run `git submodule update --init`"
+            )
+            continue
+        for attribute in sorted(missing):
             problems.append(
                 f"{case.id}: {path} reads attribute {attribute!r}, absent from task and pin"
             )
