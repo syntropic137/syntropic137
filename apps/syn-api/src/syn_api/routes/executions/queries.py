@@ -147,7 +147,7 @@ def _merge_totals(
     """Prefer Lane 2 totals when present; fall back to the domain summary."""
     if enrichment is None:
         return _MergedExecutionTotals(
-            cost=Decimal(str(e.total_cost_usd)),
+            cost=e.total_cost_usd,
             unpriced_observation_count=e.unpriced_observation_count,
             input_tokens=e.total_input_tokens,
             output_tokens=e.total_output_tokens,
@@ -414,7 +414,7 @@ async def get(
     total_output = detail.total_output_tokens
     total_cache_creation = detail.total_cache_creation_tokens
     total_cache_read = detail.total_cache_read_tokens
-    total_cost: Decimal | str = Decimal("0")
+    total_cost = Decimal("0")
     # Derived from the phases rather than read from the projection's running
     # sum, so the total and the phase list can never disagree: the sum only
     # counts phases that have COMPLETED, which silently excluded the one still
@@ -470,7 +470,7 @@ class _EnrichedExecutionCost:
     """Execution-level totals from Lane 2, with the coverage of that total."""
 
     total_tokens: int
-    total_cost_usd: Decimal | str
+    total_cost_usd: Decimal
     unpriced_observation_count: int = 0
 
 
@@ -479,7 +479,7 @@ async def _enrich_costs(
     manager: object,
     phases: list[PhaseExecution],
     fallback_tokens: int,
-    fallback_cost: Decimal | str,
+    fallback_cost: Decimal,
 ) -> _EnrichedExecutionCost:
     """Enrich execution and phase costs from TimescaleDB (#505).
 
@@ -920,7 +920,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
             detail.total_tokens,
             total_input + total_output + total_cache_creation + total_cache_read,
         ),
-        total_cost_usd=Decimal(str(detail.total_cost_usd)),
+        total_cost_usd=detail.total_cost_usd,
         unpriced_observation_count=detail.unpriced_observation_count,
         cache_read_rate_display=cache_rates.cache_read_rate_display,
         cache_write_rate_display=cache_rates.cache_write_rate_display,
