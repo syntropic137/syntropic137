@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py
+index 1efc3abab..69eb074ec 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py
+@@ -311,8 +311,6 @@ class PhaseWorkspace:
+             last_agent_message=last_agent_message,
+         )
+         kept = output.artifact_ids
+-        if output.refused:
+-            await self._record_refused(aggregate, todo.phase_id, output.refused)
+         if kept:
+             logger.warning(
+                 "Phase %s (%s) did not complete (%s); kept %d artifact(s) rather "
