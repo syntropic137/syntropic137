@@ -41,7 +41,7 @@ MANIFEST = {
 }
 
 
-def _replayed(reading: ImageManifestReading | None, *, drop: str | None = None):  # noqa: ANN202
+def _replayed(reading: ImageManifestReading | None, *, drop: str | None = None):
     aggregate = WorkflowExecutionAggregate()
     aggregate._handle_command(
         StartExecutionCommand(
