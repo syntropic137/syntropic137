@@ -294,9 +294,6 @@ class DependencySeedStore:
             os.utime(staging)
             size = _size(staging)
             _make_read_only(staging)
-            # Recorded once here, so a prune on every cache hit reads one
-            # small file per seed instead of walking every file of every seed.
-            _write_size(target, size)
         except BaseException:
             # A failed publish leaves nothing behind: prune spares a recent
             # staging directory as a publish in flight, so it must not linger.
@@ -304,11 +301,20 @@ class DependencySeedStore:
                 with contextlib.suppress(OSError):
                     _remove(staging)
             raise
-        try:
-            staging.rename(target)
-        except OSError:
-            # Another warmer published the same lockfile first; theirs is as good.
-            _remove(staging)
+        # The seed and its recorded size are published together, by whichever
+        # warmer wins the rename: a loser writing its own size would leave the
+        # winner's seed accounted at the loser's bytes (#1812).
+        with _seed_lease(target, exclusive=True):
+            try:
+                staging.rename(target)
+            except OSError:
+                # Another warmer published the same lockfile first; theirs is
+                # as good, and so is the size it recorded.
+                _remove(staging)
+            else:
+                # Recorded once here, so a prune on every cache hit reads one
+                # small file per seed instead of walking every file of every seed.
+                _write_size(target, size)
         self.prune()
 
     def prune(self) -> int:
@@ -445,8 +451,9 @@ def _merge_tree(source: Path, destination: Path) -> None:
     cache shares wheel entries, many of them symlinks. `shutil.copytree` with
     `dirs_exist_ok` calls `os.symlink` straight onto an existing link and
     fails, so links are merged here: one already pointing at the same target
-    is kept, any other is replaced atomically. A file over a file is
-    overwritten (the cache is content-addressed, so it is the same bytes).
+    is kept, and one pointing elsewhere is replaced atomically and logged
+    (`_place_symlink`). A file over a file is overwritten (the cache is
+    content-addressed, so it is the same bytes).
     """
     destination.mkdir(parents=True, exist_ok=True)
     for directory, dirs, files in os.walk(source):
@@ -466,8 +473,20 @@ def _merge_tree(source: Path, destination: Path) -> None:
 
 
 def _place_symlink(link: Path, destination: Path) -> None:
-    if destination.is_symlink() and destination.readlink() == link:
-        return
+    if destination.is_symlink():
+        existing = destination.readlink()
+        if existing == link:
+            return
+        # Two seeds disagree on one cache entry. The later seed's link wins, so
+        # the seed copied last stays whole; the earlier seed keeps every other
+        # entry. Logged, never silent: uv names its entries by content, so a
+        # disagreement means the seeds were not built the same way (#1812).
+        logger.warning(
+            "Dependency seeds disagree on %s (%s, now %s); keeping the later seed's",
+            destination,
+            existing,
+            link,
+        )
     staged = destination.parent / f".link-{uuid.uuid4().hex}"
     staged.symlink_to(link)
     # Fails (and the seed copy with it) if a real directory is in the way.
