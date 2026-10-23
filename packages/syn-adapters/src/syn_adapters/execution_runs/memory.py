@@ -217,6 +217,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
                 if held.state == "claimed"
                 and held.leased_until < now
                 and held.writer_epoch <= epoch
+                and self._in_scope(held, entry)
             ),
             key=lambda held: (held.leased_until, held.execution_id),
         )
@@ -245,6 +246,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
                 if held.state in ("fencing", "reaped")
                 and held.reconciler != reconciler
                 and self._adoptable(held, entry.host.epoch)
+                and self._in_scope(held, entry)
             ),
             key=lambda held: (held.leased_until, held.execution_id),
         )
@@ -312,6 +314,11 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         """The Postgres takeover predicate: its reconciler has left, and the epoch is readable."""
         left = self._hosts.get(row.reconciler or "")
         return (left is None or not left.registered) and row.writer_epoch <= epoch
+
+    def _in_scope(self, row: _Run, reconciler: _Host) -> bool:
+        """The Postgres scope predicate: the claimer's reaper reaches what this one does (D13)."""
+        claimer = self._hosts.get(row.executor_id or "")
+        return claimer is not None and claimer.host.reap_scope == reconciler.host.reap_scope
 
     @staticmethod
     def _fenced(row: _Run, reconciler: str) -> FencedRun:

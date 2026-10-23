@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from syn_domain.contexts._shared.host_capacity import HostCapacity
@@ -43,7 +44,9 @@ class ProcHostCapacity:
 
 def _schedulable_cpus() -> int:
     """CPUs this process may run on; every CPU where affinity is not exposed (macOS)."""
-    if hasattr(os, "sched_getaffinity"):
+    # sys.platform, not hasattr: pyright narrows on it, so a macOS typecheck
+    # does not flag the Linux-only call.
+    if sys.platform == "linux":
         return len(os.sched_getaffinity(0))
     return os.cpu_count() or 1
 

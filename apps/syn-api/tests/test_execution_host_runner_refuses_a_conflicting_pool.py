@@ -18,6 +18,7 @@ from syn_api.services import execution_host_runner as runner
 from syn_domain.contexts.orchestration.ports import (
     ExecutorHost,
     ExecutorPool,
+    IsolationLevel,
     PoolDefinitionConflict,
 )
 from syn_shared.settings import reset_settings
@@ -27,9 +28,26 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 _LIVE = "live-member"
 
 
+class _Reaper:
+    """The backend as the runner reads it; ``docker info`` is not called in a unit test."""
+
+    def scope(self) -> str:
+        return "engine-under-test"
+
+    def provider(self) -> str:
+        return "docker"
+
+    def isolation(self) -> IsolationLevel:
+        return IsolationLevel.CONTAINER
+
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        return True
+
+
 async def _queue_with_a_live_member(monkeypatch: pytest.MonkeyPatch) -> InMemoryExecutionRunQueue:
     queue = InMemoryExecutionRunQueue()
     member = ExecutorHost(
+        reap_scope="daemon-1",
         host_id=_LIVE,
         container_id="another-box",
         generation="g1",
@@ -44,6 +62,7 @@ async def _queue_with_a_live_member(monkeypatch: pytest.MonkeyPatch) -> InMemory
     monkeypatch.setattr(runner, "get_workflow_execution_repository", MagicMock())
     monkeypatch.setattr(runner, "get_execution_event_stream", MagicMock())
     monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())
+    monkeypatch.setattr(runner, "DockerDeadHostReaper", _Reaper)
     return queue
 
 

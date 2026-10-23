@@ -77,3 +77,10 @@ CREATE TABLE IF NOT EXISTS execution_runs (
 );
 CREATE INDEX IF NOT EXISTS execution_runs_state_admitted_idx
     ON execution_runs (state, admitted_at);
+
+-- step: execution_budget_reap_scope
+-- D5, D13: what the executor's reaper can reach (a Docker engine ID), derived
+-- from the backend and never configured. A reconciler fences and takes over
+-- only runs whose claimer shares it. Rows from before the column stay NULL,
+-- which equals nothing, until a successor in their own container scopes them.
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS reap_scope TEXT;

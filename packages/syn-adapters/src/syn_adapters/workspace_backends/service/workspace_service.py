@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentic_events import Recording
+    from agentic_isolation.providers.e2b_client import E2BSandboxClient
 
     from syn_adapters.platform_access import PlatformTokenService
     from syn_adapters.workspace_backends.tokens.token_injection_adapter import (
@@ -72,6 +73,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
         WorkspaceAggregate,
     )
+    from syn_shared.settings.e2b import E2BSettings
     from syn_shared.settings.workspace import WorkspaceSettings
 
 logger = logging.getLogger(__name__)
@@ -81,14 +83,25 @@ class WorkspaceBackend(Enum):
     """Backend type for workspace isolation.
 
     DOCKER: Production-grade Docker containers.
+    E2B: E2B cloud sandboxes, only when SYN_E2B_ENABLED is set (#1915, dark).
     MEMORY/LOCAL: Test-only mocks (requires APP_ENVIRONMENT=test).
     RECORDING: Replay pre-recorded sessions for offline testing.
     """
 
     DOCKER = "docker"
+    E2B = "e2b"
     MEMORY = "memory"
     LOCAL = "local"
     RECORDING = "recording"
+
+    @classmethod
+    def selected(cls, e2b: E2BSettings) -> WorkspaceBackend:
+        """The production backend: E2B when the operator turned it on, else Docker.
+
+        ``E2BSettings`` refuses to load when enabled without a key or template,
+        so an enabled flag here always has what E2B needs; there is no fallback.
+        """
+        return cls.E2B if e2b.enabled else cls.DOCKER
 
 
 @dataclass
@@ -201,6 +214,8 @@ class WorkspaceService:
         capture_source_instance_id: str | None = None,
         platform_tokens: PlatformTokenService | None = None,
         credential_policy: WorkspaceCredentialPolicy = HOST_CREDENTIALS,
+        e2b: E2BSettings | None = None,
+        e2b_client: E2BSandboxClient | None = None,
     ) -> WorkspaceService:
         """Create WorkspaceService with explicit backend selection.
 
@@ -216,6 +231,10 @@ class WorkspaceService:
             platform_tokens: Issues each workspace's read-only API token (ADR-072)
             credential_policy: HostCredentials (today's behaviour) or
                 NoCredentials, fixed for every workspace this service makes (#1914)
+            e2b: E2B settings, required for E2B and ignored otherwise (#1915).
+                E2B is always NoCredentials, whatever ``credential_policy`` says.
+            e2b_client: The E2B sandbox client; the e2b SDK adapter, keyed
+                from ``e2b.api_key``, when omitted. Tests pass a double.
 
         Returns:
             Configured WorkspaceService
@@ -234,6 +253,13 @@ class WorkspaceService:
             service = cls._create_memory_impl(config=config, credential_policy=credential_policy)
         elif backend == WorkspaceBackend.LOCAL:
             service = cls._create_local_impl(config=config)
+        elif backend == WorkspaceBackend.E2B:
+            if e2b is None:
+                msg = "WorkspaceBackend.E2B needs its E2BSettings"
+                raise ValueError(msg)
+            service = cls._create_e2b_impl(
+                e2b=e2b, client=e2b_client, config=config, environment=environment
+            )
         else:
             service = cls._create_docker_impl(
                 config=config,
@@ -320,6 +346,63 @@ class WorkspaceService:
             sidecar=sidecar,
             token_injection=token_injection,
             event_stream=event_stream,
+            config=cfg,
+            credential_policy=kit.credential_policy,
+        )
+
+    @classmethod
+    def _create_e2b_impl(
+        cls,
+        *,
+        e2b: E2BSettings,
+        client: E2BSandboxClient | None,
+        config: WorkspaceServiceConfig | None,
+        environment: dict[str, str] | None,
+    ) -> WorkspaceService:
+        """Internal: the E2B backend (#1915), through the same adapters as Docker.
+
+        Only the kit and the provider differ. The kit is NoCredentials, so
+        ``create_workspace`` refuses the sidecar and token injection for every
+        E2B workspace; they are wired as for Docker only to fill the facade.
+        """
+        from agentic_isolation import E2BWorkspaceProvider
+        from agentic_isolation.providers.e2b_client import SdkE2BClient
+
+        from syn_adapters.workspace_backends.agentic import (
+            AgenticEventStreamAdapter,
+            AgenticIsolationAdapter,
+        )
+        from syn_adapters.workspace_backends.backend_kit import BackendKit
+        from syn_adapters.workspace_backends.docker import SharedEnvoyAdapter
+        from syn_adapters.workspace_backends.tokens import (
+            SidecarTokenInjectionAdapter,
+            TokenVendingServiceAdapter,
+        )
+        from syn_tokens.vending import get_token_vending_service
+
+        if not e2b.enabled or e2b.api_key is None:
+            msg = "The E2B backend was selected but SYN_E2B_ENABLED/SYN_E2B_API_KEY are unset"
+            raise ValueError(msg)
+        kit = BackendKit.e2b(e2b.template, cpu_count=e2b.cpu_count, memory_mb=e2b.memory_mb)
+        provider = E2BWorkspaceProvider(
+            e2b.template,
+            client=client or SdkE2BClient(api_key=e2b.api_key.get_secret_value()),
+            lifetime_seconds=e2b.timeout_seconds,
+        )
+        base = config or WorkspaceServiceConfig()
+        cfg = dataclasses.replace(
+            base,
+            image=kit.default_image,
+            environment={**base.environment, **(environment or {})},
+        )
+        isolation = AgenticIsolationAdapter(kit=kit, provider=provider)
+        sidecar = SharedEnvoyAdapter(proxy_url=os.environ.get("SYN_PROXY_URL", ""))
+        vending = TokenVendingServiceAdapter(get_token_vending_service())  # type: ignore[arg-type]
+        return cls(
+            isolation=isolation,  # type: ignore[arg-type]
+            sidecar=sidecar,
+            token_injection=SidecarTokenInjectionAdapter(vending, sidecar),
+            event_stream=AgenticEventStreamAdapter(isolation),
             config=cfg,
             credential_policy=kit.credential_policy,
         )
