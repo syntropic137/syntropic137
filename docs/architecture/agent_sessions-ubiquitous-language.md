@@ -158,8 +158,17 @@ worker find them after any crash (#1398, #1916).
   confirmed every agent process stopped after resume. A run in `fencing`, a
   `disconnected` stream outcome, or the spool lease are never evidence of it.
   Release requires it.
+- **Settled spool:** a spool whose session or run reached a terminal fact, so
+  no executor will resume it (`settled_at`, `CaptureSpoolLease.settled`). Only
+  a settled sandbox spool is claimed or opened: recovering it stops its agent,
+  and reaching a sandbox is not permission to stop it.
+- **Spool fence:** the lease renewal a recovery adapter calls before attaching
+  and again after, before anything destructive. It fails once another worker
+  owns the spool, so a stale worker stops nothing.
 - **Pause-until-drained:** a sandbox spool stays paused until `mark_drained`;
   only release kills it. A failed archive leaves it paused and retryable.
 - **Release:** removing staged bytes after a drained traversal (`archived`) or
-  a retention limit (`expired`). Docker removes the volume; a sandbox is killed.
-  Retention limits apply per backend.
+  a retention limit (`expired`). Docker removes the volume; a sandbox is killed,
+  but only once the provider confirms no agent process remains: a retention
+  limit evicts bytes, it never ends a running agent. Retention limits apply
+  per backend.
