@@ -95,6 +95,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds 
     ReviewRecord,
     next_phase,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+    ImageManifestReading,
+    read_image_manifest,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     AdmittedResume,
     ResumeOrigin,
@@ -331,6 +335,7 @@ class WorkflowExecutionAggregate(
         self._eval = EvalMembership()
         #: The first workspace's verified checkout (#967); None until it is applied.
         self._starting_checkout: list[SourceCommit] | None = None
+        self._image_manifests: dict[str, ImageManifestReading] = {}
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -498,6 +503,10 @@ class WorkflowExecutionAggregate(
     def starting_checkout(self) -> list[SourceCommit]:
         """Each pinned repository's verified commit when the run's first workspace began."""
         return self._starting_checkout or []
+
+    def image_manifest_for(self, phase_id: str) -> ImageManifestReading | None:
+        """The image manifest of the phase's latest workspace; None if none was recorded."""
+        return self._image_manifests.get(phase_id)
 
     @property
     def start_pins(self) -> StartPins:
@@ -957,6 +966,9 @@ class WorkflowExecutionAggregate(
         self._current_phase_workspace_id = evt(event, "workspace_id")
         if self._starting_checkout is None:
             self._starting_checkout = read_source_commits(evt(event, "checked_out_commits"))
+        reading = read_image_manifest(evt(event, "image_manifest"))
+        if reading is not None:
+            self._image_manifests[evt(event, "phase_id")] = reading
 
     @event_sourcing_handler("AgentExecutionCompleted")
     def on_agent_execution_completed(self, event: AgentExecutionCompletedEvent) -> None:

@@ -6,6 +6,9 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 
 from event_sourcing import DomainEvent, event
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+    ImageManifestReading,  # noqa: TC001 - needed at runtime for Pydantic
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     SourceCommit,  # noqa: TC001 - needed at runtime for Pydantic
 )
@@ -32,3 +35,8 @@ class WorkspaceProvisionedForPhaseEvent(DomainEvent):
     #: None on events written before it existed, and on a phase that cloned no
     #: pinned repository.
     checked_out_commits: list[SourceCommit] | None = None
+
+    #: What the workspace's image said about itself, read through the
+    #: provider's file transfer (#1913): read, absent or unreadable, never a
+    #: manifest of empty fields. None only on events written before it existed.
+    image_manifest: ImageManifestReading | None = None

@@ -23,6 +23,9 @@ if TYPE_CHECKING:
         ContinuedBranch,
         RemoteBranchReading,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+        ImageManifestReading,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
         SourceCommit,
@@ -394,6 +397,8 @@ class ProvisionWorkspaceCompletedCommand:
     `checked_out_commits` is where each pinned repository was actually found,
     read back off the workspace once setup finished and verified against its
     pin (#967) - the run's recorded starting state, not its request.
+    `image_manifest` is the workspace image's manifest, or why there is none
+    (#1913).
     """
 
     def __init__(
@@ -403,12 +408,14 @@ class ProvisionWorkspaceCompletedCommand:
         workspace_id: str,
         session_id: str = "",
         checked_out_commits: Sequence[SourceCommit] = (),
+        image_manifest: ImageManifestReading | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.workspace_id = workspace_id
         self.session_id = session_id
         self.checked_out_commits = tuple(checked_out_commits)
+        self.image_manifest = image_manifest
 
 
 class AgentExecutionCompletedCommand:
