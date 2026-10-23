@@ -506,12 +506,12 @@ class WorkflowExecutionAggregate(
         """Each pinned repository's verified commit when the run's first workspace began."""
         return self._starting_checkout or []
 
+    # The output files the phase's collection was refused, by path and reason (#1913).
     def refused_files_for(self, phase_id: str) -> tuple[FileRefusal, ...]:
-        """The output files the phase's collection was refused, by path and reason (#1913)."""
         return self._refused_files.get(phase_id, ())
 
+    # The image manifest of the phase's latest workspace; None if none was recorded.
     def image_manifest_for(self, phase_id: str) -> ImageManifestReading | None:
-        """The image manifest of the phase's latest workspace; None if none was recorded."""
         return self._image_manifests.get(phase_id)
 
     @property
@@ -1013,9 +1013,7 @@ class WorkflowExecutionAggregate(
         self._phase_artifact_ids.setdefault(phase_id, []).extend(evt(event, "artifact_ids", []))
         if evt(event, "deliverable_recovered", False):
             self._recovered_phases.add(phase_id)
-        refused = read_refusals(evt(event, "refused_files", []))
-        if refused:
-            self._refused_files[phase_id] = refused
+        self._refused_files[phase_id] = read_refusals(evt(event, "refused_files", []))
         # The salvage input has done its job for this phase and stops being
         # replayed state: a later to-do item for the same phase must re-read
         # the deliverable, never re-salvage from a stale message. Dropping it

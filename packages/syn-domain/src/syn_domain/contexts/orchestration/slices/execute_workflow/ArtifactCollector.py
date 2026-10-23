@@ -22,10 +22,7 @@ from syn_domain.contexts.artifacts import (
     PhaseOutputFile,
     primary_text,
 )
-from syn_domain.contexts.orchestration._shared.file_transfer import (
-    FileRefusal,
-    FilesRefusedError,
-)
+from syn_domain.contexts.orchestration._shared.file_transfer import FileRefusal  # noqa: TC001
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_SOURCE_PATH,
     DescribeWork,
@@ -37,6 +34,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     EmptyPhaseArtifactError,
     PhaseProducedNoDeclaredOutputError,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.output_refusals import (
+    collect_output_files,
 )
 from syn_shared.workspace_paths import (
     WORKSPACE_INPUT_DIR,
@@ -186,41 +186,6 @@ class CollectedArtifacts:
     #: Output files the provider would not read, by path and reason (#1913).
     #: Collection went on without them; the execution record says so.
     refused: tuple[FileRefusal, ...] = ()
-
-
-class OutputCollectionIncompleteError(RuntimeError):
-    """The walk of the phase's output stopped early, so nobody knows what it held.
-
-    The refusal policy (#1913): a refused FILE is named and recorded, and the
-    rest of the output is collected; a walk that stopped (too many entries,
-    too deep) cannot say which files it missed, so the phase's output is not
-    collected as if it were whole.
-    """
-
-    def __init__(self, refused: tuple[FileRefusal, ...]) -> None:
-        self.refused = refused
-        super().__init__(
-            "the phase's output could not be listed in full: "
-            + ", ".join(r.describe() for r in refused)
-            + ". Reduce the files under artifacts/output, or raise the collection limits."
-        )
-
-
-async def collect_output_files(
-    workspace: ArtifactWorkspace, patterns: list[str]
-) -> tuple[list[tuple[str, bytes]], tuple[FileRefusal, ...]]:
-    """The phase's output files and what was refused, under the refusal policy.
-
-    Raises:
-        OutputCollectionIncompleteError: the walk stopped before listing it all.
-    """
-    try:
-        return await workspace.collect_files(patterns=patterns), ()
-    except FilesRefusedError as e:
-        if not e.complete:
-            raise OutputCollectionIncompleteError(e.refused) from e
-        logger.warning("Output files refused at collection: %s", e)
-        return list(e.files), e.refused
 
 
 @dataclass(frozen=True)
