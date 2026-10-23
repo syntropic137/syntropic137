@@ -465,10 +465,10 @@ __all__ = [
     "ExecutionStatus",
     "FailExecutionCommand",
     "FailureClassification",
-    "FileRefusal",
-    "FilesRefusedError",
     # Value objects - workflow
     "FallbackAgentYamlDefinition",
+    "FileRefusal",
+    "FilesRefusedError",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     "Goal",
