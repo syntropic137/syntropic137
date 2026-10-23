@@ -6,3 +6,5 @@
 | 02-stage-overwrites-live | `stage` writes over the live compose | scripts/tests/test_pit_stop_stage_write.py::test_a_whole_transfer_stages_beside_the_live_compose_and_the_swap_applies_it |
 | 03-drift-never-refuses | `--drift` exits 0 on a real diff | scripts/tests/test_pit_stop_repoint.py::TestDrift::test_config_the_deployed_file_lacks_is_drift |
 | 04-apply-skips-staleness-check | swap moves a stale staged file over a newer live edit | scripts/tests/test_pit_stop_stage_write.py::test_the_swap_refuses_a_stage_the_live_compose_has_moved_past |
+| 05-stage-skips-drift-recheck | `stage` repoints a compose edited on the host since the precheck, unchecked | scripts/tests/test_pit_stop_stage_write.py::test_the_stage_refuses_a_compose_edited_on_the_host_since_the_precheck |
+| 06-old-asset-as-baseline | an env var swaps `$REF`'s compose for an older baseline that hides the drift | scripts/tests/test_1310_pit_stop_gateway_only.py::TestComposeDrift::test_an_old_release_asset_is_no_baseline |
