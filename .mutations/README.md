@@ -55,3 +55,4 @@ applied, the unit module run, and the patch reversed.
 | 13-stale-lease-stops-writer-after-slow-attach-rebased | 08, rebased | `packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_lease_lost_during_a_slow_attach_stops_nothing` |
 
 The command in the previous section already names every killing test.
+| 14-closing-fence-outage-skips-pause | a store error at the closing fence escapes and the sandbox is left running | `packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_store_outage_at_the_closing_fence_still_pauses_the_sandbox` |
