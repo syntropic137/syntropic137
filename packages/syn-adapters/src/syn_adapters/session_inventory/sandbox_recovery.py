@@ -17,7 +17,8 @@ to its new owner, which resumes and pauses it itself.
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager, suppress
+import logging
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
 
 from agentic_isolation.child_journal import WorkspaceChildJournalReader
@@ -34,6 +35,9 @@ if TYPE_CHECKING:
     from agentic_isolation.harnesses import ExecFn
 
     from syn_domain.contexts.agent_sessions import CaptureSpool, CaptureSpoolLease
+
+
+logger = logging.getLogger(__name__)
 
 
 class SpoolNotSettled(Exception):
@@ -140,8 +144,14 @@ class SandboxSpoolRecovery:
             # A stale worker leaves the sandbox to whoever holds the lease now:
             # pausing it would cut that worker's reads off mid-traversal.
             if not lost:
-                with suppress(CaptureSpoolLeaseLost):
+                try:
                     await fenced()
+                except CaptureSpoolLeaseLost:
+                    pass
+                except Exception:
+                    # Ownership unknown: this worker was the last confirmed owner,
+                    # and a running sandbox is the costlier failure.
+                    logger.exception("Spool fence failed before pausing sandbox %s", sandbox_id)
             if not lost:
                 await self._sandboxes.pause(sandbox_id)
 

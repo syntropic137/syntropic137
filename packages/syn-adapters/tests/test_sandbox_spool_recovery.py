@@ -417,6 +417,16 @@ async def test_lease_lost_during_a_slow_attach_stops_nothing() -> None:
 
 
 @pytest.mark.unit
+async def test_store_outage_at_the_closing_fence_still_pauses_the_sandbox() -> None:
+    """Ownership unknown is not ownership lost: the last confirmed owner pauses."""
+    remote, sandbox = _sandboxes()
+    fence = AsyncMock(side_effect=[None, None, OSError("store unavailable")])
+    async with SandboxSpoolRecovery(remote).open(_lease(), fence=fence):
+        assert not sandbox.paused
+    assert remote.order == ["resume:sbx-1", "pause:sbx-1"] and sandbox.paused
+
+
+@pytest.mark.unit
 async def test_removal_refuses_a_sandbox_whose_writer_still_runs() -> None:
     """A quota or age eviction is not permission to end a running agent."""
     remote, sandbox = _sandboxes(alive=True)
