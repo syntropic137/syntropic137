@@ -285,7 +285,8 @@ one of three states, never collapsed:
 - **absent** - the workspace has no manifest file. Not an error: no image
   ships one yet (AgentParadise/agentic-workspace#93);
 - **unreadable** - the transfer failed, or the file was not a manifest. The
-  reason is recorded with it.
+  reason is recorded with it; when the provider refused the file, the
+  **file refusal** itself is recorded too (`refusal`).
 
 Provenance, so Lane 1: it is needed after a restart. The `WorkspaceAggregate`
 also sees it but is never saved, so it is not provenance. Its
@@ -295,6 +296,26 @@ digest, and is never compared with `PINNED_DIGESTS`.
 **Unclear:** the expected manifest hash a reading should be compared with
 does not exist yet, for Docker or E2B (#1913, blocked on
 AgentParadise/agentic-workspace#93), so a reading is recorded, not checked.
+
+## File Refusal
+
+When a workspace's files are read, the provider refuses some entries instead
+of returning them. It refuses links, special files, and anything past a read
+limit. A **file refusal** (`FileRefusal`) names the path and a typed
+reason. A refused file is never recorded as an absent file or an empty one.
+Every backend reads through the provider, Docker included (#1913).
+
+The **refusal policy** for a phase's output:
+
+- **a refused file** is recorded on `ArtifactsCollectedForPhase.refused_files`
+  (`WorkflowExecutionAggregate.refused_files_for`), and the rest of the output
+  is collected;
+- **an incomplete walk** (`entry_limit_exceeded`, `depth_exceeded`) fails the
+  collection (`OutputCollectionIncompleteError`). The walk stopped, so nobody
+  knows which files it missed.
+
+The output kept from an interrupted phase is best effort. A refusal there is
+logged and is not recorded on the execution.
 
 ## Fallback Agent
 
