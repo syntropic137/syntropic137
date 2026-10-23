@@ -68,8 +68,8 @@ if TYPE_CHECKING:
     from syn_shared.settings.session_inventory import SessionInventorySettings
 
     from .database import Pool
-    from .e2b_recovery import RemoteSpoolRecovery
     from .history_source import CaptureObservationQuery
+    from .sandbox_recovery import SandboxSpoolRecovery
 
 
 logger = logging.getLogger(__name__)
@@ -154,7 +154,7 @@ async def create_inventory_runtime(
     settings: SessionInventorySettings,
     *,
     recovery_image: str | None = None,
-    remote_recovery: Mapping[SpoolBackend, RemoteSpoolRecovery] | None = None,
+    remote_recovery: Mapping[SpoolBackend, SandboxSpoolRecovery] | None = None,
     observations: CaptureObservationQuery | None = None,
 ) -> InventoryRuntime:
     evidence = PostgresSessionEvidence(pool)
@@ -189,12 +189,13 @@ async def create_inventory_runtime(
     # One recovery port per backend this worker can reach (decision 7): it claims
     # only those spools. Docker needs the verified helper image; a remote backend
     # needs its recovery kit, supplied by the caller holding that credential.
-    recovery: dict[SpoolBackend, SpoolRecoveryPort] = dict(remote_recovery or {})
-    volumes: dict[SpoolBackend, SpoolVolumePort] = dict(recovery)
+    remote = dict(remote_recovery or {})
+    recovery: dict[SpoolBackend, SpoolRecoveryPort] = dict(remote)
+    volumes: dict[SpoolBackend, SpoolVolumePort] = dict(remote)
     if recovery_image is not None:
         docker = DockerSpoolRecovery(recovery_image)
         recovery["docker"], volumes["docker"] = docker, docker
-    retention = {
+    retention: dict[SpoolBackend, CaptureSpoolRetention] = {
         backend: CaptureSpoolRetention(
             pool,
             source_id,

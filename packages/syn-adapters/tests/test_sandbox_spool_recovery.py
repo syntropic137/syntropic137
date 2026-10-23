@@ -24,9 +24,9 @@ import pytest
 from agentic_isolation.providers.base import ExecuteResult
 from event_sourcing.client.memory import MemoryEventStoreClient
 
-from syn_adapters.session_inventory.e2b_recovery import SandboxSpoolRecovery
 from syn_adapters.session_inventory.recovery_worker import CaptureRecoveryWorker
-from syn_adapters.session_inventory.spool_drain import SpoolDrainProgress
+from syn_adapters.session_inventory.sandbox_recovery import SandboxSpoolRecovery
+from syn_adapters.session_inventory.spool_drain import LocalSpoolDrain, SpoolDrainProgress
 from syn_domain.contexts.agent_sessions import CaptureSpool, CaptureSpoolLease, RunIdentity
 
 if TYPE_CHECKING:
@@ -225,8 +225,14 @@ def test_remote_spool_row_must_name_its_sandbox_and_executor() -> None:
     with pytest.raises(ValueError, match="profile"):
         CaptureSpool.model_validate({**_spool().model_dump(), "profile": "local-spool/1"})
     legacy = CaptureSpool.model_validate_json(
-        '{"run":{"source_instance_id":"%s","execution_id":"r"},"session_id":"s",'
-        '"phase_id":"p","profile":"local-spool/1"}' % SOURCE
+        json.dumps(
+            {
+                "run": {"source_instance_id": SOURCE, "execution_id": "r"},
+                "session_id": "s",
+                "phase_id": "p",
+                "profile": "local-spool/1",
+            }
+        )
     )
     assert legacy.backend == "docker"
     assert legacy.sandbox_id is None
@@ -286,6 +292,63 @@ async def test_worker_routes_remote_row_to_remote_port_and_claims_only_reachable
     spools.claim.return_value = None
     assert not await docker_only.step()
     assert tuple(spools.claim.await_args.kwargs["backends"]) == ("docker",)
+
+
+def _worker(remote: ScriptedSandboxes, capture: AsyncMock, order: list[str]):
+    """The production worker and drain over the scripted sandbox; durable store mocked."""
+    lease = CaptureSpoolLease(spool=_spool(), token=1, after=0)
+    spools = AsyncMock()
+    spools.claim.return_value = lease
+    spools.mark_drained.side_effect = lambda _lease: order.append("mark_drained")
+    recovery = SandboxSpoolRecovery(remote)
+
+    class Release:
+        async def after_drain(self, lease: CaptureSpoolLease, *, exclusive: bool) -> bool:
+            order.append("release")
+            return exclusive and await recovery.remove(lease.spool)
+
+    worker = CaptureRecoveryWorker(
+        spools,
+        {"e2b": recovery},
+        LocalSpoolDrain(capture),
+        lease_seconds=60,
+        retry_seconds=5,
+        release={"e2b": Release()},
+    )
+    return worker, spools
+
+
+@pytest.mark.unit
+async def test_live_writer_is_stopped_drained_and_killed_only_after_mark_drained() -> None:
+    remote, sandbox = _sandboxes(alive=True)
+    capture = AsyncMock()
+    order: list[str] = []
+    worker, _ = _worker(remote, capture, order)
+    assert await worker.step()
+    archived = "".join(
+        json.loads(call.args[0].content)["raw"] for call in capture.handle.await_args_list
+    )
+    # Every line the agent wrote, including the one between resume and stop,
+    # is archived: nothing landed after the traversal.
+    assert sandbox.native and all(line in archived for line in sandbox.native)
+    assert '"after-resume"' in archived
+    assert order == ["mark_drained", "release"]
+    assert remote.order == ["resume:sbx-1", "pause:sbx-1", "kill:sbx-1"]
+
+
+@pytest.mark.unit
+async def test_failed_archive_keeps_sandbox_paused_and_spool_retryable() -> None:
+    remote, sandbox = _sandboxes(alive=False)
+    capture = AsyncMock()
+    capture.handle.side_effect = OSError("archive unavailable")
+    order: list[str] = []
+    worker, spools = _worker(remote, capture, order)
+    assert await worker.step()
+    assert sandbox.paused and not sandbox.killed
+    assert order == []
+    spools.mark_drained.assert_not_awaited()
+    spools.advance.assert_awaited_once()
+    assert spools.advance.await_args.kwargs["retry_seconds"] == 5
 
 
 # --- Real store, production wiring ------------------------------------------

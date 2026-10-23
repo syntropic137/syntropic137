@@ -1,4 +1,6 @@
-"""Reopen a paused sandbox's capture spool from its durable row (#1916, decision 7).
+"""Reopen a paused sandbox's capture spool from its durable row (#1916).
+
+Design: docs/research/2026-10-08-remote-executor-e2b.md, decision 7.
 
 The spool lives on the sandbox's own disk at ``/spool``, retained by pausing the
 sandbox rather than by a volume. Recovery resumes it, stops and confirms every
@@ -61,15 +63,13 @@ class RecoverySandboxes(Protocol):
         ...
 
 
-class RemoteSpoolRecovery(Protocol):
-    """What the inventory runtime needs from a remote backend: open and remove."""
-
-    def open(self, spool: CaptureSpool) -> AbstractAsyncContextManager[RecoveryReaders]: ...
-
-    async def remove(self, spool: CaptureSpool) -> bool: ...
-
-
 class SandboxSpoolRecovery:
+    """``SpoolRecoveryPort`` and ``SpoolVolumePort`` for a sandbox backend.
+
+    Satisfies both because release has to reach the same sandbox recovery
+    opened: removing a sandbox spool is killing the sandbox.
+    """
+
     def __init__(self, sandboxes: RecoverySandboxes) -> None:
         self._sandboxes = sandboxes
 
