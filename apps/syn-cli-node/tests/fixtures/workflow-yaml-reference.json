@@ -98,6 +98,61 @@
       ],
       "document_sha256": "6930cd72d4831a5d15bfd72b2a8a7e2a83d74468a400397a6c8af44ae218c625"
     },
+    "workflows/evals/implement-pinned-sonnet/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        }
+      ],
+      "document_sha256": "906f7f2c68a184cd19824da87d0847ea83397c95c90ee35148349068ab930fe0"
+    },
+    "workflows/evals/implement-pinned-sonnet-v2/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        }
+      ],
+      "document_sha256": "14e6d7f11e7ca4fc7d047d0c9c15f3119654c5b3eed9e241cbdbc8cd98259e1f"
+    },
+    "workflows/evals/implement-pinned-v2/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        }
+      ],
+      "document_sha256": "2e94d88e9c5706c5737fba40dd0e525c322d30b06c74dd4e14817e5b74b14f09"
+    },
+    "workflows/evals/implement-score/workflow.yaml": {
+      "phases": [
+        {
+          "id": "score",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/score.md"
+        }
+      ],
+      "document_sha256": "26e86cce05cd3990e1cff5ff08e9642f663c06075d477d938c178b7bc1a8e22e"
+    },
+    "workflows/evals/implement-score-v2/workflow.yaml": {
+      "phases": [
+        {
+          "id": "score",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/score.md"
+        }
+      ],
+      "document_sha256": "9369c0b7a7f0ed853d762c1740e5e97d3ec52f38347bf1f92dd7d8ab04cc9400"
+    },
     "workflows/evals/verify-pinned/workflow.yaml": {
       "phases": [
         {
@@ -628,6 +683,59 @@
         }
       ],
       "document_sha256": "bfc4e057fbc453d9078c095c57e060881c959c9d1d25163d8dbe1e93a353ca62"
+    },
+    "workflows/sdlc/implement-v4-precheck-sonnet-fix/workflow.yaml": {
+      "phases": [
+        {
+          "id": "premise",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/premise.md"
+        },
+        {
+          "id": "implement",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "verify",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "fix",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/fix.md"
+        },
+        {
+          "id": "reverify",
+          "order": 5,
+          "model": null,
+          "prompt_file": "phases/reverify.md"
+        },
+        {
+          "id": "fix_2",
+          "order": 6,
+          "model": null,
+          "prompt_file": "phases/fix_2.md"
+        },
+        {
+          "id": "reverify_2",
+          "order": 7,
+          "model": null,
+          "prompt_file": "phases/reverify_2.md"
+        },
+        {
+          "id": "finalize_pr",
+          "order": 8,
+          "model": null,
+          "prompt_file": "phases/finalize_pr.md"
+        }
+      ],
+      "document_sha256": "636c2bf1dca4f1306b4d14b93b340b7f87b08f02056a24d561a34dd69a11f608"
     },
     "workflows/sdlc/pr-review/workflow.yaml": {
       "phases": [
