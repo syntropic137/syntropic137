@@ -51,6 +51,10 @@ class CaptureSpoolLease(InventoryModel):
     watermark: int | None = Field(default=None, ge=0)
     child_after: int = Field(default=0, ge=0)
     child_watermark: int | None = Field(default=None, ge=0)
+    settled: bool = False
+    """The session or run reached a terminal fact before this claim, so no
+    executor will resume it. Durable authority to stop a writer that recovery
+    finds still alive; never inferred from a disconnected stream."""
 
 
 class CaptureSpoolLeaseLost(Exception):
@@ -77,7 +81,8 @@ class SessionCaptureSpoolPort(Protocol):
         self, *, lease_seconds: int, backends: Collection[SpoolBackend]
     ) -> CaptureSpoolLease | None:
         """Lease one spool whose backend is in ``backends``: a worker never claims
-        a spool it holds no recovery access to."""
+        a spool it holds no recovery access to. A remote spool is claimed only
+        once settled: recovering it stops its writer."""
         ...
 
     async def renew(self, lease: CaptureSpoolLease, *, lease_seconds: int) -> None: ...

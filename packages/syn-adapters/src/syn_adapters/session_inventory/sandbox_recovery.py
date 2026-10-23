@@ -7,6 +7,10 @@ sandbox rather than by a volume. Recovery resumes it, stops and confirms every
 agent writer gone, then reads with the same execute-based readers Docker uses.
 Leaving the context pauses the sandbox again: only release, after
 ``mark_drained``, kills it.
+
+Reaching a sandbox is not permission to stop it. That comes from durable state
+only: the lease is settled (no executor will resume the session) and still
+ours, checked before attach and again after it, since attach can be slow.
 """
 
 from __future__ import annotations
@@ -21,12 +25,16 @@ from .recovery_worker import RecoveryReaders
 from .workspace_location import workspace_capture_location
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
     from contextlib import AbstractAsyncContextManager
 
     from agentic_isolation.harnesses import ExecFn
 
-    from syn_domain.contexts.agent_sessions import CaptureSpool
+    from syn_domain.contexts.agent_sessions import CaptureSpool, CaptureSpoolLease
+
+
+class SpoolNotSettled(Exception):
+    """Recovery would stop the writer of a session an executor may still resume."""
 
 
 class RecoverySandbox(Protocol):
@@ -58,6 +66,14 @@ class RecoverySandboxes(Protocol):
         """
         ...
 
+    async def writers_stopped(self, sandbox_id: str, *, executor_id: str) -> bool:
+        """True only when the provider confirms no agent process remains.
+
+        A status query: it never resumes, stops or pauses anything. Unknown is
+        False. FIXME(#1916): ``SupportsOperations.status``, as ``stop_writers``.
+        """
+        ...
+
     async def kill(self, sandbox_id: str) -> bool:
         """True when killed or already gone; False keeps it paused."""
         ...
@@ -74,10 +90,20 @@ class SandboxSpoolRecovery:
         self._sandboxes = sandboxes
 
     @asynccontextmanager
-    async def open(self, spool: CaptureSpool) -> AsyncIterator[RecoveryReaders]:
+    async def open(
+        self, lease: CaptureSpoolLease, *, fence: Callable[[], Awaitable[None]]
+    ) -> AsyncIterator[RecoveryReaders]:
+        spool = lease.spool
         sandbox_id, executor_id = _route(spool)
+        if not lease.settled:
+            raise SpoolNotSettled(
+                f"Spool {spool.session_id} in sandbox {sandbox_id} is not settled; "
+                "its executor may still resume it, so recovery will not stop its agent"
+            )
         location = workspace_capture_location(spool.run, spool.session_id)
+        await fence()
         async with self._sandboxes.attach(sandbox_id, executor_id=executor_id) as sandbox:
+            await fence()
             # Resuming resumes the agent too. A run in fencing or a disconnected
             # stream says nothing about whether it still writes: only the
             # provider's confirmation makes this traversal exclusive.
@@ -96,7 +122,11 @@ class SandboxSpoolRecovery:
             )
 
     async def remove(self, spool: CaptureSpool) -> bool:
-        sandbox_id, _ = _route(spool)
+        # Evicting bytes is not permission to end a run: a quota or age limit
+        # reaching a sandbox whose agent still runs keeps it until that stops.
+        sandbox_id, executor_id = _route(spool)
+        if not await self._sandboxes.writers_stopped(sandbox_id, executor_id=executor_id):
+            return False
         return await self._sandboxes.kill(sandbox_id)
 
 

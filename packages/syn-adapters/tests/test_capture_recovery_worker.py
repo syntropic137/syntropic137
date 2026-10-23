@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 
 class Recovery:
     @asynccontextmanager
-    async def open(self, spool):
+    async def open(self, lease, *, fence):
         yield RecoveryReaders(transcripts=AsyncMock(), children=AsyncMock())
 
 
@@ -38,7 +38,9 @@ async def test_failed_page_preserves_cursor_and_success_advances_frozen_watermar
     )
     assert await worker.step()
     spools.advance.assert_awaited_once_with(lease, after=5, watermark=10, retry_seconds=10)
-    spools.renew.assert_awaited_once_with(lease, lease_seconds=120)
+    # Once before the spool is reopened, once before the first page.
+    assert spools.renew.await_count == 2
+    spools.renew.assert_awaited_with(lease, lease_seconds=120)
     spools.advance.reset_mock()
     drain.page.side_effect = None
     drain.page.return_value = SpoolDrainProgress(watermark=10, next_after=None, captured=5)
@@ -106,7 +108,7 @@ class ExclusiveRecovery:
         self.open_now = False
 
     @asynccontextmanager
-    async def open(self, spool):
+    async def open(self, lease, *, fence):
         self.open_now = True
         try:
             yield RecoveryReaders(

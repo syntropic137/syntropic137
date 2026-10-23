@@ -26,9 +26,14 @@ from agentic_isolation.providers.base import ExecuteResult
 from event_sourcing.client.memory import MemoryEventStoreClient
 
 from syn_adapters.session_inventory.recovery_worker import CaptureRecoveryWorker
-from syn_adapters.session_inventory.sandbox_recovery import SandboxSpoolRecovery
+from syn_adapters.session_inventory.sandbox_recovery import SandboxSpoolRecovery, SpoolNotSettled
 from syn_adapters.session_inventory.spool_drain import LocalSpoolDrain, SpoolDrainProgress
-from syn_domain.contexts.agent_sessions import CaptureSpool, CaptureSpoolLease, RunIdentity
+from syn_domain.contexts.agent_sessions import (
+    CaptureSpool,
+    CaptureSpoolLease,
+    CaptureSpoolLeaseLost,
+    RunIdentity,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -52,6 +57,14 @@ def _spool(source: str = SOURCE, *, sandbox: str = "sbx-1") -> CaptureSpool:
         executor_id=EXECUTOR,
         sandbox_id=sandbox,
     )
+
+
+def _lease(*, settled: bool = True) -> CaptureSpoolLease:
+    return CaptureSpoolLease(spool=_spool(), token=1, after=0, settled=settled)
+
+
+async def _fence() -> None:
+    return None
 
 
 @dataclass
@@ -204,6 +217,10 @@ class ScriptedSandboxes:
             sandbox.paused = True
             self.order.append(f"pause:{sandbox_id}")
 
+    async def writers_stopped(self, sandbox_id: str, *, executor_id: str) -> bool:
+        sandbox = self.sandboxes[sandbox_id]
+        return sandbox.owner == executor_id and not sandbox.writer_alive
+
     async def kill(self, sandbox_id: str) -> bool:
         sandbox = self.sandboxes[sandbox_id]
         sandbox.agent_writes("at-kill")
@@ -222,11 +239,10 @@ def _sandboxes(*, alive: bool = True) -> tuple[ScriptedSandboxes, ScriptedSandbo
 
 
 @pytest.mark.unit
-def test_remote_spool_row_must_name_its_sandbox_and_executor() -> None:
+@pytest.mark.parametrize("field", ["sandbox_id", "executor_id"])
+def test_remote_spool_row_must_name_its_sandbox_and_executor(field: str) -> None:
     with pytest.raises(ValueError, match="sandbox and executor"):
-        CaptureSpool.model_validate(
-            {**_spool().model_dump(), "sandbox_id": None},
-        )
+        CaptureSpool.model_validate({**_spool().model_dump(), field: None})
     with pytest.raises(ValueError, match="profile"):
         CaptureSpool.model_validate({**_spool().model_dump(), "profile": "local-spool/1"})
     legacy = CaptureSpool.model_validate_json(
@@ -246,7 +262,7 @@ def test_remote_spool_row_must_name_its_sandbox_and_executor() -> None:
 @pytest.mark.unit
 async def test_open_stops_writer_before_reading_and_pauses_on_exit() -> None:
     remote, sandbox = _sandboxes()
-    async with SandboxSpoolRecovery(remote).open(_spool()) as readers:
+    async with SandboxSpoolRecovery(remote).open(_lease(), fence=_fence) as readers:
         assert readers.exclusive is True
         page = await readers.transcripts.page(0)
         bodies = [await readers.transcripts.read(entry) for entry in page.entries]
@@ -266,14 +282,14 @@ async def test_unconfirmed_stop_never_yields_exclusive(failure: str) -> None:
     sandbox.stop_confirms = False
     if failure == "raises":
         sandbox.stop_writers = AsyncMock(side_effect=OSError("provider 503"))  # type: ignore[method-assign]
-    async with SandboxSpoolRecovery(remote).open(_spool()) as readers:
+    async with SandboxSpoolRecovery(remote).open(_lease(), fence=_fence) as readers:
         assert readers.exclusive is False
 
 
 @pytest.mark.unit
 async def test_worker_routes_remote_row_to_remote_port_and_claims_only_reachable_backends() -> None:
     remote, _ = _sandboxes()
-    lease = CaptureSpoolLease(spool=_spool(), token=1, after=0)
+    lease = _lease()
     spools = AsyncMock()
     spools.claim.return_value = lease
     docker = AsyncMock()
@@ -299,9 +315,11 @@ async def test_worker_routes_remote_row_to_remote_port_and_claims_only_reachable
     assert tuple(spools.claim.await_args.kwargs["backends"]) == ("docker",)
 
 
-def _worker(remote: ScriptedSandboxes, capture: AsyncMock, order: list[str]):
+def _worker(
+    remote: ScriptedSandboxes, capture: AsyncMock, order: list[str], *, settled: bool = True
+):
     """The production worker and drain over the scripted sandbox; durable store mocked."""
-    lease = CaptureSpoolLease(spool=_spool(), token=1, after=0)
+    lease = _lease(settled=settled)
     spools = AsyncMock()
     spools.claim.return_value = lease
     spools.mark_drained.side_effect = lambda _lease: order.append("mark_drained")
@@ -354,6 +372,55 @@ async def test_failed_archive_keeps_sandbox_paused_and_spool_retryable() -> None
     spools.mark_drained.assert_not_awaited()
     spools.advance.assert_awaited_once()
     assert spools.advance.await_args.kwargs["retry_seconds"] == 5
+
+
+@pytest.mark.unit
+async def test_unsettled_spool_never_reaches_a_healthy_writer() -> None:
+    """No durable terminal fact: recovery neither resumes nor stops the agent."""
+    remote, sandbox = _sandboxes(alive=True)
+    worker, spools = _worker(remote, AsyncMock(), [], settled=False)
+    assert await worker.step()
+    assert sandbox.writer_alive and sandbox.paused and not sandbox.killed
+    assert remote.order == [] and "stop" not in sandbox.log
+    spools.mark_drained.assert_not_awaited()
+    with pytest.raises(SpoolNotSettled):
+        async with SandboxSpoolRecovery(remote).open(_lease(settled=False), fence=_fence):
+            pytest.fail("An unsettled remote spool must not open")
+
+
+@pytest.mark.unit
+async def test_expired_lease_never_reaches_the_sandbox() -> None:
+    remote, sandbox = _sandboxes(alive=True)
+    worker, spools = _worker(remote, AsyncMock(), [])
+    spools.renew.side_effect = CaptureSpoolLeaseLost("another worker owns it")
+    assert await worker.step()
+    assert sandbox.writer_alive and remote.order == []
+
+
+@pytest.mark.unit
+async def test_lease_lost_during_a_slow_attach_stops_nothing() -> None:
+    """Valid when attach began, owned by another worker when it returned."""
+    remote, sandbox = _sandboxes(alive=True)
+    worker, spools = _worker(remote, AsyncMock(), [])
+    # Worker check, the adapter's pre-attach fence, then lost by the time attach returns.
+    spools.renew.side_effect = [None, None, CaptureSpoolLeaseLost("expired while attaching")]
+    assert await worker.step()
+    assert remote.order[0] == "resume:sbx-1"
+    assert sandbox.writer_alive and "stop" not in sandbox.log
+    assert not any(entry.startswith("kill") for entry in remote.order)
+    spools.mark_drained.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_removal_refuses_a_sandbox_whose_writer_still_runs() -> None:
+    """A quota or age eviction is not permission to end a running agent."""
+    remote, sandbox = _sandboxes(alive=True)
+    recovery = SandboxSpoolRecovery(remote)
+    assert await recovery.remove(_spool()) is False
+    assert not sandbox.killed and sandbox.writer_alive
+    sandbox.writer_alive = False
+    assert await recovery.remove(_spool()) is True
+    assert sandbox.killed
 
 
 # --- Real store, production wiring ------------------------------------------
@@ -447,7 +514,45 @@ async def test_failed_archive_upload_leaves_sandbox_paused_and_spool_retryable(
     assert row["drained_at"] is None and row["release_reason"] is None
     assert sandbox.paused and not sandbox.killed
     assert "kill:sbx-1" not in remote.order
+    async with db_pool.acquire() as conn:
+        # The failure scheduled a retry rather than dropping the spool...
+        assert await conn.fetchval(
+            """SELECT retry_at>now() FROM session_capture_spools
+            WHERE source_instance_id=$1""",
+            source,
+        )
+        # ...and once that retry time has passed, it is claimable again.
+        await conn.execute(
+            """UPDATE session_capture_spools SET retry_at=now()-interval '1 second',
+            leased_until=now()-interval '1 second' WHERE source_instance_id=$1""",
+            source,
+        )
     assert await runtime.spools.claim(lease_seconds=60, backends=("e2b",)) is not None
+
+
+@pytest.mark.integration
+async def test_only_the_settled_sandbox_is_stopped_when_a_healthy_one_shares_the_store(
+    db_pool: asyncpg.Pool, tmp_path: Path
+) -> None:
+    """An abandoned, settled spool beside a healthy run: only the first is touched."""
+    source = str(uuid4())
+    remote, abandoned = _sandboxes(alive=True)
+    healthy = ScriptedSandbox(owner=EXECUTOR, writer_alive=True)
+    remote.sandboxes["sbx-healthy"] = healthy
+    runtime = await _runtime(db_pool, tmp_path / "archive", remote, source)
+    healthy_spool = _spool(source, sandbox="sbx-healthy").model_copy(
+        update={"session_id": "session-healthy"}
+    )
+    await runtime.spools.project(_spool(source))
+    await runtime.spools.project(healthy_spool)
+    await runtime.spools.settle(_spool(source).session_id)
+    await runtime.processor.process_pending()
+    await runtime.processor.process_pending()
+
+    assert not abandoned.writer_alive and abandoned.killed
+    assert healthy.writer_alive and healthy.paused and not healthy.killed
+    assert not any(entry.endswith(":sbx-healthy") for entry in remote.order)
+    assert await runtime.spools.claim(lease_seconds=60, backends=("e2b",)) is None
 
 
 @pytest.mark.integration

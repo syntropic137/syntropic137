@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+@@ -95,7 +95,7 @@
+     ) -> AsyncIterator[RecoveryReaders]:
+         spool = lease.spool
+         sandbox_id, executor_id = _route(spool)
+-        if not lease.settled:
++        if False:
+             raise SpoolNotSettled(
+                 f"Spool {spool.session_id} in sandbox {sandbox_id} is not settled; "
+                 "its executor may still resume it, so recovery will not stop its agent"

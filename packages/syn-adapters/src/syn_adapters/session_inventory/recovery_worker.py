@@ -10,14 +10,13 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from syn_domain.contexts.agent_sessions import CaptureSpoolLeaseLost
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Awaitable, Callable, Mapping
     from contextlib import AbstractAsyncContextManager
 
     from agentic_isolation.child_journal import WorkspaceChildJournalReader
     from agentic_isolation.session_spool import WorkspaceSpoolReader
 
     from syn_domain.contexts.agent_sessions import (
-        CaptureSpool,
         CaptureSpoolLease,
         SessionCaptureSpoolPort,
         SpoolBackend,
@@ -47,8 +46,14 @@ class SpoolReleasePort(Protocol):
 
 
 class SpoolRecoveryPort(Protocol):
-    def open(self, spool: CaptureSpool) -> AbstractAsyncContextManager[RecoveryReaders]:
-        """Reopen the retained spool and capture retained native files before reading."""
+    def open(
+        self, lease: CaptureSpoolLease, *, fence: Callable[[], Awaitable[None]]
+    ) -> AbstractAsyncContextManager[RecoveryReaders]:
+        """Reopen the retained spool and capture retained native files before reading.
+
+        ``fence`` renews the lease and raises ``CaptureSpoolLeaseLost`` once
+        another worker owns it. An adapter that changes what it reopens calls it
+        after every slow step and before every destructive one."""
         ...
 
 
@@ -96,7 +101,9 @@ class CaptureRecoveryWorker:
         async def renew() -> None:
             await self._spools.renew(lease, lease_seconds=self._lease_seconds)
 
-        async with self._recovery[lease.spool.backend].open(lease.spool) as readers:
+        # A stale worker must not reach the spool at all, let alone stop its writer.
+        await renew()
+        async with self._recovery[lease.spool.backend].open(lease, fence=renew) as readers:
             await renew()
             progress = await self._drain.page(
                 readers.transcripts,
