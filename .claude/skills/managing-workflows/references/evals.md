@@ -27,6 +27,7 @@ promote one alone.
 uv run python scripts/eval_suite.py check  [--suite evals/<suite-id>]  # git only: every pin, fix and control re-read
 uv run python scripts/eval_suite.py launch --suite evals/<suite-id>    # dispatches runs; see --help for split/version
 uv run python scripts/eval_suite.py score  --suite evals/<suite-id>    # catch rate over defects, false-block rate over controls
+# verifier-seed-aw-v1 pins agentic-workspace commits: add --repo lib/agentic-workspace to check and launch, or every pin reports missing
 
 uv run python scripts/eval_implementer.py check  [--suite evals/<suite-id>]  # git only
 uv run python scripts/eval_implementer.py admit [--case <id>]  # runs hidden tests: empty patch must FAIL, real fix must PASS
@@ -57,8 +58,10 @@ Launches cost real quota.
 - **Call a cheaper arm "quality-neutral" only when the paired difference's
   interval excludes the drop you would tolerate** (say -5pp). Inconclusive is
   not neutral.
-- **Cost, wall-clock and tokens are columns of every eval run**, beside the
-  score, so one run answers both the quality and the cost question.
+- **Report cost and wall-clock beside the score** (`eval_suite.py score` prints
+  both; it does not print tokens, and `eval_implementer.py score` prints outcome
+  only), so one run answers the quality and the cost question. Add tokens to
+  any new score output.
 - **Hidden tests can certify wrong fixes.** On SWE-bench, UTBoost
   (arXiv 2506.09289) found patches that passed the original tests but were
   wrong once the tests were strengthened. PatchDiff (arXiv 2503.15223) found

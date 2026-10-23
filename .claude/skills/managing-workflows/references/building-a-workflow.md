@@ -42,7 +42,8 @@ which one is real.
 
 - `just check-workflows` (phase references, hardcoded gates).
 - The workflow's own tests under `scripts/tests/` (for example
-  `test_reverify_pr_workflow.py` keeps copied prompts identical).
+  `test_reverify_pr_workflow.py` keeps copied prompts identical, except verify reads
+  `artifacts/input/prepare.md` where implement-v3 reads `implement.md`).
 - `syn workflow validate <dir>`.
 - A live run on the VPS for anything that changes what a workspace receives.
   CI cannot see image or setup-env behaviour, and a green pin bump once broke

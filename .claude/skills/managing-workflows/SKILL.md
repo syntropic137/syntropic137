@@ -166,7 +166,8 @@ The window, source and definition of each number above are in
 `references/audit-2026-10-21.md`.
 
 - **Shared prompts edited in one place.** `reverify-pr/phases/` copies
-  implement-v3's prompts, and a test fails when they diverge. Change both.
+  implement-v3's prompts, and a test fails when they diverge (one allowed
+  substitution: verify reads `prepare.md` for `implement.md`). Change both.
 
 ## Recommended tools and practices (as of 2026-10-23)
 
