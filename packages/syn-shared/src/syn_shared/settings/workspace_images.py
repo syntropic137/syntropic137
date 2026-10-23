@@ -664,39 +664,41 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 #                  Previous pins, for the record: claude-cli 14eeb7c5,
 #                  omni-agent 01e3c15f, toolchain 885be5de, all from
 #                  agentic-workspace be32a683 (release PR #80).
-# AGENTIC-WORKSPACE UPSTREAM FAILURE CLASSIFIER, E2B OPERATIONS, BOUNDED
-# READ_FILES, 2026-10-23. Taken from release-branch run 39944553124 ("Release
-# Workspace Images", push to release, success) of agentic-workspace fb696fd8
-# (release PR #102, after #99), the commit lib/agentic-workspace pins. Each digest below is what `docker buildx
+# AGENTIC-WORKSPACE E2B OPERATIONS REATTACH + PAUSE/RESUME, 2026-10-23. Taken
+# from release-branch run 40030830477 ("Release Workspace Images", push to
+# release, success) of agentic-workspace 42ea28d4 (release PR #105, after #102
+# and #99), the commit lib/agentic-workspace pins. Each digest below is what `docker buildx
 # imagetools inspect --format '{{.Manifest.Digest}}'` returns for the
-# full-commit tag fb696fd8342992b1481e45758edb329fb2ee6e0b, media type
+# full-commit tag 42ea28d4e06032bb08e41faaa58b6870f1232755, media type
 # application/vnd.oci.image.index.v1+json (the INDEX, amd64 + arm64). Every
-# image carries agentic.image.channel=release and revision fb696fd8, and
+# image carries agentic.image.channel=release and revision 42ea28d4, and
 # `cosign verify` (v3.1.3) passes for each against the
 # release-images.yml@refs/heads/release identity with the GitHub Actions OIDC
 # issuer. This release carries AW #96 (claude and codex upstream failure
 # classifier), #97 (SupportsOperations on the E2B provider), #92 (certifi
-# 2026.10.19 in the agentic_isolation lock) and #101 (bounded, link-safe
-# read_files for every provider, Docker included). No image manifest change.
+# 2026.10.19 in the agentic_isolation lock), #101 (bounded, link-safe
+# read_files for every provider, Docker included) and #104 (E2B operations
+# reattach from a fresh provider, public pause/resume). No image manifest
+# change.
 #
-# omni-agent       d701b1a6, omni-agent manifest 1.16.0.
-# toolchain        126e082f, built FROM omni d701b1a6 in the same run (label
+# omni-agent       c98581e4, omni-agent manifest 1.16.0.
+# toolchain        446627b8, built FROM omni c98581e4 in the same run (label
 #                  org.opencontainers.image.base.digest).
-# claude-cli       172d7cc1, claude-cli manifest 2.4.0.
+# claude-cli       10448737, claude-cli manifest 2.4.0.
 #
-#                  Previous pins, for the record: claude-cli 6aec8e2d,
-#                  omni-agent 45aa9b89, toolchain 5ba2b2ac, all from
-#                  agentic-workspace c621d819 (release PR #90).
+#                  Previous pins, for the record: claude-cli 172d7cc1,
+#                  omni-agent d701b1a6, toolchain 126e082f, all from
+#                  agentic-workspace fb696fd8 (release PR #102).
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:172d7cc1cee1b5660c6b716d70a308da3c337fc1d55c37fbedaeeebab213d89a"
+            "sha256:104487370b5107f6e545ee2ba8097801e84deabf466acbb9b970d0d4dfc55adc"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:d701b1a6811c70a7c20c6754db59e4406d614ad6181c985926a207612f1bc17d"
+            "sha256:c98581e4a66623addb85ba478947910faa7eca5cf40a77ef4f9684a6707cd6e5"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:126e082fff3b3e13a8f1da177e87f9018dd3f4cfa77cf38a9bf1aeaa6ef77651"
+            "sha256:446627b8d120735423fe89ccb1f9b3617519f245ff205f84e87f146dd8acae8c"
         ),
     }
 )
@@ -835,4 +837,5 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:885be5de3793dc838a391fb7338695f3acc2693b4c196e39e182f05765a2a1fd",  # 87fec3c8
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:5ba2b2ac8e9a4af525decabd5205b7ca841921642328ca7397fa8dc8ac1d481c",  # 9904354d
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:143be61422f6efbf47d4f6f1e1ce26078e1a39949dc1990d027333a9a8c95e7f",  # 7cc793c2
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:126e082fff3b3e13a8f1da177e87f9018dd3f4cfa77cf38a9bf1aeaa6ef77651",  # 7b164f10
 )
