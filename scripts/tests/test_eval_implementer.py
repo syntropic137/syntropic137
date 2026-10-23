@@ -25,6 +25,7 @@ from eval_implementer import (
     ROOT,
     ImplementerCase,
     _outcome_of,
+    asserted_contracts,
     check_commits,
     fix_patch,
     load_suite,
@@ -120,6 +121,157 @@ def test_a_pin_that_is_not_the_first_parent_is_reported() -> None:
         update={"cases": (case.model_copy(update={"commit": case.fix_commit}),)}
     )
     assert any("first parent" in p for p in check_commits(wrong, ROOT))
+
+
+def test_a_hidden_test_s_exact_spellings_are_read_from_its_ast() -> None:
+    found = asserted_contracts(
+        "from syn_adapters.x import status_was_lost, RetryPolicy\n"
+        "from os import path\n"
+        "class _Double:\n"
+        "    def mkdir(self): ...\n"
+        "def test(monkeypatch, caplog):\n"
+        "    monkeypatch.setattr(mod, 'container_state', f)\n"
+        "    with pytest.raises(E, match=r'could not create TMPDIR\\.') as raised:\n"
+        "        pass\n"
+        "    assert raised.value.unsettled == 1\n"
+        "    _Double().mkdir()\n"
+        "    double.calls = []\n"
+        "    assert double.calls\n"
+        "    assert 'Could not destroy workspace' in caplog.text\n"
+        "    assert 'printed nothing' not in text\n"
+        "    assert x == 'not a contract'\n"
+    )
+    assert found.names == {"status_was_lost", "RetryPolicy", "container_state"}
+    # `not in` is satisfied by never printing the text, so it needs no statement
+    assert found.literals == {"could not create TMPDIR.", "Could not destroy workspace"}
+    # what the test defines itself (mkdir, calls) is not a contract on the fix
+    assert {"unsettled", "value", "text"} <= found.attributes
+    assert not {"mkdir", "calls"} & found.attributes
+
+
+def test_a_monkeypatch_target_is_read_as_the_module_or_object_it_patches() -> None:
+    found = asserted_contracts(
+        "from syn_adapters.github import client_retry\n"
+        "from syn_adapters.github.client import GitHubAppClient as Client\n"
+        "import syn_shared.settings as settings\n"
+        "def test(monkeypatch, local):\n"
+        "    monkeypatch.setattr(client_retry, '_now', lambda: 0.0)\n"
+        "    monkeypatch.setattr(Client, '_generate_jwt', lambda _self: 'jwt')\n"
+        "    monkeypatch.setattr(settings, 'reset', lambda: None)\n"
+        "    monkeypatch.setattr('syn_adapters.github.GitHubAppClient', object)\n"
+        "    monkeypatch.setattr(local, 'helper', None)\n"
+        "    monkeypatch.setattr('os.path.join', None)\n"
+    )
+    assert found.patched == {
+        ("syn_adapters.github.client_retry", "_now"),
+        ("syn_adapters.github.client.GitHubAppClient", "_generate_jwt"),
+        ("syn_shared.settings", "reset"),
+        ("syn_adapters.github", "GitHubAppClient"),
+    }
+
+
+def test_a_monkeypatch_target_reached_by_attribute_chain_is_resolved() -> None:
+    """Codex on #2019: a plain `import a.b.c` target was unresolved, so the check fell
+    back to a tree-wide name match and `_now` in an unrelated module passed it."""
+    found = asserted_contracts(
+        "import syn_adapters.github.client_retry\n"
+        "import syn_adapters.github as gh\n"
+        "import os.path\n"
+        "def test(monkeypatch):\n"
+        "    monkeypatch.setattr(syn_adapters.github.client_retry, '_now', lambda: 0.0)\n"
+        "    monkeypatch.setattr(gh.client.GitHubAppClient, '_generate_jwt', None)\n"
+        "    monkeypatch.setattr(os.path, 'join', None)\n"
+    )
+    assert found.patched == {
+        ("syn_adapters.github.client_retry", "_now"),
+        ("syn_adapters.github.client.GitHubAppClient", "_generate_jwt"),
+    }
+
+
+@needs_history
+def test_a_fixture_that_patches_a_name_only_the_fix_defines_is_reported() -> None:
+    """E2: `_now` appeared at the pin only in unrelated apps/syn-api tests, so a tree-wide
+    grep passed it while every token-mint test errored at setup in both arms."""
+    loaded = load_suite(DEFAULT_SUITE)
+    case = loaded.case("token-mint-retry-5xx")
+    stated = "`client_retry._now() -> float`"
+    assert stated in case.task
+    unstated = loaded.model_copy(
+        update={"cases": (case.model_copy(update={"task": case.task.replace(stated, "a clock")}),)}
+    )
+    problems = check_commits(unstated, ROOT)
+    assert [p for p in problems if "monkeypatches" in p] == [
+        "token-mint-retry-5xx: packages/syn-adapters/tests/github/test_provisioning_retry.py"
+        " monkeypatches syn_adapters.github.client_retry._now, which the pin does not define"
+        " and the task never states"
+    ], "patch targets that exist at the pin (_generate_jwt, delay_after, ...) are not reported"
+
+
+@needs_history
+def test_an_attribute_the_hidden_tests_read_but_the_task_never_states_is_reported() -> None:
+    """`unsettled` existed at the pin only as an unrelated local variable, so a word match passed it."""
+    loaded = load_suite(DEFAULT_SUITE)
+    case = loaded.case("pause-not-blocked-by-queue")
+    stated = "That error has an `unsettled` attribute"
+    assert stated in case.task
+    unstated = loaded.model_copy(
+        update={"cases": (case.model_copy(update={"task": case.task.replace(stated, "It")}),)}
+    )
+    problems = check_commits(unstated, ROOT)
+    assert any("reads attribute 'unsettled'" in p for p in problems)
+    assert not any("'_run_exec'" in p for p in problems), "submodule attributes are searched"
+
+
+@needs_history
+def test_an_unsearchable_submodule_makes_the_attribute_check_incomplete_not_a_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing submodule clone once counted every attribute as present (codex, #2019)."""
+    loaded = load_suite(DEFAULT_SUITE)
+    case = loaded.case("pause-not-blocked-by-queue")
+    stated = "That error has an `unsettled` attribute"
+    unstated = loaded.model_copy(
+        update={"cases": (case.model_copy(update={"task": case.task.replace(stated, "It")}),)}
+    )
+    real_exists = Path.exists
+
+    def no_submodule_clone(path: Path) -> bool:
+        if path.name == ".git" and path.parent != ROOT:
+            return False
+        return real_exists(path)
+
+    monkeypatch.setattr(Path, "exists", no_submodule_clone)
+    problems = check_commits(unstated, ROOT)
+    assert any("could not be searched" in p and "unsettled" in p for p in problems), problems
+
+
+@needs_history
+def test_a_name_the_hidden_tests_need_but_the_task_never_states_is_reported() -> None:
+    """#2023: exec-status-lost's tests monkeypatch `container_state`, which no pin defines."""
+    loaded = load_suite(DEFAULT_SUITE)
+    case = loaded.case("exec-status-lost")
+    stated = "`exec_status_lost.container_state(container_name: str) -> str`"
+    assert stated in case.task
+    unstated = loaded.model_copy(
+        update={"cases": (case.model_copy(update={"task": case.task.replace(stated, "a helper")}),)}
+    )
+    assert any("'container_state'" in p for p in check_commits(unstated, ROOT))
+
+
+@needs_history
+def test_a_message_the_hidden_tests_assert_but_the_task_never_states_is_reported() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    case = loaded.case("codex-sandbox-tmpdir")
+    unstated = loaded.model_copy(
+        update={
+            "cases": (
+                case.model_copy(
+                    update={"task": case.task.replace("Could not destroy workspace", "an error")}
+                ),
+            )
+        }
+    )
+    assert any("'Could not destroy workspace'" in p for p in check_commits(unstated, ROOT))
 
 
 @needs_history
@@ -231,6 +383,45 @@ def two_hidden_files(
         hidden_tests=("tests/test_first.py", "tests/test_second.py"),
     )
     return case, repo
+
+
+def test_scoring_in_a_worktree_never_writes_the_shared_submodule_config(
+    two_hidden_files: tuple[ImplementerCase, Path], tmp_path: Path
+) -> None:
+    """Admit in a scratch worktree once repointed every checkout's submodule URLs at it."""
+    case, repo = two_hidden_files
+
+    def git(at: Path, *args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(at), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    lib = tmp_path / "lib-origin"
+    lib.mkdir()
+    git(lib, "init", "--quiet")
+    git(
+        lib,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.invalid",
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        "lib",
+    )
+    git(
+        repo, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", str(lib), "lib/dep"
+    )
+    git(repo, "commit", "--quiet", "-m", "add submodule")
+    pinned = case.model_copy(update={"commit": git(repo, "rev-parse", "HEAD")})
+    before = git(repo, "config", "--get-regexp", "submodule")
+
+    with eval_implementer._worktree(repo, pinned.commit) as tree:
+        assert git(tree / "lib/dep", "rev-parse", "HEAD") == git(lib, "rev-parse", "HEAD")
+
+    assert git(repo, "config", "--get-regexp", "submodule") == before
 
 
 def test_the_bug_left_in_place_fails_and_the_fix_passes(

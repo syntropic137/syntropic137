@@ -12,7 +12,7 @@ port as Docker, so the rest of the system does not know which backend ran.
 
 | Works through the E2B backend | Not yet |
 |---|---|
-| Creating and destroying a workspace, with confirmed cleanup | **Launching an agent.** The E2B provider has no operation contract (`SupportsOperations`) in agentic-workspace yet, so an agent launch fails with a clear `WorkspaceProvisionError`. |
+| Creating and destroying a workspace, with confirmed cleanup | **Launching an agent end to end.** The E2B provider implements the operation contract (`SupportsOperations`, agentic-workspace #97), but no agent launch through Syntropic137 has run on E2B yet (#1912). |
 | Running commands (stdout and stderr merged in write order) | Any workspace that needs host credentials. The E2B kit is always `NoCredentials`, so a phase with repositories is refused (see the ubiquitous language). |
 | Writing and reading files, binary-safe | Session capture. E2B cannot mount the host's capture directory. |
 | Listing and re-attaching to this run's sandboxes | Choosing E2B per run. Placement is #1917; today the flag switches every workspace. |
