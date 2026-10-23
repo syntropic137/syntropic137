@@ -11,7 +11,7 @@ export function synPath(...segments: string[]): string {
 
 export function readJsonFile<T>(
   filePath: string,
-  schema: z.ZodType<unknown, z.ZodTypeDef, unknown>,
+  schema: z.ZodType<unknown, unknown>,
   fallback: T,
 ): T {
   if (!fs.existsSync(filePath)) return fallback;

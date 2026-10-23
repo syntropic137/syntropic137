@@ -138,6 +138,25 @@ repair round is spent on it. Its design note and preregistered A/B are in
 from v3 in anything else. **Change a shared prompt in `implement-v3/phases/`
 and copy it here too.**
 
+## Experiment arm: `implement-v7`
+
+`sdlc-implement-v7` is `sdlc-implement-v4-precheck` plus evidence declarations
+and capability gaps (#2060). A review or fix that needs a tool the workspace
+lacks and cannot install records a capability gap (`nested_docker`,
+`database`, `event_store`, `live_api`, `other`) instead of spending or refusing
+a round; integration and mutation evidence is declared in
+`TASK_RESULT.evidence` for the platform evidence gate; `finalize_pr` reads the
+gate's manifest and lists open gaps under `## Needs a capable workspace` for the
+orchestrator to route. It also lets only a check the base branch requires hold
+a certified PR in draft (PC-241), reading the required set from the base
+branch's rulesets. v5 lacked the required-checks rule and v6 failed closed on
+the 403 classic protection returns to the App token; both ran as live checks on
+the owner VPS and are not in this tree. Design note and A/B:
+[`implement-v7/EXPERIMENT.md`](implement-v7/EXPERIMENT.md).
+`scripts/tests/test_implement_v7_variant.py` fails if it differs from
+v4-precheck in anything else. `reverify-pr` mirrors implement-v3 and is
+unchanged.
+
 ## Verification gates
 
 `sdlc-implement-v3` and `sdlc-reverify-pr-v1` verify a change by running the

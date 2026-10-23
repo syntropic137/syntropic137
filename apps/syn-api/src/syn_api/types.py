@@ -751,7 +751,11 @@ class ExecutionSummary(BaseModel):
     total_output_tokens: int = 0
     total_cache_creation_tokens: int = 0
     total_cache_read_tokens: int = 0
-    total_cost_usd: Decimal | str = Decimal("0")
+    total_cost_usd: Decimal = Decimal("0")
+    """USD, exact. Pydantic serialises ``Decimal`` as a JSON string
+    (``"0.11584"``), never a float, so no precision is lost on the wire and
+    clients parse it as a decimal. Every cost model here shares this contract
+    (#1433)."""
     unpriced_observation_count: int = 0
     """Observations that carried no usable rate and so added nothing to the total.
 
@@ -824,7 +828,11 @@ class ExecutionDetail(BaseModel):
     total_output_tokens: int = 0
     total_cache_creation_tokens: int = 0
     total_cache_read_tokens: int = 0
-    total_cost_usd: Decimal | str = Decimal("0")
+    total_cost_usd: Decimal = Decimal("0")
+    """USD, exact. Pydantic serialises ``Decimal`` as a JSON string
+    (``"0.11584"``), never a float, so no precision is lost on the wire and
+    clients parse it as a decimal. Every cost model here shares this contract
+    (#1433)."""
     unpriced_observation_count: int = 0
     """Observations that carried no usable rate and so added nothing to the total.
 
@@ -958,6 +966,10 @@ class SessionSummary(BaseModel):
     cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
+    """USD, exact. Pydantic serialises ``Decimal`` as a JSON string
+    (``"0.11584"``), never a float, so no precision is lost on the wire and
+    clients parse it as a decimal. Every cost model here shares this contract
+    (#1433)."""
     started_at: datetime | None = None
     completed_at: datetime | None = None
     #: The model the workflow ASKED for, from SessionStarted. Never what ran;
@@ -2328,7 +2340,11 @@ class ExecutionDetailFull(BaseModel):
     """Every phase the run declared, in order, with where each stands. Counts
     the same phases ``total_phases`` does; ``phases`` is only the ones that ran."""
     total_tokens: int = 0
-    total_cost_usd: Decimal | str = Decimal("0")
+    total_cost_usd: Decimal = Decimal("0")
+    """USD, exact. Pydantic serialises ``Decimal`` as a JSON string
+    (``"0.11584"``), never a float, so no precision is lost on the wire and
+    clients parse it as a decimal. Every cost model here shares this contract
+    (#1433)."""
     unpriced_observation_count: int = 0
     total_duration_seconds: float | None
     """Wall-clock seconds across the execution's phases, including any still
