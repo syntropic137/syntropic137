@@ -4,12 +4,21 @@ Called by scripts/pit_stop.sh at `stage`:
 
     python3 scripts/pit_stop_repoint.py <tag> <deployed-compose> <staged-compose> [--service gateway]
     python3 scripts/pit_stop_repoint.py --on-tag <tag> <compose> <service>
+    python3 scripts/pit_stop_repoint.py --drift <published-compose> <deployed-compose>
 
 The second form prints 1 when the compose service <service> (`api` or
 `gateway`) has one image line and it names exactly the ref `ship` loaded, else 0. It is the count
 the stage and --swap-only prechecks trust, so it reads the image lines the same
 way the repoint writes them: a commented-out line, a longer tag that merely
 starts with <tag> (`beta.1` vs `beta.10`) or a suffixed one is not on the tag.
+
+The third form exits 1 and prints a unified diff when the deployed compose
+differs from the one the shipped ref publishes in anything but image pins, else
+exits 0 silently (#1511). A pit stop only repoints pins, so an image whose
+startup needs new compose config (a volume, an env var, a proxy policy) would
+otherwise be deployed without it and abort on every start. Every image line is
+compared by image NAME: the published file says `${SYN_VERSION:-latest}`, a
+release-installed host a digest, a hotfixed one a tag, and none of that is drift.
 
 It writes the staged compose and prints, on stdout, the name to back the
 deployed file up under (empty when every pin is already the shipped ref, so
@@ -36,6 +45,7 @@ as deployed until a pit stop that recreates the executor exists.
 
 from __future__ import annotations
 
+import difflib
 import re
 import sys
 from dataclasses import dataclass
@@ -157,7 +167,35 @@ def on_tag(compose: str, tag: str, service: str) -> bool:
     return found == {f"{REGISTRY}/{IMAGES[service]}:{tag}"}
 
 
+def _without_pins(compose: str) -> list[str]:
+    """`compose` with every image ref cut to its repository, and without blank
+    and comment lines: neither pins nor commentary change what a service runs."""
+
+    def unpinned(m: re.Match[str]) -> str:
+        path, _, name = m["ref"].partition("@")[0].rpartition("/")
+        return m["lead"] + (f"{path}/" if path else "") + name.partition(":")[0]
+
+    lines = _IMAGE_LINE.sub(unpinned, compose).splitlines(keepends=True)
+    return [line for line in lines if line.strip() and not line.lstrip().startswith("#")]
+
+
+def drift(published: str, deployed: str) -> str:
+    """The unified diff from `deployed` to `published`, pins aside; empty when none."""
+    return "".join(
+        difflib.unified_diff(
+            _without_pins(deployed),
+            _without_pins(published),
+            fromfile="deployed",
+            tofile="published",
+        )
+    )
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) == 3 and argv[0] == "--drift":
+        diff = drift(Path(argv[1]).read_text(), Path(argv[2]).read_text())
+        print(diff, end="")
+        return 1 if diff else 0
     if len(argv) == 4 and argv[0] == "--on-tag":
         _, tag, compose, svc = argv
         print(1 if svc in IMAGES and on_tag(Path(compose).read_text(), tag, svc) else 0)

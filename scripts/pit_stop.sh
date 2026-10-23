@@ -12,16 +12,21 @@
 # webhook or a poller could admit work in the gap before the swap.
 #
 #   stages: prepare -> build -> ship -> stage | gate -> drain -> swap -> verify -> ungate
-#   --stage-only  stop after `stage` (runs may still be in flight)
+#   --stage-only  stop after `stage` (runs may still be in flight). The pins
+#                 go to a SIDE file, never the live compose, so a routine
+#                 `compose up` before the swap still starts the old build (#1511)
 #   --swap-only   skip to `gate`; the version must already be staged
 #   --dry-run     echo every mutating command; still run read-only checks
 #   --skip-probe  EMERGENCIES ONLY: do not prove a real execution starts after ungate
 #   --service gateway   build, ship, stage and swap the gateway alone, with no
 #                 gate, no drain and no probe: it is on syn-internal only, never
 #                 agent-net, so no execution depends on it (#1310). Default: all
+#   Refuses to stage, printing the diff, when the deployed compose differs from
+#   the one $REF publishes in anything but image pins: the new image may need
+#   that config to start (#1511). Bring the host's compose up to date first.
 set -euo pipefail
 
-usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ $# -ge 1 ] || usage
 VERSION="${1#v}"; shift
 TAG="v${VERSION}"
@@ -30,6 +35,10 @@ HOST="${SYN_PIT_HOST:-root@100.114.86.77}"
 API="${SYN_PIT_API:-http://100.114.86.77:8137/api/v1}"
 COMPOSE_DIR="/root/.syntropic137"
 COMPOSE="docker-compose.syntropic137.yaml"
+# Where `stage` puts the repointed compose until the swap applies it (#1511).
+STAGED="$COMPOSE.pit-stop-staged"
+# What $REF publishes; the deployed compose is held to it, image pins aside.
+PUBLISHED="docker/docker-compose.syntropic137.yaml"
 DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-2700}"
 API_READY_TIMEOUT="${SYN_PIT_API_READY_TIMEOUT:-900}"
 PROBE_WORKFLOW="${SYN_PIT_PROBE_WORKFLOW:-telemetry-lag-probe-v1}"
@@ -307,9 +316,12 @@ GATE
 # for v0.33.2-beta.1, and an unescaped `.` let `ghcrxio/...` stand in for
 # `ghcr.io/...`. The pin is read by the repoint's own parser, so the precheck
 # and the stage agree on what an image line is.
+#
+# It counts the STAGED file, not the live one: staging no longer touches the
+# compose a routine `compose up` reads (#1511), so the pins are only there.
 pins_on_tag() {
     local n=0 svc c
-    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.check" || { echo 0; return 0; }
+    remote "cat $COMPOSE_DIR/$STAGED" > "$TMP/compose.check" || { echo 0; return 0; }
     for svc in $SWAPPED; do
         c="$(python3 "$REPOINT_PY" --on-tag "$TAG" "$TMP/compose.check" "$svc" || true)"
         if [ "$c" = 1 ]; then n=$((n + 1)); fi
@@ -490,6 +502,20 @@ trap 'exit 143' TERM
 if [ "$DRY" = 0 ]; then claim_the_swap; fi
 
 if [ "$MODE" != "swap" ]; then
+    # Before anything is built: a pit stop repoints image pins and nothing else,
+    # so a compose the new image's startup depends on would never reach the
+    # host. beta.6 aborted on every start for want of the session-inventory
+    # archive dir it carried (#1511). Read-only, so it runs under --dry-run too.
+    step "precheck: the deployed compose is $REF's published compose, image pins aside"
+    git -C "$REPO_TOP" show "$REF:$PUBLISHED" > "$TMP/compose.published" \
+        || die "could not read $PUBLISHED at $REF"
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
+    if ! python3 "$REPOINT_PY" --drift "$TMP/compose.published" "$TMP/compose.deployed" > "$TMP/compose.drift"; then
+        cat "$TMP/compose.drift"
+        die "$COMPOSE_DIR/$COMPOSE on $HOST is not the compose $REF publishes (diff above, image pins ignored). The $TAG images may need that config to start: bring the deployed compose up to date, then run the pit stop again. Nothing was built, shipped or staged"
+    fi
+    echo "   no drift"
+
     step "prepare: worktree at $REF, bump to $VERSION"
     WT="$WT_BASE/pit-stop-$VERSION"
     [ -e "$WT" ] && die "$WT already exists; remove it or pick another version"
@@ -544,33 +570,34 @@ if [ "$MODE" != "swap" ]; then
     [ "$DRY" = 1 ] || [ "$(images_on_tag)" = "$N" ] \
         || die "expected $N image(s) tagged $TAG on the host; the deploy would be half old"
 
-    step "stage: back up the deployed compose and repoint $REPOINTS"
+    step "stage: repoint $REPOINTS into $STAGED (the live compose is untouched until the swap)"
     # Read here, repointed locally, written back whole: a release-installed host
     # pins each image by its own digest and a hotfixed one by its own tag, so no
     # single substitution covers both services (scripts/pit_stop_repoint.py).
+    #
+    # Into a SIDE file, never over $COMPOSE: a routine `compose up` between
+    # stage and swap (a rotated credential, say) would otherwise start the new
+    # build undrained, ungated and unverified (#1511). apply_staged moves it in.
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
     BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged" --service "$SERVICE")" \
         || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
-    if [ -n "$BAK" ]; then
-        # Written beside the file, checked against the staged checksum, and only
-        # then renamed over it. `cat` exits 0 on a short read, so without the
-        # check a dropped transfer would install half a compose file.
-        SUM="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.staged")"
-        run remote "cd $COMPOSE_DIR && cat > $COMPOSE.pit-stop && echo '$SUM  $COMPOSE.pit-stop' | sha256sum -c --status - && cp $COMPOSE $COMPOSE.bak-$BAK && mv $COMPOSE.pit-stop $COMPOSE || { rm -f $COMPOSE.pit-stop; exit 1; }" < "$TMP/compose.staged" \
-            || die "the staged compose did not arrive intact on $HOST; the deployed file is unchanged"
-        if [ "$DRY" = 0 ]; then
-            remote "cat $COMPOSE_DIR/$COMPOSE" | cmp -s - "$TMP/compose.staged" || die "the compose on $HOST is not the one staged; the backup is $COMPOSE.bak-$BAK"
-            echo "   backed up to $COMPOSE.bak-$BAK"
-        fi
-    else
-        echo "   $ALREADY"
+    [ -n "$BAK" ] || echo "   $ALREADY"
+    # Written beside the file, checked against the staged checksum, and only
+    # then renamed into place. `cat` exits 0 on a short read, so without the
+    # check a dropped transfer would stage half a compose file.
+    SUM="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.staged")"
+    run remote "cd $COMPOSE_DIR && cat > $COMPOSE.pit-stop && echo '$SUM  $COMPOSE.pit-stop' | sha256sum -c --status - && mv $COMPOSE.pit-stop $STAGED || { rm -f $COMPOSE.pit-stop; exit 1; }" < "$TMP/compose.staged" \
+        || die "the staged compose did not arrive intact on $HOST; nothing was staged"
+    if [ "$DRY" = 0 ]; then
+        remote "cat $COMPOSE_DIR/$STAGED" | cmp -s - "$TMP/compose.staged" || die "$STAGED on $HOST is not the compose staged"
+        echo "   staged in $STAGED; $COMPOSE still runs what it ran"
     fi
     # The same count --swap-only prechecks, so a stage it would refuse fails here.
     # Only the swapped services are counted, so syn-api's pin, old or new, says
     # nothing about a gateway-only stage.
     if [ "$DRY" = 0 ]; then
         new_n="$(pins_on_tag)"
-        [ "$new_n" = "$N" ] || die "the deployed compose pins $new_n/$N services to $TAG after the repoint"
+        [ "$new_n" = "$N" ] || die "the staged compose pins $new_n/$N services to $TAG after the repoint"
     fi
     if [ "$MODE" = "stage" ]; then
         step "staged $TAG; run with --swap-only once drained"
@@ -579,12 +606,12 @@ if [ "$MODE" != "swap" ]; then
 fi
 
 if [ "$MODE" = "swap" ] && [ "$DRY" = 0 ]; then
-    step "precheck: $TAG is staged in the compose file and present on the host"
+    step "precheck: $TAG is staged in $STAGED and present on the host"
     # --swap-only recreates whatever the compose file names. Without this it
     # would drain the platform and disrupt production containers before
     # discovering, at verify, that the file pins something else entirely.
     pins="$(pins_on_tag)"
-    [ "$pins" = "$N" ] || die "the deployed compose file pins $pins/$N services to $TAG; stage it first"
+    [ "$pins" = "$N" ] || die "$STAGED pins $pins/$N services to $TAG; stage it first"
     staged="$(images_on_tag)"
     [ "$staged" = "$N" ] || die "$staged/$N images tagged $TAG on $HOST; stage it first"
     echo "   pins=$N images=$N"
@@ -629,7 +656,36 @@ start_gateway() {
     echo "   syn137-gateway: docker start issued"
 }
 
+# Move the staged compose over the live one, keeping the live one as a backup.
+# Only here, at the swap: until now a `compose up` kept starting the old build
+# (#1511). The staged file must still be what repointing the live compose
+# gives, so an edit made to the live file since the stage is never undone by it.
+apply_staged() {
+    step "apply: $STAGED over $COMPOSE, the previous one kept as a backup"
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.live" \
+        || die "could not read the deployed compose file; nothing was recreated"
+    BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.live" "$TMP/compose.want" --service "$SERVICE")" \
+        || die "could not repoint the deployed compose file; nothing was recreated"
+    if [ "$DRY" = 0 ]; then
+        remote "cat $COMPOSE_DIR/$STAGED" | cmp -s - "$TMP/compose.want" \
+            || die "$COMPOSE on $HOST changed after $TAG was staged; stage again so that change is kept. Nothing was recreated"
+    fi
+    if [ -z "$BAK" ]; then
+        run remote "rm -f $COMPOSE_DIR/$STAGED" || die "could not remove $STAGED on $HOST; nothing was recreated"
+        echo "   $ALREADY"
+        return 0
+    fi
+    run remote "cd $COMPOSE_DIR && cp $COMPOSE $COMPOSE.bak-$BAK && mv $STAGED $COMPOSE" \
+        || die "could not apply $STAGED on $HOST; nothing was recreated"
+    if [ "$DRY" = 0 ]; then
+        remote "cat $COMPOSE_DIR/$COMPOSE" | cmp -s - "$TMP/compose.want" \
+            || die "the compose on $HOST is not the one staged; the backup is $COMPOSE.bak-$BAK"
+        echo "   backed up to $COMPOSE.bak-$BAK"
+    fi
+}
+
 if [ "$SERVICE" = gateway ]; then
+    apply_staged
     # NO GATE AND NO DRAIN, deliberately. The gateway is on syn-internal only,
     # never agent-net (docker/docker-compose.syntropic137.yaml), so no execution
     # reaches it and recreating it cannot kill one. --no-deps is what keeps the
@@ -708,6 +764,8 @@ wait_for_api_ready() {
     done
 }
 
+# Gated and drained, nothing recreated yet: a failure here re-opens admission.
+apply_staged
 step "swap: recreate api + gateway (no pull: the images are only in the host's daemon)"
 RECOVERY="RECOVERY: admission is still PAUSED. Once syn137-api is healthy, finish by hand:
    ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d gateway'
