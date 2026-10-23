@@ -41,7 +41,10 @@ MANIFEST = {
 }
 
 
-def _replayed(reading: ImageManifestReading | None, *, drop: str | None = None):
+def _replayed(
+    reading: ImageManifestReading | None, *, drop: str | None = None
+) -> WorkflowExecutionAggregate:
+    """The aggregate rebuilt from the JSON of its events, ``drop`` removed from each."""
     aggregate = WorkflowExecutionAggregate()
     aggregate._handle_command(
         StartExecutionCommand(
@@ -69,7 +72,7 @@ def _replayed(reading: ImageManifestReading | None, *, drop: str | None = None):
             image_manifest=reading,
         )
     )
-    envelopes = []
+    envelopes: list[EventEnvelope] = []
     for envelope in aggregate.get_uncommitted_events():
         payload = envelope.event.model_dump(mode="json")
         payload.pop(drop or "", None)
