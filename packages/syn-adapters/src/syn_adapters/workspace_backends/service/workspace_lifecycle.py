@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 
 from syn_adapters.workspace_backends.errors import TeardownFailure, WorkspaceTeardownError
 from syn_domain.contexts.orchestration import (
+    IMAGE_MANIFEST_FILE,
+    IMAGE_MANIFEST_ROOT,
     CreateWorkspaceCommand,
     ImageManifest,
     ImageManifestReading,
@@ -24,10 +26,6 @@ from syn_domain.contexts.orchestration import (
     TerminateWorkspaceCommand,
     WorkspaceAggregate,
     WorkspaceUsage,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
-    IMAGE_MANIFEST_FILE,
-    IMAGE_MANIFEST_ROOT,
 )
 
 if TYPE_CHECKING:

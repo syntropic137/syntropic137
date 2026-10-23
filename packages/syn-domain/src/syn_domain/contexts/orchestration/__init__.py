@@ -112,6 +112,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     ResumeExecutionCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+    IMAGE_MANIFEST_FILE,
+    IMAGE_MANIFEST_ROOT,
     ImageManifestContent,
     ImageManifestReading,
     ImageManifestState,
@@ -371,6 +373,8 @@ __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
     "HOST_CREDENTIALS",
+    "IMAGE_MANIFEST_FILE",
+    "IMAGE_MANIFEST_ROOT",
     "MAX_START_ATTEMPTS",
     "NO_CREDENTIALS",
     "ORCHESTRATION_EVENT_EPOCH",
