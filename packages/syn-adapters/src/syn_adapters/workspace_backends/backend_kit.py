@@ -65,10 +65,6 @@ class BackendKit:
     #: workspaces itself rather than per request. None: no ceiling.
     max_cpu_cores: float | None = None
     max_memory_mb: int | None = None
-    #: Whether files are read back through the provider rather than from the
-    #: workspace directory on this host. A remote workspace has no host
-    #: directory; Docker keeps its bounded host-mount read.
-    reads_through_provider: bool = False
 
     def __post_init__(self) -> None:
         self._require_permitted(self.default_image)
@@ -86,7 +82,8 @@ class BackendKit:
         template was built (agentic-workspace ``build_template`` takes the
         verified digest). E2B sizes a sandbox by its template, so a workspace
         asking for more than the template has is refused. The sandbox's disk
-        is not on this host, so files come back through the provider.
+        is not on this host; files come back through the provider, as on every
+        backend (#1913).
         """
         return cls(
             default_image=template,
@@ -96,7 +93,6 @@ class BackendKit:
             verifies_images=False,
             max_cpu_cores=float(cpu_count),
             max_memory_mb=memory_mb,
-            reads_through_provider=True,
         )
 
     @property

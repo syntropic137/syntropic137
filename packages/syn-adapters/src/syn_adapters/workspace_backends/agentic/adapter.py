@@ -25,13 +25,17 @@ from agentic_isolation import (
 )
 from agentic_isolation.contract import OperationError
 from agentic_isolation.providers.base import SupportsOperations
+from agentic_isolation.providers.base import Workspace as ProviderWorkspace
 from agentic_isolation.providers.capabilities import SupportsFileTransfer, TransferRoot
+from agentic_isolation.providers.file_transfer import ReadFilesResult, ReadLimits
 from agentic_isolation.providers.operation_spool import OperationFailure
 
 from syn_adapters.diagnostics import capture_signal_death
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
+    MAX_COLLECTION_BYTES,
+    MAX_COLLECTION_ENTRIES,
+    MAX_DIRECTORY_DEPTH,
     check_workspace_health,
-    copy_files_from_workspace,
     copy_files_to_workspace,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
@@ -68,11 +72,16 @@ from syn_adapters.workspace_backends.exec_status_lost import (
 )
 from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_adapters.workspace_backends.host_security import host_security_failure
+from syn_domain.contexts.orchestration._shared.file_transfer import (
+    FileRefusal,
+    FilesRefusedError,
+)
 from syn_shared.env_constants import (
     ENV_SYN_AGENT_NETWORK,
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
     ENV_SYN_WORKSPACE_HOST_DIR,
 )
+from syn_shared.settings import get_settings
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
@@ -695,29 +704,33 @@ class AgenticIsolationAdapter:
         patterns: list[str],
         base_path: str = "/workspace",
     ) -> list[tuple[str, bytes]]:
-        """Copy files from workspace.
+        """Copy files from workspace, read by the provider's bounded file transfer.
 
-        Only `/workspace` of a local backend is on this host, through its
-        mount; every other root, and every root of a remote backend, is read by
-        the provider's file transfer (#1913). The mount read ignores
-        `base_path`, so routing another root to it would read the wrong files.
+        Every root of every backend, Docker's `/workspace` included (#1913):
+        the provider walks and reads inside the workspace, refusing links,
+        special files and anything past `collection_read_limits()`, and names
+        each refusal. The host bind mount could only log what it skipped, so
+        a refusal there was a file that silently went missing.
+
+        Raises `FilesRefusedError` when anything asked for was refused; the
+        caller decides what a refusal means, never this adapter.
 
         Every workspace holds the session-store token, and only this adapter
         knows it, so a file the workload wrote leaves with it replaced (#1927).
         """
-        if self._kit.reads_through_provider or base_path != "/workspace":
-            collected = await self._read_through_provider(handle, patterns, base_path)
-        else:
-            collected = await copy_files_from_workspace(handle, patterns, base_path)
+        files, refused = await self._read_through_provider(handle, patterns, base_path)
         scrubber = CredentialScrubber(self.credentials.withheld(()))
-        return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
+        scrubbed = tuple((path, scrub_bytes(scrubber, content)) for path, content in files)
+        if refused:
+            raise FilesRefusedError(scrubbed, refused)
+        return list(scrubbed)
 
     async def _read_through_provider(
         self, handle: IsolationHandle, patterns: list[str], base_path: str
-    ) -> list[tuple[str, bytes]]:
-        """A remote workspace's files, read by the provider (its disk is not on this host)."""
+    ) -> tuple[tuple[tuple[str, bytes], ...], tuple[FileRefusal, ...]]:
+        """The files the provider read, and what it refused, by path and reason."""
         workspace = self._workspaces.get(handle.isolation_id)
-        if workspace is None:
+        if not isinstance(workspace, ProviderWorkspace):
             raise RuntimeError(f"Workspace not found: {handle.isolation_id}")
         if not isinstance(self._provider, SupportsFileTransfer):
             msg = f"the {self._kit.isolation_type} provider cannot transfer files"
@@ -726,15 +739,26 @@ class AgenticIsolationAdapter:
             msg = f"cannot read files from {base_path!r}: not a transfer root"
             raise ValueError(msg)
         root = cast("TransferRoot", base_path)
-        result = await self._provider.read_files(workspace, patterns, base_path=root)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
-        if result.refused:
-            # A refused entry (a link, a special file, or past a read limit) is
-            # a file the caller asked for and would not get; fail closed rather
-            # than return a partial set as if it were whole.
-            refused = ", ".join(f"{r.path} ({r.reason})" for r in result.refused)
-            msg = f"the {self._kit.isolation_type} provider refused to read: {refused}"
-            raise RuntimeError(msg)
-        return list(result.files)
+        result: ReadFilesResult = await self._provider.read_files(
+            workspace, patterns, base_path=root, limits=collection_read_limits()
+        )
+        refused = tuple(FileRefusal(path=r.path, reason=r.reason) for r in result.refused)
+        return result.files, refused
+
+
+def collection_read_limits() -> ReadLimits:
+    """The budget for one read, chosen to match what the host-mount read allowed.
+
+    The same per-file cap as artifact storage, and the same collection-wide
+    bytes, entries and depth the bind-mount walk was bounded by, so moving
+    Docker onto the provider read does not move where a collection is cut off.
+    """
+    return ReadLimits(
+        max_total_bytes=MAX_COLLECTION_BYTES,
+        max_file_bytes=get_settings().storage.max_file_size_bytes,
+        max_entries=MAX_COLLECTION_ENTRIES,
+        max_depth=MAX_DIRECTORY_DEPTH,
+    )
 
 
 def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:

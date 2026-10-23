@@ -18,6 +18,8 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
+from syn_domain.contexts.orchestration._shared.file_transfer import FileRefusal
+
 IMAGE_MANIFEST_ROOT = "/opt/agentic"
 """The transfer root the manifest lives under, inside every workspace image."""
 
@@ -59,6 +61,9 @@ class ImageManifestReading(BaseModel):
     manifest: ImageManifestContent | None = None
     #: Why the read failed; set exactly when `state` is UNREADABLE.
     detail: str | None = None
+    #: The provider's refusal of the manifest file (a link, a special file,
+    #: past a limit), by path and reason. Only on an UNREADABLE reading.
+    refusal: FileRefusal | None = None
 
     @model_validator(mode="after")
     def _state_matches_fields(self) -> Self:
@@ -69,6 +74,9 @@ class ImageManifestReading(BaseModel):
         if (self.detail is not None) != (self.state is ImageManifestState.UNREADABLE):
             msg = f"a {self.state} image manifest reading carries a detail only when unreadable"
             raise ValueError(msg)
+        if self.refusal is not None and self.state is not ImageManifestState.UNREADABLE:
+            msg = f"a {self.state} image manifest reading cannot carry a refusal"
+            raise ValueError(msg)
         return self
 
     @classmethod
@@ -78,6 +86,15 @@ class ImageManifestReading(BaseModel):
     @classmethod
     def unreadable(cls, detail: str) -> ImageManifestReading:
         return cls(state=ImageManifestState.UNREADABLE, detail=detail)
+
+    @classmethod
+    def refused(cls, refusal: FileRefusal) -> ImageManifestReading:
+        """The provider would not read the manifest file: unreadable, never absent."""
+        return cls(
+            state=ImageManifestState.UNREADABLE,
+            detail=f"the provider refused to read {refusal.describe()}",
+            refusal=refusal,
+        )
 
     @classmethod
     def from_files(cls, files: list[tuple[str, bytes]]) -> ImageManifestReading:

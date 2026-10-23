@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration import (
     WorkspaceAggregate,
     WorkspaceUsage,
 )
+from syn_domain.contexts.orchestration._shared.file_transfer import FilesRefusedError
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.workspace_service import (
@@ -161,6 +162,13 @@ async def _read_image_manifest(
         files = await service._isolation.copy_from(
             handle, [IMAGE_MANIFEST_FILE], IMAGE_MANIFEST_ROOT
         )
+    except FilesRefusedError as e:
+        # One file was asked for, so the refusal is that file's (or the walk
+        # stopping before it): recorded with its path and reason, never absent.
+        logger.warning("The image manifest of %s was refused: %s", handle.isolation_id, e)
+        if not e.refused:
+            return ImageManifestReading.unreadable(str(e))
+        return ImageManifestReading.refused(e.refused[0])
     except Exception as e:
         logger.warning(
             "Could not read the image manifest of %s: %s", handle.isolation_id, e, exc_info=True
