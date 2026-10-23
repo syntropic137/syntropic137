@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     )
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
     from syn_domain.contexts.agent_sessions import RolloutDocument
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+        ImageManifestReading,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationHandle,
@@ -84,6 +87,10 @@ class ManagedWorkspace:
     isolation_handle: IsolationHandle
     sidecar_handle: SidecarHandle | None
     _service: WorkspaceService = field(repr=False)
+    #: The image manifest read when the workspace was provisioned (#1913),
+    #: carried onto the phase's persisted provisioning event. None only for a
+    #: workspace built without provisioning one, as tests do.
+    image_manifest: ImageManifestReading | None = None
     _tokens_injected: bool = False
     #: How this workspace's git credential was minted, recorded by the setup
     #: phase so it can be minted AGAIN later (#1393). None until the setup

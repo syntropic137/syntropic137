@@ -696,12 +696,17 @@ class AgenticIsolationAdapter:
         patterns: list[str],
         base_path: str = "/workspace",
     ) -> list[tuple[str, bytes]]:
-        """Copy files from workspace via mounted volume.
+        """Copy files from workspace.
+
+        Only `/workspace` of a local backend is on this host, through its
+        mount; every other root, and every root of a remote backend, is read by
+        the provider's file transfer (#1913). The mount read ignores
+        `base_path`, so routing another root to it would read the wrong files.
 
         Every workspace holds the session-store token, and only this adapter
         knows it, so a file the workload wrote leaves with it replaced (#1927).
         """
-        if self._kit.reads_through_provider:
+        if self._kit.reads_through_provider or base_path != "/workspace":
             collected = await self._read_through_provider(handle, patterns, base_path)
         else:
             collected = await copy_files_from_workspace(handle, patterns, base_path)

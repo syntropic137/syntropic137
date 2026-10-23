@@ -8,9 +8,7 @@ See ADR-021, ADR-023, ADR-024.
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
-import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -18,6 +16,8 @@ from syn_adapters.workspace_backends.errors import TeardownFailure, WorkspaceTea
 from syn_domain.contexts.orchestration import (
     CreateWorkspaceCommand,
     ImageManifest,
+    ImageManifestReading,
+    ImageManifestState,
     IsolationConfig,
     SecurityPolicy,
     SidecarConfig,
@@ -25,7 +25,10 @@ from syn_domain.contexts.orchestration import (
     WorkspaceAggregate,
     WorkspaceUsage,
 )
-from syn_shared.diagnostics import name_exit_status
+from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+    IMAGE_MANIFEST_FILE,
+    IMAGE_MANIFEST_ROOT,
+)
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.workspace_service import (
@@ -145,49 +148,30 @@ def build_isolation_config(
     )
 
 
-VERSION_JSON_PATH = "/opt/agentic/version.json"
-"""Path to the version manifest inside workspace images."""
-
-
 async def _read_image_manifest(
     service: WorkspaceService,
     handle: IsolationHandle,
-) -> ImageManifest | None:
-    """Read /opt/agentic/version.json from a running container (best-effort).
+) -> ImageManifestReading:
+    """The workspace image's manifest, read by the provider's file transfer (#1913).
 
-    Returns None if the image doesn't contain a version manifest (older images)
-    or if the read fails for any reason. Never raises.
-
-    The blocking Docker exec_run() call is dispatched to a thread via
-    asyncio.to_thread() so it does not stall the event loop if Docker is
-    slow or unresponsive.
+    Never raises: provisioning does not fail for want of provenance. A failed
+    read is recorded as UNREADABLE with its cause, never as absent, and a
+    workspace with no manifest (every image today, AgentParadise/agentic-workspace#93)
+    as ABSENT.
     """
     try:
-        provider = getattr(service._isolation, "_provider", None)
-        if provider is None:
-            return None
-
-        container = getattr(provider, "_active_workspaces", {}).get(handle.isolation_id)
-        if container is None:
-            return None
-
-        exit_code, output = await asyncio.to_thread(container.exec_run, ["cat", VERSION_JSON_PATH])
-        if exit_code != 0:
-            logger.debug("No version manifest in image (%s)", name_exit_status(exit_code))
-            return None
-
-        data = json.loads(output)
-        return ImageManifest(
-            provider=data.get("provider", ""),
-            provider_version=data.get("provider_version", ""),
-            components=data.get("components", {}),
-            build_commit=data.get("build_commit", ""),
-            built_at=data.get("built_at", ""),
-            manifest_digest=data.get("manifest_digest", ""),
+        files = await service._isolation.copy_from(
+            handle, [IMAGE_MANIFEST_FILE], IMAGE_MANIFEST_ROOT
         )
-    except Exception:
-        logger.debug("Failed to read image manifest", exc_info=True)
-        return None
+    except Exception as e:
+        logger.warning(
+            "Could not read the image manifest of %s: %s", handle.isolation_id, e, exc_info=True
+        )
+        return ImageManifestReading.unreadable(f"{type(e).__name__}: {e}")
+    reading = ImageManifestReading.from_files(files)
+    if reading.state is not ImageManifestState.READ:
+        logger.info("Image manifest of %s: %s", handle.isolation_id, reading.state)
+    return reading
 
 
 async def provision_workspace(
@@ -197,7 +181,7 @@ async def provision_workspace(
     workspace_id: str,
     *,
     with_sidecar: bool,
-) -> tuple[IsolationHandle, SidecarHandle | None]:
+) -> tuple[IsolationHandle, SidecarHandle | None, ImageManifestReading]:
     """Provision isolation container and optional sidecar.
 
     Args:
@@ -208,7 +192,7 @@ async def provision_workspace(
         with_sidecar: Whether to start sidecar proxy
 
     Returns:
-        Tuple of (isolation_handle, sidecar_handle or None)
+        Tuple of (isolation_handle, sidecar_handle or None, the image manifest reading)
     """
     # Create isolation container
     logger.info(
@@ -225,13 +209,16 @@ async def provision_workspace(
         isolation_id=isolation_handle.isolation_id,
     )
 
-    # Read image version manifest from container (best-effort)
-    manifest = await _read_image_manifest(service, isolation_handle)
+    image_manifest = await _read_image_manifest(service, isolation_handle)
 
     aggregate.record_isolation_started(
         isolation_id=isolation_handle.isolation_id,
         isolation_type=isolation_handle.isolation_type,
-        image_manifest=manifest,
+        image_manifest=(
+            ImageManifest(**image_manifest.manifest.model_dump())
+            if image_manifest.manifest is not None
+            else None
+        ),
     )
 
     # Start sidecar if requested
@@ -252,7 +239,7 @@ async def provision_workspace(
             sidecar_handle.proxy_url,
         )
 
-    return isolation_handle, sidecar_handle
+    return isolation_handle, sidecar_handle, image_manifest
 
 
 async def _revoke_tokens(service: WorkspaceService, execution_id: str) -> None:

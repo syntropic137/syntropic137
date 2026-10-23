@@ -144,6 +144,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors
     WorkflowTemplateProvenanceStrippedError,
     WorkflowTemplateVersionAlreadyInstalledError,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+    ImageManifestContent,
+    ImageManifestReading,
+    ImageManifestState,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.required_inputs import (
     TASK_PLACEHOLDER,
 )
@@ -462,6 +467,9 @@ __all__ = [
     "HostCredentials",
     "HostWorkspaceGit",
     "ImageManifest",
+    "ImageManifestContent",
+    "ImageManifestReading",
+    "ImageManifestState",
     "InheritanceUnavailableError",
     "InjectTokensCommand",
     # Value objects - workflow template
