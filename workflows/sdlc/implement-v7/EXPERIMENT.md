@@ -145,6 +145,17 @@ then one line naming the issue. A pair's two runs are dispatched back to back on
 the same `main`; odd-numbered pairs dispatch the treatment first, even-numbered
 the control first, so drift on `main` does not favour one arm.
 
+**Base SHA per arm, and the mismatch rule.** Back-to-back dispatch does not
+freeze `main`: each implement phase fetches and merges the `origin/main` it
+finds. So each arm's base is recorded, not assumed. A run's base is
+`git merge-base <its first pushed SHA> origin/main`, cross-checked against the
+`origin/main` SHA its implement report names. Both are written under Results
+beside the pair. If the two arms' bases differ, list the commits between them
+(`git log --name-only <older>..<newer>`). If any of those commits touches a file
+that either arm's diff touches, the pair is excluded as a whole, with that
+reason. If none does, the pair is scored. This rule is fixed before the first
+dispatch.
+
 **Two PRs per issue, one lands.** Both PRs are second-verified with
 `sdlc-reverify-pr-v1`, the same for both arms, and those findings are the
 quality guard below. Which PR may land is fixed per pair before dispatch,
@@ -198,10 +209,16 @@ where the mechanism did not fire is reported, not scored.
 
 - **Non-required failures.** At the start of the batch, read the base
   branch's required set once, the way v7's prompts read it (rulesets, plus
-  classic protection when it answers). For each run, list the failing check runs and
-  commit statuses on its final head with `gh api
-  repos/<o>/<r>/commits/<sha>/check-runs` and `.../status`. A run saw a
-  non-required failure if any failing name is not in that set.
+  classic protection when it answers). For each run, take **every head SHA it
+  pushed**: the execution's pushed SHAs and branch continuation history from
+  `GET /executions/<id>`, joined with the PR's commit list. A failure on an
+  early head can cost the control a repair round and then vanish after the next
+  push, so the final head alone is not enough. For each of those SHAs, list the
+  failing check runs and commit statuses with `gh api
+  repos/<o>/<r>/commits/<sha>/check-runs` and `.../status`. Capture this right
+  after the run ends and **before** its second verification pushes anything,
+  and store the capture under Results. A run saw a non-required failure if any
+  failing name, on any of its heads, is not in that set.
 - **Exclusion is by pair.** If either run of a pair saw a non-required
   failure, or either run is not scored (the mechanism check, or a platform
   failure that its one re-dispatch did not clear), the whole pair leaves the

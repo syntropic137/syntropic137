@@ -553,3 +553,64 @@ class TestRequiredSetReadsRulesetsFirst:
 
     def test_any_other_classic_error_is_unreadable(self) -> None:
         assert _required_set(_Answer(("A",)), _Answer(status=502)) is None
+
+
+#: The rule block every v7 review and finalize states, from the command block to
+#: the sentence that ends the unreadable case. Pinned whole: a block that
+#: filters the wrong rule type or exempts another classic error must fail.
+_RULE_BLOCK = re.compile(
+    r"```\ngh repo view --json nameWithOwner.*?the set \*\*unreadable\*\*\.", re.S
+)
+_RULESET_FILTER = (
+    "gh api --paginate repos/<owner>/<name>/rules/branches/<base> --jq "
+    '\'.[] | select(.type == "required_status_checks") '
+    "| .parameters.required_status_checks[].context'"
+)
+_CLASSIC_RESTRICTION = (
+    "Only a failure of the rules command (any error, a 5xx, a timeout, or output "
+    "that is not a list of check names), or a classic error other than 404 or 403, "
+    "makes the set **unreadable**."
+)
+
+
+def _rule_block(text: str) -> str:
+    found = _RULE_BLOCK.search(text)
+    assert found is not None, "the required-checks rule block is missing"
+    return found.group(0)
+
+
+def _rule_block_problems(block: str) -> list[str]:
+    """What is wrong with one phase's copy of the rule block; empty when it is right."""
+    problems: list[str] = []
+    if _RULESET_FILTER not in block:
+        problems.append("the rules command does not filter type == required_status_checks")
+    if _CLASSIC_RESTRICTION not in _flat(block):
+        problems.append("the classic-error restriction is not exactly 404 or 403")
+    return problems
+
+
+class TestTheRuleBlockIsPinnedAndShared:
+    """Codex on #2063 (v7): wording asserts let a wrong rule type or a classic-500 exemption pass."""
+
+    def test_the_block_is_identical_in_every_review_and_finalize(self) -> None:
+        prompts = _prompts(_V7)
+        blocks = {phase: _rule_block(prompts[phase]) for phase in (*_REVIEWS, "finalize_pr")}
+        assert len(set(blocks.values())) == 1, sorted(blocks)
+
+    @pytest.mark.parametrize("phase", (*_REVIEWS, "finalize_pr"))
+    def test_the_block_filters_required_status_checks_and_exempts_only_404_and_403(
+        self, phase: str
+    ) -> None:
+        assert _rule_block_problems(_rule_block(_prompts(_V7)[phase])) == []
+
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ('select(.type == "required_status_checks")', 'select(.type == "pull_request")'),
+            ("a classic error other than 404 or 403", "a classic error other than 404, 403 or 500"),
+        ],
+    )
+    def test_a_mutated_block_is_caught(self, old: str, new: str) -> None:
+        block = _rule_block(_prompts(_V7)["verify"])
+        assert old in block, "the mutation must apply"
+        assert _rule_block_problems(block.replace(old, new)) != []
