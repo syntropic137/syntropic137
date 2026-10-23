@@ -158,12 +158,17 @@ ten days is one repo touched. Its delta is a plain count ("+3").
 
 An upstream failure of kind `quota` (PC-83): the provider's usage allowance for
 our account is spent until a reset it names ("try again at Oct 9th, 2026 9:10
-PM"). Distinct from capacity, which returns in seconds: a quota returns on a
-calendar date, so it is never retried, and the Phase fails with
-`<provider> quota exhausted until <time>`. Recognised from codex's own fault
-line only. **Unclear:** claude quota text is not recognised here and reads as
-`unknown`; recognising it is harness knowledge and belongs in agentic-workspace
-(#1605).
+PM", or claude's "You've hit your weekly limit · resets Oct 15, 8am (UTC)").
+Distinct from capacity, which returns in seconds: a quota returns on a calendar
+date, so it is never retried. It hands the Phase to its
+[Fallback Agent](#fallback-agent) when it has one; otherwise the Phase fails
+with `<provider> quota exhausted until <resets_at>`. **resets_at** is when the
+provider says the allowance returns, always UTC. It is unstated when the
+provider named no time, or named one that could not be placed. Claude names
+its reset without a year, so it is placed at the first matching time after the
+reason was read. Recognising either provider's quota is harness knowledge:
+agentic-workspace's harness classifiers own it, and this context only maps
+their answer to its own kind (#1605).
 
 ## Upstream Retry
 
@@ -185,7 +190,8 @@ not the agent's answer and says nothing about the change: the same request is
 routinely served by another provider's model. Resending it to the same filter
 gets the same verdict, so it is never retried; it hands the Phase to its
 [Fallback Agent](#fallback-agent), under the same rule as a capacity or quota
-failure. Recognised from codex's own fault line only. **Unclear:** no real
+failure. Recognised by agentic-workspace's harness classifiers (#1605); codex's
+only inside its own fault line. **Unclear:** no real
 claude refusal output exists in this repo or its submodules, so a claude
 refusal is not yet recognised and reads as `unknown`. A refusal that arrives
 after the agent only read, searched or spoke still falls back: that is not

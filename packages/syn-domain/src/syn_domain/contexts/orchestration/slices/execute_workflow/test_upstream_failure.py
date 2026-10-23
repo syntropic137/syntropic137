@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults import (
+    codex_login_fault_in,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     _extract_error_reason,  # pyright: ignore[reportPrivateUsage]
 )
@@ -33,17 +36,17 @@ def test_a_claude_auth_error_with_its_message_reads_as_auth(raw: str) -> None:
     assert UPSTREAM_FAILURES.kind_of(reason) is UpstreamFailureKind.AUTH
 
 
-def test_detail_never_makes_a_fault_transient() -> None:
-    """Only `auth` is read by prefix: appended text must not buy a retry."""
-    reason = _extract_error_reason(
-        '{"type":"error","error":{"type":"rate_limit_error","message":"quota resets next month"}}'
-    )
-
-    assert UPSTREAM_FAILURES.kind_of(reason) is UpstreamFailureKind.UNKNOWN
-
-
 def test_an_auth_label_quoted_mid_reason_is_not_auth() -> None:
     assert (
         UPSTREAM_FAILURES.kind_of("agent wrote: Authentication failed: see above")
         is UpstreamFailureKind.UNKNOWN
     )
+
+
+def test_a_codex_login_fault_reads_as_auth() -> None:
+    """Not on codex's fault line, so the claude classifier reads it, by its auth label (#1605)."""
+    reason = codex_login_fault_in(
+        "ERROR codex_login::auth::manager: Failed to refresh token: 401 Unauthorized"
+    )
+
+    assert UPSTREAM_FAILURES.kind_of(reason) is UpstreamFailureKind.AUTH
