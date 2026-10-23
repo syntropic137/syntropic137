@@ -300,3 +300,35 @@ async def test_terminal_run_settles_its_spools_only(db_pool: asyncpg.Pool) -> No
         await spools.mark_drained(lease)
         await retention.after_drain(lease, exclusive=True)
     assert sorted(volumes.removed) == ["completed", "killed"]
+
+
+async def test_byte_quota_counts_and_evicts_only_its_own_backend(db_pool: asyncpg.Pool) -> None:
+    """A full sandbox quota never evicts a Docker volume, nor the reverse (#1916)."""
+    spools, docker, docker_volumes, evidence, source = await _setup(db_pool, max_bytes=1000)
+    sandbox_volumes = Volumes()
+    sandbox = CaptureSpoolRetention(
+        db_pool, source, sandbox_volumes, evidence, backend="e2b", max_bytes=1000
+    )
+    await spools.project(_spool(source, "volume"))
+    await spools.project(
+        CaptureSpool(
+            run=RunIdentity(source_instance_id=source, execution_id="run"),
+            session_id="paused-sandbox",
+            phase_id="phase",
+            profile="sandbox-spool/1",
+            backend="e2b",
+            executor_id="executor",
+            sandbox_id="sbx",
+        )
+    )
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE session_capture_spools SET staged_bytes=CASE session_id
+            WHEN 'volume' THEN 900 ELSE 1500 END WHERE source_instance_id=$1""",
+            source,
+        )
+    # Together the two exceed either quota; each backend alone, only the sandbox.
+    assert await docker.step() == 0
+    assert await sandbox.step() == 1
+    assert docker_volumes.removed == []
+    assert sandbox_volumes.removed == ["paused-sandbox"]
