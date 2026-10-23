@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py
+index 34d61c8d2..78192555d 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py
+@@ -162,7 +162,7 @@ def _format_anthropic_error(error_obj: dict[str, object], prefix: str) -> str:
+     if http_code:
+         with_status = api_error_label(error_type, http_code)
+         with_message = f"{with_status}: {message}"
+-        return with_message if message and _says_more(with_message, with_status) else with_status
++        return with_status
+     if message and message.lower() != label.lower():
+         return api_error_with_message(error_type, message)
+     return label
