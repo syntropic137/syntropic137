@@ -111,6 +111,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     InterruptExecutionCommand,
     ResumeExecutionCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+    ImageManifestContent,
+    ImageManifestReading,
+    ImageManifestState,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
     replays_generic,
 )
@@ -143,11 +148,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors
     WorkflowTemplateDigestMismatchError,
     WorkflowTemplateProvenanceStrippedError,
     WorkflowTemplateVersionAlreadyInstalledError,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
-    ImageManifestContent,
-    ImageManifestReading,
-    ImageManifestState,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.required_inputs import (
     TASK_PLACEHOLDER,

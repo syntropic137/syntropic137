@@ -57,6 +57,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_recor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.execution_tags import (
     ExecutionTags,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+    ImageManifestReading,
+    read_image_manifest,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
     resumed_event_applies,
 )
@@ -94,10 +98,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start i
 from syn_domain.contexts.orchestration.domain.aggregate_execution.review_rounds import (
     ReviewRecord,
     next_phase,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
-    ImageManifestReading,
-    read_image_manifest,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     AdmittedResume,
