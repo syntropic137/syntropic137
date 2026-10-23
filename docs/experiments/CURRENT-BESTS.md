@@ -85,9 +85,9 @@ Aliases resolve in `packages/syn-shared/src/syn_shared/agents.py`
 
 | Phase role | Default | Evidence | Override |
 |---|---|---|---|
-| Premise, implement, fix, finalize | `opus` | **no eval evidence yet** that Opus beats Sonnet 5.5 here. E2 (PR #2019, `docs/experiments/2026-10-17-implementer-sonnet-vs-opus.md`, `implementer-seed-v1`, n=10 per arm): Sonnet 5/10 vs Opus 6/10, verdict "proceed", meaning no evidence of a large drop, not equivalence | Sonnet 5.5 on `fix`/`fix_2` only as E3's arm, below |
+| Premise, implement, fix, finalize | `opus` | **no eval evidence yet** that Opus beats Sonnet 5.5 here. E2 (PR #2019, `docs/experiments/2026-10-17-implementer-sonnet-vs-opus.md`, `implementer-seed-v1` at suite **v3** as frozen on that branch, not main's v1, with the amended arms the record lists; n=10 per arm): Sonnet 5/10 vs Opus 6/10, verdict "proceed", meaning no evidence of a large drop, not equivalence | Sonnet 5.5 on `fix`/`fix_2` only as E3's arm, below |
 | Verify, reverify, cross-model review | codex `gpt-sol`, fallback `opus` | **eval:** E1 (PR #2019, `docs/experiments/2026-10-17-verifier-gpt-6-luna-vs-sol.md`, `verifier-seed-v1` train): Sol blocked all 26 defect cases; `gpt-6-luna` REJECTED (b - c = 6, and a false block on a clean control Sol certified) | a run that fell back to Opus is not cross-family; report it as such |
-| Fix phases on Sonnet 5.5 | experiment arm only (`sdlc-implement-v4-precheck-sonnet-fix`, on PR #2019) | **production, interim:** E3 (PR #2019, `docs/experiments/2026-10-17-fix-phase-sonnet.md`): provisional ADOPT, rounds and cost clauses met, 0 escapes so far, control n=2 of a planned 6. Final after **2026-11-02** | not a default before the final score |
+| Fix phases on Sonnet 5.5 | experiment arm only (`sdlc-implement-v4-precheck-sonnet-fix`, on PR #2019) | **production, interim:** E3 (PR #2019, `docs/experiments/2026-10-17-fix-phase-sonnet.md`): provisional ADOPT, rounds and cost clauses met, 0 escapes so far, control n=2 of a planned 6. Final once every merged arm PR has had its 14-day escape window (the record says 2026-11-02; control PR #2036 merged 2026-10-22, so at least **2026-11-05**) | not a default before the final score |
 | Mechanical phases (`quickfix`, `report`, `gather`, `file`) | `sonnet` | **no eval evidence yet** | `opus` when the phase needs judgement |
 
 Not recommended: a verifier on the implementer's model family (it is not
@@ -108,8 +108,9 @@ model, prompt or workflow bumps the version (`evals/verifier-seed-v1/suite.yaml`
 The verifier LLM judge is pinned to `claude-sonnet-5-5`, prompt version 5,
 answering three times and taking the majority (`JUDGE_MODEL`,
 `JUDGE_PROMPT_VERSION` in `scripts/eval_suite.py`; PR #2036, merged
-2026-10-22). Its false-negative calibration fixtures are still open (#2048). Every
-suite here screens one phase; none is end-to-end.
+2026-10-22). Its false-negative calibration fixtures are still open (#2048). The
+verifier and implementer suites screen single phases; feedback-screening
+benchmarks the screening ports. None evaluates a whole SDLC workflow.
 
 ## Still believed valid, not re-measured since 2026-05-02
 
