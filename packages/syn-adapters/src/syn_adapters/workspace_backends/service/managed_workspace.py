@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration._shared.file_transfer import FilesRefusedError
+from syn_domain.contexts.orchestration import FilesRefusedError
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     TokenType,
     WorkspaceStatus,

@@ -72,7 +72,7 @@ from syn_adapters.workspace_backends.exec_status_lost import (
 )
 from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_adapters.workspace_backends.host_security import host_security_failure
-from syn_domain.contexts.orchestration._shared.file_transfer import (
+from syn_domain.contexts.orchestration import (
     FileRefusal,
     FilesRefusedError,
 )

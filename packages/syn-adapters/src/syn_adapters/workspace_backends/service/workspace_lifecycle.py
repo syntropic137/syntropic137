@@ -17,6 +17,7 @@ from syn_domain.contexts.orchestration import (
     IMAGE_MANIFEST_FILE,
     IMAGE_MANIFEST_ROOT,
     CreateWorkspaceCommand,
+    FilesRefusedError,
     ImageManifest,
     ImageManifestReading,
     ImageManifestState,
@@ -27,7 +28,6 @@ from syn_domain.contexts.orchestration import (
     WorkspaceAggregate,
     WorkspaceUsage,
 )
-from syn_domain.contexts.orchestration._shared.file_transfer import FilesRefusedError
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.workspace_service import (

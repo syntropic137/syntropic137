@@ -39,6 +39,10 @@ from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
 )
 from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
+from syn_domain.contexts.orchestration._shared.file_transfer import (
+    FileRefusal,
+    FilesRefusedError,
+)
 from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,
@@ -461,6 +465,8 @@ __all__ = [
     "ExecutionStatus",
     "FailExecutionCommand",
     "FailureClassification",
+    "FileRefusal",
+    "FilesRefusedError",
     # Value objects - workflow
     "FallbackAgentYamlDefinition",
     "GlobalClaudePluginEntry",
