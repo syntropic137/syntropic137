@@ -294,15 +294,14 @@ class AgenticIsolationAdapter:
     def operations(self) -> SupportsOperations:
         """The provider's operation contract, which the event stream launches through.
 
-        Raises WorkspaceProvisionError for a provider without one: E2B has no
-        operation contract in agentic-workspace yet (#1915), so an agent cannot
-        launch on it, and saying so beats an AttributeError mid-launch.
+        Raises WorkspaceProvisionError for a provider without one, so an agent
+        cannot launch on it, and saying so beats an AttributeError mid-launch.
         """
         if not isinstance(self._provider, SupportsOperations):
             msg = (
                 f"The {self._kit.isolation_type} workspace backend cannot launch agent "
                 "operations yet: its agentic-workspace provider does not implement "
-                "SupportsOperations (#1915)."
+                "SupportsOperations."
             )
             raise WorkspaceProvisionError(msg)
         return self._provider

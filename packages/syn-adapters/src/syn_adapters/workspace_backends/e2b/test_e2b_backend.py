@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import pytest
 from agentic_isolation import E2BWorkspaceProvider
 from agentic_isolation.providers import e2b as e2b_provider
+from agentic_isolation.providers.base import SupportsOperations
 from agentic_isolation.providers.e2b_client import CommandExit, SandboxListing
 from pydantic import ValidationError
 
@@ -240,10 +241,12 @@ def test_e2b_backend_without_settings_is_refused() -> None:
         WorkspaceService.create(backend=WorkspaceBackend.E2B)
 
 
-def test_an_agent_cannot_launch_on_e2b_yet(monkeypatch: pytest.MonkeyPatch) -> None:
-    adapter, _ = _adapter(SandboxDouble())
-    with pytest.raises(WorkspaceProvisionError, match="SupportsOperations"):
-        _ = adapter.operations
+def test_e2b_offers_the_operation_contract_agents_launch_through() -> None:
+    # agentic-workspace #97 gave the E2B provider SupportsOperations, so the
+    # adapter hands back the provider instead of refusing the launch.
+    adapter, provider = _adapter(SandboxDouble())
+    assert isinstance(provider, SupportsOperations)
+    assert adapter.operations is provider
 
 
 async def test_a_workspace_bigger_than_the_template_is_refused() -> None:
