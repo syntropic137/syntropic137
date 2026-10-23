@@ -173,6 +173,40 @@ needs all of the scoreable pairs to favour one arm before it reaches p < 0.05
 (5 of 5 gives p = 0.031 one-sided). Read anything short of that as
 directional, and report every pair's difference rather than a single total.
 
+### Sample amendment (2026-10-23, before any dispatch)
+
+The selection rule above was applied at 2026-10-23T20:38:40Z and produced an unrunnable
+sample: requiring the `bug` or `tech-debt` label left one recent evidence-class
+issue, and the older matches were stale or oversized (#750 names the retired
+agentic-primitives image, #772 is a spec, #143/#145 are architecture
+refactors). Nothing had been dispatched, so the rule is amended once, here, and
+frozen again:
+
+- open, unassigned, created on or after 2026-09-25 (the agentic-workspace
+  cutover; older issues name systems that no longer exist), milestone Launch or
+  Post-Launch, any label except `architecture`, `enhancement`, `scale`,
+  `scaling`; title not starting `spec`, `RFC` or `Epic`; not gated on a
+  release or an owner decision; not referenced by an open PR;
+- evidence class: the body names `tests/integration`, an integration test,
+  `testcontainers`, `docker`, `compose`, mutation evidence, a real store,
+  Postgres, TimescaleDB or the event store;
+- the five lowest-numbered evidence-class issues and the lowest-numbered
+  other one (the control).
+
+Sample at 2026-10-23T20:38:40Z:
+
+| Pair | Issue | Class | First arm | Lands |
+|---|---|---|---|---|
+| 1 | #1431 pit_stop.sh mixed-version staging | evidence | v7 | v7 |
+| 2 | #1509 live evidence for session-discovery rows | evidence | v4-precheck | v4-precheck |
+| 3 | #1511 pit-stop swaps images but not compose | evidence | v7 | v7 |
+| 4 | #1516 capture degraded on executions | evidence | v4-precheck | v4-precheck |
+| 5 | #1553 event store OOM under replay subscriptions | evidence | v7 | v7 |
+| 6 | #1424 vendor transcript parsing outside adapters | control | v4-precheck | v4-precheck |
+
+A task whose premise phase refutes it in both arms is excluded as a pair and
+not replaced: the premise phase is part of what is measured.
+
 ### Mechanism check (before any metric is read)
 
 For each treatment run: did each review write a `Capability gaps:` line, did
