@@ -138,3 +138,28 @@ Rebuilding one run's session inventory snapshot from host evidence, one durable
 - **Coalesce:** while a run has an open job, new evidence for that run waits.
   The next job picks up the latest watermark, so one job is minted per
   catch-up and not one per watermark.
+
+## Capture Spool
+
+Staged transcript and child-journal bytes a workspace wrote before they reached
+the local archive, and the durable row (`CaptureSpool`) that lets a recovery
+worker find them after any crash (#1398, #1916).
+
+- **Spool backend:** where the staged bytes live. `docker` is a named volume on
+  this host; `e2b` is the `/spool` directory on a sandbox's own disk, kept by
+  pausing the sandbox. Rows written before #1916 carry no backend and are
+  `docker`. A worker claims only spools on a backend it holds recovery access
+  to.
+- **Sandbox spool:** profile `sandbox-spool/1`. Its row names the sandbox and
+  the executor that launched it, so a fresh worker routes from the row and
+  never from memory.
+- **Exclusive drain:** a traversal during which nothing else could write. For
+  Docker, no other container referenced the volume. For a sandbox, the provider
+  confirmed every agent process stopped after resume. A run in `fencing`, a
+  `disconnected` stream outcome, or the spool lease are never evidence of it.
+  Release requires it.
+- **Pause-until-drained:** a sandbox spool stays paused until `mark_drained`;
+  only release kills it. A failed archive leaves it paused and retryable.
+- **Release:** removing staged bytes after a drained traversal (`archived`) or
+  a retention limit (`expired`). Docker removes the volume; a sandbox is killed.
+  Retention limits apply per backend.
