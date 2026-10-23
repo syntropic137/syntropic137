@@ -266,6 +266,30 @@ sandbox by its template, not per request, so the template's CPU and memory are
 a ceiling, not a request. Not an OCI image reference: nothing is
 cosign-verified when a workspace starts from it.
 
+## Image Manifest
+
+What a workspace image says about itself: `/opt/agentic/version.json`, read
+off the running workspace through the provider's file transfer on every
+backend (#1913), and recorded per phase on `WorkspaceProvisionedForPhase` as
+an **image manifest reading** (`ImageManifestReading`). A reading is exactly
+one of three states, never collapsed:
+
+- **read** - the file was there and was a manifest; every field is required,
+  none is defaulted;
+- **absent** - the workspace has no manifest file. Not an error: no image
+  ships one yet (AgentParadise/agentic-workspace#93);
+- **unreadable** - the transfer failed, or the file was not a manifest. The
+  reason is recorded with it.
+
+Provenance, so Lane 1: it is needed after a restart. The `WorkspaceAggregate`
+also sees it but is never saved, so it is not provenance. Its
+`manifest_digest` is the hash of the build's `manifest.yaml`, not an OCI image
+digest, and is never compared with `PINNED_DIGESTS`.
+
+**Unclear:** the expected manifest hash a reading should be compared with
+does not exist yet, for Docker or E2B (#1913, blocked on
+AgentParadise/agentic-workspace#93), so a reading is recorded, not checked.
+
 ## Fallback Agent
 
 The agent (provider and model) a Phase declares under `fallback_agent`, to be
