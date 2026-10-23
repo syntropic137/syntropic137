@@ -30,7 +30,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 if TYPE_CHECKING:
     from event_sourcing import EventStoreRepository
 
-pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.asyncio,
+    pytest.mark.may_skip(reason="skips when no event store answers", issue="#1984"),
+]
 
 _READ = ImageManifestReading(
     state=ImageManifestState.READ,
