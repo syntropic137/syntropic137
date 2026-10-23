@@ -1,6 +1,8 @@
 """The stage step must never install a partial compose file on the host.
 
-Staging writes the repointed compose back over the deployed one. `cat` exits 0
+Staging writes the repointed compose to a side file beside the deployed one,
+and the swap moves it over the deployed one (#1511). Before #1511 staging wrote
+over the deployed file, so a routine `compose up` started an unstaged build. `cat` exits 0
 when its input ends early, so a transfer cut short used to be renamed over the
 deployed file before anything compared it, and the script then aborted with
 half a compose in place (verification of #1538).
@@ -25,9 +27,12 @@ _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "pit_stop.sh"
 _FIXTURES = Path(__file__).parent / "fixtures" / "pit_stop"
 _COMPOSE = "docker-compose.syntropic137.yaml"
+_STAGED = f"{_COMPOSE}.pit-stop-staged"
 _TAG = "v0.33.2-beta.1"
 
-_START = 'step "stage: back up the deployed compose and repoint $REPOINTS"'
+_START = (
+    'step "stage: repoint $REPOINTS into $STAGED (the live compose is untouched until the swap)"'
+)
 _END = 'if [ "$MODE" = "stage" ]; then'
 
 _FULL = 'remote() { bash -c "$*"; }'
@@ -45,6 +50,13 @@ def _stage_block() -> str:
     return "\n".join(lines[starts[0] : ends[0]])
 
 
+def _apply_staged() -> str:
+    """`apply_staged` as the script defines it."""
+    text = _SCRIPT.read_text()
+    start = text.index("apply_staged() {")
+    return text[start : text.index("\n}\n", start) + 3]
+
+
 def _counters() -> str:
     """`pins_on_tag` and `images_on_tag` as the script defines them."""
     text = _SCRIPT.read_text()
@@ -54,9 +66,20 @@ def _counters() -> str:
 
 
 def _run_stage(
-    fixture: str, host: Path, tmp: Path, stub: str, service: str = "all", compose: str | None = None
+    fixture: str,
+    host: Path,
+    tmp: Path,
+    stub: str,
+    service: str = "all",
+    compose: str | None = None,
+    apply: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    if compose is None:
+    """Run the stage block, or with `apply` the swap's `apply_staged`, against
+    `host`. `fixture`/`compose` is written as the live compose unless both are
+    empty, which leaves the host exactly as a previous call left it."""
+    if not fixture and compose is None:
+        pass
+    elif compose is None:
         shutil.copy(_FIXTURES / fixture, host / _COMPOSE)
     else:
         (host / _COMPOSE).write_text(compose)
@@ -64,15 +87,17 @@ def _run_stage(
     preamble = f"""
 set -euo pipefail
 TAG={_TAG}; MODE=stage; DRY=0; HOST=fake-host; SERVICE={service}; REPOINTS=pins; ALREADY="pins already on the tag"; N={n}; SWAPPED="{swapped}"
-COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; TMP={tmp}; REPOINT_PY={_SCRIPT.parent / "pit_stop_repoint.py"}
+COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; STAGED={_COMPOSE}.pit-stop-staged; TMP={tmp}; REPOINT_PY={_SCRIPT.parent / "pit_stop_repoint.py"}
 step() {{ printf '==> %s\\n' "$*"; }}
 die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
 run() {{ "$@"; }}
 {stub}
 {_counters()}
+{_apply_staged()}
 """
+    body = "apply_staged" if apply else _stage_block()
     return subprocess.run(
-        ["bash", "-c", preamble + _stage_block(), str(_SCRIPT)],
+        ["bash", "-c", preamble + body, str(_SCRIPT)],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -95,22 +120,46 @@ def dirs(tmp_path: Path) -> tuple[Path, Path]:
         ("compose-tag.yaml", None),
     ],
 )
-def test_a_whole_transfer_stages_and_keeps_a_backup(
+def test_a_whole_transfer_stages_beside_the_live_compose_and_the_swap_applies_it(
     fixture: str, backup: str | None, dirs: tuple[Path, Path]
 ) -> None:
     host, tmp = dirs
+    original = (_FIXTURES / fixture).read_text()
     proc = _run_stage(fixture, host, tmp, _FULL)
     assert proc.returncode == 0, proc.stderr
 
-    deployed = (host / _COMPOSE).read_text()
-    assert deployed.count(f"syn-api:{_TAG}") == 1
-    assert deployed.count(f"syn-gateway:{_TAG}") == 1
+    # #1511: a `compose up` now would still start what ran before the stage.
+    assert (host / _COMPOSE).read_text() == original
+    assert not list(host.glob(f"{_COMPOSE}.bak-*"))
+    staged = (host / _STAGED).read_text()
+    assert staged.count(f"syn-api:{_TAG}") == 1
+    assert staged.count(f"syn-gateway:{_TAG}") == 1
+    assert not (host / f"{_COMPOSE}.pit-stop").exists()
+
+    proc = _run_stage("", host, tmp, _FULL, apply=True)
+    assert proc.returncode == 0, proc.stderr
+    assert (host / _COMPOSE).read_text() == staged
+    assert not (host / _STAGED).exists()
     backups = list(host.glob(f"{_COMPOSE}.bak-*"))
     assert len(backups) == 1
-    assert backups[0].read_text() == (_FIXTURES / fixture).read_text()
+    assert backups[0].read_text() == original
     if backup is not None:
         assert backups[0].name == f"{_COMPOSE}.bak-{backup}"
-    assert not (host / f"{_COMPOSE}.pit-stop").exists()
+
+
+def test_the_swap_refuses_a_stage_the_live_compose_has_moved_past(dirs: tuple[Path, Path]) -> None:
+    """An edit to the live compose after the stage (a new env var) must not be
+    silently reverted by moving the older staged file over it."""
+    host, tmp = dirs
+    assert _run_stage("compose-digest.yaml", host, tmp, _FULL).returncode == 0
+    edited = (host / _COMPOSE).read_text() + "    environment:\n      ADDED_AFTER_STAGE: '1'\n"
+    (host / _COMPOSE).write_text(edited)
+
+    proc = _run_stage("", host, tmp, _FULL, apply=True)
+    assert proc.returncode != 0
+    assert "changed after" in proc.stderr
+    assert (host / _COMPOSE).read_text() == edited
+    assert not list(host.glob(f"{_COMPOSE}.bak-*"))
 
 
 @pytest.mark.parametrize("fixture", ["compose-digest.yaml", "compose-tag.yaml"])
@@ -125,6 +174,7 @@ def test_a_short_transfer_leaves_the_deployed_compose_untouched(
     assert proc.returncode != 0
     assert "did not arrive intact" in proc.stderr
     assert not (host / f"{_COMPOSE}.pit-stop").exists()
+    assert not (host / _STAGED).exists()
     assert not list(host.glob(f"{_COMPOSE}.bak-*"))
 
 
@@ -137,10 +187,11 @@ def test_a_gateway_only_stage_repoints_one_pin_and_passes_its_own_count(
     proc = _run_stage("compose-digest.yaml", host, tmp, _FULL, service="gateway")
     assert proc.returncode == 0, proc.stderr
 
-    deployed = (host / _COMPOSE).read_text()
-    assert deployed.count(f"syn-gateway:{_TAG}") == 1
-    assert f"syn-api:{_TAG}" not in deployed
-    assert "syn-api@sha256:bf783882d031" in deployed
+    staged = (host / _STAGED).read_text()
+    assert staged.count(f"syn-gateway:{_TAG}") == 1
+    assert f"syn-api:{_TAG}" not in staged
+    assert "syn-api@sha256:bf783882d031" in staged
+    assert _run_stage("", host, tmp, _FULL, service="gateway", apply=True).returncode == 0
     (backup,) = host.glob(f"{_COMPOSE}.bak-*")
     assert backup.name == f"{_COMPOSE}.bak-sha256-6b416d4a25dd"
 
@@ -159,6 +210,6 @@ def test_a_gateway_only_stage_passes_when_the_api_is_already_on_the_tag(
     proc = _run_stage("", host, tmp, _FULL, service="gateway", compose=compose)
     assert proc.returncode == 0, proc.stderr
 
-    deployed = (host / _COMPOSE).read_text()
-    assert deployed.count(f"syn-api:{_TAG}") == 1
-    assert deployed.count(f"syn-gateway:{_TAG}") == 1
+    staged = (host / _STAGED).read_text()
+    assert staged.count(f"syn-api:{_TAG}") == 1
+    assert staged.count(f"syn-gateway:{_TAG}") == 1

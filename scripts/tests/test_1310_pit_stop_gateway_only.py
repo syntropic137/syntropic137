@@ -74,7 +74,13 @@ printf '%s' "$body" > "$out"
 """
 
 
-def _dry_run(tmp: Path, *flags: str, compose: str = "compose-tag.yaml") -> tuple[str, str, Path]:
+def _dry_run(
+    tmp: Path,
+    *flags: str,
+    compose: str = "compose-tag.yaml",
+    published: str | None = None,
+    rc: int = 0,
+) -> tuple[str, str, Path]:
     """A dry run's normalised stdout, its stderr, and where the stubs logged."""
     bin_dir, log = tmp / "bin", tmp / "log"
     bin_dir.mkdir()
@@ -88,6 +94,9 @@ def _dry_run(tmp: Path, *flags: str, compose: str = "compose-tag.yaml") -> tuple
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "PIT_LOG": str(log),
         "PIT_COMPOSE": str(_FIXTURES / compose),
+        # The deployed compose is held to the published one (#1511); the
+        # fixture is its own published compose, so these dry runs see no drift.
+        "SYN_PIT_PUBLISHED_COMPOSE": str(_FIXTURES / (published or compose)),
         "SYN_API_PASSWORD": "pw",
         "SYN_PIT_HOST": "root@fake-host",
         "SYN_PIT_API": "http://fake-host:8137/api/v1",
@@ -101,7 +110,7 @@ def _dry_run(tmp: Path, *flags: str, compose: str = "compose-tag.yaml") -> tuple
         check=False,
         timeout=60,
     )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.returncode == rc, proc.stdout + proc.stderr
     common = subprocess.run(
         ["git", "-C", str(_ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
         capture_output=True,
@@ -150,13 +159,14 @@ class TestGatewayOnly:
     def test_repoints_only_the_gateway(self, tmp_path: Path) -> None:
         """What the repoint reports is what it changed: one pin, the gateway's."""
         out, err, _ = _dry_run(tmp_path, "--service", "gateway")
-        assert _lines(err, "syn-gateway: ") == [
+        # Printed twice: once by the stage, once by the swap re-deriving it (#1511).
+        assert set(_lines(err, "syn-gateway: ")) == {
             "   syn-gateway: ghcr.io/syntropic137/syn-gateway:v0.33.1-beta.2"
             f" -> ghcr.io/syntropic137/syn-gateway:v{_VERSION}"
-        ]
+        }
         assert _lines(err, "syn-api: ") == []
-        (write,) = _lines(out, "sha256sum -c")
-        assert "docker-compose.syntropic137.yaml.bak-v0.33.1-beta.2" in write
+        (apply,) = _lines(out, "mv docker-compose.syntropic137.yaml.pit-stop-staged")
+        assert "docker-compose.syntropic137.yaml.bak-v0.33.1-beta.2" in apply
 
     def test_never_touches_admission_or_waits_for_a_drain(self, tmp_path: Path) -> None:
         out, _, log = _dry_run(tmp_path, "--service", "gateway")
@@ -292,6 +302,8 @@ remote() {{
 }}
 {_function("api_curl")}
 maintenance() {{ echo "maintenance $1" >> {log}; }}
+# Moving the staged compose in is pinned in test_pit_stop_stage_write.py.
+apply_staged() {{ :; }}
 {_function("start_gateway")}
 {_function("swapped_is_running")}
 """
@@ -358,3 +370,20 @@ class TestGatewayOnlyLive:
         assert proc.returncode != 0
         assert "PIT STOP ABORTED" in proc.stderr
         assert "up -d --no-deps gateway" in proc.stderr
+
+
+class TestComposeDrift:
+    """#1511: beta.6 needed compose config the deployed file lacked, and the pit
+    stop shipped it anyway because it only ever moves image pins."""
+
+    def test_a_deployed_compose_behind_the_published_one_is_refused_before_any_build(
+        self, tmp_path: Path
+    ) -> None:
+        out, err, log = _dry_run(
+            tmp_path, compose="compose-tag.yaml", published="compose-drifted.yaml", rc=1
+        )
+        assert "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory" in out
+        assert "is not the compose origin/main publishes" in err
+        assert "docker buildx" not in out
+        assert "pit-stop-staged" not in out
+        assert "maintenance" not in (log / "curl").read_text() if (log / "curl").exists() else True

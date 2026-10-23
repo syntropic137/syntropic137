@@ -507,8 +507,14 @@ if [ "$MODE" != "swap" ]; then
     # host. beta.6 aborted on every start for want of the session-inventory
     # archive dir it carried (#1511). Read-only, so it runs under --dry-run too.
     step "precheck: the deployed compose is $REF's published compose, image pins aside"
-    git -C "$REPO_TOP" show "$REF:$PUBLISHED" > "$TMP/compose.published" \
-        || die "could not read $PUBLISHED at $REF"
+    # SYN_PIT_PUBLISHED_COMPOSE names a file to compare against instead, e.g.
+    # the release asset a host was installed from.
+    if [ -n "${SYN_PIT_PUBLISHED_COMPOSE:-}" ]; then
+        cp "$SYN_PIT_PUBLISHED_COMPOSE" "$TMP/compose.published" || die "could not read $SYN_PIT_PUBLISHED_COMPOSE"
+    else
+        git -C "$REPO_TOP" show "$REF:$PUBLISHED" > "$TMP/compose.published" \
+            || die "could not read $PUBLISHED at $REF"
+    fi
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
     if ! python3 "$REPOINT_PY" --drift "$TMP/compose.published" "$TMP/compose.deployed" > "$TMP/compose.drift"; then
         cat "$TMP/compose.drift"
