@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+index 7e21aa2c5..450ae5dd0 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+@@ -743,7 +743,7 @@ class AgenticIsolationAdapter:
+             workspace, patterns, base_path=root, limits=collection_read_limits()
+         )
+         refused = tuple(FileRefusal(path=r.path, reason=r.reason) for r in result.refused)
+-        return result.files, refused
++        return result.files + tuple((r.path, b"") for r in refused), ()
+ 
+ 
+ def collection_read_limits() -> ReadLimits:

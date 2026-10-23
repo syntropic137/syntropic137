@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+index 7e21aa2c5..de2b337a7 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+@@ -721,8 +721,6 @@ class AgenticIsolationAdapter:
+         files, refused = await self._read_through_provider(handle, patterns, base_path)
+         scrubber = CredentialScrubber(self.credentials.withheld(()))
+         scrubbed = tuple((path, scrub_bytes(scrubber, content)) for path, content in files)
+-        if refused:
+-            raise FilesRefusedError(scrubbed, refused)
+         return list(scrubbed)
+ 
+     async def _read_through_provider(

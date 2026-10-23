@@ -299,3 +299,29 @@ async def test_refused_artifacts_are_named_and_the_read_ones_kept(
     )
     assert raised.value.files == (("artifacts/output/a.bin", blob),)
     assert raised.value.complete
+
+
+def test_no_type_ignore_hides_the_provider_read_contract() -> None:
+    """PC-239: an ignore on the read_files call hid its return type changing under us.
+
+    pyright checks the call only while nothing suppresses it, so the source
+    must carry no suppression on any line of the call into the AW port.
+    """
+    import ast
+    import inspect
+
+    source = inspect.getsource(adapter_module)
+    lines = source.splitlines()
+    calls = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "read_files"
+    ]
+    assert calls, "the adapter no longer calls read_files"
+    for call in calls:
+        start = call.lineno - 1
+        end = call.end_lineno or call.lineno
+        suppressed = [line for line in lines[start:end] if "type: ignore" in line]
+        assert not suppressed, suppressed
