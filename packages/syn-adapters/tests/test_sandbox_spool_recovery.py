@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from agentic_isolation.child_journal import ChildChange
 from agentic_isolation.providers.base import ExecuteResult
 from event_sourcing.client.memory import MemoryEventStoreClient
 
@@ -62,7 +63,7 @@ class ScriptedSandbox:
     stop_confirms: bool = True
     native: list[str] = field(default_factory=list)
     envelopes: list[bytes] = field(default_factory=list)
-    children: list[dict[str, object]] = field(default_factory=list)
+    children: list[ChildChange] = field(default_factory=list)
     paused: bool = True
     killed: bool = False
     log: list[str] = field(default_factory=list)
@@ -102,7 +103,7 @@ class ScriptedSandbox:
             sequence = int(shlex.split(argv[-1])[2])
             return _ok(base64.b64encode(self.envelopes[sequence - 1]).decode())
         if argv[:3] == ["python3", "-m", "agentic_session_store.child_export"]:
-            return _ok(json.dumps(self._children_page(argv)))
+            return _ok(self._children_page(argv))
         raise AssertionError(f"unexpected sandbox command {argv}")
 
     def _snapshot(self) -> None:
@@ -140,13 +141,15 @@ class ScriptedSandbox:
         ]
         return json.dumps({"schema_version": 1, "watermark": watermark, "entries": entries})
 
-    def _children_page(self, argv: list[str]) -> dict[str, object]:
+    def _children_page(self, argv: list[str]) -> str:
         after = int(argv[argv.index("--after") + 1])
-        changes = [c for c in self.children if cast("int", c["sequence"]) > after]
-        return {
-            "schema_version": 3,
-            "page": {"watermark": len(self.children), "changes": changes, "next_after": None},
-        }
+        changes = [c.model_dump(mode="json") for c in self.children if c.sequence > after]
+        return json.dumps(
+            {
+                "schema_version": 3,
+                "page": {"watermark": len(self.children), "changes": changes, "next_after": None},
+            }
+        )
 
     def archived_lines(self) -> set[str]:
         return set(self.native)
@@ -156,25 +159,27 @@ def _ok(stdout: str) -> ExecuteResult:
     return ExecuteResult(exit_code=0, stdout=stdout, stderr="", duration_ms=0)
 
 
-def _child(sequence: int) -> dict[str, object]:
-    return {
-        "sequence": sequence,
-        "intent": {
+def _child(sequence: int) -> ChildChange:
+    return ChildChange.model_validate(
+        {
             "sequence": sequence,
-            "child_invocation_id": f"child-{sequence}",
-            "call": {
-                "invocation_id": "inv",
-                "attempt_id": "attempt",
-                "harness": "claude",
-                "parent_native_id": "native",
-                "tool_call_id": f"tool-{sequence}",
-                "target_harness": "codex",
+            "intent": {
+                "sequence": sequence,
+                "child_invocation_id": f"child-{sequence}",
+                "call": {
+                    "invocation_id": "inv",
+                    "attempt_id": "attempt",
+                    "harness": "claude",
+                    "parent_native_id": "native",
+                    "tool_call_id": f"tool-{sequence}",
+                    "target_harness": "codex",
+                },
+                "child_native_id": f"child-native-{sequence}",
+                "status": "completed",
+                "exit_code": 0,
             },
-            "child_native_id": f"child-native-{sequence}",
-            "status": "completed",
-            "exit_code": 0,
-        },
-    }
+        }
+    )
 
 
 class ScriptedSandboxes:
