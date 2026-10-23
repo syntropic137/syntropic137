@@ -6,7 +6,7 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 
 from event_sourcing import DomainEvent, event
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
     ImageManifestReading,  # noqa: TC001 - needed at runtime for Pydantic
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (

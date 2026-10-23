@@ -111,7 +111,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     InterruptExecutionCommand,
     ResumeExecutionCommand,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
     IMAGE_MANIFEST_FILE,
     IMAGE_MANIFEST_ROOT,
     ImageManifestContent,

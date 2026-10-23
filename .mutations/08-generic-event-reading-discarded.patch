@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/ImageManifestValueObjects.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/ImageManifestValueObjects.py
+index a26826c9a..ba1f8c279 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/ImageManifestValueObjects.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/ImageManifestValueObjects.py
+@@ -102,6 +102,8 @@ def read_image_manifest(raw: object) -> ImageManifestReading | None:
+         return None
+     if isinstance(raw, ImageManifestReading):
+         return raw
++    if isinstance(raw, dict):
++        return None
+     try:
+         return ImageManifestReading.model_validate(raw)
+     except ValidationError as e:

@@ -23,7 +23,7 @@ if TYPE_CHECKING:
         ContinuedBranch,
         RemoteBranchReading,
     )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
         ImageManifestReading,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (

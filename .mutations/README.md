@@ -12,3 +12,12 @@ Each patch re-introduces one defect into production source. Each one was applied
 | `06-handler-drops-the-manifest.patch` | `WorkspaceProvisionHandler` does not pass the workspace's reading onto the command | `test_967_the_checkout_is_verified_before_the_agent.py::test_the_image_manifest_travels_from_the_workspace_to_the_replayed_execution` |
 
 The real-store test needs the event store (Docker), so run patch 05 with `docker=true`.
+
+## Added in fix round 1
+
+The VSA events-isolation rule (VSA028) lets an event import only a value-objects module, so `aggregate_execution/image_provenance.py` became `aggregate_execution/ImageManifestValueObjects.py`. Patch 03 targets the old path and no longer applies; it is left in place, unedited, and `07` is the same defect at the new path.
+
+| Patch | Defect | Killing test(s) |
+|---|---|---|
+| `07-absent-manifest-persisted-as-empty-after-the-move.patch` | patch 03 at the moved path: no manifest file becomes a READ manifest of empty fields | `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/test_1913_image_manifest_reading.py::test_no_manifest_file_is_absent_not_a_manifest_of_empty_fields`, `packages/syn-adapters/tests/workspace_backends/test_1913_image_manifest_through_file_transfer.py::test_an_image_with_no_manifest_is_recorded_absent` |
+| `08-generic-event-reading-discarded.patch` | a reading on a generically deserialised event (ADR-023) is dropped on replay | `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/test_1913_image_manifest_reading.py::test_a_generic_stored_reading_replays_typed` |

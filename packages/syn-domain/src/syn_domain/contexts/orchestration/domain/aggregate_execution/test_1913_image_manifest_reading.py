@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     ProvisionWorkspaceCompletedCommand,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
     IMAGE_MANIFEST_FILE,
     ImageManifestContent,
     ImageManifestReading,
@@ -152,15 +152,26 @@ def test_a_provisioning_recorded_before_the_field_existed_still_replays() -> Non
 
 
 def test_a_generic_stored_reading_replays_typed() -> None:
-    """A stored event that only deserialises generically (ADR-023) still yields the reading."""
-    reading = ImageManifestReading.unreadable("RuntimeError: sandbox gone")
-    typed = _replayed(reading)
-    event = GenericDomainEvent(
-        event_type="WorkspaceProvisionedForPhase",
-        phase_id="build",
-        workspace_id="ws-1913",
-        image_manifest=reading.model_dump(mode="json"),
-    )
-    typed.on_workspace_provisioned_for_phase(event)  # type: ignore[arg-type]
+    """A stored event that only deserialises generically (ADR-023) still yields the reading.
 
-    assert typed.image_manifest_for("build") == reading
+    The aggregate starts with no provenance, and two phases carry different
+    readings, so neither a prior typed reading nor the first phase's value can
+    satisfy the assertions.
+    """
+    readings = {
+        "build": ImageManifestReading.unreadable("RuntimeError: sandbox gone"),
+        "test": ImageManifestReading(
+            state=ImageManifestState.READ, manifest=ImageManifestContent(**MANIFEST)
+        ),
+    }
+    aggregate = WorkflowExecutionAggregate()
+    for phase_id, reading in readings.items():
+        event = GenericDomainEvent(
+            event_type="WorkspaceProvisionedForPhase",
+            phase_id=phase_id,
+            workspace_id=f"ws-{phase_id}",
+            image_manifest=reading.model_dump(mode="json"),
+        )
+        aggregate.on_workspace_provisioned_for_phase(event)  # type: ignore[arg-type]
+
+    assert {phase_id: aggregate.image_manifest_for(phase_id) for phase_id in readings} == readings

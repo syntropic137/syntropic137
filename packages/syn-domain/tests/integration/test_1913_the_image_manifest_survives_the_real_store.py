@@ -16,7 +16,7 @@ import pytest
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     ProvisionWorkspaceCompletedCommand,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
     ImageManifestContent,
     ImageManifestReading,
     ImageManifestState,

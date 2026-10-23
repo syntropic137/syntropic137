@@ -57,7 +57,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_recor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.execution_tags import (
     ExecutionTags,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
     ImageManifestReading,
     read_image_manifest,
 )

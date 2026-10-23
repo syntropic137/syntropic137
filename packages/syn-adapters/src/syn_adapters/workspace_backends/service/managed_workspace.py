@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     )
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
     from syn_domain.contexts.agent_sessions import RolloutDocument
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
         ImageManifestReading,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (

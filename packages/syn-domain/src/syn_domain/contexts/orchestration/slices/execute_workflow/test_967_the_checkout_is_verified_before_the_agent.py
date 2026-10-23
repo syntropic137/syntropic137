@@ -28,7 +28,7 @@ from pydantic import ValidationError
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
-from syn_domain.contexts.orchestration.domain.aggregate_execution.image_provenance import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
     ImageManifestReading,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
