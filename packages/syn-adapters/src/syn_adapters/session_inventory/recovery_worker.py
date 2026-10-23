@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from syn_domain.contexts.agent_sessions import CaptureSpoolLeaseLost
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from contextlib import AbstractAsyncContextManager
 
     from agentic_isolation.child_journal import WorkspaceChildJournalReader
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
         CaptureSpool,
         CaptureSpoolLease,
         SessionCaptureSpoolPort,
+        SpoolBackend,
     )
 
     from .child_journal import ChildJournalDrain
@@ -32,8 +34,10 @@ class RecoveryReaders:
     transcripts: WorkspaceSpoolReader
     children: WorkspaceChildJournalReader
     exclusive: bool = False
-    """No other container referenced the volume when it was opened, so nothing
-    else could write during this traversal. Release requires it."""
+    """Nothing else could write during this traversal: no other container
+    referenced the volume, or the provider confirmed no agent process remains
+    in the sandbox. Never inferred from a run state or a disconnected stream.
+    Release requires it."""
 
 
 class SpoolReleasePort(Protocol):
@@ -44,7 +48,7 @@ class SpoolReleasePort(Protocol):
 
 class SpoolRecoveryPort(Protocol):
     def open(self, spool: CaptureSpool) -> AbstractAsyncContextManager[RecoveryReaders]:
-        """Reopen an existing volume and capture retained native files before reading."""
+        """Reopen the retained spool and capture retained native files before reading."""
         ...
 
 
@@ -52,21 +56,27 @@ class CaptureRecoveryWorker:
     def __init__(
         self,
         spools: SessionCaptureSpoolPort,
-        recovery: SpoolRecoveryPort,
+        recovery: Mapping[SpoolBackend, SpoolRecoveryPort],
         drain: LocalSpoolDrain,
         *,
         lease_seconds: int,
         retry_seconds: int,
         children: ChildJournalDrain | None = None,
-        release: SpoolReleasePort | None = None,
+        release: Mapping[SpoolBackend, SpoolReleasePort] | None = None,
     ) -> None:
+        """``recovery`` names every backend this worker can reach; it claims
+        only those spools. A backend with no ``release`` entry keeps its bytes."""
+        if not recovery:
+            raise ValueError("A recovery worker needs at least one backend")
         self._spools, self._recovery, self._drain = spools, recovery, drain
         self._children = children
-        self._release = release
+        self._release = release or {}
         self._lease_seconds, self._retry_seconds = lease_seconds, retry_seconds
 
     async def step(self) -> bool:
-        lease = await self._spools.claim(lease_seconds=self._lease_seconds)
+        lease = await self._spools.claim(
+            lease_seconds=self._lease_seconds, backends=tuple(self._recovery)
+        )
         if lease is None:
             return False
         try:
@@ -86,7 +96,7 @@ class CaptureRecoveryWorker:
         async def renew() -> None:
             await self._spools.renew(lease, lease_seconds=self._lease_seconds)
 
-        async with self._recovery.open(lease.spool) as readers:
+        async with self._recovery[lease.spool.backend].open(lease.spool) as readers:
             await renew()
             progress = await self._drain.page(
                 readers.transcripts,
@@ -110,10 +120,12 @@ class CaptureRecoveryWorker:
             )
             complete = progress.next_after is None and children == "complete"
         # Release after the helper container is gone: its mount would block removal.
+        # A remote sandbox stays paused until this point; release kills it.
         if complete:
             await self._spools.mark_drained(lease)
-            if self._release is not None:
-                await self._release.after_drain(lease, exclusive=readers.exclusive)
+            release = self._release.get(lease.spool.backend)
+            if release is not None:
+                await release.after_drain(lease, exclusive=readers.exclusive)
 
     async def _recover_children(
         self, lease: CaptureSpoolLease, readers: RecoveryReaders

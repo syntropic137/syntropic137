@@ -117,7 +117,11 @@ async def test_killed_workspace_recovers_native_bytes_without_remote_store(
             CaptureLocalTranscriptHandler(archive, journal, AgenticNativeSessionEvidence())
         )
         worker = CaptureRecoveryWorker(
-            registry, DockerSpoolRecovery(IMAGE), drain, lease_seconds=120, retry_seconds=0
+            registry,
+            {"docker": DockerSpoolRecovery(IMAGE)},
+            drain,
+            lease_seconds=120,
+            retry_seconds=0,
         )
         assert await worker.step()
         assert await journal.watermark(run) == 1

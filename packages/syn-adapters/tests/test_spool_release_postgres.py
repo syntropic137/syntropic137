@@ -68,7 +68,7 @@ def _spool(source: str, session: str) -> CaptureSpool:
 
 
 async def _traverse(spools: PostgresCaptureSpools, *, staged: int = 0) -> CaptureSpoolLease:
-    lease = await spools.claim(lease_seconds=60)
+    lease = await spools.claim(lease_seconds=60, backends=("docker",))
     assert lease is not None
     await spools.advance(lease, after=0, watermark=None, retry_seconds=0, staged_bytes=staged)
     await spools.mark_drained(lease)
@@ -102,7 +102,7 @@ async def test_archived_release_requires_settlement_later_traversal_and_exclusiv
     assert not await retention.after_drain(later, exclusive=False)
     assert await retention.after_drain(later, exclusive=True)
     assert volumes.removed == ["s"]
-    assert await spools.claim(lease_seconds=60) is None  # never drained again
+    assert await spools.claim(lease_seconds=60, backends=("docker",)) is None  # never drained again
     assert await retention.step() == 0  # nothing pending, nothing repeated
     assert await _gaps(db_pool, source) == 0  # archived releases record no gap
     async with db_pool.acquire() as conn:
@@ -125,7 +125,7 @@ async def test_in_use_volume_reopens_an_archived_release_for_capture(
     lease = await _traverse(spools)
     assert not await retention.after_drain(lease, exclusive=True)
     # A container attached after traversal; its writes are not archived yet.
-    again = await spools.claim(lease_seconds=60)
+    again = await spools.claim(lease_seconds=60, backends=("docker",))
     assert again is not None and again.token > lease.token
 
 
@@ -146,7 +146,7 @@ async def test_paused_non_terminal_spool_survives_age_drain_and_resumes(
     assert await retention.step() == 0  # age expiry needs a terminal session too
     assert volumes.removed == [] and await _gaps(db_pool, source) == 0
     # The workspace resumes; later bytes are still captured from the same volume.
-    resumed = await spools.claim(lease_seconds=60)
+    resumed = await spools.claim(lease_seconds=60, backends=("docker",))
     assert resumed is not None and resumed.token > first.token
     await spools.advance(resumed, after=0, watermark=None, retry_seconds=0, staged_bytes=50)
     await spools.settle("paused")
@@ -197,7 +197,9 @@ async def test_expiry_records_gap_before_removal_and_retries_until_removed(
     page = await evidence.read(spool.run, await evidence.watermark(spool.run))
     gap = page.items[-1].batch.evidence.acquisition_gaps[0].gap
     assert gap.reason == SPOOL_EXPIRED_GAP and gap.node_keys
-    assert await spools.claim(lease_seconds=60) is not None  # fresh spool only
+    assert (
+        await spools.claim(lease_seconds=60, backends=("docker",)) is not None
+    )  # fresh spool only
     volumes.in_use.clear()
     async with db_pool.acquire() as conn:
         await conn.execute(
@@ -291,7 +293,7 @@ async def test_terminal_run_settles_its_spools_only(db_pool: asyncpg.Pool) -> No
     assert rows[(other, "killed")] is None
     # The killed session's spool now releases after a later complete traversal.
     for _ in range(6):  # bounded: an unsettled spool stays claimable
-        lease = await spools.claim(lease_seconds=60)
+        lease = await spools.claim(lease_seconds=60, backends=("docker",))
         if lease is None:
             break
         await spools.advance(lease, after=0, watermark=None, retry_seconds=0)
