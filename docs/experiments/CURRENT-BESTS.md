@@ -1,12 +1,13 @@
 # Current bests
 
 **Living document.** For each common task it names the workflow, model or
-setting to use today, and the evidence behind it. Skills and runbooks point
-here instead of hardcoding workflow ids. A workflow being installed on a
+setting to use today, and the evidence behind it. The intent is that skills
+and runbooks point here instead of hardcoding workflow ids; today only
+`FINDINGS-LEDGER.md` links it. A workflow being installed on a
 deployment does not make it recommended: `syn workflow list` is what is
 available, this file is what is best.
 
-**Last updated:** 2026-10-21 (#2059). The previous edit was 2026-05-02, and
+**Last updated:** 2026-10-23 (#2059). The previous edit was 2026-05-02, and
 both workflows it recommended are absent from this repository.
 
 ## How to read and update this
@@ -29,9 +30,11 @@ Two caveats apply to the 2026-10 experiments below:
 - E1-E4 live on PR #2019, **not yet on `main`**. Their paths below are paths
   on that PR's branch. When it lands, add their ledger rows and link them here
   (#2059 acceptance).
-- Every experiment so far ran 2-15 tasks per arm. At those sizes a result can
-  rule out a large effect at best. Read "ADOPT" as "no evidence of harm", not
-  "proven better".
+- Sample sizes are small. Production A/Bs: v4-precheck n=3 per arm, E3 a
+  control of n=2 (6 planned). Eval suites: E1 29 cases, one run per case per
+  arm (58 runs); E2 5 cases x 2 runs = 10 runs per arm. At those sizes a result
+  can rule out a large effect at best. Read "ADOPT" as "no evidence of harm",
+  not "proven better".
 
 ---
 
@@ -41,7 +44,7 @@ Two caveats apply to the 2026-10 experiments below:
 |---|---|---|---|
 | Behaviour change from an issue | `sdlc-implement-v3` | **no eval evidence yet** against an alternative end to end. Design rationale: `workflows/sdlc/README.md`, and `workflows/sdlc/implement/workflow.yaml` (why implement and verify are separate phases) | `sdlc-implement-v4-precheck`, see Under experiment |
 | Change whose diff is its own proof (pins, typos, dead links) | `sdlc-quickfix-v1` | **no eval evidence yet**; the routing test is in `workflows/sdlc/README.md` ("is there anything to prove?") | when in doubt, `implement` |
-| Second verification of a ready PR, or rescue of a run that died in verify | `sdlc-reverify-pr-v1 -t "#N"` | **no eval evidence yet** as a workflow; its review prompts are implement-v3's, held identical by `scripts/tests/test_reverify_pr_workflow.py` | verifier on Opus while codex quota is out (README, "Switching the verifier model"); say it is no longer cross-family |
+| Second verification of a ready PR, or rescue of a run that died in verify | `syn workflow run sdlc-reverify-pr-v1 -t "#N"` | **no eval evidence yet** as a workflow; its review prompts are implement-v3's, held identical by `scripts/tests/test_reverify_pr_workflow.py` | verifier on Opus while codex quota is out (README, "Switching the verifier model"); say it is no longer cross-family |
 | Research and plan | `sdlc-research-plan-v3` | **no eval evidence yet** | `sdlc-research-experiment-plan-v1` when the plan needs an experiment first |
 | PR review | `sdlc-pr-review-v1` | **no eval evidence yet** | `sdlc-pr-review-slp-v1`, unmeasured |
 | Decision record, refactor plan, retrospective | `sdlc-decision-record-v1`, `sdlc-refactor-plan-v2`, `sdlc-retrospective-v1` | **no eval evidence yet** | none |
@@ -62,10 +65,12 @@ EXISTS").
   cross-arm finding matters more: in 3 of 6 slots verify certified a head
   whose real-service tests had never run, and orchestrator-run evidence found
   a real defect each time.
-- **`sdlc-implement-v5`: built, never run.** Draft PR #2063 (#2060):
+- **`sdlc-implement-v5`: first live check running.** Draft PR #2063 (#2060):
   v4-precheck plus declared evidence and structured capability gaps, per
   decision 4 of `docs/plans/20261015_platform-dispatched-evidence.md`. Not on
-  `main`, not installed, no runs. **no eval evidence yet.**
+  `main`. Installed on the owner VPS from the PR branch on 2026-10-23 for one
+  live check (exec-47d6ab7275be, #1144); its A/B has not started.
+  **no eval evidence yet.**
 - **End-to-end replay (E4):** preregistered on PR #2019
   (`docs/experiments/2026-10-20-end-to-end-replay.md`), not dispatched, blocked
   on the replay target (#2055). Until it runs, no workflow default here has
@@ -100,17 +105,16 @@ same file refuses them).
 
 Compare only runs on the same suite version and the same judge: a changed
 model, prompt or workflow bumps the version (`evals/verifier-seed-v1/suite.yaml`).
-The verifier LLM judge is pinned to `claude-sonnet-4-6`
-(`evals/verifier-seed-v1/README.md`); its replacement is #2036 / #2048. Every
+The verifier LLM judge is pinned to `claude-sonnet-5-5`, prompt version 5,
+answering three times and taking the majority (`JUDGE_MODEL`,
+`JUDGE_PROMPT_VERSION` in `scripts/eval_suite.py`; PR #2036, merged
+2026-10-22). Its false-negative calibration fixtures are still open (#2048). Every
 suite here screens one phase; none is end-to-end.
 
 ## Still believed valid, not re-measured since 2026-05-02
 
 - **Watch an execution with SSE** (`GET /api/v1/sse/executions/{execution_id}`,
   `GET /api/v1/sse/activity`) instead of polling `/executions/{id}`.
-- **One phase per deliverable** when a workflow must produce several files.
-  Whether a phase still captures only one primary artifact has not been
-  re-checked.
 
 The other 2026-05-02 entries (the `claude -p` orchestrator pattern, Playwright
 system libraries, workspace cache redirection) depended on workspace image and
@@ -123,4 +127,5 @@ dropped rather than carried forward unverified; git history has the old text.
 | Date | Change | Driving finding |
 |---|---|---|
 | 2026-05-02 | Initial population from cycle 3 + cycle 4 results | F8 (cycle 3), cycle 4 probes |
+| 2026-10-23 | Codex review of #2066: judge pin now `claude-sonnet-5-5` (#2036 merged); per-experiment sample sizes; dropped "one phase per deliverable" (a phase's whole output tree is captured since #988, `ArtifactCollector.py`); v5 live check noted. | #2066 review |
 | 2026-10-21 | Rewritten for the SDLC suite: workflow per kind of work, model per phase, suite versions, each with its evidence or "no eval evidence yet". v4-precheck provisional ADOPT, v5 unrun. Cycle 3/4 workflow entries superseded. | #2059; `implement-v4-precheck/EXPERIMENT.md`; E1-E4 on PR #2019 |
