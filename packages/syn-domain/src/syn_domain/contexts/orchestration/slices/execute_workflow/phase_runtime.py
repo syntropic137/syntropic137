@@ -52,6 +52,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     capture_and_import_phase,
     close_phase_workspaces,
+    record_workspace_runtime,
     record_workspace_usage,
     remember_leader_native_id,
 )
@@ -442,6 +443,19 @@ class PhaseRuntime:
             started_at=self._started_at.get(phase_id, datetime.now(UTC)),
             session_manager=self._session_managers.get(phase_id),
             fallback=self._fallbacks.get(phase_id),
+        )
+
+    async def record_runtime(self, phase_id: str) -> None:
+        """Record which OCI runtime this phase's workspace runs under (Lane 2).
+
+        Call after `launch`, which is where the session id is first known, and
+        before the agent runs, so a phase that fails still leaves the row.
+        """
+        await record_workspace_runtime(
+            self._writer,
+            self._workspaces.get(phase_id),
+            session_id=self._session_ids.get(phase_id, ""),
+            phase_id=phase_id,
         )
 
     def remember_leader(

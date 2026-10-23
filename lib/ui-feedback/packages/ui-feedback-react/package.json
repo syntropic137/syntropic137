@@ -39,7 +39,7 @@
     "typescript": "~5.7.2",
     "vite": "^6.2.0",
     "vite-plugin-dts": "5.1.2",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   },
   "keywords": [
     "react",

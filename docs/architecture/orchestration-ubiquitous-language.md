@@ -209,6 +209,19 @@ never run at once. The setup script is not retried, because a clone killed
 mid-transfer would be skipped by the re-run. Resuming provisions a fresh
 workspace instead. Each deadline is a Setting.
 
+## Workspace Runtime
+
+The OCI runtime a workspace container runs under: `runc`, `gvisor`, `kata` (a
+Kata Containers VM, run through Docker's runtime seam) or `sysbox`. An operator
+**requests** one with the `SYN_WORKSPACE_RUNTIME` Setting. Unset means
+**auto**: agentic-workspace picks gVisor when Docker has it registered and runc
+otherwise. The **effective** runtime is what agentic-workspace's resolver
+actually launched the container with. Syntropic137 never decides or detects it,
+it only reads the answer back (`IsolationRuntime` on the `IsolationHandle`). An
+explicit request Docker cannot honour fails the workspace; it never falls back
+to runc. The effective runtime is Lane 2 telemetry, one `Workspace runtime` log
+line per workspace, and does not reach an aggregate.
+
 ## Workspace Credential Policy
 
 Whether a workspace may hold the host's credentials (`WorkspaceCredentialPolicy`,
@@ -233,9 +246,25 @@ The one composition point for a workspace backend (`BackendKit`, #1914). Built
 once at wiring, it owns every decision that differs between backends: which
 image may run and how it is verified, whether sessions are captured, the
 [Workspace Credential Policy](#workspace-credential-policy), and the isolation
-type reported on the handle. Only the Docker kit exists. A NoCredentials kit
-starts only with an image approved for credential-free runs, and no such image
-is pinned yet, so today none can start.
+type reported on the handle. A NoCredentials kit starts only with an image
+approved for credential-free runs. Two kits exist:
+
+- **Docker kit**: the default. No credential-free image is pinned yet, so a
+  NoCredentials Docker kit cannot start.
+- **E2B kit** (#1915, experimental, off unless `SYN_E2B_ENABLED`): always
+  NoCredentials, never captures, and its one approved image is its
+  [E2B Template](#e2b-template). It also carries the template's CPU and memory,
+  refusing a workspace that asks for more, and reads files back through the
+  provider because the workspace disk is not on this host.
+
+## E2B Template
+
+The pre-built E2B image every E2B workspace starts from (`SYN_E2B_TEMPLATE`,
+#1915), built from the pinned workspace image by agentic-workspace's
+`build_template`, which verifies the image digest at build time. E2B sizes a
+sandbox by its template, not per request, so the template's CPU and memory are
+a ceiling, not a request. Not an OCI image reference: nothing is
+cosign-verified when a workspace starts from it.
 
 ## Fallback Agent
 
@@ -599,8 +628,9 @@ successful API response reports the first.
 
 ## Execution Budget
 
-How many Executions one Executor runs at once (`SYN_EXECUTION_MAX_CONCURRENT`);
-with the Run Queue off, that Executor is the API process itself.
+How many Executions one Executor runs at once. It is sized at startup from
+[Host Capacity](#host-capacity) and [Run Demand](#run-demand), and is never
+more than `SYN_EXECUTION_MAX_CONCURRENT`; see [Binding Term](#binding-term). With the Run Queue off, that Executor is the API process itself.
 ONE budget bounds every start path: a direct start, a trigger dispatch and the
 start of a resumed Execution all claim a slot from it. Sized against memory,
 not isolation: each running Execution costs the API memory, and an API killed
@@ -625,6 +655,34 @@ free one early. (ADR-072 D3, D12.)
 Every budget row names its Executor Pool (`execution_budget.pool_id`). A
 pool's capacity is the sum of its members' rows, reported and never claimed
 against, exactly as global capacity is the sum of every row. (ADR-072 D13.)
+
+## Host Capacity
+
+What the host an Executor runs on has: CPU cores, physical memory and free
+disk on the workspace volume, plus its CPU pressure (PSI `some avg60`). It is
+read through `HostCapacityPort` at startup. It is NOT the workspace container limits
+(`SYN_WORKSPACE_CPU_LIMIT`, `SYN_WORKSPACE_MEMORY_LIMIT_MB`). Those are ceilings
+on one run, not facts about the host. (#1715.)
+
+## Run Demand
+
+What one running Execution uses, measured: the median CPU cores and the p95
+peak memory and teardown disk, pooled over every phase that ended inside
+`SYN_EXECUTION_PROFILE_WINDOW_DAYS` (the [Phase Profile](#phase-profile) data,
+#1716). Each phase sample counts because an Execution holds one phase workspace at a time.
+Below 10 measured phases there is no Run Demand. A small number is never
+substituted for it. (#1715.)
+
+## Binding Term
+
+The term that set the [Execution Budget](#execution-budget) when it was sized
+from [Host Capacity](#host-capacity) and [Run Demand](#run-demand). The budget is
+`min(operator max, cpu, memory, disk)`, and the binding term names whichever
+is smallest: `cpu`, `memory`, `disk` or `operator_max`. When no budget could
+be computed, the budget is the operator max (`SYN_EXECUTION_MAX_CONCURRENT`),
+and the binding term records the reason: `operator_max_no_profile`,
+`operator_max_profiles_unreadable` or `operator_max_host_unreadable`. /health
+reports it. (#1715.)
 
 ## Queued Start
 
@@ -797,8 +855,12 @@ What an Executor's reconciler can actually reap: one Docker daemon, one
 provider account. Recorded on its budget row (`reap_scope`), derived from the
 backend and never configured. A reconciler fences, takes over and reaps only
 runs claimed in its own Reap Scope, so a reconciler on another machine can
-never free a slot whose workspace may still be running. (ADR-072 D5, D13;
-lands before any Overflow to a second machine.)
+never free a slot whose workspace may still be running. On Docker it is the
+daemon's engine ID. A budget row with no Reap Scope (written before the column
+existed) is reaped by no one until a successor in its own container gives it
+that successor's. The same backend's reap gates every release: a claimer closes
+its own run only once the reap shows the run's resources gone. (ADR-072 D3, D5,
+D13.)
 
 ## Run Queue
 

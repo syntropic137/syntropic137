@@ -6,8 +6,11 @@ Real ``WorkspaceDockerProvider``, real container. Run with:
       uv run pytest -m integration packages/syn-adapters/tests/test_docker_operation_contract.py
 
 The credential reaches the workload's environment through a binding resolved
-by ``WorkspaceCredentials``, and is absent from the docker argv, the labels and
-the provider's logs. The agent stream reaches the workload through
+by ``WorkspaceCredentials``, and is absent from the docker argv, the labels,
+the provider's logs and the lines the workload printed it on. Two layers
+redact those lines: the provider's spool replaces a launch binding (the grant)
+before it stores a byte, and the stream boundary (#1927) replaces the
+workspace-scoped session-store token, which the spool never registers. The agent stream reaches the workload through
 ``start``/``observe`` and keeps its launch marker and exit status.
 """
 
@@ -26,7 +29,9 @@ from agentic_isolation import (
     WorkspaceDockerProvider,
     WorkspaceRuntime,
 )
+from agentic_isolation.providers.operation_spool import REDACTED as PROVIDER_REDACTED
 
+from syn_adapters.workspace_backends.agentic.credential_scrubber import REDACTED_MARKER
 from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 from syn_adapters.workspace_backends.agentic.session_store_env import (
     session_store_credential_bindings,
@@ -116,8 +121,19 @@ async def test_bound_credentials_reach_the_workload_and_nothing_else(
         ]
 
         assert lines[0] == announce_as(wrapper), "the launch marker is the first line"
-        assert f"store={_TOKEN}" in lines
-        assert f"grant={_GRANT}" in lines
+        # The workload received both values, and printed them; neither left
+        # the stream boundary (#1927). Each line names the layer that caught it.
+        # The store token is workspace-scoped, so only our scrubber knows it.
+        assert f"store={REDACTED_MARKER}" in lines
+        # The grant is a launch binding (``bind_launch``). agentic-workspace's
+        # contract redacts every value it resolves from
+        # ``spec.credential_bindings`` with its own marker before output is
+        # stored (``SupportsOperations.start`` in providers/base.py;
+        # ``DockerOperations._start_locked`` registers ``resolved`` with the
+        # ``OperationSpool``), so our scrubber, still applied, finds no value
+        # left. Its marker here means the provider kept that promise.
+        assert f"grant={PROVIDER_REDACTED.decode()}" in lines
+        assert not any(_TOKEN in line or _GRANT in line for line in lines)
         assert adapter.last_exit_code == 7
 
         inspected = json.loads(

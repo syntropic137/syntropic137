@@ -24,7 +24,30 @@ from syn_shared.settings import reset_settings
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 
-async def _started_host(monkeypatch: pytest.MonkeyPatch) -> ExecutorHost:
+class _Reaper:
+    """The backend as the runner reads it; ``docker info`` is not called in a unit test."""
+
+    def __init__(
+        self, provider: str = "docker", isolation: IsolationLevel = IsolationLevel.CONTAINER
+    ) -> None:
+        self._provider, self._isolation = provider, isolation
+
+    def scope(self) -> str:
+        return "engine-under-test"
+
+    def provider(self) -> str:
+        return self._provider
+
+    def isolation(self) -> IsolationLevel:
+        return self._isolation
+
+    async def reap(self, executor_id: str, execution_id: str) -> bool:
+        return True
+
+
+async def _started_host(
+    monkeypatch: pytest.MonkeyPatch, reaper: _Reaper | None = None
+) -> ExecutorHost:
     executor = MagicMock()
     executor.join = AsyncMock()
     executor.leave = AsyncMock()
@@ -36,6 +59,7 @@ async def _started_host(monkeypatch: pytest.MonkeyPatch) -> ExecutorHost:
     monkeypatch.setattr(runner, "get_execution_event_stream", MagicMock())
     monkeypatch.setattr(runner, "ExecutionHost", built)
     monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())
+    monkeypatch.setattr(runner, "DockerDeadHostReaper", lambda: reaper or _Reaper())
     reset_settings()
     try:
         await runner.start_execution_host()
@@ -83,3 +107,13 @@ async def test_an_unknown_capability_refuses_to_start(monkeypatch: pytest.Monkey
     monkeypatch.setenv("SYN_EXECUTOR_POOL_CAPABILITIES", '["gpu"]')
     with pytest.raises(ValueError, match="gpu"):
         await _started_host(monkeypatch)
+
+
+async def test_the_host_records_its_reapers_scope_and_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Scope, provider and isolation are read from the backend (D13), never from
+    # settings: a provider and level no setting could produce prove the source.
+    host = await _started_host(monkeypatch, _Reaper("kata", IsolationLevel.MICROVM))
+    assert host.reap_scope == "engine-under-test"
+    assert (host.pool.provider, host.pool.isolation) == ("kata", IsolationLevel.MICROVM)

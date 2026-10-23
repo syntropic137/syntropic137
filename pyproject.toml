@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "1.0.3"
+version = "1.0.4"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -187,7 +187,7 @@ pythonpath = [
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = ["-ra", "-q", "--strict-markers", "-m", "not integration"]
+addopts = ["-ra", "-q", "--strict-markers", "-m", "not integration and not e2b"]
 # pytest skips a `Test*` class that defines __init__ or __new__ with only a
 # warning, so its tests run in no job and no census counts them (#1935).
 filterwarnings = ["error::pytest.PytestCollectionWarning"]
@@ -197,6 +197,7 @@ markers = [
     "e2e: End-to-end tests (full system)",
     "regression: Regression tests for known bugs",
     "architecture: Architectural fitness functions (CI-enforced structural checks)",
+    "e2b: needs a real E2B account (SYN_E2B_API_KEY, SYN_E2B_TEMPLATE); never in CI, run with `just test-e2b` (#1915)",
     "may_skip(reason, issue): an integration test that may skip, declared with why and the issue that removes it (#1984)",
 ]
 

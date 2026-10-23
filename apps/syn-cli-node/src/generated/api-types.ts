@@ -2830,6 +2830,12 @@ export interface components {
             eval_id: components["schemas"]["EvalId"];
         };
         /**
+         * BindingTerm
+         * @description Which term of the formula set the budget.
+         * @enum {string}
+         */
+        BindingTerm: "operator_max" | "cpu" | "memory" | "disk" | "operator_max_no_profile" | "operator_max_profiles_unreadable" | "operator_max_host_unreadable";
+        /**
          * BodyAvailability
          * @enum {string}
          */
@@ -4278,6 +4284,39 @@ export interface components {
             message: string;
         };
         /**
+         * ExecutionBudgetHealth
+         * @description The execution budget this process enforces, and what it is doing right now (#1715).
+         */
+        ExecutionBudgetHealth: {
+            /**
+             * Budget
+             * @description Most executions this process runs at once.
+             */
+            budget: number;
+            /** @description Which term set the budget: 'cpu', 'memory' or 'disk' when the host is the limit; 'operator_max' when SYN_EXECUTION_MAX_CONCURRENT is; 'operator_max_no_profile' when too few phases have been measured to size from; 'operator_max_profiles_unreadable' or 'operator_max_host_unreadable' when a read failed and the budget fell back to SYN_EXECUTION_MAX_CONCURRENT. */
+            binding_term: components["schemas"]["BindingTerm"];
+            /**
+             * Admitted
+             * @description Starts accepted into the budget: since this process began with the Run Queue off; every run the Run Queue has admitted, across the pool, with it on.
+             */
+            admitted: number;
+            /**
+             * Running
+             * @description Starts holding a slot now: in this process with the Run Queue off; Run Queue runs claimed, fencing or reaped, across the pool, with it on.
+             */
+            running: number;
+            /**
+             * Queued
+             * @description Starts waiting for a slot now: in this process with the Run Queue off; Run Queue runs admitted and not yet claimed, across the pool, with it on.
+             */
+            queued: number;
+            /**
+             * Cpu Pressure Avg60
+             * @description Percent of the last 60s some task on this host waited for CPU (PSI 'some avg60'). Null where the kernel does not report it.
+             */
+            cpu_pressure_avg60?: number | null;
+        };
+        /**
          * ExecutionBudgetInfo
          * @description How full the execution budget is right now, for the app bar (PC-124).
          *
@@ -5657,6 +5696,8 @@ export interface components {
             db_pools?: components["schemas"]["DbPoolHealth"][] | null;
             /** @description How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API. */
             cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
+            /** @description The execution budget sized from host capacity and measured per-run demand, the term that bound it, and the starts admitted, running and queued in this process or the Run Queue (#1715). Omitted before startup has sized it, and when the Run Queue cannot be read. */
+            execution_budget?: components["schemas"]["ExecutionBudgetHealth"] | null;
         };
         /**
          * HeatmapDayBucketResponse
