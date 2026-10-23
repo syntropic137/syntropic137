@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/phase_step_events.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/phase_step_events.py
+index f9a198572..48d953212 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/phase_step_events.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/phase_step_events.py
+@@ -44,7 +44,6 @@ def workspace_provisioned_event(
+         session_id=command.session_id,
+         provisioned_at=datetime.now(UTC),
+         checked_out_commits=list(command.checked_out_commits) or None,
+-        image_manifest=command.image_manifest,
+     )
+ 
+ 

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+index 54ed335b3..f8f52a928 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+@@ -706,7 +706,7 @@ class AgenticIsolationAdapter:
+         Every workspace holds the session-store token, and only this adapter
+         knows it, so a file the workload wrote leaves with it replaced (#1927).
+         """
+-        if self._kit.reads_through_provider or base_path != "/workspace":
++        if self._kit.reads_through_provider:
+             collected = await self._read_through_provider(handle, patterns, base_path)
+         else:
+             collected = await copy_files_from_workspace(handle, patterns, base_path)

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
+index 1a7d29d0d..2f74c5a27 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
+@@ -167,7 +167,7 @@ async def _read_image_manifest(
+         logger.warning(
+             "Could not read the image manifest of %s: %s", handle.isolation_id, e, exc_info=True
+         )
+-        return ImageManifestReading.unreadable(f"{type(e).__name__}: {e}")
++        return ImageManifestReading.absent()
+     reading = ImageManifestReading.from_files(files)
+     if reading.state is not ImageManifestState.READ:
+         logger.info("Image manifest of %s: %s", handle.isolation_id, reading.state)
