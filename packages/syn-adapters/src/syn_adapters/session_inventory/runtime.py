@@ -204,6 +204,7 @@ async def create_inventory_runtime(
             backend=backend,
             age_seconds=settings.spool_retention_seconds,
             max_bytes=settings.spool_max_bytes,
+            max_count=settings.spool_max_count,
         )
         for backend, volume in volumes.items()
     }

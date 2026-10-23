@@ -332,3 +332,41 @@ async def test_byte_quota_counts_and_evicts_only_its_own_backend(db_pool: asyncp
     assert await sandbox.step() == 1
     assert docker_volumes.removed == []
     assert sandbox_volumes.removed == ["paused-sandbox"]
+
+
+def _sandbox_spool(source: str, session: str) -> CaptureSpool:
+    return CaptureSpool(
+        run=RunIdentity(source_instance_id=source, execution_id="run"),
+        session_id=session,
+        phase_id="phase",
+        profile="sandbox-spool/1",
+        backend="e2b",
+        executor_id="executor",
+        sandbox_id=f"sbx-{session}",
+    )
+
+
+async def test_count_ceiling_bounds_empty_paused_sandboxes_but_never_a_running_one(
+    db_pool: asyncpg.Pool,
+) -> None:
+    """Decision 7: byte quotas cannot bound spools that staged nothing (#1916)."""
+    spools, docker, docker_volumes, evidence, source = await _setup(db_pool)
+    sandbox_volumes = Volumes()
+    sandbox = CaptureSpoolRetention(
+        db_pool, source, sandbox_volumes, evidence, backend="e2b", max_count=1
+    )
+    await spools.project(_spool(source, "volume"))
+    for session in ("old", "running", "new"):
+        await spools.project(_sandbox_spool(source, session))
+    await spools.settle("old")
+    # Three paused sandboxes, zero staged bytes, a ceiling of one. Only the
+    # settled one goes; the two non-terminal ones stay though that exceeds it.
+    assert await sandbox.step() == 1
+    assert sandbox_volumes.removed == ["old"]
+    assert await docker.step() == 0
+    assert docker_volumes.removed == []
+    assert await _gaps(db_pool, source) == 1
+    await spools.settle("new")
+    assert await sandbox.step() == 1
+    assert sandbox_volumes.removed == ["old", "new"]
+    assert await sandbox.step() == 0
