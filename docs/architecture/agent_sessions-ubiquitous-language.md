@@ -163,8 +163,9 @@ worker find them after any crash (#1398, #1916).
   a settled sandbox spool is claimed or opened: recovering it stops its agent,
   and reaching a sandbox is not permission to stop it.
 - **Spool fence:** the lease renewal a recovery adapter calls before attaching
-  and again after, before anything destructive. It fails once another worker
-  owns the spool, so a stale worker stops nothing.
+  and again after, before anything destructive, and once more before the
+  closing pause. It fails once another worker owns the spool, so a stale worker
+  stops nothing and does not pause the sandbox its new owner is reading.
 - **Pause-until-drained:** a sandbox spool stays paused until `mark_drained`;
   only release kills it. A failed archive leaves it paused and retryable.
 - **Release:** removing staged bytes after a drained traversal (`archived`) or
