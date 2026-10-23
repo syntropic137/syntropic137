@@ -224,10 +224,11 @@ class ExecutionCostProjection:
         _track_session(execution_cost, session_id)
 
         data = event_data.get("data", {})
-        execution_cost.input_tokens += data.get("total_input_tokens", 0)
-        execution_cost.output_tokens += data.get("total_output_tokens", 0)
-        execution_cost.tool_calls += data.get("tool_count", 0)
-        execution_cost.turns += data.get("num_turns", 0)
+        # A killed run's summary carries these as null, not absent (#1164).
+        execution_cost.input_tokens += data.get("total_input_tokens") or 0
+        execution_cost.output_tokens += data.get("total_output_tokens") or 0
+        execution_cost.tool_calls += data.get("tool_count") or 0
+        execution_cost.turns += data.get("num_turns") or 0
         execution_cost.duration_ms += data.get("duration_ms", 0) or 0
 
         if (reported_cost := parse_vendor_cost(data.get("total_cost_usd"))) is not None:

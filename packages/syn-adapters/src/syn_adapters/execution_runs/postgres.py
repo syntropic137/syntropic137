@@ -250,7 +250,10 @@ class PostgresExecutionRunQueue:
         if limit < 1:
             return []
         async with self._pool.acquire() as conn:
-            # SKIP LOCKED keeps two fencers from blocking on, or sharing, a row;
+            # Only a claimer in this reconciler's reap scope: anything else is a
+            # machine whose containers this reaper cannot see (D5, D13). The
+            # scope never changes for a row, so the pick's check holds after the
+            # lock. SKIP LOCKED keeps two fencers from blocking on, or sharing, a row;
             # the outer predicate is re-checked once the row is locked. The
             # pick is a MATERIALIZED CTE because an IN (... LIMIT) subquery may
             # be rescanned once per outer row, each rescan locking LIMIT more.
@@ -259,6 +262,8 @@ class PostgresExecutionRunQueue:
                     SELECT c.execution_id FROM execution_runs c
                     WHERE c.state='claimed' AND c.leased_until<now()
                     AND c.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
+                    AND (SELECT reap_scope FROM execution_budget WHERE executor_id=c.executor_id)
+                        =(SELECT reap_scope FROM execution_budget WHERE executor_id=$1)
                     ORDER BY c.leased_until, c.execution_id
                     FOR UPDATE OF c SKIP LOCKED LIMIT $2
                 ) UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
@@ -278,7 +283,8 @@ class PostgresExecutionRunQueue:
         if limit < 1:
             return []
         async with self._pool.acquire() as conn:
-            # Take over rows whose reconciler has left. SKIP LOCKED keeps two
+            # Take over rows whose reconciler has left, in this reap scope only
+            # (D5, D13), the same rule as fence_expired's. SKIP LOCKED keeps two
             # adopters apart; the outer predicate is re-checked after the lock,
             # so a second adopter finds a live owner and takes nothing. The pick
             # is a MATERIALIZED CTE for the same reason as fence_expired's.
@@ -288,6 +294,8 @@ class PostgresExecutionRunQueue:
                     WHERE o.state IN ('fencing','reaped') AND o.reconciler IS DISTINCT FROM $1
                     AND o.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
                     AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=o.reconciler)
+                    AND (SELECT reap_scope FROM execution_budget WHERE executor_id=o.executor_id)
+                        =(SELECT reap_scope FROM execution_budget WHERE executor_id=$1)
                     ORDER BY o.leased_until, o.execution_id
                     FOR UPDATE OF o SKIP LOCKED LIMIT $2
                 ) UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
@@ -447,12 +455,23 @@ class PostgresExecutionRunQueue:
             host.host_id,
         )
         inserted = await conn.fetchval(
-            """INSERT INTO execution_budget (executor_id,container_id,capacity,pool_id)
-            VALUES ($1,$2,$3,$4) ON CONFLICT (executor_id) DO NOTHING RETURNING executor_id""",
+            """INSERT INTO execution_budget (executor_id,container_id,capacity,pool_id,reap_scope)
+            VALUES ($1,$2,$3,$4,$5) ON CONFLICT (executor_id) DO NOTHING RETURNING executor_id""",
             host.host_id,
             host.container_id,
             int(free or 0) if held else capacity,
             host.pool.pool_id,
+            host.reap_scope,
+        )
+        # Rows from before the scope column (D13): one container runs on one
+        # daemon, so a successor in the same container proves the same scope.
+        # Never inferred any other way; rows with no such successor stay NULL,
+        # unfenceable and charged, for the D5 alert.
+        await conn.execute(
+            """UPDATE execution_budget SET reap_scope=$2
+            WHERE container_id=$1 AND reap_scope IS NULL""",
+            host.container_id,
+            host.reap_scope,
         )
         if inserted is not None and held:
             await conn.execute(

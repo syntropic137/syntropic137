@@ -1,7 +1,7 @@
 {
   "name": "syn-dashboard-ui",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "scripts": {
     "predev": "[ -d node_modules ] || npm install",
@@ -45,10 +45,10 @@
     "jsdom": "29.0.1",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.46.4",
-    "vite": "7.3.6",
+    "typescript-eslint": "8.71.1",
+    "vite": "7.3.7",
     "openapi-typescript": "7.8.0",
     "tsx": "4.19.4",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   }
 }

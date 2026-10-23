@@ -63,6 +63,10 @@ unchanged, and there is no new execution status for upgrades.
 `SYN_PROCESS_ROLE = api | executor | all` (default `all`, so dev and tests
 keep one process).
 
+Implemented (#1310 1.6) as `SYN_EXECUTION_PROCESS_ROLE`: the `SYN_EXECUTION_`
+prefix is kept because `.env.example` and the compose forwarding are generated
+from prefix + field name. The compose files pin it per service.
+
 | Role | Runs | Does not run |
 |---|---|---|
 | `api` | routes, admission, the read path, the projection coordinator and ProcessManagers, pollers | any execution; it has no Docker access |
@@ -98,9 +102,8 @@ executor: its pool, capacity, slots in use, heartbeat, last claim check,
 full-since and reap scope; D3, D13), `executor_pools` (one row per Executor
 Pool: priority, provider, region, isolation, capabilities and overflow delay;
 D13) and `executor_hosts` (one row per registered host: its container,
-generation, epoch and drain flag, D5, D9, D10). The last claim check,
-full-since and reap scope columns land with D13's later steps (see D13,
-Status). Production fails fast
+generation, epoch and drain flag, D5, D9, D10). The last claim check and
+full-since columns land with D13's later steps (see D13, Status). Production fails fast
 without Postgres (ADR-060); the test double inherits `InMemoryAdapter`.
 
 **Row states.**
@@ -217,9 +220,11 @@ a leaked or double-freed slot. A deferred row is unowned: its next claim
 charges whichever executor takes it, from step 3 above.
 
 A claimer closes a run only once its backend shows the run's resources gone
-(D13). Otherwise it leaves the run charged for reconciliation. (This gate lands
-with D13's reach-and-release step; until then a claimer closes when its drain
-returns.)
+(D13). Otherwise it leaves the run charged for reconciliation: its Lease
+expires and a reconciler in the same reap scope fences it, and releases it only
+once its own reap succeeds (D5). A reap that raises counts as not shown gone. This holds
+however the drain ended, so an error the processor turned into a failed workflow
+cannot free a slot over resources that may still exist.
 
 **Closing a row that holds no charge changes no counter.** A row that is
 `opening`, `abandoned` or `admitted` has `executor_id = NULL`, whether it has
@@ -454,11 +459,12 @@ A reconciler can reap only what its backend reaches: a Docker reaper one
 daemon, a provider reaper one account. `execution_budget.reap_scope` records
 that reach. It is derived from the backend and never configured. A run whose
 scope has no live executor stays charged and raises this alert. Rows from
-before the column are given a scope only by a successor in the same container.
-(The scope guards on fencing and takeover land with D13's reach-and-release
-step, before any second machine overflows; until then a reconciler on another
-machine could report a reap it cannot perform, which is why no second machine
-is supported yet.)
+before the column are given a scope only by a successor in the same container:
+one container runs on one daemon, so it proves the same scope. A NULL scope
+equals nothing, so until then no reconciler fences the row; it stays charged and
+raises this alert, and the runbook step is an operator-verified manual
+`UPDATE`. On Docker the scope is the `docker info` engine ID, read once at
+startup; an executor that cannot read one does not start.
 
 Visibility-timeout redelivery (Sidekiq, Celery, SQS) is deliberately not
 adopted: redelivering an hour-long agent phase is exactly the duplicate-effects
@@ -747,11 +753,15 @@ decides placement); and claim-then-defer (churns tokens and penalises the run).
 **Status.** The pool model has landed: the `executor_pools` table,
 `execution_budget.pool_id` (existing rows join the seeded `default` pool), the
 dropped `backend` column, the port values, the registration conflict rule and
-`SYN_EXECUTOR_POOL_*`. Placement is not yet in the claim: every executor still
-takes the oldest admitted run. The reach-and-release gate and reap scope (D3,
-D5), the claim signals `claim_checked_at` and `full_since` (D3, D4), priority
-and overflow in the claim, run requirements, and the placement read follow in
-that order, as the plan sets out.
+`SYN_EXECUTOR_POOL_*`. The reach-and-release step has landed too (#1734): the
+`RunReaper` port (scope, provider, isolation, reap by owner and execution),
+`execution_budget.reap_scope` with the same-container backfill, scope-guarded
+fencing and takeover (D5), and the claimer's reap-before-close gate (D3). A
+pool's provider and isolation are now read from the reaper, never from
+settings. Placement is not yet in the claim: every executor still takes the
+oldest admitted run. The claim signals `claim_checked_at` and `full_since` (D3,
+D4), priority and overflow in the claim, run requirements, and the placement
+read follow in that order, as the plan sets out.
 
 **Applying the schema (#1965).** The api and every executor apply the Run Queue
 schema as they start, so they apply it concurrently. `ensure_ready` therefore

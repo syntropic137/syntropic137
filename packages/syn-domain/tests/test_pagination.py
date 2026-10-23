@@ -359,6 +359,83 @@ def test_an_unparseable_value_is_still_nothing() -> None:
     assert coerce_datetime(1743508800) is None
 
 
+class _ParsesAnything(datetime):
+    """A ``fromisoformat`` more permissive than any Python's.
+
+    Python 3.14 reads ``T24:00``; 3.12 and 3.13 do not. A test that leaves
+    the parse to the interpreter running it proves only that interpreter, so
+    this stand-in accepts every string, and whatever ``coerce_datetime``
+    still refuses it refused by its own rule.
+    """
+
+    @classmethod
+    def fromisoformat(cls, date_string: str) -> _ParsesAnything:
+        del date_string
+        return cls(2026, 1, 1, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [
+        "2026-10-01T24:00",
+        "2026-10-01T24:00:00",
+        "2026-10-01T24:00:00Z",
+        "2026-10-01T24:00:00.000000+00:00",
+        "2026-12-31 24:00:00",
+        "20261001T2400",
+        "2026-W40-1T24:00",
+        # fromisoformat takes any one separator character, digits included.
+        "2026-10-01224:00",
+        "2026100122400",
+        "2026-10-01024:00:00Z",
+        "2026-W40924:00",
+        "2026W40124:00",
+        "2026-10-01\n24:00",
+        "2026-10-01\x0024:00",
+        "2026-10-01\N{GRINNING FACE}24:00",
+    ],
+)
+def test_hour_24_names_no_instant_whatever_the_parser_accepts(
+    stamp: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #1637: the SQL gate refuses hour 24 on every Python, so this must too.
+    monkeypatch.setattr("syn_domain.pagination.datetime", _ParsesAnything)
+    assert coerce_datetime(stamp) is None
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [
+        "2026-10-24T10:00",
+        "2026-10-24",
+        "2026-10-01T00:00",
+        "2026-10-01T23:24:24",
+        "2026-10-01T10:00+24:00",
+        # A digit separator before a 2, read where fromisoformat reads it.
+        "2026-10-01200:00",
+        "2026W0151240",
+    ],
+)
+def test_the_hour_24_rule_leaves_other_24s_to_the_parser(
+    stamp: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A day, minute, second or offset of 24 is not hour 24.
+    monkeypatch.setattr("syn_domain.pagination.datetime", _ParsesAnything)
+    assert coerce_datetime(stamp) is not None
+
+
+@pytest.mark.parametrize(
+    ("stamp", "instant"),
+    [
+        ("2026-10-01200:00", datetime(2026, 10, 1, tzinfo=UTC)),
+        ("2026W0151240", datetime(2025, 12, 29, 12, 40, tzinfo=UTC)),
+    ],
+)
+def test_a_digit_separator_is_not_mistaken_for_the_hour(stamp: str, instant: datetime) -> None:
+    # Valid on every Python from 3.11: the rule must split where the parser does.
+    assert coerce_datetime(stamp) == instant
+
+
 @pytest.mark.parametrize(
     ("row", "after", "before"),
     [

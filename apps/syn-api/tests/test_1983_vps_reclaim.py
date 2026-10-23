@@ -480,8 +480,10 @@ def test_the_production_reclaimer_is_wired_to_the_gate(
 
     monkeypatch.setattr("syn_api._wiring_db.get_shared_db_pool", lambda: object())
     monkeypatch.setattr(vps_reclaim, "_source_instance_id", lambda _root: "src-test")
+    monkeypatch.setenv("SYN_DISK_RECLAIM_OBSERVER_CONTAINERS", "node-exporter")
     gate = QuiescenceGate(_Port(_QUIET), apply=True)
     reclaimer = vps_reclaim.production_reclaimer(gate, _APPLY)
+    assert reclaimer.observer_containers == frozenset({"node-exporter"})
     assert reclaimer.read_models_rebuilding == gate.completeness
     assert reclaimer.paused == gate.stop_reason
     assert reclaimer.is_live == gate.is_live

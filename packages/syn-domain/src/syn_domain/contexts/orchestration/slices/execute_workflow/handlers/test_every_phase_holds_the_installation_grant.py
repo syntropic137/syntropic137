@@ -8,7 +8,9 @@ are ephemeral and open their own PRs, so the downgrade is gone.
 
 These drive the real `sdlc/implement` workflow file through the real chain and
 assert on the bash the workspace executes and the env the agent is handed:
-- every phase mints with no permission subset, scoped to its repositories (#725);
+- every phase mints through the one agent-token path, scoped to its
+  repositories (#725). What that token holds - the grant with `actions`
+  capped at `read` - is pinned beside it, in syn_adapters/github/test_agent_token.py;
 - hosts.yml is still the ONLY route `gh` gets a credential by (#725).
 """
 

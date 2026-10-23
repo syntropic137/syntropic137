@@ -10,6 +10,12 @@ as they were before (ADR-059).
 This runs before the startup gate and every router, so no route can be
 reached from a workspace without passing it.
 
+Some answers depend on the body (an EVAL token may launch a workflow only into
+an eval it names, #1744). The enforcer, not this middleware, decides when: it
+is handed a reader, and only if it calls it is the body buffered - up to one
+byte past ``MAX_EVAL_BODY_BYTES`` - and then replayed to the app unchanged, so
+the route parses exactly the bytes that were authorized.
+
 Two things the router does are mirrored here, or the boundary drifts from what
 is actually routed:
 
@@ -29,6 +35,8 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
 from starlette._utils import get_route_path
+
+from syn_adapters.platform_access import MAX_EVAL_BODY_BYTES
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -58,25 +66,28 @@ class WorkspaceIngressMiddleware:
             None,
         )
         method = scope.get("method", "GET") if scope["type"] == "http" else "WEBSOCKET"
-        denial = await self._tokens.authorize(authorization, method, get_route_path(scope))
+        body = _BufferedBody(receive)
+        denial = await self._tokens.authorize(
+            authorization, method, get_route_path(scope), body.read
+        )
         if denial is None:
-            await self._app(scope, receive, self._keep_redirects_on_platform(scope, send))
+            await self._app(scope, body.replay, self._keep_redirects_on_platform(scope, send))
             return
         if scope["type"] == "websocket":
             await send({"type": "websocket.close", "code": 1008})
             return
-        body = json.dumps({"detail": denial.reason}).encode()
+        detail = json.dumps({"detail": denial.reason}).encode()
         await send(
             {
                 "type": "http.response.start",
                 "status": denial.status,
                 "headers": [
                     (b"content-type", b"application/json"),
-                    (b"content-length", str(len(body)).encode()),
+                    (b"content-length", str(len(detail)).encode()),
                 ],
             }
         )
-        await send({"type": "http.response.body", "body": body})
+        await send({"type": "http.response.body", "body": detail})
 
     def _keep_redirects_on_platform(self, scope: Scope, send: Send) -> Send:
         host = next((v.decode("latin-1") for n, v in scope["headers"] if n == b"host"), "")
@@ -103,3 +114,35 @@ def _onto_platform(location: bytes, scope: Scope, host: str, base: str) -> bytes
         return location
     route_path = get_route_path({**scope, "path": parts.path or "/"})
     return urlunsplit(("", "", base + route_path, parts.query, parts.fragment)).encode("latin-1")
+
+
+class _BufferedBody:
+    """A request body read at most once for the enforcer, then replayed to the app.
+
+    Until ``read`` is called nothing is consumed and ``replay`` IS the original
+    ``receive``, so a request whose answer does not depend on its body streams
+    through untouched. Once read, the buffered messages are handed back first,
+    exactly as they arrived, and only then is ``receive`` called again.
+    """
+
+    def __init__(self, receive: Receive) -> None:
+        self._receive = receive
+        self._messages: list[Message] | None = None
+
+    async def read(self) -> bytes:
+        if self._messages is None:
+            self._messages = []
+            size, more = 0, True
+            while more and size <= MAX_EVAL_BODY_BYTES:
+                message = await self._receive()
+                self._messages.append(message)
+                if message["type"] != "http.request":
+                    break
+                size += len(message.get("body", b""))
+                more = message.get("more_body", False)
+        return b"".join(m.get("body", b"") for m in self._messages if m["type"] == "http.request")
+
+    async def replay(self) -> Message:
+        if self._messages:
+            return self._messages.pop(0)
+        return await self._receive()

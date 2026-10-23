@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 import pytest
 from agentic_events import EventEmitter, Recording
@@ -37,6 +38,7 @@ from pydantic import ValidationError
 
 from syn_adapters.platform_access import WorkspacePlatformGrant
 from syn_adapters.workspace_backends.agentic import stream_adapter
+from syn_adapters.workspace_backends.agentic.credential_scrubber import REDACTED_MARKER
 from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 from syn_adapters.workspace_backends.agentic.stream_adapter import (
     AgenticEventStreamAdapter,
@@ -590,6 +592,153 @@ async def test_a_recorded_run_yields_the_same_events_through_provider_pages(
     assert "git_commit" in kinds, "the embedded hook event is among those compared"
     assert kinds.count("tool_execution_started") >= 2
     assert after == before
+
+
+# #1927: a credential value the workload prints never leaves the stream
+# boundary, in any encoding, wherever a page boundary cuts it. Asserted on what
+# CONSUMES the stream - the yielded lines, the Lane 2 tool events the production
+# processor records from them, and every log line - not on the scrubber alone.
+
+_CANARY = "ghs_CANARY/0b6f2c+Zq9"  # 21 chars: base64 with no padding; '/' and '+' URL-encode
+_NEAR_MISS = "ghs_CANARY/0b6f2c+Zq8"
+_LEAKED_FORMS = {
+    "raw": _CANARY,
+    "base64": base64.b64encode(_CANARY.encode()).decode(),
+    "url-encoded": quote(_CANARY, safe=""),
+}
+
+
+def _printed(form: str) -> bytes:
+    return f"prefix {form} suffix\n".encode()
+
+
+def _assert_no_form_of_the_canary(text: str) -> None:
+    for name, form in _LEAKED_FORMS.items():
+        assert form not in text, f"the {name} canary leaked"
+
+
+@pytest.mark.parametrize("form", sorted(_LEAKED_FORMS))
+async def test_a_printed_launch_credential_never_reaches_a_yielded_line(form: str) -> None:
+    adapter, _, _ = _stream([_printed(_LEAKED_FORMS[form])])
+
+    lines = await _lines(adapter, environment={"SYN_API_TOKEN": _CANARY})
+
+    _assert_no_form_of_the_canary("\n".join(lines))
+    assert lines == [f"prefix {REDACTED_MARKER} suffix"]
+
+
+@pytest.mark.parametrize("form", sorted(_LEAKED_FORMS))
+async def test_a_credential_split_across_two_pages_is_still_redacted(form: str) -> None:
+    printed = _printed(_LEAKED_FORMS[form])
+    cut = len(b"prefix ") + len(_LEAKED_FORMS[form]) // 2
+    adapter, _, _ = _stream([printed[:cut], printed[cut:]])
+
+    lines = await _lines(adapter, environment={"SYN_API_TOKEN": _CANARY})
+
+    assert lines == [f"prefix {REDACTED_MARKER} suffix"]
+
+
+async def test_a_near_miss_and_the_launch_marker_are_untouched() -> None:
+    wrapper = "syn-wrapper-1927"
+    marker = announce_as(wrapper)
+    adapter, _, _ = _stream([f"{marker}\n".encode(), _printed(_NEAR_MISS)])
+
+    lines = [
+        line
+        async for line in adapter.stream(
+            _HANDLE, ["claude"], environment={"SYN_API_TOKEN": _CANARY}, wrapper_name=wrapper
+        )
+    ]
+
+    assert lines == [marker, f"prefix {_NEAR_MISS} suffix"], "byte-identical (#1879)"
+
+
+async def test_the_session_store_token_is_redacted_without_being_in_the_environment() -> None:
+    credentials = WorkspaceCredentials(
+        SessionStoreSettings(_env_file=None, auth_token=_CANARY)  # type: ignore[arg-type]
+    )
+    ops = RecordingOperations(credentials, [_printed(_CANARY)])
+    adapter = AgenticEventStreamAdapter(_Host(ops, credentials))  # type: ignore[arg-type]
+
+    assert await _lines(adapter) == [f"prefix {REDACTED_MARKER} suffix"]
+
+
+async def test_a_value_withheld_mid_stream_is_redacted_from_the_next_page() -> None:
+    """A renewal installs a new GitHub token while the agent runs (#725)."""
+    issued: list[str] = []
+    printed = _printed(_CANARY)
+    adapter, ops, _ = _stream([b"first\n", printed])
+    original_observe = ops.observe
+
+    async def renew_then_observe(
+        ref: OperationRef, *, cursor: str | None, max_bytes: int, wait_seconds: float = 0
+    ) -> ObservationPage:
+        page = await original_observe(
+            ref, cursor=cursor, max_bytes=max_bytes, wait_seconds=wait_seconds
+        )
+        issued.append(_CANARY)
+        return page
+
+    ops.observe = renew_then_observe  # type: ignore[method-assign]
+
+    lines = [
+        line async for line in adapter.stream(_HANDLE, ["claude"], withheld=lambda: tuple(issued))
+    ]
+
+    assert lines == ["first", f"prefix {REDACTED_MARKER} suffix"]
+
+
+def _tool_lines_printing_the_canary() -> list[str]:
+    """A Bash tool whose result prints the canary every way, as JSON the processor parses."""
+    printed = " ".join(_LEAKED_FORMS.values())
+    use = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "t-leak",
+                    "name": "Bash",
+                    "input": {"command": f"echo {_CANARY}"},
+                }
+            ]
+        },
+    }
+    result = {
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "t-leak",
+                    "content": f"{printed}\n{_CANARY}",
+                    "is_error": False,
+                }
+            ]
+        },
+    }
+    return [json.dumps(use), json.dumps(result)]
+
+
+async def test_a_printed_credential_never_reaches_a_tool_event_or_a_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    blob = ("\n".join(_tool_lines_printing_the_canary()) + "\n").encode()
+    cut = blob.index(_CANARY.encode()) + 5
+    adapter, _, _ = _stream([blob[:cut], blob[cut:]])
+
+    with caplog.at_level(logging.DEBUG):
+        observations, _ = await _process(
+            adapter.stream(_HANDLE, ["claude"], environment={"SYN_API_TOKEN": _CANARY})
+        )
+
+    kinds = [observation.kind for observation in observations]
+    assert "tool_execution_started" in kinds, "the scrubbed lines are still valid JSON"
+    assert "tool_execution_completed" in kinds
+    recorded = "\n".join(observation.data_json for observation in observations)
+    assert REDACTED_MARKER in recorded, "the tool event recorded the redaction, not nothing"
+    _assert_no_form_of_the_canary(recorded)
+    _assert_no_form_of_the_canary(caplog.text)
 
 
 class TestResolveStreamExitCode:

@@ -32,7 +32,8 @@ DEFAULT_SELFHOST_API_URL = f"http://localhost:{SELFHOST_GATEWAY_PORT}"
 """Default API URL for selfhost users (CLI, browser)."""
 
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
-"""Anthropic Messages API endpoint (the eval suite's LLM judge, scripts/eval_suite.py)."""
+"""Anthropic Messages API endpoint (the eval suite's LLM judge, scripts/eval_suite.py,
+and the feedback AnthropicScreener)."""
 
 TAURI_DESKTOP_ORIGINS: tuple[str, ...] = ("tauri://localhost", "http://tauri.localhost")
 """Origins the packaged desktop app (apps/syn-desktop) sends requests from:

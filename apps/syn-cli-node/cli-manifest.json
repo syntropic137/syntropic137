@@ -1,0 +1,1829 @@
+{
+  "global_options": [
+    {
+      "name": "help",
+      "short": "h",
+      "takes_value": false
+    }
+  ],
+  "top_level_flags": [
+    "--help",
+    "-h",
+    "--version"
+  ],
+  "root_commands": [
+    {
+      "name": "health",
+      "args": [],
+      "options": []
+    },
+    {
+      "name": "run",
+      "args": [
+        "workflow-id"
+      ],
+      "options": [
+        {
+          "name": "dry-run",
+          "short": "n",
+          "takes_value": false
+        },
+        {
+          "name": "eval",
+          "short": null,
+          "takes_value": true
+        },
+        {
+          "name": "input",
+          "short": "i",
+          "takes_value": true
+        },
+        {
+          "name": "no-eval",
+          "short": null,
+          "takes_value": false
+        },
+        {
+          "name": "quiet",
+          "short": "q",
+          "takes_value": false
+        },
+        {
+          "name": "repo",
+          "short": "R",
+          "takes_value": true
+        },
+        {
+          "name": "tag",
+          "short": null,
+          "takes_value": true
+        },
+        {
+          "name": "task",
+          "short": "t",
+          "takes_value": true
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "args": [],
+      "options": []
+    }
+  ],
+  "groups": [
+    {
+      "name": "artifacts",
+      "commands": [
+        {
+          "name": "content",
+          "args": [
+            "artifact-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "create",
+          "args": [],
+          "options": [
+            {
+              "name": "content",
+              "short": "c",
+              "takes_value": true
+            },
+            {
+              "name": "phase",
+              "short": "p",
+              "takes_value": true
+            },
+            {
+              "name": "title",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "type",
+              "short": "t",
+              "takes_value": true
+            },
+            {
+              "name": "workflow",
+              "short": "w",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "args": [],
+          "options": [
+            {
+              "name": "page",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "page-size",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "phase",
+              "short": "p",
+              "takes_value": true
+            },
+            {
+              "name": "type",
+              "short": "t",
+              "takes_value": true
+            },
+            {
+              "name": "workflow",
+              "short": "w",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "args": [
+            "artifact-id"
+          ],
+          "options": [
+            {
+              "name": "no-content",
+              "short": null,
+              "takes_value": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "claude-plugin",
+      "commands": [
+        {
+          "name": "global",
+          "args": [
+            "action",
+            "name_or_value",
+            "version"
+          ],
+          "options": []
+        },
+        {
+          "name": "install",
+          "args": [
+            "ref"
+          ],
+          "options": [
+            {
+              "name": "force",
+              "short": "f",
+              "takes_value": false
+            },
+            {
+              "name": "global",
+              "short": "g",
+              "takes_value": false
+            },
+            {
+              "name": "plugin",
+              "short": "p",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "installed",
+          "args": [],
+          "options": []
+        },
+        {
+          "name": "list",
+          "args": [],
+          "options": []
+        },
+        {
+          "name": "show",
+          "args": [
+            "name",
+            "version"
+          ],
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "config",
+      "commands": [
+        {
+          "name": "env",
+          "args": [],
+          "options": []
+        },
+        {
+          "name": "show",
+          "args": [],
+          "options": []
+        },
+        {
+          "name": "validate",
+          "args": [],
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "control",
+      "commands": [
+        {
+          "name": "cancel",
+          "args": [
+            "execution-id"
+          ],
+          "options": [
+            {
+              "name": "force",
+              "short": "f",
+              "takes_value": false
+            },
+            {
+              "name": "reason",
+              "short": "r",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "inject",
+          "args": [
+            "execution-id"
+          ],
+          "options": [
+            {
+              "name": "message",
+              "short": "m",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "status",
+          "args": [
+            "execution-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "stop",
+          "args": [
+            "execution-id"
+          ],
+          "options": [
+            {
+              "name": "force",
+              "short": "f",
+              "takes_value": false
+            },
+            {
+              "name": "reason",
+              "short": "r",
+              "takes_value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "conversations",
+      "commands": [
+        {
+          "name": "metadata",
+          "args": [
+            "session-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "show",
+          "args": [
+            "session-id"
+          ],
+          "options": [
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "limit",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "offset",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "costs",
+      "commands": [
+        {
+          "name": "execution",
+          "args": [
+            "execution-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "executions",
+          "args": [],
+          "options": [
+            {
+              "name": "limit",
+              "short": "n",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "session",
+          "args": [
+            "session-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "sessions",
+          "args": [],
+          "options": [
+            {
+              "name": "execution",
+              "short": "e",
+              "takes_value": true
+            },
+            {
+              "name": "limit",
+              "short": "n",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "summary",
+          "args": [],
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "eval",
+      "commands": [
+        {
+          "name": "archive",
+          "args": [
+            "eval-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "attach",
+          "args": [
+            "execution-id",
+            "eval-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "create",
+          "args": [],
+          "options": [
+            {
+              "name": "goal",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "name",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "repo",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "tag",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "workflow",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "detach",
+          "args": [
+            "execution-id",
+            "eval-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "list",
+          "args": [],
+          "options": [
+            {
+              "name": "page",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "page-size",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "status",
+              "short": "s",
+              "takes_value": true
+            },
+            {
+              "name": "tag",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "runs",
+          "args": [
+            "eval-id"
+          ],
+          "options": [
+            {
+              "name": "page",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "page-size",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "args": [
+            "eval-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "trend",
+          "args": [
+            "eval-id"
+          ],
+          "options": [
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "page",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "page-size",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "events",
+      "commands": [
+        {
+          "name": "costs",
+          "args": [
+            "session-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "recent",
+          "args": [],
+          "options": [
+            {
+              "name": "limit",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "type",
+              "short": "t",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "session",
+          "args": [
+            "session-id"
+          ],
+          "options": [
+            {
+              "name": "limit",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "offset",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "type",
+              "short": "t",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "timeline",
+          "args": [
+            "session-id"
+          ],
+          "options": [
+            {
+              "name": "limit",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "tools",
+          "args": [
+            "session-id"
+          ],
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "execution",
+      "commands": [
+        {
+          "name": "list",
+          "args": [],
+          "options": [
+            {
+              "name": "page",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "page-size",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "status",
+              "short": "s",
+              "takes_value": true
+            },
+            {
+              "name": "tag",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "resume",
+          "args": [
+            "execution-id"
+          ],
+          "options": [
+            {
+              "name": "acknowledge-external-effects",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "override-cancellation",
+              "short": null,
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "sessions",
+          "args": [
+            "execution-id"
+          ],
+          "options": [
+            {
+              "name": "all",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "attempt",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "cursor",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "idempotency-key",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "kind",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "limit",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "max-pages",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "phase",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "refresh",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "require-complete",
+              "short": null,
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "args": [
+            "execution-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "tag",
+          "args": [
+            "action",
+            "execution-id",
+            "tags"
+          ],
+          "options": []
+        },
+        {
+          "name": "transcript",
+          "args": [
+            "execution-id",
+            "harness",
+            "native-id",
+            "revision"
+          ],
+          "options": [
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "raw",
+              "short": null,
+              "takes_value": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "feedback",
+      "commands": [
+        {
+          "name": "list",
+          "args": [],
+          "options": [
+            {
+              "name": "execution",
+              "short": "e",
+              "takes_value": true
+            },
+            {
+              "name": "limit",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "page",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "route",
+              "short": "r",
+              "takes_value": true
+            },
+            {
+              "name": "search",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "since",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "status",
+              "short": "s",
+              "takes_value": true
+            },
+            {
+              "name": "type",
+              "short": "t",
+              "takes_value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "github",
+      "commands": [
+        {
+          "name": "repos",
+          "args": [],
+          "options": [
+            {
+              "name": "include-private",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "installation",
+              "short": "i",
+              "takes_value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "insights",
+      "commands": [
+        {
+          "name": "cost",
+          "args": [],
+          "options": []
+        },
+        {
+          "name": "heatmap",
+          "args": [],
+          "options": [
+            {
+              "name": "days",
+              "short": "d",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "overview",
+          "args": [],
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "marketplace",
+      "commands": [
+        {
+          "name": "add",
+          "args": [
+            "repo"
+          ],
+          "options": [
+            {
+              "name": "name",
+              "short": "n",
+              "takes_value": true
+            },
+            {
+              "name": "ref",
+              "short": "r",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "args": [],
+          "options": []
+        },
+        {
+          "name": "refresh",
+          "args": [
+            "name"
+          ],
+          "options": []
+        },
+        {
+          "name": "remove",
+          "args": [
+            "name"
+          ],
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "metrics",
+      "commands": [
+        {
+          "name": "profiles",
+          "args": [],
+          "options": [
+            {
+              "name": "days",
+              "short": "d",
+              "takes_value": true
+            },
+            {
+              "name": "workflow",
+              "short": "w",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "shipped",
+          "args": [],
+          "options": [
+            {
+              "name": "days",
+              "short": "d",
+              "takes_value": true
+            },
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "workflow",
+              "short": "w",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "args": [],
+          "options": [
+            {
+              "name": "workflow",
+              "short": "w",
+              "takes_value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "observe",
+      "commands": [
+        {
+          "name": "latency",
+          "args": [],
+          "options": [
+            {
+              "name": "route",
+              "short": "r",
+              "takes_value": true
+            },
+            {
+              "name": "window",
+              "short": "w",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "tokens",
+          "args": [
+            "session-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "tools",
+          "args": [
+            "session-id"
+          ],
+          "options": [
+            {
+              "name": "limit",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "org",
+      "commands": [
+        {
+          "name": "create",
+          "args": [],
+          "options": [
+            {
+              "name": "name",
+              "short": "n",
+              "takes_value": true
+            },
+            {
+              "name": "slug",
+              "short": "s",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "args": [
+            "org-id"
+          ],
+          "options": [
+            {
+              "name": "force",
+              "short": "f",
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "args": [],
+          "options": []
+        },
+        {
+          "name": "show",
+          "args": [
+            "org-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "update",
+          "args": [
+            "org-id"
+          ],
+          "options": [
+            {
+              "name": "name",
+              "short": "n",
+              "takes_value": true
+            },
+            {
+              "name": "slug",
+              "short": "s",
+              "takes_value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "repo",
+      "commands": [
+        {
+          "name": "activity",
+          "args": [
+            "repo-id"
+          ],
+          "options": [
+            {
+              "name": "limit",
+              "short": "n",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "assign",
+          "args": [
+            "repo-id"
+          ],
+          "options": [
+            {
+              "name": "system",
+              "short": "s",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "cost",
+          "args": [
+            "repo-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "failures",
+          "args": [
+            "repo-id"
+          ],
+          "options": [
+            {
+              "name": "limit",
+              "short": "n",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "health",
+          "args": [
+            "repo-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "list",
+          "args": [],
+          "options": [
+            {
+              "name": "org",
+              "short": "o",
+              "takes_value": true
+            },
+            {
+              "name": "system",
+              "short": "s",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "register",
+          "args": [],
+          "options": [
+            {
+              "name": "org",
+              "short": "o",
+              "takes_value": true
+            },
+            {
+              "name": "system",
+              "short": "s",
+              "takes_value": true
+            },
+            {
+              "name": "url",
+              "short": "u",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "sessions",
+          "args": [
+            "repo-id"
+          ],
+          "options": [
+            {
+              "name": "limit",
+              "short": "n",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "args": [
+            "repo-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "unassign",
+          "args": [
+            "repo-id"
+          ],
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "sessions",
+      "commands": [
+        {
+          "name": "list",
+          "args": [],
+          "options": [
+            {
+              "name": "execution",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "limit",
+              "short": "n",
+              "takes_value": true
+            },
+            {
+              "name": "status",
+              "short": "s",
+              "takes_value": true
+            },
+            {
+              "name": "workflow",
+              "short": "w",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "args": [
+            "session-id"
+          ],
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "skill",
+      "commands": [
+        {
+          "name": "add",
+          "args": [
+            "ref"
+          ],
+          "options": []
+        },
+        {
+          "name": "list",
+          "args": [],
+          "options": [
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "args": [
+            "name"
+          ],
+          "options": [
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "system",
+      "commands": [
+        {
+          "name": "activity",
+          "args": [
+            "system-id"
+          ],
+          "options": [
+            {
+              "name": "limit",
+              "short": "n",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "cost",
+          "args": [
+            "system-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "create",
+          "args": [],
+          "options": [
+            {
+              "name": "description",
+              "short": "d",
+              "takes_value": true
+            },
+            {
+              "name": "name",
+              "short": "n",
+              "takes_value": true
+            },
+            {
+              "name": "org",
+              "short": "o",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "args": [
+            "system-id"
+          ],
+          "options": [
+            {
+              "name": "force",
+              "short": "f",
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "history",
+          "args": [
+            "system-id"
+          ],
+          "options": [
+            {
+              "name": "limit",
+              "short": "n",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "args": [],
+          "options": [
+            {
+              "name": "org",
+              "short": "o",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "patterns",
+          "args": [
+            "system-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "show",
+          "args": [
+            "system-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "status",
+          "args": [
+            "system-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "update",
+          "args": [
+            "system-id"
+          ],
+          "options": [
+            {
+              "name": "description",
+              "short": "d",
+              "takes_value": true
+            },
+            {
+              "name": "name",
+              "short": "n",
+              "takes_value": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "triggers",
+      "commands": [
+        {
+          "name": "delete",
+          "args": [
+            "trigger-id"
+          ],
+          "options": [
+            {
+              "name": "force",
+              "short": "f",
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "disable-all",
+          "args": [],
+          "options": [
+            {
+              "name": "force",
+              "short": "f",
+              "takes_value": false
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "enable",
+          "args": [
+            "preset"
+          ],
+          "options": [
+            {
+              "name": "repo",
+              "short": "r",
+              "takes_value": true
+            },
+            {
+              "name": "workflow",
+              "short": "w",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "history",
+          "args": [
+            "trigger-id"
+          ],
+          "options": [
+            {
+              "name": "limit",
+              "short": "n",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "args": [],
+          "options": [
+            {
+              "name": "all",
+              "short": "a",
+              "takes_value": false
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takes_value": true
+            },
+            {
+              "name": "status",
+              "short": "s",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "pause",
+          "args": [
+            "trigger-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "register",
+          "args": [],
+          "options": [
+            {
+              "name": "condition",
+              "short": "c",
+              "takes_value": true
+            },
+            {
+              "name": "cooldown",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "event",
+              "short": "e",
+              "takes_value": true
+            },
+            {
+              "name": "max-attempts",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takes_value": true
+            },
+            {
+              "name": "workflow",
+              "short": "w",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "resume",
+          "args": [
+            "trigger-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "show",
+          "args": [
+            "trigger-id"
+          ],
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "watch",
+      "commands": [
+        {
+          "name": "activity",
+          "args": [],
+          "options": []
+        },
+        {
+          "name": "execution",
+          "args": [
+            "execution-id"
+          ],
+          "options": []
+        }
+      ]
+    },
+    {
+      "name": "workflow",
+      "commands": [
+        {
+          "name": "create",
+          "args": [
+            "name"
+          ],
+          "options": [
+            {
+              "name": "description",
+              "short": "d",
+              "takes_value": true
+            },
+            {
+              "name": "from",
+              "short": "f",
+              "takes_value": true
+            },
+            {
+              "name": "no-repos",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "ref",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "repo",
+              "short": "r",
+              "takes_value": true
+            },
+            {
+              "name": "repos",
+              "short": "R",
+              "takes_value": true
+            },
+            {
+              "name": "type",
+              "short": "t",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "args": [
+            "workflow-id"
+          ],
+          "options": [
+            {
+              "name": "force",
+              "short": "f",
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "export",
+          "args": [
+            "workflow-id"
+          ],
+          "options": [
+            {
+              "name": "force",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "format",
+              "short": "f",
+              "takes_value": true
+            },
+            {
+              "name": "output",
+              "short": "o",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "info",
+          "args": [
+            "name"
+          ],
+          "options": []
+        },
+        {
+          "name": "init",
+          "args": [
+            "directory"
+          ],
+          "options": [
+            {
+              "name": "multi",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "name",
+              "short": "n",
+              "takes_value": true
+            },
+            {
+              "name": "phases",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "type",
+              "short": "t",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "install",
+          "args": [
+            "source"
+          ],
+          "options": [
+            {
+              "name": "dry-run",
+              "short": "n",
+              "takes_value": false
+            },
+            {
+              "name": "force",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "prune",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "ref",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "yes",
+              "short": "y",
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "args": [],
+          "options": [
+            {
+              "name": "include-archived",
+              "short": null,
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "packages",
+          "args": [],
+          "options": []
+        },
+        {
+          "name": "run",
+          "args": [
+            "workflow-id"
+          ],
+          "options": [
+            {
+              "name": "dry-run",
+              "short": "n",
+              "takes_value": false
+            },
+            {
+              "name": "eval",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "input",
+              "short": "i",
+              "takes_value": true
+            },
+            {
+              "name": "no-eval",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "quiet",
+              "short": "q",
+              "takes_value": false
+            },
+            {
+              "name": "repo",
+              "short": "R",
+              "takes_value": true
+            },
+            {
+              "name": "tag",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "task",
+              "short": "t",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "search",
+          "args": [
+            "query"
+          ],
+          "options": [
+            {
+              "name": "category",
+              "short": "c",
+              "takes_value": true
+            },
+            {
+              "name": "registry",
+              "short": "r",
+              "takes_value": true
+            },
+            {
+              "name": "tag",
+              "short": "t",
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "args": [
+            "workflow-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "status",
+          "args": [
+            "workflow-id"
+          ],
+          "options": []
+        },
+        {
+          "name": "tag",
+          "args": [
+            "action",
+            "workflow-id",
+            "tags"
+          ],
+          "options": []
+        },
+        {
+          "name": "uninstall",
+          "args": [
+            "name"
+          ],
+          "options": [
+            {
+              "name": "keep-workflows",
+              "short": null,
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "update",
+          "args": [
+            "name"
+          ],
+          "options": [
+            {
+              "name": "dry-run",
+              "short": "n",
+              "takes_value": false
+            },
+            {
+              "name": "force",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "prune",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "ref",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "yes",
+              "short": "y",
+              "takes_value": false
+            }
+          ]
+        },
+        {
+          "name": "validate",
+          "args": [
+            "file"
+          ],
+          "options": []
+        }
+      ]
+    }
+  ]
+}

@@ -50,8 +50,9 @@ that fixture requests - must carry
 `pytest.param(..., marks=...)` count per parameter leg, so a declaration on one
 leg does not cover another. The census reads the AST
 (`scripts/check_integration_skips.py`) and resolves names in the scope pytest
-does (class fixtures and `self.` methods stay in their class). It cannot see a
-skip inside a helper imported from another module, a plugin fixture or a
+does (class fixtures and `self.` methods stay in their class), following
+`from x import name` into first-party helpers and fixtures. It cannot see a
+skip reached through `import x` then `x.helper()`, a plugin fixture or a
 dynamically built mark, and it charges a skip in a parametrized fixture's body
 to every integration leg of that fixture. A malformed `may_skip` has no budget. The undeclared
 count is an exact ratchet: lower it when it drops.

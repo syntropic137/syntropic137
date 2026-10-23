@@ -2,12 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from syn_domain.contexts.github._shared.trigger_presets import (
     PRESETS,
     create_preset_command,
 )
+from syn_domain.contexts.github._shared.trigger_query_store import (
+    InMemoryTriggerQueryStore,
+)
+from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
+    RegisterTriggerHandler,
+)
+
+
+class _NullRepository:
+    async def get_by_id(self, id):
+        return None
+
+    async def save(self, aggregate):
+        pass
 
 
 @pytest.mark.unit
@@ -69,3 +85,15 @@ class TestTriggerPresets:
             assert cmd.event
             assert cmd.workflow_id
             assert cmd.repository == "syntropic137/test"
+
+    def test_review_fix_preset_registers_without_debounce(self) -> None:
+        """review-fix used to ask for a 60s debounce that never ran (#1961)."""
+        handler = RegisterTriggerHandler(
+            store=InMemoryTriggerQueryStore(), repository=_NullRepository()
+        )
+        cmd = create_preset_command(preset_name="review-fix", repository="syntropic137/test")
+
+        aggregate = asyncio.run(handler.handle(cmd))
+
+        assert aggregate.config.debounce_seconds == 0
+        assert aggregate.config.cooldown_seconds == 600

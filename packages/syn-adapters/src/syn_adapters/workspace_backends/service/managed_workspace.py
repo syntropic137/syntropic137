@@ -18,7 +18,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 from syn_shared.env_constants import phase_deadline_of
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
     from contextlib import AbstractAsyncContextManager
     from datetime import datetime
     from pathlib import Path
@@ -43,6 +43,11 @@ if TYPE_CHECKING:
         WorkspaceAggregate,
     )
 
+from syn_adapters.workspace_backends.agentic.credential_scrubber import (
+    CredentialScrubber,
+    scrub_bytes,
+)
+from syn_adapters.workspace_backends.agentic.credentials import names_a_credential
 from syn_adapters.workspace_backends.dependency_seed import seed_dependency_caches
 from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
 from syn_adapters.workspace_backends.service.credential_keeper import keep_credential_fresh
@@ -89,6 +94,10 @@ class ManagedWorkspace:
     #: the renewal task reads the installed credential's expiry from, and what
     #: teardown revokes. In-process only - see `issued_tokens`.
     _ledger: IssuanceLedger = field(default_factory=IssuanceLedger, repr=False)
+    #: Every other credential value this workspace was given - by the setup
+    #: phase (model keys, file credentials) or by a launch's environment (the
+    #: platform grant) - withheld from its stream and its files (#1927).
+    _withheld: set[str] = field(default_factory=set, repr=False)
     #: What the isolation consumed, set by teardown (`create_workspace`'s
     #: `finally`) and so only readable after `__aexit__`. None before teardown,
     #: and when the backend measured nothing.
@@ -179,6 +188,9 @@ class ManagedWorkspace:
         if self.platform_grant is not None:
             await self._bound_platform_grant_to_phase(phase_deadline_of(environment))
             environment = {**(environment or {}), **self.platform_grant.env}
+        # A launch credential is in the workload's environment, so it can be in
+        # any file the workload writes: collection withholds it too (#1927).
+        self.withhold(v for k, v in (environment or {}).items() if names_a_credential(k))
         stream = self._service._event_stream.stream(
             self.isolation_handle,
             command,
@@ -186,6 +198,9 @@ class ManagedWorkspace:
             working_directory=working_directory,
             environment=environment,
             wrapper_name=wrapper_name,
+            # Read live: a renewal installs a new token while the agent runs,
+            # and the agent can print the one on disk (#1927).
+            withheld=self._withheld_values,
         )
         async for line in stream:  # type: ignore[attr-defined]
             yield line
@@ -268,11 +283,15 @@ class ManagedWorkspace:
             List of (relative_path, content) tuples
         """
         pats = patterns or ["artifacts/**/*"]
-        return await self._service._isolation.copy_from(
+        collected = await self._service._isolation.copy_from(
             self.isolation_handle,
             pats,
             base_path=base_path,
         )
+        # A file the agent wrote can hold whatever it printed, so it leaves the
+        # workspace through the same scrubber as the stream (#1927).
+        scrubber = CredentialScrubber(self._withheld_values())
+        return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
 
     async def run_setup_phase(
         self,
@@ -304,6 +323,18 @@ class ManagedWorkspace:
             # seeds exist only now, and nothing has run in the workspace yet.
             await seed_dependency_caches(self, secrets.clones_under(self.path))
         return result
+
+    def _withheld_values(self) -> tuple[str, ...]:
+        """Every value this workspace holds that its output must not carry.
+
+        Read live: a renewal installs a new token while the agent runs, and
+        the agent can print the one on disk (#1927).
+        """
+        return (*(token.token for token in self._ledger.issued), *self._withheld)
+
+    def withhold(self, values: Iterable[str]) -> None:
+        """Withhold ``values`` from this workspace's stream from now on (#1927)."""
+        self._withheld.update(values)
 
     @property
     def credential_expires_at(self) -> datetime | None:
@@ -374,9 +405,14 @@ class ManagedWorkspace:
             CredentialRenewalFailedError: the credential is not known to be
                 usable. A workspace whose setup phase never ran holds no
                 credential to renew and returns quietly instead - nothing
-                downstream of it can be depending on one.
+                downstream of it can be depending on one. Nor does a
+                credential-free (NoCredentials) workspace, which was given
+                none to renew (#1914).
         """
-        if self._credential_source is None:
+        if (
+            self._credential_source is None
+            or not self._service.credential_policy.supplies_credentials
+        ):
             return ()
         return await _renew_git_credential(self, self._credential_source, self._ledger)
 

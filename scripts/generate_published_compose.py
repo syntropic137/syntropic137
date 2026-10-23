@@ -40,10 +40,27 @@ SERVICE_IMAGES: dict[str, str] = {
     "event-store": "ghcr.io/syntropic137/event-store",
     "collector": "ghcr.io/syntropic137/syn-collector",
     "api": "ghcr.io/syntropic137/syn-api",
+    # The same image as api: one pin, one build identity (ADR-072 D1).
+    "executor": "ghcr.io/syntropic137/syn-api",
+    "docker-create-guard": "ghcr.io/syntropic137/syn-api",
     "gateway": "ghcr.io/syntropic137/syn-gateway",
     "envoy-proxy": "ghcr.io/syntropic137/sidecar-proxy",
     "token-injector": "ghcr.io/syntropic137/token-injector",
 }
+
+# Services that need files from a repo checkout the published install does
+# not have. db-backup bind-mounts docker/db-backup/syn-db-backup.sh; a missing
+# bind source becomes a directory and the service would crash-loop.
+# TODO(#1791): ship the backup script with the published install.
+REPO_ONLY_SERVICES = frozenset({"db-backup"})
+
+# What other services carry only for a repo-only service. timescaledb's
+# healthcheck hands its identity to db-backup through the db_identity volume,
+# by running the bind-mounted syn-db-backup.sh. Without db-backup there is no
+# reader, and without the script the healthcheck would fail, so the published
+# timescaledb keeps the base healthcheck and neither mount.
+REPO_ONLY_MOUNT_SOURCES = ("db_identity", "./db-backup/")
+REPO_ONLY_VOLUMES = frozenset({"db_identity"})
 
 # Service order in the output (readability — matches current published file)
 SERVICE_ORDER = [
@@ -51,7 +68,9 @@ SERVICE_ORDER = [
     "event-store",
     "collector",
     "docker-socket-proxy",
+    "docker-create-guard",
     "api",
+    "executor",
     "gateway",
     "cloudflared",
     "minio",
@@ -110,7 +129,8 @@ def _env_to_dict(env: dict | list | None) -> dict[str, str | None]:
             k, _, v = s.partition("=")
             result[k] = v
         else:
-            result[s] = ""
+            # A bare list item is compose's pass-through too, so the same rule.
+            result[s] = None
     return result
 
 
@@ -198,6 +218,21 @@ def _resolve_extends(services: dict, compose_dir: Path) -> None:
 # =============================================================================
 
 
+def _drop_repo_only_handoffs(services: dict, base_services: dict) -> None:
+    """Remove what services carry only for REPO_ONLY_SERVICES (see above)."""
+    for name, svc in services.items():
+        volumes = svc.get("volumes")
+        if not volumes:
+            continue
+        kept = [v for v in volumes if not str(v).startswith(REPO_ONLY_MOUNT_SOURCES)]
+        if len(kept) == len(volumes):
+            continue
+        svc["volumes"] = kept
+        base_check = base_services.get(name, {}).get("healthcheck")
+        if base_check is not None and "healthcheck" in svc:
+            svc["healthcheck"]["test"] = copy.deepcopy(base_check["test"])
+
+
 def _replace_builds_with_images(services: dict) -> None:
     """Replace build: blocks with GHCR image: references.
 
@@ -245,22 +280,29 @@ def _apply_api_overrides(services: dict) -> None:
     - APP_ENVIRONMENT defaults to 'selfhost' (not 'production')
     - SYN_AGENT_NETWORK is hardcoded (project name is fixed)
     - GitHub App PEM uses file-based Docker secret (not env var)
+
+    The executor gets the same: it is the api image in another role, and a
+    claimed run needs exactly what an in-process one does (ADR-072 D1).
     """
-    if "api" not in services:
-        return
-    env = services["api"].get("environment", {})
+    for name in ("api", "executor"):
+        if name in services:
+            _apply_runtime_overrides(services[name])
+
+
+def _apply_runtime_overrides(service: dict) -> None:
+    env = service.get("environment", {})
     env["APP_ENVIRONMENT"] = "${APP_ENVIRONMENT:-selfhost}"
     env["SYN_AGENT_NETWORK"] = "syntropic137_selfhost_agent-net"
     # File-based secret replaces direct env var for PEM
     env["SYN_GITHUB_APP_PRIVATE_KEY_FILE"] = "/run/secrets/github_app_private_key"
     env.pop("SYN_GITHUB_PRIVATE_KEY", None)
-    services["api"]["environment"] = env
+    service["environment"] = env
 
     # Ensure github_app_private_key in secrets list
-    secrets = services["api"].get("secrets", [])
+    secrets = service.get("secrets", [])
     if "github_app_private_key" not in secrets:
         secrets.append("github_app_private_key")
-    services["api"]["secrets"] = secrets
+    service["secrets"] = secrets
 
 
 def _apply_envoy_overrides(services: dict) -> None:
@@ -388,6 +430,25 @@ def _rewrite_secrets(secrets: dict) -> dict:
     return result
 
 
+def _inline_configs(configs: dict, compose_dir: Path) -> dict:
+    """Inline file-based configs as `content`, so the published file stays standalone.
+
+    A self-hoster downloads the published compose alone (plus the release
+    assets), so a `file:` reference into the repo cannot survive. Compose
+    interpolates `content`, so every `$` is escaped as `$$`: the file reaches
+    the container byte for byte, and any `${VAR}` in it stays for the image to
+    render. Only `file:` configs are supported; anything else is refused rather
+    than published unreviewed.
+    """
+    result: dict[str, dict] = {}
+    for name, defn in configs.items():
+        if not isinstance(defn, dict) or set(defn) != {"file"}:
+            raise ValueError(f"config {name}: only `{{file: ...}}` configs can be published")
+        text = (compose_dir / defn["file"]).read_text()
+        result[name] = {"content": text.replace("$", "$$")}
+    return result
+
+
 # =============================================================================
 # Generation
 # =============================================================================
@@ -401,9 +462,11 @@ def generate() -> dict:
     base_svcs = base.get("services", {})
     _resolve_extends(base_svcs, BASE_COMPOSE.parent)
     selfhost_svcs = selfhost.get("services", {})
+    # The executor has no base service and extends the passthrough directly.
+    _resolve_extends(selfhost_svcs, SELFHOST_COMPOSE.parent)
 
     # Merge services (base + selfhost overlay)
-    all_names = set(base_svcs) | set(selfhost_svcs)
+    all_names = (set(base_svcs) | set(selfhost_svcs)) - REPO_ONLY_SERVICES
     merged_svcs: dict = {}
     for name in all_names:
         b = base_svcs.get(name, {})
@@ -416,6 +479,7 @@ def generate() -> dict:
             merged_svcs[name] = copy.deepcopy(o)
 
     # Apply transforms
+    _drop_repo_only_handoffs(merged_svcs, base_svcs)
     _replace_builds_with_images(merged_svcs)
     _rewrite_paths(merged_svcs)
     _replace_default_network(merged_svcs)
@@ -451,7 +515,19 @@ def generate() -> dict:
     # selfhost networks first, then base (agent-net)
 
     # Named volumes inherit from the base just like service mounts.
-    volumes = {**(base.get("volumes", {}) or {}), **(selfhost.get("volumes", {}) or {})}
+    volumes = {
+        name: spec
+        for name, spec in {
+            **(base.get("volumes", {}) or {}),
+            **(selfhost.get("volumes", {}) or {}),
+        }.items()
+        if name not in REPO_ONLY_VOLUMES
+    }
+
+    configs = _inline_configs(
+        {**(base.get("configs", {}) or {}), **(selfhost.get("configs", {}) or {})},
+        BASE_COMPOSE.parent,
+    )
 
     return {
         "name": "syntropic137_selfhost",
@@ -459,6 +535,7 @@ def generate() -> dict:
         "secrets": merged_secrets,
         "volumes": volumes,
         "networks": merged_nets,
+        "configs": configs,
     }
 
 

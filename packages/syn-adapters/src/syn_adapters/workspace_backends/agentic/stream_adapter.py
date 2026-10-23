@@ -29,11 +29,12 @@ from agentic_isolation.contract import (
 )
 
 from syn_adapters.diagnostics import capture_signal_death
+from syn_adapters.workspace_backends.agentic.credential_scrubber import CredentialScrubber
 from syn_domain.contexts.orchestration import announce_as, mint_wrapper_name
 from syn_shared.diagnostics import SignalDeath, name_exit_status
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable, Iterable
 
     from agentic_isolation.contract import OperationRef, OperationStatus
     from agentic_isolation.providers.base import SupportsOperations, Workspace
@@ -121,6 +122,11 @@ def _timeout_seconds(timeout_seconds: float | None) -> int:
     if not timeout_seconds or timeout_seconds <= 0:
         return _UNBOUNDED_TIMEOUT_SECONDS
     return max(1, math.ceil(timeout_seconds))
+
+
+def _refreshed(scrubber: CredentialScrubber, current: tuple[str, ...]) -> CredentialScrubber:
+    """``scrubber``, or a new one when the secret set it matches has changed."""
+    return scrubber if scrubber.covers(current) else CredentialScrubber(current)
 
 
 class LineDecoder:
@@ -215,6 +221,7 @@ class AgenticEventStreamAdapter:
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
         wrapper_name: str | None = None,
+        withheld: Callable[[], Iterable[str]] | None = None,
     ) -> AsyncIterator[str]:
         """Stream the agent's output lines as the provider observes them.
 
@@ -232,9 +239,14 @@ class AgenticEventStreamAdapter:
                 name the agent can read is a name it can forge (#1065). It
                 reaches the provider as the spec's ``launch_marker``, which the
                 provider passes on stdin and ``exec`` then replaces.
+            withheld: Further credential values the workload holds (its GitHub
+                tokens), read again before every page because a renewal adds
+                new ones while the stream runs.
 
         Yields:
-            Individual output lines as they are produced
+            Individual output lines as they are produced, with every credential
+            value replaced (#1927): the launch's own credentials, the
+            session-store token and ``withheld``. See ``credential_scrubber``.
 
         ARCHITECTURE NOTE - one stream, stdout and stderr together (ADR-043):
         the operation's observation stream carries both channels in arrival
@@ -249,6 +261,7 @@ class AgenticEventStreamAdapter:
         credentials = self._host.credentials
 
         plain, bindings, parked = credentials.bind_launch(environment or {})
+        bound = credentials.withheld(parked)
         try:
             wrapper = wrapper_name if wrapper_name is not None else mint_wrapper_name()
             spec = OperationSpec(
@@ -271,11 +284,21 @@ class AgenticEventStreamAdapter:
             # Resolved during start, or never needed when the spec or the start
             # failed: no launch value outlives this block either way.
             credentials.release(parked)
-        logger.debug("Started stream operation %s (cmd=%s)", ref.operation_id, command)
+
+        def secrets() -> tuple[str, ...]:
+            return (*bound, *(withheld() if withheld is not None else ()))
+
+        # One secret set for everything this method retains or emits: the
+        # lines, the start log and the signal diagnostic (#1927).
+        logger.debug(
+            "Started stream operation %s (cmd=%s)",
+            ref.operation_id,
+            CredentialScrubber(secrets()).scrub(str(command)),
+        )
 
         self._running[handle.isolation_id] = (provider, ref)
         try:
-            async for line in self._observe(provider, ref):
+            async for line in self._observe(provider, ref, secrets, spec.launch_marker.line):
                 yield line
             status = await provider.status(ref)
         except BaseException:
@@ -285,7 +308,9 @@ class AgenticEventStreamAdapter:
             # fails is logged with its cause, never raised in its place.
             try:
                 await self._settle(
-                    await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS), spec
+                    await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS),
+                    spec,
+                    CredentialScrubber(secrets()),
                 )
             except Exception:
                 logger.exception(
@@ -296,7 +321,7 @@ class AgenticEventStreamAdapter:
         finally:
             if self._running.get(handle.isolation_id) == (provider, ref):
                 del self._running[handle.isolation_id]
-        await self._settle(status, spec)
+        await self._settle(status, spec, CredentialScrubber(secrets()))
 
     async def cancel_running(self, handle: IsolationHandle) -> bool:
         """Stop the operation streaming in ``handle``'s workspace; True once it is over.
@@ -334,22 +359,43 @@ class AgenticEventStreamAdapter:
         logger.info("Stream operation %s cancelled (%s)", ref.operation_id, status.state)
         return True
 
-    async def _observe(self, provider: SupportsOperations, ref: OperationRef) -> AsyncIterator[str]:
+    async def _observe(
+        self,
+        provider: SupportsOperations,
+        ref: OperationRef,
+        secrets: Callable[[], Iterable[str]],
+        launch_line: str,
+    ) -> AsyncIterator[str]:
+        """Yield the operation's output as scrubbed lines.
+
+        Scrubbing whole lines is what makes a value split across two pages
+        safe: the decoder carries the unterminated part of a line into the
+        next page, so no line is scrubbed until all of it has arrived.
+
+        The launch marker's own line is passed through byte-identical: launch
+        detection depends on it (#1879), the platform wrote it, and a short
+        value that happened to occur inside it would otherwise erase it.
+        """
         decoder = LineDecoder()
+        scrubber = CredentialScrubber()
         cursor: str | None = None
         while True:
             page = await provider.observe(
                 ref, cursor=cursor, max_bytes=_PAGE_BYTES, wait_seconds=_OBSERVE_WAIT_SECONDS
             )
+            # Refreshed every page: a token renewed mid-stream is withheld
+            # from the next page on.
+            scrubber = _refreshed(scrubber, tuple(secrets()))
             if isinstance(page.gap, ObservationGap):
                 self._record_gap(page.gap, decoder.gap(), ref)
-            for line in decoder.feed(base64.b64decode(page.data_b64)):
-                yield line
-            cursor = page.next_cursor
+            lines = decoder.feed(base64.b64decode(page.data_b64))
             if page.complete:
-                for line in decoder.finish():
-                    yield line
+                lines = [*lines, *decoder.finish()]
+            for line in lines:
+                yield line if line == launch_line else scrubber.scrub(line)
+            if page.complete:
                 return
+            cursor = page.next_cursor
 
     def _record_gap(self, gap: ObservationGap, severed_chars: int, ref: OperationRef) -> None:
         if gap.lost_bytes is None or self._last_lost_bytes == -1:
@@ -364,7 +410,9 @@ class AgenticEventStreamAdapter:
             severed_chars,
         )
 
-    async def _settle(self, status: OperationStatus, spec: OperationSpec) -> None:
+    async def _settle(
+        self, status: OperationStatus, spec: OperationSpec, scrubber: CredentialScrubber
+    ) -> None:
         timed_out = status.state == "timed_out"
         reported = _exit_code_of(status)
         exit_code = _resolve_stream_exit_code(reported, timed_out=timed_out)
@@ -378,8 +426,11 @@ class AgenticEventStreamAdapter:
         self._last_exit_code = exit_code
         # THE MOMENT OF DEATH for the agent process itself - the shape that
         # takes a whole phase with tokens=0+0 and no terminal event (#1295,
-        # #1319). The argv is the spec's, which carries no credential.
-        self._last_signal_death = await capture_signal_death(list(spec.argv), exit_code)
+        # #1319). The argv is the spec's, and the agent's command line can
+        # still name a value it was given, so it is scrubbed first (#1927).
+        self._last_signal_death = await capture_signal_death(
+            [scrubber.scrub(arg) for arg in spec.argv], exit_code
+        )
         if self._last_signal_death is not None:
             logger.error(
                 "Agent process died on a signal (operation=%s):\n%s",

@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,12 +25,21 @@ from typing import get_args
 
 import httpx
 import pytest
-from pydantic import SecretStr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import eval_suite
 import yaml
+from agentic_isolation.harnesses.claude import ClaudeHeadless
+from agentic_isolation.harnesses.claude.headless import (
+    ClaudeHeadlessEmptyOutputError,
+    ClaudeHeadlessExitError,
+    ClaudeHeadlessModelError,
+    ClaudeHeadlessNotOAuthError,
+    ClaudeHeadlessReportedError,
+    ClaudeHeadlessTimeoutError,
+    ClaudeHeadlessUnreadableOutputError,
+)
 from eval_suite import (
     DEFAULT_SUITE,
     ROOT,
@@ -75,7 +85,6 @@ from syn_shared.agents import (
     resolve_model_alias,
 )
 from syn_shared.pricing import resolve_model_pricing
-from syn_shared.settings.config import Settings
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -3284,6 +3293,18 @@ class _FakeModel:
         return self.reply
 
 
+@dataclass
+class _SplitModel:
+    """A `ModelClient` whose successive answers differ: the judge's samples disagree."""
+
+    replies: list[str]
+    calls: int = 0
+
+    def complete(self, *, model: str, system: str, prompt: str) -> str:
+        self.calls += 1
+        return self.replies[(self.calls - 1) % len(self.replies)]
+
+
 def _reply(verdict: str, quote: str = "", reason: str = "r") -> str:
     return json.dumps({"verdict": verdict, "quote": quote, "reason": reason})
 
@@ -3326,9 +3347,45 @@ def test_llm_judge_credits_a_paraphrase_the_keyword_judge_misses() -> None:
     assert score.llm is not None and score.llm.verdict == "match"
     assert score.llm.quote == _PARAPHRASE_QUOTE
     assert score.passed and score.caught
-    [call] = model.calls
-    assert call["model"] == eval_suite.JUDGE_MODEL
-    assert "minio.py" in call["prompt"] and _PARAPHRASE_QUOTE in call["prompt"]
+    assert len(model.calls) == eval_suite.JUDGE_SAMPLES
+    for call in model.calls:
+        assert call["model"] == eval_suite.JUDGE_MODEL
+        assert "minio.py" in call["prompt"] and _PARAPHRASE_QUOTE in call["prompt"]
+
+
+@pytest.mark.unit
+def test_the_judges_majority_answer_is_the_verdict() -> None:
+    model = _SplitModel(
+        [_reply("match", _PARAPHRASE_QUOTE), _reply("no_match"), _reply("match", _PARAPHRASE_QUOTE)]
+    )
+    judgement = eval_suite.LlmJudge(model).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert (judgement.verdict, judgement.quote) == ("match", _PARAPHRASE_QUOTE)
+    assert "match 2/3" in judgement.reason and "no_match 1/3" in judgement.reason
+    assert model.calls == eval_suite.JUDGE_SAMPLES
+
+
+@pytest.mark.unit
+def test_a_judge_that_disagrees_with_itself_is_unclear_and_not_caught() -> None:
+    """No verdict has a majority: the score must not credit a catch on one vote in three."""
+    model = _SplitModel([_reply("match", _PARAPHRASE_QUOTE), _reply("no_match"), _reply("unclear")])
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, eval_suite.LlmJudge(model))
+    assert score.llm is not None and score.llm.verdict == "unclear"
+    assert score.llm.reason.startswith("no majority")
+    assert not score.caught and not score.passed
+
+
+@pytest.mark.unit
+def test_a_sample_quoting_no_finding_votes_unclear_not_match() -> None:
+    """The quote check runs per sample, before the vote: an invented quote cannot tip it."""
+    model = _SplitModel(
+        [
+            _reply("match", "an invented sentence"),
+            _reply("match", _PARAPHRASE_QUOTE),
+            _reply("no_match"),
+        ]
+    )
+    judgement = eval_suite.LlmJudge(model).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert judgement.verdict == "unclear"
 
 
 @pytest.mark.unit
@@ -3386,9 +3443,9 @@ def test_llm_judged_score_is_recorded_under_the_judges_identity(
     rows, _ = score_suite(loaded, server.client(), [_LAUNCHED], eval_suite.LlmJudge(model))
 
     [(_, body)] = server.scores
-    assert body["scorer_version"] == "8+llm:claude-sonnet-4-6@prompt-v3"
+    assert body["scorer_version"] == "8+llm:claude-sonnet-5-5@prompt-v5"
     assert body["verdict"] == "PASS"
-    assert "LLM judge (`llm:claude-sonnet-4-6@prompt-v3`): `match`" in str(body["evidence"])
+    assert "LLM judge (`llm:claude-sonnet-5-5@prompt-v5`): `match`" in str(body["evidence"])
     assert "keyword judge: no match" in str(body["evidence"])
     table = render(loaded, rows)
     assert "keyword OR LLM match, unclear not caught): 1/1" in table
@@ -3411,80 +3468,295 @@ def test_keyword_only_scoring_records_the_plain_suite_version(
     assert "LLM judge" not in str(body["evidence"])
 
 
+@dataclass
+class _FakeTransport:
+    """Stands in for `ClaudeHeadless` behind `HeadlessJudgeClient`: answers `replies` in
+    turn, raising any that is an exception, and records the model of every call."""
+
+    replies: list[str | Exception]
+    models: list[str] = field(default_factory=list)
+
+    def complete(self, *, model: str, system: str, prompt: str) -> str:
+        self.models.append(model)
+        reply = self.replies[(len(self.models) - 1) % len(self.replies)]
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+def _wired_judge(transport: _FakeTransport) -> eval_suite.LlmJudge:
+    """The judge exactly as `score --llm-judge` builds it, on a fake transport."""
+    return eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient(transport=transport))
+
+
 @pytest.mark.unit
-def test_llm_judge_flag_without_a_key_fails_before_any_call(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_score_llm_judge_runs_on_agentic_workspaces_claude_headless(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(eval_suite, "get_settings", lambda: Settings(_env_file=None))
-    assert eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"]) == 1
-    assert "needs ANTHROPIC_API_KEY" in capsys.readouterr().err
+    """The `score --llm-judge` wiring builds the judge on AW's `ClaudeHeadless` at the
+    pinned effort, behind `HeadlessJudgeClient`: no local transport, no API client."""
+    built: list[eval_suite.ModelClient] = []
+
+    def spy(client: eval_suite.ModelClient, model: str = eval_suite.JUDGE_MODEL) -> object:
+        built.append(client)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(eval_suite, "LlmJudge", spy)
+    with pytest.raises(SystemExit):
+        eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"])
+    [client] = built
+    assert isinstance(client, eval_suite.HeadlessJudgeClient)
+    assert type(client.transport) is ClaudeHeadless
+    assert client.transport.effort == eval_suite.JUDGE_EFFORT
 
 
 @pytest.mark.unit
-def test_the_judge_uses_the_key_configured_in_settings_dotenv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_calibration_wiring_runs_on_agentic_workspaces_claude_headless(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """ADR-004: the credential comes from `Settings` (env or .env), not a parallel env read."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    dotenv = tmp_path / ".env"
-    dotenv.write_text("ANTHROPIC_API_KEY=fake-dotenv-key\n")
-    sent: list[httpx.Request] = []
+    """`eval_judge_calibrate` builds the same judge as `score --llm-judge`."""
+    import eval_judge_calibrate
 
-    def handle(request: httpx.Request) -> httpx.Response:
-        sent.append(request)
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+    built: list[eval_suite.ModelClient] = []
 
-    client = eval_suite.AnthropicMessages.from_settings(Settings(_env_file=dotenv))
-    client._http = httpx.Client(transport=httpx.MockTransport(handle))
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    [request] = sent
-    assert request.headers["x-api-key"] == "fake-dotenv-key"
-    assert "fake-dotenv-key" not in repr(vars(client)) + capsys.readouterr().out
+    def spy(client: eval_suite.ModelClient, model: str = eval_suite.JUDGE_MODEL) -> object:
+        built.append(client)
+        raise SystemExit(0)
 
-
-@pytest.mark.unit
-def test_anthropic_client_sends_the_pinned_model_at_temperature_zero() -> None:
-    sent: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        sent.append(request)
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
-
-    client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(handle))
-    )
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    [request] = sent
-    assert request.headers["x-api-key"] == "test-key"
-    body = json.loads(request.content)
-    assert (body["model"], body["temperature"]) == (eval_suite.JUDGE_MODEL, 0)
+    monkeypatch.setattr(eval_judge_calibrate, "LlmJudge", spy)
+    with pytest.raises(SystemExit):
+        eval_judge_calibrate.main(["--suite-tag", "", "--api-url", "http://unreachable.invalid"])
+    [client] = built
+    assert isinstance(client, eval_suite.HeadlessJudgeClient)
+    assert type(client.transport) is ClaudeHeadless
 
 
 @pytest.mark.unit
-def test_a_model_that_rejects_temperature_zero_is_refused_before_sending() -> None:
-    """The 4.7+/5.x models 400 on a non-default temperature: the pinned judge is not one of them.
+def test_the_judge_runs_every_sample_through_the_transport_with_the_pinned_model() -> None:
+    transport = _FakeTransport([_reply("match", _PARAPHRASE_QUOTE)])
+    judgement = _wired_judge(transport).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert judgement.verdict == "match"
+    assert judgement.judge == "llm:claude-sonnet-5-5@prompt-v5"
+    assert transport.models == [eval_suite.JUDGE_MODEL] * eval_suite.JUDGE_SAMPLES
 
-    The transport below plays the provider's contract, so a pinned model it rejects
-    fails here rather than mid-scoring against the real API.
+
+_TRANSPORT_FAILURES = [
+    ClaudeHeadlessExitError("claude -p --model claude-sonnet-5-5 exited 1: not logged in"),
+    ClaudeHeadlessTimeoutError("gave no answer within 300s"),
+    ClaudeHeadlessEmptyOutputError("printed nothing"),
+    ClaudeHeadlessUnreadableOutputError("printed no JSON result envelope"),
+    ClaudeHeadlessReportedError("reported an error: 'usage limit reached'"),
+    ClaudeHeadlessNotOAuthError("runs only on its OAuth login"),
+    ClaudeHeadlessModelError("needs an exact model id"),
+    FileNotFoundError(2, "No such file or directory", "claude"),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure", _TRANSPORT_FAILURES, ids=lambda e: type(e).__name__)
+def test_every_transport_failure_is_a_judge_error_with_its_cause(failure: Exception) -> None:
+    """Each AW error, and the CLI missing altogether, reaches the caller as a
+    `JudgeTransportError` chained to it: never a reply, never a raw transport type."""
+    client = eval_suite.HeadlessJudgeClient(transport=_FakeTransport([failure]))
+    with pytest.raises(eval_suite.JudgeTransportError) as raised:
+        client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
+    assert raised.value.__cause__ is failure
+    assert type(failure).__name__ in str(raised.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failing_sample", range(3))
+def test_one_failed_sample_fails_the_judgement_rather_than_voting(failing_sample: int) -> None:
+    """Two samples agree on `match`; the third fails. A failure is never a vote and never
+    an abstention: the judgement fails, whichever sample it was."""
+    assert eval_suite.JUDGE_SAMPLES == 3
+    replies: list[str | Exception] = [_reply("match", _PARAPHRASE_QUOTE)] * 3
+    replies[failing_sample] = ClaudeHeadlessReportedError("usage limit reached")
+    transport = _FakeTransport(replies)
+    with pytest.raises(eval_suite.JudgeTransportError, match="usage limit reached"):
+        _wired_judge(transport).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert len(transport.models) == failing_sample + 1
+
+
+@dataclass
+class _EntryPoint:
+    """The real `score --llm-judge` and `eval_judge_calibrate` entry points with only
+    their two outside edges replaced: AW's `ClaudeHeadless` by `transport` and the API
+    by `server`. The adapter, judge, vote, report extraction and scorer all run.
+
+    `server.scores` is what was POSTed, `transport.models` the calls made, and `built`
+    the keyword arguments every `ClaudeHeadless` was constructed with.
     """
-    sent: list[httpx.Request] = []
 
-    def provider(request: httpx.Request) -> httpx.Response:
-        sent.append(request)
-        body = json.loads(request.content)
-        if body["model"] not in eval_suite.TEMPERATURE_ZERO_MODELS and body["temperature"] != 1:
-            return httpx.Response(400, json={"error": {"message": "temperature not supported"}})
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+    server: _Server
+    transport: _FakeTransport
+    ledger: Path
+    built: list[dict[str, object]] = field(default_factory=list)
 
-    client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(provider))
+    def run(self, command: str) -> int:
+        import eval_judge_calibrate
+
+        args = ["--launches", str(self.ledger), "--version", "8", "--api-url", "http://api.invalid"]
+        if command == "score":
+            return eval_suite.main(["score", "--llm-judge", *args])
+        return eval_judge_calibrate.main(["--suite-tag", _LAUNCHED.suite, *args])
+
+
+def _entry_point(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, replies: list[str | Exception]
+) -> _EntryPoint:
+    monkeypatch.setitem(globals(), "_FINDING", _PARAPHRASED)
+    server = _Server(load_suite(DEFAULT_SUITE))
+    http = server.client()
+    ledger = tmp_path / "launches.jsonl"
+    ledger.write_text(_LAUNCHED.model_dump_json() + "\n")
+    edges = _EntryPoint(server, _FakeTransport(replies), ledger)
+
+    def claude_headless(**kwargs: object) -> _FakeTransport:
+        edges.built.append(kwargs)
+        return edges.transport
+
+    monkeypatch.setattr(eval_suite, "ClaudeHeadless", claude_headless)
+    monkeypatch.setattr(httpx, "Client", lambda **_: http)
+    return edges
+
+
+@pytest.mark.unit
+def test_score_main_posts_the_llm_judges_majority_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Through `eval_suite.main`: three pinned samples reach AW's client, and the POSTed
+    score carries the LLM judge's identity and its majority `match`. The keyword judge
+    alone misses this paraphrase, so the PASS can only be the LLM's.
+
+    Mutation check: score with `llm=None` in `main` and this fails.
+    """
+    edges = _entry_point(
+        monkeypatch,
+        tmp_path,
+        [
+            _reply("match", _PARAPHRASE_QUOTE),
+            _reply("no_match"),
+            _reply("match", _PARAPHRASE_QUOTE),
+        ],
     )
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    for unsupported in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-4-7"):
-        with pytest.raises(eval_suite.JudgeError, match="does not accept temperature 0"):
-            client.complete(model=unsupported, system="s", prompt="p")
-    assert len(sent) == 1
+
+    edges.run("score")  # exits 1: the suite's other cases were never launched
+
+    assert edges.built == [{"effort": eval_suite.JUDGE_EFFORT}]
+    assert edges.transport.models == [eval_suite.JUDGE_MODEL] * eval_suite.JUDGE_SAMPLES
+    [(_, body)] = edges.server.scores
+    assert body["scorer_version"] == "8+llm:claude-sonnet-5-5@prompt-v5"
+    assert body["verdict"] == "PASS"
+    assert "LLM judge (`llm:claude-sonnet-5-5@prompt-v5`): `match`" in str(body["evidence"])
+
+
+@pytest.mark.unit
+def test_calibration_main_reports_the_llm_judges_majority_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Through `eval_judge_calibrate.main`: the row's LLM column is the majority vote of
+    three pinned samples on AW's client, here `no_match` over one `match`."""
+    edges = _entry_point(
+        monkeypatch,
+        tmp_path,
+        [_reply("no_match"), _reply("match", _PARAPHRASE_QUOTE), _reply("no_match")],
+    )
+
+    assert edges.run("calibrate") == 0
+
+    assert edges.built == [{"effort": eval_suite.JUDGE_EFFORT}]
+    assert edges.transport.models == [eval_suite.JUDGE_MODEL] * eval_suite.JUDGE_SAMPLES
+    out = capsys.readouterr().out
+    assert "judge: llm:claude-sonnet-5-5@prompt-v5" in out
+    assert f"| {_LAUNCHED.case} | {_LAUNCHED.run_id} | no_match | no_match |" in out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("command", ["score", "calibrate"])
+@pytest.mark.parametrize("failing_sample", range(3))
+def test_a_transport_failure_aborts_the_entry_point_without_a_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    failing_sample: int,
+) -> None:
+    """An AW error on any sample, including after valid ones, aborts the real entry
+    point as a `JudgeTransportError` chained to it: no score is POSTed and no
+    calibration table is printed. A failure is never a vote."""
+    failure = ClaudeHeadlessReportedError("usage limit reached")
+    replies: list[str | Exception] = [_reply("match", _PARAPHRASE_QUOTE)] * 3
+    replies[failing_sample] = failure
+    edges = _entry_point(monkeypatch, tmp_path, replies)
+
+    with pytest.raises(eval_suite.JudgeTransportError) as raised:
+        edges.run(command)
+
+    assert raised.value.__cause__ is failure
+    assert len(edges.transport.models) == failing_sample + 1
+    assert edges.server.scores == []
+    assert "| case | run |" not in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_the_judge_reads_no_api_key() -> None:
+    """Owner decision 2026-10-20: the judge never calls the API with a key."""
+    source = Path(eval_suite.__file__).read_text()
+    assert "anthropic_api_key" not in source and "x-api-key" not in source
+    assert not hasattr(eval_suite, "AnthropicMessages")
+
+
+@pytest.mark.unit
+def test_no_claude_code_transport_is_left_in_this_repo() -> None:
+    """The headless transport is agentic-workspace's (#2036): no argv, envelope or
+    auth-status parsing here, and nothing here starts a `claude` process."""
+    source = Path(eval_suite.__file__).read_text()
+    for marker in ('"--output-format"', '"--system-prompt"', '"auth", "status"', "ClaudeCode"):
+        assert marker not in source, marker
+
+
+_PRE5_MODELS = (
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
+    "claude-haiku-4-5",
+    "claude-3-7-sonnet-20250219",
+    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-latest",
+    "sonnet",
+)
+
+
+@pytest.mark.unit
+def test_the_pinned_judge_model_is_an_allowed_5x_model() -> None:
+    assert eval_suite.JUDGE_MODEL in eval_suite.JUDGE_MODELS
+    for model in eval_suite.JUDGE_MODELS:
+        assert re.fullmatch(r"claude-(opus|sonnet|haiku)-5-\d+", model)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model", _PRE5_MODELS)
+def test_a_pre5_model_passed_to_the_client_is_refused_before_any_call(model: str) -> None:
+    """The outgoing boundary: a direct `complete` with a pre-5 id or alias never reaches
+    the transport, so `ClaudeHeadless`'s looser `claude-` prefix check is not the policy."""
+    transport = _FakeTransport(["ok"])
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.HeadlessJudgeClient(transport=transport).complete(
+            model=model, system="s", prompt="p"
+        )
+    assert transport.models == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model", _PRE5_MODELS)
+def test_a_pre5_judge_override_is_refused_before_any_call(model: str) -> None:
+    """An explicit `LlmJudge(model=...)` cannot route the judge to a pre-5 model."""
+    transport = _FakeTransport(["ok"])
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient(transport=transport), model=model).judge(
+            _EXPECTED, blocking_findings(_PARAPHRASED)
+        )
+    assert transport.models == []
 
 
 @pytest.mark.unit
@@ -3498,8 +3770,9 @@ def test_every_defect_case_gives_the_judge_its_root_cause_and_hides_it_from_the_
         assert case.expected.defect not in case.task
         model = _FakeModel(_reply("no_match"))
         eval_suite.LlmJudge(model).judge(case.expected, ["some finding"])
-        [call] = model.calls
-        assert case.expected.defect in call["prompt"], case.id
+        assert model.calls and all(
+            case.expected.defect in call["prompt"] for call in model.calls
+        ), case.id
 
 
 @pytest.mark.unit

@@ -29,23 +29,22 @@ This prevents privilege escalation even if an agent executes a compromised binar
 
 Secrets (API keys, tokens) are never baked into images. The injection lifecycle:
 
-1. **Setup phase**: Orchestrator injects secrets via sidecar proxy or environment variables
+1. **Setup phase**: Orchestrator injects secrets as agent environment variables and credential files
 2. **Execution phase**: Agent runs with access to injected secrets
 3. **Cleanup phase**: Secrets are revoked/cleared before container destruction
 
-The sidecar proxy (ADR-022) is the preferred injection method: the agent process never sees raw API keys. The proxy intercepts outbound requests and adds authentication headers.
+The agent process does see raw credentials. Claude Code validates its credential locally before sending any request, so sidecar substitution of a placeholder (ADR-022) no longer works: the Claude credential is placed directly in the agent environment, and Anthropic traffic is routed through the Envoy sidecar for observability only. GitHub installation tokens are written to `~/.git-credentials` and `~/.config/gh/hosts.yml`, which the agent can read. Restoring the "agent never sees raw secrets" property is tracked in [#724](https://github.com/syntropic137/syntropic137/issues/724) and [#725](https://github.com/syntropic137/syntropic137/issues/725).
 
-## Vendor Telemetry Disabled
+## Vendor Telemetry
 
-All vendor phone-home telemetry is disabled by default:
+The images do **not** disable vendor telemetry. What they set:
 
-| Variable | Purpose |
-|----------|---------|
-| `DISABLE_TELEMETRY=1` | Disable Anthropic's Statsig usage metrics |
-| `DISABLE_ERROR_REPORTING=1` | Disable Anthropic's Sentry error reporting |
-| `RTK_TELEMETRY_DISABLED=1` | Disable RTK analytics |
+| Variable | Where | Purpose |
+|----------|-------|---------|
+| `ANTHROPIC_NO_ATTRIBUTION=1` | Image environment | Disable Claude attribution in commits and PRs |
+| `RTK_TELEMETRY_DISABLED=1` | Prefixed to the entrypoint's `rtk init` commands only | Disable RTK analytics during `rtk init` |
 
-Only the explicitly configured OTel export (to your own collector) sends data out.
+`DISABLE_TELEMETRY` and `DISABLE_ERROR_REPORTING` are not set by any image.
 
 ## Supply Chain Security
 

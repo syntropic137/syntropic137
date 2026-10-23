@@ -15,7 +15,8 @@ class TriggerConfig:
     Attributes:
         max_attempts: Max fires per (PR, trigger) combination.
         daily_limit: Max triggers per day for this rule.
-        debounce_seconds: Wait before evaluating (batch rapid events).
+        debounce_seconds: Always 0 for new triggers; not applied (#1961).
+            Kept so triggers registered with a non-zero value still replay.
         cooldown_seconds: Min time between fires for same PR.
     """
 

@@ -84,6 +84,7 @@ from syn_api.inventory_types import TranscriptRevocationResponse as TranscriptRe
 from syn_api.model_identity import CostModelKey, ObservedModelId, ResolvedModelId  # noqa: TC001
 from syn_api.services.cpu_throttling import CpuThrottling  # noqa: TC001
 from syn_api.services.degraded_reasons import DegradedReason  # noqa: TC001
+from syn_api.services.execution_capacity import ExecutionBudgetHealth  # noqa: TC001
 from syn_domain.contexts.orchestration import (
     DefinitionChangeKind,
     DelegationFailure,
@@ -108,6 +109,7 @@ from syn_shared.codex_auth_status import CodexAuthStatus  # noqa: TC001
 from syn_shared.display import format_utc_timestamp
 from syn_shared.display.formatters import EM_DASH, format_cost, format_tokens
 from syn_shared.observed_model import format_observed_model
+from syn_shared.platform_access import PlatformScope
 from syn_shared.pricing import (  # noqa: TC001 - pydantic resolves at runtime
     CostSplitBasis,
     TokenTypeCost,
@@ -605,6 +607,9 @@ class PhaseDefinitionResponse(BaseModel):
     fallback_agent: FallbackAgentResponse | None = None
     clone_repos: bool = True
     delivers_repo_changes: bool = True
+    platform_access: PlatformScope = PlatformScope.READ
+    """What this phase's workspace may do against the API (ADR-072). ``eval``
+    can launch runs into a named eval and score them."""
     # PC-116: the phase fails when it reports no review_verdict.
     requires_verdict: bool = False
     sandbox: str = DEFAULT_PHASE_SANDBOX
@@ -3289,6 +3294,13 @@ class HealthResponse(_OmitsAbsentFields):
         description="How often the API container hit its CPU limit (#1600). Always present "
         "once the gate is ready, with status 'unknown' when the cgroup does not say; "
         "omitted only while the gate is withholding the API.",
+    )
+    execution_budget: ExecutionBudgetHealth | None = Field(
+        default=None,
+        description="The execution budget sized from host capacity and measured per-run "
+        "demand, the term that bound it, and the starts admitted, running and queued in "
+        "this process or the Run Queue (#1715). Omitted before startup has sized it, "
+        "and when the Run Queue cannot be read.",
     )
 
 

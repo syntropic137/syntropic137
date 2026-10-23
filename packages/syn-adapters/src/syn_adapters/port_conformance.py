@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     )
     from syn_adapters.execution_runs import PostgresExecutionRunQueue
     from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
+    from syn_adapters.feedback_screening import AnthropicScreener, HeuristicScreener
     from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
@@ -56,6 +57,7 @@ if TYPE_CHECKING:
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.github.revision_resolver import GitHubRevisionResolver
     from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
+    from syn_adapters.host_capacity import ProcHostCapacity
     from syn_adapters.maintenance import (
         InMemoryMaintenanceAdapter,
         PostgresMaintenanceAdapter,
@@ -147,6 +149,7 @@ if TYPE_CHECKING:
         TokenVendingServiceAdapter,
     )
     from syn_domain.contexts._shared.disk_space import DiskSpacePort
+    from syn_domain.contexts._shared.host_capacity import HostCapacityPort
     from syn_domain.contexts._shared.maintenance import MaintenancePort
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
@@ -207,7 +210,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
         ArtifactContentStoragePort as ArtifactsArtifactContentStoragePort,
     )
-    from syn_domain.contexts.feedback.ports import NonceLedgerPort
+    from syn_domain.contexts.feedback.ports import NonceLedgerPort, ScreeningPort
     from syn_domain.contexts.github.ports.ChecksApiPort import GitHubChecksAPIPort
     from syn_domain.contexts.github.ports.EventsApiPort import GitHubEventsAPIPort
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
@@ -423,6 +426,10 @@ if TYPE_CHECKING:
         """The workspace-volume probe /health and admission both judge (#1560)."""
         _statvfs: DiskSpacePort = statvfs
 
+    def _host_capacity(proc: ProcHostCapacity) -> None:
+        """The host the execution budget is sized against (#1715)."""
+        _proc: HostCapacityPort = proc
+
     def _codex_credential_file(codex: CodexAuthFileFormat) -> None:
         """codex's auth.json format, until it moves to agentic-workspace (#1973)."""
         _codex: CodexCredentialFileFormat = codex
@@ -499,3 +506,8 @@ if TYPE_CHECKING:
         """The Run Queue (ADR-072). The double must keep the port, not just Postgres."""
         _postgres: ExecutionRunQueue = postgres
         _memory: ExecutionRunQueue = memory
+
+    def _feedback_screening(heuristic: HeuristicScreener, anthropic: AnthropicScreener) -> None:
+        """feedback's classifiers (ADR-076-feedback-ticketing): the floor and the model."""
+        _heuristic: ScreeningPort = heuristic
+        _anthropic: ScreeningPort = anthropic

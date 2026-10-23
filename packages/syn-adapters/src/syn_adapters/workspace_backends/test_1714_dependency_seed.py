@@ -927,3 +927,139 @@ def test_a_publish_that_fails_partway_leaves_no_staging(
         store.publish(key, _built_cache(tmp_path / "b", "x"))
 
     assert not list((tmp_path / "seeds").rglob(".staging-*"))
+
+
+def test_a_losing_publisher_leaves_the_winners_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two warmers of one lockfile, both staged before either publishes (#1812)."""
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10**9)
+    key = SeedKey("uv", "org/app", "3" * 64)
+    target = tmp_path / "seeds" / key.relative_path
+    loser_staged, winner_done = threading.Event(), threading.Event()
+    make_read_only = dependency_seed._make_read_only
+
+    def staged_then_ordered(staging: Path) -> None:
+        make_read_only(staging)
+        # The interleaving is forced at the publish step: the loser has
+        # staged its cache before the winner publishes, and decides after.
+        if threading.current_thread().name == "loser":
+            loser_staged.set()
+            assert winner_done.wait(10)
+        else:
+            assert loser_staged.wait(10)
+
+    monkeypatch.setattr(dependency_seed, "_make_read_only", staged_then_ordered)
+    winner_cache = _built_cache(tmp_path / "winner", "w" * 5000)
+    loser_cache = _built_cache(tmp_path / "loser", "l" * 10)
+
+    def winner_publishes() -> None:
+        store.publish(key, winner_cache)
+        winner_done.set()
+
+    loser = threading.Thread(target=store.publish, args=(key, loser_cache), name="loser")
+    winner = threading.Thread(target=winner_publishes, name="winner")
+    loser.start()
+    winner.start()
+    winner.join(10)
+    loser.join(10)
+
+    assert (target / "archive" / "pkg.py").read_text() == "w" * 5000
+    winners_bytes = _size_of(target)
+    assert (tmp_path / "seeds" / "uv" / "org" / "app" / f"{'3' * 64}.size").read_text() == str(
+        winners_bytes
+    )
+    # The retained bytes prune counts are the bytes on disk: a budget one byte
+    # under them evicts the seed (once past the grace) and frees exactly them.
+    long_ago = time.time() - 7200
+    os.utime(target, (long_ago, long_ago))
+    store._max_bytes = winners_bytes - 1
+    assert store.prune() == winners_bytes
+    assert not list((tmp_path / "seeds").rglob(".staging-*"))
+
+
+def _uv_like_cache(root: Path, repository: str) -> Path:
+    """A uv cache: a wheel entry linking into the archive, one shared and one not."""
+    root.mkdir(parents=True)
+    (root / "archive-v0" / "shared").mkdir(parents=True)
+    (root / "archive-v0" / "shared" / "common.py").write_text("common")
+    (root / "archive-v0" / repository).mkdir()
+    (root / "archive-v0" / repository / "own.py").write_text(repository)
+    (root / "wheels-v5").mkdir()
+    (root / "wheels-v5" / "common").symlink_to("/workspace/.cache/uv/archive-v0/shared")
+    (root / "wheels-v5" / repository).symlink_to(f"/workspace/.cache/uv/archive-v0/{repository}")
+    return root
+
+
+def test_two_repositories_sharing_uv_wheels_keep_both_seeds_whole(tmp_path: Path) -> None:
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10**9)
+    lock_a, lock_b = b"lock = 'a'\n", b"lock = 'b'\n"
+    for name, lock in (("a", lock_a), ("b", lock_b)):
+        store.publish(
+            SeedKey("uv", f"org/{name}", _sha(lock)), _uv_like_cache(tmp_path / name, name)
+        )
+    workspace_dir = tmp_path / "ws"
+
+    outcome = store.seed(workspace_dir, _two_clones(workspace_dir, lock_a, lock_b))
+
+    cache = workspace_dir / ".cache" / "uv"
+    assert [key.repository for key in outcome.copied] == ["org/a", "org/b"]
+    assert _files_under(cache) == _files_under(tmp_path / "a") | _files_under(tmp_path / "b")
+    for name in ("common", "a", "b"):
+        assert (cache / "wheels-v5" / name).is_symlink()
+
+
+def test_an_identical_existing_symlink_merges_cleanly(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    source = _uv_like_cache(tmp_path / "seed", "a")
+    destination = tmp_path / "ws" / ".cache" / "uv"
+    dependency_seed._merge_tree(source, destination)
+
+    dependency_seed._merge_tree(source, destination)
+
+    assert (destination / "wheels-v5" / "a").readlink() == Path("/workspace/.cache/uv/archive-v0/a")
+    assert not [record for record in caplog.records if record.levelname == "WARNING"]
+
+
+def test_a_conflicting_symlink_is_logged_and_keeps_the_rest_of_the_destination(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    first = _uv_like_cache(tmp_path / "first", "a")
+    second = _uv_like_cache(tmp_path / "second", "b")
+    (second / "wheels-v5" / "common").unlink()
+    (second / "wheels-v5" / "common").symlink_to("/workspace/.cache/uv/archive-v0/b")
+    destination = tmp_path / "ws" / ".cache" / "uv"
+    dependency_seed._merge_tree(first, destination)
+
+    dependency_seed._merge_tree(second, destination)
+
+    common = destination / "wheels-v5" / "common"
+    assert common.readlink() == Path("/workspace/.cache/uv/archive-v0/b")  # the later seed's
+    assert (destination / "archive-v0" / "a" / "own.py").read_text() == "a"
+    assert (destination / "wheels-v5" / "a").is_symlink()
+    [warning] = [record for record in caplog.records if record.levelname == "WARNING"]
+    assert str(common) in warning.getMessage()
+
+
+def test_a_later_seed_that_fails_to_merge_keeps_the_earlier_seed(tmp_path: Path) -> None:
+    store = DependencySeedStore(tmp_path / "seeds", max_bytes=10**9)
+    lock_a, lock_b = b"lock = 'a'\n", b"lock = 'b'\n"
+    first = tmp_path / "first"
+    (first / "wheel").mkdir(parents=True)
+    (first / "wheel" / "module.py").write_text("from a")
+    second = _uv_like_cache(tmp_path / "second", "b")
+    # A link where the first seed has a real directory: the merge cannot place it.
+    (second / "wheel").symlink_to("archive-v0/b")
+    key_a, key_b = SeedKey("uv", "org/a", _sha(lock_a)), SeedKey("uv", "org/b", _sha(lock_b))
+    store.publish(key_a, first)
+    store.publish(key_b, second)
+    workspace_dir = tmp_path / "ws"
+
+    outcome = store.seed(workspace_dir, _two_clones(workspace_dir, lock_a, lock_b))
+
+    cache = workspace_dir / ".cache" / "uv"
+    assert outcome.copied == [key_a]
+    assert _files_under(cache) == _files_under(first)  # nothing of the failed seed
+    assert (cache / "wheel" / "module.py").read_text() == "from a"
+    assert [path.name for path in (workspace_dir / ".cache").iterdir()] == ["uv"]  # no staging

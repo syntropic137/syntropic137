@@ -2830,6 +2830,12 @@ export interface components {
             eval_id: components["schemas"]["EvalId"];
         };
         /**
+         * BindingTerm
+         * @description Which term of the formula set the budget.
+         * @enum {string}
+         */
+        BindingTerm: "operator_max" | "cpu" | "memory" | "disk" | "operator_max_no_profile" | "operator_max_profiles_unreadable" | "operator_max_host_unreadable";
+        /**
          * BodyAvailability
          * @enum {string}
          */
@@ -3595,7 +3601,7 @@ export interface components {
          *     StrEnum so values serialize directly to JSON in health responses.
          * @enum {string}
          */
-        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space";
+        DegradedReason: "artifact_storage" | "claude_plugin_storage" | "skill_storage" | "conversation_storage" | "ui_feedback" | "subscription_coordinator" | "projection_catchup" | "projection_stalled" | "projection_dropped_event" | "projection_held" | "subscription_halted" | "event_poller" | "check_run_poller" | "anthropic_api_key" | "github_app" | "disk_space" | "workspace_reclaim";
         /**
          * DelegationAttempt
          * @description One delegate the phase's agent launched, as the platform observed it.
@@ -3704,6 +3710,8 @@ export interface components {
              * @description One line for an operator: free space, the floors and where they came from.
              */
             detail: string;
+            /** @description The workspace directory reclaimer's last pass (#1983); null when its state could not be read. */
+            reclaim?: components["schemas"]["WorkspaceReclaimHealth"] | null;
         };
         /**
          * DurationTrendSummaryResponse
@@ -4274,6 +4282,39 @@ export interface components {
              * @default Workflow execution started
              */
             message: string;
+        };
+        /**
+         * ExecutionBudgetHealth
+         * @description The execution budget this process enforces, and what it is doing right now (#1715).
+         */
+        ExecutionBudgetHealth: {
+            /**
+             * Budget
+             * @description Most executions this process runs at once.
+             */
+            budget: number;
+            /** @description Which term set the budget: 'cpu', 'memory' or 'disk' when the host is the limit; 'operator_max' when SYN_EXECUTION_MAX_CONCURRENT is; 'operator_max_no_profile' when too few phases have been measured to size from; 'operator_max_profiles_unreadable' or 'operator_max_host_unreadable' when a read failed and the budget fell back to SYN_EXECUTION_MAX_CONCURRENT. */
+            binding_term: components["schemas"]["BindingTerm"];
+            /**
+             * Admitted
+             * @description Starts accepted into the budget: since this process began with the Run Queue off; every run the Run Queue has admitted, across the pool, with it on.
+             */
+            admitted: number;
+            /**
+             * Running
+             * @description Starts holding a slot now: in this process with the Run Queue off; Run Queue runs claimed, fencing or reaped, across the pool, with it on.
+             */
+            running: number;
+            /**
+             * Queued
+             * @description Starts waiting for a slot now: in this process with the Run Queue off; Run Queue runs admitted and not yet claimed, across the pool, with it on.
+             */
+            queued: number;
+            /**
+             * Cpu Pressure Avg60
+             * @description Percent of the last 60s some task on this host waited for CPU (PSI 'some avg60'). Null where the kernel does not report it.
+             */
+            cpu_pressure_avg60?: number | null;
         };
         /**
          * ExecutionBudgetInfo
@@ -5655,6 +5696,8 @@ export interface components {
             db_pools?: components["schemas"]["DbPoolHealth"][] | null;
             /** @description How often the API container hit its CPU limit (#1600). Always present once the gate is ready, with status 'unknown' when the cgroup does not say; omitted only while the gate is withholding the API. */
             cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
+            /** @description The execution budget sized from host capacity and measured per-run demand, the term that bound it, and the starts admitted, running and queued in this process or the Run Queue (#1715). Omitted before startup has sized it, and when the Run Queue cannot be read. */
+            execution_budget?: components["schemas"]["ExecutionBudgetHealth"] | null;
         };
         /**
          * HeatmapDayBucketResponse
@@ -6400,6 +6443,8 @@ export interface components {
              * @default true
              */
             delivers_repo_changes: boolean;
+            /** @default read */
+            platform_access: components["schemas"]["PlatformScope"];
             /**
              * Requires Verdict
              * @default false
@@ -6797,6 +6842,18 @@ export interface components {
             /** Status Display */
             status_display: string;
         };
+        /**
+         * PlatformScope
+         * @description The one scope a workspace's platform token carries.
+         *
+         *     ``READ`` is every phase's default: GET/HEAD on the read-only resources.
+         *     ``EVAL`` is READ plus exactly two writes - launching a workflow run INTO a
+         *     named eval, and scoring a run of an eval - and only a phase that declares
+         *     ``platform_access: eval`` is given it. ADR-072 is the authority for what
+         *     each scope reaches; ``syn_adapters.platform_access`` is the enforcement.
+         * @enum {string}
+         */
+        PlatformScope: "read" | "eval";
         /**
          * Priority
          * @description Feedback priority level.
@@ -7663,6 +7720,33 @@ export interface components {
             parent_execution_id: string;
             /** Resume Phase Id */
             resume_phase_id: string;
+        };
+        /**
+         * RetainedReason
+         * @description Why a stale workspace directory was kept (#1983). Kept is not failed.
+         *
+         *     Each names the one proof that could not be made. /health counts them, so
+         *     an operator sees what the disk is holding and why, not one opaque number.
+         * @enum {string}
+         */
+        RetainedReason: "unowned" | "not_terminal" | "mounted" | "unreadable" | "dirty" | "unversioned" | "stash" | "unpushed_unproven" | "submodule_store_unproven" | "unreachable_objects" | "capture_unknown" | "identity_changed" | "delete_failed";
+        /**
+         * RetainedWorkspaceDirs
+         * @description Workspace directories the reclaimer kept for one reason, at its last pass (#1983).
+         */
+        RetainedWorkspaceDirs: {
+            /** @description The proof that could not be made. */
+            reason: components["schemas"]["RetainedReason"];
+            /**
+             * Count
+             * @description Directories kept for this reason.
+             */
+            count: number;
+            /**
+             * Size Bytes
+             * @description Bytes those directories hold, as measured.
+             */
+            size_bytes: number;
         };
         /**
          * ReviewVerdict
@@ -10170,6 +10254,57 @@ export interface components {
         WorkflowTrendsResponse: {
             /** Trends */
             trends: components["schemas"]["WorkflowCardTrendResponse"][];
+        };
+        /**
+         * WorkspaceReclaimHealth
+         * @description What the workspace directory reclaimer last did (#1983).
+         */
+        WorkspaceReclaimHealth: {
+            /**
+             * Last Pass At
+             * @description When its last pass ended, UTC; null before the first.
+             */
+            last_pass_at: string | null;
+            /**
+             * Paused
+             * @description Why the last pass stopped before deleting anything, e.g. 'maintenance'.
+             */
+            paused: string | null;
+            /**
+             * Last Pass Skipped
+             * @description Why the last pass did not look at all (docker or a read model unreadable).
+             */
+            last_pass_skipped: string | null;
+            /**
+             * Reclaimed Bytes 24H
+             * @description Bytes this process reclaimed in the last 24 hours (resets on restart).
+             */
+            reclaimed_bytes_24h: number;
+            /**
+             * Dry Run Reclaimable
+             * @description Directories the last pass found reclaimable and left, in dry-run mode.
+             */
+            dry_run_reclaimable: number;
+            /**
+             * Deletes In Progress
+             * @description Proven directories whose delete ran out of the last pass's time budget; the next pass, or the first after a restart, finishes them.
+             */
+            deletes_in_progress: number;
+            /**
+             * Out Of Time
+             * @description Whether the last pass stopped at SYN_DISK_RECLAIM_PASS_BUDGET_MINUTES.
+             */
+            out_of_time: boolean;
+            /**
+             * Retained
+             * @description Directories kept at the last pass, per reason.
+             */
+            retained: components["schemas"]["RetainedWorkspaceDirs"][];
+            /**
+             * Delete Failed Passes
+             * @description Consecutive passes with a failed delete; 2 or more degrades /health.
+             */
+            delete_failed_passes: number;
         };
         /**
          * CostSummaryResponse

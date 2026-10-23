@@ -28,7 +28,7 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.build_info import get_build_info
-from syn_api.services import cpu_throttling, inventory_lifecycle
+from syn_api.services import cpu_throttling, execution_capacity, inventory_lifecycle
 from syn_api.services.admission_announcement import (
     announce_admission_if_open,
     start_disk_recovery_watch,
@@ -40,19 +40,15 @@ from syn_api.services.disk_pressure import (
     start_disk_pressure_monitor,
     stop_disk_pressure_monitor,
 )
-from syn_api.services.execution_host_runner import (
-    resolve_previous_process,
-    start_execution_host,
-    stop_execution_host,
-)
+from syn_api.services.execution_host_runner import start_execution_host, stop_execution_host
 from syn_api.services.execution_posture import (
     api_memory_limit_mib,
     log_execution_concurrency_posture,
 )
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
 from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
+from syn_api.services.process_role import current_role, resolve_previous_world, role_services
 from syn_api.services.read_path_health import _judge_read_path
-from syn_api.services.reconciliation import reconcile_orphaned_sessions
 from syn_api.services.request_latency_lifecycle import start_request_latency, stop_request_latency
 from syn_api.services.seeding import seed_offline_data
 from syn_api.services.subscription_health import render_subscription_health
@@ -143,6 +139,9 @@ class _ServiceEntry:
     init_fn: Callable[[LifecycleState], Awaitable[None]]
     recoverable: bool = False
     shutdown_fn: Callable[[LifecycleState], Awaitable[None]] | None = None
+    #: Started only where the process serves the API (ADR-072 D1): the
+    #: subscription and the pollers dispatch work, and an executor must not.
+    api_only: bool = False
 
 
 # Registry is defined after _init_* functions below — see _SERVICE_REGISTRY.
@@ -208,11 +207,10 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # previous process from work this one just started. Resolving the old world
     # before opening the door to a new one removes the race rather than
     # narrowing it; the started_before cutoff below is defence in depth.
-    process_started_at = datetime.now(UTC)
-    await reconcile_orphaned_sessions()
-    await resolve_previous_process(started_before=process_started_at)
+    role = current_role()
+    await resolve_previous_world(role, started_before=datetime.now(UTC))
 
-    for entry in _SERVICE_REGISTRY:
+    for entry in role_services(_SERVICE_REGISTRY, role):
         try:
             await entry.init_fn(state)
         except Exception:
@@ -229,7 +227,8 @@ async def _init_degradable_services(state: LifecycleState) -> None:
         task.add_done_callback(_handle_recovery_task_exception)
         state._recovery_task = task
     # Last: the claim loop drains through the processor wired above (ADR-072).
-    await start_execution_host()
+    if role.hosts_executions:
+        await start_execution_host()
 
 
 async def startup(
@@ -285,11 +284,9 @@ async def startup(
     except Exception:
         logger.warning("Could not determine execution concurrency posture at startup.")
 
-    if settings.is_test:
-        return Ok({"mode": "full"})
-
-    if settings.is_offline:
-        await seed_offline_data()
+    if settings.uses_in_memory_stores:
+        if settings.is_offline:
+            await seed_offline_data()
         return Ok({"mode": "full"})
 
     # Critical path — abort on failure
@@ -381,6 +378,7 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             disk=disk,
             db_pools=db_pools,
             cpu_throttling=cpu_throttling.read_cpu_throttling(),
+            execution_budget=await execution_capacity.describe_execution_budget(),
         )
     )
 
@@ -565,6 +563,9 @@ async def _init_event_store() -> Result[None, LifecycleError]:
             message=f"Event store connection failed: {e}",
         )
 
+    # Sized through the pool just opened, before any start path or the claim
+    # loop can claim (#1715): sized earlier, the profiles are always unreadable.
+    await execution_capacity.size_execution_budget_at_startup()
     return Ok(None)
 
 
@@ -943,24 +944,28 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
         init_fn=init_ui_feedback,
         recoverable=True,
         shutdown_fn=shutdown_ui_feedback,
+        api_only=True,
     ),
     _ServiceEntry(
         reason=DegradedReason.SUBSCRIPTION_COORDINATOR,
         init_fn=_init_subscriptions,
         recoverable=True,
         shutdown_fn=_shutdown_subscriptions,
+        api_only=True,
     ),
     _ServiceEntry(
         reason=DegradedReason.EVENT_POLLER,
         init_fn=_init_event_poller,
         recoverable=False,
         shutdown_fn=_shutdown_event_poller,
+        api_only=True,
     ),
     _ServiceEntry(
         reason=DegradedReason.CHECK_RUN_POLLER,
         init_fn=_init_check_run_poller,
         recoverable=False,
         shutdown_fn=_shutdown_check_run_poller,
+        api_only=True,
     ),
 )
 
@@ -976,11 +981,6 @@ def _is_recoverable(reason: DegradedReason) -> bool:
 def _get_recoverable(state: LifecycleState) -> list[DegradedReason]:
     """Return the subset of degraded reasons that can be recovered by retrying."""
     return [r for r in state.degraded_reasons if _is_recoverable(r)]
-
-
-def _all_recovered(state: LifecycleState) -> bool:
-    """Check whether all recoverable subsystems have been restored."""
-    return not any(_is_recoverable(r) for r in state.degraded_reasons)
 
 
 async def _try_recover_reason(state: LifecycleState, reason: DegradedReason) -> None:
@@ -1019,7 +1019,7 @@ async def _recovery_loop(state: LifecycleState) -> None:
     while not state._shutting_down and _get_recoverable(state):
         await _attempt_recovery_pass(state, delay)
 
-        if _all_recovered(state):
+        if not _get_recoverable(state):
             logger.info("All recoverable subsystems healthy — recovery loop exiting")
             return
 

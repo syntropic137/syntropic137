@@ -711,6 +711,11 @@ check-event-store-pin:
 check-compose-images-public:
     @uv run python scripts/check_compose_images_public.py
 
+# The generated docker-socket-proxy template (#1806) must still match the pinned
+# image's own template and pass `haproxy -c` inside that image. Needs docker.
+check-docker-proxy-haproxy:
+    @uv run python scripts/docker_socket_proxy_config.py --validate
+
 check-default-workspace-image:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -761,6 +766,16 @@ test:
 test-unit:
     @echo "Running unit tests (parallel)..."
     uv run pytest -m unit -n auto --tb=short
+
+# The E2B conformance suite against REAL E2B (#1915). Local only, never CI:
+# needs SYN_E2B_API_KEY and SYN_E2B_TEMPLATE from your environment or keychain
+# (docs/deployment/e2b.md). Without them every test SKIPS, which is not a pass.
+# The e2b SDK is not in the lock (it is agentic-isolation's optional extra), so
+# it is added for this run only, at the version agentic-isolation pins. It is
+# newer than the project cutoff, so this run resolves it with a later cutoff;
+# --frozen keeps that from rewriting uv.lock.
+test-e2b:
+    uv run --frozen --with e2b==2.52.0 --exclude-newer 2026-10-02T00:00:00Z pytest -m e2b -rA --tb=short packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/live_e2b_suite.py
 
 # Integration tests (uses test-stack if running, else testcontainers)
 test-integration:
@@ -1092,7 +1107,7 @@ fitness-invariants-agent:
 #
 # Add a gate here, never to CI alone. `test_ci_and_preflight_agree.py` fails
 # if a `just` target CI runs is not in this closure.
-preflight: preflight-portable check-submodules vsa-validate fitness codegen-check check-architecture-docs check-compose-overlays check-default-workspace-image check-pinned-image-channels check-event-store-pin check-compose-images-public
+preflight: preflight-portable check-submodules vsa-validate fitness codegen-check check-architecture-docs check-compose-overlays check-default-workspace-image check-pinned-image-channels check-event-store-pin check-compose-images-public check-docker-proxy-haproxy
     @echo "✅ preflight: every STATIC CI gate passed locally"
     @echo "   Not covered here: unit tests, dashboard build, CLI checks and"
     @echo "   the docs build. Run 'just qa-ci' for all of those."
@@ -1134,6 +1149,8 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 #   check-default-workspace-image      exit 127  no docker CLI
 #   check-pinned-image-channels        exit 1    no registry credentials
 #   check-event-store-pin              (added 2026-10-04, not measured in the
+#                                      image; needs the docker CLI, absent)
+#   check-docker-proxy-haproxy         (added 2026-10-14, not measured in the
 #                                      image; needs the docker CLI, absent)
 #
 # Re-measure before moving a recipe across the line. "It should work" is how
@@ -1181,7 +1198,8 @@ preflight-agent: preflight-portable fitness-agent fitness-invariants-agent
     @echo "   Not run here (no toolchain in the image): vsa-validate,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
     @echo "   check-default-workspace-image, check-pinned-image-channels,"
-    @echo "   check-event-store-pin, check-compose-images-public."
+    @echo "   check-event-store-pin, check-compose-images-public,"
+    @echo "   check-docker-proxy-haproxy."
     @echo "   CI runs all of those. Run 'just preflight' on a dev machine."
 
 # Regenerate CLAUDE.md from AGENTS.md.
@@ -1218,14 +1236,14 @@ check-agent-docs:
 
 # Mirrors ci.yml `mutations-not-merged`. Deliberately NOT in preflight: the
 # pre-push hook would block pushing the very patches mutation-evidence.yml
-# reads. Delete the dir before merge; the PR comment is the record. See
+# reads. The orchestrator deletes the dir after a PASS; the PR comment is the record. See
 # .claude/skills/devops/agent_mutation_evidence.md.
 # Fail if `.mutations/` is tracked (PR-scoped evidence, never main).
 check-no-mutations:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -n "$(git ls-files -- .mutations)" ]; then
-        echo "❌ delete .mutations/ before merge; evidence is in the mutation-evidence comment"
+        echo "❌ .mutations/ is tracked; the orchestrator removes it after a mutation-evidence PASS on this head (#2028)"
         git ls-files -- .mutations
         exit 1
     fi
@@ -1794,6 +1812,23 @@ selfhost-seed:
       python /app/scripts/seed_triggers.py
     echo "✅ Seeding complete"
 
+# Back up the whole syn database into $BACKUP_DIR, verified before it reports ok
+# (logic: infra/scripts/selfhost_backup.py; the backup: docker/db-backup/)
+selfhost-backup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    exec uv run python infra/scripts/selfhost_backup.py --compose "{{compose_selfhost}}" backup
+
+# Replace the syn database with a verified backup; the old one is kept aside (--force for a populated DB)
+# (logic: infra/scripts/selfhost_backup.py; arguments reach it as argv, never as recipe text)
+[positional-arguments]
+selfhost-restore file *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    exec uv run python infra/scripts/selfhost_backup.py --compose "{{compose_selfhost}}" restore -- "$@"
+
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
 selfhost-update *args:
     #!/usr/bin/env bash
@@ -1946,6 +1981,15 @@ health-json:
 docs-cli-gen:
     @echo "📄 Generating CLI reference docs..."
     @cd apps/syn-cli-node && pnpm run generate:docs
+    @echo "📄 Generating CLI command manifest (read by the docs-drift gate)..."
+    @cd apps/syn-cli-node && pnpm run generate:manifest
+
+# List every `syn` command, setup command and /api/v1 route in the public docs
+# that the software rejects, budgeted or not. The gate itself is the fitness
+# test ci/fitness/code_quality/test_docs_drift.py, run by `fitness` (so by
+# `preflight` and CI); this prints the full list behind it.
+check-docs-drift *FILES:
+    @uv run python scripts/check_docs_drift.py {{FILES}}
 
 # Start docs site dev server (regenerates CLI docs first)
 docs: docs-cli-gen
@@ -1983,8 +2027,8 @@ docs-sync: check-env-example check-architecture-docs
         echo "   Run 'just codegen' and commit the changes."; \
         exit 1; \
     fi
-    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts apps/syn-dashboard-ui/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
-        echo "✅ API docs, CLI types, and dashboard types are up-to-date"; \
+    @if git diff --quiet apps/syn-docs/openapi.json apps/syn-docs/content/docs/api/ apps/syn-cli-node/src/generated/api-types.ts apps/syn-dashboard-ui/src/generated/api-types.ts packages/openclaw-plugin/src/generated/api-types.ts packages/syn-ui/data/src/generated/api-types.ts 2>/dev/null && [ -z "$(git ls-files --others --exclude-standard apps/syn-docs/content/docs/api/)" ]; then \
+        echo "✅ API docs, CLI types, dashboard, OpenClaw plugin and syn-ui data types are up-to-date"; \
     else \
         echo "❌ API artifacts need to be committed:"; \
         echo "   Run 'just codegen' and commit the changes."; \
@@ -2004,6 +2048,10 @@ codegen: docs-cli-gen
     cd apps/syn-cli-node && pnpm run generate:types
     @echo "📄 Generating Dashboard TypeScript types..."
     cd apps/syn-dashboard-ui && pnpm run generate:types
+    @echo "📄 Generating OpenClaw plugin TypeScript types..."
+    cd packages/openclaw-plugin && pnpm run generate:types
+    @echo "📄 Generating syn-ui data-layer TypeScript types..."
+    cd packages/syn-ui/data && pnpm run generate:types
     @echo "📄 Exporting plugin JSON schemas..."
     uv run python scripts/export_plugin_schemas.py
     @echo "📄 Generating .env.example and the compose settings passthrough..."
@@ -2081,6 +2129,7 @@ codex-auth-clip *flags:
 # setting -- which is the #1101 gap with an extra step.
 gen-compose:
     uv run python scripts/settings_forwarding.py
+    uv run python scripts/docker_socket_proxy_config.py
     uv run python scripts/generate_published_compose.py
 
 # Check both compose artifacts are up to date (CI mode -- fails if stale).
@@ -2089,6 +2138,7 @@ gen-compose:
 # passthrough (#1101).
 check-compose:
     uv run python scripts/settings_forwarding.py --check
+    uv run python scripts/docker_socket_proxy_config.py --check
     uv run python scripts/generate_published_compose.py --check
 
 # Plugin JSON schemas must match the Pydantic models. These are what third-party

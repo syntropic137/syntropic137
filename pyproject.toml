@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "1.0.3"
+version = "1.0.4"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -58,8 +58,10 @@ exclude-newer = "2026-08-20T21:12:36Z"
 # Security patches past the cutoff, each pinned to just after its release:
 #   pyjwt 2.15.0 (2026-09-23): PYSEC-2026-4141 (2.14.0 was GHSA-w6j9-cwv2-h6wq)
 #   urllib3 2.8.0 (2026-09-15): PYSEC-2026-4175/4176/4177
-exclude-newer-package = { pyjwt = "2026-09-24T00:00:00Z", urllib3 = "2026-09-16T00:00:00Z" }
+#   certifi 2026.10.19 (2026-10-20): GHSA-6q48-6c7w-9gw2
+exclude-newer-package = { pyjwt = "2026-09-24T00:00:00Z", urllib3 = "2026-09-16T00:00:00Z", certifi = "2026-10-20T03:00:00Z" }
 constraint-dependencies = [
+    "certifi>=2026.10.19",   # GHSA-6q48-6c7w-9gw2
     "idna>=3.15",           # PYSEC-2026-215
     "requests>=2.33.0",      # GHSA-gc5v-m9x4-r6x2
     "urllib3>=2.8.0",        # GHSA-38jv-5279-wg99, PYSEC-2026-141, PYSEC-2026-142, PYSEC-2026-4175/4176/4177
@@ -185,7 +187,7 @@ pythonpath = [
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = ["-ra", "-q", "--strict-markers", "-m", "not integration"]
+addopts = ["-ra", "-q", "--strict-markers", "-m", "not integration and not e2b"]
 # pytest skips a `Test*` class that defines __init__ or __new__ with only a
 # warning, so its tests run in no job and no census counts them (#1935).
 filterwarnings = ["error::pytest.PytestCollectionWarning"]
@@ -195,6 +197,7 @@ markers = [
     "e2e: End-to-end tests (full system)",
     "regression: Regression tests for known bugs",
     "architecture: Architectural fitness functions (CI-enforced structural checks)",
+    "e2b: needs a real E2B account (SYN_E2B_API_KEY, SYN_E2B_TEMPLATE); never in CI, run with `just test-e2b` (#1915)",
     "may_skip(reason, issue): an integration test that may skip, declared with why and the issue that removes it (#1984)",
 ]
 
