@@ -40,3 +40,18 @@ the unit gate.
 ```
 just mutation-evidence 2078 "packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_live_writer_is_stopped_drained_and_killed_only_after_mark_drained packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_failed_archive_keeps_sandbox_paused_and_spool_retryable packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_worker_routes_remote_row_to_remote_port_and_claims_only_reachable_backends packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_open_stops_writer_before_reading_and_pauses_on_exit packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_unsettled_spool_never_reaches_a_healthy_writer packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_lease_lost_during_a_slow_attach_stops_nothing packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_removal_refuses_a_sandbox_whose_writer_still_runs packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_remote_spool_row_must_name_its_sandbox_and_executor[executor_id]" false
 ```
+
+## Fix round 2 (reverify B3)
+
+`RecoverySandboxes.attach` became `resume` plus `pause`, so the closing pause
+is decided from lease authority. 05 and 08 no longer apply to that source; they
+are left untouched and 12 and 13 are the same bugs rebased. Each patch was
+applied, the unit module run, and the patch reversed.
+
+| Patch | Bug | Killing test |
+|---|---|---|
+| 11-stale-worker-pauses-new-owners-sandbox | a worker whose lease was lost during attach still pauses the sandbox the new owner is reading | `packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_lease_lost_during_a_slow_attach_stops_nothing` |
+| 12-upload-failure-releases-sandbox-rebased-2 | 05, rebased | `packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_failed_archive_keeps_sandbox_paused_and_spool_retryable` |
+| 13-stale-lease-stops-writer-after-slow-attach-rebased | 08, rebased | `packages/syn-adapters/tests/test_sandbox_spool_recovery.py::test_lease_lost_during_a_slow_attach_stops_nothing` |
+
+The command in the previous section already names every killing test.
