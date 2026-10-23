@@ -97,12 +97,17 @@ report's may be old:
 
 ```
 gh repo view --json nameWithOwner --jq .nameWithOwner
-gh api repos/<owner>/<name>/rules/branches/<base> --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context]'
+gh api --paginate repos/<owner>/<name>/rules/branches/<base> --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context'
+gh api repos/<owner>/<name>/branches/<base>/protection/required_status_checks --jq '.contexts[]'
 ```
 
-If that list is empty, read classic branch protection:
-`gh api repos/<owner>/<name>/branches/<base>/protection/required_status_checks --jq .contexts`.
-A 404 there means no checks are required.
+GitHub enforces rulesets and classic branch protection together, so the
+required set is the **union** of both outputs, never one in place of the
+other. The rules endpoint is paginated, and `--paginate` reads every page. A
+404 from the classic command means no classic protection is configured: it
+adds nothing, and it is a readable answer. Any other failure of either
+command (a 403, a 5xx, a timeout, or output that is not a list of check
+names) makes the set **unreadable**.
 
 - A `FLAKE/INFRA` row whose check is **not required** is not open. Move it,
   together with the report's own `### Not required, not holding` lines, to a
@@ -111,8 +116,8 @@ A 404 there means no checks are required.
   the PR a draft and gets no rerun.
 - Every other handoff (`ORCHESTRATOR_EVIDENCE`, `CI_GAP`, and `FLAKE/INFRA` on
   a required check) stays open, as above.
-- **If neither command gives a readable answer**, keep every `FLAKE/INFRA` row
-  open, which is the rule without this section. Write
+- **If the set is unreadable** (either command fails, other than a 404 from
+  the classic one), keep every `FLAKE/INFRA` row open, which is the rule without this section. Write
   `Required checks: unreadable` with the error verbatim in the comment.
 
 Write `Required checks: <name>, <name>` (or `none`, or `unreadable`) in the
@@ -127,16 +132,32 @@ files a manifest beside the phase that declared it:
 Read the newest one under the final review phase (the one whose report you
 read above); it governs that report's rows. A manifest under an earlier phase
 (for example `implement`'s mutation declaration) covers only the rows that
-phase declared, and only if its `required_check` passed on the current head.
+phase declared, and is judged by the same rule below.
 
 - **No manifest:** nothing was declared, or the gate is off. Every handoff row
   stays as the report wrote it. Write `Platform evidence: none`.
-- **A manifest:** it closes the declared `ORCHESTRATOR_EVIDENCE` rows only when
-  all of these hold: `complete` is `true`, every step settled `passed`, and the
-  `required_check` step passed on the branch head. Then those rows are closed,
-  and only those. Anything else (a step `failed`, `void` or `unavailable`)
-  leaves them open; quote each such step's `reason`. Write `Platform evidence:
-  <gate-id> passed` or `Platform evidence: <gate-id> open: <reasons>`.
+- **A manifest:** the gate plans one of two shapes, and the rule follows the
+  shape it actually planned:
+  - **With cleanup:** it has a `remove_mutation_patches` step, and therefore a
+    `required_check` step after it. The gate plans these only when it removes
+    committed `.mutations/` in front of the final phase. It passes when every
+    step settled `passed` and the branch head is `patch_removal.after_sha`.
+  - **Without cleanup:** mutation and/or integration steps only, and no
+    `required_check` step. It passes when every step settled `passed` and every
+    check in the required set above is green on the current branch head. An
+    unreadable required set means it does not pass.
+
+  A manifest that passes closes the `ORCHESTRATOR_EVIDENCE` rows its phase
+  declared, and only those. Write `Platform evidence: <gate-id> passed`.
+- **A manifest that does not pass holds the PR in draft on its own**, whether
+  or not the report has any handoff row. A report whose handoff section is
+  `None.` does not make a failed gate ready. Treat it as one open
+  `ORCHESTRATOR_EVIDENCE` handoff (`capability=other` unless a declared row
+  names one): a step `failed`, `void` or `unavailable` (quote each `reason`),
+  a cleanup whose `after_sha` is not the head, required checks not green on
+  the head, or a file that does not parse as a manifest (a gate writes one
+  only once every step has settled, so a partial file is never a pass). Write
+  `Platform evidence: <gate-id> open: <reasons>`.
 
 Every `ORCHESTRATOR_EVIDENCE` row that is still open names a capability
 (`capability=<name>` at the start of its Item). Those rows are the work a

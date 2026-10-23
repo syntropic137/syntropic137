@@ -73,9 +73,11 @@ defects?
 
 This is two variables, not one: the capability-gap change and PC-241's
 required-checks rule. The required-checks rule only changes the outcome when a
-non-required check fails, so each run's report says whether any did (the
-`Not required, not holding` list), and the primary metric is read on the runs
-where none did.
+non-required check fails, so the primary metric is read only on **pairs** in
+which neither arm saw one. Whether a run saw one is decided by the scorer from
+GitHub's own check data (below), identically for both arms, never from the
+treatment's `Not required, not holding` text, which the control does not
+write.
 
 Same task set, same models, same deployment flags for both arms in a batch.
 
@@ -84,12 +86,32 @@ Same task set, same models, same deployment flags for both arms in a batch.
 Treatment runs spend fewer fix rounds on unfixable evidence and have fewer
 fix-phase refusals, with escaped findings no higher.
 
-### Sample
+### Sample (frozen 2026-10-23)
 
-At least 3 tasks per arm whose change needs Docker, a database or mutation
-evidence to verify (the tasks behind #2036, #2038, #2040, #1968, #1922 are
-the candidates), plus 1 task per arm that needs none, as a control for
-spurious gaps. Each task runs once per arm.
+Exactly six tasks, each run once per arm: twelve runs, six matched pairs. Each
+task re-implements a merged change from the commit main was at just before it
+merged (the merge commit's first parent), so the fix is absent from the base.
+The task brief is the PR's linked issue, or the PR's own description where it
+links none, with the fix's diff and hidden tests withheld. Both arms get the
+identical brief text and base SHA.
+
+| Task | Base SHA | Expected evidence |
+|---|---|---|
+| #2036 (issue #2021) | `87ac1cc32cbf6df0df022b3a3b4a47f786edf722` | mutation |
+| #2038 (issue #1055) | `538aac945a73d0722934b5274b3128b1c7f3f340` | mutation |
+| #2040 (issue #2030) | `68416b9c9193a9fe3b297bfff548f9f8578b6b5d` | mutation |
+| #1968 (PR description) | `74ceba50c6b523d139271562b40527f21172c67b` | Docker, integration, mutation |
+| #1922 (PR description) | `ab74ed13b847ef8bff89fa0095cdce972423648d` | Docker (compose) |
+| #1144 part 2, `_run_headless` (control) | `a35a86e9e6388c558cc55c62734d88071808958b` | none |
+
+The control task needs no external evidence, so a capability gap reported on
+it is spurious. The "expected evidence" column is the dispatcher's reading of
+each original PR's history; it is not used for scoring.
+
+Power, honestly: six pairs detect only a large effect. A paired sign test
+needs all of the scoreable pairs to favour one arm before it reaches p < 0.05
+(5 of 5 gives p = 0.031 one-sided). Read anything short of that as
+directional, and report every pair's difference rather than a single total.
 
 ### Mechanism check (before any metric is read)
 
@@ -101,7 +123,9 @@ where the mechanism did not fire is reported, not scored.
 
 ### Metrics
 
-- **Primary:** fix rounds whose scope was only unfixable evidence, per arm.
+- **Primary:** fix rounds whose scope was only unfixable evidence, as a
+  **paired difference** (treatment minus control) per task, over the
+  scoreable pairs. Reported per pair and as the sign count.
 - **Secondary:** fix-phase refusals per arm; capability gaps by name;
   declared entries refused by the parser; gaps that turned out to be the
   PR's own defect once run (misclassified).
@@ -117,10 +141,30 @@ where the mechanism did not fire is reported, not scored.
 - **Reject:** escaped findings higher, or a misclassified gap reached READY.
 - **No difference** is a result: the tasks did not hit the class.
 
+### Scoring, the same for both arms
+
+- **Non-required failures.** At the start of the batch, read the base
+  branch's required set once (the union of rules and classic protection, as
+  the prompts read it). For each run, list the failing check runs and
+  commit statuses on its final head with `gh api
+  repos/<o>/<r>/commits/<sha>/check-runs` and `.../status`. A run saw a
+  non-required failure if any failing name is not in that set.
+- **Exclusion is by pair.** If either run of a pair saw a non-required
+  failure, or either run is not scored (the mechanism check, or a platform
+  failure that its one re-dispatch did not clear), the whole pair leaves the
+  primary metric. Excluded pairs are still listed, with the reason.
+- **Unfixable-evidence rounds.** A fix round counts when every finding it was
+  handed is one the round's own verify report or fix report places outside
+  what the workspace can produce (Docker, a database, a live API, a CI-only
+  check). The scorer applies the same rubric to both arms, reading the
+  findings and not the treatment-only headings.
+
 ### Stopping rule
 
-The sample above, then stop and write the result here. A run that fails for a
-platform reason is re-dispatched once on the same arm.
+The twelve runs above, then stop and write the result here. No task is added,
+swapped or dropped after the first dispatch. A run that fails for a platform
+reason is re-dispatched once on the same arm; if it fails again, its pair is
+excluded as above.
 
 ## Results
 

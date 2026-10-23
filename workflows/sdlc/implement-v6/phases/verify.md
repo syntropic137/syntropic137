@@ -296,12 +296,17 @@ touched, kept a certified PR in draft).
 
 ```
 gh repo view --json nameWithOwner --jq .nameWithOwner
-gh api repos/<owner>/<name>/rules/branches/<base> --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context]'
+gh api --paginate repos/<owner>/<name>/rules/branches/<base> --jq '.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context'
+gh api repos/<owner>/<name>/branches/<base>/protection/required_status_checks --jq '.contexts[]'
 ```
 
-If that list is empty, read classic branch protection instead:
-`gh api repos/<owner>/<name>/branches/<base>/protection/required_status_checks --jq .contexts`.
-A 404 there means the branch requires no checks.
+GitHub enforces rulesets and classic branch protection together, so the
+required set is the **union** of both outputs, never one in place of the
+other. The rules endpoint is paginated, and `--paginate` reads every page. A
+404 from the classic command means no classic protection is configured: it
+adds nothing, and it is a readable answer. Any other failure of either
+command (a 403, a 5xx, a timeout, or output that is not a list of check
+names) makes the set **unreadable**.
 
 - **A required check** keeps the precheck's classes unchanged.
 - **A check that is not required, and fails for a cause outside this diff**
@@ -312,8 +317,8 @@ A 404 there means the branch requires no checks.
   It never counts toward `FLAKE_INFRA` and gets no rerun.
 - **A check that is not required, and fails because of this diff** is still
   `REPAIRABLE`. Required or not, a defect the branch introduced is a defect.
-- **The required set cannot be read** (both commands fail, for example on a
-  403): write `Required checks: unreadable` with the error verbatim, and treat
+- **The required set cannot be read** (either command fails, other than a
+  404 from the classic one): write `Required checks: unreadable` with the error verbatim, and treat
   every check as required, exactly as the precheck says.
 
 Write the set you read on one line before the handoff table:

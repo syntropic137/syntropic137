@@ -31,10 +31,27 @@ from pathlib import Path
 
 import pytest
 
-from syn_domain.contexts.orchestration._shared.evidence_contract import EvidenceRequest
+from syn_domain.contexts.orchestration._shared.evidence_contract import (
+    EvidenceKind,
+    EvidenceManifest,
+    EvidenceRequest,
+    EvidenceStepKind,
+    PatchRemoval,
+    StepOutcome,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_gate import (
+    GateInputs,
+    SettledStep,
+    build_manifest,
+    plan_steps,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_record import (
     declared_evidence_from_reported,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    DeclaredEvidence,
+    ObservedHead,
 )
 
 pytestmark = pytest.mark.unit
@@ -223,14 +240,24 @@ def test_a_capability_key_on_an_entry_is_refused_as_the_prompt_says() -> None:
 
 
 class TestFinalizeTrustsOnlyACompletePassedManifest:
-    def test_a_manifest_closes_rows_only_when_complete_and_every_step_passed(self) -> None:
+    def test_the_rule_names_both_plan_shapes_the_gate_produces(self) -> None:
         rule = _flat(_section(_prompts(_V6)["finalize_pr"], _FINALIZE_SECTION))
+        assert "**With cleanup:** it has a `remove_mutation_patches` step" in rule
+        assert "the branch head is `patch_removal.after_sha`" in rule
         assert (
-            "`complete` is `true`, every step settled `passed`, and the `required_check` step passed on the branch head"
+            "**Without cleanup:** mutation and/or integration steps only, and no `required_check` step"
             in rule
         )
-        assert "Anything else (a step `failed`, `void` or `unavailable`) leaves them open" in rule
-        assert "and only those" in rule
+        assert "every check in the required set above is green on the current branch head" in rule
+        assert "closes the `ORCHESTRATOR_EVIDENCE` rows its phase declared, and only those" in rule
+
+    def test_a_failed_manifest_holds_draft_even_when_the_report_has_no_handoff_row(self) -> None:
+        """Codex #2063 r1: a failed cleanup gate after a `None.` report could reach ready."""
+        rule = _flat(_section(_prompts(_V6)["finalize_pr"], _FINALIZE_SECTION))
+        assert "**A manifest that does not pass holds the PR in draft on its own**" in rule
+        assert "whether or not the report has any handoff row" in rule
+        assert "does not make a failed gate ready" in rule
+        assert "a file that does not parse as a manifest" in rule
 
     def test_an_open_handoff_still_never_reaches_gh_pr_ready(self) -> None:
         finalize = _prompts(_V6)["finalize_pr"]
@@ -288,3 +315,128 @@ class TestOnlyARequiredCheckHoldsACertifiedPrInDraft:
         for phase in _REVIEWS:
             text = _prompts(_V6)[phase]
             assert text.index(_REQUIRED_REVIEW_SECTION) < text.index(_REVIEW_SECTION), phase
+
+
+_REPO = "syntropic137/syntropic137"
+_SHA = "a" * 40
+_CLEANED = "c" * 40
+
+
+def _declared(kind: EvidenceKind, test: str) -> DeclaredEvidence:
+    return DeclaredEvidence(
+        request=EvidenceRequest(
+            kind=kind, repository=_REPO, branch="feat/x", pr=42, head_sha=_SHA, tests=(test,)
+        )
+    )
+
+
+def _gate(*, patches: bool) -> GateInputs:
+    return GateInputs(
+        declared=(
+            _declared(EvidenceKind.MUTATION, "tests/test_a.py::t"),
+            _declared(EvidenceKind.INTEGRATION, "tests/integration/test_i.py::t"),
+        ),
+        observed=(
+            ObservedHead(
+                repository=_REPO,
+                branch="feat/x",
+                readable=True,
+                head_sha=_SHA,
+                mutation_patches_present=patches,
+                open_pr_number=42,
+            ),
+        ),
+        repositories=frozenset({_REPO}),
+        next_is_final=True,
+        certified=True,
+    )
+
+
+def _manifest(*, patches: bool, outcome: StepOutcome = StepOutcome.PASSED) -> EvidenceManifest:
+    plan = plan_steps(_gate(patches=patches))
+    settled = [
+        SettledStep(
+            index=step.index, outcome=outcome, reason=None if outcome is StepOutcome.PASSED else "x"
+        )
+        for step in plan
+    ]
+    removed = (
+        PatchRemoval(before_sha=_SHA, after_sha=_CLEANED, author="syntropic137")
+        if patches and outcome is StepOutcome.PASSED
+        else None
+    )
+    return build_manifest("g-1", plan, settled, removed)
+
+
+def _finalize_closes(manifest: EvidenceManifest, *, head: str, required_green: bool | None) -> bool:
+    """The finalize_pr rule as written, applied to a manifest the real gate builds.
+
+    ``required_green`` is None when the required set was unreadable.
+    """
+    if any(step.outcome is not StepOutcome.PASSED for step in manifest.steps):
+        return False
+    kinds = {step.kind for step in manifest.steps}
+    if EvidenceStepKind.REMOVE_MUTATION_PATCHES in kinds:
+        assert EvidenceStepKind.REQUIRED_CHECK in kinds
+        return manifest.patch_removal is not None and manifest.patch_removal.after_sha == head
+    assert EvidenceStepKind.REQUIRED_CHECK not in kinds
+    return required_green is True
+
+
+class TestFinalizeOnTheGatesRealPlanShapes:
+    """Codex #2063 r1: an integration-only plan has no `required_check` step to wait for."""
+
+    def test_the_gate_plans_a_required_check_only_around_a_cleanup(self) -> None:
+        with_cleanup = {s.kind for s in _manifest(patches=True).steps}
+        without = {s.kind for s in _manifest(patches=False).steps}
+        assert {
+            EvidenceStepKind.REMOVE_MUTATION_PATCHES,
+            EvidenceStepKind.REQUIRED_CHECK,
+        } <= with_cleanup
+        assert EvidenceStepKind.REQUIRED_CHECK not in without
+        assert EvidenceStepKind.INTEGRATION in without
+
+    def test_a_passed_plan_without_cleanup_closes_on_green_required_checks(self) -> None:
+        manifest = _manifest(patches=False)
+        assert _finalize_closes(manifest, head=_SHA, required_green=True)
+        assert not _finalize_closes(manifest, head=_SHA, required_green=False)
+        assert not _finalize_closes(manifest, head=_SHA, required_green=None)
+
+    def test_a_passed_plan_with_cleanup_closes_only_on_the_cleaned_head(self) -> None:
+        manifest = _manifest(patches=True)
+        assert _finalize_closes(manifest, head=_CLEANED, required_green=None)
+        assert not _finalize_closes(manifest, head=_SHA, required_green=True)
+
+    @pytest.mark.parametrize("patches", [True, False])
+    @pytest.mark.parametrize(
+        "outcome", [StepOutcome.FAILED, StepOutcome.VOID, StepOutcome.UNAVAILABLE]
+    )
+    def test_any_step_not_passed_never_closes(self, patches: bool, outcome: StepOutcome) -> None:
+        manifest = _manifest(patches=patches, outcome=outcome)
+        assert not _finalize_closes(manifest, head=_CLEANED, required_green=True)
+
+
+class TestRequiredSetIsTheUnionOfEverySource:
+    """Codex #2063 r1: rulesets and classic protection are enforced together, and paged."""
+
+    @pytest.mark.parametrize("phase", (*_REVIEWS, "finalize_pr"))
+    def test_every_phase_reads_all_pages_and_both_sources(self, phase: str) -> None:
+        text = _prompts(_V6)[phase]
+        assert "gh api --paginate repos/<owner>/<name>/rules/branches/<base>" in text
+        assert "branches/<base>/protection/required_status_checks --jq '.contexts[]'" in text
+        flat = _flat(text)
+        assert (
+            "the required set is the **union** of both outputs, never one in place of the other"
+            in flat
+        )
+        assert "If that list is empty" not in flat
+
+    @pytest.mark.parametrize("phase", (*_REVIEWS, "finalize_pr"))
+    def test_a_classic_404_is_an_answer_and_any_other_failure_is_unreadable(
+        self, phase: str
+    ) -> None:
+        flat = _flat(_prompts(_V6)[phase])
+        assert "A 404 from the classic command means no classic protection is configured" in flat
+        assert "Any other failure of either command" in flat
+        assert "makes the set **unreadable**" in flat
+        assert "other than a 404 from the classic one" in flat
