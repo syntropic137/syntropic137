@@ -5,28 +5,31 @@ Design: docs/research/2026-10-08-remote-executor-e2b.md, decision 7.
 The spool lives on the sandbox's own disk at ``/spool``, retained by pausing the
 sandbox rather than by a volume. Recovery resumes it, stops and confirms every
 agent writer gone, then reads with the same execute-based readers Docker uses.
-Leaving the context pauses the sandbox again: only release, after
-``mark_drained``, kills it.
+Leaving the context pauses the sandbox again while the lease is still ours: only
+release, after ``mark_drained``, kills it.
 
-Reaching a sandbox is not permission to stop it. That comes from durable state
-only: the lease is settled (no executor will resume the session) and still
-ours, checked before attach and again after it, since attach can be slow.
+Reaching a sandbox is not permission to stop it, or to pause it. That comes from
+durable state only: the lease is settled (no executor will resume the session)
+and still ours, checked before attach, again after it, since attach can be slow,
+and again before the closing pause. Once the lease is lost the sandbox belongs
+to its new owner, which resumes and pauses it itself.
 """
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Protocol
 
 from agentic_isolation.child_journal import WorkspaceChildJournalReader
 from agentic_isolation.session_spool import WorkspaceSpoolReader, capture_retained_partition
+
+from syn_domain.contexts.agent_sessions import CaptureSpoolLeaseLost
 
 from .recovery_worker import RecoveryReaders
 from .workspace_location import workspace_capture_location
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
-    from contextlib import AbstractAsyncContextManager
 
     from agentic_isolation.harnesses import ExecFn
 
@@ -57,13 +60,12 @@ class RecoverySandbox(Protocol):
 class RecoverySandboxes(Protocol):
     """The recovery kit for one backend and account (decision 8)."""
 
-    def attach(
-        self, sandbox_id: str, *, executor_id: str
-    ) -> AbstractAsyncContextManager[RecoverySandbox]:
-        """Resume ``sandbox_id`` after an ownership check against ``executor_id``.
+    async def resume(self, sandbox_id: str, *, executor_id: str) -> RecoverySandbox:
+        """Resume ``sandbox_id`` after an ownership check against ``executor_id``."""
+        ...
 
-        Leaving the context pauses it again, whatever happened inside.
-        """
+    async def pause(self, sandbox_id: str) -> None:
+        """Pause ``sandbox_id`` again; its disk, and so the spool, is kept."""
         ...
 
     async def writers_stopped(self, sandbox_id: str, *, executor_id: str) -> bool:
@@ -101,9 +103,20 @@ class SandboxSpoolRecovery:
                 "its executor may still resume it, so recovery will not stop its agent"
             )
         location = workspace_capture_location(spool.run, spool.session_id)
-        await fence()
-        async with self._sandboxes.attach(sandbox_id, executor_id=executor_id) as sandbox:
-            await fence()
+        lost = False
+
+        async def fenced() -> None:
+            nonlocal lost
+            try:
+                await fence()
+            except CaptureSpoolLeaseLost:
+                lost = True
+                raise
+
+        await fenced()
+        sandbox = await self._sandboxes.resume(sandbox_id, executor_id=executor_id)
+        try:
+            await fenced()
             # Resuming resumes the agent too. A run in fencing or a disconnected
             # stream says nothing about whether it still writes: only the
             # provider's confirmation makes this traversal exclusive.
@@ -120,6 +133,17 @@ class SandboxSpoolRecovery:
                 ),
                 exclusive=exclusive,
             )
+        except CaptureSpoolLeaseLost:
+            lost = True
+            raise
+        finally:
+            # A stale worker leaves the sandbox to whoever holds the lease now:
+            # pausing it would cut that worker's reads off mid-traversal.
+            if not lost:
+                with suppress(CaptureSpoolLeaseLost):
+                    await fenced()
+            if not lost:
+                await self._sandboxes.pause(sandbox_id)
 
     async def remove(self, spool: CaptureSpool) -> bool:
         # Evicting bytes is not permission to end a run: a quota or age limit

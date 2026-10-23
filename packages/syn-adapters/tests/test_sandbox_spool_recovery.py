@@ -14,7 +14,6 @@ import base64
 import hashlib
 import json
 import shlex
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
@@ -37,7 +36,6 @@ from syn_domain.contexts.agent_sessions import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
     from pathlib import Path
 
     import asyncpg
@@ -203,8 +201,7 @@ class ScriptedSandboxes:
         self.sandboxes: dict[str, ScriptedSandbox] = {}
         self.order: list[str] = []
 
-    @asynccontextmanager
-    async def attach(self, sandbox_id: str, *, executor_id: str) -> AsyncIterator[ScriptedSandbox]:
+    async def resume(self, sandbox_id: str, *, executor_id: str) -> ScriptedSandbox:
         sandbox = self.sandboxes[sandbox_id]
         if sandbox.owner != executor_id:
             raise PermissionError("sandbox belongs to another executor")
@@ -212,11 +209,11 @@ class ScriptedSandboxes:
         self.order.append(f"resume:{sandbox_id}")
         # Resuming resumes the agent: it writes before anyone can stop it.
         sandbox.agent_writes("after-resume")
-        try:
-            yield sandbox
-        finally:
-            sandbox.paused = True
-            self.order.append(f"pause:{sandbox_id}")
+        return sandbox
+
+    async def pause(self, sandbox_id: str) -> None:
+        self.sandboxes[sandbox_id].paused = True
+        self.order.append(f"pause:{sandbox_id}")
 
     async def writers_stopped(self, sandbox_id: str, *, executor_id: str) -> bool:
         sandbox = self.sandboxes[sandbox_id]
@@ -413,9 +410,9 @@ async def test_lease_lost_during_a_slow_attach_stops_nothing() -> None:
     # Worker check, the adapter's pre-attach fence, then lost by the time attach returns.
     spools.renew.side_effect = [None, None, CaptureSpoolLeaseLost("expired while attaching")]
     assert await worker.step()
-    assert remote.order[0] == "resume:sbx-1"
+    # The new owner resumes and pauses it itself; a stale pause would cut its reads off.
+    assert remote.order == ["resume:sbx-1"]
     assert sandbox.writer_alive and "stop" not in sandbox.log
-    assert not any(entry.startswith("kill") for entry in remote.order)
     spools.mark_drained.assert_not_awaited()
 
 
@@ -434,8 +431,16 @@ async def test_removal_refuses_a_sandbox_whose_writer_still_runs() -> None:
 # --- Real store, production wiring ------------------------------------------
 
 
-async def _runtime(pool: asyncpg.Pool, archive: Path, remote: ScriptedSandboxes, source: str):
-    """A fresh worker process: nothing survives but the database and the remote account."""
+async def _runtime(
+    pool: asyncpg.Pool,
+    archive: Path,
+    remote: ScriptedSandboxes | None,
+    source: str,
+):
+    """A fresh worker process: nothing survives but the database and the remote account.
+
+    ``remote=None`` is a worker wired without the E2B recovery kit, as production is today.
+    """
     from syn_adapters.session_inventory import runtime as runtime_module
     from syn_shared.settings.session_inventory import SessionInventorySettings
 
@@ -449,7 +454,7 @@ async def _runtime(pool: asyncpg.Pool, archive: Path, remote: ScriptedSandboxes,
         cast("Pool", pool),
         MemoryEventStoreClient(),
         settings,
-        remote_recovery={"e2b": SandboxSpoolRecovery(remote)},
+        remote_recovery=None if remote is None else {"e2b": SandboxSpoolRecovery(remote)},
     )
 
 
@@ -567,9 +572,18 @@ async def test_only_the_settled_sandbox_is_stopped_when_a_healthy_one_shares_the
 async def test_worker_without_remote_access_never_claims_a_remote_spool(
     db_pool: asyncpg.Pool, tmp_path: Path
 ) -> None:
+    """A settled, claimable E2B row: only a worker holding the kit takes it."""
     source = str(uuid4())
-    remote, _ = _sandboxes()
-    runtime = await _runtime(db_pool, tmp_path / "archive", remote, source)
-    await runtime.spools.project(_spool(source))
-    assert await runtime.spools.claim(lease_seconds=60, backends=("docker",)) is None
-    assert await runtime.spools.claim(lease_seconds=60, backends=("e2b",)) is not None
+    remote, sandbox = _sandboxes(alive=True)
+    blind = await _runtime(db_pool, tmp_path / "archive", None, source)
+    await blind.spools.project(_spool(source))
+    await blind.spools.settle(_spool(source).session_id)
+    await blind.processor.process_pending()
+    assert remote.order == [] and sandbox.writer_alive
+    assert (await _row(db_pool, source))["drained_at"] is None
+
+    authorized = await _runtime(db_pool, tmp_path / "archive", remote, source)
+    await authorized.processor.process_pending()
+    await authorized.processor.process_pending()
+    assert (await _row(db_pool, source))["drained_at"] is not None
+    assert remote.order[0] == "resume:sbx-1"
