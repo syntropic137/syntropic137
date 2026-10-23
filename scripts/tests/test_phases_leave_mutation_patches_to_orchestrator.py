@@ -31,7 +31,7 @@ _PR_WORKFLOWS = (
     "sdlc/implement",
     "sdlc/implement-v3",
     "sdlc/implement-v4-precheck",
-    "sdlc/implement-v6",
+    "sdlc/implement-v7",
     "sdlc/reverify-pr",
     "custom/bake-opus",
     "custom/bake-haiku",
@@ -39,7 +39,7 @@ _PR_WORKFLOWS = (
 )
 
 #: The workflows whose verifiers sort open items into precheck classes.
-_PRECHECK_WORKFLOWS = ("sdlc/implement-v4-precheck", "sdlc/implement-v6")
+_PRECHECK_WORKFLOWS = ("sdlc/implement-v4-precheck", "sdlc/implement-v7")
 
 #: Phases that push to a PR branch that may carry `.mutations/`.
 _PUSHERS = frozenset({"implement", "prepare", "fix", "fix_2"})

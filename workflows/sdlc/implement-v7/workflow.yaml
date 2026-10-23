@@ -1,5 +1,5 @@
-id: sdlc-implement-v6
-name: "SDLC: Premise, implement + draft PR, verify with evidence precheck and capability gaps, fix, re-verify, mark ready (v6)"
+id: sdlc-implement-v7
+name: "SDLC: Premise, implement + draft PR, verify with evidence precheck and capability gaps, fix, re-verify, mark ready (v7)"
 description: >
   sdlc-implement-v4-precheck with ONE change: evidence declarations and
   capability gaps (#2060). Reviewers and authors declare integration and
@@ -7,9 +7,10 @@ description: >
   dispatch it, every ORCHESTRATOR_EVIDENCE row names the capability the
   workspace lacked, fix phases stop on a capability gap instead of refusing
   after work, and finalize_pr reads the platform-evidence manifest and lists
-  the gaps under "Needs a capable workspace". v6 also lets only a check the
-  base branch requires hold a certified PR in draft (PC-241; v5 is the same
-  arm without that rule). An A/B arm against v4-precheck; see EXPERIMENT.md
+  the gaps under "Needs a capable workspace". It also lets only a check the
+  base branch requires hold a certified PR in draft (PC-241), reading the
+  required set from the base branch's rulesets (v7; v6 read classic protection
+  as an equal source, and its 403 made every run fail closed). An A/B arm against v4-precheck; see EXPERIMENT.md
   beside this file.
 type: implementation
 classification: standard
@@ -34,8 +35,11 @@ inputs:
 # The reviews and finalize_pr also gain a required-checks section (PC-241):
 # only a check the base branch requires can hold a certified PR in draft.
 # v5 (9d4278c51, run as exec-47d6ab7275be and exec-ac271b4ad91a) had no such
-# section; ids are immutable once run, so the fix is this v6.
-# scripts/tests/test_implement_v6_variant.py fails if anything else differs.
+# section; ids are immutable once run, so the fix became v6 (959affd6c, run
+# as exec-ea452869d0b1). v6 treated a 403 from classic branch protection as an
+# unreadable required set, which the App token always gets on a ruleset repo,
+# so it is v7 that reads rulesets first.
+# scripts/tests/test_implement_v7_variant.py fails if anything else differs.
 # The design note is EXPERIMENT.md. The evidence contract is
 # docs/plans/20261015_platform-dispatched-evidence.md section A.11, which
 # v4-precheck's EXPERIMENT.md decision 4 assigned to a v5 rather than to an

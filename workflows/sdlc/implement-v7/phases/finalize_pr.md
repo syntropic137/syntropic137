@@ -101,13 +101,17 @@ gh api --paginate repos/<owner>/<name>/rules/branches/<base> --jq '.[] | select(
 gh api repos/<owner>/<name>/branches/<base>/protection/required_status_checks --jq '.contexts[]'
 ```
 
-GitHub enforces rulesets and classic branch protection together, so the
-required set is the **union** of both outputs, never one in place of the
-other. The rules endpoint is paginated, and `--paginate` reads every page. A
-404 from the classic command means no classic protection is configured: it
-adds nothing, and it is a readable answer. Any other failure of either
-command (a 403, a 5xx, a timeout, or output that is not a list of check
-names) makes the set **unreadable**.
+The rules command is the source: rulesets are how a repository requires
+checks today, and the App token can read them. It is paginated, and
+`--paginate` reads every page. The classic command is a second source: when it
+answers, the required set is the **union** of both outputs, because GitHub
+enforces both. A 404 or a 403 from the classic command means classic
+protection is not readable with this token (the App token gets 403 on a
+ruleset repository). Note it as `Classic protection: not readable (<code>)`
+and use the rules output alone: that is still a readable answer. Only a
+failure of the rules command (any error, a 5xx, a timeout, or output that is
+not a list of check names), or a classic error other than 404 or 403, makes
+the set **unreadable**.
 
 - A `FLAKE/INFRA` row whose check is **not required** is not open. Move it,
   together with the report's own `### Not required, not holding` lines, to a
@@ -116,8 +120,8 @@ names) makes the set **unreadable**.
   the PR a draft and gets no rerun.
 - Every other handoff (`ORCHESTRATOR_EVIDENCE`, `CI_GAP`, and `FLAKE/INFRA` on
   a required check) stays open, as above.
-- **If the set is unreadable** (either command fails, other than a 404 from
-  the classic one), keep every `FLAKE/INFRA` row open, which is the rule without this section. Write
+- **If the set is unreadable** (the rules command fails, or the classic
+  one fails with anything but 404 or 403), keep every `FLAKE/INFRA` row open, which is the rule without this section. Write
   `Required checks: unreadable` with the error verbatim in the comment.
 
 Write `Required checks: <name>, <name>` (or `none`, or `unreadable`) in the

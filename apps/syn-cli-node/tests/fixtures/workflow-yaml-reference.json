@@ -737,7 +737,7 @@
       ],
       "document_sha256": "636c2bf1dca4f1306b4d14b93b340b7f87b08f02056a24d561a34dd69a11f608"
     },
-    "workflows/sdlc/implement-v6/workflow.yaml": {
+    "workflows/sdlc/implement-v7/workflow.yaml": {
       "phases": [
         {
           "id": "premise",
@@ -788,7 +788,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "aec9e4f904fc4b4d2f5df3d44c2e263b4e50f3fb99106fe413a37030fcbf8462"
+      "document_sha256": "51395ee065898011ed7a0f034467ea05360e106c000191dc8560b9524d32920a"
     },
     "workflows/sdlc/pr-review/workflow.yaml": {
       "phases": [

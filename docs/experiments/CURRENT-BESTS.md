@@ -65,14 +65,18 @@ EXISTS").
   cross-arm finding matters more: in 3 of 6 slots verify certified a head
   whose real-service tests had never run, and orchestrator-run evidence found
   a real defect each time.
-- **`sdlc-implement-v6`: A/B not started.** Draft PR #2063 (#2060):
-  v4-precheck plus declared evidence and structured capability gaps, per
-  decision 4 of `docs/plans/20261015_platform-dispatched-evidence.md`, plus
-  PC-241's rule that only a required check holds a certified PR in draft. Not
-  on `main`. Its predecessor `sdlc-implement-v5` ran two live checks on the
-  owner VPS on 2026-10-23: exec-47d6ab7275be (premise refuted a stale task)
-  and exec-ac271b4ad91a (certified on round 0, PR #2080, which found PC-241).
-  **no eval evidence yet.**
+- **`sdlc-implement-v7`: A/B not started.** Draft PR #2063 (#2060):
+  v4-precheck plus declared evidence and structured capability gaps
+  (decision 4 of `workflows/sdlc/implement-v4-precheck/EXPERIMENT.md`, prompt
+  contract in `docs/plans/20261015_platform-dispatched-evidence.md` section
+  A.11), plus PC-241's rule that only a required check holds a certified PR in
+  draft, with the required set read from rulesets. Not on `main`. Live checks
+  on the owner VPS, 2026-10-23: v5 as exec-47d6ab7275be (premise refuted a
+  stale task) and exec-ac271b4ad91a (certified on round 0, PR #2080, which
+  found PC-241); v6 as exec-ea452869d0b1 (certified on round 0, PR #2083, a
+  real `capability=database` gap; classic protection's 403 made it fail closed
+  on required checks, hence v7). The evidence gate it declares to is not wired
+  (#2085). **no eval evidence yet.**
 - **End-to-end replay (E4):** preregistered on PR #2019
   (`docs/experiments/2026-10-20-end-to-end-replay.md`), not dispatched, blocked
   on the replay target (#2055). Until it runs, no workflow default here has

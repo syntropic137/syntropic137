@@ -1,4 +1,4 @@
-"""`sdlc-implement-v6` is sdlc-implement-v4-precheck plus two added sections (an A/B arm, #2060).
+"""`sdlc-implement-v7` is sdlc-implement-v4-precheck plus two added sections (an A/B arm, #2060).
 
 The first is evidence declarations and capability gaps: reviews and fix rounds
 name the capability a workspace lacked instead of spending or refusing a round,
@@ -6,7 +6,7 @@ integration and mutation evidence is declared in `TASK_RESULT.evidence` for the
 platform evidence gate, and `finalize_pr` reads the gate's manifest. The second
 (PC-241, found by v5's live check) is that only a check the base branch requires
 can hold a certified PR in draft. The preregistration is
-`workflows/sdlc/implement-v6/EXPERIMENT.md`.
+`workflows/sdlc/implement-v7/EXPERIMENT.md`.
 
 An A/B is only readable if the arms differ in the one variable, so these tests
 pin that, reading the definitions as `POST /workflows` installs them:
@@ -27,6 +27,7 @@ from __future__ import annotations
 import difflib
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -58,7 +59,7 @@ pytestmark = pytest.mark.unit
 
 _SDLC = Path(__file__).resolve().parents[2] / "workflows" / "sdlc"
 _V4 = _SDLC / "implement-v4-precheck" / "workflow.yaml"
-_V6 = _SDLC / "implement-v6" / "workflow.yaml"
+_V7 = _SDLC / "implement-v7" / "workflow.yaml"
 
 _REVIEWS = ("verify", "reverify", "reverify_2")
 _FIXES = ("fix", "fix_2")
@@ -74,9 +75,9 @@ _REQUIRED_FINALIZE_SECTION = "## Only a required check holds the PR in draft"
 #: The closed list the orchestrator routes on. Every phase must name the same set.
 _CAPABILITIES = ("nested_docker", "database", "event_store", "live_api", "other")
 
-#: Words only the v6 change introduces. A changed finalize hunk naming none of
+#: Words only the v7 change introduces. A changed finalize hunk naming none of
 #: them is a second variable.
-_V6_TERMS = (
+_V7_TERMS = (
     "platform evidence",
     "Platform evidence",
     "manifest",
@@ -109,15 +110,15 @@ def _flat(text: str) -> str:
 
 
 def test_the_arm_differs_from_v4_only_in_its_identity_and_seven_prompts() -> None:
-    v4, v6 = _load(_V4), _load(_V6)
-    assert (v4.id, v6.id) == ("sdlc-implement-v4-precheck", "sdlc-implement-v6")
+    v4, v7 = _load(_V4), _load(_V7)
+    assert (v4.id, v7.id) == ("sdlc-implement-v4-precheck", "sdlc-implement-v7")
 
     identity = {"id", "name", "description"}
-    assert v4.model_dump(exclude=identity | {"phases"}) == v6.model_dump(
+    assert v4.model_dump(exclude=identity | {"phases"}) == v7.model_dump(
         exclude=identity | {"phases"}
     )
-    assert [p.id for p in v4.phases] == [p.id for p in v6.phases]
-    for old, new in zip(v4.phases, v6.phases, strict=True):
+    assert [p.id for p in v4.phases] == [p.id for p in v7.phases]
+    for old, new in zip(v4.phases, v7.phases, strict=True):
         drop = {"prompt_template"} if old.id in _CHANGED else set()
         assert old.model_dump(exclude=drop) == new.model_dump(exclude=drop), (
             f"phase {old.id} differs from v4-precheck in more than its prompt"
@@ -126,7 +127,7 @@ def test_the_arm_differs_from_v4_only_in_its_identity_and_seven_prompts() -> Non
 
 @pytest.mark.parametrize("phase", _CHANGED)
 def test_the_treatment_actually_changed_each_prompt_it_claims(phase: str) -> None:
-    assert _prompts(_V4)[phase] != _prompts(_V6)[phase]
+    assert _prompts(_V4)[phase] != _prompts(_V7)[phase]
 
 
 @pytest.mark.parametrize(
@@ -141,7 +142,7 @@ def test_the_treatment_actually_changed_each_prompt_it_claims(phase: str) -> Non
 def test_each_added_section_is_one_text_wherever_it_appears(
     phases: tuple[str, ...], heading: str
 ) -> None:
-    prompts = _prompts(_V6)
+    prompts = _prompts(_V7)
     assert len({_section(prompts[p], heading) for p in phases}) == 1, (
         f"the copies of {heading!r} have drifted apart"
     )
@@ -159,30 +160,30 @@ def test_each_added_section_is_one_text_wherever_it_appears(
 def test_removing_the_added_sections_gives_back_v4_exactly(
     phase: str, heading: tuple[str, ...]
 ) -> None:
-    v6 = _prompts(_V6)[phase]
+    v7 = _prompts(_V7)[phase]
     for one in heading:
-        v6 = v6.replace(_section(v6, one), "", 1)
-    assert v6 == _prompts(_V4)[phase]
+        v7 = v7.replace(_section(v7, one), "", 1)
+    assert v7 == _prompts(_V4)[phase]
 
 
 def test_every_finalize_difference_from_v4_is_about_the_v5_change() -> None:
     old = _prompts(_V4)["finalize_pr"].splitlines()
-    new = _prompts(_V6)["finalize_pr"].splitlines()
+    new = _prompts(_V7)["finalize_pr"].splitlines()
     for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(
         a=old, b=new, autojunk=False
     ).get_opcodes():
         if tag == "equal":
             continue
         hunk = "\n".join(new[max(0, j1 - 1) : j2 + 1])
-        assert any(term in hunk for term in _V6_TERMS), (
-            f"finalize_pr: a change unrelated to v6:\n{hunk}"
+        assert any(term in hunk for term in _V7_TERMS), (
+            f"finalize_pr: a change unrelated to v7:\n{hunk}"
         )
 
 
 @pytest.mark.parametrize("phase", (*_REVIEWS, *_FIXES))
 def test_every_phase_names_the_same_closed_capability_list(phase: str) -> None:
     heading = _REVIEW_SECTION if phase in _REVIEWS else _FIX_SECTION
-    named = re.findall(r"`([a-z_]+)`", _section(_prompts(_V6)[phase], heading))
+    named = re.findall(r"`([a-z_]+)`", _section(_prompts(_V7)[phase], heading))
     assert [c for c in named if c in _CAPABILITIES] and set(_CAPABILITIES) <= set(named)
 
 
@@ -210,7 +211,7 @@ def _concrete(example: str) -> object:
     ],
 )
 def test_the_example_entry_is_one_the_platform_accepts(phase: str, heading: str) -> None:
-    section = _section(_prompts(_V6)[phase], heading)
+    section = _section(_prompts(_V7)[phase], heading)
     match = _EXAMPLE.search(section)
     assert match, f"{phase} shows no evidence entry"
     declared = declared_evidence_from_reported(_concrete(match.group(1)))
@@ -219,7 +220,7 @@ def test_the_example_entry_is_one_the_platform_accepts(phase: str, heading: str)
 
 
 def _review_example() -> str:
-    match = _EXAMPLE.search(_section(_prompts(_V6)["verify"], _REVIEW_SECTION))
+    match = _EXAMPLE.search(_section(_prompts(_V7)["verify"], _REVIEW_SECTION))
     assert match, "verify shows no evidence entry"
     return match.group(1)
 
@@ -228,7 +229,7 @@ def test_the_keys_the_prompts_promise_are_the_contracts_keys() -> None:
     entry = _concrete(_review_example())
     assert isinstance(entry, list) and len(entry) == 1
     assert set(entry[0]) == set(EvidenceRequest.model_fields)
-    assert "Use exactly these six keys" in _section(_prompts(_V6)["verify"], _REVIEW_SECTION)
+    assert "Use exactly these six keys" in _section(_prompts(_V7)["verify"], _REVIEW_SECTION)
     assert len(EvidenceRequest.model_fields) == 6
 
 
@@ -241,7 +242,7 @@ def test_a_capability_key_on_an_entry_is_refused_as_the_prompt_says() -> None:
 
 class TestFinalizeTrustsOnlyACompletePassedManifest:
     def test_the_rule_names_both_plan_shapes_the_gate_produces(self) -> None:
-        rule = _flat(_section(_prompts(_V6)["finalize_pr"], _FINALIZE_SECTION))
+        rule = _flat(_section(_prompts(_V7)["finalize_pr"], _FINALIZE_SECTION))
         assert "**With cleanup:** it has a `remove_mutation_patches` step" in rule
         assert "the branch head is `patch_removal.after_sha`" in rule
         assert (
@@ -253,7 +254,7 @@ class TestFinalizeTrustsOnlyACompletePassedManifest:
 
     def test_a_failed_manifest_holds_draft_even_when_the_report_has_no_handoff_row(self) -> None:
         """Codex #2063 r1: a failed cleanup gate after a `None.` report could reach ready."""
-        rule = _flat(_section(_prompts(_V6)["finalize_pr"], _FINALIZE_SECTION))
+        rule = _flat(_section(_prompts(_V7)["finalize_pr"], _FINALIZE_SECTION))
         assert (
             "**A manifest on the current head that does not pass holds the PR in draft on its own**"
             in rule
@@ -263,7 +264,7 @@ class TestFinalizeTrustsOnlyACompletePassedManifest:
         assert "a file that does not parse as a manifest" in rule
 
     def test_an_open_handoff_still_never_reaches_gh_pr_ready(self) -> None:
-        finalize = _prompts(_V6)["finalize_pr"]
+        finalize = _prompts(_V7)["finalize_pr"]
         handoff = _flat(_section(finalize, "## If CERTIFIED and a handoff is open"))
         assert "Keep it a **draft**: never call `gh pr ready` here." in handoff
         assert "Needs a capable workspace" in handoff
@@ -271,7 +272,7 @@ class TestFinalizeTrustsOnlyACompletePassedManifest:
         assert "Follow this section only when no handoff is open" in certified
 
     def test_the_head_exception_is_only_the_recorded_patch_removal(self) -> None:
-        head = _flat(_section(_prompts(_V6)["finalize_pr"], "## Check the head"))
+        head = _flat(_section(_prompts(_V7)["finalize_pr"], "## Check the head"))
         assert "`patch_removal.after_sha` whose `before_sha` is the certified SHA" in head
 
     def test_the_count_line_each_review_writes_is_the_one_finalize_copies(self) -> None:
@@ -279,8 +280,8 @@ class TestFinalizeTrustsOnlyACompletePassedManifest:
             "Capability gaps: nested_docker=<n> database=<n> event_store=<n> live_api=<n> other=<n>"
         )
         for phase in _REVIEWS:
-            assert line in _prompts(_V6)[phase], phase
-        assert "its `Capability gaps:` line copied verbatim" in _flat(_prompts(_V6)["finalize_pr"])
+            assert line in _prompts(_V7)[phase], phase
+        assert "its `Capability gaps:` line copied verbatim" in _flat(_prompts(_V7)["finalize_pr"])
 
 
 class TestOnlyARequiredCheckHoldsACertifiedPrInDraft:
@@ -289,7 +290,7 @@ class TestOnlyARequiredCheckHoldsACertifiedPrInDraft:
     _RULES = "rules/branches/<base>"
 
     def test_finalize_holds_only_on_a_required_check(self) -> None:
-        rule = _flat(_section(_prompts(_V6)["finalize_pr"], _REQUIRED_FINALIZE_SECTION))
+        rule = _flat(_section(_prompts(_V7)["finalize_pr"], _REQUIRED_FINALIZE_SECTION))
         assert (
             "A `FLAKE/INFRA` handoff holds a certified PR in draft only when its check is required on the base branch"
             in rule
@@ -299,7 +300,7 @@ class TestOnlyARequiredCheckHoldsACertifiedPrInDraft:
         assert self._RULES in rule and "required_status_checks" in rule
 
     def test_finalize_falls_back_to_holding_when_the_required_set_is_unreadable(self) -> None:
-        rule = _flat(_section(_prompts(_V6)["finalize_pr"], _REQUIRED_FINALIZE_SECTION))
+        rule = _flat(_section(_prompts(_V7)["finalize_pr"], _REQUIRED_FINALIZE_SECTION))
         assert "keep every `FLAKE/INFRA` row open" in rule
         assert "`Required checks: unreadable`" in rule
 
@@ -307,7 +308,7 @@ class TestOnlyARequiredCheckHoldsACertifiedPrInDraft:
     def test_a_review_parks_a_non_required_outside_failure_and_still_blocks_its_own(
         self, phase: str
     ) -> None:
-        rule = _flat(_section(_prompts(_V6)[phase], _REQUIRED_REVIEW_SECTION))
+        rule = _flat(_section(_prompts(_V7)[phase], _REQUIRED_REVIEW_SECTION))
         assert "not a handoff and not a blocker" in rule
         assert "### Not required, not holding" in rule
         assert "fails because of this diff** is still `REPAIRABLE`" in rule
@@ -316,7 +317,7 @@ class TestOnlyARequiredCheckHoldsACertifiedPrInDraft:
 
     def test_the_required_section_comes_before_the_capability_section(self) -> None:
         for phase in _REVIEWS:
-            text = _prompts(_V6)[phase]
+            text = _prompts(_V7)[phase]
             assert text.index(_REQUIRED_REVIEW_SECTION) < text.index(_REVIEW_SECTION), phase
 
 
@@ -452,7 +453,7 @@ class TestFinalizeJudgesTheCurrentHeadAndAMissingManifest:
     """Codex #2063 r2: a missing manifest failed open; a superseded failure held forever."""
 
     def test_the_prompt_separates_no_gate_from_a_missing_manifest(self) -> None:
-        rule = _flat(_section(_prompts(_V6)["finalize_pr"], _FINALIZE_SECTION))
+        rule = _flat(_section(_prompts(_V7)["finalize_pr"], _FINALIZE_SECTION))
         assert "**No manifest, nothing declared:** there was no gate to run" in rule
         assert (
             "**No manifest, but evidence was declared:** the declared evidence is unproven" in rule
@@ -462,7 +463,7 @@ class TestFinalizeJudgesTheCurrentHeadAndAMissingManifest:
         assert "Platform evidence: declared, no manifest" in rule
 
     def test_the_prompt_retires_manifests_on_an_earlier_head(self) -> None:
-        rule = _flat(_section(_prompts(_V6)["finalize_pr"], _FINALIZE_SECTION))
+        rule = _flat(_section(_prompts(_V7)["finalize_pr"], _FINALIZE_SECTION))
         assert (
             "`patch_removal.after_sha` when it has one, otherwise the `head_sha` its steps ran on"
             in rule
@@ -487,27 +488,68 @@ class TestFinalizeJudgesTheCurrentHeadAndAMissingManifest:
         assert _finalize_holds_draft([failed_on_s], head=_SHA, declared=True, open_rows=0)
 
 
-class TestRequiredSetIsTheUnionOfEverySource:
-    """Codex #2063 r1: rulesets and classic protection are enforced together, and paged."""
+@dataclass(frozen=True)
+class _Answer:
+    """One `gh api` call as a phase sees it: a list of check names, or an HTTP error."""
+
+    contexts: tuple[str, ...] = ()
+    status: int = 200
+
+
+def _required_set(rules: _Answer, classic: _Answer) -> frozenset[str] | None:
+    """The rule the v7 prompts state, as a decision table. None is `unreadable`.
+
+    The rules endpoint is the source. Classic protection adds its checks when it
+    answers, and a 404 or 403 from it (the App token's answer on a ruleset
+    repository) is a note, not a failure. Anything else fails closed.
+    """
+    if rules.status != 200:
+        return None
+    if classic.status == 200:
+        return frozenset(rules.contexts) | frozenset(classic.contexts)
+    if classic.status in (403, 404):
+        return frozenset(rules.contexts)
+    return None
+
+
+class TestRequiredSetReadsRulesetsFirst:
+    """v7: v6 failed closed on every run because the App token gets 403 from classic protection."""
 
     @pytest.mark.parametrize("phase", (*_REVIEWS, "finalize_pr"))
-    def test_every_phase_reads_all_pages_and_both_sources(self, phase: str) -> None:
-        text = _prompts(_V6)[phase]
+    def test_every_phase_reads_all_ruleset_pages_and_classic_as_a_second_source(
+        self, phase: str
+    ) -> None:
+        text = _prompts(_V7)[phase]
         assert "gh api --paginate repos/<owner>/<name>/rules/branches/<base>" in text
         assert "branches/<base>/protection/required_status_checks --jq '.contexts[]'" in text
         flat = _flat(text)
-        assert (
-            "the required set is the **union** of both outputs, never one in place of the other"
-            in flat
-        )
-        assert "If that list is empty" not in flat
+        assert "The rules command is the source" in flat
+        assert "when it answers, the required set is the **union** of both outputs" in flat
 
     @pytest.mark.parametrize("phase", (*_REVIEWS, "finalize_pr"))
-    def test_a_classic_404_is_an_answer_and_any_other_failure_is_unreadable(
-        self, phase: str
-    ) -> None:
-        flat = _flat(_prompts(_V6)[phase])
-        assert "A 404 from the classic command means no classic protection is configured" in flat
-        assert "Any other failure of either command" in flat
+    def test_each_phase_states_the_three_cases(self, phase: str) -> None:
+        flat = _flat(_prompts(_V7)[phase])
+        assert (
+            "A 404 or a 403 from the classic command means classic protection is not readable"
+            in flat
+        )
+        assert "use the rules output alone: that is still a readable answer" in flat
+        assert "Only a failure of the rules command" in flat
         assert "makes the set **unreadable**" in flat
-        assert "other than a 404 from the classic one" in flat
+        assert "other than a 404 from the classic one" not in flat, "v6's rule is gone"
+
+    def test_ruleset_answer_and_classic_403_is_readable(self) -> None:
+        """exec-ea452869d0b1's inputs: v6 called this unreadable."""
+        assert _required_set(_Answer(("CI Success",)), _Answer(status=403)) == {"CI Success"}
+        assert _required_set(_Answer(("CI Success",)), _Answer(status=404)) == {"CI Success"}
+
+    def test_a_failed_ruleset_read_is_unreadable_whatever_classic_says(self) -> None:
+        for classic in (_Answer(("B",)), _Answer(status=403), _Answer(status=404)):
+            assert _required_set(_Answer(status=500), classic) is None
+            assert _required_set(_Answer(status=403), classic) is None
+
+    def test_classic_200_is_unioned(self) -> None:
+        assert _required_set(_Answer(("A",)), _Answer(("B",))) == {"A", "B"}
+
+    def test_any_other_classic_error_is_unreadable(self) -> None:
+        assert _required_set(_Answer(("A",)), _Answer(status=502)) is None

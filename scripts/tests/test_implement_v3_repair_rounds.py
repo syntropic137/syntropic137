@@ -71,8 +71,8 @@ _ROUND_WORKFLOWS = {
     / "implement-v4-precheck"
     / "workflow.yaml",
     # v4-precheck plus evidence declarations and capability gaps (#2060;
-    # test_implement_v6_variant.py pins that it differs in nothing else).
-    "sdlc-implement-v6": _REPO_ROOT / "workflows" / "sdlc" / "implement-v6" / "workflow.yaml",
+    # test_implement_v7_variant.py pins that it differs in nothing else).
+    "sdlc-implement-v7": _REPO_ROOT / "workflows" / "sdlc" / "implement-v7" / "workflow.yaml",
 }
 _FINALIZE = _WORKFLOW.parent / "phases" / "finalize_pr.md"
 
