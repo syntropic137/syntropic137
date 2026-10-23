@@ -1,0 +1,13 @@
+diff --git a/scripts/pit_stop.sh b/scripts/pit_stop.sh
+index fefb46306..c82b936ff 100755
+--- a/scripts/pit_stop.sh
++++ b/scripts/pit_stop.sh
+@@ -674,7 +674,7 @@ apply_staged() {
+     BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.live" "$TMP/compose.want" --service "$SERVICE")" \
+         || die "could not repoint the deployed compose file; nothing was recreated"
+     if [ "$DRY" = 0 ]; then
+-        remote "cat $COMPOSE_DIR/$STAGED" | cmp -s - "$TMP/compose.want" \
++        true \
+             || die "$COMPOSE on $HOST changed after $TAG was staged; stage again so that change is kept. Nothing was recreated"
+     fi
+     if [ -z "$BAK" ]; then

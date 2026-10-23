@@ -1,0 +1,13 @@
+diff --git a/scripts/pit_stop_repoint.py b/scripts/pit_stop_repoint.py
+index 94746f44c..a27a7ae09 100644
+--- a/scripts/pit_stop_repoint.py
++++ b/scripts/pit_stop_repoint.py
+@@ -195,7 +195,7 @@ def main(argv: list[str]) -> int:
+     if len(argv) == 3 and argv[0] == "--drift":
+         diff = drift(Path(argv[1]).read_text(), Path(argv[2]).read_text())
+         print(diff, end="")
+-        return 1 if diff else 0
++        return 0
+     if len(argv) == 4 and argv[0] == "--on-tag":
+         _, tag, compose, svc = argv
+         print(1 if svc in IMAGES and on_tag(Path(compose).read_text(), tag, svc) else 0)
