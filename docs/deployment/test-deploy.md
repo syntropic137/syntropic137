@@ -145,10 +145,11 @@ to its image name (pins are not drift) and comments and blank lines ignored.
 Any other difference aborts the pit stop and prints the diff: a pit stop only
 moves pins, so a new image whose startup needs a new volume, env var or socket
 proxy policy would be deployed without it. Bring the deployed compose up to
-date by hand (keep its pins), then run the pit stop again. There is no flag to
-stage the published compose wholesale; `SYN_PIT_PUBLISHED_COMPOSE=<file>`
-compares against a file instead of `--ref`'s, e.g. the release asset the host
-was installed from.
+date by hand (keep its pins), then run the pit stop again. The same check runs
+again on the file `stage` actually repoints, so an edit made on the host during
+the build cannot slip past it. There is no flag to stage the published compose
+wholesale, and no way to compare against any file but `--ref`'s: the release
+asset the host was installed from lacks exactly the config a newer image needs.
 
 The sections below remain the reference for what each stage does and why.
 

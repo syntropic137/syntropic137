@@ -501,6 +501,15 @@ trap 'exit 143' TERM
 # Read-only and lock-free under --dry-run.
 if [ "$DRY" = 0 ]; then claim_the_swap; fi
 
+# Die, printing the diff, unless $TMP/compose.deployed is $TMP/compose.published
+# with only its image pins changed (#1511). $1 says what the refusal left undone.
+refuse_drift() {
+    if ! python3 "$REPOINT_PY" --drift "$TMP/compose.published" "$TMP/compose.deployed" > "$TMP/compose.drift"; then
+        cat "$TMP/compose.drift"
+        die "$COMPOSE_DIR/$COMPOSE on $HOST is not the compose $REF publishes (diff above, image pins ignored). The $TAG images may need that config to start: bring the deployed compose up to date, then run the pit stop again. $1"
+    fi
+}
+
 if [ "$MODE" != "swap" ]; then
     # Before anything is built: a pit stop repoints image pins and nothing else,
     # so a compose the new image's startup depends on would never reach the
@@ -509,19 +518,12 @@ if [ "$MODE" != "swap" ]; then
     step "precheck: the deployed compose is $REF's published compose, image pins aside"
     # Fetched here, not at prepare, so $REF is the ref that ships, not a stale one.
     run git -C "$REPO_TOP" fetch -q origin
-    # SYN_PIT_PUBLISHED_COMPOSE names a file to compare against instead, e.g.
-    # the release asset a host was installed from.
-    if [ -n "${SYN_PIT_PUBLISHED_COMPOSE:-}" ]; then
-        cp "$SYN_PIT_PUBLISHED_COMPOSE" "$TMP/compose.published" || die "could not read $SYN_PIT_PUBLISHED_COMPOSE"
-    else
-        git -C "$REPO_TOP" show "$REF:$PUBLISHED" > "$TMP/compose.published" \
-            || die "could not read $PUBLISHED at $REF"
-    fi
+    # Always $REF's own file: an older baseline (the release asset the host
+    # was installed from, say) lacks exactly the config the new image needs.
+    git -C "$REPO_TOP" show "$REF:$PUBLISHED" > "$TMP/compose.published" \
+        || die "could not read $PUBLISHED at $REF"
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
-    if ! python3 "$REPOINT_PY" --drift "$TMP/compose.published" "$TMP/compose.deployed" > "$TMP/compose.drift"; then
-        cat "$TMP/compose.drift"
-        die "$COMPOSE_DIR/$COMPOSE on $HOST is not the compose $REF publishes (diff above, image pins ignored). The $TAG images may need that config to start: bring the deployed compose up to date, then run the pit stop again. Nothing was built, shipped or staged"
-    fi
+    refuse_drift "Nothing was built, shipped or staged"
     echo "   no drift"
 
     step "prepare: worktree at $REF, bump to $VERSION"
@@ -586,6 +588,9 @@ if [ "$MODE" != "swap" ]; then
     # stage and swap (a rotated credential, say) would otherwise start the new
     # build undrained, ungated and unverified (#1511). apply_staged moves it in.
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
+    # Checked again on the bytes actually repointed: the precheck read was
+    # before the build, and the host's file may have changed since.
+    refuse_drift "The $TAG images are on the host, but nothing was staged"
     BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged" --service "$SERVICE")" \
         || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
     [ -n "$BAK" ] || echo "   $ALREADY"

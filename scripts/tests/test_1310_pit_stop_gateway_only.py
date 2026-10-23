@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 import threading
@@ -44,12 +45,29 @@ _GOLDEN_STAGED = _FIXTURES / "dry-run-all-staged.txt"
 #: whole file locally (0.33.2-beta.9 did).
 _VERSION = "0.0.0-beta.1310"
 
+#: The first read of the deployed compose returns $PIT_COMPOSE; every later one
+#: returns $PIT_COMPOSE_LATER when it is set: the host's file edited mid-build.
 _SSH = """#!/usr/bin/env bash
 echo "$*" >> "$PIT_LOG/ssh"
 case "$*" in
-    *"cat /root/.syntropic137/docker-compose.syntropic137.yaml"*) cat "$PIT_COMPOSE" ;;
+    *"cat /root/.syntropic137/docker-compose.syntropic137.yaml"*)
+        if [ -n "${PIT_COMPOSE_LATER:-}" ] && [ -e "$PIT_LOG/compose-read" ]; then
+            cat "$PIT_COMPOSE_LATER"
+        else
+            touch "$PIT_LOG/compose-read"; cat "$PIT_COMPOSE"
+        fi ;;
     *"ps -eo args"*) echo 0 ;;
 esac
+"""
+
+#: Real git, except that $REF's published compose is $PIT_PUBLISHED: the
+#: script's only source for it, so the drift check is driven through the same
+#: read an operator's run makes (#1511).
+_GIT = """#!/usr/bin/env bash
+case "$*" in
+    *" show "*":docker/docker-compose.syntropic137.yaml") exec cat "$PIT_PUBLISHED" ;;
+esac
+exec {git} "$@"
 """
 
 # The prechecks read /workflows (the probe's) and /health (the disk), and the
@@ -79,13 +97,17 @@ def _dry_run(
     *flags: str,
     compose: str = "compose-tag.yaml",
     published: str | None = None,
+    later: str | None = None,
     rc: int = 0,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[str, str, Path]:
     """A dry run's normalised stdout, its stderr, and where the stubs logged."""
     bin_dir, log = tmp / "bin", tmp / "log"
     bin_dir.mkdir()
     log.mkdir()
-    for name, body in (("ssh", _SSH), ("curl", _CURL)):
+    git = shutil.which("git")
+    assert git is not None
+    for name, body in (("ssh", _SSH), ("curl", _CURL), ("git", _GIT.format(git=git))):
         stub = bin_dir / name
         stub.write_text(body)
         stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
@@ -94,12 +116,14 @@ def _dry_run(
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "PIT_LOG": str(log),
         "PIT_COMPOSE": str(_FIXTURES / compose),
-        # The deployed compose is held to the published one (#1511); the
+        # The deployed compose is held to $REF's published one (#1511); the
         # fixture is its own published compose, so these dry runs see no drift.
-        "SYN_PIT_PUBLISHED_COMPOSE": str(_FIXTURES / (published or compose)),
+        "PIT_PUBLISHED": str(_FIXTURES / (published or compose)),
         "SYN_API_PASSWORD": "pw",
         "SYN_PIT_HOST": "root@fake-host",
         "SYN_PIT_API": "http://fake-host:8137/api/v1",
+        **({"PIT_COMPOSE_LATER": str(_FIXTURES / later)} if later else {}),
+        **(extra_env or {}),
     }
     proc = subprocess.run(
         [str(_SCRIPT), _VERSION, "--dry-run", *flags],
@@ -387,3 +411,37 @@ class TestComposeDrift:
         assert "docker buildx" not in out
         assert "pit-stop-staged" not in out
         assert "maintenance" not in (log / "curl").read_text() if (log / "curl").exists() else True
+
+    def test_an_edit_made_on_the_host_during_the_build_is_refused_at_stage(
+        self, tmp_path: Path
+    ) -> None:
+        """The precheck read a compatible compose; by the time `stage` reads it
+        again the archive setting the new image needs is gone. The stage must
+        check the bytes it repoints, not trust the earlier read."""
+        out, err, _ = _dry_run(
+            tmp_path,
+            compose="compose-drifted.yaml",
+            later="compose-tag.yaml",
+            rc=1,
+        )
+        assert "   no drift" in out
+        assert "docker buildx" in out
+        assert "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory" in out
+        assert "is not the compose origin/main publishes" in err
+        assert "nothing was staged" in err
+        assert "mv docker-compose.syntropic137.yaml.pit-stop " not in out
+        assert "swap:" not in out
+
+    def test_an_old_release_asset_is_no_baseline(self, tmp_path: Path) -> None:
+        """The asset a host was installed from matches that host and lacks what
+        the new image needs. Naming it as the baseline once hid the drift."""
+        out, err, _ = _dry_run(
+            tmp_path,
+            compose="compose-tag.yaml",
+            published="compose-drifted.yaml",
+            rc=1,
+            extra_env={"SYN_PIT_PUBLISHED_COMPOSE": str(_FIXTURES / "compose-tag.yaml")},
+        )
+        assert "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory" in out
+        assert "is not the compose origin/main publishes" in err
+        assert "docker buildx" not in out

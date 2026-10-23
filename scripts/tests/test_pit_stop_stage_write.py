@@ -57,6 +57,13 @@ def _apply_staged() -> str:
     return text[start : text.index("\n}\n", start) + 3]
 
 
+def _refuse_drift() -> str:
+    """`refuse_drift` as the script defines it."""
+    text = _SCRIPT.read_text()
+    start = text.index("refuse_drift() {")
+    return text[start : text.index("\n}\n", start) + 3]
+
+
 def _counters() -> str:
     """`pins_on_tag` and `images_on_tag` as the script defines them."""
     text = _SCRIPT.read_text()
@@ -73,25 +80,34 @@ def _run_stage(
     service: str = "all",
     compose: str | None = None,
     apply: bool = False,
+    published: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the stage block, or with `apply` the swap's `apply_staged`, against
     `host`. `fixture`/`compose` is written as the live compose unless both are
-    empty, which leaves the host exactly as a previous call left it."""
+    empty, which leaves the host exactly as a previous call left it.
+
+    `published` is the fixture the precheck read as $REF's compose; by default
+    the live compose itself, so the stage sees no drift."""
     if not fixture and compose is None:
         pass
     elif compose is None:
         shutil.copy(_FIXTURES / fixture, host / _COMPOSE)
     else:
         (host / _COMPOSE).write_text(compose)
+    if published is not None:
+        shutil.copy(_FIXTURES / published, tmp / "compose.published")
+    elif fixture or compose is not None:
+        shutil.copy(host / _COMPOSE, tmp / "compose.published")
     n, swapped = {"all": (2, "api gateway"), "gateway": (1, "gateway")}[service]
     preamble = f"""
 set -euo pipefail
-TAG={_TAG}; MODE=stage; DRY=0; HOST=fake-host; SERVICE={service}; REPOINTS=pins; ALREADY="pins already on the tag"; N={n}; SWAPPED="{swapped}"
+TAG={_TAG}; REF=origin/main; MODE=stage; DRY=0; HOST=fake-host; SERVICE={service}; REPOINTS=pins; ALREADY="pins already on the tag"; N={n}; SWAPPED="{swapped}"
 COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; STAGED={_COMPOSE}.pit-stop-staged; TMP={tmp}; REPOINT_PY={_SCRIPT.parent / "pit_stop_repoint.py"}
 step() {{ printf '==> %s\\n' "$*"; }}
 die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
 run() {{ "$@"; }}
 {stub}
+{_refuse_drift()}
 {_counters()}
 {_apply_staged()}
 """
@@ -160,6 +176,28 @@ def test_the_swap_refuses_a_stage_the_live_compose_has_moved_past(dirs: tuple[Pa
     assert "changed after" in proc.stderr
     assert (host / _COMPOSE).read_text() == edited
     assert not list(host.glob(f"{_COMPOSE}.bak-*"))
+
+
+def test_the_stage_refuses_a_compose_edited_on_the_host_since_the_precheck(
+    dirs: tuple[Path, Path],
+) -> None:
+    """#1511 verification: the precheck passed a compose that carried the
+    archive setting $REF publishes; during the build it was edited away. The
+    stage reads the file again, and it is those bytes that must be checked."""
+    host, tmp = dirs
+    proc = _run_stage("compose-tag.yaml", host, tmp, _FULL, published="compose-drifted.yaml")
+
+    assert proc.returncode != 0
+    assert "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory" in proc.stdout
+    assert "is not the compose origin/main publishes" in proc.stderr
+    assert (host / _COMPOSE).read_bytes() == (_FIXTURES / "compose-tag.yaml").read_bytes()
+    assert not (host / _STAGED).exists()
+    assert not (host / f"{_COMPOSE}.pit-stop").exists()
+
+    # And nothing the swap could apply: with no stage, it refuses.
+    proc = _run_stage("", host, tmp, _FULL, apply=True)
+    assert proc.returncode != 0
+    assert (host / _COMPOSE).read_bytes() == (_FIXTURES / "compose-tag.yaml").read_bytes()
 
 
 @pytest.mark.parametrize("fixture", ["compose-digest.yaml", "compose-tag.yaml"])
