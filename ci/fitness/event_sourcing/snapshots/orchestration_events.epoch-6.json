@@ -214,6 +214,33 @@
     "event_type": "ArtifactsCollectedForPhase",
     "schema": {
       "$defs": {
+        "FileRefusal": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "hard_link",
+                "symlink",
+                "escaping_symlink",
+                "special_file",
+                "vanished",
+                "file_too_large",
+                "total_bytes_exceeded",
+                "depth_exceeded",
+                "entry_limit_exceeded"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "reason"
+          ],
+          "type": "object"
+        },
         "ObservedHead": {
           "additionalProperties": false,
           "properties": {
@@ -310,6 +337,12 @@
         },
         "phase_id": {
           "type": "string"
+        },
+        "refused_files": {
+          "items": {
+            "$ref": "#/$defs/FileRefusal"
+          },
+          "type": "array"
         },
         "session_id": {
           "anyOf": [
