@@ -181,6 +181,7 @@ class _RawStreamHandler:
     streams: tuple[_Stream, ...]
     granted_timeouts: list[int] = field(default_factory=list)
     collectors: list[ObservabilityCollector | None] = field(default_factory=list)
+    runners: list[Runner] = field(default_factory=list)
 
     async def handle(
         self,
@@ -199,6 +200,7 @@ class _RawStreamHandler:
     ) -> AgentExecutionResult:
         self.granted_timeouts.append(timeout_seconds)
         self.collectors.append(collector)
+        self.runners.append(runner)
         assert collector is not None
         # The LAST entry repeats, so a script of one stream describes an agent
         # that fails the same way however many times it is asked.

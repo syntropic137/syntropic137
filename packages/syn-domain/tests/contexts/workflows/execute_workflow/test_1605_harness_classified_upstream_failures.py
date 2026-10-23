@@ -17,10 +17,16 @@ Mutations (`.mutations/1605-*.patch`), and the test that kills each:
 - `resets_at` dropped from the quota: the same test (the error says "an unstated time")
 - QUOTA mapped to UNKNOWN by a default branch:
   `test_a_claude_weekly_limit_runs_the_fallback` and the same test (the recorded kind)
+
+`TestAWeeklyLimitInsideA429` feeds the raw CLI line to the real stream
+processor instead of a reason, because the defect it pins is in that
+normalisation: a 429 body's message, dropped for its status, took the quota
+sentence with it and the limit was retried as a rate limit.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -39,6 +45,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.busy_upstream imp
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     codex_fault_reason,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.test_1344_raw_stream_activity_stops_a_retry import (
+    CODEX_SUCCEEDS,
+    _claude,
+    _RawStreamHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.upstream_failure import (
     HarnessUpstreamFailureReader,
@@ -103,7 +114,7 @@ class _RecordingRepository(FakeExecutionRepository):
 
 
 async def _run(
-    fake: FakeAgentExecutionHandler,
+    fake: FakeAgentExecutionHandler | _RawStreamHandler,
     primary: AgentConfiguration,
     fallback: AgentConfiguration | None = None,
 ) -> tuple[WorkflowExecutionResult, _RecordingRepository]:
@@ -160,6 +171,48 @@ class TestAClaudeWeeklyLimit:
 
         assert result.status == "completed", result.error_message
         assert fake.runners == [AgentRunner.CLAUDE, AgentRunner.CODEX]
+
+
+#: A weekly limit the API sends as a 429 whose message is the quota sentence.
+#: The shape is the API's documented error body; the sentence is recorded.
+WEEKLY_LIMIT_IN_A_429 = json.dumps(
+    {
+        "type": "result",
+        "is_error": True,
+        "result": "API Error: 429 "
+        + json.dumps(
+            {
+                "type": "error",
+                "error": {
+                    "type": "rate_limit_error",
+                    "message": CLAUDE_WEEKLY_LIMITS["resets Oct 23, 3pm"][0],
+                },
+            }
+        ),
+    }
+)
+
+
+class TestAWeeklyLimitInsideA429:
+    async def test_it_is_a_quota_not_retried_and_says_when_it_resets(self) -> None:
+        handler = _RawStreamHandler(streams=(_claude(WEEKLY_LIMIT_IN_A_429),))
+
+        result, repository = await _run(handler, CLAUDE)
+
+        assert len(handler.granted_timeouts) == 1, result.error_message
+        assert result.status == "failed"
+        message = result.error_message
+        assert message is not None
+        _, surfaced = CLAUDE_WEEKLY_LIMITS["resets Oct 23, 3pm"]
+        assert re.search(surfaced, message), message
+        assert _failed_kind(repository) is UpstreamFailureKind.QUOTA
+
+    async def test_it_runs_the_fallback(self) -> None:
+        handler = _RawStreamHandler(streams=(_claude(WEEKLY_LIMIT_IN_A_429), CODEX_SUCCEEDS))
+
+        await _run(handler, CLAUDE, CODEX_FALLBACK)
+
+        assert handler.runners == [AgentRunner.CLAUDE, AgentRunner.CODEX]
 
 
 class TestTheOtherKindsKeepTheirDecision:
