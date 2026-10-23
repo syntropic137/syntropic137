@@ -314,8 +314,12 @@ The **refusal policy** for a phase's output:
   collection (`OutputCollectionIncompleteError`). The walk stopped, so nobody
   knows which files it missed.
 
-The output kept from an interrupted phase is best effort. A refusal there is
-logged and is not recorded on the execution.
+The output kept from a phase that will not complete (failed, cancelled,
+interrupted) is best effort, but its refusals are not: they are recorded on
+`OutputFilesRefusedForPhase` before the phase's outcome, and read back through
+the same `refused_files_for`. A walk that stopped keeps nothing as if it were
+whole, and records what stopped it. A refused image manifest records every
+refusal the read returned on its UNREADABLE reading (`ImageManifestReading.refusals`).
 
 ## Fallback Agent
 

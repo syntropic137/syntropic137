@@ -36,6 +36,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     PhaseProducedNoDeclaredOutputError,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.output_refusals import (
+    KeptOutput,
+    OutputCollectionIncompleteError,
     collect_output_files,
 )
 from syn_shared.workspace_paths import (
@@ -784,7 +786,7 @@ class ArtifactCollector:
         agent: AgentIdentity,
         outcome: UnfinishedPhase,
         last_agent_message: str | None = None,
-    ) -> list[str]:
+    ) -> KeptOutput:
         """Keep whatever a phase that will not complete managed to write. Never raises.
 
         Deliberately does NOT enforce the output contract that
@@ -807,16 +809,16 @@ class ArtifactCollector:
         "failed on its own report" distinguishable in a listing without giving
         this loop two shapes to have (#1321).
 
-        Returns the ids of what was kept, newest question first: an empty list
-        is the ordinary answer for a phase that wrote nothing, and is not an
-        error.
+        Returns the ids of what was kept, newest question first, and every
+        file the provider refused (#1913): no ids is the ordinary answer for a
+        phase that wrote nothing, and is not an error.
         """
         try:
             # Same filter as the happy path: this is the route a phase takes
             # when it will not complete, and it shares the pattern, so fixing
             # only the other site would leave every such run sweeping junk
             # (issue #919).
-            partial_collected, _ = await collect_output_files(workspace, [_OUTPUT_GLOB])
+            partial_collected, refused = await collect_output_files(workspace, [_OUTPUT_GLOB])
             kept: list[_Deliverable] = []
             for artifact_path, artifact_content in partial_collected:
                 if not _is_collectable(artifact_path):
@@ -849,7 +851,7 @@ class ArtifactCollector:
                 title=outcome.title(phase_name=phase_name, source_path=RECOVERED_SOURCE_PATH),
                 describe_work=None,
             )
-            return await self._store(
+            stored = await self._store(
                 kept,
                 workflow_id=workflow_id,
                 phase_id=phase_id,
@@ -858,6 +860,12 @@ class ArtifactCollector:
                 artifact_type=_primary_type(output_artifact_types),
                 agent=agent,
             )
+            return KeptOutput(artifact_ids=stored, refused=refused)
+        except OutputCollectionIncompleteError as err:
+            # The walk stopped: nothing is kept as if it were whole, and what
+            # stopped it is handed back to be recorded, never only logged.
+            logger.warning("Output of unfinished phase %s not kept: %s", phase_id, err)
+            return KeptOutput(refused=err.refused)
         except Exception as err:
             logger.warning(
                 "Failed to keep the output of unfinished phase %s (%s): %s",
@@ -865,7 +873,7 @@ class ArtifactCollector:
                 session_id,
                 err,
             )
-            return []
+            return KeptOutput()
 
     async def create_artifact(
         self,

@@ -8,6 +8,7 @@ files it missed. A refusal is never collected as an empty or a missing file.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from syn_domain.contexts.orchestration._shared.file_transfer import (
@@ -20,6 +21,18 @@ logger = logging.getLogger(__name__)
 
 class _CollectsFiles(Protocol):
     async def collect_files(self, patterns: list[str]) -> list[tuple[str, bytes]]: ...
+
+
+@dataclass(frozen=True)
+class KeptOutput:
+    """What was kept of a phase that will not complete, and what was refused.
+
+    The refusals travel with the ids so the caller can record them on the
+    execution: dropping them here is how they used to reach only a log line.
+    """
+
+    artifact_ids: list[str] = field(default_factory=list)
+    refused: tuple[FileRefusal, ...] = ()
 
 
 class OutputCollectionIncompleteError(RuntimeError):

@@ -290,6 +290,17 @@ class RetryPhaseCommand:
         self.reason = reason
 
 
+class RecordRefusedOutputCommand:
+    """Command to record what the provider refused of an unfinished phase's output (#1913)."""
+
+    def __init__(
+        self, execution_id: str, phase_id: str, refused_files: Sequence[FileRefusal]
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.refused_files = tuple(refused_files)
+
+
 class RecordPhasePushCommand:
     """Command to record a commit the running phase's workspace pushed (PC-128)."""
 

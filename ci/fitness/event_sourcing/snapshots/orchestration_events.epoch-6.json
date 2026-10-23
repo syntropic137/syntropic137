@@ -2319,6 +2319,72 @@
     "schema_version": 1,
     "version": "v1"
   },
+  "OutputFilesRefusedForPhaseEvent": {
+    "event_type": "OutputFilesRefusedForPhase",
+    "schema": {
+      "$defs": {
+        "FileRefusal": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "hard_link",
+                "symlink",
+                "escaping_symlink",
+                "special_file",
+                "vanished",
+                "file_too_large",
+                "total_bytes_exceeded",
+                "depth_exceeded",
+                "entry_limit_exceeded"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "reason"
+          ],
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "type": "string"
+        },
+        "phase_id": {
+          "type": "string"
+        },
+        "refused_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "refused_files": {
+          "items": {
+            "$ref": "#/$defs/FileRefusal"
+          },
+          "type": "array"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "execution_id",
+        "phase_id",
+        "refused_files",
+        "refused_at"
+      ],
+      "type": "object"
+    },
+    "schema_version": 1,
+    "version": "v1"
+  },
   "PhaseCommitPushedEvent": {
     "event_type": "PhaseCommitPushed",
     "schema": {

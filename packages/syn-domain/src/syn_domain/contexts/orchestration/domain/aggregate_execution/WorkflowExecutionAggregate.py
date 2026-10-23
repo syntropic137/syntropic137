@@ -35,6 +35,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     ProvisionWorkspaceCompletedCommand,
     RecordCancelledWorkCommand,
     RecordPhasePushCommand,
+    RecordRefusedOutputCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
@@ -172,6 +173,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
         NextPhaseReadyEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.OutputFilesRefusedForPhaseEvent import (
+        OutputFilesRefusedForPhaseEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
         PhaseCommitPushedEvent,
@@ -661,6 +665,30 @@ class WorkflowExecutionAggregate(
 
         self._apply(push_event(command, self._workflow_id or ""))
 
+    @command_handler("RecordRefusedOutputCommand")
+    def record_refused_output(self, command: RecordRefusedOutputCommand) -> None:
+        """Handle RecordRefusedOutputCommand - an unfinished phase's refused output (#1913).
+
+        Refused for any phase but the running one, as a push is: the output
+        kept on the way out is the running phase's, before its outcome is told.
+        """
+        from syn_domain.contexts.orchestration.domain.events.OutputFilesRefusedForPhaseEvent import (
+            OutputFilesRefusedForPhaseEvent,
+        )
+
+        if self._status != ExecutionStatus.RUNNING or self._running_phase_id != command.phase_id:
+            msg = f"Cannot record refused output for {command.phase_id}: it is not running"
+            raise ValueError(msg)
+        self._apply(
+            OutputFilesRefusedForPhaseEvent(
+                workflow_id=self._workflow_id or "",
+                execution_id=command.aggregate_id,
+                phase_id=command.phase_id,
+                refused_files=list(command.refused_files),
+                refused_at=datetime.now(UTC),
+            )
+        )
+
     @command_handler("CompletePhaseCommand")
     def complete_phase(self, command: CompletePhaseCommand) -> None:
         """Handle CompletePhaseCommand."""
@@ -945,6 +973,11 @@ class WorkflowExecutionAggregate(
         collected = self._phase_artifact_ids.setdefault(phase_id, [])
         if artifact_id and artifact_id not in collected:
             collected.append(artifact_id)
+
+    @event_sourcing_handler("OutputFilesRefusedForPhase")
+    def on_output_files_refused_for_phase(self, event: OutputFilesRefusedForPhaseEvent) -> None:
+        """Apply OutputFilesRefusedForPhaseEvent - read by `refused_files_for`."""
+        self._refused_files[evt(event, "phase_id")] = read_refusals(evt(event, "refused_files", []))
 
     @event_sourcing_handler("PhaseCommitPushed")
     def on_phase_commit_pushed(self, event: PhaseCommitPushedEvent) -> None:
