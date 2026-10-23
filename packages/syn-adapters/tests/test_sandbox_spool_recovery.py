@@ -642,3 +642,87 @@ async def test_worker_without_remote_access_never_claims_a_remote_spool(
     await authorized.processor.process_pending()
     assert (await _row(db_pool, source))["drained_at"] is not None
     assert remote.order[0] == "resume:sbx-1"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("outcome", ["partial_page", "child_failure"])
+async def test_successful_progress_on_the_real_store_pauses_before_giving_the_lease_up(
+    db_pool: asyncpg.Pool, tmp_path: Path, outcome: str
+) -> None:
+    """The store's ``advance`` really relinquishes the lease; the pause must precede it."""
+    source = str(uuid4())
+    remote, sandbox = _sandboxes(alive=True)
+    # The runtime installs the schema; the worker under test is built by hand.
+    spools = (await _runtime(db_pool, tmp_path / "archive", None, source)).spools
+    await spools.project(_spool(source))
+    await spools.settle(_spool(source).session_id)
+    drain = AsyncMock()
+    drain.page.return_value = SpoolDrainProgress(
+        watermark=2, next_after=1 if outcome == "partial_page" else None, captured=1
+    )
+    children = AsyncMock()
+    if outcome == "child_failure":
+        children.page.side_effect = OSError("child journal unreadable")
+    else:
+        children.page.return_value = SpoolDrainProgress(watermark=0, next_after=None, captured=0)
+    worker = CaptureRecoveryWorker(
+        spools,
+        {"e2b": SandboxSpoolRecovery(remote)},
+        drain,
+        lease_seconds=60,
+        retry_seconds=5,
+        children=children,
+    )
+    assert await worker.step()
+    assert remote.order == ["resume:sbx-1", "pause:sbx-1"]
+    assert sandbox.paused and not sandbox.killed
+    row = await _row(db_pool, source)
+    assert row["after_sequence"] == (1 if outcome == "partial_page" else 2)
+    assert row["drained_at"] is None
+
+
+@pytest.mark.integration
+async def test_stale_worker_neither_stops_nor_pauses_the_new_owners_sandbox(
+    db_pool: asyncpg.Pool, tmp_path: Path
+) -> None:
+    """Two workers, one store: the first's token expires and is superseded while it attaches."""
+    source = str(uuid4())
+    # The runtime installs the schema; the worker under test is built by hand.
+    spools = (await _runtime(db_pool, tmp_path / "archive", None, source)).spools
+    await spools.project(_spool(source))
+    await spools.settle(_spool(source).session_id)
+    replacement: list[CaptureSpoolLease] = []
+
+    class SlowAttach(ScriptedSandboxes):
+        async def resume(self, sandbox_id: str, *, executor_id: str) -> ScriptedSandbox:
+            sandbox = await super().resume(sandbox_id, executor_id=executor_id)
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    """UPDATE session_capture_spools SET leased_until=now()-interval '1 second'
+                    WHERE source_instance_id=$1""",
+                    source,
+                )
+            lease = await spools.claim(lease_seconds=60, backends=("e2b",))
+            assert lease is not None
+            replacement.append(lease)
+            return sandbox
+
+    remote = SlowAttach()
+    _, sandbox = _sandboxes(alive=True)
+    remote.sandboxes["sbx-1"] = sandbox
+    worker = CaptureRecoveryWorker(
+        spools,
+        {"e2b": SandboxSpoolRecovery(remote)},
+        LocalSpoolDrain(AsyncMock()),
+        lease_seconds=60,
+        retry_seconds=5,
+    )
+    assert await worker.step()
+    stale = replacement[0].token - 1
+    assert stale >= 1
+    assert remote.order == ["resume:sbx-1"]
+    assert sandbox.writer_alive and not sandbox.paused and not sandbox.killed
+    assert "stop" not in sandbox.log
+    # The replacement's token is untouched by the stale worker's failure path.
+    await spools.renew(replacement[0], lease_seconds=60)
+    assert (await _row(db_pool, source))["drained_at"] is None
