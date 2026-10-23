@@ -1,15 +1,26 @@
-# sdlc-implement-v5: design note and preregistration (2026-10-21)
+# sdlc-implement-v6: design note and preregistration (2026-10-21, v6 cut 2026-10-23)
+
+**Lineage.** This arm was first cut and run as `sdlc-implement-v5` (definition at
+commit `9d4278c51`, installed on the owner VPS 2026-10-23). It ran twice, as a
+live check and not as part of the A/B: `exec-47d6ab7275be` (the premise phase
+refuted a stale task, so nothing was pushed) and `exec-ac271b4ad91a` (certified on
+round 0, PR #2080). That second run found papercut PC-241: finalize left the
+certified PR in draft over two Vercel preview statuses that `main` does not
+require, which failed "rate limited" on apps the diff never touched. Workflow ids
+are immutable once run, so the fix is cut as `sdlc-implement-v6` rather than
+reinstalled over v5. The two v5 runs are not scored.
 
 ## Design note
 
-### The one change
+### The change
 
-`sdlc-implement-v5` is `sdlc-implement-v4-precheck` plus **evidence
+`sdlc-implement-v6` is `sdlc-implement-v4-precheck` plus **evidence
 declarations and capability gaps** (#2060). It is the v5 that
 v4-precheck's EXPERIMENT.md decision 4 called for ("cut `sdlc-implement-v5`
 as v4 plus evidence declarations, and do not edit v4 in place"), with the
 prompt contract of `docs/plans/20261015_platform-dispatched-evidence.md`
-section A.11. It changes seven prompts and nothing else:
+section A.11. It changes seven prompts and nothing else. v6 adds one more
+section to four of them for PC-241 (last row):
 
 | Prompt | Adds |
 |---|---|
@@ -17,6 +28,7 @@ section A.11. It changes seven prompts and nothing else:
 | `fix`, `fix_2` | one shared section: a finding that cannot be proven here is reported under `## Capability gaps` before any work, never refused after it; declare committed `.mutations/` |
 | `implement` | declare committed `.mutations/` |
 | `finalize_pr` | read the platform-evidence manifest (it closes declared rows only when complete, every step passed and `required_check` passed); accept the platform's recorded patch-removal commit as the head; list open gaps under `## Needs a capable workspace`; copy the `Capability gaps:` and `Platform evidence:` lines |
+| `verify`, `reverify`, `reverify_2`, `finalize_pr` (v6) | `## Only a check the base branch requires can hold this PR` (reviews) and `## Only a required check holds the PR in draft` (finalize): read the base branch's required checks; a non-required check failing for a cause outside the diff is listed under `Not required, not holding` and never holds a certified PR in draft; a non-required check the diff breaks is still `REPAIRABLE`; if the required set cannot be read, every check is treated as required, as in v4-precheck |
 
 The capability names are a closed list: `nested_docker`, `database`,
 `event_store`, `live_api`, `other`. They are what the orchestrator routes on:
@@ -37,7 +49,7 @@ and it left the evidence for a person to run by hand.
 
 Every field of the workflow YAML except id, name and description; every phase's
 model, provider, timeout, skills and tools; every other line of every prompt.
-`scripts/tests/test_implement_v5_variant.py` pins it.
+`scripts/tests/test_implement_v6_variant.py` pins it.
 
 ### What the declaration half needs
 
@@ -54,10 +66,16 @@ Does adding capability gaps and evidence declarations to v4-precheck cut the
 repair work spent on evidence a workspace cannot produce, without more escaped
 defects?
 
-### Arms (one variable)
+### Arms
 
 - **Control:** `sdlc-implement-v4-precheck`.
-- **Treatment:** `sdlc-implement-v5`.
+- **Treatment:** `sdlc-implement-v6`.
+
+This is two variables, not one: the capability-gap change and PC-241's
+required-checks rule. The required-checks rule only changes the outcome when a
+non-required check fails, so each run's report says whether any did (the
+`Not required, not holding` list), and the primary metric is read on the runs
+where none did.
 
 Same task set, same models, same deployment flags for both arms in a batch.
 
@@ -106,4 +124,6 @@ platform reason is re-dispatched once on the same arm.
 
 ## Results
 
-Not run. This arm has not run live.
+The A/B has not run. The v5 live checks (lineage, above) exercised the
+`Capability gaps:` line (all zero) and the `Needs a capable workspace` heading
+(`None.`). They did not exercise a real gap or an evidence declaration.

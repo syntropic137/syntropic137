@@ -89,6 +89,35 @@ report has no `## Handed to the orchestrator` section at all. A report that
 says nothing about handoffs has not shown that there are none. A final report
 whose section is the single word `None.` has no open handoffs.
 
+## Only a required check holds the PR in draft
+
+A `FLAKE/INFRA` handoff holds a certified PR in draft only when its check is
+required on the base branch. Re-read the required set yourself, because the
+report's may be old:
+
+```
+gh repo view --json nameWithOwner --jq .nameWithOwner
+gh api repos/<owner>/<name>/rules/branches/<base> --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context]'
+```
+
+If that list is empty, read classic branch protection:
+`gh api repos/<owner>/<name>/branches/<base>/protection/required_status_checks --jq .contexts`.
+A 404 there means no checks are required.
+
+- A `FLAKE/INFRA` row whose check is **not required** is not open. Move it,
+  together with the report's own `### Not required, not holding` lines, to a
+  `### Not required, not holding` note in the PR description and in any
+  comment you post: name, state, description, one line each. It does not keep
+  the PR a draft and gets no rerun.
+- Every other handoff (`ORCHESTRATOR_EVIDENCE`, `CI_GAP`, and `FLAKE/INFRA` on
+  a required check) stays open, as above.
+- **If neither command gives a readable answer**, keep every `FLAKE/INFRA` row
+  open, which is the rule without this section. Write
+  `Required checks: unreadable` with the error verbatim in the comment.
+
+Write `Required checks: <name>, <name>` (or `none`, or `unreadable`) in the
+comment and in the description, so a reader can see what you held the PR to.
+
 ## Read the platform evidence and the capability gaps
 
 The reports declare integration and mutation evidence in `TASK_RESULT`, and

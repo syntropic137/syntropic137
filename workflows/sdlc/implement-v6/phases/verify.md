@@ -286,6 +286,39 @@ round acted on, and run the precheck again on the candidate SHA. A fix push
 starts new CI, so a flake may have cleared, and a handoff that is now closed
 leaves the table, with the evidence that closed it.
 
+## Only a check the base branch requires can hold this PR
+
+The precheck above sorts every failing or missing check. Before you put one
+in the handoff table, find out whether the base branch requires it. A check
+that merging does not wait on cannot be what keeps a certified PR a draft
+(PC-241: two Vercel preview statuses, rate limited on apps the diff never
+touched, kept a certified PR in draft).
+
+```
+gh repo view --json nameWithOwner --jq .nameWithOwner
+gh api repos/<owner>/<name>/rules/branches/<base> --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context]'
+```
+
+If that list is empty, read classic branch protection instead:
+`gh api repos/<owner>/<name>/branches/<base>/protection/required_status_checks --jq .contexts`.
+A 404 there means the branch requires no checks.
+
+- **A required check** keeps the precheck's classes unchanged.
+- **A check that is not required, and fails for a cause outside this diff**
+  (the three predicates of the precheck's step 3 hold, or it is a commit
+  status such as a deployment preview that this diff cannot affect): not a
+  handoff and not a blocker. List it under a `### Not required, not holding`
+  heading after the handoff table, one line each: name, state, description.
+  It never counts toward `FLAKE_INFRA` and gets no rerun.
+- **A check that is not required, and fails because of this diff** is still
+  `REPAIRABLE`. Required or not, a defect the branch introduced is a defect.
+- **The required set cannot be read** (both commands fail, for example on a
+  403): write `Required checks: unreadable` with the error verbatim, and treat
+  every check as required, exactly as the precheck says.
+
+Write the set you read on one line before the handoff table:
+`Required checks: <name>, <name>` (or `none`, or `unreadable`).
+
 ## Capability gaps and declared evidence
 
 A workspace is one of several the platform can run a phase on, and they do not

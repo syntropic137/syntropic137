@@ -25,7 +25,7 @@ _REVIEWS = [
     for w in (
         "sdlc/implement-v3",
         "sdlc/implement-v4-precheck",
-        "sdlc/implement-v5",
+        "sdlc/implement-v6",
         "sdlc/reverify-pr",
     )
     for p in _ROUNDS

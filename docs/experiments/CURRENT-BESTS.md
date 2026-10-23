@@ -65,11 +65,13 @@ EXISTS").
   cross-arm finding matters more: in 3 of 6 slots verify certified a head
   whose real-service tests had never run, and orchestrator-run evidence found
   a real defect each time.
-- **`sdlc-implement-v5`: first live check running.** Draft PR #2063 (#2060):
+- **`sdlc-implement-v6`: A/B not started.** Draft PR #2063 (#2060):
   v4-precheck plus declared evidence and structured capability gaps, per
-  decision 4 of `docs/plans/20261015_platform-dispatched-evidence.md`. Not on
-  `main`. Installed on the owner VPS from the PR branch on 2026-10-23 for one
-  live check (exec-47d6ab7275be, #1144); its A/B has not started.
+  decision 4 of `docs/plans/20261015_platform-dispatched-evidence.md`, plus
+  PC-241's rule that only a required check holds a certified PR in draft. Not
+  on `main`. Its predecessor `sdlc-implement-v5` ran two live checks on the
+  owner VPS on 2026-10-23: exec-47d6ab7275be (premise refuted a stale task)
+  and exec-ac271b4ad91a (certified on round 0, PR #2080, which found PC-241).
   **no eval evidence yet.**
 - **End-to-end replay (E4):** preregistered on PR #2019
   (`docs/experiments/2026-10-20-end-to-end-replay.md`), not dispatched, blocked

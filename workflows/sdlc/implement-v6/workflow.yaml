@@ -1,5 +1,5 @@
-id: sdlc-implement-v5
-name: "SDLC: Premise, implement + draft PR, verify with evidence precheck and capability gaps, fix, re-verify, mark ready (v5)"
+id: sdlc-implement-v6
+name: "SDLC: Premise, implement + draft PR, verify with evidence precheck and capability gaps, fix, re-verify, mark ready (v6)"
 description: >
   sdlc-implement-v4-precheck with ONE change: evidence declarations and
   capability gaps (#2060). Reviewers and authors declare integration and
@@ -7,8 +7,10 @@ description: >
   dispatch it, every ORCHESTRATOR_EVIDENCE row names the capability the
   workspace lacked, fix phases stop on a capability gap instead of refusing
   after work, and finalize_pr reads the platform-evidence manifest and lists
-  the gaps under "Needs a capable workspace". An A/B arm against v4-precheck;
-  see EXPERIMENT.md beside this file.
+  the gaps under "Needs a capable workspace". v6 also lets only a check the
+  base branch requires hold a certified PR in draft (PC-241; v5 is the same
+  arm without that rule). An A/B arm against v4-precheck; see EXPERIMENT.md
+  beside this file.
 type: implementation
 classification: standard
 requires_repos: true
@@ -29,7 +31,11 @@ inputs:
 # (verify, reverify, reverify_2) and the two fix rounds (fix, fix_2) gain a
 # "Capability gaps and declared evidence" section, implement gains the
 # mutation declaration, and finalize_pr reads the platform-evidence manifest.
-# scripts/tests/test_implement_v5_variant.py fails if anything else differs.
+# The reviews and finalize_pr also gain a required-checks section (PC-241):
+# only a check the base branch requires can hold a certified PR in draft.
+# v5 (9d4278c51, run as exec-47d6ab7275be and exec-ac271b4ad91a) had no such
+# section; ids are immutable once run, so the fix is this v6.
+# scripts/tests/test_implement_v6_variant.py fails if anything else differs.
 # The design note is EXPERIMENT.md. The evidence contract is
 # docs/plans/20261015_platform-dispatched-evidence.md section A.11, which
 # v4-precheck's EXPERIMENT.md decision 4 assigned to a v5 rather than to an
