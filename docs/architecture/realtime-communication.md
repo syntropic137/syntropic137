@@ -1,505 +1,282 @@
 # Real-time Communication Architecture
 
-**Last Updated:** 2026-01-26  
-**Reference:** [ADR-019: WebSocket Control Plane Architecture](../adrs/ADR-019-websocket-control-plane.md)
-
-> **Out of date (2026-09-29).** This document describes the WebSocket control
-> plane, which was REMOVED (see [ADR-049](../adrs/ADR-049-sse-over-websocket-for-execution-streams.md)):
-> observation is served by SSE, and control is plain HTTP POST. The pause and
-> resume commands it shows were also deleted, because nothing ever read the
-> pause signal. Read it as history until it is rewritten (#1469).
+**Last Updated:** 2026-10-24
+**References:** [ADR-049: SSE for Real-Time Execution Streams](../adrs/ADR-049-sse-over-websocket-for-execution-streams.md), [ADR-019: WebSocket Control Plane Architecture](../adrs/ADR-019-websocket-control-plane.md) (historical title; its notes record the removal), [ADR-055: Projection Checkpoint Coordinator](../adrs/ADR-055-projection-checkpoint-coordinator-architecture.md)
 
 ---
 
 ## Overview
 
-Syn137 provides **real-time communication** for long-running workflow executions through two mechanisms:
+Real-time communication is two separate, one-directional paths:
 
-1. **WebSocket** - Bidirectional control plane (pause, resume, cancel)
-2. **Server-Sent Events (SSE)** - Unidirectional event streaming (execution progress)
+| Path | Direction | Mechanism | Routes |
+|------|-----------|-----------|--------|
+| **Observation** | server → client | Server-Sent Events (`text/event-stream`) | `GET /sse/executions/{execution_id}`, `GET /sse/activity`, `GET /sse/health` |
+| **Control** | client → server | Plain HTTP request/response | `POST /executions/{execution_id}/cancel`, `POST /executions/{execution_id}/inject`, `GET /executions/{execution_id}/state` |
 
-This dual-channel approach separates control signals from data streaming, following industry best practices.
+There is no WebSocket anywhere in the API, the dashboard, syn-ui or the CLI.
+See [History](#history) for what was removed and why.
+
+Route paths above are as the API serves them. Browsers and the CLI reach them
+under `/api/v1`, which the gateway and the Vite dev proxy strip before
+forwarding (see [Reaching the API](#reaching-the-api)).
 
 ---
 
-## Architecture Overview
+## Observation: Server-Sent Events
+
+### Data flow
 
 ```mermaid
-C4Container
-    title Real-time Communication Architecture
-    
-    Container_Boundary(client, "Client Layer") {
-        Container(dashboard, "Dashboard UI", "React + TypeScript", "Web application with real-time updates")
-    }
-    
-    Container_Boundary(api, "API Layer") {
-        Container(ws_endpoint, "WebSocket Endpoint", "FastAPI WebSocket", "/api/ws/control/{execution_id}")
-        Container(sse_endpoint, "SSE Endpoint", "FastAPI SSE", "/api/executions/{execution_id}/stream")
-        Container(rest_api, "REST API", "FastAPI", "HTTP control endpoints")
-    }
-    
-    Container_Boundary(core, "Domain Core") {
-        Container(controller, "ExecutionController", "Python", "Control signal processing")
-        Container(state_machine, "State Machine", "Python", "Valid state transitions")
-        Container(executor, "WorkflowExecutor", "Python", "Executes workflows")
-    }
-    
-    Container_Boundary(state, "State Management") {
-        Container(control_state, "Control State Store", "Redis/In-Memory", "Current execution states")
-        Container(signal_queue, "Signal Queue", "Redis/In-Memory", "Pending control signals")
-    }
-    
-    Rel(dashboard, ws_endpoint, "Connect via WebSocket", "Control signals bidirectional")
-    Rel(dashboard, sse_endpoint, "Subscribe via SSE", "Execution events unidirectional")
-    Rel(dashboard, rest_api, "HTTP POST", "Alternative control channel")
-    
-    Rel(ws_endpoint, controller, "Enqueue control signal")
-    Rel(rest_api, controller, "Enqueue control signal")
-    Rel(controller, state_machine, "Validate transition")
-    Rel(controller, control_state, "Read/write state")
-    Rel(controller, signal_queue, "Publish signal")
-    
-    Rel(executor, signal_queue, "Poll for signals at yield points")
-    Rel(executor, state_machine, "Check valid transition")
-    Rel(executor, sse_endpoint, "Emit execution events")
-    Rel(sse_endpoint, dashboard, "Stream events", "SSE")
-    
-    UpdateRelStyle(dashboard, ws_endpoint, $lineColor="blue")
-    UpdateRelStyle(dashboard, sse_endpoint, $lineColor="orange")
+flowchart LR
+    ES[(Event store)] --> COORD[SubscriptionCoordinator]
+    COORD --> ADAPTER["RealTimeProjectionAdapter<br/>(realtime_sse)"]
+    ADAPTER -->|"on_&lt;event_type&gt;()"| RT[RealTimeProjection]
+    PUSH[GitHub push webhook] -->|"broadcast_global('git_commit')"| RT
+    RT -->|"queue per subscriber,<br/>channel = execution_id"| EXEC["GET /sse/executions/{id}"]
+    RT -->|"channel = _activity_"| ACT["GET /sse/activity"]
+    EXEC --> CLIENTS[Dashboard / syn-ui / CLI]
+    ACT --> CLIENTS
 ```
+
+1. Domain events reach `RealTimeProjectionAdapter`
+   (`packages/syn-adapters/src/syn_adapters/subscriptions/realtime_adapter.py`).
+   `CoordinatorSubscriptionService` adds it to the coordinator's projection list
+   when a realtime projection is configured (`coordinator_service.py`).
+2. The adapter turns the event type into a handler name (`PhaseStarted` →
+   `on_phase_started`) and calls it on `RealTimeProjection`
+   (`packages/syn-adapters/src/syn_adapters/projections/realtime.py`).
+   `ExecutionCancelled` is validated into `ExecutionCancelledPayload` first; the
+   other events are passed as their `model_dump(mode="json")`.
+3. `RealTimeProjection` keeps one `asyncio.Queue` per connected subscriber,
+   grouped by channel: an execution id, or `_activity_` for the global feed. It
+   persists nothing. A broadcast wraps the event in an `SSEEventFrame` and puts
+   it on every queue for that channel.
+4. The route in `apps/syn-api/src/syn_api/routes/sse.py` reads its queue and
+   writes frames to the response. Routes reach the projection through
+   `apps/syn-api/src/syn_api/services/realtime.py`, which gets the singleton
+   from `_wiring.get_realtime()`.
+
+The realtime projection lives in process memory, so a client connected to one
+API process only sees events that process's coordinator dispatches. A
+disconnected client misses whatever was broadcast while it was away; nothing is
+buffered for it.
+
+### Endpoints
+
+| Route | Channel | Ends when |
+|-------|---------|-----------|
+| `GET /sse/executions/{execution_id}` | the execution id | a terminal frame is delivered, or the client disconnects |
+| `GET /sse/activity` | `_activity_` | the client disconnects (it has no terminal event) |
+| `GET /sse/health` | none | plain JSON, not a stream: `SSEHealthResponse` with `status`, `active_executions` (channels with a subscriber) and `active_connections` (subscriber queues) |
+
+The execution id is used as given. It is not prefix-resolved, so a client must
+pass the full id.
+
+### Wire format
+
+Every data frame is one line, `data: <SSEEventFrame JSON>`, followed by a blank
+line. No `event:` line is ever written, so `EventSource.onmessage` receives
+every frame and clients switch on the JSON's `event_type`.
+
+`SSEEventFrame` (`projections/realtime.py`, `frozen=True`, `extra="forbid"`):
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `type` | `"connected" \| "event" \| "terminal"` | frame kind |
+| `event_type` | `str` | domain event type, `git_commit`, or `connected` |
+| `execution_id` | `str \| None` | the channel's execution id; `None` on the activity channel |
+| `data` | `dict[str, JsonValue]` | the event payload |
+| `timestamp` | `str` | ISO 8601, set when the frame is built |
+
+Stream lifecycle, per connection:
+
+1. The route calls `realtime.connect(channel)` and gets a fresh queue.
+2. It sends a `connected` handshake frame. Its `data` is `{}` on an execution
+   stream and `{"channel": "activity"}` on the activity stream.
+3. It waits on the queue for up to 30 seconds. A timeout writes the comment
+   `: keepalive`, which carries no data and keeps proxies from closing an idle
+   connection.
+4. A terminal broadcast puts the frame and then a `None` sentinel on the queue.
+   The route delivers the frame and ends the response on the sentinel.
+5. In a `finally` block it calls `realtime.disconnect(channel, queue)`, which
+   drops the channel once its last subscriber leaves.
+
+Responses carry `Cache-Control: no-cache` and `X-Accel-Buffering: no`; the
+second tells nginx not to buffer the stream.
+
+### Event types
+
+`RealTimeProjectionAdapter.get_subscribed_event_types()` is the list of domain
+events that reach SSE at all. Each is sent on its execution's channel when the
+event carries a string `execution_id`. Some are also copied to the activity
+channel so list views can update without polling.
+
+| `event_type` | Execution channel | Activity channel | Terminal |
+|--------------|:-----------------:|:----------------:|:--------:|
+| `WorkflowExecutionStarted` | yes | yes | |
+| `PhaseStarted` | yes | | |
+| `PhaseCompleted` | yes | | |
+| `OperationRecorded` | yes | | |
+| `ArtifactCreated` | yes | | |
+| `SessionStarted` | yes | yes | |
+| `SessionCompleted` | yes | yes | |
+| `WorkflowCompleted` | yes | yes | yes |
+| `WorkflowFailed` | yes | yes | yes |
+| `ExecutionCancelled` | yes | yes | yes |
+| `git_commit` | | yes | |
+
+`git_commit` is not a domain event from the coordinator. The GitHub push
+webhook handler (`apps/syn-api/src/syn_api/routes/webhooks/push_events.py`)
+records each commit and calls `broadcast_global("git_commit", data)` directly.
+
+The terminal flag applies to the execution channel only. On the activity
+channel the same events are ordinary `event` frames, and that stream never
+ends.
+
+### Clients
+
+| Client | File | How |
+|--------|------|-----|
+| Dashboard (`apps/syn-dashboard-ui`) | `src/hooks/useExecutionStream.ts` | one `EventSource` on `${API_BASE}/sse/executions/{id}`, relying on the browser's automatic reconnect |
+| | `src/hooks/useActivityStream.ts` | one `EventSource` on `${API_BASE}/sse/activity` per tab, shared by every consumer |
+| | `src/api/observability.ts` | builds the execution stream URL; fetches `/sse/health` |
+| syn-ui (`packages/syn-ui/data`) | `src/live/stream.ts` | `liveHub`: one refcounted `EventSource` per URL per tab, its own backoff reconnect when the browser gives up, and an `onReconnect` callback so subscribers refetch rather than trust a stream that may have missed frames |
+| | `src/live/events.ts`, `src/live/invalidate.ts` | parse frames and map them to query-cache invalidations (`invalidationsFor`, `connectLiveInvalidation`, `connectExecutionInvalidation`) |
+| CLI (`apps/syn-cli-node`) | `src/client/sse.ts` | `streamSSE(path)` over `fetch`; `SSEPath` is the type `` `/sse/${string}` `` |
+| | `src/commands/watch.ts` | `syn watch execution <id>` and `syn watch activity` |
+
+Both web apps use `API_BASE = '/api/v1'`. The CLI reads `SYN_API_URL` and adds
+`/api/v1` itself (`API_PREFIX` in `src/client/constants.ts`).
 
 ---
 
-## Communication Channels
+## Control: HTTP
 
-### Channel 1: WebSocket (Control Plane)
+Control is ordinary request/response, defined in
+`apps/syn-api/src/syn_api/routes/executions/control.py`:
 
-**Purpose:** Bidirectional real-time control signals
+| Route | Body | Does |
+|-------|------|------|
+| `POST /executions/{execution_id}/cancel` | `CancelRequest` (`reason`, optional) | queues a cancel signal, or withdraws a start still queued for a slot (#1650) |
+| `POST /executions/{execution_id}/inject` | `InjectRequest` (`message`, `role`: `user` or `system`) | queues an inject signal; see [Known gaps](#known-gaps) |
+| `GET /executions/{execution_id}/state` | none | `StateResponse`: the execution's status, read from its event stream |
 
-**Endpoint:** `wss://api.syn137.dev/api/ws/control/{execution_id}`
-
-**Direction:** Bidirectional (client ↔ server)
-
-**Use Cases:**
-- Pause execution at safe point
-- Resume paused execution
-- Cancel execution with cleanup
-- Real-time state updates
-
-**Message Format:**
-
-Client → Server (Commands):
-```json
-{
-  "command": "pause",
-  "reason": "User requested pause",
-  "timestamp": "2026-01-26T10:30:00Z"
-}
-```
-
-Server → Client (State Updates):
-```json
-{
-  "type": "state_changed",
-  "execution_id": "exec_123",
-  "old_state": "running",
-  "new_state": "paused",
-  "timestamp": "2026-01-26T10:30:01Z"
-}
-```
-
-### Channel 2: Server-Sent Events (Data Plane)
-
-**Purpose:** Unidirectional event streaming from server to client
-
-**Endpoint:** `https://api.syn137.dev/api/executions/{execution_id}/stream`
-
-**Direction:** Unidirectional (server → client)
-
-**Use Cases:**
-- Stream execution progress
-- Real-time tool execution events
-- Token consumption updates
-- Error notifications
-- Phase completion events
-
-**Event Format (SSE):**
-```
-event: tool_executed
-data: {"tool": "bash", "duration_ms": 1234, "tokens": 150}
-
-event: phase_completed
-data: {"phase": "planning", "status": "success"}
-
-event: execution_completed
-data: {"status": "success", "total_tokens": 5000}
-```
-
----
-
-## Control Flow: WebSocket
-
-### Connection Lifecycle
-
-```mermaid
-sequenceDiagram
-    participant Client as Dashboard UI
-    participant WS as WebSocket Handler
-    participant Auth as Auth Middleware
-    participant Controller as ExecutionController
-    participant SM as StateMachine
-    participant Store as Control State Store
-    
-    Client->>WS: Connect WebSocket<br/>wss://.../ws/control/exec_123
-    WS->>Auth: Validate auth token
-    Auth-->>WS: Authorized ✓
-    
-    WS->>Store: Get current state
-    Store-->>WS: state="running"
-    WS-->>Client: Connected + current state
-    
-    Note over Client,WS: Connection established
-    
-    Client->>WS: {"command": "pause"}
-    WS->>Controller: handle_pause_command()
-    Controller->>SM: validate_transition("running" → "paused")
-    SM-->>Controller: Valid ✓
-    Controller->>Store: set_state("paused")
-    Controller-->>WS: State changed
-    WS-->>Client: {"type": "state_changed", "new_state": "paused"}
-    
-    Note over Store: Executor polls state,<br/>sees "paused", enters pause loop
-    
-    Client->>WS: {"command": "resume"}
-    WS->>Controller: handle_resume_command()
-    Controller->>SM: validate_transition("paused" → "running")
-    SM-->>Controller: Valid ✓
-    Controller->>Store: set_state("running")
-    Controller-->>WS: State changed
-    WS-->>Client: {"type": "state_changed", "new_state": "running"}
-    
-    Client->>WS: Disconnect
-    WS-->>Client: Connection closed
-```
-
-### State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING: Execution queued
-    
-    PENDING --> RUNNING: Start execution
-    
-    RUNNING --> PAUSED: Pause command<br/>(at safe point)
-    RUNNING --> CANCELLED: Cancel command
-    RUNNING --> COMPLETED: Task finished
-    RUNNING --> FAILED: Error occurred
-    
-    PAUSED --> RUNNING: Resume command
-    PAUSED --> CANCELLED: Cancel command
-    
-    COMPLETED --> [*]
-    CANCELLED --> [*]
-    FAILED --> [*]
-    
-    note right of RUNNING
-        Executor checks for signals
-        at yield points (after tools)
-    end note
-    
-    note right of PAUSED
-        Executor enters pause loop,
-        polls for resume signal
-    end note
-    
-    note right of CANCELLED
-        Cleanup triggered,
-        container destroyed
-    end note
-```
-
-**Terminal States:** COMPLETED, CANCELLED, FAILED (no outgoing transitions)
-
----
-
-## Data Flow: Server-Sent Events
-
-### Event Streaming Lifecycle
+Cancel and inject return `ControlResponse` (`success`, `execution_id`, `state`,
+`message`, `error`); a refused request is HTTP 400. These routes accept an id
+prefix: a prefix is resolved through the `workflow_execution_details` read
+model, which answers 409 while that model is rebuilding (#1555).
 
 ```mermaid
 sequenceDiagram
-    participant Client as Dashboard UI
-    participant SSE as SSE Handler
-    participant Executor as WorkflowExecutor
-    participant Agent as Claude CLI (in Docker)
-    participant Collector as Event Collector
-    
-    Client->>SSE: GET /executions/exec_123/stream<br/>(Accept: text/event-stream)
-    activate SSE
-    SSE-->>Client: Connection established<br/>(Keep-alive)
-    
-    Note over Executor,Agent: Execution in progress
-    
-    Agent->>Collector: POST /events<br/>{"type": "tool_executed"}
-    Collector->>Executor: Event processed
-    Executor->>SSE: Emit event
-    SSE-->>Client: event: tool_executed<br/>data: {...}
-    
-    Agent->>Collector: POST /events<br/>{"type": "tokens_used"}
-    Collector->>Executor: Event processed
-    Executor->>SSE: Emit event
-    SSE-->>Client: event: tokens_used<br/>data: {...}
-    
-    Executor->>SSE: Phase completed
-    SSE-->>Client: event: phase_completed<br/>data: {...}
-    
-    Executor->>SSE: Execution completed
-    SSE-->>Client: event: execution_completed<br/>data: {...}
-    
-    SSE-->>Client: Connection closed
-    deactivate SSE
-```
+    participant C as Client (UI / CLI)
+    participant API as control.py
+    participant EC as ExecutionController
+    participant AGG as WorkflowExecution aggregate
+    participant Q as RedisSignalQueueAdapter
+    participant P as CancelSignalPoller
+    participant SSE as /sse/executions/{id}
 
-### Event Types
-
-| Event Type | Description | Frequency |
-|------------|-------------|-----------|
-| `execution_started` | Execution began | Once |
-| `phase_started` | New phase began | Per phase |
-| `tool_executed` | Agent used a tool | High |
-| `tokens_used` | Token consumption | Per LLM call |
-| `phase_completed` | Phase finished | Per phase |
-| `error_occurred` | Error during execution | On error |
-| `execution_completed` | Execution finished | Once |
-| `execution_failed` | Execution failed | On failure |
-
----
-
-## Alternative: HTTP REST API
-
-For clients that can't maintain WebSocket connections, a REST API provides the same control functionality:
-
-```http
-POST /api/executions/{execution_id}/pause
-POST /api/executions/{execution_id}/resume
-POST /api/executions/{execution_id}/cancel
-GET  /api/executions/{execution_id}/state
-```
-
-**Response:**
-```json
-{
-  "execution_id": "exec_123",
-  "state": "paused",
-  "updated_at": "2026-01-26T10:30:00Z"
-}
-```
-
-**Trade-offs:**
-- ✅ Simpler (no connection management)
-- ✅ Works through restrictive firewalls
-- ❌ No real-time state updates (must poll)
-- ❌ Higher latency
-
----
-
-## Hexagonal Architecture
-
-The control plane uses **ports & adapters** for clean separation:
-
-```mermaid
-flowchart TB
-    subgraph api["API Adapters (Inbound Ports)"]
-        ws[WebSocket Handler]
-        rest[REST Handler]
+    C->>API: POST /executions/{id}/cancel
+    API->>EC: handle_command(CancelExecution)
+    EC->>AGG: rehydrate from event stream, accepts_control(CANCEL)?
+    alt not RUNNING
+        EC-->>API: success=false
+        API-->>C: 400
+    else RUNNING
+        EC->>Q: enqueue(signal)
+        EC-->>API: success=true, "Cancel signal queued"
+        API-->>C: 200 ControlResponse (state unchanged)
+        P->>Q: dequeue (every 10 lines, or after 2s of silence)
+        P-->>P: interrupt the agent
+        Note over AGG,SSE: ExecutionCancelled is recorded
+        SSE-->>C: terminal frame, stream closes
     end
-    
-    subgraph core["Domain Core (Pure Logic)"]
-        controller[ExecutionController]
-        state_machine[StateMachine]
-        commands[Command Types]
-    end
-    
-    subgraph adapters["Storage Adapters (Outbound Ports)"]
-        state_store[WorkflowExecutionAggregate]
-        signal_queue[SignalQueuePort]
-    end
-    
-    subgraph impl["Implementations"]
-        mem_state[InMemoryStateAdapter]
-        redis_state[RedisStateAdapter]
-        mem_queue[InMemoryQueueAdapter]
-        redis_queue[RedisQueueAdapter]
-    end
-    
-    ws --> controller
-    rest --> controller
-    
-    controller --> state_machine
-    controller --> commands
-    
-    controller --> state_store
-    controller --> signal_queue
-    
-    state_store -.->|dev| mem_state
-    state_store -.->|prod| redis_state
-    signal_queue -.->|dev| mem_queue
-    signal_queue -.->|prod| redis_queue
-    
-    style core fill:#e3f2fd,color:#000
-    style adapters fill:#fff3e0,color:#000
 ```
 
-**Benefits:**
-- ✅ Core logic testable without infrastructure
-- ✅ Swap implementations (in-memory ↔ Redis)
-- ✅ Transport-agnostic (WebSocket, REST, CLI)
+- **Who decides.** `ExecutionController`
+  (`packages/syn-adapters/src/syn_adapters/control/controller.py`) holds no
+  rule of its own. It rehydrates the aggregate on every request and asks
+  `WorkflowExecutionAggregate.accepts_control()`, which admits cancel and
+  inject only while the status is `RUNNING` (ADR-014 s7). An execution with no
+  stream, or a store that cannot be read, is refused.
+- **A 200 means queued, not done.** The response's `state` is the state before
+  the signal is acted on. Clients learn the outcome from the
+  `ExecutionCancelled` frame on the execution stream, or from `/state`.
+- **The queue.** `_wiring.get_controller()` uses `RedisSignalQueueAdapter`
+  (`control/adapters/redis_adapter.py`): one short-lived key per execution,
+  5-minute TTL, claimed and then acknowledged on read. If Redis cannot be set
+  up, a null adapter is used and signals are not delivered.
+- **The reader.** `CancelSignalPoller`
+  (`packages/syn-domain/.../slices/execute_workflow/CancelSignalPoller.py`)
+  polls from both `EventStreamProcessor` and `CodexStreamProcessor`, every 10
+  output lines and whenever the agent has been quiet for
+  `CANCEL_POLL_SECONDS` (2.0).
+
+CLI commands (`apps/syn-cli-node/src/commands/control.ts`, group `control`):
+`cancel`, `stop` (cancel with `--force` and a default reason), `inject` and
+`status` (`GET .../state`). The dashboard (`src/api/executions.ts`) and syn-ui
+(`data/src/resources/executions.ts`) call the cancel route.
+
+`POST /executions/{execution_id}/resume` (`routes/executions/resume.py`) is
+not a control action. It starts a new run from a terminal one (ADR-014 s7) and
+does not touch the signal queue.
 
 ---
 
-## Executor Integration
+## Reaching the API
 
-The executor checks for control signals at **yield points**:
-
-```python
-async def execute_workflow(self, workflow: Workflow) -> Result:
-    state = await self.get_state()
-    
-    for phase in workflow.phases:
-        # Check for control signals BEFORE each phase
-        await self.check_control_signals()
-        
-        result = await self.execute_phase(phase)
-        
-        for tool_result in result.tools:
-            # Check for control signals AFTER each tool
-            await self.check_control_signals()
-            
-            await self.emit_event(ToolExecuted(tool=tool_result))
-    
-    return result
-
-async def check_control_signals(self):
-    """Check for pause/cancel signals at safe yield points."""
-    state = await self.control_state.get(self.execution_id)
-    
-    if state == "paused":
-        # Enter pause loop until resumed
-        await self.pause_loop()
-    elif state == "cancelled":
-        # Cleanup and exit
-        raise ExecutionCancelled()
-```
-
-**Yield Points:**
-- Before each workflow phase
-- After each tool execution
-- After each LLM call
-
-**Why yield points?**
-- ✅ Safe to pause (no partial operations)
-- ✅ Clean state (can resume)
-- ✅ Predictable behavior
+| Where | `/api/v1` handling |
+|-------|--------------------|
+| Vite dev server | `apps/syn-dashboard-ui/vite.config.ts` proxies `/api/v1` and strips the prefix |
+| Gateway, dev | `infra/docker/images/gateway/nginx.conf.dev`, `location /api/v1/` rewrites the prefix away and sets `proxy_buffering off` |
+| Gateway, selfhost | `infra/docker/images/gateway/docker-entrypoint.sh` generates `location /api/v1/` → `http://api:8000/` with `proxy_read_timeout 300s`. SSE streams pass through this generic location; buffering is turned off by the API's `X-Accel-Buffering: no` header, and the 30-second keepalive is well inside the read timeout |
 
 ---
 
-## Dashboard UI Integration
+## Known gaps
 
-```typescript
-// WebSocket for control
-const controlSocket = new WebSocket(`wss://api.syn137.dev/ws/control/${executionId}`);
+Each of these is a fact about the code on the date above, not a design intent.
 
-controlSocket.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-  if (message.type === 'state_changed') {
-    updateExecutionState(message.new_state);
-  }
-};
-
-// Pause execution
-function pauseExecution() {
-  controlSocket.send(JSON.stringify({
-    command: 'pause',
-    reason: 'User requested'
-  }));
-}
-
-// SSE for events
-const eventSource = new EventSource(`/api/executions/${executionId}/stream`);
-
-eventSource.addEventListener('tool_executed', (event) => {
-  const data = JSON.parse(event.data);
-  appendToolToTimeline(data);
-});
-
-eventSource.addEventListener('tokens_used', (event) => {
-  const data = JSON.parse(event.data);
-  updateTokenCount(data.tokens);
-});
-```
+- **Inject is accepted but not delivered** (#1530). The controller queues an
+  `INJECT` signal and answers success, but the only reader,
+  `CancelSignalPoller`, acts on `CANCEL` alone. Nothing passes
+  `inject_message` to the agent.
+- **Subagent events never reach SSE.** `RealTimeProjection` has
+  `on_subagent_started` and `on_subagent_stopped`, but `SubagentStarted` and
+  `SubagentStopped` are not in the adapter's subscribed event types, so those
+  handlers are never called.
+- **The selfhost gateway still proxies removed paths.** The generated config
+  keeps `location /ws/`, `location /api/v1/ws` and `location /api/v1/stream`.
+  No API route exists behind any of them; the real streams use
+  `location /api/v1/`.
+- **Stale comments in `_wiring.get_controller()`** still mention
+  pause/resume.
 
 ---
 
-## Error Handling
+## History
 
-### Connection Errors
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant WS as WebSocket
-    participant Server
-    
-    Client->>WS: Connect
-    WS-->>Client: Connected
-    
-    Note over WS,Server: Network interruption
-    
-    WS--xClient: Connection lost
-    
-    Client->>Client: Exponential backoff<br/>(1s, 2s, 4s, 8s...)
-    
-    Client->>WS: Reconnect attempt
-    WS->>Server: Get current state
-    Server-->>WS: state="running"
-    WS-->>Client: Reconnected + state sync
-    
-    Note over Client: Resume from current state
-```
-
-### Command Failures
-
-| Failure | Response | Action |
-|---------|----------|--------|
-| Invalid transition | `400 Bad Request` | Show error to user |
-| Execution not found | `404 Not Found` | Redirect to list |
-| Already terminal state | `409 Conflict` | Refresh state |
-| Server error | `500 Internal Error` | Retry with backoff |
-
----
-
-## Monitoring & Metrics
-
-### WebSocket Metrics
-- `websocket_connections_active` - Current open connections
-- `websocket_messages_sent_total` - Messages sent to clients
-- `websocket_messages_received_total` - Commands received
-- `websocket_connection_duration_seconds` - Connection lifetime
-
-### SSE Metrics
-- `sse_connections_active` - Current SSE streams
-- `sse_events_sent_total` - Events streamed
-- `sse_connection_duration_seconds` - Stream lifetime
-
-### Control Metrics
-- `control_commands_total{command}` - Commands by type
-- `control_transition_failures_total` - Invalid transitions
-- `execution_pause_duration_seconds` - Time spent paused
+- **Until March 2026** the API served WebSocket endpoints:
+  `/ws/executions/{id}`, `/ws/activity`, `/ws/health`, and a bidirectional
+  control channel `/ws/control/{id}`. Observation is one-directional and the
+  control channel duplicated the HTTP routes, so all four were removed in
+  favour of SSE: ADR-049 (accepted 2026-03-21), implemented in
+  [#264](https://github.com/syntropic137/syntropic137/pull/264) (ISS-262,
+  committed 2026-03-22). The
+  removal note is also in ADR-019.
+- **2026-09-29**: execution pause and resume were deleted
+  ([#1471](https://github.com/syntropic137/syntropic137/pull/1471)). Nothing
+  ever read the pause signal, and `ExecutionStatus.PAUSED` went with them. The
+  control plane now carries cancel and inject only. Earlier versions of this
+  document, which describe the WebSocket channel and a pause/resume state
+  machine, are in git history.
 
 ---
 
 ## Related Documentation
 
-- [ADR-019: WebSocket Control Plane Architecture](../adrs/ADR-019-websocket-control-plane.md)
-- [Event Architecture](./event-architecture.md)
-- [Infrastructure Data Flow](./infrastructure-data-flow.md)
+- [ADR-049: SSE for Real-Time Execution Streams](../adrs/ADR-049-sse-over-websocket-for-execution-streams.md)
+- [ADR-019: WebSocket Control Plane Architecture](../adrs/ADR-019-websocket-control-plane.md) (historical title; its notes record the removal)
+- [ADR-055: Projection Checkpoint Coordinator](../adrs/ADR-055-projection-checkpoint-coordinator-architecture.md)
+- [Projection Subscriptions](./projection-subscriptions.md)
