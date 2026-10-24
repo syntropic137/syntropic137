@@ -1,0 +1,11 @@
+--- a/ci/fitness/code_quality/test_no_hardcoded_version_literals.py
++++ b/ci/fitness/code_quality/test_no_hardcoded_version_literals.py
+@@ -109,7 +109,7 @@
+ 
+ def _tracked_python(root: Path) -> list[str]:
+     listed = subprocess.run(
+-        ["git", "-C", str(root), "ls-files", "-z", "--recurse-submodules", "--", "*.py"],
++        ["git", "-C", str(root), "ls-files", "-z", "--", "*.py"],
+         check=True,
+         capture_output=True,
+     ).stdout.decode()

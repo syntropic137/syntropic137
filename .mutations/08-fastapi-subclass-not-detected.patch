@@ -1,0 +1,11 @@
+--- a/ci/fitness/code_quality/test_no_hardcoded_version_literals.py
++++ b/ci/fitness/code_quality/test_no_hardcoded_version_literals.py
+@@ -89,7 +89,7 @@
+         (node.lineno, "literal FastAPI(version=...)")
+         for node in ast.walk(tree)
+         if isinstance(node, ast.Call)
+-        and _callee(node).endswith("FastAPI")
++        and _callee(node) == "FastAPI"
+         and any(k.arg == "version" and _is_str_literal(k.value) for k in node.keywords)
+     )
+     return sorted(found)

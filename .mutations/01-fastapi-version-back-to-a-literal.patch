@@ -1,0 +1,11 @@
+--- a/lib/ui-feedback/backend/ui-feedback-api/src/ui_feedback/main.py
++++ b/lib/ui-feedback/backend/ui-feedback-api/src/ui_feedback/main.py
+@@ -60,7 +60,7 @@
+ app = FastAPI(
+     title="UI Feedback API",
+     description="REST API for capturing and managing UI feedback",
+-    version=version_string(),
++    version="0.1.0",
+     lifespan=lifespan,
+ )
+ 

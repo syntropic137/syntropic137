@@ -1,0 +1,11 @@
+--- a/ci/fitness/code_quality/test_no_hardcoded_version_literals.py
++++ b/ci/fitness/code_quality/test_no_hardcoded_version_literals.py
+@@ -65,7 +65,7 @@
+         return (
+             isinstance(target, ast.Name)
+             and target.id == "__version__"
+-            and _is_str_literal(stmt.value)
++            and False
+         )
+     return False
+ 
