@@ -634,7 +634,7 @@ class WorkspaceService:
         workspace: ManagedWorkspace | None = None
 
         try:
-            isolation_handle, sidecar_handle = await provision_workspace(
+            isolation_handle, sidecar_handle, image_manifest = await provision_workspace(
                 self,
                 isolation_config,
                 aggregate,
@@ -648,6 +648,7 @@ class WorkspaceService:
                 aggregate=aggregate,
                 isolation_handle=isolation_handle,
                 sidecar_handle=sidecar_handle,
+                image_manifest=image_manifest,
                 _service=self,
             )
 

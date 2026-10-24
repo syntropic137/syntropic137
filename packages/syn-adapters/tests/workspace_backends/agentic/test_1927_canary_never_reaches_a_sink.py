@@ -21,12 +21,23 @@ import logging
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import quote
 
 import pytest
+from agentic_isolation.config import WorkspaceConfig
+from agentic_isolation.providers.base import Workspace as ProviderWorkspace
+from agentic_isolation.providers.capabilities import TransferRoot
+from agentic_isolation.providers.file_transfer import (
+    DEFAULT_READ_LIMITS,
+    ReadFilesResult,
+    ReadLimits,
+)
+from agentic_isolation.providers.file_transfer import FileRefusal as AWRefusal
 from test_stream_on_operations import _HANDLE, _Observations, _stream, _Workspace
 
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
@@ -35,6 +46,7 @@ from syn_adapters.workspace_backends.service.issued_tokens import IssuedToken
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_adapters.workspace_backends.service.setup_phase import run_setup_phase
 from syn_adapters.workspace_backends.service.setup_phase_secrets import SetupPhaseSecrets
+from syn_domain.contexts.orchestration._shared.file_transfer import FilesRefusedError
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
     IsolationHandle,
@@ -54,6 +66,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
     TokenAccumulator,
 )
 from syn_shared.settings.session_store import SessionStoreSettings
+
+if TYPE_CHECKING:
+    from agentic_isolation import AgenticWorkspace
+    from agentic_isolation.providers.base import WorkspaceProvider
 
 pytestmark = pytest.mark.unit
 
@@ -230,23 +246,67 @@ async def test_a_launch_only_credential_is_scrubbed_from_collected_files(key: st
     assert not _leaks({"stored artifact": content}), _leaks({"stored artifact": content})
 
 
-async def test_the_session_store_token_is_scrubbed_from_collected_files(tmp_path: Path):
-    """Bound at create, never in a launch: only the isolation adapter knows it."""
+class _ReadsFiles:
+    """A provider at the pinned `SupportsFileTransfer` boundary, holding ``files`` under /workspace."""
+
+    name = "docker"
+
+    def __init__(self, files: tuple[tuple[str, bytes], ...], refused: tuple[AWRefusal, ...] = ()):
+        self.files = files
+        self.refused = refused
+
+    async def read_files(
+        self,
+        workspace: ProviderWorkspace,
+        patterns: Sequence[str],
+        *,
+        base_path: TransferRoot,
+        limits: ReadLimits = DEFAULT_READ_LIMITS,
+    ) -> ReadFilesResult:
+        return ReadFilesResult(files=self.files, refused=self.refused)
+
+
+def _collecting(provider: _ReadsFiles) -> ManagedWorkspace:
     store = SessionStoreSettings(_env_file=None, auth_token=CANARY)  # type: ignore[arg-type]
-    isolation = AgenticIsolationAdapter(session_store=store)
-    (tmp_path / "artifacts" / "output").mkdir(parents=True)
-    (tmp_path / "artifacts" / "output" / "report.md").write_bytes(_workload_output())
-    handle = IsolationHandle(
-        isolation_id="ws-1927", isolation_type="docker", host_workspace_path=str(tmp_path)
+    isolation = AgenticIsolationAdapter(
+        session_store=store, provider=cast("WorkspaceProvider", provider)
     )
-    workspace = ManagedWorkspace(
-        "ws-1927", "exec-1927", MagicMock(), handle, None, _service(isolation)
+    isolation._workspaces["ws-1927"] = cast(
+        "AgenticWorkspace",
+        ProviderWorkspace(
+            id="ws-1927", provider="docker", path=Path("/workspace"), config=WorkspaceConfig()
+        ),
     )
+    handle = IsolationHandle(isolation_id="ws-1927", isolation_type="docker")
+    return ManagedWorkspace("ws-1927", "exec-1927", MagicMock(), handle, None, _service(isolation))
+
+
+async def test_the_session_store_token_is_scrubbed_from_collected_files():
+    """Bound at create, never in a launch: only the isolation adapter knows it."""
+    workspace = _collecting(_ReadsFiles((("artifacts/output/report.md", _workload_output()),)))
 
     files = await workspace.collect_files(patterns=["artifacts/output/**/*"])
     content = await _store([(Path(p).name, c) for p, c in files])
     assert REDACTED_MARKER in content
     assert "workload output: " in content, "useful output survives"
+    assert not _leaks({"stored artifact": content}), _leaks({"stored artifact": content})
+
+
+async def test_the_files_a_refusal_carries_are_scrubbed_too():
+    """A refusal hands back what WAS read; those bytes leave through the same scrubber (#1913)."""
+    workspace = _collecting(
+        _ReadsFiles(
+            (("artifacts/output/report.md", _workload_output()),),
+            (AWRefusal("artifacts/output/link", "symlink"),),
+        )
+    )
+
+    with pytest.raises(FilesRefusedError) as raised:
+        await workspace.collect_files(patterns=["artifacts/output/**/*"])
+
+    ((_, carried),) = raised.value.files
+    content = await _store([("report.md", carried)])
+    assert REDACTED_MARKER in content
     assert not _leaks({"stored artifact": content}), _leaks({"stored artifact": content})
 
 

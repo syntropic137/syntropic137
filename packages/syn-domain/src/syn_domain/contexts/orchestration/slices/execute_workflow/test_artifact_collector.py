@@ -222,17 +222,19 @@ class TestArtifactCollector:
         workspace = MockWorkspace(
             collected_files=[("artifacts/output/partial.md", b"partial content")]
         )
-        result = await collector.collect_from_unfinished_phase(
-            workspace=workspace,
-            workflow_id="w1",
-            phase_id="p1",
-            execution_id="e1",
-            session_id="s1",
-            phase_name="Phase",
-            output_artifact_types=("text",),
-            agent=UNREPORTED_AGENT,
-            outcome=UnfinishedPhase.INTERRUPTED,
-        )
+        result = (
+            await collector.collect_from_unfinished_phase(
+                workspace=workspace,
+                workflow_id="w1",
+                phase_id="p1",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Phase",
+                output_artifact_types=("text",),
+                agent=UNREPORTED_AGENT,
+                outcome=UnfinishedPhase.INTERRUPTED,
+            )
+        ).artifact_ids
         assert len(result) == 1
         assert len(repo.saved) == 1
 
@@ -243,17 +245,19 @@ class TestArtifactCollector:
                 raise RuntimeError("disk full")
 
         collector = ArtifactCollector(MockArtifactRepo(), None, None)
-        result = await collector.collect_from_unfinished_phase(
-            workspace=BrokenWorkspace(),
-            workflow_id="w1",
-            phase_id="p1",
-            execution_id="e1",
-            session_id="s1",
-            phase_name="Phase",
-            output_artifact_types=("text",),
-            agent=UNREPORTED_AGENT,
-            outcome=UnfinishedPhase.INTERRUPTED,
-        )
+        result = (
+            await collector.collect_from_unfinished_phase(
+                workspace=BrokenWorkspace(),
+                workflow_id="w1",
+                phase_id="p1",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Phase",
+                output_artifact_types=("text",),
+                agent=UNREPORTED_AGENT,
+                outcome=UnfinishedPhase.INTERRUPTED,
+            )
+        ).artifact_ids
         assert result == []
 
 
@@ -339,17 +343,19 @@ class TestBuildJunkIsNotCollected:
             ]
         )
 
-        ids = await collector.collect_from_unfinished_phase(
-            workspace=workspace,
-            workflow_id="w1",
-            phase_id="p1",
-            execution_id="e1",
-            session_id="s1",
-            phase_name="Test Phase",
-            output_artifact_types=("markdown",),
-            agent=UNREPORTED_AGENT,
-            outcome=UnfinishedPhase.INTERRUPTED,
-        )
+        ids = (
+            await collector.collect_from_unfinished_phase(
+                workspace=workspace,
+                workflow_id="w1",
+                phase_id="p1",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Test Phase",
+                output_artifact_types=("markdown",),
+                agent=UNREPORTED_AGENT,
+                outcome=UnfinishedPhase.INTERRUPTED,
+            )
+        ).artifact_ids
 
         assert len(ids) == 1
 
@@ -563,17 +569,19 @@ class TestADeclaredOutputMustBeProduced:
         """
         collector = ArtifactCollector(MockArtifactRepo(), None, None)
 
-        ids = await collector.collect_from_unfinished_phase(
-            workspace=MockWorkspace(),
-            workflow_id="w1",
-            phase_id="p1",
-            execution_id="e1",
-            session_id="s1",
-            phase_name="Interrupted",
-            output_artifact_types=("markdown",),
-            agent=UNREPORTED_AGENT,
-            outcome=UnfinishedPhase.INTERRUPTED,
-        )
+        ids = (
+            await collector.collect_from_unfinished_phase(
+                workspace=MockWorkspace(),
+                workflow_id="w1",
+                phase_id="p1",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Interrupted",
+                output_artifact_types=("markdown",),
+                agent=UNREPORTED_AGENT,
+                outcome=UnfinishedPhase.INTERRUPTED,
+            )
+        ).artifact_ids
 
         assert ids == []
 

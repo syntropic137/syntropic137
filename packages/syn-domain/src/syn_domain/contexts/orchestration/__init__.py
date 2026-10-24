@@ -39,6 +39,10 @@ from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
 )
 from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
+from syn_domain.contexts.orchestration._shared.file_transfer import (
+    FileRefusal,
+    FilesRefusedError,
+)
 from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,
@@ -110,6 +114,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     FailExecutionCommand,
     InterruptExecutionCommand,
     ResumeExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+    IMAGE_MANIFEST_FILE,
+    IMAGE_MANIFEST_ROOT,
+    ImageManifestContent,
+    ImageManifestReading,
+    ImageManifestState,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
     replays_generic,
@@ -366,6 +377,8 @@ __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
     "HOST_CREDENTIALS",
+    "IMAGE_MANIFEST_FILE",
+    "IMAGE_MANIFEST_ROOT",
     "MAX_START_ATTEMPTS",
     "NO_CREDENTIALS",
     "ORCHESTRATION_EVENT_EPOCH",
@@ -454,6 +467,8 @@ __all__ = [
     "FailureClassification",
     # Value objects - workflow
     "FallbackAgentYamlDefinition",
+    "FileRefusal",
+    "FilesRefusedError",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     "Goal",
@@ -462,6 +477,9 @@ __all__ = [
     "HostCredentials",
     "HostWorkspaceGit",
     "ImageManifest",
+    "ImageManifestContent",
+    "ImageManifestReading",
+    "ImageManifestState",
     "InheritanceUnavailableError",
     "InjectTokensCommand",
     # Value objects - workflow template
