@@ -27,6 +27,9 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from syn_adapters.workspace_backends.agentic.capability_verdict import (
+    CAPABILITY_STATUS_OBSERVATION,
+)
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
     SUPPORTED_OBSERVATION_SCHEMA_VERSIONS,
@@ -37,7 +40,7 @@ from syn_adapters.workspace_backends.agentic.capture_result import (
 )
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_api._wiring import get_event_store
-from syn_api.types import CaptureStatusEntry, CaptureStatusResponse
+from syn_api.types import CapabilityStatusEntry, CaptureStatusEntry, CaptureStatusResponse
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -259,6 +262,63 @@ async def _execution_entries(
     ]
 
 
+class _RecordedStartVerdict(BaseModel):
+    """A `capability_status` row as recorded at agent launch (#1516).
+
+    Parsed, not probed, for `_RecordedCapability`'s reason. A row that breaks
+    it is skipped: an unreadable verdict is unknown, never a guess at one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore", strict=True)
+
+    capability: str
+    status: Literal["ready", "degraded", "failed"]
+    failed_checks: list[str] = Field(default_factory=list)
+    doctor_exit: int = 0
+
+
+def capability_status_display(
+    status: Literal["ready", "degraded", "failed"], failed_checks: Sequence[str]
+) -> str:
+    """A start-up verdict as an operator reads it, naming the failed checks."""
+    label = {
+        "ready": "Capture ready",
+        "degraded": "Capture degraded",
+        "failed": "Capture failed at start",
+    }[status]
+    if status != "ready" and failed_checks:
+        return f"{label}: {', '.join(failed_checks)} failed"
+    return label
+
+
+def _to_capability(row: Mapping[str, object]) -> CapabilityStatusEntry | None:
+    try:
+        verdict = _RecordedStartVerdict.model_validate(row)
+    except ValidationError:
+        return None
+    return CapabilityStatusEntry(
+        execution_id=_text(row.get("execution_id")),
+        phase_id=_text(row.get("phase_id")),
+        workspace_id=_text(row.get("workspace_id")),
+        capability=verdict.capability,
+        status=verdict.status,
+        failed_checks=verdict.failed_checks,
+        doctor_exit=verdict.doctor_exit,
+        capability_status_display=capability_status_display(verdict.status, verdict.failed_checks),
+    )
+
+
+async def _execution_capabilities(
+    store: AgentEventStore, execution_id: str, limit: int
+) -> list[CapabilityStatusEntry]:
+    """One execution's start-up verdicts, from the flattened rows."""
+    rows = await store.query_by_execution(
+        execution_id, event_type=CAPABILITY_STATUS_OBSERVATION, limit=limit
+    )
+    entries = [_to_capability(row) for row in rows]
+    return [entry for entry in entries if entry is not None]
+
+
 @router.get("/status", response_model=CaptureStatusResponse)
 async def get_capture_status(
     limit: int = Query(default=50, ge=1, le=MAX_LIMIT),
@@ -274,6 +334,9 @@ async def get_capture_status(
     """Recorded session-capture verdicts, newest first."""
     store = get_event_store()
     try:
+        capabilities = (
+            await _execution_capabilities(store, execution_id, limit) if execution_id else []
+        )
         scanned = (
             await _execution_entries(store, execution_id, limit)
             if execution_id
@@ -310,4 +373,5 @@ async def get_capture_status(
         # which is a wrong answer rather than a missing feature.
         truncated=len(scanned) >= limit,
         entries=entries,
+        capabilities=capabilities,
     )

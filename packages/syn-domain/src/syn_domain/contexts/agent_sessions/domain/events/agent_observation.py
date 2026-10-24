@@ -83,6 +83,11 @@ class ObservationType(StrEnum):
     # data loss. This is the record.
     SESSION_CAPTURE = "session_capture"
 
+    # How the session-store capability came up in the workspace (#1516),
+    # recorded as the agent launches so a degraded start is visible while the
+    # phase runs, not only after its teardown sweep. Lane 2, like capture.
+    CAPABILITY_STATUS = "capability_status"
+
     # The agent's git credential expired and no renewal succeeded first
     # (#725). Lane 2, like capture: renewal is infrastructure, and a lapse
     # changes what the agent can do, never what the domain decided. Recorded

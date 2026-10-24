@@ -204,9 +204,12 @@ session-store capability's start-up checks failed (e.g. `store_reachable`), so
 agentic-workspace degraded it rather than failing the workspace (AW #27). The
 Phase runs and completes normally; its transcripts never reach the store. The
 cause is the capability's own `capability_status` verdict (`ready`,
-`degraded`, `failed`), read from the workspace's audit row before teardown and
-recorded with the capture verdict, whose state then reads `degraded` instead of
-an unexplained `failed`, `incomplete` or `unknown`. It still needs a backfill:
+`degraded`, `failed`), read from the workspace's audit row as the agent
+launches and recorded then as its own `capability_status` observation, so the
+Phase reads as degraded while it runs and keeps that explanation if it never
+reaches teardown. The teardown capture verdict reads it again, and its state
+then reads `degraded` instead of an unexplained `failed`, `incomplete` or
+`unknown`. It still needs a backfill:
 degraded is explained, not settled. A verdict that cannot be read is unknown,
 never degraded, and never fails the Phase. Not `capture failed`, which means
 capture was on and the export broke (#1516).

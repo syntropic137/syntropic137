@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Protocol
 from syn_adapters.workspace_backends.agentic.capability_verdict import (
     SESSION_STORE_CAPABILITY,
     AgenticCapabilityStatusReader,
+    record_capability_verdict,
 )
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     build_expectations,
@@ -74,6 +75,16 @@ class SessionCapturePort(Protocol):
         expect_sessions: bool,
     ) -> AuthoritativeCapture: ...
 
+    async def record_capability(
+        self,
+        execute: WorkspaceExecutor,
+        *,
+        session_id: str,
+        execution_id: str,
+        workspace_id: str,
+        phase_id: str,
+    ) -> CapabilityVerdict | None: ...
+
 
 class SessionCaptureService:
     """Runs the probe and records the verdict.
@@ -92,6 +103,38 @@ class SessionCaptureService:
         self._app_environment = app_environment
         self._writer = writer
         self._capability_reader = capability_reader or AgenticCapabilityStatusReader()
+
+    async def record_capability(
+        self,
+        execute: WorkspaceExecutor,
+        *,
+        session_id: str,
+        execution_id: str,
+        workspace_id: str,
+        phase_id: str,
+    ) -> CapabilityVerdict | None:
+        """Read the session-store capability's start-up verdict and record it now.
+
+        Called as the agent launches, so a degraded workspace is visible while
+        its phase runs and stays visible if the phase never reaches teardown
+        (#1516). Fail-open: the reader turns any read failure into None, and
+        None (no row, or none readable) records nothing.
+        """
+        # With no store configured the capability is not active, there is no
+        # row, and an execution that captures nothing by design shows nothing.
+        if build_expectations(self._settings, self._app_environment, expect_sessions=True) is None:
+            return None
+        verdict = await self._capability_reader.read(execute, SESSION_STORE_CAPABILITY)
+        if verdict is not None:
+            await record_capability_verdict(
+                self._writer,
+                verdict,
+                session_id=session_id,
+                execution_id=execution_id,
+                phase_id=phase_id,
+                workspace_id=workspace_id,
+            )
+        return verdict
 
     async def capture_and_record(
         self,

@@ -18,6 +18,7 @@ returned as None exactly like "no row", and never fails the run that asked.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 
@@ -28,20 +29,33 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     from agentic_isolation.harnesses import ExecFn
 
+    from syn_adapters.workspace_backends.agentic.capture_observation import (
+        ObservationWriter,
+    )
     from syn_adapters.workspace_backends.agentic.capture_probe import WorkspaceExecutor
+    from syn_shared.events import EventType
 
 __all__ = [
+    "CAPABILITY_STATUS_OBSERVATION",
     "SESSION_STORE_CAPABILITY",
     "AgenticCapabilityStatusReader",
     "CapabilityStatusReader",
     "CapabilityStatusValue",
     "CapabilityVerdict",
+    "record_capability_verdict",
 ]
 
 logger = logging.getLogger(__name__)
 
 #: The capability name agentic-workspace gives the session store.
 SESSION_STORE_CAPABILITY: Final = "session-store"
+
+#: The Lane 2 row a start-up verdict is recorded as, spelled by syn_shared for
+#: the reason `SESSION_CAPTURE_OBSERVATION` is: that spelling gates the write.
+CAPABILITY_STATUS_OBSERVATION: Final[EventType] = "capability_status"
+
+#: The same bounded slice of the run a capture verdict's write gets.
+_WRITE_TIMEOUT_SECONDS: Final = 5.0
 
 #: Used when the reader passes no timeout of its own.
 _DEFAULT_TIMEOUT_SECONDS: Final = 10
@@ -100,6 +114,40 @@ class AgenticCapabilityStatusReader:
             failed_checks=status.failed_checks,
             doctor_exit=status.doctor_exit,
         )
+
+
+async def record_capability_verdict(
+    writer: ObservationWriter | None,
+    verdict: CapabilityVerdict,
+    *,
+    session_id: str,
+    execution_id: str,
+    phase_id: str,
+    workspace_id: str,
+) -> None:
+    """Record a start-up verdict on Lane 2, as its own row.
+
+    Its own row, not a field of the teardown capture verdict: it is a fact
+    about the START, so it is written while the agent is still running and
+    survives a phase that never reaches teardown (#1516). Best-effort like
+    every observation: a failed write is logged and dropped.
+    """
+    if writer is None:
+        return
+    try:
+        await asyncio.wait_for(
+            writer.record_observation(
+                session_id=session_id,
+                observation_type=CAPABILITY_STATUS_OBSERVATION,
+                data=verdict.model_dump(mode="json"),
+                execution_id=execution_id,
+                phase_id=phase_id,
+                workspace_id=workspace_id,
+            ),
+            timeout=_WRITE_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning("could not record %s capability status: %s", verdict.capability, exc)
 
 
 def _exec_fn_for(execute: WorkspaceExecutor) -> ExecFn:

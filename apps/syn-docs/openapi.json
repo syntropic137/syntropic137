@@ -8972,6 +8972,80 @@
         "title": "CancelRequest",
         "description": "Request to cancel an execution."
       },
+      "CapabilityStatusEntry": {
+        "properties": {
+          "execution_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Id"
+          },
+          "phase_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "capability": {
+            "type": "string",
+            "title": "Capability"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "degraded",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "failed_checks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Failed Checks"
+          },
+          "doctor_exit": {
+            "type": "integer",
+            "title": "Doctor Exit",
+            "default": 0
+          },
+          "capability_status_display": {
+            "type": "string",
+            "title": "Capability Status Display"
+          }
+        },
+        "type": "object",
+        "required": [
+          "capability",
+          "status",
+          "capability_status_display"
+        ],
+        "title": "CapabilityStatusEntry",
+        "description": "One workspace's session-store capability verdict, recorded at agent launch.\n\nRecorded at START (#1516), so a degraded workspace is visible while its\nphase runs and stays visible if the phase never reaches teardown. Only\nreturned for an execution-filtered read."
+      },
       "CaptureReceipt": {
         "properties": {
           "node": {
@@ -9270,6 +9344,13 @@
             },
             "type": "array",
             "title": "Entries"
+          },
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityStatusEntry"
+            },
+            "type": "array",
+            "title": "Capabilities"
           }
         },
         "type": "object",

@@ -2945,6 +2945,38 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /**
+         * CapabilityStatusEntry
+         * @description One workspace's session-store capability verdict, recorded at agent launch.
+         *
+         *     Recorded at START (#1516), so a degraded workspace is visible while its
+         *     phase runs and stays visible if the phase never reaches teardown. Only
+         *     returned for an execution-filtered read.
+         */
+        CapabilityStatusEntry: {
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Capability */
+            capability: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "degraded" | "failed";
+            /** Failed Checks */
+            failed_checks?: string[];
+            /**
+             * Doctor Exit
+             * @default 0
+             */
+            doctor_exit: number;
+            /** Capability Status Display */
+            capability_status_display: string;
+        };
         /** CaptureReceipt */
         CaptureReceipt: {
             node: components["schemas"]["InventoryNodeRef"];
@@ -3059,6 +3091,8 @@ export interface components {
             truncated: boolean;
             /** Entries */
             entries?: components["schemas"]["CaptureStatusEntry"][];
+            /** Capabilities */
+            capabilities?: components["schemas"]["CapabilityStatusEntry"][];
         };
         /**
          * ClaudePluginFileEntry
