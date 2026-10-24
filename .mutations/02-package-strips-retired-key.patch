@@ -1,0 +1,13 @@
+diff --git a/apps/syn-cli-node/src/commands/workflow/crud.ts b/apps/syn-cli-node/src/commands/workflow/crud.ts
+index 7ce9f264a..1a02ffe63 100644
+--- a/apps/syn-cli-node/src/commands/workflow/crud.ts
++++ b/apps/syn-cli-node/src/commands/workflow/crud.ts
+@@ -397,7 +397,7 @@ async function validateOnServer(workflows: PackageWorkflows): Promise<WorkflowVa
+   for (const wf of workflows) {
+     const data = unwrap(
+       await api.POST("/workflows/validate", {
+-        body: { content: JSON.stringify(wf.definition), filename: `${wf.name}.json` },
++        body: { content: JSON.stringify(wf.definition, (k: string, v: unknown) => (k === "can_open_pr" ? undefined : v)), filename: `${wf.name}.json` },
+       }),
+       "Failed to validate workflow",
+     );
