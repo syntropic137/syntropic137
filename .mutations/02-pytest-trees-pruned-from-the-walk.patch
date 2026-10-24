@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
-index 8e04e390e..d24516cdd 100644
+index 5d5d05660..9d29c9f42 100644
 --- a/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
 +++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
-@@ -304,6 +304,7 @@ def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
+@@ -312,6 +312,7 @@ def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
      try:
          for dirpath, dirnames, filenames in os.walk(directory, onerror=_raise):
              here = Path(dirpath)

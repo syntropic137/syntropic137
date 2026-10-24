@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
+index 5d5d05660..889eb5d09 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
+@@ -147,7 +147,7 @@ def _is_proven_cache(path: Path) -> bool:
+     """
+     if path.is_symlink() or not path.is_dir():
+         return False
+-    return path.name.startswith(PYTEST_TEMP_PREFIX) or _has_cachedir_tag(path)
++    return "pytest" in path.name or _has_cachedir_tag(path)
+ 
+ 
+ def _has_cachedir_tag(path: Path) -> bool:
