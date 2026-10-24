@@ -4457,6 +4457,8 @@ export interface components {
             completed_at?: string | null;
             /** Phases */
             phases?: components["schemas"]["PhaseExecutionInfo"][];
+            /** Capture Status Display */
+            capture_status_display?: string | null;
             /**
              * Total Phases
              * @default 0
@@ -6569,6 +6571,8 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Capture Status Display */
+            capture_status_display?: string | null;
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
             /** Exit Code */

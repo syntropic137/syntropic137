@@ -12566,6 +12566,17 @@
             "type": "array",
             "title": "Phases"
           },
+          "capture_status_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Status Display"
+          },
           "total_phases": {
             "type": "integer",
             "title": "Total Phases",
@@ -17499,6 +17510,17 @@
             },
             "type": "object",
             "title": "Cost By Model"
+          },
+          "capture_status_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Status Display"
           },
           "agent_session_ids": {
             "anyOf": [
