@@ -8,3 +8,4 @@
 | 04-apply-skips-staleness-check | swap moves a stale staged file over a newer live edit | scripts/tests/test_pit_stop_stage_write.py::test_the_swap_refuses_a_stage_the_live_compose_has_moved_past |
 | 05-stage-skips-drift-recheck | `stage` repoints a compose edited on the host since the precheck, unchecked | scripts/tests/test_pit_stop_stage_write.py::test_the_stage_refuses_a_compose_edited_on_the_host_since_the_precheck |
 | 06-old-asset-as-baseline | an env var swaps `$REF`'s compose for an older baseline that hides the drift | scripts/tests/test_1310_pit_stop_gateway_only.py::TestComposeDrift::test_an_old_release_asset_is_no_baseline |
+| 07-apply-reopens-after-write | an ssh failure after the live compose write re-opens admission over new pins the old build still runs | scripts/tests/test_pit_stop_stage_write.py::test_admission_stays_paused_once_the_live_compose_may_have_been_written |

@@ -472,7 +472,8 @@ claim_the_swap() {
 #     admission. The platform is exactly as it was apart from the gate, and a
 #     gate left shut with no pit stop to clear it held admission 2.25h (PC-115).
 #   Gated, and the swap has begun (SWAPPING=1): stay PAUSED and print RECOVERY.
-#     A build that has not passed verify never takes traffic (#1575).
+#     A build that has not passed verify never takes traffic (#1575). The swap
+#     begins at the write of the live compose, not at the recreate (#1511).
 # GATED is set BEFORE the pause PUT, so a PUT that persisted but failed in
 # flight is still undone. The lock goes on every exit; $TMP as the first trap.
 GATED=0
@@ -687,6 +688,29 @@ apply_staged() {
         echo "   $ALREADY"
         return 0
     fi
+    # From this write on, the live compose may name $TAG while the old build
+    # still runs: an ssh that fails here, or loses the reply, may have moved the
+    # stage in anyway. A `compose up` would then recreate under executions
+    # admitted since, so admission stays PAUSED from here and RECOVERY says
+    # how to finish or undo it. The move is a rename: $STAGED still being there
+    # means it never happened (#1511).
+    if [ "$SERVICE" = gateway ]; then
+        RECOVERY="RECOVERY: admission was never paused and nothing was recreated, but $COMPOSE on $HOST may already name the $TAG gateway.
+   ssh $HOST 'ls $COMPOSE_DIR/$STAGED'     # still there: the live compose is unchanged; run the pit stop again
+   gone, so finish:  ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d --no-deps gateway'
+   or put it back:   ssh $HOST 'cd $COMPOSE_DIR && cp $COMPOSE.bak-$BAK $COMPOSE'"
+    else
+        RECOVERY="RECOVERY: admission is still PAUSED and nothing was recreated, but $COMPOSE on $HOST may already name $TAG.
+   ssh $HOST 'ls $COMPOSE_DIR/$STAGED'     # still there: the live compose is unchanged; re-open admission (last line)
+   gone, so either finish the swap:
+     ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d api gateway'
+     curl -fsS -u admin:\$SYN_API_PASSWORD $API/version     # image_tag must be $TAG
+   or put the previous compose back (the running containers already match it):
+     ssh $HOST 'cd $COMPOSE_DIR && cp $COMPOSE.bak-$BAK $COMPOSE'
+   then re-open admission:
+     curl -fsS -u admin:\$SYN_API_PASSWORD -X PUT $API/maintenance -H 'Content-Type: application/json' -d '{\"active\": false, \"reason\": \"\", \"actor\": \"manual\"}'"
+    fi
+    SWAPPING=1
     run remote "cd $COMPOSE_DIR && cp $COMPOSE $COMPOSE.bak-$BAK && mv $STAGED $COMPOSE" \
         || die "could not apply $STAGED on $HOST; nothing was recreated"
     if [ "$DRY" = 0 ]; then
@@ -776,7 +800,8 @@ wait_for_api_ready() {
     done
 }
 
-# Gated and drained, nothing recreated yet: a failure here re-opens admission.
+# Gated and drained, nothing recreated yet: a refusal before apply_staged writes
+# the live compose re-opens admission; from that write on it stays PAUSED.
 apply_staged
 step "swap: recreate api + gateway (no pull: the images are only in the host's daemon)"
 RECOVERY="RECOVERY: admission is still PAUSED. Once syn137-api is healthy, finish by hand:

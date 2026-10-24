@@ -64,6 +64,13 @@ def _refuse_drift() -> str:
     return text[start : text.index("\n}\n", start) + 3]
 
 
+def _function(name: str) -> str:
+    """The top-level shell function `name` as the script defines it."""
+    text = _SCRIPT.read_text()
+    start = text.index(f"\n{name}() {{") + 1
+    return text[start : text.index("\n}\n", start) + 3]
+
+
 def _counters() -> str:
     """`pins_on_tag` and `images_on_tag` as the script defines them."""
     text = _SCRIPT.read_text()
@@ -102,7 +109,7 @@ def _run_stage(
     preamble = f"""
 set -euo pipefail
 TAG={_TAG}; REF=origin/main; MODE=stage; DRY=0; HOST=fake-host; SERVICE={service}; REPOINTS=pins; ALREADY="pins already on the tag"; N={n}; SWAPPED="{swapped}"
-COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; STAGED={_COMPOSE}.pit-stop-staged; TMP={tmp}; REPOINT_PY={_SCRIPT.parent / "pit_stop_repoint.py"}
+COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; STAGED={_COMPOSE}.pit-stop-staged; TMP={tmp}; API=http://fake-host; REPOINT_PY={_SCRIPT.parent / "pit_stop_repoint.py"}
 step() {{ printf '==> %s\\n' "$*"; }}
 die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
 run() {{ "$@"; }}
@@ -251,3 +258,52 @@ def test_a_gateway_only_stage_passes_when_the_api_is_already_on_the_tag(
     staged = (host / _STAGED).read_text()
     assert staged.count(f"syn-api:{_TAG}") == 1
     assert staged.count(f"syn-gateway:{_TAG}") == 1
+
+
+@pytest.mark.parametrize("failure", ["post_read", "write_ack", "stale_stage"])
+def test_admission_stays_paused_once_the_live_compose_may_have_been_written(
+    failure: str, tmp_path: Path
+) -> None:
+    """#1511 verification: gated and drained, the swap moves the stage over the
+    live compose and the ssh then fails, after the write (`post_read`) or by
+    losing its reply (`write_ack`). The live file names the new images while
+    the old ones still run, so the real exit trap must keep admission PAUSED
+    and print how to finish or undo. A refusal before the write
+    (`stale_stage`) changed nothing, and must still re-open it."""
+    host, tmp = tmp_path / "host", tmp_path / "tmp"
+    host.mkdir()
+    tmp.mkdir()
+    original = (_FIXTURES / "compose-digest.yaml").read_text()
+    assert _run_stage("compose-digest.yaml", host, tmp, _FULL).returncode == 0
+    wanted = (host / _STAGED).read_text()
+    if failure == "stale_stage":
+        (host / _COMPOSE).write_text(original + "    environment:\n      ADDED_AFTER_STAGE: '1'\n")
+
+    admission, moved = tmp_path / "admission", tmp_path / "moved"
+    stub = f"""
+GATED=1; SWAPPING=0; LOCKED=0; RECOVERY=""; RECOVERY_SHOWN=0
+maintenance() {{ echo "maintenance $1" >> {admission}; }}
+{_function("die")}
+{_function("release_on_exit")}
+trap release_on_exit EXIT
+remote() {{
+    if [ "{failure}" = post_read ] && [ -e {moved} ] && [ "$*" = "cat {host}/{_COMPOSE}" ]; then
+        echo "ssh: connection lost" >&2; return 255
+    fi
+    bash -c "$*" || return $?
+    case "$*" in *"&& mv "*) touch {moved}; [ "{failure}" != write_ack ] || return 255 ;; esac
+}}
+"""
+    proc = _run_stage("", host, tmp, stub, apply=True)
+    assert proc.returncode != 0
+
+    if failure == "stale_stage":
+        assert "changed after" in proc.stderr
+        assert admission.read_text() == "maintenance false\n"
+        assert "RECOVERY" not in proc.stderr
+        return
+    assert (host / _COMPOSE).read_text() == wanted != original
+    assert not admission.exists(), admission.read_text()
+    assert "still PAUSED" in proc.stderr
+    assert "up -d api gateway" in proc.stderr
+    assert f"cp {_COMPOSE}.bak-sha256-bf783882d031 {_COMPOSE}" in proc.stderr
