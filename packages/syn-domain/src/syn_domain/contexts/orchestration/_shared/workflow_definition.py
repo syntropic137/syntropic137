@@ -31,7 +31,7 @@ from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     normalize_frontmatter,
 )
 from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
-    without_retired_fields,
+    reject_retired_fields,
 )
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
@@ -554,19 +554,19 @@ class PhaseYamlDefinition(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _drop_retired_fields(cls, data: object) -> object:
-        """Ignore a key that is retired, by name, before `extra="forbid"` runs.
+    def _reject_retired_fields(cls, data: object) -> object:
+        """Refuse a retired key by name, before `extra="forbid"` runs (#1502).
 
-        By name and not `extra="ignore"`: ignoring every unknown key is exactly
-        what let a misspelt `prompt:` install and run with no instructions
-        (#961). Only the keys in `RETIRED_PHASE_FIELDS` are dropped, and the
-        author is told about each one (`retired_field_notices`).
+        By name so the author is told which key, since when and why, in the
+        style of `_reject_removed_provider`, rather than the generic "Extra
+        inputs are not permitted". Only the keys in `RETIRED_PHASE_FIELDS` get
+        this message; any other unknown key is still refused by
+        `extra="forbid"` (#961).
 
-        Ignoring is safe here when it was not for the removed provider
-        (`_reject_removed_provider`): a retired key already does nothing, so
-        dropping it changes nothing the phase does.
+        Stored events are NOT checked here: `REMOVED_EXECUTABLE_PHASE_KEYS`
+        keeps replay of pre-retirement history working forever.
         """
-        return without_retired_fields(data)
+        return reject_retired_fields(data)
 
     @field_validator("skills", mode="before")
     @classmethod

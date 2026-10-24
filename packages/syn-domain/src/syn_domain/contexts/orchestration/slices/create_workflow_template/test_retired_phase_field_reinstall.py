@@ -140,11 +140,11 @@ class TestReinstallOverAPreRetirementTemplate:
         assert repository.saved == 0
         assert publisher.events == []
 
-    @pytest.mark.asyncio
-    async def test_package_still_carrying_the_key_is_identical(self) -> None:
-        """The author has not touched it yet: still the same install."""
-        changed, repository, publisher = await _reinstall("can_open_pr: true")
+    def test_package_still_carrying_the_key_is_refused(self) -> None:
+        """The key is refused at authoring time (#1502), before any handler runs.
 
-        assert changed is False
-        assert repository.saved == 0
-        assert publisher.events == []
+        The stored template is untouched: the author deletes the line and the
+        reinstall above is the no-op it always was.
+        """
+        with pytest.raises(ValueError, match="'can_open_pr' is retired"):
+            _command("can_open_pr: true")
