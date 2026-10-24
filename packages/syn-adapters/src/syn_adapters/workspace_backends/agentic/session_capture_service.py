@@ -6,6 +6,7 @@ cannot enforce it: only the layer holding the workspace context manager can
 prove the probe ran before teardown.
 
     while the container is still RUNNING
+      -> the HOST reads the capability verdict     (capability_verdict)
       -> the HOST runs the exporter                (capture_probe)
       -> the result is interpreted, not guessed    (capture_result)
       -> the verdict is recorded on Lane 2         (capture_observation)
@@ -28,6 +29,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol
 
+from syn_adapters.workspace_backends.agentic.capability_verdict import (
+    SESSION_STORE_CAPABILITY,
+    AgenticCapabilityStatusReader,
+)
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     build_expectations,
     record_capture_outcome,
@@ -37,6 +42,10 @@ from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_store_env import build_partition
 
 if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.agentic.capability_verdict import (
+        CapabilityStatusReader,
+        CapabilityVerdict,
+    )
     from syn_adapters.workspace_backends.agentic.capture_observation import (
         ObservationWriter,
     )
@@ -77,10 +86,12 @@ class SessionCaptureService:
         settings: SessionStoreSettings,
         app_environment: str,
         writer: ObservationWriter | None,
+        capability_reader: CapabilityStatusReader | None = None,
     ) -> None:
         self._settings = settings
         self._app_environment = app_environment
         self._writer = writer
+        self._capability_reader = capability_reader or AgenticCapabilityStatusReader()
 
     async def capture_and_record(
         self,
@@ -121,6 +132,15 @@ class SessionCaptureService:
         )
         outcome = await probe_capture(execute, expectations=expectations)
 
+        # Only asked when a store is configured: with none there is no row to
+        # read, and an execution that captures nothing by design shows nothing.
+        capability = (
+            await self._capability_reader.read(execute, SESSION_STORE_CAPABILITY)
+            if expectations is not None
+            else None
+        )
+        outcome = _explained_by(outcome, capability)
+
         await record_capture_outcome(
             self._writer,
             outcome,
@@ -130,6 +150,7 @@ class SessionCaptureService:
             # retry can find the transcripts by the identity that produced
             # them rather than by reconstructing one.
             partition=build_partition(execution_id, workspace_id),
+            capability=capability,
             execution_id=execution_id,
             phase_id=phase_id,
             workspace_id=workspace_id,
@@ -155,3 +176,24 @@ class SessionCaptureService:
             )
 
         return outcome
+
+
+def _explained_by(
+    outcome: AuthoritativeCapture, capability: CapabilityVerdict | None
+) -> AuthoritativeCapture:
+    """The verdict, read as DEGRADED when the workspace started with capture off.
+
+    Whatever the exporter said afterwards - nothing discovered, a failed
+    upload, a disabled exporter - is a CONSEQUENCE of the degraded start, and
+    reporting it on its own is the unexplained capture loss #1516 is about.
+    The capability's verdict is the cause, so it names the state.
+    """
+    if capability is None or not capability.degraded:
+        return outcome
+    checks = ", ".join(capability.failed_checks) or "no check named"
+    return outcome.model_copy(
+        update={
+            "state": CaptureState.DEGRADED,
+            "reason": f"session-store capability degraded at start: {checks} failed",
+        }
+    )
