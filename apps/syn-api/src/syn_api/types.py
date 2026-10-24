@@ -3810,6 +3810,23 @@ class CaptureStatusEntry(BaseModel):
     `sessions` array), which is NOT the same as [] meaning it confirmed none.
     """
 
+    capability_status: str | None = None
+    """The session-store capability's start-up verdict: ready, degraded or failed.
+
+    null when the workspace recorded none (capture not active, or an image
+    predating the capability status row) or it could not be read. A degraded
+    start is why `state` reads "degraded": the workspace ran with capture off.
+    """
+
+    failed_checks: list[str] = Field(default_factory=list)
+    """The capability checks that failed at start, e.g. ["store_reachable"]."""
+
+    doctor_exit: int | None = None
+    """The capability doctor's exit code at start, when a verdict was recorded."""
+
+    capture_status_display: str
+    """Human-readable verdict, e.g. "Capture degraded: store_reachable failed"."""
+
 
 class CaptureStatusResponse(BaseModel):
     """Recorded capture verdicts, newest first."""

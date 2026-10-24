@@ -22,7 +22,7 @@ anything unreadable here reads as UNKNOWN and counts as needing backfill.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -41,6 +41,8 @@ from syn_api.types import CaptureStatusEntry, CaptureStatusResponse
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from datetime import datetime
+
+    from syn_adapters.events.store import AgentEventStore
 
 router = APIRouter(prefix="/capture", tags=["capture"])
 
@@ -143,6 +145,37 @@ def _state_of(payload: Mapping[str, object]) -> CaptureState:
         return CaptureState.UNKNOWN
 
 
+def _checks_of(payload: Mapping[str, object]) -> list[str]:
+    raw = payload.get("failed_checks")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, str) and item]
+
+
+def _doctor_exit_of(payload: Mapping[str, object]) -> int | None:
+    value = payload.get("doctor_exit")
+    # bool subclasses int; a `true` here was not written by us.
+    return value if type(value) is int else None
+
+
+_DISPLAY: Mapping[CaptureState, str] = {
+    CaptureState.CAPTURED: "Captured",
+    CaptureState.DISABLED: "Capture disabled",
+    CaptureState.INCOMPLETE: "Capture incomplete",
+    CaptureState.FAILED: "Capture failed",
+    CaptureState.DEGRADED: "Capture degraded",
+    CaptureState.UNKNOWN: "Capture status unknown",
+}
+
+
+def capture_status_display(state: CaptureState, failed_checks: Sequence[str]) -> str:
+    """The verdict as an operator reads it, naming the cause of a degraded start."""
+    label = _DISPLAY[state]
+    if state is CaptureState.DEGRADED and failed_checks:
+        return f"{label}: {', '.join(failed_checks)} failed"
+    return label
+
+
 def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
     """Project one stored observation row into the response shape.
 
@@ -171,6 +204,7 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
         # is worth least.
         state = CaptureState.UNKNOWN
 
+    failed_checks = _checks_of(payload)
     return CaptureStatusEntry(
         session_id=session_id,
         execution_id=_text(event.get("execution_id")),
@@ -186,7 +220,35 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
         expected_deployment=_text(payload.get("expected_deployment")),
         origin_deployment=_text(payload.get("origin_deployment")),
         agent_session_ids=read_agent_session_ids(payload),
+        capability_status=_text(payload.get("capability_status")),
+        failed_checks=failed_checks,
+        doctor_exit=_doctor_exit_of(payload),
+        capture_status_display=capture_status_display(state, failed_checks),
     )
+
+
+async def _execution_events(
+    store: AgentEventStore, execution_id: str, limit: int
+) -> list[Mapping[str, object]]:
+    """One execution's verdicts, in the envelope shape `_to_entry` reads.
+
+    `query_by_execution` FLATTENS the payload into the row and names the time
+    `timestamp`, unlike `query_recent_by_types`. Re-nesting it here keeps one
+    projection for both reads, rather than a second that drifts from the first.
+    """
+    rows = await store.query_by_execution(
+        execution_id, event_type=SESSION_CAPTURE_OBSERVATION, limit=limit
+    )
+    return [
+        {
+            "session_id": row.get("session_id"),
+            "execution_id": row.get("execution_id"),
+            "phase_id": row.get("phase_id"),
+            "time": row.get("timestamp"),
+            "data": row,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/status", response_model=CaptureStatusResponse)
@@ -196,12 +258,18 @@ async def get_capture_status(
         default=False,
         description="Return only sessions whose transcripts did not reach the store.",
     ),
+    execution_id: Annotated[
+        str | None,
+        Query(description="Return only verdicts recorded for this execution."),
+    ] = None,
 ) -> CaptureStatusResponse:
     """Recorded session-capture verdicts, newest first."""
     store = get_event_store()
     try:
-        events: Sequence[Mapping[str, object]] = await store.query_recent_by_types(
-            [SESSION_CAPTURE_OBSERVATION], limit=limit
+        events: Sequence[Mapping[str, object]] = (
+            await _execution_events(store, execution_id, limit)
+            if execution_id
+            else await store.query_recent_by_types([SESSION_CAPTURE_OBSERVATION], limit=limit)
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"capture status unavailable: {exc}") from exc
