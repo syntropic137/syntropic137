@@ -90,6 +90,26 @@ token usage, a cost figure, a stream chunk. See `agent_observation.py` and
 Observations are Lane 2. An Observation is never the reason state changed; if
 something must be replayed to decide state, it belongs in `orchestration`.
 
+## Capture Degraded
+
+A session-capture verdict (`CaptureState.DEGRADED`): the workspace STARTED
+with the session store disabled because the store's doctor failed and its
+policy is to degrade rather than fail the workspace. Nothing from that phase
+reached the store, by design. Read from the entrypoint's `capability_status`
+row (the **start capability**, `StartCapability`) through agentic-workspace's
+reader, never by parsing the audit file here, and recorded on the
+`session_capture` Observation (schema 3, `start_capability`).
+
+It composes with the host-side verdict rather than replacing it: a degraded
+start turns an otherwise unexplained `failed`, `incomplete` or `disabled`
+verdict into `degraded`, and leaves a `captured` one alone, because the
+exporter's evidence of a stored session outranks a start-time prediction.
+Surfaced to clients as `capture_status_display` (`Capture degraded:
+store_reachable failed`) on the phase and the execution (#1516).
+
+A start verdict that cannot be read is unknown and shows nothing. It is never
+a run failure: capture is fail-open.
+
 ## Cost by Token Type
 
 A Session's priced cost split into input, output, cache write and cache read
