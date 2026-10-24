@@ -1,13 +1,24 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
-index 54ed335b3..f8f52a928 100644
+index 49bf438f2..923adbc45 100644
 --- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
 +++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
-@@ -706,7 +706,7 @@ class AgenticIsolationAdapter:
+@@ -36,6 +36,7 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
+     MAX_COLLECTION_ENTRIES,
+     MAX_DIRECTORY_DEPTH,
+     check_workspace_health,
++    copy_files_from_workspace,
+     copy_files_to_workspace,
+ )
+ from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
+@@ -718,7 +719,10 @@ class AgenticIsolationAdapter:
          Every workspace holds the session-store token, and only this adapter
          knows it, so a file the workload wrote leaves with it replaced (#1927).
          """
--        if self._kit.reads_through_provider or base_path != "/workspace":
-+        if self._kit.reads_through_provider:
-             collected = await self._read_through_provider(handle, patterns, base_path)
-         else:
-             collected = await copy_files_from_workspace(handle, patterns, base_path)
+-        files, refused = await self._read_through_provider(handle, patterns, base_path)
++        if base_path == "/workspace" and not self._kit.reads_through_provider:
++            files, refused = tuple(await copy_files_from_workspace(handle, patterns, base_path)), ()
++        else:
++            files, refused = await self._read_through_provider(handle, patterns, base_path)
+         scrubber = CredentialScrubber(self.credentials.withheld(()))
+         scrubbed = tuple((path, scrub_bytes(scrubber, content)) for path, content in files)
+         if refused:
