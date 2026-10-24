@@ -45,3 +45,9 @@ The adapter-side event value objects moved to `_shared/FileRefusalValueObjects.p
 | `16-incomplete-walk-collected-as-whole-after-the-move.patch` | patch 13 at `output_refusals.py`: a walk that stopped at the entry limit is collected as if it were whole | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/test_1913_refused_output_files.py::test_a_walk_that_stopped_fails_the_collection_with_its_refusals` |
 | `17-unfinished-phase-refusals-not-recorded.patch` | an unfinished phase's refused output reaches only a log line, never the execution | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/test_1913_refused_output_files.py::test_an_unfinished_phase_keeps_what_was_read_and_records_every_refusal`, `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/test_1913_refused_output_files.py::test_an_unfinished_phase_whose_walk_stopped_records_why` |
 | `18-stopped-walk-on-unfinished-phase-drops-its-refusals.patch` | an unfinished phase whose walk stopped keeps nothing and forgets what stopped it | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/test_1913_refused_output_files.py::test_an_unfinished_phase_whose_walk_stopped_records_why` |
+
+## Added in fix round 4 (round 1 of 2 in this run)
+
+| Patch | Defect | Killing test(s) |
+|---|---|---|
+| `19-refusals-erased-when-the-store-fails.patch` | an unfinished phase whose artifact store fails after the read hands back no refusals, so the ones already known never reach the execution | `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/test_1913_refused_output_files.py::test_an_unfinished_phase_whose_store_failed_still_records_every_refusal` |

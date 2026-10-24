@@ -813,6 +813,10 @@ class ArtifactCollector:
         file the provider refused (#1913): no ids is the ordinary answer for a
         phase that wrote nothing, and is not an error.
         """
+        # Held outside the try: a refusal known before a later step fails
+        # (storing, salvaging) is still a refusal, and the fallback below must
+        # hand it back to be recorded rather than erase it.
+        refused: tuple[FileRefusal, ...] = ()
         try:
             # Same filter as the happy path: this is the route a phase takes
             # when it will not complete, and it shares the pattern, so fixing
@@ -873,7 +877,7 @@ class ArtifactCollector:
                 session_id,
                 err,
             )
-            return KeptOutput()
+            return KeptOutput(refused=refused)
 
     async def create_artifact(
         self,

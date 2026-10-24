@@ -263,3 +263,19 @@ async def test_an_unfinished_phase_whose_walk_stopped_records_why() -> None:
 
     assert kept == []
     assert replayed.refused_files_for(PHASE) == (LINK, stopped)
+
+
+async def test_an_unfinished_phase_whose_store_failed_still_records_every_refusal() -> None:
+    class _FailingRepo(_Repo):
+        async def save(self, aggregate: ArtifactAggregate) -> None:
+            raise RuntimeError("artifact store unavailable")
+
+    kept, replayed, journal = await _keep_unfinished(
+        _RefusingWorkspace((LINK, SHARED)), _FailingRepo()
+    )
+
+    # Nothing was kept and nothing escaped, but what the provider refused
+    # before the store failed is still on the execution, both of it.
+    assert kept == []
+    assert replayed.refused_files_for(PHASE) == (LINK, SHARED)
+    journal.append.assert_awaited()

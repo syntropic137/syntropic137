@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py
+@@ -877,7 +877,7 @@
+                 session_id,
+                 err,
+             )
+-            return KeptOutput(refused=refused)
++            return KeptOutput()
+ 
+     async def create_artifact(
+         self,
