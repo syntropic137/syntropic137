@@ -256,7 +256,7 @@ describe("unchanged reinstall (issue #822)", () => {
   });
 
   it("prints the server's warnings even when already installed", async () => {
-    const notice = "phase 'p1': 'can_open_pr' is retired (#1477) and ignored";
+    const notice = "phase 'p1': an example notice from the server";
     mockFetch.mockResolvedValue(
       new Response(
         JSON.stringify({

@@ -52,7 +52,6 @@ from syn_domain.contexts.orchestration._shared.resolved_skill import (
 )
 from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
     RETIRED_PHASE_FIELDS,
-    retired_field_notices,
 )
 from syn_domain.contexts.orchestration._shared.skill_errors import (
     SkillError,
@@ -599,7 +598,6 @@ __all__ = [
     "replays_generic",
     "repository_key",
     "require_supported_execution_type",
-    "retired_field_notices",
     "salvage_stranded_phase",
     "utc_day",
     "validate_phase_declarations",

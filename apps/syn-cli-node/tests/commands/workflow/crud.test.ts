@@ -224,10 +224,10 @@ describe("workflow crud commands", () => {
   });
 
   describe("validate", () => {
-    // A retired key is accepted by the server with a notice (#1477 follow-up).
-    // The CLI must carry the file to the server untouched and print what comes
-    // back; it holds no list of retired keys of its own.
-    const NOTICE = "phase 'p1': 'can_open_pr' is retired (#1477) and ignored";
+    // The server may return notices that never make the file invalid. The CLI
+    // must carry the file to the server untouched and print what comes back;
+    // it holds no authoring rules of its own.
+    const NOTICE = "phase 'p1': an example notice from the server";
     let tmpDir: string;
 
     beforeEach(() => {
@@ -235,7 +235,7 @@ describe("workflow crud commands", () => {
       fs.writeFileSync(
         path.join(tmpDir, "workflow.yaml"),
         "id: pkg-wf\nname: Pkg WF\ntype: custom\nphases:\n" +
-          "  - id: p1\n    name: Phase\n    order: 1\n    prompt_template: hi\n    can_open_pr: true\n",
+          "  - id: p1\n    name: Phase\n    order: 1\n    prompt_template: hi\n",
         "utf-8",
       );
     });
@@ -255,7 +255,7 @@ describe("workflow crud commands", () => {
       const request = mockFetch.mock.calls[0]![0] as Request;
       expect(request.url).toContain("/workflows/validate");
       const body = JSON.parse(await request.text()) as { content: string };
-      expect(body.content).toContain("can_open_pr");
+      expect(body.content).toContain("\"prompt_template\":\"hi\"");
       expect(stdout()).toContain("Valid");
       expect(stderr()).toContain(NOTICE);
     });

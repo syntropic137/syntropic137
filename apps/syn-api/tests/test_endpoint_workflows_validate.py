@@ -1,8 +1,8 @@
-"""POST /workflows/validate reports a retired phase key as a warning, not an error.
+"""POST /workflows/validate reports a retired phase key as an error (#1502).
 
-Unmocked: the whole point is that the real validator accepts the key and the
-real notice reaches the response, so `syn workflow validate` can tell an
-author the line does nothing (#1477 follow-up).
+Unmocked: the real validator refuses the key and its message, naming the key
+and why, reaches the response, so `syn workflow validate` tells an author
+which line to delete.
 """
 
 from __future__ import annotations
@@ -30,28 +30,28 @@ phases:
 """
 
 
-async def test_a_retired_key_is_valid_with_a_warning() -> None:
+async def test_a_retired_key_is_invalid() -> None:
     result = await validate_yaml_endpoint(ValidateYamlRequest(content=RETIRED_KEY_YAML))
 
-    assert result.valid is True
-    assert result.errors == []
-    assert len(result.warnings) == 1
-    assert "'can_open_pr'" in result.warnings[0]
-    assert "'open_pr'" in result.warnings[0]
+    assert result.valid is False
+    assert len(result.errors) == 1
+    assert "'can_open_pr' is retired" in result.errors[0]
+    assert "'open_pr'" in result.errors[0]
+    assert result.warnings == []
 
 
-async def test_a_clean_workflow_has_no_warnings() -> None:
+async def test_a_clean_workflow_is_valid() -> None:
     clean = RETIRED_KEY_YAML.replace("    can_open_pr: true\n", "")
 
     result = await validate_yaml_endpoint(ValidateYamlRequest(content=clean))
 
     assert result.valid is True
+    assert result.errors == []
     assert result.warnings == []
 
 
 @pytest.mark.parametrize("content", ["phases: [unclosed", "- a"])
 async def test_malformed_yaml_is_invalid_not_a_server_error(content: str) -> None:
-    """Notices are computed before validity is known, so they must not raise."""
     result = await validate_yaml_endpoint(ValidateYamlRequest(content=content))
 
     assert result.valid is False
