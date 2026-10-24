@@ -17,10 +17,12 @@ import { isTerminalExecutionStatus } from '../utils/terminalStatus'
 import { RUNNING_POLL_INTERVAL_MS, useSerialRefresh } from './useSerialRefresh'
 
 export function useExecutionCapture(executionId: string, status: string): DegradedPhase[] {
-  const [degraded, setDegraded] = useState<DegradedPhase[]>([])
-
-  // Another execution's verdicts must never be shown on this one's page.
-  useEffect(() => setDegraded([]), [executionId])
+  // Kept with the id it was read for: another execution's verdicts must never
+  // be shown on this one's page, even for the render before its first read.
+  const [read, setRead] = useState<{ executionId: string; degraded: DegradedPhase[] }>({
+    executionId,
+    degraded: [],
+  })
 
   const fetchCapture = useCallback(
     (signal: AbortSignal): Promise<void> =>
@@ -29,7 +31,7 @@ export function useExecutionCapture(executionId: string, status: string): Degrad
         ? Promise.resolve()
         : getExecutionCaptureStatus(executionId, signal)
             .then((response) => {
-              if (!signal.aborted) setDegraded(degradedPhases(response))
+              if (!signal.aborted) setRead({ executionId, degraded: degradedPhases(response) })
             })
             // Telemetry about the run, never a reason to break its page; a
             // failed refresh keeps what is already on screen.
@@ -48,5 +50,7 @@ export function useExecutionCapture(executionId: string, status: string): Degrad
     refetch()
   }, [refetch, fetchCapture, status])
 
-  return degraded
+  return read.executionId === executionId ? read.degraded : NONE
 }
+
+const NONE: DegradedPhase[] = []
