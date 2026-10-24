@@ -63,6 +63,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      # uv picks the interpreter from .python-version, not the runner's
+      # python3 (#1242).
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
       - name: Verify version, and that the tag is reachable from main
         id: check
         env:
@@ -83,7 +87,7 @@ jobs:
 
           # The repo's own version must match the tag, or the images are built
           # from a tree that disagrees with what they are labelled.
-          FILE_VERSION=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          FILE_VERSION=$(uv run --no-project python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           if [[ "${FILE_VERSION}" != "${VERSION}" ]]; then
             echo "::error file=pyproject.toml::Tag says '${VERSION}' but pyproject.toml says '${FILE_VERSION}'."
             exit 1

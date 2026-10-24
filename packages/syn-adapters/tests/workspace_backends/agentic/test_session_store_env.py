@@ -38,6 +38,7 @@ from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
     ENV_AGENTIC_SESSION_STORE_PARTITION,
     ENV_AGENTIC_SESSION_STORE_PROVIDER,
+    ENV_AGENTIC_SESSION_STORE_REQUIRED,
     ENV_AGENTIC_SESSION_STORE_SPOOL,
     ENV_AGENTIC_SESSION_STORE_TAGS,
     ENV_AGENTIC_SESSION_STORE_URL,
@@ -602,6 +603,20 @@ class TestReservedKeys:
         assert ENV_AGENTIC_SESSION_STORE_AUTH in text
         for value in HOSTILE_ENV.values():
             assert value not in text
+
+    @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+    def test_a_caller_cannot_force_the_hard_fail(self, enabled: bool) -> None:
+        """REQUIRED=1 would turn a degraded store back into a failed workspace
+        (#1516). syn137 never emits it, so a caller-supplied one is stripped."""
+        env = apply_session_store_env(
+            {ENV_AGENTIC_SESSION_STORE_REQUIRED: "1", "EXISTING_VAR": "kept"},
+            _enabled_settings() if enabled else _disabled_settings(),
+            execution_id="e",
+            workspace_id="w",
+        )
+
+        assert ENV_AGENTIC_SESSION_STORE_REQUIRED not in env
+        assert env["EXISTING_VAR"] == "kept"
 
     def test_caller_environment_is_not_mutated(self) -> None:
         caller_env = {"EXISTING_VAR": "kept", **HOSTILE_ENV}

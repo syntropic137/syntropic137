@@ -117,7 +117,9 @@ issue = "#673"
 
 [untyped-dicts.syn-api]
 path = "apps/syn-api"
-value = 146
+# 146 -> 145 (#1516): the capture-status route projects each stored row as it
+# reads it, so the window of raw mappings it used to annotate is gone.
+value = 145
 issue = "#673"
 
 [untyped-dicts.syn-collector]
