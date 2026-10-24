@@ -1,12 +1,161 @@
 diff --git a/apps/syn-api/src/syn_api/routes/capture.py b/apps/syn-api/src/syn_api/routes/capture.py
-index dcd4a58a6..27109fc59 100644
+index dcd4a58a6..d27300935 100644
 --- a/apps/syn-api/src/syn_api/routes/capture.py
 +++ b/apps/syn-api/src/syn_api/routes/capture.py
-@@ -236,7 +236,6 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
+@@ -25,6 +25,7 @@ from __future__ import annotations
+ from typing import TYPE_CHECKING, Annotated, Literal
+ 
+ from fastapi import APIRouter, HTTPException, Query
++from pydantic import BaseModel, ConfigDict, Field, ValidationError
+ 
+ from syn_adapters.workspace_backends.agentic.capture_observation import (
+     SESSION_CAPTURE_OBSERVATION,
+@@ -145,32 +146,19 @@ def _state_of(payload: Mapping[str, object]) -> CaptureState:
+         return CaptureState.UNKNOWN
+ 
+ 
+-def _checks_of(payload: Mapping[str, object]) -> list[str]:
+-    raw = payload.get("failed_checks")
+-    if not isinstance(raw, list):
+-        return []
+-    return [item for item in raw if isinstance(item, str) and item]
++class _RecordedCapability(BaseModel):
++    """The capability verdict as recorded (#1516), parsed rather than probed.
+ 
++    The payload was written by another process, so it is validated here once.
++    A row that breaks it - a wrong type, a verdict the contract does not
++    define - reads as no verdict at all, never as a guess at one.
++    """
+ 
+-def _capability_status_of(
+-    payload: Mapping[str, object],
+-) -> Literal["ready", "degraded", "failed"] | None:
+-    """The recorded verdict, or None for anything the contract does not define."""
+-    match payload.get("capability_status"):
+-        case "ready":
+-            return "ready"
+-        case "degraded":
+-            return "degraded"
+-        case "failed":
+-            return "failed"
+-        case _:
+-            return None
+-
++    model_config = ConfigDict(frozen=True, extra="ignore", strict=True)
+ 
+-def _doctor_exit_of(payload: Mapping[str, object]) -> int | None:
+-    value = payload.get("doctor_exit")
+-    # bool subclasses int; a `true` here was not written by us.
+-    return value if type(value) is int else None
++    capability_status: Literal["ready", "degraded", "failed"] | None = None
++    failed_checks: list[str] = Field(default_factory=list)
++    doctor_exit: int | None = None
+ 
+ 
+ _DISPLAY: Mapping[CaptureState, str] = {
+@@ -219,7 +207,10 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
+         # is worth least.
+         state = CaptureState.UNKNOWN
+ 
+-    failed_checks = _checks_of(payload)
++    try:
++        capability = _RecordedCapability.model_validate(payload)
++    except ValidationError:
++        capability = _RecordedCapability()
+     return CaptureStatusEntry(
+         session_id=session_id,
+         execution_id=_text(event.get("execution_id")),
+@@ -235,17 +226,16 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
+         expected_deployment=_text(payload.get("expected_deployment")),
          origin_deployment=_text(payload.get("origin_deployment")),
          agent_session_ids=read_agent_session_ids(payload),
-         capability_status=_capability_status_of(payload),
+-        capability_status=_capability_status_of(payload),
 -        failed_checks=failed_checks,
-         doctor_exit=_doctor_exit_of(payload),
-         capture_status_display=capture_status_display(state, failed_checks),
+-        doctor_exit=_doctor_exit_of(payload),
+-        capture_status_display=capture_status_display(state, failed_checks),
++        capability_status=capability.capability_status,
++        doctor_exit=capability.doctor_exit,
++        capture_status_display=capture_status_display(state, capability.failed_checks),
+     )
+ 
+ 
+-async def _execution_events(
++async def _execution_entries(
+     store: AgentEventStore, execution_id: str, limit: int
+-) -> list[Mapping[str, object]]:
+-    """One execution's verdicts, in the envelope shape `_to_entry` reads.
++) -> list[CaptureStatusEntry | None]:
++    """One execution's verdicts, projected by the same `_to_entry`.
+ 
+     `query_by_execution` FLATTENS the payload into the row and names the time
+     `timestamp`, unlike `query_recent_by_types`. Re-nesting it here keeps one
+@@ -255,13 +245,15 @@ async def _execution_events(
+         execution_id, event_type=SESSION_CAPTURE_OBSERVATION, limit=limit
+     )
+     return [
+-        {
+-            "session_id": row.get("session_id"),
+-            "execution_id": row.get("execution_id"),
+-            "phase_id": row.get("phase_id"),
+-            "time": row.get("timestamp"),
+-            "data": row,
+-        }
++        _to_entry(
++            {
++                "session_id": row.get("session_id"),
++                "execution_id": row.get("execution_id"),
++                "phase_id": row.get("phase_id"),
++                "time": row.get("timestamp"),
++                "data": row,
++            }
++        )
+         for row in rows
+     ]
+ 
+@@ -281,22 +273,27 @@ async def get_capture_status(
+     """Recorded session-capture verdicts, newest first."""
+     store = get_event_store()
+     try:
+-        events: Sequence[Mapping[str, object]] = (
+-            await _execution_events(store, execution_id, limit)
++        scanned = (
++            await _execution_entries(store, execution_id, limit)
+             if execution_id
+-            else await store.query_recent_by_types([SESSION_CAPTURE_OBSERVATION], limit=limit)
++            else [
++                _to_entry(event)
++                for event in await store.query_recent_by_types(
++                    [SESSION_CAPTURE_OBSERVATION], limit=limit
++                )
++            ]
+         )
+     except Exception as exc:
+         raise HTTPException(status_code=503, detail=f"capture status unavailable: {exc}") from exc
+ 
+-    entries = [entry for entry in map(_to_entry, events) if entry is not None]
++    entries = [entry for entry in scanned if entry is not None]
+     # Counted over the scanned window, not over what is returned: an operator
+     # filtering to the backlog still wants to know how big it is.
+     backlog = sum(1 for entry in entries if entry.needs_backfill)
+     # NOT dropped quietly. A verdict with no session id is still evidence that
+     # something happened, and a response that omitted it entirely could read as
+     # "all clear" while a failure sat unattributable in the store.
+-    unattributable = len(events) - len(entries)
++    unattributable = len(scanned) - len(entries)
+ 
+     if needs_backfill:
+         entries = [entry for entry in entries if entry.needs_backfill]
+@@ -305,11 +302,11 @@ async def get_capture_status(
+         total=len(entries),
+         needs_backfill_count=backlog,
+         unattributable_count=unattributable,
+-        scanned=len(events),
++        scanned=len(scanned),
+         # The database applies the limit BEFORE this filter, so a full window
+         # means older failures may exist beyond it. Without this a caller could
+         # read an empty backlog off a page that simply did not reach them,
+         # which is a wrong answer rather than a missing feature.
+-        truncated=len(events) >= limit,
++        truncated=len(scanned) >= limit,
+         entries=entries,
      )

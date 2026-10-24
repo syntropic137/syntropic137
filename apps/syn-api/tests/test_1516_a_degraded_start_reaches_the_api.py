@@ -24,7 +24,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 from syn_shared.settings.session_store import SessionStoreSettings
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from pydantic import JsonValue
 
 _STORE = "http://store:8799"
 _HOST = "ws-host-1"
@@ -94,32 +94,25 @@ class _Recorder:
     """The observation writer and the route's store, sharing one table."""
 
     def __init__(self) -> None:
-        self.rows: list[Mapping[str, object]] = []
+        self.rows: list[dict[str, JsonValue]] = []
 
-    async def record_observation(
-        self,
-        session_id: str,
-        observation_type: str,
-        data: dict[str, object],
-        execution_id: str | None = None,
-        phase_id: str | None = None,
-        workspace_id: str | None = None,
-    ) -> None:
+    async def record_observation(self, **kwargs: object) -> None:
         # Flattened and JSON round-tripped, as query_by_execution returns it.
+        data: dict[str, JsonValue] = json.loads(json.dumps(kwargs["data"]))
         self.rows.append(
             {
                 "timestamp": "2026-10-24T00:00:01+00:00",
-                "event_type": observation_type,
-                "session_id": session_id,
-                "execution_id": execution_id,
-                "phase_id": phase_id,
-                **json.loads(json.dumps(data)),
+                "event_type": str(kwargs["observation_type"]),
+                "session_id": str(kwargs["session_id"]),
+                "execution_id": str(kwargs["execution_id"]),
+                "phase_id": str(kwargs["phase_id"]),
+                **data,
             }
         )
 
     async def query_by_execution(
         self, execution_id: str, event_type: str | None = None, limit: int = 1000
-    ) -> Sequence[Mapping[str, object]]:
+    ) -> list[dict[str, JsonValue]]:
         return [
             row
             for row in self.rows
