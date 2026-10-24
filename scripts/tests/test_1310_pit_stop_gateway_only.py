@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import stat
 import subprocess
 import threading
@@ -60,14 +59,15 @@ case "$*" in
 esac
 """
 
-#: Real git, except that $REF's published compose is $PIT_PUBLISHED: the
-#: script's only source for it, so the drift check is driven through the same
-#: read an operator's run makes (#1511).
+#: Only the two read-only Git calls a dry run makes. Never consult the runner's
+#: checkout, refs, credentials or network: $REF's compose is a local fixture.
 _GIT = """#!/usr/bin/env bash
+echo "$*" >> "$PIT_LOG/git"
 case "$*" in
-    *" show "*":docker/docker-compose.syntropic137.yaml") exec cat "$PIT_PUBLISHED" ;;
+    *" rev-parse --path-format=absolute --git-common-dir") printf '%s/.git\\n' "$PIT_REPO_TOP" ;;
+    *" show "*":docker/docker-compose.syntropic137.yaml") cat "$PIT_PUBLISHED" ;;
+    *) echo "unexpected git: $*" >&2; exit 99 ;;
 esac
-exec {git} "$@"
 """
 
 # The prechecks read /workflows (the probe's) and /health (the disk), and the
@@ -100,21 +100,22 @@ def _dry_run(
     later: str | None = None,
     rc: int = 0,
     extra_env: dict[str, str] | None = None,
+    repo_top: Path | None = None,
 ) -> tuple[str, str, Path]:
     """A dry run's normalised stdout, its stderr, and where the stubs logged."""
     bin_dir, log = tmp / "bin", tmp / "log"
     bin_dir.mkdir()
     log.mkdir()
-    git = shutil.which("git")
-    assert git is not None
-    for name, body in (("ssh", _SSH), ("curl", _CURL), ("git", _GIT.format(git=git))):
+    repo_top = repo_top or tmp / "syntropic137"
+    for name, body in (("ssh", _SSH), ("curl", _CURL), ("git", _GIT)):
         stub = bin_dir / name
         stub.write_text(body)
         stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if not k.startswith(("SYN_PIT_", "PIT_"))},
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "PIT_LOG": str(log),
+        "PIT_REPO_TOP": str(repo_top),
         "PIT_COMPOSE": str(_FIXTURES / compose),
         # The deployed compose is held to $REF's published one (#1511); the
         # fixture is its own published compose, so these dry runs see no drift.
@@ -135,15 +136,15 @@ def _dry_run(
         timeout=60,
     )
     assert proc.returncode == rc, proc.stdout + proc.stderr
-    common = subprocess.run(
-        ["git", "-C", str(_ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    repo_top = str(Path(common).parent) if Path(common).name == ".git" else common
     out = re.sub(r"\[\d\d:\d\d:\d\dZ \+\d+s\]", "[T]", proc.stdout)
-    return out.replace(str(Path(repo_top).parent), "<PARENT>"), proc.stderr, log
+    # Replace only repository/worktree path tokens. Replacing the parent of
+    # /work replaced EVERY slash in mutation evidence's /work checkout (#2088).
+    for source, target in (
+        (str(repo_top) + "_worktrees", "<PARENT>/syntropic137_worktrees"),
+        (str(repo_top), "<PARENT>/syntropic137"),
+    ):
+        out = re.sub(r"(?<!\S)" + re.escape(source) + r"(?=[/\s]|$)", target, out)
+    return out, proc.stderr, log
 
 
 def _lines(out: str, needle: str) -> list[str]:
@@ -445,3 +446,34 @@ class TestComposeDrift:
         assert "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory" in out
         assert "is not the compose origin/main publishes" in err
         assert "docker buildx" not in out
+
+
+@pytest.mark.parametrize(
+    "repo_top", ["/work", "/checkout/pr", "/nested/syntropic137"], ids=["container", "ci", "clone"]
+)
+def test_dry_run_is_independent_of_the_checkout_location(
+    tmp_path: Path, repo_top: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every checkout shape preserves both absolute config paths and image URLs.
+
+    /work is the trusted mutation container's checkout; its parent is /.
+    The other shapes cover CI's differently named checkout and a normal clone.
+    """
+    monkeypatch.setenv("SYN_PIT_PROBE_WORKFLOW", "runner-specific-probe")
+    monkeypatch.setenv("PIT_COMPOSE_LATER", "/runner/missing.yaml")
+    out, err, log = _dry_run(
+        tmp_path,
+        compose="compose-tag.yaml",
+        published="compose-drifted.yaml",
+        rc=1,
+        repo_top=Path(repo_top),
+    )
+    for line in (
+        "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory",
+        "     image: ghcr.io/syntropic137/syn-api",
+    ):
+        assert line in out
+    assert "is not the compose origin/main publishes" in err
+    calls = (log / "git").read_text().splitlines()
+    assert len(calls) == 2
+    assert calls[1] == f"-C {repo_top} show origin/main:docker/docker-compose.syntropic137.yaml"
