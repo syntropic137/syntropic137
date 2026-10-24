@@ -439,9 +439,10 @@ class TestAdapterIntegration:
         provider = await _create(_enabled_settings())
         ws_config = provider.create.await_args.args[0]
 
-        assert set(SESSION_STORE_CONTRACT_ENV_VARS) - {ENV_AGENTIC_SESSION_STORE_AUTH} <= set(
-            ws_config.environment
-        )
+        assert set(SESSION_STORE_CONTRACT_ENV_VARS) - {
+            ENV_AGENTIC_SESSION_STORE_AUTH,
+            ENV_AGENTIC_SESSION_STORE_REQUIRED,
+        } <= set(ws_config.environment)
         assert ws_config.environment[ENV_AGENTIC_SESSION_STORE_URL] == STORE_URL
         assert ENV_AGENTIC_SESSION_STORE_AUTH not in ws_config.environment
         [binding] = ws_config.credentials

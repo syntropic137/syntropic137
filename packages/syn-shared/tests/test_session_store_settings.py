@@ -24,6 +24,7 @@ from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
     ENV_AGENTIC_SESSION_STORE_PARTITION,
     ENV_AGENTIC_SESSION_STORE_PROVIDER,
+    ENV_AGENTIC_SESSION_STORE_REQUIRED,
     ENV_AGENTIC_SESSION_STORE_SPOOL,
     ENV_AGENTIC_SESSION_STORE_TAGS,
     ENV_AGENTIC_SESSION_STORE_URL,
@@ -157,7 +158,7 @@ class TestNoScatteredEnvNameLiterals:
     def test_the_contract_set_is_exactly_the_declared_constants(self) -> None:
         """Pinned by NAME, not by count.
 
-        The count was 6 and is now 7 (DEPLOYMENT). A bare length assertion
+        The count was 6, then 7 (DEPLOYMENT), and is now 8 (REQUIRED, #1516). A bare length assertion
         makes every addition look like a break while catching nothing about
         WHICH variable was added, so it is spelled out instead.
         """
@@ -171,6 +172,7 @@ class TestNoScatteredEnvNameLiterals:
                     ENV_AGENTIC_SESSION_STORE_PARTITION,
                     ENV_AGENTIC_SESSION_STORE_TAGS,
                     ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
+                    ENV_AGENTIC_SESSION_STORE_REQUIRED,
                 }
             )
             == SESSION_STORE_CONTRACT_ENV_VARS
