@@ -1,8 +1,0 @@
---- a/lib/ui-feedback/backend/ui-feedback-api/src/ui_feedback/version.py
-+++ b/lib/ui-feedback/backend/ui-feedback-api/src/ui_feedback/version.py
-@@ -53,4 +53,4 @@
- 
- def version_string() -> str:
-     """The running release, or ``UNKNOWN_VERSION`` where a string is required."""
--    return service_version() or UNKNOWN_VERSION
-+    return service_version() or "0.1.0"

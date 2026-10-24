@@ -1,7 +1,0 @@
---- a/lib/ui-feedback/backend/ui-feedback-api/src/ui_feedback/__init__.py
-+++ b/lib/ui-feedback/backend/ui-feedback-api/src/ui_feedback/__init__.py
-@@ -4,3 +4,4 @@
- was a second home for the release. The version lives in ``pyproject.toml`` and
- is read through ``ui_feedback.version``.
- """
-+__version__ = "0.1.0"
