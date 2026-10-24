@@ -612,22 +612,40 @@ def test_a_pytest_temp_tree_does_not_hide_a_store_beside_it(base: Path, tmp_path
     assert listing.session_store is True
 
 
-async def test_a_pytest_fixture_store_alone_is_not_retained_as_capture(
+async def test_a_dir_whose_only_extra_is_a_pytest_temp_tree_is_reclaimed(
     base: Path, tmp_path: Path
 ) -> None:
-    """The capture clause passes; the temp tree is then judged as files like any other.
-
-    A name proves nothing about disposability (`_is_proven_cache`), and pytest
-    writes no CACHEDIR.TAG into its temp tree, so it is unversioned work.
-    """
+    """The live #2095 shape: a pushed repo plus pytest's temp tree, fixture store and all."""
     ws = _workspace(base, "ws-fixture-only", tmp_path)
     store = _pytest_fixture_store(ws)
     store.mkdir(parents=True)
     (store / "envelope.jsonl").write_text("{}\n")
     result = await _reclaimer(base).run_once()
-    [kept] = [r for r in result.retained if r.workspace_id == "ws-fixture-only"]
+    assert result.reclaimed == ("ws-fixture-only",)
+    assert not ws.exists()
+
+
+@pytest.mark.parametrize(
+    "beside",
+    [
+        ".tmp/notes.md",  # the temp dir itself is not disposable
+        ".tmp/pytest-notes/only-copy.md",  # only `pytest-of-*` is pytest's
+        ".tmp/my-pytest-of-agent/only-copy.md",  # the name must START with it
+    ],
+)
+async def test_unversioned_work_beside_a_pytest_temp_tree_keeps_the_dir(
+    base: Path, tmp_path: Path, beside: str
+) -> None:
+    ws = _workspace(base, "ws-tests-and-work", tmp_path)
+    _pytest_fixture_store(ws).mkdir(parents=True)
+    work = ws / beside
+    work.parent.mkdir(parents=True, exist_ok=True)
+    work.write_text("work nobody pushed\n")
+    result = await _reclaimer(base).run_once()
+    [kept] = [r for r in result.retained if r.workspace_id == "ws-tests-and-work"]
     assert kept.reason is RetainedReason.UNVERSIONED
-    assert ".tmp/pytest-of-agent/" in kept.detail
+    assert beside in kept.detail
+    assert work.read_text() == "work nobody pushed\n"
 
 
 async def test_capture_records_that_do_not_cover_every_session_keep_the_dir(

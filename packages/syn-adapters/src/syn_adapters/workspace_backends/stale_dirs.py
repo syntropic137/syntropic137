@@ -68,8 +68,10 @@ SESSION_STORE_DIRNAME = ".agentic-session-store"
 #: ``<tmp>/pytest-of-<user>/pytest-<N>/`` (``_pytest.tmpdir``). Agents run test
 #: suites inside their workspace with the temp dir there, and the reclaimer's
 #: own tests create session stores as fixtures (#2095). AW never writes into
-#: one, so a session store inside it is a fixture, not capture. Only the store
-#: check skips it; it is still walked, sized and read like everything else.
+#: one, so a session store inside it is a fixture, not capture. It is still
+#: walked and sized. It is also disposable (`_is_proven_cache`): pytest itself
+#: rotates these trees and deletes all but the last few runs, so nothing in
+#: one is meant to outlive the session that made it.
 PYTEST_TEMP_PREFIX = "pytest-of-"
 
 
@@ -129,17 +131,23 @@ _CACHEDIR_TAG_SIGNATURE = b"Signature: 8a477f597d28d172789f06886806bc55"
 
 
 def _is_proven_cache(path: Path) -> bool:
-    """Whether a directory's contents are shown regenerable by what it holds.
+    """Whether a directory's contents are shown disposable.
 
-    A name proves nothing - an agent may write its only copy into ``target``
-    or ``.cache`` - so each rule reads the directory, not what it is called:
-    a CACHEDIR.TAG explicitly designates the contents as disposable. A
-    package manifest or virtualenv marker does not prove that every file
-    inside can be reproduced: agents may edit installed dependencies.
+    A name proves nothing in general - an agent may write its only copy into
+    ``target`` or ``.cache`` - so the general rule reads the directory, not
+    what it is called: a CACHEDIR.TAG explicitly designates the contents as
+    disposable. A package manifest or virtualenv marker does not prove that
+    every file inside can be reproduced: agents may edit installed
+    dependencies.
+
+    The one name that is admitted is pytest's per-user temp root,
+    ``pytest-of-<user>`` (#2095): pytest owns it, rotates it and deletes all
+    but its last few runs on its own, so its contents are disposable by the
+    tool's own contract, and it never writes a CACHEDIR.TAG there.
     """
     if path.is_symlink() or not path.is_dir():
         return False
-    return _has_cachedir_tag(path)
+    return path.name.startswith(PYTEST_TEMP_PREFIX) or _has_cachedir_tag(path)
 
 
 def _has_cachedir_tag(path: Path) -> bool:
