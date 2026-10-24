@@ -3810,7 +3810,7 @@ class CaptureStatusEntry(BaseModel):
     `sessions` array), which is NOT the same as [] meaning it confirmed none.
     """
 
-    capability_status: str | None = None
+    capability_status: Literal["ready", "degraded", "failed"] | None = None
     """The session-store capability's start-up verdict: ready, degraded or failed.
 
     null when the workspace recorded none (capture not active, or an image

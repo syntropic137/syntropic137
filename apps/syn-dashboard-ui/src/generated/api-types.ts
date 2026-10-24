@@ -3019,7 +3019,7 @@ export interface components {
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
             /** Capability Status */
-            capability_status?: string | null;
+            capability_status?: ("ready" | "degraded" | "failed") | null;
             /** Failed Checks */
             failed_checks?: string[];
             /** Doctor Exit */

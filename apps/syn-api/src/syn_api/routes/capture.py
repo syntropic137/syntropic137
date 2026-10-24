@@ -22,7 +22,7 @@ anything unreadable here reads as UNKNOWN and counts as needing backfill.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -152,6 +152,21 @@ def _checks_of(payload: Mapping[str, object]) -> list[str]:
     return [item for item in raw if isinstance(item, str) and item]
 
 
+def _capability_status_of(
+    payload: Mapping[str, object],
+) -> Literal["ready", "degraded", "failed"] | None:
+    """The recorded verdict, or None for anything the contract does not define."""
+    match payload.get("capability_status"):
+        case "ready":
+            return "ready"
+        case "degraded":
+            return "degraded"
+        case "failed":
+            return "failed"
+        case _:
+            return None
+
+
 def _doctor_exit_of(payload: Mapping[str, object]) -> int | None:
     value = payload.get("doctor_exit")
     # bool subclasses int; a `true` here was not written by us.
@@ -220,7 +235,7 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
         expected_deployment=_text(payload.get("expected_deployment")),
         origin_deployment=_text(payload.get("origin_deployment")),
         agent_session_ids=read_agent_session_ids(payload),
-        capability_status=_text(payload.get("capability_status")),
+        capability_status=_capability_status_of(payload),
         failed_checks=failed_checks,
         doctor_exit=_doctor_exit_of(payload),
         capture_status_display=capture_status_display(state, failed_checks),

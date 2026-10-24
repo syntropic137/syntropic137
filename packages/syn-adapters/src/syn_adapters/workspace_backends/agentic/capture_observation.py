@@ -22,6 +22,9 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from syn_adapters.workspace_backends.agentic.capability_verdict import (
+    CapabilityStatusValue,  # noqa: TC001 - a pydantic field type, needed at runtime
+)
 from syn_adapters.workspace_backends.agentic.capture_result import CaptureExpectations
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_store_env import deployment_identity
@@ -149,7 +152,7 @@ class CaptureObservationData(BaseModel):
 
     # The session-store capability's START-UP verdict, read from the workspace's
     # audit row. None when there was no row or it could not be read (#1516).
-    capability_status: str | None = None
+    capability_status: CapabilityStatusValue | None = None
     failed_checks: list[str] = Field(default_factory=list)
     doctor_exit: int | None = None
 

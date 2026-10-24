@@ -34,6 +34,7 @@ __all__ = [
     "SESSION_STORE_CAPABILITY",
     "AgenticCapabilityStatusReader",
     "CapabilityStatusReader",
+    "CapabilityStatusValue",
     "CapabilityVerdict",
 ]
 
@@ -46,13 +47,17 @@ SESSION_STORE_CAPABILITY: Final = "session-store"
 _DEFAULT_TIMEOUT_SECONDS: Final = 10
 
 
+#: The verdicts agentic-workspace's capability status contract defines.
+CapabilityStatusValue = Literal["ready", "degraded", "failed"]
+
+
 class CapabilityVerdict(BaseModel):
     """How one capability came up in one workspace, as syn137 records it."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     capability: str
-    status: Literal["ready", "degraded", "failed"]
+    status: CapabilityStatusValue
     failed_checks: tuple[str, ...] = ()
     doctor_exit: int = 0
 

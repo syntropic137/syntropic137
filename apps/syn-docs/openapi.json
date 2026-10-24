@@ -9191,7 +9191,12 @@
           "capability_status": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "degraded",
+                  "failed"
+                ]
               },
               {
                 "type": "null"
