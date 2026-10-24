@@ -475,7 +475,15 @@ export interface PhaseExecutionDetail {
   failure_classification?: FailureClassification | null
   /** What this phase SAID caused its failure - attribution only, never a colour. */
   reported_failure_reason?: ReportedFailureReason | null
+  /**
+   * "Capture degraded: ..." when this phase's workspace started with session
+   * capture disabled (#1516); null otherwise. Render verbatim.
+   */
+  capture_status_display?: CaptureStatusDisplay
 }
+
+/** The server's capture-degraded sentence (#1516), typed from the generated schema. */
+export type CaptureStatusDisplay = components['schemas']['PhaseExecutionInfo']['capture_status_display']
 
 /** A phase's start config, aliased to the generated schema rather than restated. */
 export type PhaseStartConfig = components['schemas']['PhaseStartConfig']
@@ -500,6 +508,8 @@ export interface ExecutionDetailResponse {
   started_at: string | null
   completed_at: string | null
   phases: PhaseExecutionDetail[]
+  /** "Capture degraded: ..." when any phase started with capture disabled (#1516). */
+  capture_status_display?: CaptureStatusDisplay
   /**
    * Phases this run set out to do.
    *
