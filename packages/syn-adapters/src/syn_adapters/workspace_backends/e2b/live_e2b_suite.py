@@ -18,7 +18,10 @@ import pytest
 from agentic_isolation import E2BWorkspaceProvider
 from agentic_isolation.providers.e2b_client import SdkE2BClient
 
-from syn_adapters.workspace_backends.agentic import AgenticIsolationAdapter
+from syn_adapters.workspace_backends.agentic import (
+    AgenticEventStreamAdapter,
+    AgenticIsolationAdapter,
+)
 from syn_adapters.workspace_backends.backend_kit import BackendKit
 from syn_adapters.workspace_backends.e2b import e2b_conformance as suite
 from syn_adapters.workspace_backends.errors import WorkspaceTeardownError
@@ -94,3 +97,33 @@ async def test_negative_control_noop_kill_fails_cleanup_against_real_e2b(
         # Free the sandbox the broken kill left behind, through the real kill.
         _, real = _adapter(template, client)
         await real.teardown(await real.attach(handle.isolation_id, expect_labels={}))
+
+
+async def test_an_agent_launches_on_real_e2b(live_client: tuple[SdkE2BClient, str]) -> None:
+    """#1912: the stream path, with a launch credential, on a real sandbox."""
+    client, template = live_client
+    isolation = AgenticIsolationAdapter(
+        kit=BackendKit.e2b(
+            template,
+            cpu_count=int(os.environ.get("SYN_E2B_CPU_COUNT", "2")),
+            memory_mb=int(os.environ.get("SYN_E2B_MEMORY_MB", "2048")),
+        ),
+        provider=lambda credentials: E2BWorkspaceProvider(
+            template, client=client, credentials=credentials
+        ),
+    )
+    stream = AgenticEventStreamAdapter(isolation)
+    handle = await isolation.create(suite.isolation_config(template))
+    try:
+        agent = ["sh", "-c", 'test -n "$SYN_API_TOKEN" && echo delivered; exit 7']
+        lines = [
+            line
+            async for line in stream.stream(
+                handle, agent, timeout_seconds=60, environment={"SYN_API_TOKEN": "live-1912"}
+            )
+        ]
+        assert "delivered" in lines
+        assert stream.last_exit_code == 7
+        assert handle.isolation_type == "e2b"
+    finally:
+        await isolation.destroy(handle)

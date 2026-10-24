@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
+index 86b30128d..7cad65ff9 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
+@@ -268,7 +268,7 @@ class AgenticEventStreamAdapter:
+                 schema=MISSING,
+                 execution_id=handle.isolation_id,
+                 operation_key=uuid.uuid4().hex,
+-                argv=tuple(command),
++                argv=("docker", "exec", handle.isolation_id, *command),
+                 working_directory=_relative_working_directory(working_directory),
+                 environment=plain,
+                 credential_bindings=bindings,

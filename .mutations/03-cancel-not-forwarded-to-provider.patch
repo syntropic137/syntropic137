@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
+index 86b30128d..f61046e6a 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
+@@ -341,7 +341,7 @@ class AgenticEventStreamAdapter:
+             return False
+         provider, ref = running
+         try:
+-            status = await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS)
++            return True
+         except Exception:
+             logger.exception(
+                 "Cancelling stream operation %s failed: the agent may still be running",

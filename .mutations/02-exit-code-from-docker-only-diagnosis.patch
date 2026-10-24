@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
+index 86b30128d..f8cec9236 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
+@@ -423,7 +423,7 @@ class AgenticEventStreamAdapter:
+                 exit_code,
+                 status.ref.operation_id,
+             )
+-        self._last_exit_code = exit_code
++        self._last_exit_code = None  # a docker inspect diagnosis, which E2B cannot answer
+         # THE MOMENT OF DEATH for the agent process itself - the shape that
+         # takes a whole phase with tokens=0+0 and no terminal event (#1295,
+         # #1319). The argv is the spec's, and the agent's command line can

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+index 6b6ba64ee..8b7ae70d1 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+@@ -464,7 +464,7 @@ class AgenticIsolationAdapter:
+ 
+         return IsolationHandle(
+             isolation_id=workspace_obj.id,
+-            isolation_type=self._kit.isolation_type,
++            isolation_type="docker",
+             proxy_url=None,
+             workspace_path="/workspace",
+             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),

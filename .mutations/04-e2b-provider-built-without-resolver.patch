@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+index b5fb0b6c6..59a14fcd6 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+@@ -399,7 +399,6 @@ class WorkspaceService:
+                 e2b.template,
+                 client=sandboxes,
+                 lifetime_seconds=e2b.timeout_seconds,
+-                credentials=credentials,
+             ),
+         )
+         sidecar = SharedEnvoyAdapter(proxy_url=os.environ.get("SYN_PROXY_URL", ""))
