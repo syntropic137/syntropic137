@@ -287,6 +287,93 @@ def local_python_version() -> str:
     return f"{major}.{minor}"
 
 
+# `python`, `python3` or `python3.12` in command position: at the start of a
+# line, or after a shell separator or `$(`. `uv run python` does not match;
+# there `python` is uv's argument, and uv resolves it from .python-version.
+_BARE_PYTHON_RE: Final = re.compile(
+    r"(?:^|[;&|(]|\$\()\s*(python(?:3(?:\.\d+)?)?)(?=\s|$|\))", re.MULTILINE
+)
+
+
+def _local_action_steps(uses: str, repo_root: Path) -> list[object]:
+    """The steps of a local composite action, or [] for anything else.
+
+    `./.github/actions/x` and `./trusted/.github/actions/x` (a second checkout
+    of this repo) both name `.github/actions/x` here.
+    """
+    _, marker, name = uses.partition(".github/actions/")
+    if not uses.startswith("./") or not marker:
+        return []
+    for filename in ("action.yml", "action.yaml"):
+        path = repo_root / ".github" / "actions" / name / filename
+        if path.is_file():
+            document = yaml.safe_load(path.read_text())
+            runs = document.get("runs") if isinstance(document, dict) else None
+            steps = runs.get("steps") if isinstance(runs, dict) else None
+            return steps if isinstance(steps, list) else []
+    return []
+
+
+def _pins_python(steps: list[object], repo_root: Path) -> bool:
+    """Whether a job's steps install a pinned interpreter with setup-python,
+    directly or through a local composite action."""
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        uses = step.get("uses")
+        if not isinstance(uses, str):
+            continue
+        settings = step.get("with")
+        if (
+            uses.startswith("actions/setup-python@")
+            and isinstance(settings, dict)
+            and settings.get("python-version")
+        ):
+            return True
+        if _pins_python(_local_action_steps(uses, repo_root), repo_root):
+            return True
+    return False
+
+
+def bare_python_problems(workflow_dir: Path) -> list[str]:
+    """`run:` steps that invoke a Python the job never pinned.
+
+    WHY THIS EXISTS (issue #1242, the #1018 class one level down). The
+    interpreter check above compares the version CI pins with the local one,
+    but a step that calls `python3` in a job with no `actions/setup-python` runs
+    whatever the runner image ships, and nothing pins that. Two steps in
+    `_check-version.yml` and one in `_check-codegen-sync.yml` did exactly that.
+
+    Every workflow is scanned, not only the pull_request-triggered ones: a
+    release-only job runs the wrong interpreter just as quietly. A job that pins
+    one with setup-python may call it directly (the evidence workflows run
+    `python -I` on purpose, so an untrusted checkout is never installed).
+    """
+    repo_root = workflow_dir.parent.parent
+    problems: list[str] = []
+    for path in sorted(workflow_dir.glob("*.y*ml")):
+        document = yaml.safe_load(path.read_text())
+        jobs = document.get("jobs") if isinstance(document, dict) else None
+        if not isinstance(jobs, dict):
+            continue
+        for job_id, job in jobs.items():
+            steps = job.get("steps") if isinstance(job, dict) else None
+            if not isinstance(steps, list) or _pins_python(steps, repo_root):
+                continue
+            for step in steps:
+                run = step.get("run") if isinstance(step, dict) else None
+                if not isinstance(run, str):
+                    continue
+                for command in sorted(set(_BARE_PYTHON_RE.findall(run))):
+                    problems.append(
+                        f"{path.name} job {job_id!r} step {step.get('name', '(unnamed)')!r} "
+                        f"runs a bare `{command}` with no interpreter pin. Use `uv run "
+                        f"--no-project python` (the .python-version pin), or pin the job "
+                        f"with actions/setup-python."
+                    )
+    return problems
+
+
 def find_problems(
     workflows: dict[str, dict[str, object]], justfile: str
 ) -> tuple[list[str], int, int]:
@@ -374,6 +461,7 @@ def main() -> int:
     problems, covered, total = find_problems(workflows, justfile)
     problems.extend(script_step_problems(workflows, justfile))
     problems.extend(dispatch_only_problems(WORKFLOW_DIR, set(workflows)))
+    problems.extend(bare_python_problems(WORKFLOW_DIR))
 
     if problems:
         print("❌ local QA has drifted from CI:")

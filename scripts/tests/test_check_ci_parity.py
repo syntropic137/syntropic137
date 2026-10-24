@@ -342,3 +342,142 @@ def test_real_dispatch_only_workflows_are_clean() -> None:
     from scripts.check_ci_parity import WORKFLOW_DIR, dispatch_only_problems
 
     assert dispatch_only_problems(WORKFLOW_DIR, set(pr_triggered_workflows(WORKFLOW_DIR))) == []
+
+
+# --- bare python in run steps (#1242) ----------------------------------------
+
+
+def _repo_with(tmp_path: Path, workflow_text: str, action_text: str | None = None) -> Path:
+    """A repo root holding one workflow, and optionally one composite action."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "release.yml").write_text(workflow_text)
+    if action_text is not None:
+        action = tmp_path / ".github" / "actions" / "py-env"
+        action.mkdir(parents=True)
+        (action / "action.yml").write_text(action_text)
+    return workflows
+
+
+def _job(*steps: str) -> str:
+    """A workflow_call-only workflow, so the scan cannot lean on pull_request."""
+    return "on: workflow_call\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n" + "".join(
+        f"      - {step}\n" for step in steps
+    )
+
+
+_CHECKOUT = "uses: actions/checkout@v4"
+_PINNED = 'uses: actions/setup-python@v5\n        with:\n          python-version: "3.12"'
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        "python3 scripts/x.py",
+        "python scripts/x.py",
+        "python3.12 scripts/x.py",
+        'V=$(python3 -c "print(1)")',
+        "cat f | python3 -c 'import sys'",
+        "true && python3 x.py",
+        "true; python x.py",
+        "|\n          echo start\n          python3 x.py",
+    ],
+)
+def test_a_bare_python_in_an_unpinned_job_fails(tmp_path: Path, run: str) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
+    workflows = _repo_with(tmp_path, _job(_CHECKOUT, f"run: {run}"))
+
+    problems = bare_python_problems(workflows)
+
+    assert len(problems) == 1 and "release.yml job 'build'" in problems[0], problems
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        "uv run python scripts/x.py",
+        "uv run --no-project python scripts/x.py",
+        'V=$(uv run --no-project python -c "print(1)")',
+        "echo python is not run here",
+        "./mypython3 x.py",
+        "pythonic-tool --help",
+    ],
+)
+def test_python_that_is_not_a_bare_command_passes(tmp_path: Path, run: str) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
+    workflows = _repo_with(tmp_path, _job(_CHECKOUT, f"run: {run}"))
+
+    assert bare_python_problems(workflows) == []
+
+
+def test_a_job_pinned_with_setup_python_may_call_python(tmp_path: Path) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
+    workflows = _repo_with(tmp_path, _job(_CHECKOUT, _PINNED, "run: python -I scripts/x.py"))
+
+    assert bare_python_problems(workflows) == []
+
+
+def test_setup_python_without_a_version_is_not_a_pin(tmp_path: Path) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
+    workflows = _repo_with(
+        tmp_path, _job(_CHECKOUT, "uses: actions/setup-python@v5", "run: python x.py")
+    )
+
+    assert len(bare_python_problems(workflows)) == 1
+
+
+@pytest.mark.parametrize("prefix", ["./", "./trusted/"])
+def test_a_pin_inside_a_local_composite_action_counts(tmp_path: Path, prefix: str) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
+    action = 'runs:\n  using: composite\n  steps:\n    - uses: actions/setup-python@v5\n      with:\n        python-version: "3.12"\n'
+    workflows = _repo_with(
+        tmp_path,
+        _job(_CHECKOUT, f"uses: {prefix}.github/actions/py-env", "run: python -I x.py"),
+        action,
+    )
+
+    assert bare_python_problems(workflows) == []
+
+
+def test_a_composite_action_without_a_pin_does_not_count(tmp_path: Path) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
+    action = "runs:\n  using: composite\n  steps:\n    - run: echo hi\n      shell: bash\n"
+    workflows = _repo_with(
+        tmp_path, _job(_CHECKOUT, "uses: ./.github/actions/py-env", "run: python x.py"), action
+    )
+
+    assert len(bare_python_problems(workflows)) == 1
+
+
+def test_main_exits_1_on_a_bare_python(
+    monkeypatch: pytest.MonkeyPatch, mapping: None, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        check_ci_parity,
+        "pr_triggered_workflows",
+        lambda _: {"ci.yml": workflow("unit", "ui", "scan")},
+    )
+    monkeypatch.setattr(check_ci_parity, "JUSTFILE", _justfile_at(tmp_path))
+    workflows = _repo_with(tmp_path / "repo", _job("run: uv run --no-project python x.py"))
+    for listed in check_ci_parity.DISPATCH_ONLY:
+        (workflows / listed).write_text("on: workflow_dispatch\njobs: {}\n")
+    (workflows / "ci.yml").write_text("jobs: {}\n")
+    monkeypatch.setattr(check_ci_parity, "WORKFLOW_DIR", workflows)
+    # Clean first, so the 1 below can only come from the bare python.
+    assert check_ci_parity.main() == 0
+
+    (workflows / "release.yml").write_text(_job("run: python3 x.py"))
+
+    assert check_ci_parity.main() == 1
+
+
+def test_the_repos_own_workflows_pin_every_python() -> None:
+    from scripts.check_ci_parity import WORKFLOW_DIR, bare_python_problems
+
+    assert bare_python_problems(WORKFLOW_DIR) == []
