@@ -19,6 +19,7 @@ from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdap
 from syn_adapters.workspace_backends.docker.docker_sidecar_adapter import DockerSidecarAdapter
 from syn_adapters.workspace_backends.host_labels import UNKNOWN_GENERATION
 from syn_adapters.workspace_backends.service.workspace_lifecycle import provision_workspace
+from syn_domain.contexts.orchestration import ImageManifestReading
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationConfig,
     IsolationHandle,
@@ -107,7 +108,7 @@ async def _sidecar_labels() -> dict[str, str]:
     with (
         patch(
             "syn_adapters.workspace_backends.service.workspace_lifecycle._read_image_manifest",
-            AsyncMock(return_value=None),
+            AsyncMock(return_value=ImageManifestReading.absent()),
         ),
         patch(f"{module}.get_container_network", AsyncMock(return_value="agent-net")),
         patch(f"{module}.run_sidecar_container", run),

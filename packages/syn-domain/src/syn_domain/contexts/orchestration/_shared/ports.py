@@ -78,7 +78,12 @@ class IsolationBackendPort(Protocol):
         patterns: list[str],
         base_path: str = "/workspace",
     ) -> list[tuple[str, bytes]]:
-        """Copy files out of the isolation."""
+        """Copy files out of the isolation.
+
+        Raises `FilesRefusedError` (`_shared.file_transfer`) when any entry asked
+        for was refused, carrying what was read and each refusal by path and
+        reason: a refused file is never returned as absent or empty.
+        """
         ...
 
 

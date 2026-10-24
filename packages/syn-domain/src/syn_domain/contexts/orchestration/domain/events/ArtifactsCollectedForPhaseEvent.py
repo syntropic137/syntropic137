@@ -7,6 +7,9 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 from event_sourcing import DomainEvent, event
 from pydantic import Field
 
+from syn_domain.contexts.orchestration._shared.FileRefusalValueObjects import (
+    FileRefusal,  # noqa: TC001 - needed at runtime for Pydantic
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ObservedHead,  # noqa: TC001 - needed at runtime for Pydantic
 )
@@ -42,3 +45,9 @@ class ArtifactsCollectedForPhaseEvent(DomainEvent):
     #: The forge's heads for every branch this execution pushed, inherited or
     #: declared, read host-side during collection (plan §A.2). Recorded only.
     observed_heads: list[ObservedHead] = Field(default_factory=list)
+
+    #: Output files the provider would not read (a link, a special file, one
+    #: past a read limit), each by path and reason (#1913). The collection
+    #: went on without them, so this is the only record they existed; a
+    #: refused file is never stored as an empty or a missing one.
+    refused_files: list[FileRefusal] = Field(default_factory=list)
