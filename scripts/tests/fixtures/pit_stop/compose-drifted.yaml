@@ -1,0 +1,12 @@
+# What a newer ref publishes: the API needs an env var compose-tag.yaml lacks (#1511).
+services:
+  api:
+    container_name: syn137-api
+    environment:
+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory
+    image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}
+  gateway:
+    container_name: syn137-gateway
+    image: ghcr.io/syntropic137/syn-gateway:v0.33.1-beta.2
+  collector:
+    image: ghcr.io/syntropic137/syn-collector:v0.33.1-beta.2
