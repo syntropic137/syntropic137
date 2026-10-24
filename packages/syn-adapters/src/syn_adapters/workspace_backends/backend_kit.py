@@ -65,6 +65,10 @@ class BackendKit:
     #: workspaces itself rather than per request. None: no ceiling.
     max_cpu_cores: float | None = None
     max_memory_mb: int | None = None
+    #: Whether the workspace's processes run on this host's kernel, so that a
+    #: signal death can be explained from this host's ring buffer. A remote
+    #: sandbox has its own kernel: this host's records say nothing about it.
+    shares_host_kernel: bool = True
 
     def __post_init__(self) -> None:
         self._require_permitted(self.default_image)
@@ -93,6 +97,7 @@ class BackendKit:
             verifies_images=False,
             max_cpu_cores=float(cpu_count),
             max_memory_mb=memory_mb,
+            shares_host_kernel=False,
         )
 
     @property

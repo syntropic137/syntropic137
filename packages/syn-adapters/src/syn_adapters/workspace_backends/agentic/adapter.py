@@ -309,6 +309,11 @@ class AgenticIsolationAdapter:
         return self._kit.credential_policy
 
     @property
+    def shares_host_kernel(self) -> bool:
+        """Whether this backend's processes run on this host's kernel (#1912)."""
+        return self._kit.shares_host_kernel
+
+    @property
     def operations(self) -> SupportsOperations:
         """The provider's operation contract, which the event stream launches through.
 
@@ -665,7 +670,9 @@ class AgenticIsolationAdapter:
         # bare `-11` (#1295). Captured HERE rather than by any caller because
         # the reap removes the container moments later and no caller runs
         # before it (#1319).
-        signal_death = await capture_signal_death(command, result.exit_code)
+        signal_death = await capture_signal_death(
+            command, result.exit_code, host_kernel=self._kit.shares_host_kernel
+        )
         if signal_death is not None:
             logger.error(
                 "Command in workspace %s died on a signal:\n%s",

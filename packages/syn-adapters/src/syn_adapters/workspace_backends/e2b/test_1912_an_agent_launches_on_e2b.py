@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from typing import TYPE_CHECKING, ClassVar
+from unittest.mock import AsyncMock
 
 import pytest
 from agentic_isolation.contract import (
@@ -39,6 +40,7 @@ from syn_adapters.workspace_backends.e2b.test_e2b_backend import (
     _settings,
 )
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
+from syn_domain.contexts.orchestration import announce_as
 
 if TYPE_CHECKING:
     from agentic_isolation.contract import OperationSpec
@@ -156,7 +158,7 @@ async def test_the_agent_launches_through_the_e2b_provider(service: WorkspaceSer
         assert _CREDENTIAL[0] not in spec.environment
         # The launch marker and the credential travel through the provider.
         assert spec.launch_marker == LaunchMarker(
-            argv0="syn-launch-1912", line=spec.launch_marker.line
+            argv0="syn-launch-1912", line=announce_as("syn-launch-1912")
         )
         assert provider.delivered == dict([_CREDENTIAL])
         assert lines == [_LINE.decode().strip()]
@@ -174,3 +176,24 @@ async def test_cancelling_the_agent_cancels_the_e2b_operation(service: Workspace
         async for _ in stream:  # type: ignore[attr-defined]
             pass
         assert workspace.last_stream_exit_code == 143
+
+
+async def test_a_remote_signal_death_is_never_explained_by_this_host(
+    service: WorkspaceService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sandbox has its own kernel: this host's ring buffer is never read for it."""
+    host_reader = AsyncMock(return_value=(("HOST_ONLY_FAULT",), None))
+    monkeypatch.setattr("syn_adapters.diagnostics.signal_capture._kernel_fault_lines", host_reader)
+    async with service.create_workspace("exec-1912", with_sidecar=False) as workspace:
+        (provider,) = ScriptedE2BProvider.built
+        provider.hang = True
+        stream = workspace.stream(_AGENT)
+        await anext(stream)  # type: ignore[call-overload]
+        assert await workspace.interrupt() is True
+        async for _ in stream:  # type: ignore[attr-defined]
+            pass
+        death = workspace._service._event_stream.last_signal_death  # type: ignore[attr-defined]
+        assert death is not None
+        assert (workspace.last_stream_exit_code, death.signal_number) == (143, 15)
+        assert host_reader.await_count == 0
+        assert "HOST_ONLY_FAULT" not in death.describe()

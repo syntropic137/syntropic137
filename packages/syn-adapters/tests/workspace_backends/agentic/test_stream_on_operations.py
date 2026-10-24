@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock
 from urllib.parse import quote
 
 import pytest
@@ -162,6 +163,7 @@ class _Host:
     def __init__(self, operations: RecordingOperations, credentials: WorkspaceCredentials) -> None:
         self.operations = operations
         self.credentials = credentials
+        self.shares_host_kernel = True
 
     def workspace(self, isolation_id: str) -> Workspace | None:
         return Workspace(
@@ -406,6 +408,25 @@ async def test_signal_death_survives_and_carries_no_credential(
     assert _TOKEN not in " ".join(death.command)
     assert _TOKEN not in caplog.text
     assert "SIGSEGV" in caplog.text
+
+
+@pytest.mark.parametrize(("shares_host_kernel", "reads"), [(True, 1), (False, 0)])
+async def test_a_remote_signal_death_never_reads_this_hosts_kernel(
+    monkeypatch: pytest.MonkeyPatch, shares_host_kernel: bool, reads: int
+) -> None:
+    """#1912: this host's ring buffer explains only a process on this host's kernel."""
+    host_reader = AsyncMock(return_value=(("HOST_ONLY_FAULT",), None))
+    monkeypatch.setattr("syn_adapters.diagnostics.signal_capture._kernel_fault_lines", host_reader)
+    adapter, _, _ = _stream([b"{}\n"], state="failed", exit_code=None, signal="SIGTERM")
+    adapter._host.shares_host_kernel = shares_host_kernel  # type: ignore[attr-defined]
+
+    await _lines(adapter)
+
+    death = adapter.last_signal_death
+    assert death is not None
+    assert (adapter.last_exit_code, death.signal_number) == (143, 15)
+    assert host_reader.await_count == reads
+    assert ("HOST_ONLY_FAULT" in death.describe()) is shares_host_kernel
 
 
 async def test_a_timed_out_success_reports_the_timeout_status() -> None:

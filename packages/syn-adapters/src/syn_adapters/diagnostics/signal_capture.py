@@ -120,6 +120,8 @@ def _redact_assignment(assignment: str) -> str:
 async def capture_signal_death(
     command: Sequence[str],
     exit_code: int | None,
+    *,
+    host_kernel: bool = True,
 ) -> SignalDeath | None:
     """The diagnostic for a process that died on a signal, or None if it did not.
 
@@ -133,6 +135,11 @@ async def capture_signal_death(
     Cannot raise. See the module docstring: raising here would convert a lost
     phase into an unreadable one.
 
+    ``host_kernel=False`` says the process ran on another machine's kernel (a
+    remote sandbox). This host's ring buffer is then never read: its records
+    belong to unrelated processes, and naming one as the fault would be a
+    false diagnosis. The signal is still named.
+
     Returns:
         A :class:`SignalDeath` whenever ``exit_code`` names a signal under
         either convention, always carrying the signal name and the command, and
@@ -143,7 +150,10 @@ async def capture_signal_death(
     number = signal_number_of(exit_code)
     if number is None or exit_code is None:
         return None
-    lines, unreadable = await _kernel_fault_lines()
+    if host_kernel:
+        lines, unreadable = await _kernel_fault_lines()
+    else:
+        lines, unreadable = (), _REMOTE_KERNEL
     return SignalDeath(
         exit_code=exit_code,
         signal_number=number,
@@ -213,6 +223,13 @@ _DENIED: Final[str] = (
     f"reading {_KMSG} was denied. The service that runs workspaces needs "
     f"CAP_SYSLOG, or the host needs kernel.dmesg_restrict=0, before the "
     f"faulting library can be named from here."
+)
+
+
+#: Why a remote process's death carries no kernel lines.
+_REMOTE_KERNEL: Final[str] = (
+    "the process ran in a remote sandbox with its own kernel, so this host's "
+    "ring buffer cannot say why it died and was not read."
 )
 
 
