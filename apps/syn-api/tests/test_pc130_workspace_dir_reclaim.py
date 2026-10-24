@@ -561,6 +561,169 @@ async def test_a_session_store_anywhere_inside_keeps_the_dir(base: Path, tmp_pat
     assert ws.exists()
 
 
+async def test_a_session_store_at_the_spool_root_keeps_the_dir(base: Path, tmp_path: Path) -> None:
+    """AW's in-workspace example, ``SPOOL=/workspace``: ``<dir>/.agentic-session-store`` (#2095)."""
+    ws = _workspace(base, "ws-spool-root", tmp_path)
+    store = ws / stale_dirs.SESSION_STORE_DIRNAME / "repos"
+    store.mkdir(parents=True)
+    (store.parent / ".owner").write_text("agentic-session-store-metadata-v1\n")
+    (store / "state.json").write_text("{}\n")
+    result = await _reclaimer(base).run_once()
+    assert _reason(result, "ws-spool-root") is RetainedReason.CAPTURE_UNKNOWN
+    assert ws.exists()
+
+
+def _pytest_fixture_store(ws: Path) -> Path:
+    """Where the live leak put one (#2095): this file's own fixture, run inside a workspace."""
+    return (
+        ws
+        / ".tmp"
+        / "pytest-of-agent"
+        / "pytest-7"
+        / "test_a_session_store_anywhere_0"
+        / "workspaces"
+        / "ws-capture"
+        / "repos"
+        / "app"
+        / "deep"
+        / stale_dirs.SESSION_STORE_DIRNAME
+    )
+
+
+def test_a_session_store_inside_a_pytest_temp_tree_is_not_capture(
+    base: Path, tmp_path: Path
+) -> None:
+    ws = _workspace(base, "ws-ran-tests", tmp_path)
+    [before] = scan_workspace_dirs(str(base))
+    store = _pytest_fixture_store(ws)
+    store.mkdir(parents=True)
+    (store / "envelope.jsonl").write_text("{}\n")
+    [listing] = scan_workspace_dirs(str(base))
+    assert listing.session_store is False
+    assert listing.unreadable is None
+    assert listing.size_bytes - before.size_bytes == len("{}\n")  # still walked and sized
+
+
+def test_a_pytest_temp_tree_does_not_hide_a_store_beside_it(base: Path, tmp_path: Path) -> None:
+    ws = _workspace(base, "ws-both", tmp_path)
+    _pytest_fixture_store(ws).mkdir(parents=True)
+    (ws / ".tmp" / stale_dirs.SESSION_STORE_DIRNAME).mkdir()
+    [listing] = scan_workspace_dirs(str(base))
+    assert listing.session_store is True
+
+
+async def test_a_dir_whose_only_extra_is_a_pytest_temp_tree_is_reclaimed(
+    base: Path, tmp_path: Path
+) -> None:
+    """The live #2095 shape: a pushed repo plus pytest's temp tree, fixture store and all."""
+    ws = _workspace(base, "ws-fixture-only", tmp_path)
+    store = _pytest_fixture_store(ws)
+    store.mkdir(parents=True)
+    (store / "envelope.jsonl").write_text("{}\n")
+    result = await _reclaimer(base).run_once()
+    assert result.reclaimed == ("ws-fixture-only",)
+    assert not ws.exists()
+
+
+def _pytest_shaped(root: Path) -> Path:
+    """What pytest itself writes in ``pytest-of-<user>``; returns one run dir."""
+    run = root / "pytest-0"
+    run.mkdir(parents=True)
+    (root / "pytest-current").symlink_to(run)
+    (root / "garbage-0b8e9c3a-1f2d-4e5a-9b6c-7d8e9f0a1b2c").mkdir()
+    return run
+
+
+async def test_a_pytest_shaped_tree_outside_the_workspace_tmpdir_is_kept(
+    base: Path, tmp_path: Path
+) -> None:
+    """Only ``<dir>/.tmp`` is the platform's TMPDIR: the same tree anywhere else is work."""
+    ws = _workspace(base, "ws-misplaced", tmp_path)
+    work = _pytest_shaped(ws / "pytest-of-x") / "only-copy.md"
+    work.write_text("work nobody pushed\n")
+    result = await _reclaimer(base).run_once()
+    [kept] = [r for r in result.retained if r.workspace_id == "ws-misplaced"]
+    assert kept.reason is RetainedReason.UNVERSIONED
+    assert "pytest-of-x/pytest-0/only-copy.md" in kept.detail
+    assert work.exists()
+
+
+async def test_a_spool_under_a_misplaced_pytest_tree_keeps_the_dir(
+    base: Path, tmp_path: Path
+) -> None:
+    """A spool configured at ``/workspace/pytest-of-x/...`` is capture, whatever its name."""
+    ws = _workspace(base, "ws-spool-named-pytest", tmp_path)
+    run = _pytest_shaped(ws / "pytest-of-x")
+    (run / "spool" / stale_dirs.SESSION_STORE_DIRNAME).mkdir(parents=True)
+    result = await _reclaimer(base).run_once()
+    assert _reason(result, "ws-spool-named-pytest") is RetainedReason.CAPTURE_UNKNOWN
+    assert ws.exists()
+
+
+async def test_a_store_in_a_tmpdir_tree_pytest_did_not_shape_keeps_the_dir(
+    base: Path, tmp_path: Path
+) -> None:
+    """Right place, wrong shape: ``pytest-of-agent`` holds something pytest never writes."""
+    ws = _workspace(base, "ws-not-pytest", tmp_path)
+    root = ws / ".tmp" / "pytest-of-agent"
+    _pytest_shaped(root)
+    (root / "spool" / stale_dirs.SESSION_STORE_DIRNAME).mkdir(parents=True)
+    result = await _reclaimer(base).run_once()
+    assert _reason(result, "ws-not-pytest") is RetainedReason.CAPTURE_UNKNOWN
+    assert ws.exists()
+
+
+async def test_work_in_a_tmpdir_tree_pytest_did_not_shape_keeps_the_dir(
+    base: Path, tmp_path: Path
+) -> None:
+    ws = _workspace(base, "ws-not-pytest-work", tmp_path)
+    root = ws / ".tmp" / "pytest-of-agent"
+    _pytest_shaped(root)
+    (root / "only-copy.md").write_text("work nobody pushed\n")
+    result = await _reclaimer(base).run_once()
+    [kept] = [r for r in result.retained if r.workspace_id == "ws-not-pytest-work"]
+    assert kept.reason is RetainedReason.UNVERSIONED
+    assert (root / "only-copy.md").exists()
+
+
+def test_a_workspace_dir_that_is_a_repository_has_no_pytest_temp_tree(
+    base: Path, tmp_path: Path
+) -> None:
+    """``<dir>/.tmp`` inside a repository is that repository's content, not the TMPDIR."""
+    remote = _remote(tmp_path, "ws-is-repo")
+    _git(tmp_path, "init", "--bare", "-b", "main", str(remote))
+    ws = base / "ws-is-repo"
+    _git(base, "clone", str(remote), "ws-is-repo")
+    store = _pytest_shaped(ws / ".tmp" / "pytest-of-agent") / stale_dirs.SESSION_STORE_DIRNAME
+    store.mkdir()
+    assert stale_dirs.pytest_temp_roots(ws) == frozenset()
+    [listing] = scan_workspace_dirs(str(base))
+    assert listing.session_store is True
+
+
+@pytest.mark.parametrize(
+    "beside",
+    [
+        ".tmp/notes.md",  # the temp dir itself is not disposable
+        ".tmp/pytest-notes/only-copy.md",  # only `pytest-of-*` is pytest's
+        ".tmp/my-pytest-of-agent/only-copy.md",  # the name must START with it
+    ],
+)
+async def test_unversioned_work_beside_a_pytest_temp_tree_keeps_the_dir(
+    base: Path, tmp_path: Path, beside: str
+) -> None:
+    ws = _workspace(base, "ws-tests-and-work", tmp_path)
+    _pytest_fixture_store(ws).mkdir(parents=True)
+    work = ws / beside
+    work.parent.mkdir(parents=True, exist_ok=True)
+    work.write_text("work nobody pushed\n")
+    result = await _reclaimer(base).run_once()
+    [kept] = [r for r in result.retained if r.workspace_id == "ws-tests-and-work"]
+    assert kept.reason is RetainedReason.UNVERSIONED
+    assert beside in kept.detail
+    assert work.read_text() == "work nobody pushed\n"
+
+
 async def test_capture_records_that_do_not_cover_every_session_keep_the_dir(
     base: Path, tmp_path: Path
 ) -> None:
