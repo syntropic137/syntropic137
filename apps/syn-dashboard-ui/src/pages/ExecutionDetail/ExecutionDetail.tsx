@@ -17,9 +17,10 @@ import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
 import { ReadModelNotice } from '../../components/ReadPathBanner'
-import { CaptureDegradedBadge } from '../../components/capture'
+import { CaptureDegradedBadge, type DegradedPhase } from '../../components/capture'
 import { ExecutionEvalBadge } from '../../components/evals'
 import { useExecutionData } from '../../hooks'
+import { useExecutionCapture } from '../../hooks/useExecutionCapture'
 import { useReadModelStatus } from '../../hooks/useReadPathHealth'
 import type { ExecutionDetailResponse, FailureClassification, ReportedFailureReason } from '../../types'
 import { type ExactUsd, exactUsdToString, parseExactUsd } from '../../utils/exactUsd'
@@ -182,8 +183,9 @@ function ExecutionErrorCard({
 
 const CONTROLLABLE_STATUSES = new Set(['running', 'queued'])
 
-function ExecutionHeader({ execution, executionId, isConnected, refreshError, now, refreshExecution }: {
+function ExecutionHeader({ execution, executionId, isConnected, refreshError, now, refreshExecution, captureDegraded }: {
   execution: ExecutionDetailResponse
+  captureDegraded: readonly DegradedPhase[]
   executionId: string | undefined
   isConnected: boolean
   refreshError: string | null
@@ -209,7 +211,7 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
                 pulse={execution.status === 'running'}
               />
               <ExecutionEvalBadge evalRun={execution.eval} />
-              <CaptureDegradedBadge executionId={execution.workflow_execution_id} />
+              <CaptureDegradedBadge degraded={captureDegraded} />
             </div>
             <p className="mt-1 break-words text-sm text-[var(--color-text-secondary)]">{execution.workflow_name}</p>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
@@ -292,6 +294,9 @@ export function ExecutionDetail() {
   // From /health once measured, so a 404 while the detail read model replays
   // can say why, and a terminal execution's snapshot cannot outlive catch-up.
   const rebuilding = useReadModelStatus('workflow_execution_details', execution?.read_model_status)
+  // Called before the early returns below, like every hook here; it waits for
+  // the id and follows the status, so it re-reads as the run finishes (#1516).
+  const captureDegraded = useExecutionCapture(executionId ?? '', execution?.status ?? '')
 
   if (loading) return <PageLoader />
 
@@ -323,7 +328,7 @@ export function ExecutionDetail() {
     <div className="space-y-6">
       <Breadcrumbs items={breadcrumbs} />
       <ReadModelNotice status={rebuilding} />
-      <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} refreshError={error} now={now} refreshExecution={refreshExecution} />
+      <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} refreshError={error} now={now} refreshExecution={refreshExecution} captureDegraded={captureDegraded} />
       {execution.error_message && (
         <ExecutionErrorCard
           message={execution.error_message}
@@ -360,7 +365,7 @@ export function ExecutionDetail() {
         </section>
       )}
       <section id="phase-timeline">
-        <PhaseTimeline execution={execution} now={now} />
+        <PhaseTimeline execution={execution} now={now} captureDegraded={captureDegraded} />
       </section>
       <SessionInventory key={execution.workflow_execution_id} executionId={execution.workflow_execution_id} />
       {execution.artifact_ids.length > 0 && (
