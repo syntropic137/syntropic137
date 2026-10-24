@@ -56,7 +56,7 @@ def _adapter(template: str, client: object) -> tuple[AgenticIsolationAdapter, E2
         cpu_count=int(os.environ.get("SYN_E2B_CPU_COUNT", "2")),
         memory_mb=int(os.environ.get("SYN_E2B_MEMORY_MB", "2048")),
     )
-    return AgenticIsolationAdapter(kit=kit, provider=provider), provider
+    return AgenticIsolationAdapter(kit=kit, provider=lambda _: provider), provider
 
 
 @pytest.fixture
