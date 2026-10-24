@@ -288,19 +288,35 @@ async def _load_phase_captures(execution_id: str) -> dict[str, PhaseCapture] | N
                 agent_session_ids=read_agent_session_ids(row),
                 capture_status_display=read_capture_status_display(row),
             )
-    for row in start_rows:
-        session_id = row.get("session_id")
-        if not isinstance(session_id, str) or not session_id:
+    _add_start_verdicts(
+        by_session,
+        [
+            (
+                row.get("session_id"),
+                read_start_verdict_display(row.get("schema_version"), row.get("start_capability")),
+            )
+            for row in start_rows
+        ],
+    )
+    return by_session
+
+
+def _add_start_verdicts(
+    by_session: dict[str, PhaseCapture], verdicts: list[tuple[object, str | None]]
+) -> None:
+    """Fill each phase's display from its launch-time start verdict (#1516).
+
+    ``verdicts`` pairs each start row's session id with its display. The
+    verdict is immutable for a workspace, so the start row and the capture
+    row's copy agree; the start row is what a RUNNING phase has, before any
+    capture row exists.
+    """
+    for session_id, display in verdicts:
+        if not isinstance(session_id, str) or not session_id or display is None:
             continue
-        display = read_start_verdict_display(row.get("schema_version"), row.get("start_capability"))
-        if display is None:
-            continue
-        # The verdict is immutable for a workspace, so the start row and the
-        # capture row's copy agree; the start row is what a RUNNING phase has.
         known = by_session.get(session_id, _NOT_REPORTED)
         if known.capture_status_display is None:
             by_session[session_id] = known._replace(capture_status_display=display)
-    return by_session
 
 
 async def _map_phase_detail(

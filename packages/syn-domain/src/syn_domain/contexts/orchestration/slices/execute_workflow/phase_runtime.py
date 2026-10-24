@@ -461,6 +461,11 @@ class PhaseRuntime:
             phase_id=phase_id,
         )
 
+    async def record_launch(self, phase_id: str) -> None:
+        """Record the Lane 2 facts a phase's launch establishes, before its agent runs."""
+        await self.record_runtime(phase_id)
+        await self.record_start_verdict(phase_id)
+
     async def record_start_verdict(self, phase_id: str) -> None:
         """Record whether this phase's workspace started with capture degraded (#1516).
 
