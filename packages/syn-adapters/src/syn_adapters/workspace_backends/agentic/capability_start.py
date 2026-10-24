@@ -38,6 +38,8 @@ from agentic_isolation.providers.base import ExecuteResult
 from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
+    from agentic_isolation.harnesses import ExecFn
+
     from syn_adapters.workspace_backends.agentic.capture_probe import WorkspaceExecutor
 
 __all__ = [
@@ -89,29 +91,41 @@ class CapabilityStatusReader(Protocol):
     async def read(self, execute: WorkspaceExecutor, capability: str) -> StartCapability | None: ...
 
 
+class _ExecutorAsExecFn:
+    """Our argv ``WorkspaceExecutor`` presented as AW's shell-string ``ExecFn``.
+
+    The AW reader shell-quotes its argv with ``shlex.join``, so splitting the
+    command back recovers the exact argv. ``env`` is the external ``ExecFn``
+    contract, passed straight through as process environment.
+    """
+
+    def __init__(self, execute: WorkspaceExecutor) -> None:
+        self._execute = execute
+
+    async def __call__(
+        self,
+        command: str,
+        *,
+        timeout: float | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> ExecuteResult:
+        del cwd  # the read script uses absolute paths only
+        seconds = math.ceil(timeout) if timeout is not None else _READ_TIMEOUT_SECONDS
+        result = await self._execute(shlex.split(command), timeout_seconds=seconds, environment=env)
+        return ExecuteResult(
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            timed_out=result.timed_out,
+        )
+
+
 class AgenticCapabilityStatusReader:
     """``CapabilityStatusReader`` over agentic-workspace's typed reader."""
 
     async def read(self, execute: WorkspaceExecutor, capability: str) -> StartCapability | None:
-        async def exec_fn(
-            command: str,
-            *,
-            timeout: float | None = None,
-            cwd: str | None = None,
-            env: dict[str, str] | None = None,
-        ) -> ExecuteResult:
-            # The AW reader shell-quotes its argv with shlex.join; splitting
-            # it back recovers the exact argv for our argv-based executor.
-            del cwd  # the read script uses absolute paths only
-            seconds = math.ceil(timeout) if timeout is not None else _READ_TIMEOUT_SECONDS
-            result = await execute(shlex.split(command), timeout_seconds=seconds, environment=env)
-            return ExecuteResult(
-                exit_code=result.exit_code,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                timed_out=result.timed_out,
-            )
-
+        exec_fn: ExecFn = _ExecutorAsExecFn(execute)
         try:
             row = await read_capability_status(
                 exec_fn, capability, timeout=float(_READ_TIMEOUT_SECONDS)
