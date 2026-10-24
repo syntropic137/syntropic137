@@ -2,7 +2,15 @@ import { clsx } from 'clsx'
 import { Clock, DollarSign, Layers, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { Card, CardContent, CardHeader, ObservedModel, PhaseStartPins, SkillUseLine } from '../../components'
+import {
+  CaptureDegradedBadge,
+  Card,
+  CardContent,
+  CardHeader,
+  ObservedModel,
+  PhaseStartPins,
+  SkillUseLine,
+} from '../../components'
 import { TokenInOut } from '../../components/TokenInOut'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
@@ -105,6 +113,11 @@ function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: 
         <Icon className={clsx('h-4 w-4', statusIconColors[tone] ?? 'text-slate-400')} />
         <span className="text-sm font-medium text-[var(--color-text-primary)]">{phase.name}</span>
       </div>
+      {phase.capture_status_display && (
+        <div className="mt-1">
+          <CaptureDegradedBadge display={phase.capture_status_display} />
+        </div>
+      )}
       {/* The model that RAN, verbatim; the requested alias is secondary context only. */}
       <ObservedModel
         display={phase.model_display}

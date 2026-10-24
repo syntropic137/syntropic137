@@ -13,6 +13,7 @@ import {
   SkillUseOverview,
   StatusBadge,
 } from '../../components'
+import { CaptureDegradedBadge } from '../../components/CaptureDegradedBadge'
 import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
@@ -208,6 +209,7 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
                 pulse={execution.status === 'running'}
               />
               <ExecutionEvalBadge evalRun={execution.eval} />
+              <CaptureDegradedBadge display={execution.capture_status_display} />
             </div>
             <p className="mt-1 break-words text-sm text-[var(--color-text-secondary)]">{execution.workflow_name}</p>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">

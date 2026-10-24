@@ -311,3 +311,23 @@ describe('a failed phase card says why that phase failed (#1592)', () => {
     expect(queryByTestId('phase-failure')).toBeNull()
   })
 })
+
+describe('PhaseTimeline capture degraded (#1516)', () => {
+  it('badges the phase whose workspace started with capture degraded, and only that one', () => {
+    renderTimeline([
+      phase({
+        phase_id: 'implement',
+        capture_status_display: 'Capture degraded: store_reachable failed',
+      }),
+      phase({ phase_id: 'verify', capture_status_display: null }),
+    ])
+    const badges = document.querySelectorAll('[data-testid="capture-degraded"]')
+    expect(badges).toHaveLength(1)
+    expect(badges[0].textContent).toBe('Capture degraded: store_reachable failed')
+  })
+
+  it('shows nothing when no phase reported a degraded start', () => {
+    renderTimeline([phase({ phase_id: 'implement' })])
+    expect(document.querySelector('[data-testid="capture-degraded"]')).toBeNull()
+  })
+})
