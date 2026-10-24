@@ -1,0 +1,1 @@
+export { CaptureDegradedBadge } from './CaptureDegradedBadge'
