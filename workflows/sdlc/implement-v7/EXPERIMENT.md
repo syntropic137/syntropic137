@@ -207,6 +207,67 @@ Sample at 2026-10-23T20:38:40Z:
 A task whose premise phase refutes it in both arms is excluded as a pair and
 not replaced: the premise phase is part of what is measured.
 
+### Amendment 2 (2026-10-24, after pair 3, before pair 4)
+
+Pair 3's second arm (v4-precheck, `exec-27d6a784bd47`) did not start fresh.
+It found the first arm's branch `fix/1511-pit-stop-compose-drift` and PR #2088,
+pushed two commits on top of v7's six, and certified the combined head. The
+arms were not independent, so pair 3 is excluded. Both arms derive the branch
+name from the issue, and nothing in the brief says the other arm's work is off
+limits.
+
+From pair 4 on, each brief ends with this added paragraph. Only the branch name
+differs between the arms:
+
+> This run is one arm of a paired experiment. Work only on a new branch named
+> `ab/pair<N>-<arm>` created from `origin/main`, and open your own draft PR from
+> it. Do not read, check out, push to, or comment on any other branch or PR for
+> this issue, even if one exists.
+
+A run that touches the other arm's branch or PR anyway is a protocol failure,
+and its pair is excluded.
+
+Results so far:
+- pair 1 excluded: both arms found #1431 already fixed by #1538;
+- pair 2 excluded: both arms refused correctly, since #1509 needs live
+  operator evidence;
+- pair 3 excluded: contaminated, as above;
+- 6 runs, $21.31.
+
+### Stopped (2026-10-24, after pair 4): no scoreable pair
+
+| Pair | Issue | v7 | v4-precheck | Outcome |
+|---|---|---|---|---|
+| 1 | #1431 | `exec-58523e492a17`, premise refuted, $0.92 | `exec-a09af92dc57e`, premise refuted, $0.68 | excluded: already fixed by #1538 |
+| 2 | #1509 | `exec-8739317d2a6f`, correct refusal, $0.93 | `exec-3fc452e02344`, correct refusal, $1.03 | excluded: needs live operator evidence; no Docker in the workspace |
+| 3 | #1511 | `exec-5ceed2a5497d`, certified after 1 round, $11.27 | `exec-27d6a784bd47`, certified round 0, $6.48 | excluded: the second arm built on the first arm's branch (#2088, merged as ordinary work) |
+| 4 | #1516 | `exec-e4d588572bdf`, certified after 1 round, $14.46, #2093 closed | `exec-12997a73d0cf`, certified after 1 round, $16.40, #2092 landing | excluded: bases 8dc48cb65 and eb2343e92 are 32 commits apart, touching files both arms changed |
+
+Eight runs, $52.17. The A/B is stopped. #1553 and #1424 go back to the normal
+queue.
+
+**Why it produced nothing:** the platform could run one arm at a time only, so
+each pair's arms ran hours apart and main moved between them. The base-mismatch
+rule then excludes any pair whose change touches busy files. Under that
+constraint the design cannot produce a matched pair. The orchestrator owned
+the one-slot, sequential rule. The protocol owned not dry-running one pair
+before committing to six.
+
+**Restart condition:** either both arms are dispatched in the same minute in
+two slots, so they start from the same `origin/main`, or the #2055 replay
+harness pins a base SHA. Before restarting, dry-run the selection rule and
+check each picked issue's premise by hand, since pairs 1 and 2 were lost to
+stale and operator-only issues.
+
+**What the runs did show, mechanism only, not a metric:**
+- v7 read the required set from the rulesets endpoint (`CI Success`), recorded
+  classic protection's 403 as a note, and listed Vercel rate-limit failures as
+  `Not required, not holding`;
+- v7 reported `nested_docker` capability gaps on pairs 3 and 4;
+- both arms honoured the per-arm branch paragraph on pair 4;
+- the premise and implement phases refused stale and operator-only tasks for
+  about $1 a run.
+
 ### Mechanism check (before any metric is read)
 
 For each treatment run: did each review write a `Capability gaps:` line, did
