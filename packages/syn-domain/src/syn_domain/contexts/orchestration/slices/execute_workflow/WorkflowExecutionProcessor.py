@@ -864,7 +864,7 @@ class WorkflowExecutionProcessor:
                     todo,
                     phase,
                     launch,
-                    workflow_id,
+                    aggregate,
                     dispatch_ctx,
                     said,
                     UnfinishedPhase.INTERRUPTED,
@@ -906,7 +906,7 @@ class WorkflowExecutionProcessor:
         except Exception:
             if not kept:
                 await self._keep(
-                    todo, phase, launch, workflow_id, dispatch_ctx, said, UnfinishedPhase.FAILED
+                    todo, phase, launch, aggregate, dispatch_ctx, said, UnfinishedPhase.FAILED
                 )
             raise
 
@@ -915,7 +915,7 @@ class WorkflowExecutionProcessor:
         todo: TodoItem,
         phase: ExecutablePhase,
         launch: PhaseLaunch,
-        workflow_id: str,
+        aggregate: WorkflowExecutionAggregate,
         dispatch_ctx: _DispatchContext,
         said: str | None,
         outcome: UnfinishedPhase,
@@ -927,9 +927,9 @@ class WorkflowExecutionProcessor:
             todo,
             phase,
             workspace=launch.workspace,
-            workflow_id=workflow_id,
             last_agent_message=said,
             outcome=outcome,
+            aggregate=aggregate,
         )
 
     async def _handle_cancel_signal(

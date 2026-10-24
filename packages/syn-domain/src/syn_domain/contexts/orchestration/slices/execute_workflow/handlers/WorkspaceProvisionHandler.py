@@ -694,6 +694,7 @@ class WorkspaceProvisionHandler:
             workspace_id=workspace.workspace_id,
             session_id=session_id,
             checked_out_commits=checked_out,
+            image_manifest=workspace.image_manifest,
         )
         return ProvisionResult(
             workspace=workspace,

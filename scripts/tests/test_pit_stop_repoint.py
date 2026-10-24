@@ -53,7 +53,7 @@ def _precheck_count(compose: Path, tag: str = _TAG, swapped: str = "api gateway"
             "bash",
             "-c",
             f'remote() {{ bash -c "$*"; }}\nTAG={tag}; SWAPPED="{swapped}"\n'
-            f"COMPOSE_DIR={compose.parent}; COMPOSE={compose.name}; TMP={compose.parent}\n"
+            f"COMPOSE_DIR={compose.parent}; STAGED={compose.name}; TMP={compose.parent}\n"
             f"REPOINT_PY={_SCRIPT.parent / 'pit_stop_repoint.py'}\n{counter}pins_on_tag",
         ],
         capture_output=True,
@@ -360,3 +360,47 @@ class TestBlankLinesDoNotMoveOwnership:
         assert after["executor"]["image"] == "ghcr.io/syntropic137/syn-api:v1"
         assert after["api"]["image"] == f"ghcr.io/syntropic137/syn-api:{_TAG}"
         assert _precheck_count(staged) == 2
+
+
+def _drift(tmp_path: Path, published: str, deployed: str) -> tuple[int, str]:
+    (tmp_path / "published.yaml").write_text(published)
+    (tmp_path / "deployed.yaml").write_text(deployed)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(_HELPER),
+            "--drift",
+            str(tmp_path / "published.yaml"),
+            str(tmp_path / "deployed.yaml"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode, proc.stdout
+
+
+class TestDrift:
+    """#1511: what the deployed compose lacks of the published one, pins aside."""
+
+    def test_pins_alone_are_not_drift(self, tmp_path: Path) -> None:
+        published = (
+            "services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}\n"
+        )
+        deployed = f"# release asset\nservices:\n  api:\n    image: ghcr.io/syntropic137/syn-api@sha256:{'a' * 64}\n"
+        assert _drift(tmp_path, published, deployed) == (0, "")
+
+    def test_config_the_deployed_file_lacks_is_drift(self, tmp_path: Path) -> None:
+        published = (
+            "services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:latest\n"
+            "    environment:\n      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory\n"
+        )
+        deployed = "services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:v0.33.0-beta.5\n"
+        rc, diff = _drift(tmp_path, published, deployed)
+        assert rc == 1
+        assert "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory\n" in diff
+
+    def test_a_service_on_a_different_image_is_drift(self, tmp_path: Path) -> None:
+        published = "services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:latest\n"
+        deployed = "services:\n  api:\n    image: ghcr.io/syntropic137/syn-gateway:latest\n"
+        assert _drift(tmp_path, published, deployed)[0] == 1

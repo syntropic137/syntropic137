@@ -289,6 +289,55 @@ sandbox by its template, not per request, so the template's CPU and memory are
 a ceiling, not a request. Not an OCI image reference: nothing is
 cosign-verified when a workspace starts from it.
 
+## Image Manifest
+
+What a workspace image says about itself: `/opt/agentic/version.json`, read
+off the running workspace through the provider's file transfer on every
+backend (#1913), and recorded per phase on `WorkspaceProvisionedForPhase` as
+an **image manifest reading** (`ImageManifestReading`). A reading is exactly
+one of three states, never collapsed:
+
+- **read** - the file was there and was a manifest; every field is required,
+  none is defaulted;
+- **absent** - the workspace has no manifest file. Not an error: no image
+  ships one yet (AgentParadise/agentic-workspace#93);
+- **unreadable** - the transfer failed, or the file was not a manifest. The
+  reason is recorded with it; when the provider refused the file, the
+  **file refusal** itself is recorded too (`refusal`).
+
+Provenance, so Lane 1: it is needed after a restart. The `WorkspaceAggregate`
+also sees it but is never saved, so it is not provenance. Its
+`manifest_digest` is the hash of the build's `manifest.yaml`, not an OCI image
+digest, and is never compared with `PINNED_DIGESTS`.
+
+**Unclear:** the expected manifest hash a reading should be compared with
+does not exist yet, for Docker or E2B (#1913, blocked on
+AgentParadise/agentic-workspace#93), so a reading is recorded, not checked.
+
+## File Refusal
+
+When a workspace's files are read, the provider refuses some entries instead
+of returning them. It refuses links, special files, and anything past a read
+limit. A **file refusal** (`FileRefusal`) names the path and a typed
+reason. A refused file is never recorded as an absent file or an empty one.
+Every backend reads through the provider, Docker included (#1913).
+
+The **refusal policy** for a phase's output:
+
+- **a refused file** is recorded on `ArtifactsCollectedForPhase.refused_files`
+  (`WorkflowExecutionAggregate.refused_files_for`), and the rest of the output
+  is collected;
+- **an incomplete walk** (`entry_limit_exceeded`, `depth_exceeded`) fails the
+  collection (`OutputCollectionIncompleteError`). The walk stopped, so nobody
+  knows which files it missed.
+
+The output kept from a phase that will not complete (failed, cancelled,
+interrupted) is best effort, but its refusals are not: they are recorded on
+`OutputFilesRefusedForPhase` before the phase's outcome, and read back through
+the same `refused_files_for`. A walk that stopped keeps nothing as if it were
+whole, and records what stopped it. A refused image manifest records every
+refusal the read returned on its UNREADABLE reading (`ImageManifestReading.refusals`).
+
 ## Fallback Agent
 
 The agent (provider and model) a Phase declares under `fallback_agent`, to be

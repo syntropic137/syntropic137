@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from syn_api.services import lifecycle
-from syn_api.types import Err
+from syn_api.types import Err, Ok
 
 pytestmark = pytest.mark.unit
 
@@ -60,3 +60,17 @@ async def test_unavailable_archive_fails_critical_inventory_startup(
     initialize = AsyncMock(side_effect=PermissionError("archive cannot be written"))
     monkeypatch.setattr("syn_api._wiring_inventory.initialize_inventory_runtime", initialize)
     assert isinstance(await lifecycle.inventory_lifecycle.initialize_session_inventory(), Err)
+
+
+async def test_startup_abort_names_the_inventory_failure_cause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#1511: the abort line is all that survives a restart loop, so it carries the cause."""
+    initialize = AsyncMock(side_effect=PermissionError("/app/data/session-inventory not writable"))
+    monkeypatch.setattr("syn_api._wiring_inventory.initialize_inventory_runtime", initialize)
+    monkeypatch.setattr(lifecycle, "_init_import_ledger", AsyncMock(return_value=Ok(None)))
+    monkeypatch.setattr(lifecycle, "start_request_latency", AsyncMock())
+    monkeypatch.setattr("syn_api._wiring_db.init_shared_db_pool", AsyncMock())
+    result = await lifecycle._init_durable_stores()
+    assert isinstance(result, Err)
+    assert "PermissionError: /app/data/session-inventory not writable" in result.message
