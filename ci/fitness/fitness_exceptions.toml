@@ -475,9 +475,6 @@ allowed_prefixes = [
 # session, which the detail page renders as "no session was captured".
 # The phase-metrics build failing makes a workflow report zero phases.
 "apps/syn-api/src/syn_api/routes/metrics.py:_build_phase_metrics" = { issue = "#1341" }
-# A collection failure makes an unfinished phase report zero artifacts kept,
-# which is also what a phase that wrote nothing reports.
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py:ArtifactCollector.collect_from_unfinished_phase" = { issue = "#1341" }
 
 [harness_format_boundary]
 # ci/fitness/code_quality/test_harness_format_boundary.py (#1398, acceptance row 14).
