@@ -2945,6 +2945,38 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /**
+         * CapabilityStatusEntry
+         * @description One workspace's session-store capability verdict, recorded at agent launch.
+         *
+         *     Recorded at START (#1516), so a degraded workspace is visible while its
+         *     phase runs and stays visible if the phase never reaches teardown. Only
+         *     returned for an execution-filtered read.
+         */
+        CapabilityStatusEntry: {
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Capability */
+            capability: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "degraded" | "failed";
+            /** Failed Checks */
+            failed_checks?: string[];
+            /**
+             * Doctor Exit
+             * @default 0
+             */
+            doctor_exit: number;
+            /** Capability Status Display */
+            capability_status_display: string;
+        };
         /** CaptureReceipt */
         CaptureReceipt: {
             node: components["schemas"]["InventoryNodeRef"];
@@ -3018,6 +3050,14 @@ export interface components {
             origin_deployment?: string | null;
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
+            /** Capability Status */
+            capability_status?: ("ready" | "degraded" | "failed") | null;
+            /** Failed Checks */
+            failed_checks?: string[];
+            /** Doctor Exit */
+            doctor_exit?: number | null;
+            /** Capture Status Display */
+            capture_status_display: string;
         };
         /**
          * CaptureStatusResponse
@@ -3051,6 +3091,8 @@ export interface components {
             truncated: boolean;
             /** Entries */
             entries?: components["schemas"]["CaptureStatusEntry"][];
+            /** Capabilities */
+            capabilities?: components["schemas"]["CapabilityStatusEntry"][];
         };
         /**
          * ClaudePluginFileEntry
@@ -12980,6 +13022,8 @@ export interface operations {
                 limit?: number;
                 /** @description Return only sessions whose transcripts did not reach the store. */
                 needs_backfill?: boolean;
+                /** @description Return only verdicts recorded for this execution. */
+                execution_id?: string | null;
             };
             header?: never;
             path?: never;

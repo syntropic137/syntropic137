@@ -3,6 +3,7 @@ import { Clock, DollarSign, Layers, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { Card, CardContent, CardHeader, ObservedModel, PhaseStartPins, SkillUseLine } from '../../components'
+import { CapturePhaseIndicator, type DegradedPhase } from '../../components/capture'
 import { TokenInOut } from '../../components/TokenInOut'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
@@ -188,9 +189,11 @@ interface PhaseTimelineProps {
    */
   execution: ExecutionDetailResponse
   now: number
+  /** Phases whose workspace ran with capture degraded (#1516); none by default. */
+  captureDegraded?: readonly DegradedPhase[]
 }
 
-export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
+export function PhaseTimeline({ execution, now, captureDegraded = [] }: PhaseTimelineProps) {
   // `phases` is what ran here and carries the metrics; `phase_plan` is every
   // phase the run declared, in order, with where each stands (feedback
   // cee46909). The timeline walks the plan so what is left is visible, and
@@ -198,6 +201,7 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
   const phases = execution.phases
   const plan = execution.phase_plan
   const ran = new Map(phases.map((p) => [p.phase_id, p]))
+  const degradedByPhase = new Map(captureDegraded.map((d) => [d.phaseId, d]))
   // Read from the execution, not from the phases below. Lane 1 leaves a running
   // phase's counts at 0, so a roll-up summed from the cards reported "0 tokens"
   // for the whole of a live run - directly under a headline card already
@@ -267,6 +271,8 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
                 {phase ? (
                   <div className="phase-with-inventory">
                     <PhaseCard phase={phase} tone={phaseTone(phase)} now={now} />
+                    {/* Outside the card, like the pins: the card is a link. */}
+                    <CapturePhaseIndicator degraded={degradedByPhase.get(phase.phase_id)} />
                     {/* Outside the card: the card is a link, and this expands in place. */}
                     <PhaseStartPins pins={phase.pinned_at_start} status={phase.start_pins_status} />
                     <SkillUseLine use={phase.skill_use} />

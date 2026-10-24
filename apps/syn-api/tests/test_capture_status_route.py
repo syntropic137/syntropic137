@@ -186,14 +186,14 @@ class TestTheBiasIsTowardsReportingWork:
         recorded shape nothing defines or writes. Reading either number as the
         other is exactly the misreading the field exists to prevent.
 
-        Both sets now happen to be {1, 2} again - the observation payload gained
-        `agent_session_ids` at version 2 - so this pins the observation set by
+        The observation payload gained `agent_session_ids` at version 2 and the
+        capability verdict at 3 (#1516), so this pins the observation set by
         VALUE rather than by comparison, and refuses a version outside it. If
-        the exporter later moves to 3, this route must not follow.
+        the exporter later moves to 4, this route must not follow.
         """
-        assert frozenset({1, 2}) == SUPPORTED_OBSERVATION_SCHEMA_VERSIONS
+        assert frozenset({1, 2, 3}) == SUPPORTED_OBSERVATION_SCHEMA_VERSIONS
 
-        entry = _to_entry(_row(schema_version=3))
+        entry = _to_entry(_row(schema_version=4))
 
         assert entry is not None
         assert entry.state == "unknown"
@@ -212,7 +212,7 @@ class TestTheBiasIsTowardsReportingWork:
         assert entry.agent_session_ids == ["sess-codex", "sess-claude"]
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("version", [0, 3, 999], ids=["zero", "next", "far-future"])
+    @pytest.mark.parametrize("version", [0, 4, 999], ids=["zero", "next", "far-future"])
     @pytest.mark.parametrize("stored", [[], ["x"]], ids=["empty", "populated"])
     def test_an_unsupported_schema_never_yields_agent_sessions(
         self, version: int, stored: object

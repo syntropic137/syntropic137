@@ -131,6 +131,9 @@ EventType = Literal[
     # path, so a type the domain knows about and this Literal does not is a
     # write that fails validation at the point of recording.
     "session_capture",
+    # The session-store capability's start-up verdict (#1516), produced by
+    # Syn137 at agent launch for the same gating reason.
+    "capability_status",
     # Credential lifecycle (#725), produced by Syn137 for the same gating reason.
     "git_credential_lapsed",
     # Capacity telemetry (#1310), produced by Syn137 for the same gating reason.
