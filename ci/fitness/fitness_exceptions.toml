@@ -588,3 +588,15 @@ reason = "History: names the command removed in v0.32, in a callout that says it
 # dependency is missing, or by declaring the skip with a reason and an issue.
 undeclared = 104
 issue = "#1984"
+
+[hardcoded_version_literals]
+# Release numbers written into Python source (#1389). See
+# ci/fitness/code_quality/test_no_hardcoded_version_literals.py.
+# Submodule paths ONLY: this repo's own code gets no exceptions. Each is fixed
+# upstream and leaves here with the gitlink bump; a lower count fails as stale.
+# "<path>" = { count = N, issue = "..." }
+"lib/event-sourcing-platform/event-sourcing/python/src/event_sourcing/__init__.py" = { count = 1, issue = "syntropic137/event-sourcing-platform#485 (stale: 0.1.0 vs 0.18.0)" }
+"lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/__init__.py" = { count = 1, issue = "AgentParadise/agentic-workspace#108 (stale: 0.9.0 vs 0.12.1)" }
+"lib/agentic-workspace/lib/python/agentic_events/agentic_events/__init__.py" = { count = 1, issue = "AgentParadise/agentic-workspace#108" }
+"lib/agentic-workspace/lib/python/agentic_logging/agentic_logging/__init__.py" = { count = 1, issue = "AgentParadise/agentic-workspace#108" }
+"lib/agentic-workspace/lib/python/agentic_memory/agentic_memory/__init__.py" = { count = 1, issue = "AgentParadise/agentic-workspace#108" }

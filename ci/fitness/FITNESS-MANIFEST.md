@@ -34,6 +34,23 @@ Run both: `just fitness`
 | 16 | Codex Sandbox Stays On (#1398) | test_no_codex_sandbox_bypass | no exemptions | Enforced |
 | 17 | Cross-Generation Event Compatibility | test_orchestration_event_schema_snapshot (ADR-072 D9) | snapshots/orchestration_events.epoch-<N>.json; release-time half is `just check-event-compat` | Enforced |
 | 18 | Tests Exercise Reality (#1984) | test_integration_skips_declared | fitness_exceptions.toml `[integration_skips]` (exact ratchet) | Enforced |
+| 19 | One Home Per Release Number (#1389) | test_no_hardcoded_version_literals | fitness_exceptions.toml `[hardcoded_version_literals]` (submodule paths only, exact count) | Enforced |
+
+### 19. One Home Per Release Number (#1389)
+
+A release number written into source is a second home for it, and it drifts
+the first time a bump misses it (`event_sourcing.__version__` said 0.1.0 at
+ESP 0.18.0). Rejected, as an AST match over every tracked `*.py` in this repo
+and its checked-out submodules (tests excluded): a module-scope `__version__`
+bound to a string literal (through any compound statement, not into function
+or class bodies), and a literal `version=` passed to `fastapi.FastAPI` or a
+subclass, resolved through imports, aliases, renames and subclassing. Detector:
+`scripts/check_version_literals.py`, pinned by
+`scripts/tests/test_check_version_literals.py`. Read the version from
+`importlib.metadata` instead, or delete a dunder nothing reads. Exceptions are
+exact counts, only for paths inside a submodule (fixed upstream, removed with
+the gitlink bump); a lower count, or a file gone from a checked-out submodule,
+fails as stale.
 
 ### 18. Tests Exercise Reality (#1984, PC-192/PC-193)
 
@@ -381,6 +398,7 @@ Legacy: some tests define config inline. Being consolidated into
 | test_in_memory_state_audit | Every in-memory state var is classified | 9 |
 | test_in_memory_adapters_are_guarded | No in-memory adapter is constructible in production (ADR-060) | 9 |
 | test_harness_format_boundary | Vendor formats only in adapters; one inference owner; no harness branches | 15 |
+| test_no_hardcoded_version_literals | No literal `__version__` or `fastapi.FastAPI(version=...)` (aliases resolved) in this repo or its submodules | 19 |
 
 ### API (`ci/fitness/api/`)
 
