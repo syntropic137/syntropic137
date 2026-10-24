@@ -318,11 +318,16 @@ async def record_capture_outcome(
         expected_store_url=expectations.store_url if expectations else None,
         expected_deployment=expectations.deployment if expectations else None,
         expected_sessions=expectations.expect_sessions if expectations else None,
-        capability_status=capability.status if capability else None,
-        failed_checks=list(capability.failed_checks) if capability else [],
-        doctor_exit=capability.doctor_exit if capability else None,
         partition=partition,
     )
+    if capability is not None:
+        payload = payload.model_copy(
+            update={
+                "capability_status": capability.status,
+                "failed_checks": list(capability.failed_checks),
+                "doctor_exit": capability.doctor_exit,
+            }
+        )
 
     try:
         await asyncio.wait_for(
