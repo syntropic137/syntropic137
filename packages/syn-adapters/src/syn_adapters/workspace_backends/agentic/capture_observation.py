@@ -223,11 +223,15 @@ class StartVerdictData(BaseModel):
     start_capability: StartCapability
 
 
-def read_start_verdict_display(payload: Mapping[str, object]) -> str | None:
-    """The read side of `record_start_verdict`: same text as the capture row's."""
-    if payload.get("schema_version") != _START_VERDICT_SCHEMA_VERSION:
+def read_start_verdict_display(schema_version: object, start_capability: object) -> str | None:
+    """The read side of `record_start_verdict`: same text as the capture row's.
+
+    Takes the two recorded fields rather than the row, because the row a
+    reader holds is the flattened envelope, not this payload.
+    """
+    if schema_version != _START_VERDICT_SCHEMA_VERSION:
         return None
-    return _degraded_display(payload.get("start_capability"))
+    return _degraded_display(start_capability)
 
 
 async def record_start_verdict(

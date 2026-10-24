@@ -65,16 +65,21 @@ class _Reader:
 
 
 class _Writer:
+    """Keeps what an operator would read off each start row, in order."""
+
     def __init__(self) -> None:
-        self.rows: list[tuple[str, dict[str, object]]] = []
+        self.kinds: list[str] = []
+        self.start_displays: list[str | None] = []
 
     async def record_observation(self, **kwargs: object) -> None:
         data = kwargs["data"]
         assert isinstance(data, dict)
-        self.rows.append((str(kwargs["observation_type"]), data))
-
-    def of(self, observation_type: str) -> list[dict[str, object]]:
-        return [data for kind, data in self.rows if kind == observation_type]
+        kind = str(kwargs["observation_type"])
+        self.kinds.append(kind)
+        if kind == SESSION_STORE_START_OBSERVATION:
+            self.start_displays.append(
+                read_start_verdict_display(data.get("schema_version"), data.get("start_capability"))
+            )
 
 
 _DEGRADED = StartCapability(
@@ -107,7 +112,7 @@ async def _run_held(reader: _Reader, writer: _Writer, execution_id: str):
     try:
         await asyncio.wait_for(agent.entered.wait(), timeout=15)
         assert not task.done()
-        in_flight = list(writer.of(SESSION_STORE_START_OBSERVATION))
+        in_flight = list(writer.start_displays)
     finally:
         agent.release.set()
     result = await asyncio.wait_for(task, timeout=20)
@@ -119,9 +124,9 @@ async def test_the_degraded_verdict_is_recorded_before_the_agent_returns() -> No
 
     in_flight, result = await _run_held(_Reader(_DEGRADED), writer, "exec-1516-degraded")
 
-    assert [read_start_verdict_display(row) for row in in_flight] == [
-        "Capture degraded: store_reachable failed"
-    ], f"no start verdict while the agent was running: {writer.rows}"
+    assert in_flight == ["Capture degraded: store_reachable failed"], (
+        f"no start verdict while the agent was running; rows written: {writer.kinds}"
+    )
     # Capture is fail-open: a degraded store never fails the run.
     assert result.status == "completed"
 

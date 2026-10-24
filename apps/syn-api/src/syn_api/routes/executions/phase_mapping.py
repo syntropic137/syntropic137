@@ -292,7 +292,7 @@ async def _load_phase_captures(execution_id: str) -> dict[str, PhaseCapture] | N
         session_id = row.get("session_id")
         if not isinstance(session_id, str) or not session_id:
             continue
-        display = read_start_verdict_display(row)
+        display = read_start_verdict_display(row.get("schema_version"), row.get("start_capability"))
         if display is None:
             continue
         # The verdict is immutable for a workspace, so the start row and the
