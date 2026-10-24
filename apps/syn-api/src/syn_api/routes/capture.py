@@ -291,23 +291,6 @@ def capability_status_display(
     return label
 
 
-def _to_capability(row: Mapping[str, object]) -> CapabilityStatusEntry | None:
-    try:
-        verdict = _RecordedStartVerdict.model_validate(row)
-    except ValidationError:
-        return None
-    return CapabilityStatusEntry(
-        execution_id=_text(row.get("execution_id")),
-        phase_id=_text(row.get("phase_id")),
-        workspace_id=_text(row.get("workspace_id")),
-        capability=verdict.capability,
-        status=verdict.status,
-        failed_checks=verdict.failed_checks,
-        doctor_exit=verdict.doctor_exit,
-        capability_status_display=capability_status_display(verdict.status, verdict.failed_checks),
-    )
-
-
 async def _execution_capabilities(
     store: AgentEventStore, execution_id: str, limit: int
 ) -> list[CapabilityStatusEntry]:
@@ -315,8 +298,27 @@ async def _execution_capabilities(
     rows = await store.query_by_execution(
         execution_id, event_type=CAPABILITY_STATUS_OBSERVATION, limit=limit
     )
-    entries = [_to_capability(row) for row in rows]
-    return [entry for entry in entries if entry is not None]
+    entries: list[CapabilityStatusEntry] = []
+    for row in rows:
+        try:
+            verdict = _RecordedStartVerdict.model_validate(row)
+        except ValidationError:
+            continue
+        entries.append(
+            CapabilityStatusEntry(
+                execution_id=_text(row.get("execution_id")),
+                phase_id=_text(row.get("phase_id")),
+                workspace_id=_text(row.get("workspace_id")),
+                capability=verdict.capability,
+                status=verdict.status,
+                failed_checks=verdict.failed_checks,
+                doctor_exit=verdict.doctor_exit,
+                capability_status_display=capability_status_display(
+                    verdict.status, verdict.failed_checks
+                ),
+            )
+        )
+    return entries
 
 
 @router.get("/status", response_model=CaptureStatusResponse)
