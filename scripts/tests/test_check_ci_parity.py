@@ -402,6 +402,12 @@ _PIN_ACTION = (
         "python3 > out.txt",
         "echo start\npython3 x.py",
         "f() { python3 y; }",
+        # A heredoc marker that is only a comment or a quoted string starts no body.
+        "# example <<EOF\npython3 x.py",
+        "echo 'a <<EOF'\npython3 x.py",
+        "cat <<EOF\npython3 data\nEOF\npython3 x.py",
+        # An unquoted heredoc delimiter still expands substitutions in the body.
+        "cat <<EOF\n$(python3 -c 1)\nEOF",
     ],
 )
 def test_every_spelling_of_a_bare_python_is_found(script: str) -> None:
@@ -427,6 +433,13 @@ def test_every_spelling_of_a_bare_python_is_found(script: str) -> None:
         "echo a > python3",
         'echo "\\`x\\`"',
         "echo ${#list}",
+        # Single quotes make a substitution plain text.
+        "echo '$(python3 -c 1)'",
+        "echo '`python3 -c 1`'",
+        "cat <<'EOF'\n$(python3 -c 1)\nEOF",
+        "echo $((1 + 2))",
+        "cat <<< 'python3'",
+        'x="$(gh api "a" --jq "[.[] | select(.u == \\"b\\")]" | head)"',
     ],
 )
 def test_python_that_is_not_run_as_a_command_is_not_found(script: str) -> None:
@@ -497,6 +510,15 @@ def test_a_pin_inside_a_local_composite_action_counts(tmp_path: Path) -> None:
     )
 
     assert bare_python_problems(workflows) == []
+
+
+def test_a_conditional_composite_does_not_carry_its_pin_over(tmp_path: Path) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
+    action = "uses: ./.github/actions/py-env\n        if: false"
+    workflows = _repo_with(tmp_path, _job(_CHECKOUT, action, "run: python3 x.py"), _PIN_ACTION)
+
+    assert len(bare_python_problems(workflows)) == 1
 
 
 def test_a_composite_under_a_second_checkout_is_read_only_if_it_is_this_repo(

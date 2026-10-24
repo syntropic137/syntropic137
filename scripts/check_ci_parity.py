@@ -302,64 +302,125 @@ _HEREDOC: Final = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 _SHELL_PUNCTUATION: Final = ";&|()<>\n"
 
 
-def _without_heredoc_bodies(script: str) -> str:
-    """The script with every heredoc body removed: a body is data, not commands."""
-    kept: list[str] = []
-    terminator: str | None = None
-    for line in script.splitlines():
-        if terminator is not None:
-            if line.strip() == terminator:
-                terminator = None
-            continue
-        kept.append(line)
-        match = _HEREDOC.search(line)
-        if match:
-            terminator = match.group(2)
-    return "\n".join(kept)
+def _matching_paren(script: str, start: int) -> int:
+    """The index just past the `)` closing a `$(` whose body starts at `start`."""
+    depth, quote, index = 1, None, start
+    while index < len(script) and depth:
+        char = script[index]
+        if quote == '"' and char == "\\":
+            index += 1
+        elif quote is not None:
+            if char == quote:
+                quote = None
+        elif char == "\\":
+            index += 1
+        elif char in "'\"":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        index += 1
+    if depth:
+        raise ValueError("unterminated $(")
+    return index
 
 
-def _without_comments(script: str) -> str:
-    """The script with every shell comment removed, newlines kept.
+def _split_shell(script: str) -> tuple[str, list[str]]:
+    """The script's own command text, and the scripts its substitutions run.
 
-    A `#` starts a comment only at the start of a word and outside quotes, so
-    `${#list}`, `"a # b"` and `don't` inside a comment are all read correctly.
+    One pass that tracks quoting, because each thing below means something only
+    in a given quote context:
+
+    - a comment starts at an unquoted `#` at the start of a word;
+    - a heredoc starts at an unquoted `<<WORD`, and its body is data, though
+      an unquoted WORD still expands `$(...)` inside it;
+    - `$(...)` and backticks run a script outside single quotes, and are text
+      inside them.
+
+    Each substitution is replaced by a placeholder word and returned
+    separately, so the caller scans it as a script of its own.
     """
     kept: list[str] = []
+    substitutions: list[str] = []
     quote: str | None = None
+    heredocs: list[tuple[str, bool]] = []
     index = 0
     while index < len(script):
         char = script[index]
-        escapes = quote is None or quote == '"'
-        if char == "\\" and escapes and index + 1 < len(script):
+        if quote == "'":
+            kept.append(char)
+            quote = None if char == "'" else quote
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(script):
             kept.append(script[index : index + 2])
             index += 2
             continue
-        if quote is None and char == "#" and (index == 0 or script[index - 1] in " \t\n;&|()"):
+        if script.startswith("$(", index) and not script.startswith("$((", index):
+            end = _matching_paren(script, index + 2)
+            substitutions.append(script[index + 2 : end - 1])
+            kept.append("_")
+            index = end
+            continue
+        if char == "`":
+            end = script.find("`", index + 1)
+            if end < 0:
+                raise ValueError("unterminated backtick")
+            substitutions.append(script[index + 1 : end])
+            kept.append("_")
+            index = end + 1
+            continue
+        if quote == '"':
+            kept.append(char)
+            quote = None if char == '"' else quote
+            index += 1
+            continue
+        if char in "'\"":
+            quote = char
+        elif char == "#" and (index == 0 or script[index - 1] in " \t\n;&|()"):
             while index < len(script) and script[index] != "\n":
                 index += 1
             continue
-        if quote is None and char in "'\"":
-            quote = char
-        elif char == quote:
-            quote = None
+        elif script.startswith("<<", index) and not script.startswith("<<<", index):
+            match = _HEREDOC.match(script, index)
+            if match:
+                heredocs.append((match.group(2), match.group(1) == ""))
+                kept.append(script[index : match.end()])
+                index = match.end()
+                continue
+        elif char == "\n" and heredocs:
+            kept.append(char)
+            index += 1
+            for terminator, expands in heredocs:
+                body: list[str] = []
+                while index < len(script):
+                    newline = script.find("\n", index)
+                    stop = len(script) if newline < 0 else newline
+                    line, index = script[index:stop], stop + 1
+                    if line.strip() == terminator:
+                        break
+                    body.append(line)
+                if expands:
+                    escaped = "\n".join(body).replace('"', '\\"')
+                    substitutions.extend(_split_shell(f'"{escaped}"')[1])
+            heredocs = []
+            continue
         kept.append(char)
         index += 1
-    return "".join(kept)
+    return "".join(kept), substitutions
 
 
 def bare_python_commands(script: str) -> list[str]:
     """The Python interpreters a shell script runs as commands, by name.
 
-    Parsed as shell, not matched as text: quoted strings and heredoc bodies are
-    data, `uv run python` makes `python` uv's argument, and `$(...)` and
-    backticks are scripts of their own. Raises ValueError for a script that
-    does not tokenize, so the caller can fail closed.
+    Parsed as shell, not matched as text: quoted strings, comments and heredoc
+    bodies are data, `uv run python` makes `python` uv's argument, and every
+    `$(...)` or backtick substitution is a script of its own. Raises ValueError
+    for a script that does not tokenize, so the caller can fail closed.
     """
-    lexer = shlex.shlex(
-        _without_comments(_without_heredoc_bodies(script)),
-        posix=True,
-        punctuation_chars=_SHELL_PUNCTUATION,
-    )
+    code, substitutions = _split_shell(script)
+    lexer = shlex.shlex(code, posix=True, punctuation_chars=_SHELL_PUNCTUATION)
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     lexer.commenters = ""
@@ -374,12 +435,6 @@ def bare_python_commands(script: str) -> list[str]:
             else:
                 at_command, skip_options = True, False
             continue
-        # A quoted word is one token, so a substitution inside one is scanned
-        # here. An escaped backtick is a literal, and backticks pair up.
-        for inner in token.split("$(")[1:]:
-            found.extend(bare_python_commands(inner.split(")")[0]))
-        for inner in token.replace("\\`", "").split("`")[1::2]:
-            found.extend(bare_python_commands(inner))
         if skip_operand:
             skip_operand = False
             continue
@@ -394,6 +449,8 @@ def bare_python_commands(script: str) -> list[str]:
         if _PYTHON_NAME.fullmatch(name):
             found.append(name)
         at_command, skip_options = False, False
+    for substitution in substitutions:
+        found.extend(bare_python_commands(substitution))
     return found
 
 
@@ -470,10 +527,12 @@ def _step_problems(
         if isinstance(uses, str) and uses.startswith("./"):
             inner = _local_action(uses, repo_root, checkouts)
             if inner is not None:
-                found, pinned = _step_problems(
+                found, pinned_after = _step_problems(
                     inner, repo_root, checkouts, f"{name} ({uses})", pinned
                 )
                 problems.extend(found)
+                # A conditional action may not run, so its pins do not carry over.
+                pinned = pinned if "if" in step else pinned_after
         run = step.get("run")
         if not isinstance(run, str) or pinned:
             continue
