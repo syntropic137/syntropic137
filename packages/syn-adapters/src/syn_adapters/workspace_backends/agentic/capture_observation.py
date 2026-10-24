@@ -38,13 +38,16 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SESSION_CAPTURE_OBSERVATION",
+    "SESSION_STORE_START_OBSERVATION",
     "SUPPORTED_OBSERVATION_SCHEMA_VERSIONS",
     "CaptureObservationData",
     "ObservationWriter",
     "build_expectations",
     "read_agent_session_ids",
     "read_capture_status_display",
+    "read_start_verdict_display",
     "record_capture_outcome",
+    "record_start_verdict",
 ]
 
 logger = logging.getLogger(__name__)
@@ -93,6 +96,11 @@ _WRITE_TIMEOUT_SECONDS: Final = 5.0
 #: the DOMAIN enum here would invert layering, so the shared spelling is the
 #: one both sides agree on.
 SESSION_CAPTURE_OBSERVATION: Final[EventType] = "session_capture"
+
+#: The start verdict, recorded on its own as the agent launches (#1516), so a
+#: phase that is still running already reads as degraded. The capture row
+#: written at teardown carries the same verdict again as `start_capability`.
+SESSION_STORE_START_OBSERVATION: Final[EventType] = "session_store_start"
 
 
 class CaptureObservationData(BaseModel):
@@ -184,7 +192,11 @@ def read_capture_status_display(payload: Mapping[str, object]) -> str | None:
         or version < _START_CAPABILITY_SINCE
     ):
         return None
-    raw = payload.get("start_capability")
+    return _degraded_display(payload.get("start_capability"))
+
+
+def _degraded_display(raw: object) -> str | None:
+    """``Capture degraded: <checks> failed`` for a degraded start, else None."""
     if not isinstance(raw, dict):
         return None
     try:
@@ -196,6 +208,61 @@ def read_capture_status_display(payload: Mapping[str, object]) -> str | None:
     if not start.failed_checks:
         return "Capture degraded"
     return f"Capture degraded: {', '.join(start.failed_checks)} failed"
+
+
+#: Versions of the `session_store_start` payload a reader can interpret.
+_START_VERDICT_SCHEMA_VERSION: Final = 1
+
+
+class StartVerdictData(BaseModel):
+    """The recorded shape of a start verdict (`session_store_start`)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: int = _START_VERDICT_SCHEMA_VERSION
+    start_capability: StartCapability
+
+
+def read_start_verdict_display(payload: Mapping[str, object]) -> str | None:
+    """The read side of `record_start_verdict`: same text as the capture row's."""
+    if payload.get("schema_version") != _START_VERDICT_SCHEMA_VERSION:
+        return None
+    return _degraded_display(payload.get("start_capability"))
+
+
+async def record_start_verdict(
+    writer: ObservationWriter | None,
+    start: StartCapability,
+    *,
+    session_id: str,
+    execution_id: str,
+    phase_id: str,
+    workspace_id: str,
+) -> None:
+    """Record the workspace's start verdict. Never raises except on cancellation.
+
+    Written as the agent launches rather than at teardown, so an execution
+    that is still running, or a process that dies before teardown, still
+    shows that its workspace started with capture disabled (#1516).
+    """
+    if writer is None:
+        return
+    payload = StartVerdictData(start_capability=start)
+    try:
+        await asyncio.wait_for(
+            writer.record_observation(
+                session_id=session_id,
+                observation_type=SESSION_STORE_START_OBSERVATION,
+                data=payload.model_dump(mode="json"),
+                execution_id=execution_id,
+                phase_id=phase_id,
+                workspace_id=workspace_id,
+            ),
+            timeout=_WRITE_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        # Same rule as the capture row: telemetry never fails the run.
+        logger.warning("could not record session-store start verdict: %s", exc)
 
 
 #: The observation schema that introduced `agent_session_ids`. Below this the

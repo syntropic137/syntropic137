@@ -26,7 +26,7 @@ if TYPE_CHECKING:
         ManagedWorkspace,
     )
 
-__all__ = ["capture_phase_session"]
+__all__ = ["capture_phase_session", "record_phase_start_verdict"]
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,33 @@ async def capture_phase_session(
     except Exception:
         logger.exception("Session capture failed for phase %s; continuing with teardown", phase_id)
         return None
+
+
+async def record_phase_start_verdict(
+    capture: SessionCapturePort | None,
+    workspace: ManagedWorkspace | None,
+    *,
+    session_id: str,
+    phase_id: str,
+) -> None:
+    """Record whether this phase's workspace started with capture degraded (#1516).
+
+    Called as the agent launches, so a running phase already shows it. Never
+    fails the phase: a verdict nobody could read or write is "unknown", which
+    is what capture's fail-open policy says it must be. Cancellation propagates.
+    """
+    if capture is None or workspace is None or not session_id:
+        return
+    try:
+        await capture.record_start_verdict(
+            workspace.execute,
+            session_id=session_id,
+            execution_id=workspace.execution_id,
+            workspace_id=workspace.workspace_id,
+            phase_id=phase_id,
+        )
+    except Exception:
+        logger.exception("Recording the start verdict failed for phase %s; continuing", phase_id)
 
 
 async def _record(

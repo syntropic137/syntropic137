@@ -34,6 +34,7 @@ from syn_adapters.workspace_backends.agentic.capability_start import (
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     build_expectations,
     record_capture_outcome,
+    record_start_verdict,
 )
 from syn_adapters.workspace_backends.agentic.capture_probe import probe_capture
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
@@ -58,6 +59,16 @@ logger = logging.getLogger(__name__)
 
 class SessionCapturePort(Protocol):
     """What the processor needs, expressed without naming the adapter."""
+
+    async def record_start_verdict(
+        self,
+        execute: WorkspaceExecutor,
+        *,
+        session_id: str,
+        execution_id: str,
+        workspace_id: str,
+        phase_id: str,
+    ) -> None: ...
 
     async def capture_and_record(
         self,
@@ -89,6 +100,41 @@ class SessionCaptureService:
         self._app_environment = app_environment
         self._writer = writer
         self._capability_reader = capability_reader
+
+    async def record_start_verdict(
+        self,
+        execute: WorkspaceExecutor,
+        *,
+        session_id: str,
+        execution_id: str,
+        workspace_id: str,
+        phase_id: str,
+    ) -> None:
+        """Record the workspace's start verdict on the store, as the agent launches.
+
+        The entrypoint wrote the row before the agent could run, so it can be
+        read now; recording it now is what lets a RUNNING phase, or one whose
+        process dies before teardown, show "capture degraded" (#1516). The
+        exporter is NOT asked here: what reached the store is a teardown
+        question, answered by `capture_and_record`.
+
+        Fail-open like everything here: no store configured, no row, or a read
+        that failed records nothing. Cancellation propagates.
+        """
+        # The same "is a store configured" rule capture_and_record uses.
+        if build_expectations(self._settings, self._app_environment, expect_sessions=True) is None:
+            return
+        start = await self._capability_reader.read(execute, SESSION_STORE_CAPABILITY)
+        if start is None:
+            return
+        await record_start_verdict(
+            self._writer,
+            start,
+            session_id=session_id,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace_id,
+        )
 
     async def capture_and_record(
         self,
@@ -127,11 +173,11 @@ class SessionCaptureService:
         expectations = build_expectations(
             self._settings, self._app_environment, expect_sessions=expect_sessions
         )
-        # The start verdict is read here, not at workspace start: the row was
-        # written by the entrypoint before the agent ran and does not change
-        # afterwards, and this is the one hook that already holds the running
-        # container. Only asked when a store is configured, because with none
-        # there is no capability and no row (#1516).
+        # The start verdict was already recorded at launch
+        # (`record_start_verdict`); it is read again here because the row is
+        # immutable and this composes it with the exporter's answer, so a
+        # degraded start explains the capture loss (#1516). Only asked when a
+        # store is configured, because with none there is no row.
         start = (
             await self._capability_reader.read(execute, SESSION_STORE_CAPABILITY)
             if expectations is not None

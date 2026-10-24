@@ -97,8 +97,11 @@ with the session store disabled because the store's doctor failed and its
 policy is to degrade rather than fail the workspace. Nothing from that phase
 reached the store, by design. Read from the entrypoint's `capability_status`
 row (the **start capability**, `StartCapability`) through agentic-workspace's
-reader, never by parsing the audit file here, and recorded on the
-`session_capture` Observation (schema 3, `start_capability`).
+reader, never by parsing the audit file here. Recorded twice: as the agent
+launches, on its own `session_store_start` Observation, so a phase that is
+still running already reads as degraded; and again at teardown on the
+`session_capture` Observation (schema 3, `start_capability`), where it is
+composed with what the exporter saw.
 
 It composes with the host-side verdict rather than replacing it: a degraded
 start turns an otherwise unexplained `failed`, `incomplete` or `disabled`

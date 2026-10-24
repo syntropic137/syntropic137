@@ -737,7 +737,14 @@ def _capture_rows(monkeypatch: pytest.MonkeyPatch):
                 self, execution_id: str, event_type: str | None = None, limit: int = 1000
             ) -> list[dict]:
                 seen.append((execution_id, event_type))
-                return [r for r in rows if r.get("execution_id") == execution_id]
+                # Filtered by type as the real store is: the capture lookup
+                # asks for capture rows and start rows separately (#1516).
+                return [
+                    r
+                    for r in rows
+                    if r.get("execution_id") == execution_id
+                    and (event_type is None or r.get("event_type") == event_type)
+                ]
 
         monkeypatch.setattr("syn_api._wiring.get_event_store_instance", lambda: _Store())
         return seen
@@ -857,9 +864,12 @@ async def test_the_capture_lookup_runs_once_per_execution_not_once_per_phase(_ca
         [_phase(f"phase-{i}", "completed", session_id=f"host-uuid-{i}") for i in range(4)],
     )
 
-    assert seen == [("exec-capture", "session_capture")], (
-        f"expected one capture query for the whole execution, got {len(seen)}: {seen}"
-    )
+    # One query per row type for the whole execution: capture rows, and the
+    # start verdicts recorded at launch (#1516). Never one per phase.
+    assert seen == [
+        ("exec-capture", "session_capture"),
+        ("exec-capture", "session_store_start"),
+    ], f"expected one query per row type for the whole execution, got {len(seen)}: {seen}"
 
 
 async def test_an_unreachable_event_store_reports_unknown_not_a_loss(
@@ -942,6 +952,51 @@ async def _rows_from_a_capture(session_id: str, start: object, *, exit_code: int
     return written
 
 
+async def _rows_from_a_launch(session_id: str, start: object) -> list[dict]:
+    """The rows the REAL service records as the agent launches, and nothing more."""
+    from syn_adapters.workspace_backends.agentic.session_capture_service import (
+        SessionCaptureService,
+    )
+    from syn_shared.settings.session_store import SessionStoreSettings
+
+    written: list[dict] = []
+
+    class _Writer:
+        async def record_observation(self, **kwargs: object) -> None:
+            data = kwargs["data"]
+            assert isinstance(data, dict)
+            written.append(
+                {
+                    "event_type": kwargs["observation_type"],
+                    "session_id": kwargs["session_id"],
+                    "execution_id": kwargs["execution_id"],
+                    **data,
+                }
+            )
+
+    class _Reader:
+        async def read(self, execute: object, capability: str) -> object:
+            return start
+
+    async def _never(command: list[str], *, timeout_seconds: int, environment=None):
+        raise AssertionError("the start verdict must not run the exporter")
+
+    service = SessionCaptureService(
+        SessionStoreSettings(url="http://store:8799"),
+        "dev",
+        _Writer(),
+        capability_reader=_Reader(),  # pyright: ignore[reportArgumentType]
+    )
+    await service.record_start_verdict(
+        _never,
+        session_id=session_id,
+        execution_id="exec-capture",
+        workspace_id="w-1",
+        phase_id="p-1",
+    )
+    return written
+
+
 def _degraded(*checks: str):
     from syn_adapters.workspace_backends.agentic.capability_start import StartCapability
 
@@ -969,6 +1024,34 @@ async def test_a_degraded_start_shows_capture_degraded_on_phase_and_execution(_c
         "phase-2": None,
     }
     assert response.capture_status_display == "Capture degraded: store_reachable failed"
+
+
+async def test_a_running_phase_already_shows_capture_degraded(_capture_rows):
+    """B3 (#1516): the badge is there while the agent runs, not only at teardown.
+
+    Only the launch-time row exists: the phase has not reached teardown, so
+    there is no capture row yet.
+    """
+    _capture_rows(await _rows_from_a_launch("host-uuid-1", _degraded("store_reachable")))
+
+    response = await _capture_response([_phase("phase-1", "running", session_id="host-uuid-1")])
+
+    assert response.phases[0].capture_status_display == "Capture degraded: store_reachable failed"
+    assert response.capture_status_display == "Capture degraded: store_reachable failed"
+    # Not reported yet, which is not the same as "confirmed none".
+    assert response.phases[0].agent_session_ids is None
+
+
+async def test_a_ready_launch_shows_nothing(_capture_rows):
+    from syn_adapters.workspace_backends.agentic.capability_start import StartCapability
+
+    ready = StartCapability(capability="session-store", status="ready")
+    _capture_rows(await _rows_from_a_launch("host-uuid-1", ready))
+
+    response = await _capture_response([_phase("phase-1", "running", session_id="host-uuid-1")])
+
+    assert response.phases[0].capture_status_display is None
+    assert response.capture_status_display is None
 
 
 async def test_a_ready_start_shows_nothing_new(_capture_rows):

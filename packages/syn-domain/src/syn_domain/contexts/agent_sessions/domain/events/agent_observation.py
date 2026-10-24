@@ -106,6 +106,12 @@ class ObservationType(StrEnum):
     # bounded, by `UpstreamRetryPolicy`, never by reading these back.
     UPSTREAM_RETRY = "upstream_retry"
 
+    # What the workspace's entrypoint decided about the session store before
+    # the agent ran (#1516): ready, or degraded with the doctor checks that
+    # failed. Lane 2: recorded at launch so a RUNNING phase can show "capture
+    # degraded", and it decides nothing - capture is fail-open.
+    SESSION_STORE_START = "session_store_start"
+
 
 @event("AgentObservation", "v1")
 class AgentObservationEvent(DomainEvent):

@@ -49,6 +49,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     SavedWork,
     describe_observed_branches,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_capture import (
+    record_phase_start_verdict,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     capture_and_import_phase,
     close_phase_workspaces,
@@ -453,6 +456,20 @@ class PhaseRuntime:
         """
         await record_workspace_runtime(
             self._writer,
+            self._workspaces.get(phase_id),
+            session_id=self._session_ids.get(phase_id, ""),
+            phase_id=phase_id,
+        )
+
+    async def record_start_verdict(self, phase_id: str) -> None:
+        """Record whether this phase's workspace started with capture degraded (#1516).
+
+        Same moment as `record_runtime` and for the same reason: after
+        `launch`, which knows the session, and before the agent runs, so a
+        running phase - or one whose process dies before teardown - shows it.
+        """
+        await record_phase_start_verdict(
+            self._capture_port,
             self._workspaces.get(phase_id),
             session_id=self._session_ids.get(phase_id, ""),
             phase_id=phase_id,

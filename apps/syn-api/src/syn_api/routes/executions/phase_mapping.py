@@ -29,8 +29,10 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
+    SESSION_STORE_START_OBSERVATION,
     read_agent_session_ids,
     read_capture_status_display,
+    read_start_verdict_display,
 )
 from syn_api.model_identity import cost_by_observed_model, observed_model_of
 from syn_api.types import (
@@ -263,8 +265,12 @@ async def _load_phase_captures(execution_id: str) -> dict[str, PhaseCapture] | N
         # payload because the write path strips the envelope's own key names
         # from it (`RESERVED_OBSERVATION_KEYS`, then `_EXCLUDED_KEYS`), so a
         # stored payload cannot shadow `session_id`.
-        rows = await get_event_store_instance().query_by_execution(
-            execution_id, event_type=SESSION_CAPTURE_OBSERVATION
+        store = get_event_store_instance()
+        rows = await store.query_by_execution(execution_id, event_type=SESSION_CAPTURE_OBSERVATION)
+        # The start verdict is recorded as the agent launches (#1516), so a
+        # phase that has not reached teardown has this row and no capture row.
+        start_rows = await store.query_by_execution(
+            execution_id, event_type=SESSION_STORE_START_OBSERVATION
         )
     except Exception:
         logger.debug("Failed to load capture observations for %s", execution_id, exc_info=True)
@@ -282,6 +288,18 @@ async def _load_phase_captures(execution_id: str) -> dict[str, PhaseCapture] | N
                 agent_session_ids=read_agent_session_ids(row),
                 capture_status_display=read_capture_status_display(row),
             )
+    for row in start_rows:
+        session_id = row.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+        display = read_start_verdict_display(row)
+        if display is None:
+            continue
+        # The verdict is immutable for a workspace, so the start row and the
+        # capture row's copy agree; the start row is what a RUNNING phase has.
+        known = by_session.get(session_id, _NOT_REPORTED)
+        if known.capture_status_display is None:
+            by_session[session_id] = known._replace(capture_status_display=display)
     return by_session
 
 

@@ -89,6 +89,10 @@ WORKSPACE_RUNTIME = "workspace_runtime"
 #: which transient kind earned it. Lane 2: counted for quota pressure, never
 #: replayed for state.
 UPSTREAM_RETRY = "upstream_retry"
+#: The workspace's own start verdict on the session store (#1516): ready,
+#: degraded or failed, and which doctor checks failed. Produced by Syn137 from
+#: the capability_status row, recorded at launch so a running phase shows it.
+SESSION_STORE_START = "session_store_start"
 
 # Type-safe literal union (like TypeScript)
 # MUST match the constants above and agentic_isolation.EventType
@@ -139,6 +143,8 @@ EventType = Literal[
     "workspace_runtime",
     # Upstream retry telemetry (#1882), produced by Syn137 for the same gating reason.
     "upstream_retry",
+    # Session-store start verdict (#1516), produced by Syn137 for the same gating reason.
+    "session_store_start",
 ]
 
 # Runtime validation set (auto-generated from Literal)
@@ -171,6 +177,7 @@ __all__ = [
     "SESSION_COMPLETED",
     "SESSION_ERROR",
     "SESSION_STARTED",
+    "SESSION_STORE_START",
     "SESSION_SUMMARY",
     "SUBAGENT_STARTED",
     "SUBAGENT_STOPPED",
