@@ -13,6 +13,11 @@ import json
 
 import pytest
 
+from syn_adapters.workspace_backends.agentic.capability_start import StartCapability
+from syn_adapters.workspace_backends.agentic.capture_observation import (
+    read_capture_status_display,
+)
+from syn_adapters.workspace_backends.agentic.capture_result import AuthoritativeCapture
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_capture_service import (
     SessionCaptureService,
@@ -271,3 +276,104 @@ class TestUnprovisionedWorkspacesAreNotProbed:
         )
         assert outcome.state is CaptureState.DISABLED
         assert not outcome.needs_backfill
+
+
+class _Start:
+    """A workspace whose entrypoint recorded ``start`` for the session store."""
+
+    def __init__(self, start: StartCapability | None) -> None:
+        self.start = start
+        self.asked: list[str] = []
+
+    async def read(self, execute: object, capability: str) -> StartCapability | None:
+        self.asked.append(capability)
+        return self.start
+
+
+_DEGRADED = StartCapability(
+    capability="session-store",
+    status="degraded",
+    failed_checks=("store_reachable", "auth_accepted"),
+    doctor_exit=3,
+)
+
+
+def _service_with(start: _Start, writer: _Writer, url: str | None = _STORE) -> SessionCaptureService:
+    return SessionCaptureService(
+        SessionStoreSettings(url=url), "dev", writer, capability_reader=start
+    )
+
+
+async def _capture(service: SessionCaptureService, execute) -> AuthoritativeCapture:
+    return await service.capture_and_record(
+        execute,
+        session_id="s-1",
+        execution_id="e-1",
+        workspace_id="w-1",
+        phase_id="p-1",
+        expect_sessions=True,
+    )
+
+
+@pytest.mark.unit
+class TestADegradedStartReadsAsDegraded:
+    """#1516: a capture loss after a degraded start is explained, not unexplained."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "exporter",
+        [
+            pytest.param(_ok_exec("", exit_code=1), id="exporter-failed"),
+            # 127 alone would read as DISABLED and record NOTHING: the
+            # degraded run would vanish from the indicator entirely.
+            pytest.param(_ok_exec("", exit_code=127), id="exporter-absent"),
+        ],
+    )
+    async def test_the_recorded_verdict_names_the_failed_checks(self, exporter) -> None:
+        writer = _Writer()
+
+        outcome = await _capture(_service_with(_Start(_DEGRADED), writer), exporter)
+
+        assert outcome.state is CaptureState.DEGRADED
+        assert outcome.needs_backfill
+        assert len(writer.calls) == 1
+        payload = writer.calls[0]["data"]
+        assert isinstance(payload, dict)
+        assert payload["state"] == "degraded"
+        # The consumer of the payload, not the payload: what the API serves.
+        assert (
+            read_capture_status_display(payload)
+            == "Capture degraded: store_reachable, auth_accepted failed"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_ready_start_changes_nothing(self) -> None:
+        writer = _Writer()
+        ready = StartCapability(capability="session-store", status="ready")
+
+        outcome = await _capture(_service_with(_Start(ready), writer), _ok_exec(_CLEAN))
+
+        assert outcome.state is CaptureState.CAPTURED
+        payload = writer.calls[0]["data"]
+        assert isinstance(payload, dict)
+        assert read_capture_status_display(payload) is None
+
+    @pytest.mark.asyncio
+    async def test_a_session_the_exporter_stored_is_still_captured(self) -> None:
+        """Host-side evidence of a stored session outranks the start prediction."""
+        writer = _Writer()
+
+        outcome = await _capture(_service_with(_Start(_DEGRADED), writer), _ok_exec(_CLEAN))
+
+        assert outcome.state is CaptureState.CAPTURED
+
+    @pytest.mark.asyncio
+    async def test_no_store_configured_asks_nothing_and_shows_nothing(self) -> None:
+        writer = _Writer()
+        start = _Start(_DEGRADED)
+
+        outcome = await _capture(_service_with(start, writer, url=None), _ok_exec(""))
+
+        assert outcome.state is CaptureState.DISABLED
+        assert start.asked == []
+        assert writer.calls == []

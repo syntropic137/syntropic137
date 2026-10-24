@@ -53,7 +53,11 @@ logger = logging.getLogger(__name__)
 #:
 #: 2 added `agent_session_ids`, the agent-native session ids the store
 #: confirmed for this phase.
-_PAYLOAD_SCHEMA_VERSION: Final = 2
+#:
+#: 3 added `start_capability`, the workspace's own verdict on the session
+#: store before the agent ran (#1516). Additive: every schema 2 field keeps
+#: its meaning.
+_PAYLOAD_SCHEMA_VERSION: Final = 3
 
 #: The recorded-payload versions a reader can interpret.
 #:
