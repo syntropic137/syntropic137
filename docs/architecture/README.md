@@ -84,10 +84,10 @@ claude generate-architecture-docs
 #### Real-time Communication
 
 - **[Real-time Communication](./realtime-communication.md)** 📝 Manual
-  - **What:** WebSocket control plane + SSE streaming
-  - **Why:** How Dashboard gets real-time updates
-  - **When to update:** When control flow changes
-  - **Reference:** [ADR-019](../adrs/ADR-019-websocket-control-plane.md)
+  - **What:** SSE streams for observation, HTTP routes for control (cancel, inject)
+  - **Why:** How the dashboard, syn-ui and CLI get real-time updates
+  - **When to update:** When an SSE route, frame or event type, or a control route changes
+  - **Reference:** [ADR-049](../adrs/ADR-049-sse-over-websocket-for-execution-streams.md)
 
 #### Infrastructure & Deployment
 
@@ -176,7 +176,7 @@ VSA Scanner → Manifest JSON → Diagram Generator → Markdown + Mermaid
 |----------|----------|
 | Overall system structure | [vsa-overview.svg](./vsa-overview.svg) |
 | Why we have two event types | [Event Architecture](./event-architecture.md) |
-| How Dashboard gets real-time updates | [Real-time Communication](./realtime-communication.md) |
+| How the UI and CLI get real-time updates | [Real-time Communication](./realtime-communication.md) |
 | How agent execution is secured | [Docker Workspace Lifecycle](./docker-workspace-lifecycle.md) |
 | Which events trigger which projections | [Projection Subscriptions](./projection-subscriptions.md) |
 | How services connect | [Infrastructure Data Flow](./infrastructure-data-flow.md) |
