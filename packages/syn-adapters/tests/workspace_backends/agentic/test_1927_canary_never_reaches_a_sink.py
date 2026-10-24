@@ -269,7 +269,7 @@ class _ReadsFiles:
 def _collecting(provider: _ReadsFiles) -> ManagedWorkspace:
     store = SessionStoreSettings(_env_file=None, auth_token=CANARY)  # type: ignore[arg-type]
     isolation = AgenticIsolationAdapter(
-        session_store=store, provider=cast("WorkspaceProvider", provider)
+        session_store=store, provider=lambda _: cast("WorkspaceProvider", provider)
     )
     isolation._workspaces["ws-1927"] = cast(
         "AgenticWorkspace",

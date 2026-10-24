@@ -241,7 +241,7 @@ class _TransferOnly:
 def _docker_with(provider: _TransferOnly) -> tuple[AgenticIsolationAdapter, IsolationHandle]:
     """The Docker kit (no remote flag), so the routing decision is Docker's own."""
     adapter = AgenticIsolationAdapter(
-        kit=BackendKit(), provider=cast("WorkspaceProvider", provider)
+        kit=BackendKit(), provider=lambda _: cast("WorkspaceProvider", provider)
     )
     handle = IsolationHandle(isolation_id="ws-docker", isolation_type="docker")
     adapter._workspaces[handle.isolation_id] = cast(

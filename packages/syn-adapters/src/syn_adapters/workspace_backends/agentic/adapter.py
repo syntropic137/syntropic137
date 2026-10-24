@@ -85,11 +85,11 @@ from syn_shared.settings import get_settings
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentic_isolation import AgenticWorkspace
     from agentic_isolation.contract import FinalizationOutcome
-    from agentic_isolation.providers.base import Workspace, WorkspaceProvider
+    from agentic_isolation.providers.base import CredentialResolver, Workspace, WorkspaceProvider
 
     from syn_domain.contexts.orchestration import (
         WorkspaceCredentialPolicy,
@@ -215,7 +215,7 @@ class AgenticIsolationAdapter:
         session_store: SessionStoreSettings | None = None,
         capture_source_instance_id: str | None = None,
         kit: BackendKit | None = None,
-        provider: WorkspaceProvider | None = None,
+        provider: Callable[[CredentialResolver], WorkspaceProvider] | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -232,6 +232,11 @@ class AgenticIsolationAdapter:
                 ``capture_source_instance_id`` must be left at their defaults.
                 Omitted, it is the Docker kit built from those two arguments
                 under ``HostCredentials`` - the behaviour before the kit existed.
+            provider: Builds the workspace provider from the credential
+                resolver it must resolve every binding through (#1912). Taken
+                as a builder, not an instance, because the resolver is this
+                adapter's: a provider built without it refuses every launch
+                credential. Omitted, it is the Docker provider.
 
         When running inside a container, both paths are needed:
         - container_dir: where this process writes files (/workspaces)
@@ -284,13 +289,17 @@ class AgenticIsolationAdapter:
         #: Shared with the event stream, which binds launch-scoped credentials
         #: (the platform grant) through it.
         self.credentials = WorkspaceCredentials(session_store)
-        self._provider: WorkspaceProvider = provider or WorkspaceDockerProvider(
-            default_image=default_image,
-            security=self._security,
-            workspace_base_dir=container_dir,
-            workspace_host_dir=host_dir,  # For Docker volume mounts
-            default_network=agent_network,
-            credentials=self.credentials,
+        self._provider: WorkspaceProvider = (
+            provider(self.credentials)
+            if provider is not None
+            else WorkspaceDockerProvider(
+                default_image=default_image,
+                security=self._security,
+                workspace_base_dir=container_dir,
+                workspace_host_dir=host_dir,  # For Docker volume mounts
+                default_network=agent_network,
+                credentials=self.credentials,
+            )
         )
         self._workspaces: dict[str, AgenticWorkspace] = {}
 
@@ -298,6 +307,11 @@ class AgenticIsolationAdapter:
     def credential_policy(self) -> WorkspaceCredentialPolicy:
         """The policy this adapter's kit was built with (#1914)."""
         return self._kit.credential_policy
+
+    @property
+    def shares_host_kernel(self) -> bool:
+        """Whether this backend's processes run on this host's kernel (#1912)."""
+        return self._kit.shares_host_kernel
 
     @property
     def operations(self) -> SupportsOperations:
@@ -656,7 +670,9 @@ class AgenticIsolationAdapter:
         # bare `-11` (#1295). Captured HERE rather than by any caller because
         # the reap removes the container moments later and no caller runs
         # before it (#1319).
-        signal_death = await capture_signal_death(command, result.exit_code)
+        signal_death = await capture_signal_death(
+            command, result.exit_code, host_kernel=self._kit.shares_host_kernel
+        )
         if signal_death is not None:
             logger.error(
                 "Command in workspace %s died on a signal:\n%s",

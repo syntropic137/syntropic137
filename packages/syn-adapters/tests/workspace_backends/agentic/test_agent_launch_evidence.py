@@ -77,6 +77,7 @@ class _LocalHost:
         self.operations = provider
         self.credentials = WorkspaceCredentials(SessionStoreSettings())
         self._workspace = workspace
+        self.shares_host_kernel = True
 
     def workspace(self, isolation_id: str) -> Workspace | None:
         return self._workspace
