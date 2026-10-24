@@ -3018,6 +3018,14 @@ export interface components {
             origin_deployment?: string | null;
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
+            /** Capability Status */
+            capability_status?: string | null;
+            /** Failed Checks */
+            failed_checks?: string[];
+            /** Doctor Exit */
+            doctor_exit?: number | null;
+            /** Capture Status Display */
+            capture_status_display: string;
         };
         /**
          * CaptureStatusResponse
@@ -12952,6 +12960,8 @@ export interface operations {
                 limit?: number;
                 /** @description Return only sessions whose transcripts did not reach the store. */
                 needs_backfill?: boolean;
+                /** @description Return only verdicts recorded for this execution. */
+                execution_id?: string | null;
             };
             header?: never;
             path?: never;
