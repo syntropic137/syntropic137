@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py
+index 0d79464d6..cc5d166a5 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py
+@@ -97,7 +97,6 @@ class BackendKit:
+             verifies_images=False,
+             max_cpu_cores=float(cpu_count),
+             max_memory_mb=memory_mb,
+-            shares_host_kernel=False,
+         )
+ 
+     @property

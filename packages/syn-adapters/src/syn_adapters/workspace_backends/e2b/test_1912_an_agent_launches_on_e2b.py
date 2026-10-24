@@ -190,6 +190,7 @@ async def test_a_remote_signal_death_is_never_explained_by_this_host(
         stream = workspace.stream(_AGENT)
         await anext(stream)  # type: ignore[call-overload]
         assert await workspace.interrupt() is True
+        assert provider.cancelled
         async for _ in stream:  # type: ignore[attr-defined]
             pass
         death = workspace._service._event_stream.last_signal_death  # type: ignore[attr-defined]

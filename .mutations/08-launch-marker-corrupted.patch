@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
+index e9e6a6ffd..5c2e3487d 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/stream_adapter.py
+@@ -275,7 +275,7 @@ class AgenticEventStreamAdapter:
+                 working_directory=_relative_working_directory(working_directory),
+                 environment=plain,
+                 credential_bindings=bindings,
+-                launch_marker=LaunchMarker(argv0=wrapper, line=announce_as(wrapper)),
++                launch_marker=LaunchMarker(argv0=wrapper, line=announce_as(wrapper) + "."),
+                 timeout_seconds=_timeout_seconds(timeout_seconds),
+                 metadata={},
+             )

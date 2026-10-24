@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/diagnostics/signal_capture.py b/packages/syn-adapters/src/syn_adapters/diagnostics/signal_capture.py
+index 716767f15..31ae0d498 100644
+--- a/packages/syn-adapters/src/syn_adapters/diagnostics/signal_capture.py
++++ b/packages/syn-adapters/src/syn_adapters/diagnostics/signal_capture.py
+@@ -150,7 +150,7 @@ async def capture_signal_death(
+     number = signal_number_of(exit_code)
+     if number is None or exit_code is None:
+         return None
+-    if host_kernel:
++    if host_kernel or True:
+         lines, unreadable = await _kernel_fault_lines()
+     else:
+         lines, unreadable = (), _REMOTE_KERNEL
