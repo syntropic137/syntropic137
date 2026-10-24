@@ -1,0 +1,11 @@
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -145,7 +145,7 @@
+         ):
+             for alias in node.names:
+                 if alias.name == _FASTAPI_CLASS:
+-                    constructors.add(alias.asname or alias.name)
++                    constructors.add(alias.name)
+     changed = True
+     while changed:
+         changed = False

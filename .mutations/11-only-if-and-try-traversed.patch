@@ -1,0 +1,11 @@
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -77,7 +77,7 @@
+         if isinstance(stmt, _SCOPES):
+             continue
+         for child in ast.iter_child_nodes(stmt):
+-            if isinstance(child, ast.stmt):
++            if isinstance(child, ast.stmt) and isinstance(stmt, ast.If | ast.Try):
+                 yield from module_scope_statements([child])
+             elif isinstance(child, ast.excepthandler | ast.match_case):
+                 yield from module_scope_statements(child.body)

@@ -1,0 +1,11 @@
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -152,7 +152,7 @@
+         resolved = _Bindings(frozenset(modules), frozenset(constructors))
+         for node in ast.walk(tree):
+             names: list[str] = []
+-            if isinstance(node, ast.Assign) and resolved.is_constructor(node.value):
++            if False and isinstance(node, ast.Assign) and resolved.is_constructor(node.value):
+                 names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+             elif (
+                 isinstance(node, ast.AnnAssign)

@@ -1,0 +1,11 @@
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -137,7 +137,7 @@
+             for alias in node.names:
+                 if alias.name == _FASTAPI_MODULE or alias.name.startswith("fastapi."):
+                     # ``import fastapi.applications`` binds ``fastapi`` itself.
+-                    modules.add(alias.asname or _FASTAPI_MODULE)
++                    modules.add(_FASTAPI_MODULE)
+         elif (
+             isinstance(node, ast.ImportFrom)
+             and node.module is not None

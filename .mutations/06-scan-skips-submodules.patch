@@ -1,11 +1,11 @@
---- a/ci/fitness/code_quality/test_no_hardcoded_version_literals.py
-+++ b/ci/fitness/code_quality/test_no_hardcoded_version_literals.py
-@@ -109,7 +109,7 @@
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -211,7 +211,7 @@
  
- def _tracked_python(root: Path) -> list[str]:
-     listed = subprocess.run(
--        ["git", "-C", str(root), "ls-files", "-z", "--recurse-submodules", "--", "*.py"],
-+        ["git", "-C", str(root), "ls-files", "-z", "--", "*.py"],
-         check=True,
-         capture_output=True,
-     ).stdout.decode()
+ def tracked_python(root: Path) -> list[str]:
+     """Tracked non-test ``*.py`` in this repo and every checked-out submodule."""
+-    listed = _git(root, "ls-files", "-z", "--recurse-submodules", "--", "*.py")
++    listed = _git(root, "ls-files", "-z", "--", "*.py")
+     return sorted(name for name in listed.split("\0") if name and not is_test_file(name))
+ 
+ 
