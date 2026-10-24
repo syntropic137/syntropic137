@@ -1,0 +1,15 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/retired_phase_fields.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/retired_phase_fields.py
+index 9d697ea2b..afa6c5eeb 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/retired_phase_fields.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/_shared/retired_phase_fields.py
+@@ -54,8 +54,8 @@ def reject_retired_fields(phase: object) -> object:
+     if not isinstance(phase, Mapping):
+         return phase
+     present = [field for field in RETIRED_PHASE_FIELDS if field.name in phase]
+-    if not present:
+-        return phase
++    if present or not present:
++        return {key: value for key, value in phase.items() if key not in {f.name for f in present}}
+     msg = " ".join(
+         f"phase {phase.get('id')!r}: {field.name!r} is retired ({field.retired_by}) and no longer accepted - "
+         f"{field.reason} Delete the line."
