@@ -53,10 +53,29 @@ from syn_adapters.workspace_backends.reclaim_delete import (
 __all__ = ["CLAIM_PREFIX", "DELETE_PREFIX", "is_being_deleted"]
 
 
-#: Where AW keeps session capture when it is written into the workspace
-#: rather than to the `/spool` volume. Its presence anywhere keeps the
-#: directory: capture there is the only copy (#1983, design 1.3).
+#: AW's reserved session-store metadata namespace, ``$SPOOL/.agentic-session-store``
+#: (lib/agentic-workspace/workspace/capabilities/session-store/README.md,
+#: "Spool layout"; ``__META_ROOT`` in .../session-store/apss/init.sh). It lands
+#: in a workspace directory only when the spool is inside ``/workspace``: the
+#: README's own example is ``SPOOL=/workspace``, which puts it at the top of the
+#: directory, but ``SPOOL`` (``SYN_SESSION_STORE_SPOOL_DIR`` here) is any path
+#: and may have differed when the directory was written. So its depth cannot be
+#: pinned, and one found outside a test temp tree keeps the directory: capture
+#: there is the only copy (#1983, design 1.3).
 SESSION_STORE_DIRNAME = ".agentic-session-store"
+
+#: The directory pytest creates under the temp dir for one user's runs,
+#: ``<tmp>/pytest-of-<user>/pytest-<N>/`` (``_pytest.tmpdir``). Agents run test
+#: suites inside their workspace with the temp dir there, and the reclaimer's
+#: own tests create session stores as fixtures (#2095). AW never writes into
+#: one, so a session store inside it is a fixture, not capture. Only the store
+#: check skips it; it is still walked, sized and read like everything else.
+PYTEST_TEMP_PREFIX = "pytest-of-"
+
+
+def _is_pytest_temp(directory: Path, dirpath: Path) -> bool:
+    """Whether ``dirpath`` is inside a pytest temp tree below ``directory``."""
+    return any(part.startswith(PYTEST_TEMP_PREFIX) for part in dirpath.relative_to(directory).parts)
 
 
 def _raise(error: OSError) -> NoReturn:
@@ -161,7 +180,7 @@ class WorkspaceDirListing:
     identity: tuple[int, int] = (0, 0)
     #: Why some of it could not be read, or None when the walk saw all of it.
     unreadable: str | None = None
-    #: Whether a session-store directory exists anywhere inside.
+    #: Whether a session store exists inside, outside any pytest temp tree.
     session_store: bool = False
 
 
@@ -285,7 +304,9 @@ def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
     try:
         for dirpath, dirnames, filenames in os.walk(directory, onerror=_raise):
             here = Path(dirpath)
-            if SESSION_STORE_DIRNAME in dirnames or SESSION_STORE_DIRNAME in filenames:
+            if (
+                SESSION_STORE_DIRNAME in dirnames or SESSION_STORE_DIRNAME in filenames
+            ) and not _is_pytest_temp(directory, here):
                 session_store = True
             for name in filenames:
                 size += (here / name).lstat().st_size

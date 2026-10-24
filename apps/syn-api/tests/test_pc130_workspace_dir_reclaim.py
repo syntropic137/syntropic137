@@ -561,6 +561,75 @@ async def test_a_session_store_anywhere_inside_keeps_the_dir(base: Path, tmp_pat
     assert ws.exists()
 
 
+async def test_a_session_store_at_the_spool_root_keeps_the_dir(base: Path, tmp_path: Path) -> None:
+    """AW's in-workspace example, ``SPOOL=/workspace``: ``<dir>/.agentic-session-store`` (#2095)."""
+    ws = _workspace(base, "ws-spool-root", tmp_path)
+    store = ws / stale_dirs.SESSION_STORE_DIRNAME / "repos"
+    store.mkdir(parents=True)
+    (store.parent / ".owner").write_text("agentic-session-store-metadata-v1\n")
+    (store / "state.json").write_text("{}\n")
+    result = await _reclaimer(base).run_once()
+    assert _reason(result, "ws-spool-root") is RetainedReason.CAPTURE_UNKNOWN
+    assert ws.exists()
+
+
+def _pytest_fixture_store(ws: Path) -> Path:
+    """Where the live leak put one (#2095): this file's own fixture, run inside a workspace."""
+    return (
+        ws
+        / ".tmp"
+        / "pytest-of-agent"
+        / "pytest-7"
+        / "test_a_session_store_anywhere_0"
+        / "workspaces"
+        / "ws-capture"
+        / "repos"
+        / "app"
+        / "deep"
+        / stale_dirs.SESSION_STORE_DIRNAME
+    )
+
+
+def test_a_session_store_inside_a_pytest_temp_tree_is_not_capture(
+    base: Path, tmp_path: Path
+) -> None:
+    ws = _workspace(base, "ws-ran-tests", tmp_path)
+    [before] = scan_workspace_dirs(str(base))
+    store = _pytest_fixture_store(ws)
+    store.mkdir(parents=True)
+    (store / "envelope.jsonl").write_text("{}\n")
+    [listing] = scan_workspace_dirs(str(base))
+    assert listing.session_store is False
+    assert listing.unreadable is None
+    assert listing.size_bytes - before.size_bytes == len("{}\n")  # still walked and sized
+
+
+def test_a_pytest_temp_tree_does_not_hide_a_store_beside_it(base: Path, tmp_path: Path) -> None:
+    ws = _workspace(base, "ws-both", tmp_path)
+    _pytest_fixture_store(ws).mkdir(parents=True)
+    (ws / ".tmp" / stale_dirs.SESSION_STORE_DIRNAME).mkdir()
+    [listing] = scan_workspace_dirs(str(base))
+    assert listing.session_store is True
+
+
+async def test_a_pytest_fixture_store_alone_is_not_retained_as_capture(
+    base: Path, tmp_path: Path
+) -> None:
+    """The capture clause passes; the temp tree is then judged as files like any other.
+
+    A name proves nothing about disposability (`_is_proven_cache`), and pytest
+    writes no CACHEDIR.TAG into its temp tree, so it is unversioned work.
+    """
+    ws = _workspace(base, "ws-fixture-only", tmp_path)
+    store = _pytest_fixture_store(ws)
+    store.mkdir(parents=True)
+    (store / "envelope.jsonl").write_text("{}\n")
+    result = await _reclaimer(base).run_once()
+    [kept] = [r for r in result.retained if r.workspace_id == "ws-fixture-only"]
+    assert kept.reason is RetainedReason.UNVERSIONED
+    assert ".tmp/pytest-of-agent/" in kept.detail
+
+
 async def test_capture_records_that_do_not_cover_every_session_keep_the_dir(
     base: Path, tmp_path: Path
 ) -> None:
