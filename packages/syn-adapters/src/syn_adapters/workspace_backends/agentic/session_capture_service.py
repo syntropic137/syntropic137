@@ -36,7 +36,6 @@ from syn_adapters.workspace_backends.agentic.capture_observation import (
     record_capture_outcome,
 )
 from syn_adapters.workspace_backends.agentic.capture_probe import probe_capture
-from syn_adapters.workspace_backends.agentic.capture_result import AuthoritativeCapture
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_store_env import build_partition
 
@@ -49,6 +48,7 @@ if TYPE_CHECKING:
         ObservationWriter,
     )
     from syn_adapters.workspace_backends.agentic.capture_probe import WorkspaceExecutor
+    from syn_adapters.workspace_backends.agentic.capture_result import AuthoritativeCapture
     from syn_shared.settings.session_store import SessionStoreSettings
 
 __all__ = ["SessionCapturePort", "SessionCaptureService", "explain_degraded_start"]

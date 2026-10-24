@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
     read_agent_session_ids,
+    read_capture_status_display,
 )
 from syn_api.model_identity import cost_by_observed_model, observed_model_of
 from syn_api.types import (
@@ -84,7 +85,7 @@ async def _load_phase_operations(
 ) -> list[ToolOperation] | None:
     """This session's timeline rows, or ``None`` if Lane 2 could not be read.
 
-    THREE-VALUED, for the same reason ``_load_agent_session_ids`` below is:
+    THREE-VALUED, for the same reason ``_load_phase_captures`` below is:
     ``[]`` is a timeline that was read and held nothing, ``None`` is a
     timeline nobody could read. Returning ``[]`` for both was #1332's defect -
     a phase whose telemetry was unreachable reported no operations and no
@@ -189,8 +190,29 @@ async def load_configured_models(
         return None
 
 
-async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | None] | None:
-    """Which agent-native session ids each of this execution's phases produced.
+class PhaseCapture(NamedTuple):
+    """What one phase's most recent capture row says, read once per execution."""
+
+    agent_session_ids: list[str] | None
+    capture_status_display: str | None
+    """Set only when the workspace started with capture degraded (#1516)."""
+
+
+def execution_capture_display(phase_displays: list[str | None]) -> str | None:
+    """The execution's capture summary, folded from its phases' (#1516).
+
+    Distinct phase texts are kept in phase order, so a single degraded phase
+    reads exactly as it does on the phase and two different causes both show.
+    """
+    distinct = list(dict.fromkeys(d for d in phase_displays if d))
+    return "; ".join(distinct) if distinct else None
+
+
+async def _load_phase_captures(execution_id: str) -> dict[str, PhaseCapture] | None:
+    """What capture reported for each of this execution's phases.
+
+    Carries which agent-native session ids each phase produced, and whether
+    its workspace started with capture degraded.
 
     Keyed by the phase's ``session_id`` - the uuid4 the HOST assigns per phase
     run. The values are the ids the AGENTS chose for themselves, which is a
@@ -231,7 +253,7 @@ async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | No
         logger.debug("Failed to load capture observations for %s", execution_id, exc_info=True)
         return None
 
-    by_session: dict[str, list[str] | None] = {}
+    by_session: dict[str, PhaseCapture] = {}
     for row in rows:
         session_id = row.get("session_id")
         if not isinstance(session_id, str) or not session_id:
@@ -239,21 +261,24 @@ async def _load_agent_session_ids(execution_id: str) -> dict[str, list[str] | No
         # Rows arrive newest first, so the first one wins: a phase re-probed
         # after a retry is described by its most recent verdict.
         if session_id not in by_session:
-            by_session[session_id] = read_agent_session_ids(row)
+            by_session[session_id] = PhaseCapture(
+                agent_session_ids=read_agent_session_ids(row),
+                capture_status_display=read_capture_status_display(row),
+            )
     return by_session
 
 
 async def _map_phase_detail(
     phase: PhaseExecutionDetail,
     manager: ProjectionManager,
-    agent_sessions: dict[str, list[str] | None] | None,
+    agent_sessions: Mapping[str, PhaseCapture] | None,
     configured_models: Mapping[str, str | None] | None = None,
     start_configs: Mapping[str, PhaseStartConfig] | None = None,
 ) -> PhaseExecution:
     """Map a domain phase to an API PhaseExecution.
 
     ``agent_sessions`` is the execution-wide capture lookup from
-    ``_load_agent_session_ids``, passed in rather than fetched here so the
+    ``_load_phase_captures``, passed in rather than fetched here so the
     query runs once per execution instead of once per phase. ``start_configs``
     is the same shape of thing from ``load_start_configs``: one stream load per
     execution. ``None`` means the start event could not be read (unavailable);
@@ -263,6 +288,11 @@ async def _map_phase_detail(
     # see", not "it did nothing" - the same statement an unreachable query
     # makes, and it must not arrive as an idle phase either.
     ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else None
+    capture = (
+        agent_sessions.get(phase.session_id)
+        if agent_sessions is not None and phase.session_id
+        else None
+    )
 
     sc = await _phase_cost(manager, phase, configured_models)
 
@@ -305,11 +335,8 @@ async def _map_phase_detail(
         cost_by_model=sc.cost_by_model,
         # `.get` on purpose: a phase with no capture row is "not reported",
         # which is None - never [], which would claim a confirmed empty sweep.
-        agent_session_ids=(
-            agent_sessions.get(phase.session_id)
-            if agent_sessions is not None and phase.session_id
-            else None
-        ),
+        agent_session_ids=capture.agent_session_ids if capture is not None else None,
+        capture_status_display=capture.capture_status_display if capture is not None else None,
         # None stays None for the same reason it does above: it means nothing
         # read this phase's workspace, which is not the same statement as an
         # empty list's "read it, and no branch had moved" (#1200).
@@ -420,6 +447,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         # #1176). `or []` here would erase the not-reported/confirmed-none
         # distinction the field exists to carry.
         agent_session_ids=phase.agent_session_ids,
+        capture_status_display=phase.capture_status_display,
         # Forwarded whole, None included: null is "not recorded" (#1454).
         pinned_at_start=phase.pinned_at_start,
         start_pins_status=phase.start_pins_status,

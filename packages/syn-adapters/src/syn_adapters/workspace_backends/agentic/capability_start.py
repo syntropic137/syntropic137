@@ -86,9 +86,7 @@ class CapabilityStatusReader(Protocol):
     that failed. Implementations never raise for either.
     """
 
-    async def read(
-        self, execute: WorkspaceExecutor, capability: str
-    ) -> StartCapability | None: ...
+    async def read(self, execute: WorkspaceExecutor, capability: str) -> StartCapability | None: ...
 
 
 class AgenticCapabilityStatusReader:

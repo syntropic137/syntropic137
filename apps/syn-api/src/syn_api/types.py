@@ -2255,6 +2255,10 @@ class PhaseExecution(BaseModel):
     ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
     fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    capture_status_display: str | None = None
+    """``Capture degraded: <checks> failed`` when this phase's workspace started
+    with the session store disabled because its doctor failed (#1516). Null
+    when capture was ready, not configured, or nothing could tell."""
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
     the store reported them.

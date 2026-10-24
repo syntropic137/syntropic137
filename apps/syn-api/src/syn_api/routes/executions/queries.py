@@ -56,9 +56,10 @@ from .models import (
     ExecutionSummaryResponse,
 )
 from .phase_mapping import (
-    _load_agent_session_ids,
+    _load_phase_captures,
     _map_phase_detail,
     _map_phase_to_response,
+    execution_capture_display,
     load_configured_models,
 )
 from .queued_start import QueuedStart, not_yet_started, queued_starts
@@ -529,7 +530,7 @@ async def get_detail(
     detail = await manager.workflow_execution_detail.get_by_id(execution_id)
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
-    agent_sessions = await _load_agent_session_ids(execution_id)
+    agent_sessions = await _load_phase_captures(execution_id)
     configured_models = await load_configured_models(manager, detail.workflow_id)
     start_configs = await load_start_configs(execution_id)
     phases = [
@@ -908,6 +909,9 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         started_at=str(detail.started_at) if detail.started_at else None,
         completed_at=str(detail.completed_at) if detail.completed_at else None,
         phases=phases,
+        capture_status_display=execution_capture_display(
+            [p.capture_status_display for p in phases]
+        ),
         total_phases=detail.total_phases,
         completed_phases=detail.completed_phases,
         phase_progress=detail.phase_progress,
