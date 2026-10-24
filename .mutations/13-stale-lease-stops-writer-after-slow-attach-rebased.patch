@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+index 9d4af75f5..9a9c6a606 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+@@ -116,7 +116,6 @@ class SandboxSpoolRecovery:
+         await fenced()
+         sandbox = await self._sandboxes.resume(sandbox_id, executor_id=executor_id)
+         try:
+-            await fenced()
+             # Resuming resumes the agent too. A run in fencing or a disconnected
+             # stream says nothing about whether it still writes: only the
+             # provider's confirmation makes this traversal exclusive.

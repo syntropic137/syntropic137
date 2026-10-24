@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 
 class Recovery:
     @asynccontextmanager
-    async def open(self, spool):
+    async def open(self, lease, *, fence):
         yield RecoveryReaders(transcripts=AsyncMock(), children=AsyncMock())
 
 
@@ -33,10 +33,14 @@ async def test_failed_page_preserves_cursor_and_success_advances_frozen_watermar
     spools.claim.return_value = lease
     drain = AsyncMock()
     drain.page.side_effect = OSError("archive unavailable")
-    worker = CaptureRecoveryWorker(spools, Recovery(), drain, lease_seconds=120, retry_seconds=10)
+    worker = CaptureRecoveryWorker(
+        spools, {"docker": Recovery()}, drain, lease_seconds=120, retry_seconds=10
+    )
     assert await worker.step()
     spools.advance.assert_awaited_once_with(lease, after=5, watermark=10, retry_seconds=10)
-    spools.renew.assert_awaited_once_with(lease, lease_seconds=120)
+    # Once before the spool is reopened, once before the first page.
+    assert spools.renew.await_count == 2
+    spools.renew.assert_awaited_with(lease, lease_seconds=120)
     spools.advance.reset_mock()
     drain.page.side_effect = None
     drain.page.return_value = SpoolDrainProgress(watermark=10, next_after=None, captured=5)
@@ -50,7 +54,7 @@ async def test_no_work_does_not_open_or_drain_a_spool() -> None:
     spools, drain = AsyncMock(), AsyncMock()
     spools.claim.return_value = None
     assert not await CaptureRecoveryWorker(
-        spools, Recovery(), drain, lease_seconds=120, retry_seconds=10
+        spools, {"docker": Recovery()}, drain, lease_seconds=120, retry_seconds=10
     ).step()
     drain.page.assert_not_awaited()
 
@@ -75,7 +79,7 @@ async def test_child_failure_keeps_child_cursor_without_blocking_transcript_prog
     children.page.side_effect = OSError("journal unavailable")
     worker = CaptureRecoveryWorker(
         spools,
-        Recovery(),
+        {"docker": Recovery()},
         drain,
         children=children,
         lease_seconds=120,
@@ -104,7 +108,7 @@ class ExclusiveRecovery:
         self.open_now = False
 
     @asynccontextmanager
-    async def open(self, spool):
+    async def open(self, lease, *, fence):
         self.open_now = True
         try:
             yield RecoveryReaders(
@@ -145,7 +149,12 @@ async def test_complete_traversal_marks_drained_then_offers_release_after_helper
 
     release.after_drain.side_effect = after_drain
     worker = CaptureRecoveryWorker(
-        spools, recovery, drain, lease_seconds=120, retry_seconds=10, release=release
+        spools,
+        {"docker": recovery},
+        drain,
+        lease_seconds=120,
+        retry_seconds=10,
+        release={"docker": release},
     )
     assert await worker.step()
     spools.advance.assert_awaited_once_with(
@@ -174,12 +183,12 @@ async def test_incomplete_traversal_never_marks_drained_or_releases(case: str) -
         children.page.side_effect = OSError("journal unavailable")
     worker = CaptureRecoveryWorker(
         spools,
-        ExclusiveRecovery(True),
+        {"docker": ExclusiveRecovery(True)},
         drain,
         children=children,
         lease_seconds=120,
         retry_seconds=10,
-        release=release,
+        release={"docker": release},
     )
     assert await worker.step()
     spools.mark_drained.assert_not_awaited()

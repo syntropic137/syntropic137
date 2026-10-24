@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/ports/SessionCaptureSpoolPort.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/ports/SessionCaptureSpoolPort.py
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/ports/SessionCaptureSpoolPort.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/ports/SessionCaptureSpoolPort.py
+@@ -37,7 +37,7 @@
+         remote = self.backend != "docker"
+         if remote != (self.profile == "sandbox-spool/1"):
+             raise ValueError("Spool profile does not match its backend")
+-        if remote and (self.sandbox_id is None or self.executor_id is None):
++        if remote and self.sandbox_id is None:
+             raise ValueError("A remote spool must name its sandbox and executor")
+         if not remote and self.sandbox_id is not None:
+             raise ValueError("A Docker spool is a volume, not a sandbox")

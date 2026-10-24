@@ -1,0 +1,14 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
+index 801be2acc..768e77fe4 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
+@@ -96,7 +96,8 @@ class CaptureRecoveryWorker:
+         async def renew() -> None:
+             await self._spools.renew(lease, lease_seconds=self._lease_seconds)
+ 
+-        async with self._recovery[lease.spool.backend].open(lease.spool) as readers:
++        port = self._recovery.get("docker") or self._recovery[lease.spool.backend]
++        async with port.open(lease.spool) as readers:
+             await renew()
+             progress = await self._drain.page(
+                 readers.transcripts,

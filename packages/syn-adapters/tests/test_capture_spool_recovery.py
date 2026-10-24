@@ -30,17 +30,17 @@ async def test_replay_preserves_cursor_and_expired_worker_cannot_advance(
     )
     await spools.project(spool)
     other_installation = PostgresCaptureSpools(db_pool, str(uuid4()))
-    assert await other_installation.claim(lease_seconds=60) is None
+    assert await other_installation.claim(lease_seconds=60, backends=("docker",)) is None
     with pytest.raises(ValueError, match="installation"):
         await other_installation.project(spool)
-    lease = await spools.claim(lease_seconds=60)
+    lease = await spools.claim(lease_seconds=60, backends=("docker",))
     assert lease is not None
     assert lease.spool == spool
-    assert await spools.claim(lease_seconds=60) is None
+    assert await spools.claim(lease_seconds=60, backends=("docker",)) is None
     await spools.advance(lease, after=5, watermark=10, retry_seconds=0)
     await spools.project(spool)
     restarted = PostgresCaptureSpools(db_pool, source_id)
-    next_lease = await restarted.claim(lease_seconds=60)
+    next_lease = await restarted.claim(lease_seconds=60, backends=("docker",))
     assert next_lease is not None
     assert next_lease.after == 5 and next_lease.watermark == 10
     with pytest.raises(CaptureSpoolLeaseLost):
@@ -52,13 +52,13 @@ async def test_replay_preserves_cursor_and_expired_worker_cannot_advance(
             "UPDATE session_capture_spools SET leased_until=now()-interval '1 second' WHERE source_instance_id=$1",
             spool.run.source_instance_id,
         )
-    replacement = await restarted.claim(lease_seconds=60)
+    replacement = await restarted.claim(lease_seconds=60, backends=("docker",))
     assert replacement is not None and replacement.token > next_lease.token
     with pytest.raises(CaptureSpoolLeaseLost):
         await spools.advance(next_lease, after=10, watermark=None, retry_seconds=0)
     await restarted.advance(replacement, after=10, watermark=None, retry_seconds=0)
     await restarted.project(spool)
-    final = await restarted.claim(lease_seconds=60)
+    final = await restarted.claim(lease_seconds=60, backends=("docker",))
     assert final is not None and final.after == 10 and final.watermark is None
     with pytest.raises(ValueError, match="rebound"):
         await restarted.project(spool.model_copy(update={"phase_id": "other"}))
@@ -74,17 +74,17 @@ async def test_child_cursor_is_independent_restart_safe_and_fenced(db_pool: asyn
         phase_id="phase",
     )
     await spools.project(spool)
-    lease = await spools.claim(lease_seconds=60)
+    lease = await spools.claim(lease_seconds=60, backends=("docker",))
     assert lease is not None
     assert lease.child_after == 0 and lease.child_watermark is None
     await spools.advance_children(lease, after=2, watermark=5)
     # Advancing child work neither releases the lease nor changes envelope progress.
-    assert await spools.claim(lease_seconds=60) is None
+    assert await spools.claim(lease_seconds=60, backends=("docker",)) is None
     with pytest.raises(CaptureSpoolLeaseLost):
         await spools.advance_children(lease, after=1, watermark=5)
     await spools.advance(lease, after=40, watermark=50, retry_seconds=0)
     restarted = PostgresCaptureSpools(db_pool, source)
-    current = await restarted.claim(lease_seconds=60)
+    current = await restarted.claim(lease_seconds=60, backends=("docker",))
     assert current is not None
     assert (current.after, current.watermark) == (40, 50)
     assert (current.child_after, current.child_watermark) == (2, 5)
@@ -96,6 +96,6 @@ async def test_child_cursor_is_independent_restart_safe_and_fenced(db_pool: asyn
         await spools.advance_children(lease, after=5, watermark=None)
     await restarted.advance_children(current, after=5, watermark=None)
     await restarted.advance(current, after=50, watermark=None, retry_seconds=0)
-    final = await restarted.claim(lease_seconds=60)
+    final = await restarted.claim(lease_seconds=60, backends=("docker",))
     assert final is not None
     assert (final.after, final.child_after, final.child_watermark) == (50, 5, None)

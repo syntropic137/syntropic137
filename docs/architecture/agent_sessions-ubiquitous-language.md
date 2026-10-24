@@ -138,3 +138,38 @@ Rebuilding one run's session inventory snapshot from host evidence, one durable
 - **Coalesce:** while a run has an open job, new evidence for that run waits.
   The next job picks up the latest watermark, so one job is minted per
   catch-up and not one per watermark.
+
+## Capture Spool
+
+Staged transcript and child-journal bytes a workspace wrote before they reached
+the local archive, and the durable row (`CaptureSpool`) that lets a recovery
+worker find them after any crash (#1398, #1916).
+
+- **Spool backend:** where the staged bytes live. `docker` is a named volume on
+  this host; `e2b` is the `/spool` directory on a sandbox's own disk, kept by
+  pausing the sandbox. Rows written before #1916 carry no backend and are
+  `docker`. A worker claims only spools on a backend it holds recovery access
+  to.
+- **Sandbox spool:** profile `sandbox-spool/1`. Its row names the sandbox and
+  the executor that launched it, so a fresh worker routes from the row and
+  never from memory.
+- **Exclusive drain:** a traversal during which nothing else could write. For
+  Docker, no other container referenced the volume. For a sandbox, the provider
+  confirmed every agent process stopped after resume. A run in `fencing`, a
+  `disconnected` stream outcome, or the spool lease are never evidence of it.
+  Release requires it.
+- **Settled spool:** a spool whose session or run reached a terminal fact, so
+  no executor will resume it (`settled_at`, `CaptureSpoolLease.settled`). Only
+  a settled sandbox spool is claimed or opened: recovering it stops its agent,
+  and reaching a sandbox is not permission to stop it.
+- **Spool fence:** the lease renewal a recovery adapter calls before attaching
+  and again after, before anything destructive, and once more before the
+  closing pause. It fails once another worker owns the spool, so a stale worker
+  stops nothing and does not pause the sandbox its new owner is reading.
+- **Pause-until-drained:** a sandbox spool stays paused until `mark_drained`;
+  only release kills it. A failed archive leaves it paused and retryable.
+- **Release:** removing staged bytes after a drained traversal (`archived`) or
+  a retention limit (`expired`). Docker removes the volume; a sandbox is killed,
+  but only once the provider confirms no agent process remains: a retention
+  limit evicts bytes, it never ends a running agent. Retention limits apply
+  per backend.

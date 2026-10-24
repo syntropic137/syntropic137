@@ -1,0 +1,14 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+index 9d4af75f5..ef0a8f6f1 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+@@ -136,6 +136,9 @@ class SandboxSpoolRecovery:
+         except CaptureSpoolLeaseLost:
+             lost = True
+             raise
++        except Exception:
++            await self._sandboxes.kill(sandbox_id)
++            raise
+         finally:
+             # A stale worker leaves the sandbox to whoever holds the lease now:
+             # pausing it would cut that worker's reads off mid-traversal.

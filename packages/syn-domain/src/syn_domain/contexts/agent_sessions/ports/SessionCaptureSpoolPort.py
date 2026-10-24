@@ -1,8 +1,9 @@
 """Durable recovery work projected from pre-launch session capture intent."""
 
-from typing import Literal, Protocol
+from collections.abc import Collection
+from typing import Literal, Protocol, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
     InventoryModel,
@@ -10,12 +11,37 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     RunIdentity,
 )
 
+SpoolBackend = Literal["docker", "e2b"]
+"""Where the staged bytes live, so a worker can route recovery from the row alone."""
+
 
 class CaptureSpool(InventoryModel):
+    """A durable claim on staged capture bytes.
+
+    Docker rows keep their historical shape: a named volume on this host, found
+    by run and session. A remote row also names the sandbox holding the spool on
+    its own disk and the executor that launched it, so a fresh worker with
+    empty memory can reach it.
+    """
+
     run: RunIdentity
     session_id: RoutingIdentifier
     phase_id: RoutingIdentifier
-    profile: Literal["local-spool/1"] = "local-spool/1"
+    profile: Literal["local-spool/1", "sandbox-spool/1"] = "local-spool/1"
+    backend: SpoolBackend = "docker"
+    executor_id: RoutingIdentifier | None = None
+    sandbox_id: RoutingIdentifier | None = None
+
+    @model_validator(mode="after")
+    def _route_matches_backend(self) -> Self:
+        remote = self.backend != "docker"
+        if remote != (self.profile == "sandbox-spool/1"):
+            raise ValueError("Spool profile does not match its backend")
+        if remote and (self.sandbox_id is None or self.executor_id is None):
+            raise ValueError("A remote spool must name its sandbox and executor")
+        if not remote and self.sandbox_id is not None:
+            raise ValueError("A Docker spool is a volume, not a sandbox")
+        return self
 
 
 class CaptureSpoolLease(InventoryModel):
@@ -25,6 +51,10 @@ class CaptureSpoolLease(InventoryModel):
     watermark: int | None = Field(default=None, ge=0)
     child_after: int = Field(default=0, ge=0)
     child_watermark: int | None = Field(default=None, ge=0)
+    settled: bool = False
+    """The session or run reached a terminal fact before this claim, so no
+    executor will resume it. Durable authority to stop a writer that recovery
+    finds still alive; never inferred from a disconnected stream."""
 
 
 class CaptureSpoolLeaseLost(Exception):
@@ -47,7 +77,13 @@ class SessionCaptureSpoolPort(Protocol):
         ``settle`` does; staged bytes still need a complete traversal."""
         ...
 
-    async def claim(self, *, lease_seconds: int) -> CaptureSpoolLease | None: ...
+    async def claim(
+        self, *, lease_seconds: int, backends: Collection[SpoolBackend]
+    ) -> CaptureSpoolLease | None:
+        """Lease one spool whose backend is in ``backends``: a worker never claims
+        a spool it holds no recovery access to. A remote spool is claimed only
+        once settled: recovering it stops its writer."""
+        ...
 
     async def renew(self, lease: CaptureSpoolLease, *, lease_seconds: int) -> None: ...
 

@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -28,6 +29,7 @@ from syn_adapters.session_inventory.workspace_location import workspace_capture_
 from syn_domain.contexts.agent_sessions import (
     CaptureLocalTranscriptHandler,
     CaptureSpool,
+    CaptureSpoolLease,
     RunIdentity,
 )
 
@@ -54,7 +56,9 @@ async def test_missing_volume_is_not_replaced_by_empty_capture() -> None:
     )
     location = workspace_capture_location(spool.run, spool.session_id)
     with pytest.raises(FileNotFoundError, match="not available"):
-        async with DockerSpoolRecovery(IMAGE).open(spool):
+        async with DockerSpoolRecovery(IMAGE).open(
+            CaptureSpoolLease(spool=spool, token=1, after=0), fence=AsyncMock()
+        ):
             pytest.fail("Missing capture storage must not yield a reader")
     inspected = await _docker(["volume", "inspect", location.volume_name])
     assert inspected.exit_code != 0
@@ -117,7 +121,11 @@ async def test_killed_workspace_recovers_native_bytes_without_remote_store(
             CaptureLocalTranscriptHandler(archive, journal, AgenticNativeSessionEvidence())
         )
         worker = CaptureRecoveryWorker(
-            registry, DockerSpoolRecovery(IMAGE), drain, lease_seconds=120, retry_seconds=0
+            registry,
+            {"docker": DockerSpoolRecovery(IMAGE)},
+            drain,
+            lease_seconds=120,
+            retry_seconds=0,
         )
         assert await worker.step()
         assert await journal.watermark(run) == 1

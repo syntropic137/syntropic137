@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
+@@ -104,7 +104,8 @@
+ 
+         # A stale worker must not reach the spool at all, let alone stop its writer.
+         await renew()
+-        async with self._recovery[lease.spool.backend].open(lease, fence=renew) as readers:
++        port = self._recovery.get("docker") or self._recovery[lease.spool.backend]
++        async with port.open(lease, fence=renew) as readers:
+             await renew()
+             progress = await self._drain.page(
+                 readers.transcripts,

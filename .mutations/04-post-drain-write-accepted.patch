@@ -1,0 +1,17 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+index a975b375a..57dfdf4de 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+@@ -81,10 +81,8 @@ class SandboxSpoolRecovery:
+             # Resuming resumes the agent too. A run in fencing or a disconnected
+             # stream says nothing about whether it still writes: only the
+             # provider's confirmation makes this traversal exclusive.
+-            try:
+-                exclusive = await sandbox.stop_writers()
+-            except Exception:
+-                exclusive = False
++            # The run is in fencing, so the writer is presumed gone.
++            exclusive = True
+             await capture_retained_partition(sandbox.execute, "/spool", location.partition)
+             yield RecoveryReaders(
+                 transcripts=WorkspaceSpoolReader(sandbox.execute, location.envelope_dir),

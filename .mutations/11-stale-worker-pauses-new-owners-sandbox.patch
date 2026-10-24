@@ -1,0 +1,14 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+index 9d4af75f5..8cd6db5dc 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+@@ -142,8 +142,7 @@ class SandboxSpoolRecovery:
+             if not lost:
+                 with suppress(CaptureSpoolLeaseLost):
+                     await fenced()
+-            if not lost:
+-                await self._sandboxes.pause(sandbox_id)
++            await self._sandboxes.pause(sandbox_id)
+ 
+     async def remove(self, spool: CaptureSpool) -> bool:
+         # Evicting bytes is not permission to end a run: a quota or age limit
