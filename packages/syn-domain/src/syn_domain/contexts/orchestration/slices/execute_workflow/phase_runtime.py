@@ -448,6 +448,14 @@ class PhaseRuntime:
             fallback=self._fallbacks.get(phase_id),
         )
 
+    async def record_launch(self, phase_id: str) -> None:
+        """Record what is known about this phase's workspace as its agent launches.
+
+        Both rows are Lane 2 and both need the session id `launch` just set.
+        """
+        await self.record_runtime(phase_id)
+        await self.record_capability(phase_id)
+
     async def record_capability(self, phase_id: str) -> None:
         """Record the session-store capability's start-up verdict (Lane 2, #1516).
 
