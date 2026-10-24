@@ -384,18 +384,24 @@ class WorkspaceService:
             msg = "The E2B backend was selected but SYN_E2B_ENABLED/SYN_E2B_API_KEY are unset"
             raise ValueError(msg)
         kit = BackendKit.e2b(e2b.template, cpu_count=e2b.cpu_count, memory_mb=e2b.memory_mb)
-        provider = E2BWorkspaceProvider(
-            e2b.template,
-            client=client or SdkE2BClient(api_key=e2b.api_key.get_secret_value()),
-            lifetime_seconds=e2b.timeout_seconds,
-        )
+        sandboxes = client or SdkE2BClient(api_key=e2b.api_key.get_secret_value())
         base = config or WorkspaceServiceConfig()
         cfg = dataclasses.replace(
             base,
             image=kit.default_image,
             environment={**base.environment, **(environment or {})},
         )
-        isolation = AgenticIsolationAdapter(kit=kit, provider=provider)
+        # The provider resolves launch credentials through the adapter's
+        # resolver, as Docker's does; without one it refuses them all (#1912).
+        isolation = AgenticIsolationAdapter(
+            kit=kit,
+            provider=lambda credentials: E2BWorkspaceProvider(
+                e2b.template,
+                client=sandboxes,
+                lifetime_seconds=e2b.timeout_seconds,
+                credentials=credentials,
+            ),
+        )
         sidecar = SharedEnvoyAdapter(proxy_url=os.environ.get("SYN_PROXY_URL", ""))
         vending = TokenVendingServiceAdapter(get_token_vending_service())  # type: ignore[arg-type]
         return cls(
@@ -634,7 +640,7 @@ class WorkspaceService:
         workspace: ManagedWorkspace | None = None
 
         try:
-            isolation_handle, sidecar_handle = await provision_workspace(
+            isolation_handle, sidecar_handle, image_manifest = await provision_workspace(
                 self,
                 isolation_config,
                 aggregate,
@@ -648,6 +654,7 @@ class WorkspaceService:
                 aggregate=aggregate,
                 isolation_handle=isolation_handle,
                 sidecar_handle=sidecar_handle,
+                image_manifest=image_manifest,
                 _service=self,
             )
 

@@ -44,11 +44,29 @@ _GOLDEN_STAGED = _FIXTURES / "dry-run-all-staged.txt"
 #: whole file locally (0.33.2-beta.9 did).
 _VERSION = "0.0.0-beta.1310"
 
+#: The first read of the deployed compose returns $PIT_COMPOSE; every later one
+#: returns $PIT_COMPOSE_LATER when it is set: the host's file edited mid-build.
 _SSH = """#!/usr/bin/env bash
 echo "$*" >> "$PIT_LOG/ssh"
 case "$*" in
-    *"cat /root/.syntropic137/docker-compose.syntropic137.yaml"*) cat "$PIT_COMPOSE" ;;
+    *"cat /root/.syntropic137/docker-compose.syntropic137.yaml"*)
+        if [ -n "${PIT_COMPOSE_LATER:-}" ] && [ -e "$PIT_LOG/compose-read" ]; then
+            cat "$PIT_COMPOSE_LATER"
+        else
+            touch "$PIT_LOG/compose-read"; cat "$PIT_COMPOSE"
+        fi ;;
     *"ps -eo args"*) echo 0 ;;
+esac
+"""
+
+#: Only the two read-only Git calls a dry run makes. Never consult the runner's
+#: checkout, refs, credentials or network: $REF's compose is a local fixture.
+_GIT = """#!/usr/bin/env bash
+echo "$*" >> "$PIT_LOG/git"
+case "$*" in
+    *" rev-parse --path-format=absolute --git-common-dir") printf '%s/.git\\n' "$PIT_REPO_TOP" ;;
+    *" show "*":docker/docker-compose.syntropic137.yaml") cat "$PIT_PUBLISHED" ;;
+    *) echo "unexpected git: $*" >&2; exit 99 ;;
 esac
 """
 
@@ -74,23 +92,39 @@ printf '%s' "$body" > "$out"
 """
 
 
-def _dry_run(tmp: Path, *flags: str, compose: str = "compose-tag.yaml") -> tuple[str, str, Path]:
+def _dry_run(
+    tmp: Path,
+    *flags: str,
+    compose: str = "compose-tag.yaml",
+    published: str | None = None,
+    later: str | None = None,
+    rc: int = 0,
+    extra_env: dict[str, str] | None = None,
+    repo_top: Path | None = None,
+) -> tuple[str, str, Path]:
     """A dry run's normalised stdout, its stderr, and where the stubs logged."""
     bin_dir, log = tmp / "bin", tmp / "log"
     bin_dir.mkdir()
     log.mkdir()
-    for name, body in (("ssh", _SSH), ("curl", _CURL)):
+    repo_top = repo_top or tmp / "syntropic137"
+    for name, body in (("ssh", _SSH), ("curl", _CURL), ("git", _GIT)):
         stub = bin_dir / name
         stub.write_text(body)
         stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if not k.startswith(("SYN_PIT_", "PIT_"))},
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "PIT_LOG": str(log),
+        "PIT_REPO_TOP": str(repo_top),
         "PIT_COMPOSE": str(_FIXTURES / compose),
+        # The deployed compose is held to $REF's published one (#1511); the
+        # fixture is its own published compose, so these dry runs see no drift.
+        "PIT_PUBLISHED": str(_FIXTURES / (published or compose)),
         "SYN_API_PASSWORD": "pw",
         "SYN_PIT_HOST": "root@fake-host",
         "SYN_PIT_API": "http://fake-host:8137/api/v1",
+        **({"PIT_COMPOSE_LATER": str(_FIXTURES / later)} if later else {}),
+        **(extra_env or {}),
     }
     proc = subprocess.run(
         [str(_SCRIPT), _VERSION, "--dry-run", *flags],
@@ -101,16 +135,16 @@ def _dry_run(tmp: Path, *flags: str, compose: str = "compose-tag.yaml") -> tuple
         check=False,
         timeout=60,
     )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    common = subprocess.run(
-        ["git", "-C", str(_ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    repo_top = str(Path(common).parent) if Path(common).name == ".git" else common
+    assert proc.returncode == rc, proc.stdout + proc.stderr
     out = re.sub(r"\[\d\d:\d\d:\d\dZ \+\d+s\]", "[T]", proc.stdout)
-    return out.replace(str(Path(repo_top).parent), "<PARENT>"), proc.stderr, log
+    # Replace only repository/worktree path tokens. Replacing the parent of
+    # /work replaced EVERY slash in mutation evidence's /work checkout (#2088).
+    for source, target in (
+        (str(repo_top) + "_worktrees", "<PARENT>/syntropic137_worktrees"),
+        (str(repo_top), "<PARENT>/syntropic137"),
+    ):
+        out = re.sub(r"(?<!\S)" + re.escape(source) + r"(?=[/\s]|$)", target, out)
+    return out, proc.stderr, log
 
 
 def _lines(out: str, needle: str) -> list[str]:
@@ -150,13 +184,14 @@ class TestGatewayOnly:
     def test_repoints_only_the_gateway(self, tmp_path: Path) -> None:
         """What the repoint reports is what it changed: one pin, the gateway's."""
         out, err, _ = _dry_run(tmp_path, "--service", "gateway")
-        assert _lines(err, "syn-gateway: ") == [
+        # Printed twice: once by the stage, once by the swap re-deriving it (#1511).
+        assert set(_lines(err, "syn-gateway: ")) == {
             "   syn-gateway: ghcr.io/syntropic137/syn-gateway:v0.33.1-beta.2"
             f" -> ghcr.io/syntropic137/syn-gateway:v{_VERSION}"
-        ]
+        }
         assert _lines(err, "syn-api: ") == []
-        (write,) = _lines(out, "sha256sum -c")
-        assert "docker-compose.syntropic137.yaml.bak-v0.33.1-beta.2" in write
+        (apply,) = _lines(out, "mv docker-compose.syntropic137.yaml.pit-stop-staged")
+        assert "docker-compose.syntropic137.yaml.bak-v0.33.1-beta.2" in apply
 
     def test_never_touches_admission_or_waits_for_a_drain(self, tmp_path: Path) -> None:
         out, _, log = _dry_run(tmp_path, "--service", "gateway")
@@ -292,6 +327,8 @@ remote() {{
 }}
 {_function("api_curl")}
 maintenance() {{ echo "maintenance $1" >> {log}; }}
+# Moving the staged compose in is pinned in test_pit_stop_stage_write.py.
+apply_staged() {{ :; }}
 {_function("start_gateway")}
 {_function("swapped_is_running")}
 """
@@ -358,3 +395,85 @@ class TestGatewayOnlyLive:
         assert proc.returncode != 0
         assert "PIT STOP ABORTED" in proc.stderr
         assert "up -d --no-deps gateway" in proc.stderr
+
+
+class TestComposeDrift:
+    """#1511: beta.6 needed compose config the deployed file lacked, and the pit
+    stop shipped it anyway because it only ever moves image pins."""
+
+    def test_a_deployed_compose_behind_the_published_one_is_refused_before_any_build(
+        self, tmp_path: Path
+    ) -> None:
+        out, err, log = _dry_run(
+            tmp_path, compose="compose-tag.yaml", published="compose-drifted.yaml", rc=1
+        )
+        assert "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory" in out
+        assert "is not the compose origin/main publishes" in err
+        assert "docker buildx" not in out
+        assert "pit-stop-staged" not in out
+        assert "maintenance" not in (log / "curl").read_text() if (log / "curl").exists() else True
+
+    def test_an_edit_made_on_the_host_during_the_build_is_refused_at_stage(
+        self, tmp_path: Path
+    ) -> None:
+        """The precheck read a compatible compose; by the time `stage` reads it
+        again the archive setting the new image needs is gone. The stage must
+        check the bytes it repoints, not trust the earlier read."""
+        out, err, _ = _dry_run(
+            tmp_path,
+            compose="compose-drifted.yaml",
+            later="compose-tag.yaml",
+            rc=1,
+        )
+        assert "   no drift" in out
+        assert "docker buildx" in out
+        assert "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory" in out
+        assert "is not the compose origin/main publishes" in err
+        assert "nothing was staged" in err
+        assert "mv docker-compose.syntropic137.yaml.pit-stop " not in out
+        assert "swap:" not in out
+
+    def test_an_old_release_asset_is_no_baseline(self, tmp_path: Path) -> None:
+        """The asset a host was installed from matches that host and lacks what
+        the new image needs. Naming it as the baseline once hid the drift."""
+        out, err, _ = _dry_run(
+            tmp_path,
+            compose="compose-tag.yaml",
+            published="compose-drifted.yaml",
+            rc=1,
+            extra_env={"SYN_PIT_PUBLISHED_COMPOSE": str(_FIXTURES / "compose-tag.yaml")},
+        )
+        assert "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory" in out
+        assert "is not the compose origin/main publishes" in err
+        assert "docker buildx" not in out
+
+
+@pytest.mark.parametrize(
+    "repo_top", ["/work", "/checkout/pr", "/nested/syntropic137"], ids=["container", "ci", "clone"]
+)
+def test_dry_run_is_independent_of_the_checkout_location(
+    tmp_path: Path, repo_top: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every checkout shape preserves both absolute config paths and image URLs.
+
+    /work is the trusted mutation container's checkout; its parent is /.
+    The other shapes cover CI's differently named checkout and a normal clone.
+    """
+    monkeypatch.setenv("SYN_PIT_PROBE_WORKFLOW", "runner-specific-probe")
+    monkeypatch.setenv("PIT_COMPOSE_LATER", "/runner/missing.yaml")
+    out, err, log = _dry_run(
+        tmp_path,
+        compose="compose-tag.yaml",
+        published="compose-drifted.yaml",
+        rc=1,
+        repo_top=Path(repo_top),
+    )
+    for line in (
+        "+      SYN_SESSION_INVENTORY_ARCHIVE_DIR: /app/data/session-inventory",
+        "     image: ghcr.io/syntropic137/syn-api",
+    ):
+        assert line in out
+    assert "is not the compose origin/main publishes" in err
+    calls = (log / "git").read_text().splitlines()
+    assert len(calls) == 2
+    assert calls[1] == f"-C {repo_top} show origin/main:docker/docker-compose.syntropic137.yaml"

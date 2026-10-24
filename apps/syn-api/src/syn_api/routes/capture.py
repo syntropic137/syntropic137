@@ -22,10 +22,14 @@ anything unreadable here reads as UNKNOWN and counts as needing backfill.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from syn_adapters.workspace_backends.agentic.capability_verdict import (
+    CAPABILITY_STATUS_OBSERVATION,
+)
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
     SUPPORTED_OBSERVATION_SCHEMA_VERSIONS,
@@ -36,11 +40,13 @@ from syn_adapters.workspace_backends.agentic.capture_result import (
 )
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_api._wiring import get_event_store
-from syn_api.types import CaptureStatusEntry, CaptureStatusResponse
+from syn_api.types import CapabilityStatusEntry, CaptureStatusEntry, CaptureStatusResponse
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from datetime import datetime
+
+    from syn_adapters.events.store import AgentEventStore
 
 router = APIRouter(prefix="/capture", tags=["capture"])
 
@@ -143,6 +149,39 @@ def _state_of(payload: Mapping[str, object]) -> CaptureState:
         return CaptureState.UNKNOWN
 
 
+class _RecordedCapability(BaseModel):
+    """The capability verdict as recorded (#1516), parsed rather than probed.
+
+    The payload was written by another process, so it is validated here once.
+    A row that breaks it - a wrong type, a verdict the contract does not
+    define - reads as no verdict at all, never as a guess at one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore", strict=True)
+
+    capability_status: Literal["ready", "degraded", "failed"] | None = None
+    failed_checks: list[str] = Field(default_factory=list)
+    doctor_exit: int | None = None
+
+
+_DISPLAY: Mapping[CaptureState, str] = {
+    CaptureState.CAPTURED: "Captured",
+    CaptureState.DISABLED: "Capture disabled",
+    CaptureState.INCOMPLETE: "Capture incomplete",
+    CaptureState.FAILED: "Capture failed",
+    CaptureState.DEGRADED: "Capture degraded",
+    CaptureState.UNKNOWN: "Capture status unknown",
+}
+
+
+def capture_status_display(state: CaptureState, failed_checks: Sequence[str]) -> str:
+    """The verdict as an operator reads it, naming the cause of a degraded start."""
+    label = _DISPLAY[state]
+    if state is CaptureState.DEGRADED and failed_checks:
+        return f"{label}: {', '.join(failed_checks)} failed"
+    return label
+
+
 def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
     """Project one stored observation row into the response shape.
 
@@ -171,6 +210,10 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
         # is worth least.
         state = CaptureState.UNKNOWN
 
+    try:
+        capability = _RecordedCapability.model_validate(payload)
+    except ValidationError:
+        capability = _RecordedCapability()
     return CaptureStatusEntry(
         session_id=session_id,
         execution_id=_text(event.get("execution_id")),
@@ -186,7 +229,96 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
         expected_deployment=_text(payload.get("expected_deployment")),
         origin_deployment=_text(payload.get("origin_deployment")),
         agent_session_ids=read_agent_session_ids(payload),
+        capability_status=capability.capability_status,
+        failed_checks=capability.failed_checks,
+        doctor_exit=capability.doctor_exit,
+        capture_status_display=capture_status_display(state, capability.failed_checks),
     )
+
+
+async def _execution_entries(
+    store: AgentEventStore, execution_id: str, limit: int
+) -> list[CaptureStatusEntry | None]:
+    """One execution's verdicts, projected by the same `_to_entry`.
+
+    `query_by_execution` FLATTENS the payload into the row and names the time
+    `timestamp`, unlike `query_recent_by_types`. Re-nesting it here keeps one
+    projection for both reads, rather than a second that drifts from the first.
+    """
+    rows = await store.query_by_execution(
+        execution_id, event_type=SESSION_CAPTURE_OBSERVATION, limit=limit
+    )
+    return [
+        _to_entry(
+            {
+                "session_id": row.get("session_id"),
+                "execution_id": row.get("execution_id"),
+                "phase_id": row.get("phase_id"),
+                "time": row.get("timestamp"),
+                "data": row,
+            }
+        )
+        for row in rows
+    ]
+
+
+class _RecordedStartVerdict(BaseModel):
+    """A `capability_status` row as recorded at agent launch (#1516).
+
+    Parsed, not probed, for `_RecordedCapability`'s reason. A row that breaks
+    it is skipped: an unreadable verdict is unknown, never a guess at one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore", strict=True)
+
+    capability: str
+    status: Literal["ready", "degraded", "failed"]
+    failed_checks: list[str] = Field(default_factory=list)
+    doctor_exit: int = 0
+
+
+def capability_status_display(
+    status: Literal["ready", "degraded", "failed"], failed_checks: Sequence[str]
+) -> str:
+    """A start-up verdict as an operator reads it, naming the failed checks."""
+    label = {
+        "ready": "Capture ready",
+        "degraded": "Capture degraded",
+        "failed": "Capture failed at start",
+    }[status]
+    if status != "ready" and failed_checks:
+        return f"{label}: {', '.join(failed_checks)} failed"
+    return label
+
+
+async def _execution_capabilities(
+    store: AgentEventStore, execution_id: str, limit: int
+) -> list[CapabilityStatusEntry]:
+    """One execution's start-up verdicts, from the flattened rows."""
+    rows = await store.query_by_execution(
+        execution_id, event_type=CAPABILITY_STATUS_OBSERVATION, limit=limit
+    )
+    entries: list[CapabilityStatusEntry] = []
+    for row in rows:
+        try:
+            verdict = _RecordedStartVerdict.model_validate(row)
+        except ValidationError:
+            continue
+        entries.append(
+            CapabilityStatusEntry(
+                execution_id=_text(row.get("execution_id")),
+                phase_id=_text(row.get("phase_id")),
+                workspace_id=_text(row.get("workspace_id")),
+                capability=verdict.capability,
+                status=verdict.status,
+                failed_checks=verdict.failed_checks,
+                doctor_exit=verdict.doctor_exit,
+                capability_status_display=capability_status_display(
+                    verdict.status, verdict.failed_checks
+                ),
+            )
+        )
+    return entries
 
 
 @router.get("/status", response_model=CaptureStatusResponse)
@@ -196,24 +328,38 @@ async def get_capture_status(
         default=False,
         description="Return only sessions whose transcripts did not reach the store.",
     ),
+    execution_id: Annotated[
+        str | None,
+        Query(description="Return only verdicts recorded for this execution."),
+    ] = None,
 ) -> CaptureStatusResponse:
     """Recorded session-capture verdicts, newest first."""
     store = get_event_store()
     try:
-        events: Sequence[Mapping[str, object]] = await store.query_recent_by_types(
-            [SESSION_CAPTURE_OBSERVATION], limit=limit
+        capabilities = (
+            await _execution_capabilities(store, execution_id, limit) if execution_id else []
+        )
+        scanned = (
+            await _execution_entries(store, execution_id, limit)
+            if execution_id
+            else [
+                _to_entry(event)
+                for event in await store.query_recent_by_types(
+                    [SESSION_CAPTURE_OBSERVATION], limit=limit
+                )
+            ]
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"capture status unavailable: {exc}") from exc
 
-    entries = [entry for entry in map(_to_entry, events) if entry is not None]
+    entries = [entry for entry in scanned if entry is not None]
     # Counted over the scanned window, not over what is returned: an operator
     # filtering to the backlog still wants to know how big it is.
     backlog = sum(1 for entry in entries if entry.needs_backfill)
     # NOT dropped quietly. A verdict with no session id is still evidence that
     # something happened, and a response that omitted it entirely could read as
     # "all clear" while a failure sat unattributable in the store.
-    unattributable = len(events) - len(entries)
+    unattributable = len(scanned) - len(entries)
 
     if needs_backfill:
         entries = [entry for entry in entries if entry.needs_backfill]
@@ -222,11 +368,12 @@ async def get_capture_status(
         total=len(entries),
         needs_backfill_count=backlog,
         unattributable_count=unattributable,
-        scanned=len(events),
+        scanned=len(scanned),
         # The database applies the limit BEFORE this filter, so a full window
         # means older failures may exist beyond it. Without this a caller could
         # read an empty backlog off a page that simply did not reach them,
         # which is a wrong answer rather than a missing feature.
-        truncated=len(events) >= limit,
+        truncated=len(scanned) >= limit,
         entries=entries,
+        capabilities=capabilities,
     )

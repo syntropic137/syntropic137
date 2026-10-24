@@ -63,7 +63,7 @@ jobs:
 
       - name: Check for drift
         run: |
-          python3 scripts/workflows/check_drift.py \
+          uv run --no-project python scripts/workflows/check_drift.py \
             apps/syn-cli-node/src/generated/ \
             apps/syn-docs/content/docs/cli/ \
             apps/syn-docs/content/docs/api/ \

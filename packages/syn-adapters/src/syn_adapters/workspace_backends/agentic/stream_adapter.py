@@ -172,6 +172,9 @@ class OperationHost(Protocol):
     @property
     def credentials(self) -> WorkspaceCredentials: ...
 
+    @property
+    def shares_host_kernel(self) -> bool: ...
+
 
 class AgenticEventStreamAdapter:
     """Implements EventStreamPort on agentic-workspace's provider operation contract."""
@@ -429,7 +432,9 @@ class AgenticEventStreamAdapter:
         # #1319). The argv is the spec's, and the agent's command line can
         # still name a value it was given, so it is scrubbed first (#1927).
         self._last_signal_death = await capture_signal_death(
-            [scrubber.scrub(arg) for arg in spec.argv], exit_code
+            [scrubber.scrub(arg) for arg in spec.argv],
+            exit_code,
+            host_kernel=self._host.shares_host_kernel,
         )
         if self._last_signal_death is not None:
             logger.error(

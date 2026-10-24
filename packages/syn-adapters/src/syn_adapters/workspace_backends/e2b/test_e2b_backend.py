@@ -325,7 +325,7 @@ async def test_a_refused_file_fails_the_read_instead_of_going_missing() -> None:
 def _adapter(double: SandboxDouble) -> tuple[AgenticIsolationAdapter, E2BWorkspaceProvider]:
     provider = E2BWorkspaceProvider(_TEMPLATE, client=double)
     kit = BackendKit.e2b(_TEMPLATE, cpu_count=2, memory_mb=2048)
-    return AgenticIsolationAdapter(kit=kit, provider=provider), provider
+    return AgenticIsolationAdapter(kit=kit, provider=lambda _: provider), provider
 
 
 async def test_conformance_suite_over_the_double() -> None:

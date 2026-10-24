@@ -18,6 +18,7 @@ from event_sourcing import (
     event_sourcing_handler,
 )
 
+from syn_domain.contexts.orchestration._shared.file_transfer import FileRefusal, read_refusals
 from syn_domain.contexts.orchestration._shared.phase_order import refuse_phase_order_conflict
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     LeftBranches,
@@ -56,6 +57,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.evidence_recor
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.execution_tags import (
     ExecutionTags,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.file_refusal_handlers import (
+    FileRefusalHandlers,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+    ImageManifestReading,
+    read_image_manifest,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
     resumed_event_applies,
@@ -215,7 +223,7 @@ logger = logging.getLogger(__name__)
 
 @aggregate("WorkflowExecution")
 class WorkflowExecutionAggregate(
-    AggregateRoot["WorkflowExecutionStartedEvent"], EvidenceGateHandlers
+    AggregateRoot["WorkflowExecutionStartedEvent"], EvidenceGateHandlers, FileRefusalHandlers
 ):
     """Aggregate for tracking workflow execution lifecycle."""
 
@@ -331,6 +339,8 @@ class WorkflowExecutionAggregate(
         self._eval = EvalMembership()
         #: The first workspace's verified checkout (#967); None until it is applied.
         self._starting_checkout: list[SourceCommit] | None = None
+        self._image_manifests: dict[str, ImageManifestReading] = {}
+        self._refused_files: dict[str, tuple[FileRefusal, ...]] = {}
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -498,6 +508,10 @@ class WorkflowExecutionAggregate(
     def starting_checkout(self) -> list[SourceCommit]:
         """Each pinned repository's verified commit when the run's first workspace began."""
         return self._starting_checkout or []
+
+    # The image manifest of the phase's latest workspace; None if none was recorded.
+    def image_manifest_for(self, phase_id: str) -> ImageManifestReading | None:
+        return self._image_manifests.get(phase_id)
 
     @property
     def start_pins(self) -> StartPins:
@@ -957,6 +971,9 @@ class WorkflowExecutionAggregate(
         self._current_phase_workspace_id = evt(event, "workspace_id")
         if self._starting_checkout is None:
             self._starting_checkout = read_source_commits(evt(event, "checked_out_commits"))
+        reading = read_image_manifest(evt(event, "image_manifest"))
+        if reading is not None:
+            self._image_manifests[evt(event, "phase_id")] = reading
 
     @event_sourcing_handler("AgentExecutionCompleted")
     def on_agent_execution_completed(self, event: AgentExecutionCompletedEvent) -> None:
@@ -995,6 +1012,7 @@ class WorkflowExecutionAggregate(
         self._phase_artifact_ids.setdefault(phase_id, []).extend(evt(event, "artifact_ids", []))
         if evt(event, "deliverable_recovered", False):
             self._recovered_phases.add(phase_id)
+        self._refused_files[phase_id] = read_refusals(evt(event, "refused_files", []))
         # The salvage input has done its job for this phase and stops being
         # replayed state: a later to-do item for the same phase must re-read
         # the deliverable, never re-salvage from a stale message. Dropping it

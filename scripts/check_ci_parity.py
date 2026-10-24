@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import platform
 import re
+import shlex
 import sys
 from pathlib import Path
 from typing import Final
@@ -287,6 +288,309 @@ def local_python_version() -> str:
     return f"{major}.{minor}"
 
 
+# A Python interpreter named as a command: `python`, `python3`, `python3.12`,
+# bare or by path (`/usr/bin/python3`).
+_PYTHON_NAME: Final = re.compile(r"python(?:3(?:\.\d+)?)?")
+# Words that run the command after them: `sudo python3`, `env X=1 python3`,
+# `if python3 ...`. Their own options (`env -i`) are skipped too.
+_COMMAND_PREFIXES: Final = frozenset(
+    {"sudo", "env", "exec", "command", "nohup", "time", "nice", "builtin"}
+    | {"if", "then", "else", "elif", "do", "while", "until", "!", "{"}
+)
+_ASSIGNMENT: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+_HEREDOC: Final = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+_SHELL_PUNCTUATION: Final = ";&|()<>\n"
+
+
+def _matching_paren(script: str, start: int) -> int:
+    """The index just past the `)` closing a `$(` whose body starts at `start`."""
+    depth, quote, index = 1, None, start
+    while index < len(script) and depth:
+        char = script[index]
+        if quote == '"' and char == "\\":
+            index += 1
+        elif quote is not None:
+            if char == quote:
+                quote = None
+        elif char == "\\":
+            index += 1
+        elif char in "'\"":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        index += 1
+    if depth:
+        raise ValueError("unterminated $(")
+    return index
+
+
+def _split_shell(script: str) -> tuple[str, list[str]]:
+    """The script's own command text, and the scripts its substitutions run.
+
+    One pass that tracks quoting, because each thing below means something only
+    in a given quote context:
+
+    - a comment starts at an unquoted `#` at the start of a word;
+    - a heredoc starts at an unquoted `<<WORD`, and its body is data, though
+      an unquoted WORD still expands `$(...)` inside it;
+    - `$(...)` and backticks run a script outside single quotes, and are text
+      inside them.
+
+    Each substitution is replaced by a placeholder word and returned
+    separately, so the caller scans it as a script of its own.
+    """
+    kept: list[str] = []
+    substitutions: list[str] = []
+    quote: str | None = None
+    heredocs: list[tuple[str, bool]] = []
+    index = 0
+    while index < len(script):
+        char = script[index]
+        if quote == "'":
+            kept.append(char)
+            quote = None if char == "'" else quote
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(script):
+            kept.append(script[index : index + 2])
+            index += 2
+            continue
+        if script.startswith("$(", index) and not script.startswith("$((", index):
+            end = _matching_paren(script, index + 2)
+            substitutions.append(script[index + 2 : end - 1])
+            kept.append("_")
+            index = end
+            continue
+        if char == "`":
+            end = script.find("`", index + 1)
+            if end < 0:
+                raise ValueError("unterminated backtick")
+            substitutions.append(script[index + 1 : end])
+            kept.append("_")
+            index = end + 1
+            continue
+        if quote == '"':
+            kept.append(char)
+            quote = None if char == '"' else quote
+            index += 1
+            continue
+        if char in "'\"":
+            quote = char
+        elif char == "#" and (index == 0 or script[index - 1] in " \t\n;&|()"):
+            while index < len(script) and script[index] != "\n":
+                index += 1
+            continue
+        elif script.startswith("<<", index) and not script.startswith("<<<", index):
+            match = _HEREDOC.match(script, index)
+            if match:
+                heredocs.append((match.group(2), match.group(1) == ""))
+                kept.append(script[index : match.end()])
+                index = match.end()
+                continue
+        elif char == "\n" and heredocs:
+            kept.append(char)
+            index += 1
+            for terminator, expands in heredocs:
+                body: list[str] = []
+                while index < len(script):
+                    newline = script.find("\n", index)
+                    stop = len(script) if newline < 0 else newline
+                    line, index = script[index:stop], stop + 1
+                    if line.strip() == terminator:
+                        break
+                    body.append(line)
+                if expands:
+                    escaped = "\n".join(body).replace('"', '\\"')
+                    substitutions.extend(_split_shell(f'"{escaped}"')[1])
+            heredocs = []
+            continue
+        kept.append(char)
+        index += 1
+    return "".join(kept), substitutions
+
+
+def bare_python_commands(script: str) -> list[str]:
+    """The Python interpreters a shell script runs as commands, by name.
+
+    Parsed as shell, not matched as text: quoted strings, comments and heredoc
+    bodies are data, `uv run python` makes `python` uv's argument, and every
+    `$(...)` or backtick substitution is a script of its own. Raises ValueError
+    for a script that does not tokenize, so the caller can fail closed.
+    """
+    code, substitutions = _split_shell(script)
+    lexer = shlex.shlex(code, posix=True, punctuation_chars=_SHELL_PUNCTUATION)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    found: list[str] = []
+    at_command = True
+    skip_options = False
+    skip_operand = False
+    for token in lexer:
+        if token and all(char in _SHELL_PUNCTUATION for char in token):
+            if "<" in token or ">" in token:
+                skip_operand = True  # the redirection target is a file, not a command
+            else:
+                at_command, skip_options = True, False
+            continue
+        if skip_operand:
+            skip_operand = False
+            continue
+        if not at_command:
+            continue
+        if _ASSIGNMENT.match(token) or token in _COMMAND_PREFIXES:
+            skip_options = token in _COMMAND_PREFIXES
+            continue
+        if skip_options and token.startswith("-"):
+            continue
+        name = token.rsplit("/", 1)[-1]
+        if _PYTHON_NAME.fullmatch(name):
+            found.append(name)
+        at_command, skip_options = False, False
+    for substitution in substitutions:
+        found.extend(bare_python_commands(substitution))
+    return found
+
+
+def _same_repo_checkout_paths(steps: list[object]) -> set[str]:
+    """`path:` of every checkout of this repository in a job (the root is "")."""
+    paths: set[str] = set()
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        uses = step.get("uses")
+        if not (isinstance(uses, str) and uses.startswith("actions/checkout@")):
+            continue
+        settings = step.get("with") if isinstance(step.get("with"), dict) else {}
+        repository = settings.get("repository", "${{ github.repository }}")
+        if repository == "${{ github.repository }}":
+            paths.add(str(settings.get("path", "")).strip("./"))
+    return paths
+
+
+def _local_action(uses: str, repo_root: Path, checkouts: set[str]) -> list[object] | None:
+    """The steps of a local composite action, or None when it cannot be read.
+
+    `./x` is relative to the workspace, so it names a file in this repo only
+    under a checkout of this repo: `./trusted/.github/actions/a` is this repo's
+    `.github/actions/a` when `trusted` is such a checkout, and unknown when it
+    is another repository or no checkout at all.
+    """
+    relative = uses[2:].strip("/")
+    for checkout in sorted(checkouts, key=len, reverse=True):
+        if checkout == "" or relative.startswith(checkout + "/"):
+            inner = relative if checkout == "" else relative[len(checkout) + 1 :]
+            for filename in ("action.yml", "action.yaml"):
+                path = repo_root / inner / filename
+                if path.is_file():
+                    document = yaml.safe_load(path.read_text())
+                    runs = document.get("runs") if isinstance(document, dict) else None
+                    steps = runs.get("steps") if isinstance(runs, dict) else None
+                    return steps if isinstance(steps, list) else []
+    return None
+
+
+def _pins_python(step: dict[str, object], repo_root: Path) -> bool:
+    """Whether this one step puts a pinned interpreter on PATH for the steps after it.
+
+    A conditional step may not run, and `update-environment: false` leaves PATH
+    alone, so neither pins anything. With no version input, setup-python reads
+    `.python-version`, which pins only if the file exists.
+    """
+    uses = step.get("uses")
+    if not (isinstance(uses, str) and uses.startswith("actions/setup-python@")):
+        return False
+    if "if" in step:
+        return False
+    settings = step.get("with") if isinstance(step.get("with"), dict) else {}
+    if str(settings.get("update-environment", "true")).lower() == "false":
+        return False
+    if settings.get("python-version") or settings.get("python-version-file"):
+        return True
+    return (repo_root / ".python-version").is_file()
+
+
+def _step_problems(
+    steps: list[object], repo_root: Path, checkouts: set[str], where: str, pinned: bool
+) -> tuple[list[str], bool]:
+    """Bare-python problems in `steps`, in execution order, and the pin state after them."""
+    problems: list[str] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        name = f"{where} step {step.get('name', '(unnamed)')!r}"
+        if _pins_python(step, repo_root):
+            pinned = True
+        uses = step.get("uses")
+        if isinstance(uses, str) and uses.startswith("./"):
+            inner = _local_action(uses, repo_root, checkouts)
+            if inner is not None:
+                found, pinned_after = _step_problems(
+                    inner, repo_root, checkouts, f"{name} ({uses})", pinned
+                )
+                problems.extend(found)
+                # A conditional action may not run, so its pins do not carry over.
+                pinned = pinned if "if" in step else pinned_after
+        run = step.get("run")
+        if not isinstance(run, str) or pinned:
+            continue
+        try:
+            commands = bare_python_commands(run)
+        except ValueError as error:
+            problems.append(
+                f"{name}: cannot parse its run script ({error}), so cannot prove it runs no bare python"
+            )
+            continue
+        for command in sorted(set(commands)):
+            problems.append(
+                f"{name} runs a bare `{command}` with no interpreter pinned before it. Use "
+                f"`uv run --no-project python` (the .python-version pin), or run "
+                f"actions/setup-python earlier in the job."
+            )
+    return problems, pinned
+
+
+def bare_python_problems(workflow_dir: Path) -> list[str]:
+    """`run:` steps that invoke a Python no earlier step pinned.
+
+    WHY THIS EXISTS (issue #1242, the #1018 class one level down). The
+    interpreter check above compares the version CI pins with the local one,
+    but a step that calls `python3` before any `actions/setup-python` runs
+    whatever the runner image ships, and nothing pins that. Five steps did,
+    across `_check-version.yml`, `_check-codegen-sync.yml`, `release-beta.yaml`
+    and `smoke-test.yml`.
+
+    Every workflow is scanned, not only the pull_request-triggered ones: a
+    release-only job runs the wrong interpreter just as quietly. Steps are
+    walked in order, and local composite actions are expanded in place, their
+    own `run:` steps included; a remote action is opaque and pins nothing. So
+    a job that pins first may call Python directly: the evidence workflows run
+    `python -I` on purpose, so an untrusted checkout is never installed.
+    """
+    repo_root = workflow_dir.parent.parent
+    problems: list[str] = []
+    for path in sorted(workflow_dir.glob("*.y*ml")):
+        document = yaml.safe_load(path.read_text())
+        jobs = document.get("jobs") if isinstance(document, dict) else None
+        if not isinstance(jobs, dict):
+            continue
+        for job_id, job in jobs.items():
+            steps = job.get("steps") if isinstance(job, dict) else None
+            if not isinstance(steps, list):
+                continue
+            found, _ = _step_problems(
+                steps,
+                repo_root,
+                _same_repo_checkout_paths(steps),
+                f"{path.name} job {job_id!r}",
+                False,
+            )
+            problems.extend(found)
+    return problems
+
+
 def find_problems(
     workflows: dict[str, dict[str, object]], justfile: str
 ) -> tuple[list[str], int, int]:
@@ -374,6 +678,7 @@ def main() -> int:
     problems, covered, total = find_problems(workflows, justfile)
     problems.extend(script_step_problems(workflows, justfile))
     problems.extend(dispatch_only_problems(WORKFLOW_DIR, set(workflows)))
+    problems.extend(bare_python_problems(WORKFLOW_DIR))
 
     if problems:
         print("❌ local QA has drifted from CI:")
