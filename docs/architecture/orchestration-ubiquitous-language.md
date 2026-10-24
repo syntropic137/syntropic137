@@ -197,6 +197,20 @@ refusal is not yet recognised and reads as `unknown`. A refusal that arrives
 after the agent only read, searched or spoke still falls back: that is not
 [Attempt Work](#attempt-work) (#1825).
 
+## Capture Degraded
+
+A Phase whose workspace started with session capture switched off: the
+session-store capability's start-up checks failed (e.g. `store_reachable`), so
+agentic-workspace degraded it rather than failing the workspace (AW #27). The
+Phase runs and completes normally; its transcripts never reach the store. The
+cause is the capability's own `capability_status` verdict (`ready`,
+`degraded`, `failed`), read from the workspace's audit row before teardown and
+recorded with the capture verdict, whose state then reads `degraded` instead of
+an unexplained `failed`, `incomplete` or `unknown`. It still needs a backfill:
+degraded is explained, not settled. A verdict that cannot be read is unknown,
+never degraded, and never fails the Phase. Not `capture failed`, which means
+capture was on and the export broke (#1516).
+
 ## Provision Step Timeout
 
 A provisioning step that ran inside the workspace and did not finish before its
