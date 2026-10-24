@@ -163,9 +163,16 @@ Control is ordinary request/response, defined in
 | `GET /executions/{execution_id}/state` | none | `StateResponse`: the execution's status, read from its event stream |
 
 Cancel and inject return `ControlResponse` (`success`, `execution_id`, `state`,
-`message`, `error`); a refused request is HTTP 400. These routes accept an id
-prefix: a prefix is resolved through the `workflow_execution_details` read
-model, which answers 409 while that model is rebuilding (#1555).
+`message`, `error`); a refused request is HTTP 400. These routes accept a full
+id or an id prefix (`_resolve_execution_id`). A full id found in the event
+store is used as is, without the read model. Anything else is expanded through
+the `workflow_execution_details` read model: an ambiguous prefix is 409, and a
+prefix it cannot find is 404, or 409 instead while that model is rebuilding
+(#1555). A prefix the model has already replayed still resolves during a
+rebuild. Cancel offers a prefix that missed, for either reason, to the
+queued-start withdrawal below before it answers.
+
+Cancelling an execution that has already started:
 
 ```mermaid
 sequenceDiagram
@@ -200,9 +207,20 @@ sequenceDiagram
   `WorkflowExecutionAggregate.accepts_control()`, which admits cancel and
   inject only while the status is `RUNNING` (ADR-014 s7). An execution with no
   stream, or a store that cannot be read, is refused.
-- **A 200 means queued, not done.** The response's `state` is the state before
-  the signal is acted on. Clients learn the outcome from the
-  `ExecutionCancelled` frame on the execution stream, or from `/state`.
+- **For a started execution, a 200 means queued, not done.** The diagram
+  above is that case: an execution that has already started and is `RUNNING`.
+  The response's `state` is the state before the signal is acted on. Clients
+  learn the outcome from the `ExecutionCancelled` frame on the execution
+  stream, or from `/state`.
+- **A queued start is withdrawn, not signalled.** A start still waiting for a
+  slot has no execution yet. Cancel withdraws its request instead
+  (`_withdraw_queued` in `control.py`, `withdraw_execution_request` in
+  `routes/executions/direct_start.py`). The withdrawal is durable before the
+  route returns, and the 200 already says `state="cancelled"`, message
+  `Withdrawn before it started: it will not run`. The execution never gets an
+  event stream, so no `ExecutionCancelled` frame comes; do not wait for one.
+  If the run turns out to have started before the withdrawal landed, the
+  route cancels it like any started run.
 - **The queue.** `_wiring.get_controller()` uses `RedisSignalQueueAdapter`
   (`control/adapters/redis_adapter.py`): one short-lived key per execution,
   5-minute TTL, claimed and then acknowledged on read. If Redis cannot be set
