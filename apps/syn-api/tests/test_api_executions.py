@@ -883,3 +883,127 @@ async def test_an_unreachable_event_store_reports_unknown_not_a_loss(
 
     assert response.status == "running"
     assert response.phases[0].agent_session_ids is None
+
+
+# --- #1516: capture degraded at workspace start ------------------------------
+#
+# The rows here are written by the REAL capture service, with only the
+# workspace faked, and read back in the flattened shape `query_by_execution`
+# returns. That covers every hop between the entrypoint's verdict and the field
+# an operator reads: the service, the recorded payload, the reader, both phase
+# constructors and the execution-level fold.
+
+
+async def _rows_from_a_capture(session_id: str, start: object, *, exit_code: int) -> list[dict]:
+    from syn_adapters.workspace_backends.agentic.session_capture_service import (
+        SessionCaptureService,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        ExecutionResult,
+    )
+    from syn_shared.settings.session_store import SessionStoreSettings
+
+    written: list[dict] = []
+
+    class _Writer:
+        async def record_observation(self, **kwargs: object) -> None:
+            data = kwargs["data"]
+            assert isinstance(data, dict)
+            written.append(
+                {
+                    "event_type": kwargs["observation_type"],
+                    "session_id": kwargs["session_id"],
+                    "execution_id": kwargs["execution_id"],
+                    **data,
+                }
+            )
+
+    class _Reader:
+        async def read(self, execute: object, capability: str) -> object:
+            return start
+
+    async def _exporter(command: list[str], *, timeout_seconds: int, environment=None):
+        return ExecutionResult(exit_code=exit_code, success=False, duration_ms=1.0)
+
+    service = SessionCaptureService(
+        SessionStoreSettings(url="http://store:8799"),
+        "dev",
+        _Writer(),
+        capability_reader=_Reader(),  # pyright: ignore[reportArgumentType]
+    )
+    await service.capture_and_record(
+        _exporter,
+        session_id=session_id,
+        execution_id="exec-capture",
+        workspace_id="w-1",
+        phase_id="p-1",
+        expect_sessions=True,
+    )
+    return written
+
+
+def _degraded(*checks: str):
+    from syn_adapters.workspace_backends.agentic.capability_start import StartCapability
+
+    return StartCapability(
+        capability="session-store", status="degraded", failed_checks=checks, doctor_exit=3
+    )
+
+
+async def test_a_degraded_start_shows_capture_degraded_on_phase_and_execution(_capture_rows):
+    """Acceptance: store unreachable -> the execution completes and says why."""
+    _capture_rows(
+        await _rows_from_a_capture("host-uuid-1", _degraded("store_reachable"), exit_code=1)
+    )
+
+    response = await _capture_response(
+        [
+            _phase("phase-1", "completed", session_id="host-uuid-1"),
+            _phase("phase-2", "completed", session_id="host-uuid-2"),
+        ]
+    )
+
+    by_phase = {p.phase_id: p.capture_status_display for p in response.phases}
+    assert by_phase == {
+        "phase-1": "Capture degraded: store_reachable failed",
+        "phase-2": None,
+    }
+    assert response.capture_status_display == "Capture degraded: store_reachable failed"
+
+
+async def test_a_ready_start_shows_nothing_new(_capture_rows):
+    """Acceptance: a healthy store adds nothing, even when the exporter failed."""
+    from syn_adapters.workspace_backends.agentic.capability_start import StartCapability
+
+    ready = StartCapability(capability="session-store", status="ready")
+    _capture_rows(await _rows_from_a_capture("host-uuid-1", ready, exit_code=1))
+
+    response = await _capture_response([_phase("phase-1", "completed", session_id="host-uuid-1")])
+
+    assert response.phases[0].capture_status_display is None
+    assert response.capture_status_display is None
+
+
+async def test_no_capture_rows_shows_nothing(_capture_rows):
+    """Acceptance: no session store configured records no row, and shows nothing."""
+    _capture_rows([])
+
+    response = await _capture_response([_phase("phase-1", "completed", session_id="host-uuid-1")])
+
+    assert response.phases[0].capture_status_display is None
+    assert response.capture_status_display is None
+
+
+async def test_distinct_degraded_phases_both_show_on_the_execution(_capture_rows):
+    rows = await _rows_from_a_capture("host-uuid-1", _degraded("store_reachable"), exit_code=1)
+    rows += await _rows_from_a_capture("host-uuid-2", _degraded("auth_accepted"), exit_code=1)
+    rows += await _rows_from_a_capture("host-uuid-3", _degraded("store_reachable"), exit_code=1)
+    _capture_rows(rows)
+
+    response = await _capture_response(
+        [_phase(f"phase-{i}", "completed", session_id=f"host-uuid-{i}") for i in (1, 2, 3)]
+    )
+
+    assert response.capture_status_display == (
+        "Capture degraded: store_reachable failed; Capture degraded: auth_accepted failed"
+    )

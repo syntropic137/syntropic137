@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py
+index eae868fed..d05fd68ea 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py
+@@ -190,7 +190,7 @@ def explain_degraded_start(
+     left alone: the host-side exporter's evidence of a stored session outranks
+     a start-time prediction that there would be none.
+     """
+-    if start is None or not start.degraded or outcome.state is CaptureState.CAPTURED:
++    if True:
+         return outcome
+     checks = ", ".join(start.failed_checks) or "unspecified checks"
+     return outcome.model_copy(

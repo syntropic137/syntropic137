@@ -298,7 +298,9 @@ _DEGRADED = StartCapability(
 )
 
 
-def _service_with(start: _Start, writer: _Writer, url: str | None = _STORE) -> SessionCaptureService:
+def _service_with(
+    start: _Start, writer: _Writer, url: str | None = _STORE
+) -> SessionCaptureService:
     return SessionCaptureService(
         SessionStoreSettings(url=url), "dev", writer, capability_reader=start
     )

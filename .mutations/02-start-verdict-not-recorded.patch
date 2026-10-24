@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py
+index eae868fed..bb5d3c411 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py
+@@ -153,7 +153,7 @@ class SessionCaptureService:
+             execution_id=execution_id,
+             phase_id=phase_id,
+             workspace_id=workspace_id,
+-            start_capability=start,
++            start_capability=None,
+         )
+ 
+         if outcome.needs_backfill:

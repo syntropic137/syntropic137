@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/executions/phase_mapping.py b/apps/syn-api/src/syn_api/routes/executions/phase_mapping.py
+index 336815b6d..0a42a2054 100644
+--- a/apps/syn-api/src/syn_api/routes/executions/phase_mapping.py
++++ b/apps/syn-api/src/syn_api/routes/executions/phase_mapping.py
+@@ -447,7 +447,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
+         # #1176). `or []` here would erase the not-reported/confirmed-none
+         # distinction the field exists to carry.
+         agent_session_ids=phase.agent_session_ids,
+-        capture_status_display=phase.capture_status_display,
++        capture_status_display=None,
+         # Forwarded whole, None included: null is "not recorded" (#1454).
+         pinned_at_start=phase.pinned_at_start,
+         start_pins_status=phase.start_pins_status,

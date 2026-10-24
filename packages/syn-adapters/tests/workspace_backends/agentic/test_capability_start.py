@@ -118,7 +118,9 @@ async def test_another_containers_row_is_not_this_workspaces_verdict() -> None:
     "container",
     [
         _Container("", exit_code=2),
-        _Container(f'{_HOST}\n{{"record":"capability_status","capability":"session-store","host":"{_HOST}"}}\n'),
+        _Container(
+            f'{_HOST}\n{{"record":"capability_status","capability":"session-store","host":"{_HOST}"}}\n'
+        ),
         _Container("", raises=RuntimeError("docker exec failed")),
     ],
     ids=["read-exits-non-zero", "malformed-row", "exec-raises"],
