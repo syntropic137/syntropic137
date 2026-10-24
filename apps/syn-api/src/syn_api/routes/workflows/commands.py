@@ -631,8 +631,6 @@ class _YamlCreateOutcome(BaseModel):
     requires_repos: bool
     changed: bool = True
     """False when the package was already installed byte-identical (#822)."""
-    warnings: tuple[str, ...] = ()
-    """Notices for the author, reported whether or not anything changed."""
 
 
 async def create_workflow_from_yaml(
@@ -826,5 +824,7 @@ async def create_workflow_from_yaml_endpoint(
         repository_url=outcome.repository_url,
         requires_repos=outcome.requires_repos,
         status="created" if outcome.changed else "unchanged",
-        warnings=list(outcome.warnings),
+        # Install produces no notices today; the field stays for API
+        # compatibility (#2100).
+        warnings=[],
     )
