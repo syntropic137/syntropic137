@@ -181,6 +181,13 @@ ENV_AGENTIC_SESSION_STORE_TAGS = "AGENTIC_SESSION_STORE_TAGS"
 #: the store as ``origin.deployment: null`` while everything else looks healthy.
 ENV_AGENTIC_SESSION_STORE_DEPLOYMENT = "AGENTIC_SESSION_STORE_DEPLOYMENT"
 
+#: Restores the session store's hard fail: with it set, an unreachable store
+#: fails the workspace instead of degrading it (agentic-workspace #27). Never
+#: emitted by syn137 - capture is fail-open by policy - and reserved so a
+#: caller's ``extra_environment`` cannot force a hard fail on its own
+#: workspace (#1516).
+ENV_AGENTIC_SESSION_STORE_REQUIRED = "AGENTIC_SESSION_STORE_REQUIRED"
+
 #: Every variable in the session-store contract. Used by the workspace adapter
 #: to emit the block and by tests to assert the "not configured" path leaks none
 #: of them. Keep in sync with the constants above.
@@ -196,6 +203,12 @@ SESSION_STORE_CONTRACT_ENV_VARS: frozenset[str] = frozenset(
     }
 )
 
+#: Every name a CALLER may not set: the contract syn137 emits, plus the names
+#: it deliberately never emits but that would change the capability's policy.
+SESSION_STORE_RESERVED_ENV_VARS: frozenset[str] = SESSION_STORE_CONTRACT_ENV_VARS | {
+    ENV_AGENTIC_SESSION_STORE_REQUIRED
+}
+
 __all__ = [
     "ENV_AGENTIC_ATTEMPT_ID",
     "ENV_AGENTIC_INVOCATION_ID",
@@ -203,6 +216,7 @@ __all__ = [
     "ENV_AGENTIC_SESSION_STORE_DEPLOYMENT",
     "ENV_AGENTIC_SESSION_STORE_PARTITION",
     "ENV_AGENTIC_SESSION_STORE_PROVIDER",
+    "ENV_AGENTIC_SESSION_STORE_REQUIRED",
     "ENV_AGENTIC_SESSION_STORE_SPOOL",
     "ENV_AGENTIC_SESSION_STORE_TAGS",
     "ENV_AGENTIC_SESSION_STORE_URL",
@@ -239,4 +253,5 @@ __all__ = [
     "ENV_SYN_WORKSPACE_DOCKER_IMAGE",
     "ENV_SYN_WORKSPACE_HOST_DIR",
     "SESSION_STORE_CONTRACT_ENV_VARS",
+    "SESSION_STORE_RESERVED_ENV_VARS",
 ]
