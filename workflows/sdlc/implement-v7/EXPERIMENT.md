@@ -207,6 +207,33 @@ Sample at 2026-10-23T20:38:40Z:
 A task whose premise phase refutes it in both arms is excluded as a pair and
 not replaced: the premise phase is part of what is measured.
 
+### Amendment 2 (2026-10-24, after pair 3, before pair 4)
+
+Pair 3's second arm (v4-precheck, `exec-27d6a784bd47`) did not start fresh.
+It found the first arm's branch `fix/1511-pit-stop-compose-drift` and PR #2088,
+pushed two commits on top of v7's six, and certified the combined head. The
+arms were not independent, so pair 3 is excluded. Both arms derive the branch
+name from the issue, and nothing in the brief says the other arm's work is off
+limits.
+
+From pair 4 on, each brief ends with this added paragraph. Only the branch name
+differs between the arms:
+
+> This run is one arm of a paired experiment. Work only on a new branch named
+> `ab/pair<N>-<arm>` created from `origin/main`, and open your own draft PR from
+> it. Do not read, check out, push to, or comment on any other branch or PR for
+> this issue, even if one exists.
+
+A run that touches the other arm's branch or PR anyway is a protocol failure,
+and its pair is excluded.
+
+Results so far:
+- pair 1 excluded: both arms found #1431 already fixed by #1538;
+- pair 2 excluded: both arms refused correctly, since #1509 needs live
+  operator evidence;
+- pair 3 excluded: contaminated, as above;
+- 6 runs, $21.31.
+
 ### Mechanism check (before any metric is read)
 
 For each treatment run: did each review write a `Capability gaps:` line, did
