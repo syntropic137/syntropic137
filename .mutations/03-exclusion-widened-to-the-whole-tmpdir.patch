@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
+index 8e04e390e..85b89c2a0 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
+@@ -75,7 +75,7 @@ PYTEST_TEMP_PREFIX = "pytest-of-"
+ 
+ def _is_pytest_temp(directory: Path, dirpath: Path) -> bool:
+     """Whether ``dirpath`` is inside a pytest temp tree below ``directory``."""
+-    return any(part.startswith(PYTEST_TEMP_PREFIX) for part in dirpath.relative_to(directory).parts)
++    return any(part == ".tmp" for part in dirpath.relative_to(directory).parts)
+ 
+ 
+ def _raise(error: OSError) -> NoReturn:

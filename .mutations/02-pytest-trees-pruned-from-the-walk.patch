@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
+index 8e04e390e..d24516cdd 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/stale_dirs.py
+@@ -304,6 +304,7 @@ def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
+     try:
+         for dirpath, dirnames, filenames in os.walk(directory, onerror=_raise):
+             here = Path(dirpath)
++            dirnames[:] = [d for d in dirnames if not d.startswith(PYTEST_TEMP_PREFIX)]
+             if (
+                 SESSION_STORE_DIRNAME in dirnames or SESSION_STORE_DIRNAME in filenames
+             ) and not _is_pytest_temp(directory, here):
