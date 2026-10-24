@@ -181,6 +181,13 @@ ENV_AGENTIC_SESSION_STORE_TAGS = "AGENTIC_SESSION_STORE_TAGS"
 #: the store as ``origin.deployment: null`` while everything else looks healthy.
 ENV_AGENTIC_SESSION_STORE_DEPLOYMENT = "AGENTIC_SESSION_STORE_DEPLOYMENT"
 
+#: ``1`` restores the hard fail on an unreachable store: the workspace exits
+#: before the agent runs instead of starting with capture degraded. Reserved and
+#: never emitted (#1516). Capture is fail-open by platform policy, so a caller's
+#: ``extra_environment`` must not be able to turn a store outage back into a
+#: failed workspace (#1276) for its own run.
+ENV_AGENTIC_SESSION_STORE_REQUIRED = "AGENTIC_SESSION_STORE_REQUIRED"
+
 #: Every variable in the session-store contract. Used by the workspace adapter
 #: to emit the block and by tests to assert the "not configured" path leaks none
 #: of them. Keep in sync with the constants above.
@@ -193,6 +200,7 @@ SESSION_STORE_CONTRACT_ENV_VARS: frozenset[str] = frozenset(
         ENV_AGENTIC_SESSION_STORE_PARTITION,
         ENV_AGENTIC_SESSION_STORE_TAGS,
         ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
+        ENV_AGENTIC_SESSION_STORE_REQUIRED,
     }
 )
 
@@ -203,6 +211,7 @@ __all__ = [
     "ENV_AGENTIC_SESSION_STORE_DEPLOYMENT",
     "ENV_AGENTIC_SESSION_STORE_PARTITION",
     "ENV_AGENTIC_SESSION_STORE_PROVIDER",
+    "ENV_AGENTIC_SESSION_STORE_REQUIRED",
     "ENV_AGENTIC_SESSION_STORE_SPOOL",
     "ENV_AGENTIC_SESSION_STORE_TAGS",
     "ENV_AGENTIC_SESSION_STORE_URL",

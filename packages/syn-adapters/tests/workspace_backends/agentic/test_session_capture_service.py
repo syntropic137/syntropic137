@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -17,7 +18,6 @@ from syn_adapters.workspace_backends.agentic.capability_start import StartCapabi
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     read_capture_status_display,
 )
-from syn_adapters.workspace_backends.agentic.capture_result import AuthoritativeCapture
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_capture_service import (
     SessionCaptureService,
@@ -26,6 +26,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     ExecutionResult,
 )
 from syn_shared.settings.session_store import SessionStoreSettings
+
+if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.agentic.capture_result import AuthoritativeCapture
 
 _STORE = "http://store:8799"
 

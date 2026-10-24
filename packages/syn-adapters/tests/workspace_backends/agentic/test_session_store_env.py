@@ -38,6 +38,7 @@ from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
     ENV_AGENTIC_SESSION_STORE_PARTITION,
     ENV_AGENTIC_SESSION_STORE_PROVIDER,
+    ENV_AGENTIC_SESSION_STORE_REQUIRED,
     ENV_AGENTIC_SESSION_STORE_SPOOL,
     ENV_AGENTIC_SESSION_STORE_TAGS,
     ENV_AGENTIC_SESSION_STORE_URL,
@@ -133,9 +134,11 @@ class TestEnabled:
         assert set(env) <= set(SESSION_STORE_CONTRACT_ENV_VARS)
         # AUTH is reserved too, but it is a credential: it travels as a
         # binding (see test_auth_is_a_binding_the_resolver_fills), never here.
+        # REQUIRED is reserved and never emitted: capture stays fail-open (#1516).
         assert set(env) == set(SESSION_STORE_CONTRACT_ENV_VARS) - {
             ENV_AGENTIC_SESSION_STORE_DEPLOYMENT,
             ENV_AGENTIC_SESSION_STORE_AUTH,
+            ENV_AGENTIC_SESSION_STORE_REQUIRED,
         }
 
     def test_the_deployment_variable_appears_when_supplied(self) -> None:
@@ -145,7 +148,10 @@ class TestEnabled:
             workspace_id="ws-xyz",
             deployment="syntropic137__development",
         )
-        assert set(env) == set(SESSION_STORE_CONTRACT_ENV_VARS) - {ENV_AGENTIC_SESSION_STORE_AUTH}
+        assert set(env) == set(SESSION_STORE_CONTRACT_ENV_VARS) - {
+            ENV_AGENTIC_SESSION_STORE_AUTH,
+            ENV_AGENTIC_SESSION_STORE_REQUIRED,
+        }
 
     def test_provider_url_spool_values(self) -> None:
         env = build_session_store_env(
@@ -582,6 +588,16 @@ class TestReservedKeys:
         rendered = "\n".join(f"{k}={v}" for k, v in env.items())
         for marker in ("attacker", "someone-elses", "not-syn137"):
             assert marker not in rendered
+
+    @pytest.mark.asyncio
+    async def test_a_caller_cannot_make_an_unreachable_store_fail_the_workspace(self) -> None:
+        """``REQUIRED=1`` would turn the degrade path back into #1276's outage (#1516)."""
+        caller_env = {"EXISTING_VAR": "kept", ENV_AGENTIC_SESSION_STORE_REQUIRED: "1"}
+        provider = await _create(_enabled_settings(), caller_env)
+        env = provider.create.await_args.args[0].environment
+
+        assert ENV_AGENTIC_SESSION_STORE_REQUIRED not in env
+        assert env["EXISTING_VAR"] == "kept"
 
     def test_stripping_is_logged_by_name_without_values(
         self, caplog: pytest.LogCaptureFixture
