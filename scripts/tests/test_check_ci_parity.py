@@ -347,7 +347,9 @@ def test_real_dispatch_only_workflows_are_clean() -> None:
 # --- bare python in run steps (#1242) ----------------------------------------
 
 
-def _repo_with(tmp_path: Path, workflow_text: str, action_text: str | None = None) -> Path:
+def _repo_with(
+    tmp_path: Path, workflow_text: str, action_text: str | None = None, python_version: bool = True
+) -> Path:
     """A repo root holding one workflow, and optionally one composite action."""
     workflows = tmp_path / ".github" / "workflows"
     workflows.mkdir(parents=True)
@@ -356,6 +358,8 @@ def _repo_with(tmp_path: Path, workflow_text: str, action_text: str | None = Non
         action = tmp_path / ".github" / "actions" / "py-env"
         action.mkdir(parents=True)
         (action / "action.yml").write_text(action_text)
+    if python_version:
+        (tmp_path / ".python-version").write_text("3.12\n")
     return workflows
 
 
@@ -368,91 +372,176 @@ def _job(*steps: str) -> str:
 
 _CHECKOUT = "uses: actions/checkout@v4"
 _PINNED = 'uses: actions/setup-python@v5\n        with:\n          python-version: "3.12"'
+_PIN_ACTION = (
+    "runs:\n  using: composite\n  steps:\n    - uses: actions/setup-python@v5\n"
+    '      with:\n        python-version: "3.12"\n'
+)
 
 
 @pytest.mark.parametrize(
-    "run",
+    "script",
     [
         "python3 scripts/x.py",
         "python scripts/x.py",
         "python3.12 scripts/x.py",
+        "/usr/bin/python3 x.py",
+        "sudo python3 x.py",
+        "env X=1 python3 x.py",
+        "env -i python3 x.py",
+        "exec python3 x.py",
+        "X=1 python3 x.py",
+        "if python3 x.py; then :; fi",
+        "python3; echo ok",
+        "python3<<EOF\nprint(1)\nEOF",
         'V=$(python3 -c "print(1)")',
+        'echo "$(python3 -c 1)"',
+        "echo `python3 -c 1`",
         "cat f | python3 -c 'import sys'",
+        "cmd 2>&1 | python3 -c 1",
         "true && python3 x.py",
-        "true; python x.py",
-        "|\n          echo start\n          python3 x.py",
+        "python3 > out.txt",
+        "echo start\npython3 x.py",
+        "f() { python3 y; }",
     ],
 )
-def test_a_bare_python_in_an_unpinned_job_fails(tmp_path: Path, run: str) -> None:
-    from scripts.check_ci_parity import bare_python_problems
+def test_every_spelling_of_a_bare_python_is_found(script: str) -> None:
+    from scripts.check_ci_parity import bare_python_commands
 
-    workflows = _repo_with(tmp_path, _job(_CHECKOUT, f"run: {run}"))
-
-    problems = bare_python_problems(workflows)
-
-    assert len(problems) == 1 and "release.yml job 'build'" in problems[0], problems
+    assert bare_python_commands(script), script
 
 
 @pytest.mark.parametrize(
-    "run",
+    "script",
     [
         "uv run python scripts/x.py",
         "uv run --no-project python scripts/x.py",
         'V=$(uv run --no-project python -c "print(1)")',
+        'echo "example; python3 x.py"',
+        "# python3 x.py\necho hi",
+        "echo hi # ; python3 x.py",
+        "# don't run python3 here\necho hi",
+        "cat <<EOF\npython3 x.py\nEOF",
         "echo python is not run here",
         "./mypython3 x.py",
         "pythonic-tool --help",
+        "echo a > python3",
+        'echo "\\`x\\`"',
+        "echo ${#list}",
     ],
 )
-def test_python_that_is_not_a_bare_command_passes(tmp_path: Path, run: str) -> None:
+def test_python_that_is_not_run_as_a_command_is_not_found(script: str) -> None:
+    from scripts.check_ci_parity import bare_python_commands
+
+    assert bare_python_commands(script) == [], script
+
+
+def test_a_bare_python_fails_in_a_workflow_with_no_pin(tmp_path: Path) -> None:
     from scripts.check_ci_parity import bare_python_problems
 
-    workflows = _repo_with(tmp_path, _job(_CHECKOUT, f"run: {run}"))
+    problems = bare_python_problems(_repo_with(tmp_path, _job(_CHECKOUT, "run: python3 x.py")))
 
-    assert bare_python_problems(workflows) == []
+    assert len(problems) == 1 and "release.yml job 'build'" in problems[0], problems
 
 
-def test_a_job_pinned_with_setup_python_may_call_python(tmp_path: Path) -> None:
+def test_a_pin_counts_only_for_the_steps_after_it(tmp_path: Path) -> None:
     from scripts.check_ci_parity import bare_python_problems
 
-    workflows = _repo_with(tmp_path, _job(_CHECKOUT, _PINNED, "run: python -I scripts/x.py"))
+    before = _repo_with(tmp_path / "a", _job("run: python before.py", _PINNED))
+    after = _repo_with(tmp_path / "b", _job(_PINNED, "run: python -I after.py"))
 
-    assert bare_python_problems(workflows) == []
+    assert len(bare_python_problems(before)) == 1
+    assert bare_python_problems(after) == []
 
 
-def test_setup_python_without_a_version_is_not_a_pin(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "setup",
+    [
+        'uses: actions/setup-python@v5\n        if: false\n        with:\n          python-version: "3.12"',
+        'uses: actions/setup-python@v5\n        with:\n          python-version: "3.12"\n          update-environment: false',
+    ],
+)
+def test_a_setup_python_that_may_not_reach_path_is_not_a_pin(tmp_path: Path, setup: str) -> None:
     from scripts.check_ci_parity import bare_python_problems
 
-    workflows = _repo_with(
-        tmp_path, _job(_CHECKOUT, "uses: actions/setup-python@v5", "run: python x.py")
-    )
+    workflows = _repo_with(tmp_path, _job(setup, "run: python x.py"))
 
     assert len(bare_python_problems(workflows)) == 1
 
 
-@pytest.mark.parametrize("prefix", ["./", "./trusted/"])
-def test_a_pin_inside_a_local_composite_action_counts(tmp_path: Path, prefix: str) -> None:
+def test_setup_python_with_a_version_file_pins(tmp_path: Path) -> None:
     from scripts.check_ci_parity import bare_python_problems
 
-    action = 'runs:\n  using: composite\n  steps:\n    - uses: actions/setup-python@v5\n      with:\n        python-version: "3.12"\n'
+    setup = "uses: actions/setup-python@v5\n        with:\n          python-version-file: .python-version"
+    workflows = _repo_with(tmp_path, _job(setup, "run: python x.py"), python_version=False)
+
+    assert bare_python_problems(workflows) == []
+
+
+def test_setup_python_with_no_version_pins_only_through_dot_python_version(tmp_path: Path) -> None:
+    """With no version input, setup-python reads .python-version."""
+    from scripts.check_ci_parity import bare_python_problems
+
+    job = _job("uses: actions/setup-python@v5", "run: python x.py")
+
+    assert bare_python_problems(_repo_with(tmp_path / "a", job)) == []
+    assert len(bare_python_problems(_repo_with(tmp_path / "b", job, python_version=False))) == 1
+
+
+def test_a_pin_inside_a_local_composite_action_counts(tmp_path: Path) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
     workflows = _repo_with(
         tmp_path,
-        _job(_CHECKOUT, f"uses: {prefix}.github/actions/py-env", "run: python -I x.py"),
-        action,
+        _job(_CHECKOUT, "uses: ./.github/actions/py-env", "run: python -I x.py"),
+        _PIN_ACTION,
     )
 
     assert bare_python_problems(workflows) == []
 
 
-def test_a_composite_action_without_a_pin_does_not_count(tmp_path: Path) -> None:
+def test_a_composite_under_a_second_checkout_is_read_only_if_it_is_this_repo(
+    tmp_path: Path,
+) -> None:
     from scripts.check_ci_parity import bare_python_problems
 
-    action = "runs:\n  using: composite\n  steps:\n    - run: echo hi\n      shell: bash\n"
-    workflows = _repo_with(
-        tmp_path, _job(_CHECKOUT, "uses: ./.github/actions/py-env", "run: python x.py"), action
-    )
+    def job(checkout: str) -> str:
+        return _job(checkout, "uses: ./trusted/.github/actions/py-env", "run: python -I x.py")
+
+    same = "uses: actions/checkout@v4\n        with:\n          path: trusted"
+    other = "uses: actions/checkout@v4\n        with:\n          path: trusted\n          repository: other/repo"
+
+    assert bare_python_problems(_repo_with(tmp_path / "a", job(same), _PIN_ACTION)) == []
+    assert len(bare_python_problems(_repo_with(tmp_path / "b", job(other), _PIN_ACTION))) == 1
+    assert len(bare_python_problems(_repo_with(tmp_path / "c", job(_CHECKOUT), _PIN_ACTION))) == 1
+
+
+def test_a_composite_actions_own_run_steps_are_scanned(tmp_path: Path) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
+    action = "runs:\n  using: composite\n  steps:\n    - run: python3 inner.py\n      shell: bash\n"
+    workflows = _repo_with(tmp_path, _job(_CHECKOUT, "uses: ./.github/actions/py-env"), action)
+
+    problems = bare_python_problems(workflows)
+
+    assert len(problems) == 1 and "./.github/actions/py-env" in problems[0], problems
+
+
+def test_a_remote_action_pins_nothing(tmp_path: Path) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
+    workflows = _repo_with(tmp_path, _job("uses: someone/setup-python-env@v1", "run: python x.py"))
 
     assert len(bare_python_problems(workflows)) == 1
+
+
+def test_a_run_script_that_does_not_parse_fails_closed(tmp_path: Path) -> None:
+    from scripts.check_ci_parity import bare_python_problems
+
+    workflows = _repo_with(tmp_path, _job('run: echo "unterminated'))
+
+    problems = bare_python_problems(workflows)
+
+    assert len(problems) == 1 and "cannot parse" in problems[0], problems
 
 
 def test_main_exits_1_on_a_bare_python(
