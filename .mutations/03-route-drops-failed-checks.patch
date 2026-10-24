@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/routes/capture.py b/apps/syn-api/src/syn_api/routes/capture.py
+index dcd4a58a6..27109fc59 100644
+--- a/apps/syn-api/src/syn_api/routes/capture.py
++++ b/apps/syn-api/src/syn_api/routes/capture.py
+@@ -236,7 +236,6 @@ def _to_entry(event: Mapping[str, object]) -> CaptureStatusEntry | None:
+         origin_deployment=_text(payload.get("origin_deployment")),
+         agent_session_ids=read_agent_session_ids(payload),
+         capability_status=_capability_status_of(payload),
+-        failed_checks=failed_checks,
+         doctor_exit=_doctor_exit_of(payload),
+         capture_status_display=capture_status_display(state, failed_checks),
+     )

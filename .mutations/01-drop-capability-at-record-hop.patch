@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py
+index 2286f7619..d2addd214 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/session_capture_service.py
+@@ -150,7 +150,6 @@ class SessionCaptureService:
+             # retry can find the transcripts by the identity that produced
+             # them rather than by reconstructing one.
+             partition=build_partition(execution_id, workspace_id),
+-            capability=capability,
+             execution_id=execution_id,
+             phase_id=phase_id,
+             workspace_id=workspace_id,

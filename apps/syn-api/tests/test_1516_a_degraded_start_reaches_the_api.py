@@ -72,13 +72,15 @@ def _status_row(status: str, failed_checks: list[str], doctor_exit: int) -> str:
     )
 
 
-def _container(*, status_row: str | None, exporter_stdout: str):
+def _container(*, status_row: str | None, exporter_stdout: str, read_breaks: bool = False):
     """A running workspace: answers the status read and the exporter."""
 
     async def _exec(
         command: list[str], *, timeout_seconds: int, environment=None
     ) -> ExecutionResult:
         if command[:2] == ["sh", "-c"] and "capability_status" in command[2]:
+            if read_breaks:
+                raise TimeoutError("docker exec timed out")
             rows = f"{status_row}\n" if status_row else ""
             stdout = f"{_HOST}\n{rows}"
         else:
@@ -131,11 +133,12 @@ async def _run(
     status_row: str | None,
     exporter_stdout: str,
     url: str | None = _STORE,
+    read_breaks: bool = False,
 ):
     recorder = _Recorder()
     service = SessionCaptureService(SessionStoreSettings(url=url), "dev", recorder)
     await service.capture_and_record(
-        _container(status_row=status_row, exporter_stdout=exporter_stdout),
+        _container(status_row=status_row, exporter_stdout=exporter_stdout, read_breaks=read_breaks),
         session_id="s-1",
         execution_id="e-1",
         workspace_id="w-1",
@@ -215,6 +218,19 @@ class TestNothingNewOtherwise:
                 '"doctor_exit":3', '"doctor_exit":-1'
             ),
             exporter_stdout=_CLEAN,
+        )
+
+        [entry] = response.entries
+        assert entry.state == "captured"
+        assert entry.capability_status is None
+
+    @pytest.mark.asyncio
+    async def test_a_broken_status_read_still_records_the_capture(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fail-open: the exec breaking is unknown, not a lost capture verdict."""
+        response = await _run(
+            monkeypatch, status_row=None, exporter_stdout=_CLEAN, read_breaks=True
         )
 
         [entry] = response.entries

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/capability_verdict.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/capability_verdict.py
+index d5e2ebd74..b3e265f6a 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/capability_verdict.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/capability_verdict.py
+@@ -86,7 +86,7 @@ class AgenticCapabilityStatusReader:
+             # would misreport a workspace whose capture may well be working.
+             logger.warning("could not read %s capability status: %s", capability, exc)
+             return None
+-        except Exception:
++        except ZeroDivisionError:
+             # An exec that broke (timeout, a container gone mid-read) is the
+             # same unknown. Exception, not BaseException: cancellation must
+             # keep propagating, or a shutdown hangs on a telemetry read.
