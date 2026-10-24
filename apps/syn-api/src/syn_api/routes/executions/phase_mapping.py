@@ -208,6 +208,23 @@ def execution_capture_display(phase_displays: list[str | None]) -> str | None:
     return "; ".join(distinct) if distinct else None
 
 
+#: A phase nobody reported on. Both fields None: "not reported", never "none".
+_NOT_REPORTED = PhaseCapture(agent_session_ids=None, capture_status_display=None)
+
+
+def _phase_capture(
+    captures: Mapping[str, PhaseCapture] | None, session_id: str | None
+) -> PhaseCapture:
+    """This phase's capture row, or ``_NOT_REPORTED``.
+
+    `.get` on purpose: a phase with no capture row is "not reported", which is
+    None - never [], which would claim a confirmed empty sweep.
+    """
+    if captures is None or not session_id:
+        return _NOT_REPORTED
+    return captures.get(session_id, _NOT_REPORTED)
+
+
 async def _load_phase_captures(execution_id: str) -> dict[str, PhaseCapture] | None:
     """What capture reported for each of this execution's phases.
 
@@ -288,11 +305,7 @@ async def _map_phase_detail(
     # see", not "it did nothing" - the same statement an unreachable query
     # makes, and it must not arrive as an idle phase either.
     ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else None
-    capture = (
-        agent_sessions.get(phase.session_id)
-        if agent_sessions is not None and phase.session_id
-        else None
-    )
+    capture = _phase_capture(agent_sessions, phase.session_id)
 
     sc = await _phase_cost(manager, phase, configured_models)
 
@@ -333,10 +346,8 @@ async def _map_phase_detail(
         requested_model=_requested_model(phase, sc.requested_model),
         agent_provider=phase.agent_provider,
         cost_by_model=sc.cost_by_model,
-        # `.get` on purpose: a phase with no capture row is "not reported",
-        # which is None - never [], which would claim a confirmed empty sweep.
-        agent_session_ids=capture.agent_session_ids if capture is not None else None,
-        capture_status_display=capture.capture_status_display if capture is not None else None,
+        agent_session_ids=capture.agent_session_ids,
+        capture_status_display=capture.capture_status_display,
         # None stays None for the same reason it does above: it means nothing
         # read this phase's workspace, which is not the same statement as an
         # empty list's "read it, and no branch had moved" (#1200).
