@@ -271,6 +271,9 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     # `event_store` is the same recorder the rest of Lane 2 writes through, so
     # the capture indicator lands beside the telemetry it explains rather than
     # in a store of its own.
+    from syn_adapters.workspace_backends.agentic.capability_start import (
+        AgenticCapabilityStatusReader,
+    )
     from syn_adapters.workspace_backends.agentic.session_capture_service import (
         SessionCaptureService,
     )
@@ -285,6 +288,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         _settings.session_store,
         _settings.app_environment,
         event_store,
+        capability_reader=AgenticCapabilityStatusReader(),
     )
 
     return WorkflowExecutionProcessor(

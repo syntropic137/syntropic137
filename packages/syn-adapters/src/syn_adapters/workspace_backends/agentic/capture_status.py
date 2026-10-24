@@ -52,6 +52,15 @@ class CaptureState(StrEnum):
     worth retrying and the state a backfill should target.
     """
 
+    DEGRADED = "degraded"
+    """The workspace STARTED with capture disabled (#1516).
+
+    The session-store doctor failed before the agent ran and the capability's
+    policy is to degrade rather than fail the workspace, so nothing was
+    captured by design. Distinct from FAILED: the loss is explained by the
+    start verdict, not by the exporter, and the failed checks say why.
+    """
+
     UNKNOWN = "unknown"
     """The verdict cannot be trusted either way.
 

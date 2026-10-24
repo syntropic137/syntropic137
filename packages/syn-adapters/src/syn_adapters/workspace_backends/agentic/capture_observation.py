@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from syn_adapters.workspace_backends.agentic.capability_start import StartCapability
 from syn_adapters.workspace_backends.agentic.capture_result import CaptureExpectations
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_store_env import deployment_identity
@@ -42,6 +43,7 @@ __all__ = [
     "ObservationWriter",
     "build_expectations",
     "read_agent_session_ids",
+    "read_capture_status_display",
     "record_capture_outcome",
 ]
 
@@ -74,7 +76,7 @@ _PAYLOAD_SCHEMA_VERSION: Final = 2
 #: of silent widening that coupling this gate to the exporter's constant caused.
 #: When the payload version moves, this set is edited deliberately, or not
 #: at all.
-SUPPORTED_OBSERVATION_SCHEMA_VERSIONS: Final = frozenset({1, 2})
+SUPPORTED_OBSERVATION_SCHEMA_VERSIONS: Final = frozenset({1, 2, 3})
 
 #: Telemetry gets a short, bounded slice of teardown. The write is already
 #: failure-tolerant, but a hung connection pool would otherwise block a phase
@@ -148,6 +150,48 @@ class CaptureObservationData(BaseModel):
     container-local today, so a post-teardown backfill cannot reach it: this
     field records the identity a durable archive will need, and does not by
     itself make backfill possible."""
+
+    start_capability: StartCapability | None = None
+    """What the workspace's entrypoint decided about the session store BEFORE
+    the agent ran (#1516). None means unknown: no row, or a read that failed.
+
+    Recorded beside the host-side verdict rather than folded into it, because
+    the two answer different questions: this one says capture was switched off
+    at start and which doctor checks failed; `state` says what reached the
+    store."""
+
+
+#: The observation schema that introduced `start_capability`.
+_START_CAPABILITY_SINCE: Final = 3
+
+
+def read_capture_status_display(payload: Mapping[str, object]) -> str | None:
+    """A human summary of a degraded capture, or None when there is none.
+
+    The read side of `start_capability`, beside the writer for the same reason
+    `read_agent_session_ids` is. Only a DEGRADED start produces text: a ready
+    start and an unknown one both read as nothing, so a healthy run and a run
+    with no store configured show nothing new.
+    """
+    version = payload.get("schema_version")
+    if (
+        type(version) is not int
+        or version not in SUPPORTED_OBSERVATION_SCHEMA_VERSIONS
+        or version < _START_CAPABILITY_SINCE
+    ):
+        return None
+    raw = payload.get("start_capability")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        start = StartCapability.model_validate(raw)
+    except ValueError:
+        return None
+    if not start.degraded:
+        return None
+    if not start.failed_checks:
+        return "Capture degraded"
+    return f"Capture degraded: {', '.join(start.failed_checks)} failed"
 
 
 #: The observation schema that introduced `agent_session_ids`. Below this the
@@ -272,6 +316,7 @@ async def record_capture_outcome(
     execution_id: str | None = None,
     phase_id: str | None = None,
     workspace_id: str | None = None,
+    start_capability: StartCapability | None = None,
 ) -> None:
     """Record one capture verdict. Never raises, and never blocks anything.
 
@@ -303,6 +348,7 @@ async def record_capture_outcome(
         expected_deployment=expectations.deployment if expectations else None,
         expected_sessions=expectations.expect_sessions if expectations else None,
         partition=partition,
+        start_capability=start_capability,
     )
 
     try:
@@ -310,7 +356,7 @@ async def record_capture_outcome(
             writer.record_observation(
                 session_id=session_id,
                 observation_type=SESSION_CAPTURE_OBSERVATION,
-                data=payload.model_dump(),
+                data=payload.model_dump(mode="json"),
                 execution_id=execution_id,
                 phase_id=phase_id,
                 workspace_id=workspace_id,

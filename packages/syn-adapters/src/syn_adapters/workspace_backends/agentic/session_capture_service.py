@@ -28,25 +28,30 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Protocol
 
+from syn_adapters.workspace_backends.agentic.capability_start import (
+    SESSION_STORE_CAPABILITY,
+)
 from syn_adapters.workspace_backends.agentic.capture_observation import (
     build_expectations,
     record_capture_outcome,
 )
 from syn_adapters.workspace_backends.agentic.capture_probe import probe_capture
+from syn_adapters.workspace_backends.agentic.capture_result import AuthoritativeCapture
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_store_env import build_partition
 
 if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.agentic.capability_start import (
+        CapabilityStatusReader,
+        StartCapability,
+    )
     from syn_adapters.workspace_backends.agentic.capture_observation import (
         ObservationWriter,
     )
     from syn_adapters.workspace_backends.agentic.capture_probe import WorkspaceExecutor
-    from syn_adapters.workspace_backends.agentic.capture_result import (
-        AuthoritativeCapture,
-    )
     from syn_shared.settings.session_store import SessionStoreSettings
 
-__all__ = ["SessionCapturePort", "SessionCaptureService"]
+__all__ = ["SessionCapturePort", "SessionCaptureService", "explain_degraded_start"]
 
 logger = logging.getLogger(__name__)
 
@@ -77,10 +82,13 @@ class SessionCaptureService:
         settings: SessionStoreSettings,
         app_environment: str,
         writer: ObservationWriter | None,
+        *,
+        capability_reader: CapabilityStatusReader,
     ) -> None:
         self._settings = settings
         self._app_environment = app_environment
         self._writer = writer
+        self._capability_reader = capability_reader
 
     async def capture_and_record(
         self,
@@ -119,7 +127,19 @@ class SessionCaptureService:
         expectations = build_expectations(
             self._settings, self._app_environment, expect_sessions=expect_sessions
         )
-        outcome = await probe_capture(execute, expectations=expectations)
+        # The start verdict is read here, not at workspace start: the row was
+        # written by the entrypoint before the agent ran and does not change
+        # afterwards, and this is the one hook that already holds the running
+        # container. Only asked when a store is configured, because with none
+        # there is no capability and no row (#1516).
+        start = (
+            await self._capability_reader.read(execute, SESSION_STORE_CAPABILITY)
+            if expectations is not None
+            else None
+        )
+        outcome = explain_degraded_start(
+            await probe_capture(execute, expectations=expectations), start
+        )
 
         await record_capture_outcome(
             self._writer,
@@ -133,6 +153,7 @@ class SessionCaptureService:
             execution_id=execution_id,
             phase_id=phase_id,
             workspace_id=workspace_id,
+            start_capability=start,
         )
 
         if outcome.needs_backfill:
@@ -155,3 +176,29 @@ class SessionCaptureService:
             )
 
         return outcome
+
+
+def explain_degraded_start(
+    outcome: AuthoritativeCapture, start: StartCapability | None
+) -> AuthoritativeCapture:
+    """Read a capture loss after a degraded start as DEGRADED, not unexplained.
+
+    A workspace that started with the session store disabled captures nothing
+    by design, so the probe then reports it as failed, incomplete or even
+    disabled - the last of which would not be recorded at all. Each of those
+    hides the cause the entrypoint already wrote down. A CAPTURED verdict is
+    left alone: the host-side exporter's evidence of a stored session outranks
+    a start-time prediction that there would be none.
+    """
+    if start is None or not start.degraded or outcome.state is CaptureState.CAPTURED:
+        return outcome
+    checks = ", ".join(start.failed_checks) or "unspecified checks"
+    return outcome.model_copy(
+        update={
+            "state": CaptureState.DEGRADED,
+            "reason": (
+                f"session store degraded at workspace start ({checks} failed, "
+                f"doctor exit {start.doctor_exit}); capture was disabled"
+            ),
+        }
+    )

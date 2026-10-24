@@ -60,8 +60,17 @@ def _ok_exec(stdout: str, exit_code: int = 0):
     return _exec
 
 
+class _NoStatus:
+    """No capability_status row: the pre-#1516 behaviour, kept for these tests."""
+
+    async def read(self, execute: object, capability: str) -> None:
+        return None
+
+
 def _service(writer: _Writer | None, url: str | None = _STORE) -> SessionCaptureService:
-    return SessionCaptureService(SessionStoreSettings(url=url), "dev", writer)
+    return SessionCaptureService(
+        SessionStoreSettings(url=url), "dev", writer, capability_reader=_NoStatus()
+    )
 
 
 @pytest.mark.unit
