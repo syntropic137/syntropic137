@@ -1,0 +1,12 @@
+diff --git a/scripts/check_version_literals.py b/scripts/check_version_literals.py
+index 37a1ddda7..d8143f08e 100644
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -194,6 +194,7 @@ class _Binding:
+     bases: tuple[ast.expr, ...] = ()
+ 
+     def owner(self) -> _Scope:
++        return self.scope
+         if self.name in self.scope.declared_global:
+             return self.scope.module()
+         if self.name in self.scope.declared_nonlocal and self.scope.parent is not None:

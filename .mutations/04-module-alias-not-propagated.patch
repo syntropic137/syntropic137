@@ -1,0 +1,15 @@
+diff --git a/scripts/check_version_literals.py b/scripts/check_version_literals.py
+index 37a1ddda7..7c5540d4a 100644
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -357,7 +357,9 @@ class _Resolution:
+ 
+     def binding_paths(self, binding: _Binding) -> frozenset[str]:
+         if binding.alias_of is not None:
+-            return self.paths(binding.alias_of, binding.scope)
++            return frozenset(
++                p for p in self.paths(binding.alias_of, binding.scope) if _is_constructor_path(p)
++            )
+         if any(self.is_constructor(base, binding.scope) for base in binding.bases):
+             return frozenset({f"{_FASTAPI_MODULE}.{_FASTAPI_CLASS}"})
+         return binding.paths

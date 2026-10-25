@@ -1,0 +1,13 @@
+diff --git a/scripts/check_version_literals.py b/scripts/check_version_literals.py
+index 37a1ddda7..06db50e9a 100644
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -225,7 +225,7 @@ class _ScopeBuilder:
+         self.bindings.append(binding)
+ 
+     def _shadow(self, name: str, scope: _Scope) -> None:
+-        self._bind(_Binding(name, scope))
++        return
+ 
+     def _visit_function(self, node: _FunctionLike, scope: _Scope) -> None:
+         """Defaults, annotations and decorators run in the ENCLOSING scope."""
