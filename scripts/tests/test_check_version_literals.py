@@ -73,6 +73,50 @@ FASTAPI_PLANTED: dict[str, str] = {
     "inside a function": (
         'from fastapi import FastAPI\ndef create():\n    return FastAPI(version="1")\n'
     ),
+    # #2104: module aliases and qualified module paths.
+    "module rebound by assignment": ('import fastapi\nf = fastapi\napp = f.FastAPI(version="1")\n'),
+    "module alias chain": 'import fastapi as a\nb = a\nc = b\napp = c.FastAPI(version="1")\n',
+    "qualified submodule path": (
+        'import fastapi.applications\napp = fastapi.applications.FastAPI(version="1")\n'
+    ),
+    "submodule imported as": ('import fastapi.applications as fa\napp = fa.FastAPI(version="1")\n'),
+    "submodule from package": (
+        'from fastapi import applications\napp = applications.FastAPI(version="1")\n'
+    ),
+    "subclass via qualified path": (
+        "import fastapi.applications\n"
+        "class T(fastapi.applications.FastAPI):\n    pass\n"
+        'app = T(version="1")\n'
+    ),
+    # #2104: scopes still see what they should.
+    "import in the same function": (
+        'def f():\n    from fastapi import FastAPI\n    return FastAPI(version="1")\n'
+    ),
+    "import seen by a nested function": (
+        "def f():\n    from fastapi import FastAPI\n"
+        '    def g():\n        return FastAPI(version="1")\n    return g\n'
+    ),
+    "global declared in a function": (
+        "def setup():\n    global API\n    from fastapi import FastAPI as API\n"
+        'app = API(version="1")\n'
+    ),
+    "nonlocal declared in a nested function": (
+        "def outer():\n    API = None\n    def inner():\n        nonlocal API\n"
+        "        from fastapi import FastAPI as API\n"
+        '    inner()\n    return API(version="1")\n'
+    ),
+    "rename in a class body used there": (
+        'from fastapi import FastAPI\nclass C:\n    A = FastAPI\n    app = A(version="1")\n'
+    ),
+    "inside a lambda": 'from fastapi import FastAPI\nmake = lambda: FastAPI(version="1")\n',
+    "inside a comprehension": (
+        'from fastapi import FastAPI\napps = [FastAPI(version="1") for _ in range(2)]\n'
+    ),
+    "walrus in a comprehension binds outside it": (
+        "from fastapi import FastAPI\n"
+        "def f():\n    [(A := FastAPI) for _ in [1]]\n"
+        '    return A(version="1")\n'
+    ),
 }
 
 CLEAN: dict[str, str] = {
@@ -88,6 +132,52 @@ CLEAN: dict[str, str] = {
     "FastAPI from elsewhere": 'from mylib import FastAPI\napp = FastAPI(version="1")\n',
     "attr on another module": 'import mylib\napp = mylib.FastAPI(version="1")\n',
     "annotation only": "__version__: str\n",
+    # #2104: a binding in one scope must not leak into another.
+    "import in another function": (
+        "def a():\n    from fastapi import FastAPI as API\n    return API\n"
+        'def b():\n    return API(version="1")\n'
+    ),
+    "rename in another function": (
+        "from fastapi import FastAPI\n"
+        "def a():\n    API = FastAPI\n    return API\n"
+        'app = API(version="1")\n'
+    ),
+    "parameter shadows import": (
+        'from fastapi import FastAPI\ndef f(FastAPI):\n    return FastAPI(version="1")\n'
+    ),
+    "keyword-only parameter shadows import": (
+        'from fastapi import FastAPI\ndef f(*, FastAPI):\n    return FastAPI(version="1")\n'
+    ),
+    "lambda parameter shadows import": (
+        'from fastapi import FastAPI\nmake = lambda FastAPI: FastAPI(version="1")\n'
+    ),
+    "local assignment shadows import": (
+        "from fastapi import FastAPI\n"
+        'def f():\n    FastAPI = Other\n    return FastAPI(version="1")\n'
+    ),
+    "local import from elsewhere shadows module": (
+        "import fastapi\n"
+        'def f():\n    import mylib as fastapi\n    return fastapi.FastAPI(version="1")\n'
+    ),
+    "parameter shadows module": (
+        'import fastapi\ndef f(fastapi):\n    return fastapi.FastAPI(version="1")\n'
+    ),
+    "for target shadows import": (
+        "from fastapi import FastAPI\n"
+        'def f(makers):\n    for FastAPI in makers:\n        FastAPI(version="1")\n'
+    ),
+    "comprehension target shadows import": (
+        'from fastapi import FastAPI\napps = [FastAPI(version="1") for FastAPI in makers]\n'
+    ),
+    "class body is invisible to its methods": (
+        "from fastapi import FastAPI\n"
+        "class C:\n    A = FastAPI\n"
+        '    def m(self):\n        return A(version="1")\n'
+    ),
+    "attribute past the class is not a constructor": (
+        'import fastapi\napp = fastapi.FastAPI.FastAPI(version="1")\n'
+    ),
+    "relative import named fastapi": ('from .fastapi import FastAPI\napp = FastAPI(version="1")\n'),
 }
 
 

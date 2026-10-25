@@ -12,10 +12,17 @@ reported version is not evidence of what is running (#1380). Two shapes count:
 
 FASTAPI IS RESOLVED, NOT SPELLED. A callee counts when it reaches
 ``fastapi.FastAPI`` through the module's own bindings: ``from fastapi import
-FastAPI as API``, ``import fastapi as f`` then ``f.FastAPI``, a rename by
-assignment (``API = FastAPI``, chains included) and a subclass
+FastAPI as API``, ``import fastapi as f`` then ``f.FastAPI``, a module alias
+(``f = fastapi``), a qualified path (``fastapi.applications.FastAPI``), a
+rename by assignment (``API = FastAPI``, chains included) and a subclass
 (``class Timed(FastAPI)``). A name that merely ends in ``FastAPI`` and binds to
-nothing of the kind does not count. Matching the spelling instead would let a
+nothing of the kind does not count.
+
+NAMES ARE RESOLVED PER LEXICAL SCOPE (#2104): module, function, lambda, class
+and comprehension, with ``global``/``nonlocal`` honored and a class body
+invisible to the functions nested in it. A read sees only the innermost scope
+that binds the name, so a parameter or local assignment shadows an outer
+import, and an import in one function does not leak into another. Matching the spelling instead would let a
 one-line rename dodge the gate and flag unrelated callees, the same failure
 ``check_untyped_dicts.py`` closed in #1188.
 
@@ -28,7 +35,7 @@ from __future__ import annotations
 
 import ast
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -105,71 +112,282 @@ def _binds_literal_dunder(stmt: ast.stmt) -> bool:
     return any(name == "__version__" and _is_str_literal(v) for name, v in pairs)
 
 
-@dataclass(frozen=True)
-class _Bindings:
-    """What a module's names resolve to, as far as FastAPI is concerned."""
+_Comprehension = ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp
+_FunctionLike = ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
+_NO_PATHS: frozenset[str] = frozenset()
 
-    modules: frozenset[str]  # local names bound to the fastapi package
-    constructors: frozenset[str]  # local names bound to FastAPI or a subclass
 
-    def is_constructor(self, node: ast.expr) -> bool:
-        if isinstance(node, ast.Name):
-            return node.id in self.constructors
+def _is_module_path(path: str) -> bool:
+    """``fastapi`` or a dotted path under it that does not pass the class."""
+    return _FASTAPI_CLASS not in path.split(".")
+
+
+def _is_constructor_path(path: str) -> bool:
+    parts = path.split(".")
+    return parts[-1] == _FASTAPI_CLASS and _FASTAPI_CLASS not in parts[:-1]
+
+
+def _is_fastapi_module(name: str) -> bool:
+    return name == _FASTAPI_MODULE or name.startswith(f"{_FASTAPI_MODULE}.")
+
+
+@dataclass(eq=False)
+class _Scope:
+    """One lexical scope: module, function, lambda, class or comprehension.
+
+    Hashed by identity, so it can key the resolved-value table.
+    """
+
+    parent: _Scope | None
+    is_class: bool = False
+    is_comprehension: bool = False
+    bound: set[str] = field(default_factory=set[str])
+    declared_global: set[str] = field(default_factory=set[str])
+    declared_nonlocal: set[str] = field(default_factory=set[str])
+
+    def module(self) -> _Scope:
+        scope = self
+        while scope.parent is not None:
+            scope = scope.parent
+        return scope
+
+    def is_local(self, name: str) -> bool:
         return (
-            isinstance(node, ast.Attribute)
-            and node.attr == _FASTAPI_CLASS
-            and isinstance(node.value, ast.Name)
-            and node.value.id in self.modules
+            name in self.bound
+            and name not in self.declared_global
+            and name not in self.declared_nonlocal
         )
 
 
-def _bindings(tree: ast.Module) -> _Bindings:
-    """Resolve imports, renames and subclasses to a fixpoint.
+def _owner(scope: _Scope, name: str) -> _Scope | None:
+    """The scope a read of ``name`` in ``scope`` resolves to.
 
-    Every binding anywhere in the module counts, as in ``check_untyped_dicts``:
-    a rename inside a function constructs just as well, and which binding is in
-    scope at a given call cannot be known statically.
+    The innermost scope that binds it, honoring ``global``. A class body is
+    visible only to itself, never to the functions, lambdas and
+    comprehensions nested in it. ``None`` is a builtin or an unbound name.
     """
-    modules: set[str] = set()
-    constructors: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == _FASTAPI_MODULE or alias.name.startswith("fastapi."):
-                    # ``import fastapi.applications`` binds ``fastapi`` itself.
-                    modules.add(alias.asname or _FASTAPI_MODULE)
-        elif (
-            isinstance(node, ast.ImportFrom)
-            and node.module is not None
-            and (node.module == _FASTAPI_MODULE or node.module.startswith("fastapi."))
-        ):
-            for alias in node.names:
-                if alias.name == _FASTAPI_CLASS:
-                    constructors.add(alias.asname or alias.name)
+    current: _Scope | None = scope
+    first = True
+    while current is not None:
+        if name in current.declared_global:
+            return current.module()
+        if current.is_local(name) and (first or not current.is_class):
+            return current
+        first = False
+        current = current.parent
+    return None
+
+
+@dataclass(frozen=True, eq=False)
+class _Binding:
+    """One store to ``name`` in ``scope``.
+
+    Its value is ``paths`` (an import), what ``alias_of`` resolves to (a
+    rename), or the constructor when any of ``bases`` is one (a subclass). A
+    binding with none of them still shadows every outer ``name``.
+    """
+
+    name: str
+    scope: _Scope
+    paths: frozenset[str] = _NO_PATHS
+    alias_of: ast.expr | None = None
+    bases: tuple[ast.expr, ...] = ()
+
+    def owner(self) -> _Scope:
+        if self.name in self.scope.declared_global:
+            return self.scope.module()
+        if self.name in self.scope.declared_nonlocal and self.scope.parent is not None:
+            return _owner(self.scope.parent, self.name) or self.scope
+        return self.scope
+
+
+@dataclass(frozen=True)
+class _ScopedCall:
+    call: ast.Call
+    scope: _Scope
+
+
+def _params(args: ast.arguments) -> list[ast.arg]:
+    every = [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]
+    return [p for p in every if p is not None]
+
+
+class _ScopeBuilder:
+    """One pass over a module: every scope, every binding, every call."""
+
+    def __init__(self) -> None:
+        self.module = _Scope(parent=None)
+        self.bindings: list[_Binding] = []
+        self.calls: list[_ScopedCall] = []
+
+    def _bind(self, binding: _Binding) -> None:
+        binding.scope.bound.add(binding.name)
+        self.bindings.append(binding)
+
+    def _shadow(self, name: str, scope: _Scope) -> None:
+        self._bind(_Binding(name, scope))
+
+    def _visit_function(self, node: _FunctionLike, scope: _Scope) -> None:
+        """Defaults, annotations and decorators run in the ENCLOSING scope."""
+        outer: list[ast.expr | None] = [*node.args.defaults, *node.args.kw_defaults]
+        if not isinstance(node, ast.Lambda):
+            outer.extend(node.decorator_list)
+            outer.append(node.returns)
+            outer.extend(p.annotation for p in _params(node.args))
+            self._shadow(node.name, scope)
+        for expr in outer:
+            if expr is not None:
+                self.visit(expr, scope)
+        inner = _Scope(parent=scope)
+        for param in _params(node.args):
+            self._shadow(param.arg, inner)
+        body: list[ast.stmt] | list[ast.expr] = (
+            [node.body] if isinstance(node, ast.Lambda) else node.body
+        )
+        for child in body:
+            self.visit(child, inner)
+
+    def _visit_class(self, node: ast.ClassDef, scope: _Scope) -> None:
+        for expr in [*node.decorator_list, *node.bases, *node.keywords]:
+            self.visit(expr, scope)
+        inner = _Scope(parent=scope, is_class=True)
+        for stmt in node.body:
+            self.visit(stmt, inner)
+        self._bind(_Binding(node.name, scope, bases=tuple(node.bases)))
+
+    def _visit_comprehension(self, node: _Comprehension, scope: _Scope) -> None:
+        inner = _Scope(parent=scope, is_comprehension=True)
+        for index, gen in enumerate(node.generators):
+            # The first iterable is evaluated in the enclosing scope.
+            self.visit(gen.iter, scope if index == 0 else inner)
+            self.visit(gen.target, inner)
+            for cond in gen.ifs:
+                self.visit(cond, inner)
+        results = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
+        for expr in results:
+            self.visit(expr, inner)
+
+    def _visit_import(self, node: ast.Import | ast.ImportFrom, scope: _Scope) -> None:
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            paths = _NO_PATHS
+            if isinstance(node, ast.Import):
+                # ``import a.b`` binds ``a``; ``import a.b as c`` binds ``c`` to ``a.b``.
+                name = alias.asname or alias.name.split(".")[0]
+                target = alias.name if alias.asname else name
+                if _is_fastapi_module(target):
+                    paths = frozenset({target})
+            else:
+                name = alias.asname or alias.name
+                if node.level == 0 and node.module and _is_fastapi_module(node.module):
+                    paths = frozenset({f"{node.module}.{alias.name}"})
+            self._bind(_Binding(name, scope, paths=paths))
+
+    def _visit_assignment(
+        self, node: ast.Assign | ast.AnnAssign | ast.NamedExpr, scope: _Scope
+    ) -> None:
+        if node.value is not None:
+            self.visit(node.value, scope)
+        if isinstance(node, ast.AnnAssign):
+            self.visit(node.annotation, scope)
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        # A walrus in a comprehension binds in the nearest enclosing scope
+        # that is not a comprehension.
+        owner = scope
+        while isinstance(node, ast.NamedExpr) and owner.is_comprehension and owner.parent:
+            owner = owner.parent
+        for target in targets:
+            if isinstance(target, ast.Name):
+                self._bind(_Binding(target.id, owner, alias_of=node.value))
+            else:
+                self.visit(target, scope)
+
+    def _visit_other(self, node: ast.AST, scope: _Scope) -> None:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            self._shadow(node.id, scope)
+        elif isinstance(node, ast.Global):
+            scope.declared_global.update(node.names)
+        elif isinstance(node, ast.Nonlocal):
+            scope.declared_nonlocal.update(node.names)
+        elif isinstance(node, ast.Call):
+            self.calls.append(_ScopedCall(node, scope))
+        elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name:
+            self._shadow(node.name, scope)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            self._shadow(node.rest, scope)
+        for child in ast.iter_child_nodes(node):
+            self.visit(child, scope)
+
+    def visit(self, node: ast.AST, scope: _Scope) -> None:
+        if isinstance(node, _FunctionLike):
+            self._visit_function(node, scope)
+        elif isinstance(node, ast.ClassDef):
+            self._visit_class(node, scope)
+        elif isinstance(node, _Comprehension):
+            self._visit_comprehension(node, scope)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            self._visit_import(node, scope)
+        elif isinstance(node, ast.Assign | ast.AnnAssign | ast.NamedExpr):
+            self._visit_assignment(node, scope)
+        else:
+            self._visit_other(node, scope)
+
+
+@dataclass(frozen=True)
+class _Resolution:
+    """What each (scope, name) is bound to, as dotted paths under ``fastapi``."""
+
+    values: Mapping[tuple[_Scope, str], frozenset[str]]
+
+    def paths(self, node: ast.expr, scope: _Scope) -> frozenset[str]:
+        if isinstance(node, ast.Name):
+            owner = _owner(scope, node.id)
+            return self.values.get((owner, node.id), _NO_PATHS) if owner else _NO_PATHS
+        if isinstance(node, ast.Attribute):
+            return frozenset(
+                f"{path}.{node.attr}"
+                for path in self.paths(node.value, scope)
+                if _is_module_path(path)
+            )
+        return _NO_PATHS
+
+    def is_constructor(self, node: ast.expr, scope: _Scope) -> bool:
+        return any(_is_constructor_path(path) for path in self.paths(node, scope))
+
+    def binding_paths(self, binding: _Binding) -> frozenset[str]:
+        if binding.alias_of is not None:
+            return self.paths(binding.alias_of, binding.scope)
+        if any(self.is_constructor(base, binding.scope) for base in binding.bases):
+            return frozenset({f"{_FASTAPI_MODULE}.{_FASTAPI_CLASS}"})
+        return binding.paths
+
+
+def _resolve(builder: _ScopeBuilder) -> _Resolution:
+    """Propagate imports through renames and subclasses to a fixpoint.
+
+    Flow-insensitive WITHIN a scope (a name counts when any of its bindings
+    there reaches FastAPI, since which one runs first cannot be known
+    statically) but exact ACROSS scopes: a read sees only the innermost scope
+    that binds the name, so a parameter or local assignment shadows an outer
+    import and an import in one function is invisible to another.
+    """
+    for binding in builder.bindings:
+        # ``global``/``nonlocal`` make a store bind in an outer scope.
+        binding.owner().bound.add(binding.name)
+    values: dict[tuple[_Scope, str], frozenset[str]] = {}
     changed = True
     while changed:
         changed = False
-        resolved = _Bindings(frozenset(modules), frozenset(constructors))
-        for node in ast.walk(tree):
-            names: list[str] = []
-            if isinstance(node, ast.Assign) and resolved.is_constructor(node.value):
-                names = [t.id for t in node.targets if isinstance(t, ast.Name)]
-            elif (
-                isinstance(node, ast.AnnAssign)
-                and node.value is not None
-                and isinstance(node.target, ast.Name)
-                and resolved.is_constructor(node.value)
-            ):
-                names = [node.target.id]
-            elif isinstance(node, ast.ClassDef) and any(
-                resolved.is_constructor(base) for base in node.bases
-            ):
-                names = [node.name]
-            for name in names:
-                if name not in constructors:
-                    constructors.add(name)
-                    changed = True
-    return _Bindings(frozenset(modules), frozenset(constructors))
+        resolution = _Resolution(values)
+        for binding in builder.bindings:
+            key = (binding.owner(), binding.name)
+            old = values.get(key, _NO_PATHS)
+            new = old | resolution.binding_paths(binding)
+            if new != old:
+                values[key] = new
+                changed = True
+    return _Resolution(values)
 
 
 def violations(source: str, filename: str = "<string>") -> list[Finding]:
@@ -180,13 +398,15 @@ def violations(source: str, filename: str = "<string>") -> list[Finding]:
         for stmt in module_scope_statements(tree.body)
         if _binds_literal_dunder(stmt)
     ]
-    bindings = _bindings(tree)
+    builder = _ScopeBuilder()
+    for stmt in tree.body:
+        builder.visit(stmt, builder.module)
+    resolution = _resolve(builder)
     found.extend(
-        Finding(node.lineno, FASTAPI)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and bindings.is_constructor(node.func)
-        and any(k.arg == "version" and _is_str_literal(k.value) for k in node.keywords)
+        Finding(scoped.call.lineno, FASTAPI)
+        for scoped in builder.calls
+        if resolution.is_constructor(scoped.call.func, scoped.scope)
+        and any(k.arg == "version" and _is_str_literal(k.value) for k in scoped.call.keywords)
     )
     return sorted(found, key=lambda f: (f.line, f.shape))
 
