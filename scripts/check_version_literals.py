@@ -161,28 +161,39 @@ class _Scope:
         )
 
 
-def _owners(scope: _Scope, name: str) -> tuple[_Scope, ...]:
-    """The scopes a read of ``name`` in ``scope`` may resolve to.
+def _owner(scope: _Scope, name: str) -> _Scope | None:
+    """The scope a read of ``name`` in ``scope`` resolves to.
 
     The innermost scope that binds it, honoring ``global``. A class body is
     visible only to itself, never to the functions, lambdas and
-    comprehensions nested in it. A read IN a class body that binds the name
-    may still see the enclosing binding (``API = API`` reads the outer one
-    before the class stores its own), so that body falls through as well.
-    Empty is a builtin or an unbound name.
+    comprehensions nested in it. ``None`` is a builtin or an unbound name.
     """
     current: _Scope | None = scope
     first = True
     while current is not None:
         if name in current.declared_global:
-            return (current.module(),)
+            return current.module()
         if current.is_local(name) and (first or not current.is_class):
-            if current.is_class and current.parent is not None:
-                return (current, *_owners_outside_class(current.parent, name))
-            return (current,)
+            return current
         first = False
         current = current.parent
-    return ()
+    return None
+
+
+def _owners(scope: _Scope, name: str) -> tuple[_Scope, ...]:
+    """Every scope a read of ``name`` in ``scope`` may resolve to.
+
+    ``_owner``, plus one case: a read IN a class body that binds the name may
+    still see the enclosing binding (``API = API`` reads the outer one before
+    the class stores its own), so that body falls through as well, skipping
+    any enclosing class bodies. Empty is a builtin or an unbound name.
+    """
+    owner = _owner(scope, name)
+    if owner is None:
+        return ()
+    if owner is scope and scope.is_class and scope.parent is not None:
+        return (owner, *_owners_outside_class(scope.parent, name))
+    return (owner,)
 
 
 def _owners_outside_class(scope: _Scope, name: str) -> tuple[_Scope, ...]:
