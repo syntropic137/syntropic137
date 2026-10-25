@@ -8,10 +8,16 @@ FastAPI is matched by what a name resolves to, not how it is spelled: the
 
 from __future__ import annotations
 
+import signal
 import sys
+import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -73,6 +79,66 @@ FASTAPI_PLANTED: dict[str, str] = {
     "inside a function": (
         'from fastapi import FastAPI\ndef create():\n    return FastAPI(version="1")\n'
     ),
+    # #2104: module aliases and qualified module paths.
+    "module rebound by assignment": ('import fastapi\nf = fastapi\napp = f.FastAPI(version="1")\n'),
+    "module alias chain": 'import fastapi as a\nb = a\nc = b\napp = c.FastAPI(version="1")\n',
+    "qualified submodule path": (
+        'import fastapi.applications\napp = fastapi.applications.FastAPI(version="1")\n'
+    ),
+    "submodule imported as": ('import fastapi.applications as fa\napp = fa.FastAPI(version="1")\n'),
+    "submodule from package": (
+        'from fastapi import applications\napp = applications.FastAPI(version="1")\n'
+    ),
+    "subclass via qualified path": (
+        "import fastapi.applications\n"
+        "class T(fastapi.applications.FastAPI):\n    pass\n"
+        'app = T(version="1")\n'
+    ),
+    # #2104: scopes still see what they should.
+    "import in the same function": (
+        'def f():\n    from fastapi import FastAPI\n    return FastAPI(version="1")\n'
+    ),
+    "import seen by a nested function": (
+        "def f():\n    from fastapi import FastAPI\n"
+        '    def g():\n        return FastAPI(version="1")\n    return g\n'
+    ),
+    "global declared in a function": (
+        "def setup():\n    global API\n    from fastapi import FastAPI as API\n"
+        'app = API(version="1")\n'
+    ),
+    "nonlocal declared in a nested function": (
+        "def outer():\n    API = None\n    def inner():\n        nonlocal API\n"
+        "        from fastapi import FastAPI as API\n"
+        '    inner()\n    return API(version="1")\n'
+    ),
+    "rename in a class body used there": (
+        'from fastapi import FastAPI\nclass C:\n    A = FastAPI\n    app = A(version="1")\n'
+    ),
+    "inside a lambda": 'from fastapi import FastAPI\nmake = lambda: FastAPI(version="1")\n',
+    "inside a comprehension": (
+        'from fastapi import FastAPI\napps = [FastAPI(version="1") for _ in range(2)]\n'
+    ),
+    "walrus in a comprehension binds outside it": (
+        "from fastapi import FastAPI\n"
+        "def f():\n    [(A := FastAPI) for _ in [1]]\n"
+        '    return A(version="1")\n'
+    ),
+    # #2105 review: a class-body store reads the enclosing binding on its RHS.
+    "class rebinds the outer name to itself": (
+        'from fastapi import FastAPI as API\nclass C:\n    API = API\n    app = API(version="1")\n'
+    ),
+    # #2105 review: nonlocal skips the class and lands on the enclosing function.
+    "nonlocal in a method targets the enclosing function": (
+        "def outer():\n    API = None\n"
+        "    class C:\n        API = object\n"
+        "        def setup(self):\n            nonlocal API\n"
+        "            from fastapi import FastAPI as API\n"
+        '    C().setup()\n    return API(version="1")\n'
+    ),
+    # #2105 review: self-referential attribute rebinding must still terminate.
+    "module rebound to its own submodule": (
+        'import fastapi as f\nf = f.applications\napp = f.FastAPI(version="1")\n'
+    ),
 }
 
 CLEAN: dict[str, str] = {
@@ -88,22 +154,122 @@ CLEAN: dict[str, str] = {
     "FastAPI from elsewhere": 'from mylib import FastAPI\napp = FastAPI(version="1")\n',
     "attr on another module": 'import mylib\napp = mylib.FastAPI(version="1")\n',
     "annotation only": "__version__: str\n",
+    # #2104: a binding in one scope must not leak into another.
+    "import in another function": (
+        "def a():\n    from fastapi import FastAPI as API\n    return API\n"
+        'def b():\n    return API(version="1")\n'
+    ),
+    "rename in another function": (
+        "from fastapi import FastAPI\n"
+        "def a():\n    API = FastAPI\n    return API\n"
+        'app = API(version="1")\n'
+    ),
+    "parameter shadows import": (
+        'from fastapi import FastAPI\ndef f(FastAPI):\n    return FastAPI(version="1")\n'
+    ),
+    "keyword-only parameter shadows import": (
+        'from fastapi import FastAPI\ndef f(*, FastAPI):\n    return FastAPI(version="1")\n'
+    ),
+    "lambda parameter shadows import": (
+        'from fastapi import FastAPI\nmake = lambda FastAPI: FastAPI(version="1")\n'
+    ),
+    "local assignment shadows import": (
+        "from fastapi import FastAPI\n"
+        'def f():\n    FastAPI = Other\n    return FastAPI(version="1")\n'
+    ),
+    "local import from elsewhere shadows module": (
+        "import fastapi\n"
+        'def f():\n    import mylib as fastapi\n    return fastapi.FastAPI(version="1")\n'
+    ),
+    "parameter shadows module": (
+        'import fastapi\ndef f(fastapi):\n    return fastapi.FastAPI(version="1")\n'
+    ),
+    "for target shadows import": (
+        "from fastapi import FastAPI\n"
+        'def f(makers):\n    for FastAPI in makers:\n        FastAPI(version="1")\n'
+    ),
+    "comprehension target shadows import": (
+        'from fastapi import FastAPI\napps = [FastAPI(version="1") for FastAPI in makers]\n'
+    ),
+    "class body is invisible to its methods": (
+        "from fastapi import FastAPI\n"
+        "class C:\n    A = FastAPI\n"
+        '    def m(self):\n        return A(version="1")\n'
+    ),
+    "attribute past the class is not a constructor": (
+        'import fastapi\napp = fastapi.FastAPI.FastAPI(version="1")\n'
+    ),
+    "relative import named fastapi": ('from .fastapi import FastAPI\napp = FastAPI(version="1")\n'),
 }
 
 
 @pytest.mark.parametrize("source", DUNDER_PLANTED.values(), ids=DUNDER_PLANTED.keys())
 def test_planted_dunder_is_caught(source: str) -> None:
-    assert [f.shape for f in violations(source)] == [DUNDER]
+    assert [f.shape for f in _violations_within(source, _DEADLINE_SECONDS)] == [DUNDER]
 
 
 @pytest.mark.parametrize("source", FASTAPI_PLANTED.values(), ids=FASTAPI_PLANTED.keys())
 def test_planted_fastapi_version_is_caught(source: str) -> None:
-    assert [f.shape for f in violations(source)] == [FASTAPI]
+    assert [f.shape for f in _violations_within(source, _DEADLINE_SECONDS)] == [FASTAPI]
 
 
 @pytest.mark.parametrize("source", CLEAN.values(), ids=CLEAN.keys())
 def test_clean_source_is_not_flagged(source: str) -> None:
-    assert violations(source) == []
+    assert _violations_within(source, _DEADLINE_SECONDS) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import fastapi as f\nf = f.applications\n",
+        "import fastapi as f\nf = f.x\n",
+        "import fastapi as a\nb = a\na = b.applications\nb = a.applications\n",
+    ],
+)
+def test_cyclic_attribute_rebinding_terminates(source: str) -> None:
+    """Before #2105 review each fixpoint pass grew ``fastapi.applications.applications...``.
+
+    The call runs under a deadline so a non-terminating detector is a normal,
+    recorded test failure within seconds rather than a hung run.
+    """
+    assert _violations_within(source, _DEADLINE_SECONDS) == []
+
+
+_DEADLINE_SECONDS = 5.0
+
+
+class _DeadlineExceededError(Exception):
+    pass
+
+
+def _violations_within(source: str, seconds: float) -> list[Finding]:
+    """``violations(source)``, or ``pytest.fail`` when it runs past ``seconds``.
+
+    SIGALRM interrupts the loop itself, so nothing keeps spinning afterwards.
+    Off the main thread (where signals cannot be installed) a daemon thread
+    and a bounded join give the same verdict.
+    """
+    if threading.current_thread() is threading.main_thread() and hasattr(signal, "SIGALRM"):
+
+        def _expire(_signum: int, _frame: FrameType | None) -> None:
+            raise _DeadlineExceededError
+
+        previous = signal.signal(signal.SIGALRM, _expire)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            return violations(source)
+        except _DeadlineExceededError:
+            pytest.fail(f"violations() did not return within {seconds}s")
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+    found: list[list[Finding]] = []
+    worker = threading.Thread(target=lambda: found.append(violations(source)), daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive() or not found:
+        pytest.fail(f"violations() did not return within {seconds}s")
+    return found[0]
 
 
 def test_ui_feedback_main_as_it_was_is_caught() -> None:
