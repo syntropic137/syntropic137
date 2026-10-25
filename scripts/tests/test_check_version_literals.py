@@ -8,10 +8,16 @@ FastAPI is matched by what a name resolves to, not how it is spelled: the
 
 from __future__ import annotations
 
+import signal
 import sys
+import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -221,8 +227,49 @@ def test_clean_source_is_not_flagged(source: str) -> None:
     ],
 )
 def test_cyclic_attribute_rebinding_terminates(source: str) -> None:
-    """Before #2105 review each fixpoint pass grew ``fastapi.applications.applications...``."""
-    assert violations(source) == []
+    """Before #2105 review each fixpoint pass grew ``fastapi.applications.applications...``.
+
+    The call runs under a deadline so a non-terminating detector is a normal,
+    recorded test failure within seconds rather than a hung run.
+    """
+    assert _violations_within(source, _DEADLINE_SECONDS) == []
+
+
+_DEADLINE_SECONDS = 5.0
+
+
+class _DeadlineExceededError(Exception):
+    pass
+
+
+def _violations_within(source: str, seconds: float) -> list[Finding]:
+    """``violations(source)``, or ``pytest.fail`` when it runs past ``seconds``.
+
+    SIGALRM interrupts the loop itself, so nothing keeps spinning afterwards.
+    Off the main thread (where signals cannot be installed) a daemon thread
+    and a bounded join give the same verdict.
+    """
+    if threading.current_thread() is threading.main_thread() and hasattr(signal, "SIGALRM"):
+
+        def _expire(_signum: int, _frame: FrameType | None) -> None:
+            raise _DeadlineExceededError
+
+        previous = signal.signal(signal.SIGALRM, _expire)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            return violations(source)
+        except _DeadlineExceededError:
+            pytest.fail(f"violations() did not return within {seconds}s")
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+    found: list[list[Finding]] = []
+    worker = threading.Thread(target=lambda: found.append(violations(source)), daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive() or not found:
+        pytest.fail(f"violations() did not return within {seconds}s")
+    return found[0]
 
 
 def test_ui_feedback_main_as_it_was_is_caught() -> None:
