@@ -115,6 +115,8 @@ def _binds_literal_dunder(stmt: ast.stmt) -> bool:
 _Comprehension = ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp
 _FunctionLike = ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
 _NO_PATHS: frozenset[str] = frozenset()
+# The modules that ``FastAPI`` is reachable from by attribute.
+_KNOWN_MODULES = frozenset({_FASTAPI_MODULE, f"{_FASTAPI_MODULE}.applications"})
 
 
 def _is_module_path(path: str) -> bool:
@@ -159,21 +161,48 @@ class _Scope:
         )
 
 
-def _owner(scope: _Scope, name: str) -> _Scope | None:
-    """The scope a read of ``name`` in ``scope`` resolves to.
+def _owners(scope: _Scope, name: str) -> tuple[_Scope, ...]:
+    """The scopes a read of ``name`` in ``scope`` may resolve to.
 
     The innermost scope that binds it, honoring ``global``. A class body is
     visible only to itself, never to the functions, lambdas and
-    comprehensions nested in it. ``None`` is a builtin or an unbound name.
+    comprehensions nested in it. A read IN a class body that binds the name
+    may still see the enclosing binding (``API = API`` reads the outer one
+    before the class stores its own), so that body falls through as well.
+    Empty is a builtin or an unbound name.
     """
     current: _Scope | None = scope
     first = True
     while current is not None:
         if name in current.declared_global:
-            return current.module()
+            return (current.module(),)
         if current.is_local(name) and (first or not current.is_class):
-            return current
+            if current.is_class and current.parent is not None:
+                return (current, *_owners_outside_class(current.parent, name))
+            return (current,)
         first = False
+        current = current.parent
+    return ()
+
+
+def _owners_outside_class(scope: _Scope, name: str) -> tuple[_Scope, ...]:
+    """Lookup from the scope enclosing a class body, which skips class bodies."""
+    current: _Scope | None = scope
+    while current is not None:
+        if name in current.declared_global:
+            return (current.module(),)
+        if current.is_local(name) and not current.is_class:
+            return (current,)
+        current = current.parent
+    return ()
+
+
+def _nonlocal_owner(scope: _Scope | None, name: str) -> _Scope | None:
+    """The nearest enclosing FUNCTION that binds ``name``: never a class, never the module."""
+    current = scope
+    while current is not None and current.parent is not None:
+        if current.is_local(name) and not current.is_class:
+            return current
         current = current.parent
     return None
 
@@ -197,7 +226,7 @@ class _Binding:
         if self.name in self.scope.declared_global:
             return self.scope.module()
         if self.name in self.scope.declared_nonlocal and self.scope.parent is not None:
-            return _owner(self.scope.parent, self.name) or self.scope
+            return _nonlocal_owner(self.scope.parent, self.name) or self.scope
         return self.scope
 
 
@@ -342,13 +371,19 @@ class _Resolution:
 
     def paths(self, node: ast.expr, scope: _Scope) -> frozenset[str]:
         if isinstance(node, ast.Name):
-            owner = _owner(scope, node.id)
-            return self.values.get((owner, node.id), _NO_PATHS) if owner else _NO_PATHS
+            return _NO_PATHS.union(
+                *(self.values.get((owner, node.id), _NO_PATHS) for owner in _owners(scope, node.id))
+            )
         if isinstance(node, ast.Attribute):
-            return frozenset(
+            extended = (
                 f"{path}.{node.attr}"
                 for path in self.paths(node.value, scope)
                 if _is_module_path(path)
+            )
+            # A finite domain, so the fixpoint terminates: ``f = f.applications``
+            # would otherwise grow ``fastapi.applications.applications...`` forever.
+            return frozenset(
+                path for path in extended if path in _KNOWN_MODULES or _is_constructor_path(path)
             )
         return _NO_PATHS
 

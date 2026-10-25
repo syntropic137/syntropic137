@@ -117,6 +117,22 @@ FASTAPI_PLANTED: dict[str, str] = {
         "def f():\n    [(A := FastAPI) for _ in [1]]\n"
         '    return A(version="1")\n'
     ),
+    # #2105 review: a class-body store reads the enclosing binding on its RHS.
+    "class rebinds the outer name to itself": (
+        'from fastapi import FastAPI as API\nclass C:\n    API = API\n    app = API(version="1")\n'
+    ),
+    # #2105 review: nonlocal skips the class and lands on the enclosing function.
+    "nonlocal in a method targets the enclosing function": (
+        "def outer():\n    API = None\n"
+        "    class C:\n        API = object\n"
+        "        def setup(self):\n            nonlocal API\n"
+        "            from fastapi import FastAPI as API\n"
+        '    C().setup()\n    return API(version="1")\n'
+    ),
+    # #2105 review: self-referential attribute rebinding must still terminate.
+    "module rebound to its own submodule": (
+        'import fastapi as f\nf = f.applications\napp = f.FastAPI(version="1")\n'
+    ),
 }
 
 CLEAN: dict[str, str] = {
@@ -193,6 +209,19 @@ def test_planted_fastapi_version_is_caught(source: str) -> None:
 
 @pytest.mark.parametrize("source", CLEAN.values(), ids=CLEAN.keys())
 def test_clean_source_is_not_flagged(source: str) -> None:
+    assert violations(source) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import fastapi as f\nf = f.applications\n",
+        "import fastapi as f\nf = f.x\n",
+        "import fastapi as a\nb = a\na = b.applications\nb = a.applications\n",
+    ],
+)
+def test_cyclic_attribute_rebinding_terminates(source: str) -> None:
+    """Before #2105 review each fixpoint pass grew ``fastapi.applications.applications...``."""
     assert violations(source) == []
 
 
