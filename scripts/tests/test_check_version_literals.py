@@ -205,17 +205,17 @@ CLEAN: dict[str, str] = {
 
 @pytest.mark.parametrize("source", DUNDER_PLANTED.values(), ids=DUNDER_PLANTED.keys())
 def test_planted_dunder_is_caught(source: str) -> None:
-    assert [f.shape for f in violations(source)] == [DUNDER]
+    assert [f.shape for f in _violations_within(source, _DEADLINE_SECONDS)] == [DUNDER]
 
 
 @pytest.mark.parametrize("source", FASTAPI_PLANTED.values(), ids=FASTAPI_PLANTED.keys())
 def test_planted_fastapi_version_is_caught(source: str) -> None:
-    assert [f.shape for f in violations(source)] == [FASTAPI]
+    assert [f.shape for f in _violations_within(source, _DEADLINE_SECONDS)] == [FASTAPI]
 
 
 @pytest.mark.parametrize("source", CLEAN.values(), ids=CLEAN.keys())
 def test_clean_source_is_not_flagged(source: str) -> None:
-    assert violations(source) == []
+    assert _violations_within(source, _DEADLINE_SECONDS) == []
 
 
 @pytest.mark.parametrize(
