@@ -1,6 +1,6 @@
 # Plan: k trials per eval case, pass@k / pass^k / flakiness, infra errors apart (#2108)
 
-Status: DRAFT, codex round 1 findings applied. Owner of the lane:
+Status: DRAFT, codex rounds 1 and 2 findings applied. Owner of the lane:
 syn137_workflow-mgmt (OKR okrs-51p.5).
 
 ## 1. The problem, measured
@@ -94,9 +94,22 @@ or a scorer still belongs to its cohort:
 | declared models | trial tag `models:<sha256 of the suite.yaml models map>` | the model is part of the measurement; declared, not observed, so early failures still join |
 | scoring protocol | trial tag `scorer:<scorer protocol id>` | a different judge is a different ruler |
 
-Observed models are validation, not key: a trial whose observed models (Lane
-2) disagree with the declared map is excluded as `treatment_mismatch` and
-counted. A scored trial whose `scorer_version` disagrees with its cohort's
+All cohort and trial identity is read from the execution's
+`inherited_tags` (its launch tags, never edited), not `tags` (editable), so a
+later retag cannot move a trial between cohorts. A trial with a missing or
+conflicting cohort tag in `inherited_tags` is excluded as `not_a_trial`.
+
+Declared models must be explicit ids. Existing suites declare aliases
+(`opus`, `gpt-sol`, `sonnet` in `evals/verifier-seed-v1/suite.yaml`) and
+runtime model identities reject aliases (`apps/syn-api/src/syn_api/model_identity.py`),
+so `eval_suite.py check` refuses an alias in any suite launched with
+`--trials`, and the suite's version bumps when its aliases are replaced.
+
+Observed models are validation, not key: per phase, the phase's own model
+(Lane 2, as `RunReads.own_model` reads it; delegates ignored) must equal the
+declared id, or the trial is excluded as `treatment_mismatch` and counted. A
+phase that never reported a model (it failed before the agent ran) is not a
+mismatch. A scored trial whose `scorer_version` disagrees with its cohort's
 protocol is not judged for that cohort until re-scored under it.
 
 ## 6. Decision 2: trial outcome, an ordered rule
@@ -107,17 +120,25 @@ starting checkout matches the eval's baseline. First matching row wins.
 
 | # | Condition | Outcome |
 |---|---|---|
-| 1 | `association_kind` is `attached`, or starting checkout differs from the baseline, or observed models contradict the declared map | excluded (`not_a_trial`, `base_mismatch`, `treatment_mismatch`), counted, never scored |
-| 2 | status `not_started` or `running` | `pending` |
-| 3 | status `cancelled` or `interrupted` | `infra_error` |
-| 4 | status `failed`, classification `correct_refusal` or `task` | `fail`: the agent stopped without the deliverable, whatever the score says |
-| 5 | status `failed`, classification `platform` or `unclassified` | `infra_error` |
-| 6 | status `completed`, no score recorded | `pending` (unscored) |
-| 7 | status `completed`, verdict PASS | `pass` |
-| 8 | status `completed`, verdict FAIL | `fail` |
-| 9 | status `completed`, verdict ERROR | `infra_error` (#1780: completed with no recorded review verdict is the engine's gap; or the scorer broke) |
+| 1 | `association_kind` is `attached`, or cohort tags missing or conflicting in `inherited_tags` | excluded (`not_a_trial`), counted |
+| 2 | a starting checkout IS recorded and differs from the baseline | excluded (`base_mismatch`), counted |
+| 3 | an observed phase model contradicts its declared id (section 5.2) | excluded (`treatment_mismatch`), counted |
+| 4 | status `not_started` or `running` | `pending` |
+| 5 | status `cancelled` or `interrupted` | `infra_error` |
+| 6 | status `failed`, classification `correct_refusal` or `task` | `fail`: the agent stopped without the deliverable, whatever the score says |
+| 7 | status `failed`, classification `platform` or `unclassified` | `infra_error` (includes failures before provisioning, which record no checkout) |
+| 8 | status `completed`, no starting checkout recorded | `infra_error`: a result on an unverified base is not judged |
+| 9 | status `completed`, no score recorded | `pending` (unscored) |
+| 10 | status `completed`, verdict PASS | `pass` |
+| 11 | status `completed`, verdict FAIL | `fail` |
+| 12 | status `completed`, verdict ERROR | `infra_error` (#1780: completed with no recorded review verdict is the engine's gap; or the scorer broke) |
 
-Every terminal status crossed with absent/PASS/FAIL/ERROR is a test (T1).
+An absent checkout (`starting_checkout` is `[]` before provisioning succeeds,
+`WorkflowExecutionAggregate.py`) is never a mismatch: rows 4, 5 and 7 keep
+those trials as reservations, retry counts and bound inputs. Only a judged
+outcome (rows 10, 11, and row 6 once provisioned) needs verified provenance.
+Every terminal status crossed with absent/PASS/FAIL/ERROR, with and without a
+recorded checkout, is a test (T1).
 
 Why derived, not a new verdict value: the classification and the checkout are
 already Lane 1 truth on the execution, and copying them into the score gives
@@ -136,7 +157,10 @@ So every figure is reported three ways:
 - **lower bound**: every infra error counted as a fail;
 - **upper bound**: every infra error counted as a pass.
 
-A promotion or "quality-neutral" call must hold at both bounds. If the bounds
+The bounds run over the **whole roster** (or split), not only complete cases:
+a case short of k or never launched counts as 0 in the lower bound and 1 in
+the upper, so dropping incomplete cases cannot select the easy ones. A
+promotion or "quality-neutral" call must hold at both bounds. If the bounds
 straddle the decision line, the result is `inconclusive` and the remedy is a
 top-up, not a judgement. The response also carries infra share per cohort.
 The bounds are the honest form of "infra errors are not scored as 0".
@@ -175,9 +199,9 @@ infra errors recoded.
 
 Set level, per cohort: mean pass@k and pass^k over roster cases with n >= k,
 flakiness = their difference, the flaky cases, and **coverage**: roster size,
-cases complete, cases short, cases never launched. A set mean over partial
-coverage is labelled partial, because dropping incomplete cases selects the
-easy ones. Split is a filter (`split=holdout`), read from the roster tags.
+cases complete, cases short, cases never launched. The conditional mean over
+partial coverage is labelled partial and is descriptive only; decisions read
+the roster-wide bounds of 6.1. Split is a filter (`split=holdout`), read from the roster tags.
 
 The #2108 example (10 cases, 7 always, 2 sometimes, 1 never) yields 90% / 70%
 / 20% and is a unit test.
@@ -262,12 +286,21 @@ Fixes:
    image, with this contract:
    - the scorer is `scripts/eval_implementer.py` at a recorded commit of this
      repo, and that commit is part of `scorer_version`;
-   - the repository arrives as a git bundle holding the pin, the fix commit
-     and every submodule commit both reference, made on the host before the
-     container starts;
-   - `uv sync` runs at the pin with network on, then network is cut
-     (`docker network disconnect`) before the patch is applied and the hidden
-     tests run, which keeps the script's existing order (sync before patch);
+   - the repository arrives as a git bundle holding the pin and the fix
+     commit, and **each submodule as its own bundle** holding every commit the
+     pin and the fix reference, unbundled into separate clones at the
+     submodule paths, because `_check_out_submodules` clones each one from a
+     local repository at its path (`scripts/eval_implementer.py:493-522`);
+   - **preparation, network on**: the scorer's own preparation runs in full,
+     which today is a worktree and `uv sync` at `fix_commit` (to collect the
+     intended hidden test ids) and a second worktree and `uv sync` at the pin;
+     the plan adds a `prepare` subcommand to `eval_implementer.py` that does
+     exactly this and nothing else, so the handoff is one command, not a copy
+     of its internals;
+   - **offline**: the network is cut (`docker network disconnect`), then
+     `score --prepared` applies the patch to the prepared pin worktree,
+     restores the hidden tests and runs them, with no fetch or sync allowed
+     (a sync attempt is an ERROR, not a retry);
    - the patch comes from the implement run's `implement.patch` artifact,
      downloaded through the API;
    - the result is recorded as `EvalRunScored`, scorer `eval_implementer.py`.
@@ -292,10 +325,16 @@ one roster it adds a comparison:
   paired bootstrap 95% interval on the difference in mean pass^k (10,000
   resamples over cases, fixed seed, computed in the domain so every reader
   gets the same interval);
-- the same at the 6.1 bounds.
+- **worst-case paired bounds**: the difference A - B at the two adverse
+  assignments, A_lower - B_upper and A_upper - B_lower (each over the whole
+  roster, 6.1), each with its own paired bootstrap interval. Same-direction
+  recodings (both lower, both upper) are not reported as bounds: they can both
+  show zero while the true difference spans [-1, 1].
 
-A/B decisions follow `evals.md`: holdout split, the interval excludes the
-tolerated drop at both bounds, inconclusive is not neutral.
+A/B decisions follow `evals.md`: holdout split, **paired coverage complete**
+(every roster case has k judged trials in both cohorts, or the call is
+`inconclusive`), and the interval at both adverse assignments excludes the
+tolerated drop. Inconclusive is not neutral.
 
 ## 12. Slices and tests
 
@@ -305,10 +344,10 @@ audit.
 
 | Slice | Change | Tests |
 |---|---|---|
-| S1 domain | outcome rule, estimators, bounds, cohort key, roster coverage, set summary, paired comparison; `EvalRunFacts` gains `failure_classification`, `association_kind`, `tags`, `starting_checkout`, baseline | T1 every terminal status x absent/PASS/FAIL/ERROR, plus attached, base-mismatch and treatment-mismatch rows; T2 the #2108 example gives 90/70/20; T3 an infra error is excluded from n, lowers only the lower bound; T4 n < k reports `trials_short`, no metric; T5 n = 4, k = 3 matches the closed form; T6 two scoring protocols never pool; T7 a rostered case with no trials shows as never launched and marks the mean partial; T8 pending trials reduce `trials_short`; T9 the paired comparison on a fixed fixture gives fixed counts, p and interval |
+| S1 domain | outcome rule, estimators, bounds, cohort key, roster coverage, set summary, paired comparison; `EvalRunFacts` gains `failure_classification`, `association_kind`, `inherited_tags`, `starting_checkout`, baseline | T1 every terminal status x absent/PASS/FAIL/ERROR x checkout recorded/absent, plus attached, base-mismatch and treatment-mismatch rows; T1b a retag of `tags` does not move a trial; T2 the #2108 example gives 90/70/20; T3 an infra error is excluded from n, lowers only the lower bound; T4 n < k reports `trials_short`, no metric; T5 n = 4, k = 3 matches the closed form; T6 two scoring protocols never pool; T7 a rostered case with no trials shows as never launched and marks the mean partial; T8 pending trials reduce `trials_short`; T9 the paired comparison on a fixed fixture gives fixed counts, p, intervals and adverse-assignment bounds; T10 a short case widens the roster-wide bounds |
 | S2 API + CLI | per-eval cohort fields; `GET /eval-sets/metrics`; Pydantic responses; `just codegen`; `syn eval` gains a set subcommand (`apps/syn-cli-node/src/commands/eval.ts`) | route tests on the response model; drift check; one route test where an infra trial shows in `infra_error_count` and the lower bound, not in fails |
-| S3 harness | `register`, `launch --trials k` with cohort tags, ledger `batch`/`trial`, `launch --top-up` from `trials_short` and refused while pending, `score` prints the server's figures, `check` refuses non-pin-safe workflows | `scripts/tests/test_eval_suite.py`: roster tags written and conflicts refused; k ledger lines per case; top-up launches the server's count; top-up refused while pending; exhausted case launches none; a default-branch merge in a prompt is refused |
-| S4 implementer referee | the section 10 fix 3 container path; `eval-implement-score*` retired | reference fix PASS and empty patch FAIL through the container path; a patch that needs the network to pass FAILs |
+| S3 harness | `register`, `launch --trials k` with cohort tags, ledger `batch`/`trial`, `launch --top-up` from `trials_short` and refused while pending, `score` prints the server's figures, `check` refuses non-pin-safe workflows | `scripts/tests/test_eval_suite.py`: roster tags written and conflicts refused; k ledger lines per case; top-up launches the server's count; top-up refused while pending; exhausted case launches none; a default-branch merge in a prompt is refused; a model alias in a `--trials` suite is refused |
+| S4 implementer referee | `eval_implementer.py prepare` and `score --prepared`; the section 10 fix 3 container path; `eval-implement-score*` retired | reference fix PASS and empty patch FAIL through the container path; a patch that needs the network to pass FAILs; a sync attempt offline is ERROR |
 | S5 judge panel | two-family fixed panel as the scoring protocol | unit test that both arms of a comparison get the same protocol id; panel disagreement is `unclear` |
 
 The vocabulary and `.claude/skills/managing-workflows/references/evals.md`
