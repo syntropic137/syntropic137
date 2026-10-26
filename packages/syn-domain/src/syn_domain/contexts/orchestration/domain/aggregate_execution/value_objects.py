@@ -986,8 +986,8 @@ def payload_with_origin_owners_restored(data: object) -> object:
 #: whole start event would replay as a generic one (ADR-023), losing its pins.
 #:
 #: Entries are NEVER removed: stored history replays forever. Independent of
-#: `RETIRED_PHASE_FIELDS`, which is what authors may still write and changes on
-#: its own schedule.
+#: `RETIRED_PHASE_FIELDS`, which is what authors are refused at authoring time
+#: (#1502) and changes on its own schedule.
 REMOVED_EXECUTABLE_PHASE_KEYS: Final[frozenset[str]] = frozenset(
     {
         # Retired by #1477; every start event written since #1454 carries it.

@@ -1707,7 +1707,7 @@ class WorkflowValidation(BaseModel):
     phase_count: int = 0
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    """Notices that never make the file invalid, e.g. a retired key it still carries."""
+    """Notices that never make the file invalid."""
 
 
 # ---------------------------------------------------------------------------

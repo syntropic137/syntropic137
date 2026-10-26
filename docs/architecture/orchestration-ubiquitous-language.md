@@ -1674,12 +1674,12 @@ a person-started Resume is a new decision. Code:
 - **`can_open_pr`.** Retired after #1477. It was a Phase field that, from
   #1197, decided whether a Phase's token could open a pull request. #1477
   removed the token downgrade it controlled, so it decided nothing, and it was
-  then dropped from the Phase and from Pins. Workflow YAML that still carries
-  it loads, and validate and install report a warning naming the Phase; any
-  other unknown key is still refused. Stored events that carry it replay
-  unchanged, permanently. The retired keys are listed in
-  `_shared/retired_phase_fields.py`; rejecting them at authoring time is
-  #1502. There is no replacement: every Phase may open and comment on a PR.
+  then dropped from the Phase and from Pins. After a deprecation window in
+  which it loaded with a warning, Workflow YAML that still carries it is
+  refused at validate and install with a message naming the Phase and the key
+  (#1502). Stored events that carry it replay unchanged, permanently. The
+  retired keys are listed in `_shared/retired_phase_fields.py`. There is no
+  replacement: every Phase may open and comment on a PR.
 - **Adopt / Reattach.** Reserved for #1310 Phase 3, no meaning assigned: a new
   process taking over a phase that is still running after the process that
   started it died. Not built, and deferred until an experiment shows it can be

@@ -1,20 +1,24 @@
-"""A retired phase key loads, does nothing, and is reported (#1477 follow-up).
+"""A retired phase key is refused at authoring time, by name (#1502).
 
-`can_open_pr` stopped deciding anything in #1477. It is no longer a field, but
-YAML written before that still carries it, so it is dropped by name and each
-occurrence becomes a notice. Every other unknown key is still refused (#961).
+`can_open_pr` stopped deciding anything in #1477. It was then accepted with a
+warning for a deprecation window; now it is refused, with a message naming the
+phase, the key and why. Every other unknown key is still refused generically
+(#961), and stored events keep replaying it (`REMOVED_EXECUTABLE_PHASE_KEYS`).
 """
 
 from __future__ import annotations
 
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
-    retired_field_notices,
+    RETIRED_PHASE_FIELDS,
+    reject_retired_fields,
 )
-from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+from syn_domain.contexts.orchestration._shared.workflow_definition import (
+    WorkflowDefinition,
+    validate_workflow_yaml,
+)
 from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import PhaseDefinition
 
 pytestmark = pytest.mark.unit
@@ -35,45 +39,63 @@ def _workflow(phase_line: str = "") -> str:
     )
 
 
-class TestARetiredKeyStillLoads:
-    def test_a_workflow_carrying_the_key_still_loads(self) -> None:
-        definition = WorkflowDefinition.from_yaml(_workflow("can_open_pr: true"))
+class TestARetiredKeyIsRefused:
+    def test_a_workflow_carrying_the_key_is_refused(self) -> None:
+        with pytest.raises(ValidationError) as excinfo:
+            WorkflowDefinition.from_yaml(_workflow("can_open_pr: true"))
+
+        message = str(excinfo.value)
+        assert "'can_open_pr' is retired (#1477)" in message
+        assert "'open_pr'" in message
+        assert "Delete the line" in message
+        assert "Extra inputs are not permitted" not in message, (
+            "the retired key must be named with its reason, not refused generically"
+        )
+
+    @pytest.mark.parametrize("value", ["true", "false", "null", '"banana"'])
+    def test_any_value_is_refused(self, value: str) -> None:
+        """The key itself is retired; no value makes it acceptable."""
+        with pytest.raises(ValidationError, match="'can_open_pr' is retired"):
+            WorkflowDefinition.from_yaml(_workflow(f"can_open_pr: {value}"))
+
+    def test_validate_reports_it_as_an_error(self) -> None:
+        """What `syn workflow validate` and the validate endpoint read."""
+        is_valid, error = validate_workflow_yaml(_workflow("can_open_pr: true"))
+
+        assert is_valid is False
+        assert error is not None
+        assert "'can_open_pr' is retired" in error
+
+    def test_a_clean_workflow_still_loads(self) -> None:
+        definition = WorkflowDefinition.from_yaml(_workflow())
 
         assert [p.id for p in definition.phases] == ["open_pr"]
         assert "can_open_pr" not in PhaseDefinition.model_fields
-        assert "can_open_pr" not in definition.phases[0].to_domain().model_dump()
 
-    @pytest.mark.parametrize("value", ["false", "null", '"banana"'])
-    def test_any_value_is_ignored(self, value: str) -> None:
-        """The value is never read, so no value can be wrong."""
-        text = _workflow(f"can_open_pr: {value}")
-
-        WorkflowDefinition.from_yaml(text)
-
-        assert len(retired_field_notices(yaml.safe_load(text))) == 1
-
-    def test_a_misspelt_key_is_still_refused(self) -> None:
-        """The drop is by name. `extra="ignore"` would reopen #961."""
-        with pytest.raises(ValidationError, match="can_open_prr"):
+    def test_a_misspelt_key_is_still_refused_generically(self) -> None:
+        """The retired message is by name. `extra="ignore"` would reopen #961."""
+        with pytest.raises(ValidationError, match="can_open_prr") as excinfo:
             WorkflowDefinition.from_yaml(_workflow("can_open_prr: true"))
 
+        assert "is retired" not in str(excinfo.value)
 
-class TestNotices:
-    def test_notices_name_phase_and_key(self) -> None:
-        notices = retired_field_notices(yaml.safe_load(_workflow("can_open_pr: true")))
 
-        assert len(notices) == 1
-        assert "'open_pr'" in notices[0]
-        assert "'can_open_pr'" in notices[0]
-        assert "#1477" in notices[0]
+class TestRejectRetiredFields:
+    def test_every_retired_key_is_named(self) -> None:
+        phase = {"id": "p", **{field.name: True for field in RETIRED_PHASE_FIELDS}}
 
-    def test_a_clean_workflow_has_none(self) -> None:
-        assert retired_field_notices(yaml.safe_load(_workflow())) == []
+        with pytest.raises(ValueError) as excinfo:
+            reject_retired_fields(phase)
 
-    @pytest.mark.parametrize(
-        "parsed",
-        [None, ["a"], "phases", {"name": "no phases"}, {"phases": "x"}, {"phases": ["x", None]}],
-    )
-    def test_notices_never_raise_on_odd_input(self, parsed: object) -> None:
-        """Called on whatever the author wrote, before anything validated it."""
-        assert retired_field_notices(parsed) == []
+        for field in RETIRED_PHASE_FIELDS:
+            assert f"{field.name!r} is retired ({field.retired_by})" in str(excinfo.value)
+            assert field.reason in str(excinfo.value)
+
+    def test_a_clean_phase_is_returned_unchanged(self) -> None:
+        phase = {"id": "p", "name": "P"}
+
+        assert reject_retired_fields(phase) is phase
+
+    @pytest.mark.parametrize("value", [None, ["a"], "phase", 3])
+    def test_a_non_mapping_is_left_for_the_model_to_refuse(self, value: object) -> None:
+        assert reject_retired_fields(value) is value

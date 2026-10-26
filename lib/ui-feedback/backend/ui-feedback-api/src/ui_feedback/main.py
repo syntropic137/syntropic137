@@ -20,6 +20,7 @@ from ui_feedback.config import settings
 from ui_feedback.storage.memory import InMemoryFeedbackStorage
 from ui_feedback.storage.postgres import PostgresFeedbackStorage
 from ui_feedback.storage.protocol import FeedbackStorageProtocol
+from ui_feedback.version import version_string
 
 # Global storage instance
 _storage: FeedbackStorageProtocol | None = None
@@ -59,7 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="UI Feedback API",
     description="REST API for capturing and managing UI feedback",
-    version="0.1.0",
+    version=version_string(),
     lifespan=lifespan,
 )
 
@@ -96,7 +97,7 @@ async def root() -> dict[str, str]:
     """Root endpoint with API info."""
     return {
         "name": "UI Feedback API",
-        "version": "0.1.0",
+        "version": app.version,
         "docs": "/docs",
     }
 
