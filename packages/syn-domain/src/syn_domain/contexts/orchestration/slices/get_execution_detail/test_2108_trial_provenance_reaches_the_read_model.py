@@ -9,7 +9,9 @@ because a retried phase runs on a fresh workspace.
 
 from __future__ import annotations
 
+import copy
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -32,7 +34,27 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.projection im
     WorkflowExecutionDetailProjection,
 )
 
+if TYPE_CHECKING:
+    from syn_domain.pagination import ProjectionRecord
+
 pytestmark = pytest.mark.unit
+
+
+def _copying_store() -> InMemoryProjectionStore:
+    """A store that hands out a copy, as Postgres does: an edit never saved is lost.
+
+    The in-memory store returns its live document, so a handler that forgot
+    to save would still look right through it.
+    """
+    store = InMemoryProjectionStore()
+    live = store.get
+
+    async def get(projection: str, key: str) -> ProjectionRecord | None:
+        return copy.deepcopy(await live(projection, key))
+
+    store.get = get  # pyright: ignore[reportAttributeAccessIssue]  # instance-level double
+    return store
+
 
 REPO = "syntropic137/syntropic137"
 FIRST, LATER = "a" * 40, "b" * 40
@@ -68,7 +90,7 @@ def _provisioned(
 
 
 async def _projection(*phase_ids: str) -> WorkflowExecutionDetailProjection:
-    projection = WorkflowExecutionDetailProjection(InMemoryProjectionStore())
+    projection = WorkflowExecutionDetailProjection(_copying_store())
     await projection.on_workflow_execution_started(
         {"execution_id": "exec-1", "workflow_id": "wf", "workflow_name": "wf"}
     )
