@@ -78,6 +78,38 @@ class CompressionStatus(StrEnum):
     """gzip would not be smaller, so the object is left uncompressed."""
 
 
+def _read_object(source: BinaryIO, reference: ArchivedTranscript) -> bytes:
+    """The stored bytes, inflated if compressed; the caller verifies the hash."""
+    stored = os.fstat(source.fileno()).st_size
+    compressed = source.read(len(_GZIP_MAGIC)) == _GZIP_MAGIC
+    source.seek(0)
+    if stored != reference.size and not (
+        compressed and stored <= _max_encoded_size(reference.size)
+    ):
+        raise TranscriptIntegrityError("archived transcript failed integrity verification")
+    if compressed and stored != reference.size:
+        return _decode(source, reference.size)
+    # Bound the read even if the object grows after fstat. One extra byte
+    # distinguishes a longer object from the expected content.
+    body = source.read(reference.size + 1)
+    if compressed and hashlib.sha256(body).hexdigest() != reference.sha256:
+        # A gzip object exactly as long as its body; an uncompressed body that
+        # happens to start with the gzip magic was read as itself above.
+        source.seek(0)
+        return _decode(source, reference.size)
+    return body
+
+
+def _physical(target: Path) -> tuple[int, bool] | None:
+    """Stored size and whether the object is gzip; ``None`` when absent."""
+    try:
+        with target.open("rb") as source:
+            size = os.fstat(source.fileno()).st_size
+            return size, source.read(len(_GZIP_MAGIC)) == _GZIP_MAGIC
+    except FileNotFoundError:
+        return None
+
+
 @dataclass(frozen=True)
 class CompressionOutcome:
     status: CompressionStatus
@@ -199,26 +231,7 @@ class LocalSessionTranscriptArchive:
     def _get_locked(self, reference: ArchivedTranscript) -> bytes | None:
         try:
             with (self._root / reference.sha256).open("rb") as source:
-                stored = os.fstat(source.fileno()).st_size
-                compressed = source.read(len(_GZIP_MAGIC)) == _GZIP_MAGIC
-                source.seek(0)
-                if stored != reference.size and not (
-                    compressed and stored <= _max_encoded_size(reference.size)
-                ):
-                    raise TranscriptIntegrityError(
-                        "archived transcript failed integrity verification"
-                    )
-                # Bound the read even if the object grows after fstat. One extra
-                # byte distinguishes a longer object from the expected content.
-                # An uncompressed body of the right size that happens to start
-                # with the gzip magic is read as itself.
-                if compressed and stored != reference.size:
-                    body = _decode(source, reference.size)
-                else:
-                    body = source.read(reference.size + 1)
-                    if compressed and hashlib.sha256(body).hexdigest() != reference.sha256:
-                        source.seek(0)
-                        body = _decode(source, reference.size)
+                body = _read_object(source, reference)
         except FileNotFoundError:
             return None
         if len(body) != reference.size or hashlib.sha256(body).hexdigest() != reference.sha256:
@@ -237,6 +250,18 @@ class LocalSessionTranscriptArchive:
             if _OBJECT_NAME.fullmatch(entry.name) and entry.is_file(follow_symlinks=False):
                 yield entry.name
 
+    def _replace_locked(self, target: Path, encoded: bytes) -> None:
+        descriptor, temporary = tempfile.mkstemp(prefix=".compress-", dir=self._root)
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(encoded)
+                output.flush()
+                os.fsync(output.fileno())
+            Path(temporary).replace(target)
+            _sync_directory(self._root)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+
     def compress_in_place(self, digest: str, *, apply: bool) -> CompressionOutcome | None:
         """Re-encode one stored object; ``None`` when it is absent or deleted.
 
@@ -248,17 +273,12 @@ class LocalSessionTranscriptArchive:
             raise ValueError("not an archive object key")
         target = self._root / digest
         with self._lock(digest):
-            if self._deleted(digest):
+            physical = None if self._deleted(digest) else _physical(target)
+            if physical is None:
                 return None
-            try:
-                with target.open("rb") as source:
-                    before = os.fstat(source.fileno()).st_size
-                    if source.read(len(_GZIP_MAGIC)) == _GZIP_MAGIC:
-                        return CompressionOutcome(
-                            CompressionStatus.ALREADY_COMPRESSED, before, before
-                        )
-            except FileNotFoundError:
-                return None
+            before, compressed = physical
+            if compressed:
+                return CompressionOutcome(CompressionStatus.ALREADY_COMPRESSED, before, before)
             body = self._get_locked(ArchivedTranscript(sha256=digest, size=before))
             if body is None:
                 return None
@@ -267,16 +287,6 @@ class LocalSessionTranscriptArchive:
                 raise TranscriptIntegrityError("re-encoded transcript failed verification")
             if len(encoded) >= before:
                 return CompressionOutcome(CompressionStatus.INCOMPRESSIBLE, before, before)
-            if not apply:
-                return CompressionOutcome(CompressionStatus.COMPRESSED, before, len(encoded))
-            descriptor, temporary = tempfile.mkstemp(prefix=".compress-", dir=self._root)
-            try:
-                with os.fdopen(descriptor, "wb") as output:
-                    output.write(encoded)
-                    output.flush()
-                    os.fsync(output.fileno())
-                Path(temporary).replace(target)
-                _sync_directory(self._root)
-            finally:
-                Path(temporary).unlink(missing_ok=True)
+            if apply:
+                self._replace_locked(target, encoded)
             return CompressionOutcome(CompressionStatus.COMPRESSED, before, len(encoded))
