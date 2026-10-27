@@ -27,9 +27,12 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 RELEASES = "https://github.com/AgentParadise/agentic-session-exporter/releases/download"
 DEFAULT_DEST = Path("/usr/local/bin/apss-session-exporter")

@@ -32,7 +32,7 @@ from syn_shared.settings.session_inventory import SessionInventorySettings
 from syn_shared.settings.workspace_images import PINNED_EXPORTER_VERSIONS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
-from install_apss_exporter import DEFAULT_DEST  # noqa: E402
+from install_apss_exporter import DEFAULT_DEST
 
 _ROOT = Path(__file__).resolve().parents[3]
 _DOCKERFILE = _ROOT / "infra/docker/images/syn-api/Dockerfile"

@@ -52,7 +52,9 @@ def _assert_nothing_installed(dest: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(("machine", "arch"), [("x86_64", "amd64"), ("aarch64", "arm64")])
-def test_installs_the_verified_binary_for_each_arch(tmp_path: Path, machine: str, arch: str) -> None:
+def test_installs_the_verified_binary_for_each_arch(
+    tmp_path: Path, machine: str, arch: str
+) -> None:
     release, dest = tmp_path / "release", tmp_path / "bin" / "apss-session-exporter"
     sha = _stub_release(release, arch)
     pins = {"APSS_EXPORTER_SHA256_AMD64": OTHER_SHA, "APSS_EXPORTER_SHA256_ARM64": OTHER_SHA}
