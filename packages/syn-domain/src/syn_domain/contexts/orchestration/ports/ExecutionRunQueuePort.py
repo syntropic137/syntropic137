@@ -283,7 +283,9 @@ class ExecutionRunQueue(Protocol):
         The Outage Breaker (#1917, research decision 2). Disabled, the host's
         claim takes nothing and stamps no Claim Check until ``cooldown`` has
         passed; capacity and charged runs are untouched, so the D3 ``CHECK``
-        holds. After the cooldown one more failure disables claims again at
+        holds. After the cooldown exactly one claim is let through, the probe,
+        and claims stay disabled until its create reports (or for another
+        cooldown, if it never does); one more failure disables claims again at
         once. Returns whether claims are now disabled.
         """
         ...

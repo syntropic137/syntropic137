@@ -478,7 +478,11 @@ reconciler that cannot reap it. A failed list or kill leaves the run `fencing`
 with its charge held (D3), and the next turn retries. An E2B scope is a digest
 of the account's API key (`e2b-key-<sha256 prefix>`): a kit must hold the key
 the E2B executor uses, and a kit holding another key strands the run safely
-under the alert above rather than fence what it may be unable to list.
+under the alert above rather than fence what it may be unable to list. A kit
+trusts the provider's listing by label (the D13 contract: resources are found
+by label, never by a create handle). E2B's list can lag a sandbox created
+moments before; confirming each sandbox by a durably recorded id, with the
+remote spool's routing (#1916), is the follow-up that removes that trust.
 
 Visibility-timeout redelivery (Sidekiq, Celery, SQS) is deliberately not
 adopted: redelivering an hour-long agent phase is exactly the duplicate-effects
@@ -782,8 +786,10 @@ an executor's claims are disabled for a cooldown
 nothing and stamps no Claim Check, and it never counts as a higher executor
 holding a run back, so other pools never wait on it. Capacity and the charged
 runs are untouched: they finish or are fenced normally, and the `CHECK` holds.
-After the cooldown one claim is tried; a failed create disables claims again at
-once, a successful one clears the count. The breaker does not use the D10
+After the cooldown exactly one claim is let through, the probe: that claim
+disables claims again for one more cooldown, so the probe's create decides. A
+failed create disables claims again at once, a successful one clears the count,
+and a probe that never reports frees the next one after the cooldown. The breaker does not use the D10
 drain state: a drain is one-way (the executor deregisters and exits), and a
 breaker must re-open by itself. Any exception from the backend's create counts
 (an outage, a refused quota, a bad template): each would fail every run claimed.

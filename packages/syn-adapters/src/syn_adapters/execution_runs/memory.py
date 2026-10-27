@@ -48,6 +48,7 @@ class _Host(BaseModel):
     full_since: datetime | None = None
     create_failures: int = 0
     claims_disabled_until: datetime | None = None
+    breaker_cooldown: timedelta = timedelta(0)
 
 
 class _Run(BaseModel):
@@ -203,7 +204,14 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
                 overflowed=overflowed,
                 claimed_at=now,
             )
-            self._budget(host_id, entry, in_use=entry.in_use + 1)
+            # The one probe past a tripped breaker's cooldown: Postgres's step 4.
+            probe = entry.claims_disabled_until is not None
+            self._budget(
+                host_id,
+                entry,
+                in_use=entry.in_use + 1,
+                claims_disabled_until=now + entry.breaker_cooldown if probe else None,
+            )
             return ClaimedRun(
                 execution_id=run.execution_id,
                 executor_id=host_id,
@@ -223,7 +231,13 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             return False
         now, failures = self._now(), entry.create_failures + 1
         until = now + cooldown if failures >= threshold else entry.claims_disabled_until
-        self._budget(host_id, entry, create_failures=failures, claims_disabled_until=until)
+        self._budget(
+            host_id,
+            entry,
+            create_failures=failures,
+            claims_disabled_until=until,
+            breaker_cooldown=cooldown,
+        )
         return until is not None and until > now
 
     async def record_create_success(self, host_id: str) -> None:

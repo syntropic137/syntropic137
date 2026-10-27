@@ -293,8 +293,15 @@ class PostgresExecutionRunQueue:
             if raw is None:
                 return None
             # 4. Same transaction as step 1's lock, so in_use never passes capacity.
+            # A claim on a tripped breaker past its cooldown is the one probe:
+            # claims stay disabled until its create reports, or the probe is
+            # abandoned for another cooldown (#1917).
             await conn.execute(
-                "UPDATE execution_budget SET in_use=in_use+1 WHERE executor_id=$1", host_id
+                """UPDATE execution_budget SET in_use=in_use+1,
+                claims_disabled_until=CASE WHEN claims_disabled_until IS NULL THEN NULL
+                    ELSE clock_timestamp()+breaker_cooldown_s*interval '1 second' END
+                WHERE executor_id=$1""",
+                host_id,
             )
         return ClaimedRun.model_validate_json(raw)
 
@@ -310,7 +317,8 @@ class PostgresExecutionRunQueue:
                 """UPDATE execution_budget SET create_failures=create_failures+1,
                 claims_disabled_until=CASE WHEN create_failures+1>=$2
                     THEN clock_timestamp()+$3::double precision*interval '1 second'
-                    ELSE claims_disabled_until END
+                    ELSE claims_disabled_until END,
+                breaker_cooldown_s=$3
                 WHERE executor_id=$1
                 RETURNING (claims_disabled_until>clock_timestamp())::text""",
                 host_id,

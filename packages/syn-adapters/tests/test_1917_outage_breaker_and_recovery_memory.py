@@ -75,7 +75,7 @@ async def test_the_breaker_disables_claims_until_the_cooldown_and_a_success_clea
     clock = _Clock()
     queue = InMemoryExecutionRunQueue(clock=clock)
     await _join(queue, "e2b-1", E2B, E2B_SCOPE)
-    await _admit(queue, "run-1", "run-2")
+    await _admit(queue, "run-1", "run-2", "run-3")
     held = await queue.claim("e2b-1")
     assert held is not None
 
@@ -89,8 +89,12 @@ async def test_the_breaker_disables_claims_until_the_cooldown_and_a_success_clea
     await queue.close(held)  # a charged run still releases
     clock.now += _COOLDOWN
     await queue.heartbeat("e2b-1")
+    probe = await queue.claim("e2b-1")
+    assert probe is not None  # half-open: one claim
+    assert await queue.claim("e2b-1") is None  # and only one, until its create reports
     assert await queue.record_create_failure("e2b-1", threshold=2, cooldown=_COOLDOWN)
     assert await queue.claim("e2b-1") is None
+    await queue.close(probe)
     await queue.record_create_success("e2b-1")
     assert await queue.claim("e2b-1") is not None
 

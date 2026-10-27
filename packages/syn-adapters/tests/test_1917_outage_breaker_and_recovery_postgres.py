@@ -169,8 +169,8 @@ async def test_after_the_cooldown_one_failure_retrips_at_once_and_a_success_clea
     pools: list[asyncpg.Pool],  # noqa: F811
 ) -> None:
     queue = PostgresExecutionRunQueue(pools[0])
-    await _join(queue, _executor("e2b-1", E2B, E2B_SCOPE), capacity=2)
-    await _admit(queue, "run-1", "run-2")
+    await _join(queue, _executor("e2b-1", E2B, E2B_SCOPE), capacity=3)
+    await _admit(queue, "run-1", "run-2", "run-3")
     await _trip(queue, "e2b-1")
     async with pools[0].acquire() as conn:
         await conn.execute(
@@ -179,11 +179,18 @@ async def test_after_the_cooldown_one_failure_retrips_at_once_and_a_success_clea
         )
 
     assert await queue.claim("e2b-1") is not None  # half-open: one claim is tried
+    assert await queue.claim("e2b-1") is None  # and only one, until its create reports
+    async with pools[0].acquire() as conn:  # a probe abandoned for a cooldown frees the next
+        await conn.execute(
+            """UPDATE execution_budget SET claims_disabled_until=clock_timestamp()-interval '1 s'
+            WHERE executor_id='e2b-1'"""
+        )
+    assert await queue.claim("e2b-1") is not None
     assert await _trip(queue, "e2b-1", times=1) == [True]
     assert await queue.claim("e2b-1") is None
 
     await queue.record_create_success("e2b-1")
-    assert await _row(pools[0], "e2b-1") == (2, 1, 0, False)
+    assert await _row(pools[0], "e2b-1") == (3, 2, 0, False)
     assert await queue.claim("e2b-1") is not None
 
 

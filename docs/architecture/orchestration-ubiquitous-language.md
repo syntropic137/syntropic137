@@ -987,8 +987,9 @@ slot charged. The E2B Executor's own reaper is a kit on its own account.
 ## Outage Breaker
 
 Disables an Executor's Claims after K consecutive failed workspace creates
-(an E2B outage, a refused quota, a bad template), for a cooldown, then lets one
-Claim through: a failed create disables Claims again at once, a successful one
+(an E2B outage, a refused quota, a bad template), for a cooldown, then lets
+exactly one Claim through (the probe), holding the rest until its create
+reports: a failed create disables Claims again at once, a successful one
 clears the count. Recorded on the Executor's own budget row
 (`create_failures`, `claims_disabled_until`), never by lowering capacity, so
 the budget `CHECK` holds while runs are charged and they finish or are fenced

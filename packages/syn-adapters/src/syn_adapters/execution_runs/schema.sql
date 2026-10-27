@@ -158,6 +158,11 @@ END $$;
 ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS create_failures INTEGER
     NOT NULL DEFAULT 0;
 ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS claims_disabled_until TIMESTAMPTZ;
+-- The cooldown the breaker last tripped with. A claim made once it has passed
+-- is the one probe: it disables claims again for this long, until a create
+-- outcome clears or re-trips the breaker, or the probe is abandoned.
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS breaker_cooldown_s DOUBLE PRECISION
+    NOT NULL DEFAULT 0;
 ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS recovery_scopes TEXT[]
     NOT NULL DEFAULT '{}';
 DO $$ BEGIN
