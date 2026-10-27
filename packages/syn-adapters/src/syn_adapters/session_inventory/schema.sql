@@ -217,6 +217,14 @@ CREATE TABLE IF NOT EXISTS session_capture_deletion_checkpoints (
     capture_id TEXT NOT NULL,
     PRIMARY KEY(source_instance_id,destination_id,producer_id,capture_id)
 );
+-- #2107: each destination's deletion outbox is purged once, before its first
+-- drain by a build that never propagates automatic expiry.
+CREATE TABLE IF NOT EXISTS session_capture_deletion_outbox_purges (
+    source_instance_id TEXT NOT NULL,
+    destination_id TEXT NOT NULL,
+    purged_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY(source_instance_id,destination_id)
+);
 CREATE INDEX IF NOT EXISTS session_capture_catalog_archive
     ON session_capture_catalog(source_instance_id,(payload->'archive'->>'sha256'));
 

@@ -16,6 +16,7 @@ captures are reset for redelivery through per-capture outboxes.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import shutil
@@ -86,3 +87,26 @@ class ExporterCaptureOutboxes:
 
     async def retire_legacy(self) -> None:
         await asyncio.to_thread(shutil.rmtree, self._legacy, True)
+
+
+class ExporterDeletionOutbox(ExporterCaptureTransport):
+    """A destination's replica-deletion outbox, which can be withdrawn unsent.
+
+    Used once per destination to purge deletes an older build queued, which may
+    include automatic expiry that must never reach the replica (#2107).
+    """
+
+    def __init__(self, config: ExporterConfig) -> None:
+        super().__init__(config)
+        self._outbox = config.outbox_dir
+
+    async def discard(self) -> None:
+        """Remove the outbox. Already absent is fine; any other failure raises."""
+        await asyncio.to_thread(_remove_tree, self._outbox)
+
+
+def _remove_tree(path: Path) -> None:
+    # Not ignore_errors=True: a partial removal reported as success would let a
+    # surviving queued delete drain later.
+    with contextlib.suppress(FileNotFoundError):
+        shutil.rmtree(path)

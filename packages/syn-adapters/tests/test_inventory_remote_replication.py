@@ -29,7 +29,10 @@ from syn_adapters.session_inventory.capture_delivery_jobs import (
     PostgresCaptureDeliveryJobs,
 )
 from syn_adapters.session_inventory.capture_delivery_worker import CaptureDeliveryWorker
-from syn_adapters.session_inventory.capture_outboxes import ExporterCaptureOutboxes
+from syn_adapters.session_inventory.capture_outboxes import (
+    ExporterCaptureOutboxes,
+    ExporterDeletionOutbox,
+)
 from syn_adapters.session_inventory.deletion_fence import DeletionFence
 from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
 from syn_adapters.session_inventory.exporter_transport import (
@@ -501,14 +504,16 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
             )
         )
         assert (await delayed.enqueue(identity, first)).inserted
+        # Owner deletion: automatic expiry never propagates to replicas (#2107).
         async with db_pool.acquire() as conn:
             await conn.execute(
-                "UPDATE session_capture_catalog SET created_at=now()-interval '2 days' WHERE source_instance_id=$1",
+                """INSERT INTO session_body_deletions(source_instance_id,archive_sha256,archive,reason)
+                SELECT DISTINCT ON (payload->'archive'->>'sha256') $1,
+                payload->'archive'->>'sha256',payload->'archive','deletion'
+                FROM session_capture_catalog WHERE source_instance_id=$1""",
                 source,
             )
-        retention = LocalBodyRetention(
-            db_pool, archive, source, age_seconds=86400, exporter_binary=binary
-        )
+        retention = LocalBodyRetention(db_pool, archive, source, exporter_binary=binary)
         for _ in range(10):
             if not await retention.step():
                 break
@@ -517,7 +522,7 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
         # Deletes travel through their own outbox and count as propagated only
         # after the replica acknowledges them. Withdrawn upload outboxes are
         # discarded, never sent.
-        deletion_transport = ExporterCaptureTransport(
+        deletion_transport = ExporterDeletionOutbox(
             ExporterConfig(
                 binary=binary,
                 outbox_dir=tmp_path / "deletion-outbox",
