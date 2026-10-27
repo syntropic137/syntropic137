@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_referee.py b/scripts/eval_referee.py
+index 6ce75e9cf..905982628 100644
+--- a/scripts/eval_referee.py
++++ b/scripts/eval_referee.py
+@@ -457,7 +457,7 @@ def fetch_patch(client: httpx.Client, execution_id: str) -> str:
+     raw = client.get(f"/artifacts/{patches[0].id}/raw")
+     if raw.is_error:
+         raise _RefereeError(f"artifact {patches[0].id}: {raw.status_code} {_detail(raw)}")
+-    return raw.content.decode("utf-8", errors=PATCH_ERRORS)
++    return raw.content.decode("utf-8", errors="replace")
+ 
+ 
+ def record(

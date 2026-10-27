@@ -1,0 +1,13 @@
+diff --git a/scripts/implementer_scorer.py b/scripts/implementer_scorer.py
+index 181348f8c..5c24cbfd0 100644
+--- a/scripts/implementer_scorer.py
++++ b/scripts/implementer_scorer.py
+@@ -192,7 +192,7 @@ _git = git
+ 
+ def read_patch(path: Path) -> str:
+     """A patch file as the scorer carries it: every byte, CRLF and non-UTF-8 included."""
+-    return path.read_bytes().decode("utf-8", PATCH_ERRORS)
++    return path.read_text()
+ 
+ 
+ @contextmanager

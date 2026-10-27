@@ -1,0 +1,13 @@
+diff --git a/scripts/implementer_scorer.py b/scripts/implementer_scorer.py
+index 181348f8c..f82be46a7 100644
+--- a/scripts/implementer_scorer.py
++++ b/scripts/implementer_scorer.py
+@@ -337,7 +337,7 @@ def _judge(pin: Pin, patch: str, repo: Path, tree: Path, expected: tuple[str, ..
+         applied = _git(tree, "apply", "--whitespace=nowarn", "-", stdin=patch)
+         if applied.returncode != 0:
+             return TestRun(outcome="FAIL", detail=f"patch does not apply: {applied.stderr.strip()}")
+-    touched = {*_patched_paths(tree, patch), *_changed_tracked_paths(tree)}
++    touched = {*_patched_paths(tree, patch)}
+     judged = {p for p in touched if Path(p).name in JUDGE_CONFIG}
+     for path in sorted(judged | set(pin.hidden_tests)):
+         _restore_from_fix(repo, tree, pin.fix_commit, path)

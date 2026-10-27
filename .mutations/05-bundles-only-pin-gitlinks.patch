@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_referee.py b/scripts/eval_referee.py
+index 6ce75e9cf..0708147ac 100644
+--- a/scripts/eval_referee.py
++++ b/scripts/eval_referee.py
+@@ -150,7 +150,7 @@ def write_inputs(pin: Pin, patch: str, scorer_commit: str, repo: Path, into: Pat
+     """
+     _bundle(repo, (pin.commit, pin.fix_commit), into / "repo.bundle")
+     paths: list[str] = []
+-    for i, sub in enumerate(submodules_of(repo, (pin.commit, pin.fix_commit))):
++    for i, sub in enumerate(submodules_of(repo, (pin.commit,))):
+         clone = repo / sub.path
+         if not (clone / ".git").exists():
+             raise _RefereeError(f"submodule {sub.path} has no local clone in {repo}")

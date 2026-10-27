@@ -506,6 +506,20 @@ def test_a_patch_whose_text_is_not_utf_8_is_applied_not_crashed_on(
     assert run.outcome == "PASS", run.detail
 
 
+def test_git_carries_every_byte_in_and_out(tmp_path: Path) -> None:
+    """A new file only proves the patch applied; this proves the bytes git saw are the bytes sent."""
+    raw = b"caf\xe9\r\n"
+    carried = raw.decode("utf-8", errors=implementer_scorer.PATCH_ERRORS)
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
+    blob = implementer_scorer.git(tmp_path, "hash-object", "-w", "--stdin", stdin=carried)
+    expected = subprocess.run(
+        ["git", "-C", str(tmp_path), "hash-object", "--stdin"], input=raw, capture_output=True
+    ).stdout.decode()
+    assert blob.stdout == expected
+    shown = implementer_scorer.git(tmp_path, "cat-file", "blob", blob.stdout.strip())
+    assert shown.stdout.encode("utf-8", errors=implementer_scorer.PATCH_ERRORS) == raw
+
+
 @pytest.fixture
 def guarded_crlf(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

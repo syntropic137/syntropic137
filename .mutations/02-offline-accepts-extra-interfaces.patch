@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_referee.py b/scripts/eval_referee.py
+index 6ce75e9cf..b5d8ce425 100644
+--- a/scripts/eval_referee.py
++++ b/scripts/eval_referee.py
+@@ -294,7 +294,7 @@ def _assert_offline(docker: Docker, name: str) -> None:
+     """The container must have no interface but loopback before any agent code runs."""
+     listed = docker(["exec", name, "python3", "-c", INTERFACE_PROBE], STEP_TIMEOUT_SECONDS)
+     interfaces = listed.stdout.split()
+-    if listed.returncode != 0 or interfaces != ["lo"]:
++    if listed.returncode != 0 or "lo" not in interfaces:
+         raise _RefereeError(
+             f"the network is not cut: interfaces {interfaces or '?'} ({_tail(listed)})"
+         )

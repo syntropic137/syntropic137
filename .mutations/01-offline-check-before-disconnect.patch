@@ -1,0 +1,14 @@
+diff --git a/scripts/eval_referee.py b/scripts/eval_referee.py
+index 6ce75e9cf..65e7e85de 100644
+--- a/scripts/eval_referee.py
++++ b/scripts/eval_referee.py
+@@ -250,8 +250,8 @@ def _contained(
+         )  # fmt: skip
+         if prepared.returncode != 0:
+             return TestRun(outcome="ERROR", detail=f"prepare: {_tail(prepared)}")
+-        _step(docker, ["network", "disconnect", name, name], "cut the network")
+         _assert_offline(docker, name)
++        _step(docker, ["network", "disconnect", name, name], "cut the network")
+         scored = docker(
+             ["exec", name, *_scorer("score", "--prepared", f"{_WORK}/prepared",
+                                     "--patch", f"{_IN}/implement.patch")],

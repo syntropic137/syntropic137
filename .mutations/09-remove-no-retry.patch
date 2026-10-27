@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_referee.py b/scripts/eval_referee.py
+index 6ce75e9cf..1fd0bf646 100644
+--- a/scripts/eval_referee.py
++++ b/scripts/eval_referee.py
+@@ -218,7 +218,7 @@ _GONE = ("no such container", "not found")
+ def _remove(docker: Docker, args: list[str], attempts: int = 3) -> str | None:
+     """Remove a container or network, retried. None once it is gone, else why it is not."""
+     why = ""
+-    for _ in range(attempts):
++    for _ in range(1):
+         ran = docker(args, STEP_TIMEOUT_SECONDS)
+         if ran.returncode == 0 or any(gone in ran.stderr.lower() for gone in _GONE):
+             return None

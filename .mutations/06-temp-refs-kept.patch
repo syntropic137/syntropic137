@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_referee.py b/scripts/eval_referee.py
+index 6ce75e9cf..28f0360ed 100644
+--- a/scripts/eval_referee.py
++++ b/scripts/eval_referee.py
+@@ -140,7 +140,7 @@ def _bundle(repo: Path, commits: tuple[str, ...], out: Path) -> None:
+             raise _RefereeError(f"git bundle in {repo}: {bundled.stderr.strip()}")
+     finally:
+         for ref in refs:
+-            _git(repo, "update-ref", "-d", ref)
++            pass
+ 
+ 
+ def write_inputs(pin: Pin, patch: str, scorer_commit: str, repo: Path, into: Path) -> list[str]:

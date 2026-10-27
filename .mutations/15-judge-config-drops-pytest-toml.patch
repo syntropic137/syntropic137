@@ -1,0 +1,12 @@
+diff --git a/scripts/implementer_scorer.py b/scripts/implementer_scorer.py
+index 181348f8c..8462843c1 100644
+--- a/scripts/implementer_scorer.py
++++ b/scripts/implementer_scorer.py
+@@ -78,7 +78,6 @@ hunk, and surrogateescape maps every byte to a str and back unchanged."""
+ JUDGE_CONFIG = frozenset(
+     {
+         "conftest.py",
+-        "pytest.toml",
+         ".pytest.toml",
+         "pytest.ini",
+         ".pytest.ini",
