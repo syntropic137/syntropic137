@@ -32,6 +32,9 @@ on:
       - main
       - release
       - 'release/**'
+      # A hotfix -> release PR needs the required Compose Stack Smoke Test on
+      # its head, and this workflow has no PR trigger (ADR-077).
+      - 'hotfix/**'
     # No paths filter — every push to main/release gets a smoke test result.
     # Required for release branch protection (smoke test must pass before
     # main → release PR can merge).
