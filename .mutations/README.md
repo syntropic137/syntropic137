@@ -28,3 +28,8 @@ scripts/tests/test_eval_referee_on_docker.py.
 No 17: dropping `--no-renames` is equivalent. `git apply` without `--index`
 leaves a rename's destination untracked, so `git diff HEAD` lists the deleted
 source either way.
+
+Implementer tests are named by node id: the nine `needs_history` tests check
+the checked-in case definitions against full git history, skip on the
+runner's shallow clone (which voids the baseline), and exercise none of the
+mutated code.
