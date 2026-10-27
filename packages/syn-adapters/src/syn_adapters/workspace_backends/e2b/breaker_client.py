@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         SandboxCommand,
         SandboxListing,
     )
+    from pydantic import SecretStr
 
     from syn_adapters.execution_host.outage_breaker import OutageBreaker
 
@@ -78,3 +79,10 @@ class BreakerE2BClient:
 
     async def write_bytes(self, sandbox_id: str, path: str, content: bytes, *, user: str) -> None:
         await self._client.write_bytes(sandbox_id, path, content, user=user)
+
+
+def sdk_client_with_breaker(api_key: SecretStr, breaker: OutageBreaker) -> BreakerE2BClient:
+    """The e2b SDK client for ``api_key``, its creates feeding ``breaker``."""
+    from agentic_isolation.providers.e2b_client import SdkE2BClient
+
+    return BreakerE2BClient(SdkE2BClient(api_key=api_key.get_secret_value()), breaker)

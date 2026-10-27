@@ -12,10 +12,10 @@ from syn_api._wiring import get_execution_run_queue
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
-    from agentic_isolation.providers.e2b_client import E2BSandboxClient
+    from syn_adapters.workspace_backends.e2b.breaker_client import BreakerE2BClient
 
 
-def e2b_client_with_breaker() -> E2BSandboxClient | None:
+def e2b_client_with_breaker() -> BreakerE2BClient | None:
     """The E2B executor's sandbox client, its creates feeding the Outage Breaker (#1917).
 
     None (the provider's own SDK client) with the Run Queue off: there is no
@@ -26,10 +26,8 @@ def e2b_client_with_breaker() -> E2BSandboxClient | None:
         return None
     from datetime import timedelta
 
-    from agentic_isolation.providers.e2b_client import SdkE2BClient
-
     from syn_adapters.execution_host.outage_breaker import OutageBreaker
-    from syn_adapters.workspace_backends.e2b.breaker_client import BreakerE2BClient
+    from syn_adapters.workspace_backends.e2b.breaker_client import sdk_client_with_breaker
     from syn_adapters.workspace_backends.host_labels import LABEL_HOST_ID, host_labels
 
     breaker = OutageBreaker(
@@ -38,4 +36,4 @@ def e2b_client_with_breaker() -> E2BSandboxClient | None:
         threshold=settings.e2b.breaker_failures,
         cooldown=timedelta(seconds=settings.e2b.breaker_cooldown_s),
     )
-    return BreakerE2BClient(SdkE2BClient(api_key=settings.e2b.api_key.get_secret_value()), breaker)
+    return sdk_client_with_breaker(settings.e2b.api_key, breaker)
