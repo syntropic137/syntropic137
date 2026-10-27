@@ -1,8 +1,8 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/keyed_start.py b/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
-index 4818c3334..5f76a3062 100644
+index 667e9996e..731abcf65 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
-@@ -74,7 +74,7 @@ async def already_started(workflow_id: str, execution_id: str, request: KeyedReq
+@@ -56,7 +56,7 @@ async def already_started(
          repos = [RepositoryRef.parse(r) for r in request.repos]
      except ValueError:
          return False

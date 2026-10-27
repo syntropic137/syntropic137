@@ -1,8 +1,8 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/keyed_start.py b/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
-index 4818c3334..67e5ba982 100644
+index 667e9996e..9e5a740c3 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
-@@ -53,7 +53,7 @@ def start_execution_id(workflow_id: str, idempotency_key: str | None) -> str:
+@@ -33,7 +33,7 @@ def start_execution_id(workflow_id: str, idempotency_key: str | None) -> str:
      """A fresh id for an unkeyed start; the key's one id for a keyed start."""
      if idempotency_key is None:
          return f"exec-{uuid4().hex[:12]}"
@@ -10,4 +10,4 @@ index 4818c3334..67e5ba982 100644
 +    return f"exec-{uuid4().hex[:12]}"
  
  
- async def already_started(workflow_id: str, execution_id: str, request: KeyedRequest) -> bool:
+ async def already_started(
