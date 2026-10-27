@@ -161,6 +161,37 @@ async def test_a_reference_is_never_a_base(tmp_path: Path) -> None:
         archive.splice_onto(a.sha256, a.sha256, apply=True)
 
 
+async def test_a_reference_whose_full_object_a_crash_left_is_never_a_base(tmp_path: Path) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    a, b, c = [await archive.put(_envelope(n)) for n in (10, 20, 30)]
+    stored = (tmp_path / b.sha256).read_bytes()
+    archive.splice_onto(b.sha256, c.sha256, apply=True)
+    # A crash after the reference committed, before the full object was unlinked.
+    (tmp_path / b.sha256).write_bytes(stored)
+    assert archive.splice_onto(a.sha256, b.sha256, apply=True).status is SpliceStatus.INELIGIBLE
+    assert (tmp_path / a.sha256).exists()
+
+
+async def test_deleting_a_base_with_a_damaged_referrer_fails_without_losing_it(
+    tmp_path: Path,
+) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    older, newest = await archive.put(_envelope(40)), await archive.put(_envelope(90))
+    archive.splice_onto(older.sha256, newest.sha256, apply=True)
+    reference_path = tmp_path / f".ref-{older.sha256}"
+    good = reference_path.read_bytes()
+    shifted = SpliceReference.model_validate_json(good)
+    reference_path.write_text(
+        shifted.model_copy(update={"offset": shifted.offset + 1}).model_dump_json()
+    )
+    with pytest.raises(TranscriptIntegrityError):
+        await archive.delete(newest)
+    # Nothing was materialised from unverified bytes, and the referrer is recoverable.
+    assert reference_path.exists() and (tmp_path / newest.sha256).exists()
+    reference_path.write_bytes(good)
+    assert await archive.get(older) == _envelope(40)
+
+
 async def test_splicing_a_base_retargets_its_referrers_first(tmp_path: Path) -> None:
     archive = LocalSessionTranscriptArchive(tmp_path)
     first, middle = await archive.put(_envelope(10)), await archive.put(_envelope(20))
