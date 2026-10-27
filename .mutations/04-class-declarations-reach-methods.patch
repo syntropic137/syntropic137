@@ -1,10 +1,10 @@
 diff --git a/scripts/check_version_literals.py b/scripts/check_version_literals.py
-index eac480b3b..9e1648411 100644
+index d6ca8ab61..e9bc36fbe 100644
 --- a/scripts/check_version_literals.py
 +++ b/scripts/check_version_literals.py
-@@ -187,9 +187,9 @@ def _owner(scope: _Scope, name: str) -> _Scope | None:
-     current: _Scope | None = scope
+@@ -191,9 +191,9 @@ def _owner(scope: _Scope, name: str) -> _Scope | None:
      first = True
+     closure = False
      while current is not None:
 +        if name in current.declared_global:
 +            return current.module()

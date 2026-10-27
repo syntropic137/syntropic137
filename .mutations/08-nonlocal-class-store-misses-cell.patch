@@ -1,0 +1,13 @@
+diff --git a/scripts/check_version_literals.py b/scripts/check_version_literals.py
+index d6ca8ab61..fe51586ec 100644
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -232,8 +232,6 @@ def _nonlocal_owner(scope: _Scope | None, name: str) -> _Scope | None:
+     """
+     current = scope
+     while current is not None and current.parent is not None:
+-        if current.is_class and name == _CLASS_CELL and current.cell is not None:
+-            return current.cell
+         if current.is_local(name) and not current.is_class:
+             return current
+         current = current.parent
