@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
+index 760c90c8c..6367d1fc0 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
+@@ -149,7 +149,7 @@ def compare_cohorts(
+             paired.append((case.eval_id, pa, pb))
+         a_low, a_high = first_k_bounds(ta, k)
+         b_low, b_high = first_k_bounds(tb, k)
+-        adverse_to_a.append(a_low - b_high)
++        adverse_to_a.append(a_low - b_low)
+         adverse_to_b.append(a_high - b_low)
+     a_only = sum(1 for _, pa, pb in paired if pa and not pb)
+     b_only = sum(1 for _, pa, pb in paired if pb and not pa)

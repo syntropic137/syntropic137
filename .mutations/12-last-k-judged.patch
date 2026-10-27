@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
+index 760c90c8c..da0a60aa9 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
+@@ -80,7 +80,7 @@ def first_k_all_pass(trials: Sequence[ClassifiedTrial], k: int) -> bool | None:
+     ]
+     if len(judged) < k:
+         return None
+-    return all(r is TrialOutcome.PASS for r in judged[:k])
++    return all(r is TrialOutcome.PASS for r in judged[-k:])
+ 
+ 
+ def first_k_bounds(trials: Sequence[ClassifiedTrial], k: int) -> tuple[float, float]:

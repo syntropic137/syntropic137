@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
+index bc0fb3dd9..6fc94a52b 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
+@@ -114,7 +114,7 @@ def cohort_of(run: EvalRunFacts) -> CohortKey | None:
+ 
+ def _base_mismatch(run: EvalRunFacts) -> bool:
+     """A checkout IS recorded and is not the baseline. An absent checkout never mismatches."""
+-    if not run.starting_checkout:
++    if run.starting_checkout:
+         return False
+     checked_out = {c.repository: c.sha for c in run.starting_checkout}
+     pinned = {p.repository: p.commit_sha for p in run.baseline}
