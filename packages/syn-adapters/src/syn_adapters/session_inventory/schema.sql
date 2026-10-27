@@ -324,3 +324,13 @@ CREATE TABLE IF NOT EXISTS session_capture_outbox_retirements (
 CREATE INDEX IF NOT EXISTS session_capture_spools_run_unsettled
     ON session_capture_spools(source_instance_id,(payload->'run'->>'execution_id'))
     WHERE settled_at IS NULL;
+
+-- #2107 S5: an automatic body expiry the confirmed-expiry gate refused. The
+-- tombstone is withdrawn and the body is not rediscovered until held_until.
+CREATE TABLE IF NOT EXISTS session_body_retention_holds (
+    source_instance_id TEXT NOT NULL,
+    archive_sha256 TEXT NOT NULL,
+    held_until TIMESTAMPTZ NOT NULL,
+    hold TEXT NOT NULL,
+    PRIMARY KEY(source_instance_id,archive_sha256)
+);

@@ -92,7 +92,7 @@ class SessionInventorySettings(BaseSettings):
     local_body_retention_seconds: int | None = Field(
         default=None,
         ge=1,
-        description="Optional local body lifetime since the newest catalog acquisition referencing those exact bytes: shared bytes expire only after every referencing capture is past this age. Disabled by default. Expiry permanently deletes the shared bytes but retains discovery history. When capture replication is enabled, deletion propagates asynchronously to that destination.",
+        description="Optional local body lifetime since the newest catalog acquisition referencing those exact bytes: shared bytes expire only after every referencing capture is past this age. Disabled by default. Expiry permanently deletes the shared bytes but retains discovery history. When capture replication is enabled, deletion propagates asynchronously to that destination, unless the archive confirmation gate is on (then expiry requires a confirmed remote copy and is never propagated).",
     )
 
     local_body_max_bytes: int | None = Field(
@@ -131,6 +131,36 @@ class SessionInventorySettings(BaseSettings):
         default=None,
         description="Explicit source-scoped capture credential, independent of inventory authority.",
     )
+    archive_confirm_enabled: bool = Field(
+        default=False,
+        description=(
+            "Gate automatic local body expiry (age and quota) on the capture replica confirming "
+            "it holds every uploaded revision the body backs, checked right before deletion "
+            "(#2107). Off keeps today's behaviour. On also stops propagating automatic expiry "
+            "to the replica. Owner deletions and retractions are never gated. Requires capture "
+            "replication and a read token. Follows the DRAFT APS-V1-0004 revision-confirm "
+            "contract (APSS PR #154)."
+        ),
+    )
+    archive_confirm_read_token: SecretStr | None = Field(
+        default=None,
+        description="Read-scoped token the expiry gate uses to confirm revisions at the capture replica. Never a write token.",
+    )
+    archive_offsite_backup_attested: bool = Field(
+        default=False,
+        description=(
+            "Operator attestation that the capture replica is itself backed up off-site. A "
+            "replica confirmation is a durable commit, not backup evidence, so with the gate on "
+            "no automatic expiry deletes anything until this is true. Leave false unless a "
+            "verified off-site backup of the replica exists."
+        ),
+    )
+    archive_confirm_hold_seconds: int = Field(
+        default=3600,
+        ge=60,
+        le=604800,
+        description="How long a body whose automatic expiry the gate refused waits before it is considered again.",
+    )
     exporter_binary: Path = Field(
         default=Path("/usr/local/bin/apss-session-exporter"),
         description="Absolute path to the released standard exporter used for inventory replication.",
@@ -156,6 +186,17 @@ class SessionInventorySettings(BaseSettings):
             or any(not 33 <= ord(char) <= 126 for char in capture_token)
         ):
             raise ValueError("capture token must be a nonblank bearer credential")
+        return self
+
+    @model_validator(mode="after")
+    def _archive_confirm_configuration(self) -> "SessionInventorySettings":
+        if not self.archive_confirm_enabled:
+            return self
+        if not self.capture_replication_enabled or self.archive_confirm_read_token is None:
+            raise ValueError("archive confirmation requires capture replication and a read token")
+        token = self.archive_confirm_read_token.get_secret_value()
+        if not token or len(token) > 4096 or any(not 33 <= ord(char) <= 126 for char in token):
+            raise ValueError("archive confirmation read token must be a nonblank bearer credential")
         return self
 
     @model_validator(mode="after")

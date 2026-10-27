@@ -48,6 +48,7 @@ from .recovery_worker import CaptureRecoveryWorker
 from .replication_runtime import (
     capture_destination_id,
     capture_outboxes,
+    create_expiry_gate,
     create_replication_manager,
 )
 from .spool_drain import LocalSpoolDrain
@@ -236,6 +237,9 @@ async def create_inventory_runtime(
             age_seconds=settings.local_body_retention_seconds,
             max_bytes=settings.local_body_max_bytes,
             exporter_binary=settings.exporter_binary,
+            gate=create_expiry_gate(settings),
+            destination_id=capture_destination_id(settings),
+            hold_seconds=settings.archive_confirm_hold_seconds,
         ),
         spool_release=spool_release,
         recovery=CaptureRecoveryWorker(

@@ -99,6 +99,7 @@ if TYPE_CHECKING:
         AgenticTranscriptConversation,
     )
     from syn_adapters.session_store.http_store import HttpSessionStore
+    from syn_adapters.session_store.seshmagic_archive_sink import SeshMagicArchiveSink
     from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
     from syn_adapters.storage.repositories import (
@@ -165,6 +166,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
         QualifiedSessionStorePort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.SessionArchiveSinkPort import (
+        SessionArchiveSinkPort,
     )
     from syn_domain.contexts.agent_sessions.ports.SessionCaptureCatalogPort import (
         SessionCaptureCatalogPort,
@@ -456,6 +460,7 @@ if TYPE_CHECKING:
         settlements: PostgresSettlementDeadlines,
         spool_release: CaptureSpoolRetention,
         outboxes: ExporterCaptureOutboxes,
+        archive_sink: SeshMagicArchiveSink,
     ) -> None:
         """Workflow-run session discovery and local capture (#1398).
 
@@ -484,6 +489,7 @@ if TYPE_CHECKING:
         _inventory_lane: InventoryReplicationWorkPort = inventory_replication
         _capture_lane: InventoryReplicationWorkPort = capture_delivery
         _qualified: QualifiedSessionStorePort = session_store
+        _archive_sink: SessionArchiveSinkPort = archive_sink
         _history_source: HistoricalEvidenceSourcePort = history_source
         _history_receipts: BackfillReceiptPort = history_receipts
         _history_queue: HistoryBackfillQueuePort = history_queue
