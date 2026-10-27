@@ -9,7 +9,7 @@ have applied it yet.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from event_sourcing import StreamAlreadyExistsError
@@ -19,34 +19,14 @@ from syn_api.routes.executions.direct_start import record_execution_request
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import (
     EvalChoice,
-    EvalId,
-    TagSet,
     execution_id_for_key,
     execution_request_id,
 )
 
 if TYPE_CHECKING:
+    from syn_api.routes.executions.commands import ExecuteWorkflowRequest
     from syn_domain.contexts._shared import AdmissionTicket
     from syn_domain.contexts.orchestration import RequestExecutionCommand
-
-
-class KeyedRequest(Protocol):
-    """The fields of `ExecuteWorkflowRequest` a retry is compared on."""
-
-    @property
-    def idempotency_key(self) -> str | None: ...
-    @property
-    def inputs(self) -> dict[str, str]: ...
-    @property
-    def task(self) -> str | None: ...
-    @property
-    def repos(self) -> list[str]: ...
-    @property
-    def tags(self) -> TagSet: ...
-    @property
-    def eval_id(self) -> EvalId | None: ...
-    @property
-    def no_eval(self) -> bool: ...
 
 
 def start_execution_id(workflow_id: str, idempotency_key: str | None) -> str:
@@ -56,7 +36,9 @@ def start_execution_id(workflow_id: str, idempotency_key: str | None) -> str:
     return execution_id_for_key(workflow_id, idempotency_key)
 
 
-async def already_started(workflow_id: str, execution_id: str, request: KeyedRequest) -> bool:
+async def already_started(
+    workflow_id: str, execution_id: str, request: ExecuteWorkflowRequest
+) -> bool:
     """Whether this keyed start was already accepted; 409 when its key was reused.
 
     A start that differs from the recorded one reused its key, and nothing
@@ -93,7 +75,7 @@ async def already_started(workflow_id: str, execution_id: str, request: KeyedReq
 
 
 async def record_unless_started(
-    command: RequestExecutionCommand, admitted: AdmissionTicket, request: KeyedRequest
+    command: RequestExecutionCommand, admitted: AdmissionTicket, request: ExecuteWorkflowRequest
 ) -> bool:
     """Record the request, or True when a concurrent start with the same key won its stream.
 
