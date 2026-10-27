@@ -19,13 +19,15 @@ from __future__ import annotations
 import hashlib
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 _DIGEST = r"^[0-9a-f]{64}$"
 _RAW_KEY = b'"raw":"'
 # After the raw string only the object close may follow.
 _TAIL = re.compile(rb'"\s*}\s*')
 IDENTITY_KEY = b',"raw":'
+MAX_REFERENCE_BYTES = 1024 * 1024
+"""A reference holds an envelope head and tail, never a transcript; a larger one is not written."""
 
 
 class SpliceReference(BaseModel):
@@ -43,6 +45,16 @@ class SpliceReference(BaseModel):
     length: int = Field(ge=0)
     head: bytes
     tail: bytes
+
+    @model_validator(mode="after")
+    def _consistent(self) -> SpliceReference:
+        # Checked before any base is read: a damaged length must not make a
+        # small revision's read hold most of its base.
+        if self.size != len(self.head) + self.length + len(self.tail):
+            raise ValueError("splice reference size does not add up")
+        if self.offset + self.length > self.base_size:
+            raise ValueError("splice reference slice is outside its base")
+        return self
 
 
 def _raw_span(envelope: bytes) -> tuple[int, int] | None:

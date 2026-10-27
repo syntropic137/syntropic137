@@ -48,6 +48,7 @@ from syn_domain.contexts.agent_sessions import (
 )
 
 from .archive_splice import (
+    MAX_REFERENCE_BYTES,
     SpliceReference,
     assemble,
     envelope_identity,
@@ -143,7 +144,7 @@ class SpliceStatus(StrEnum):
     """Stored as a reference, or with ``apply=False`` would be."""
     ALREADY_REFERENCED = "already_referenced"
     NO_SAVING = "no_saving"
-    """The reference would not be smaller than the stored object, so it stays full."""
+    """The reference would not be smaller than the stored object, or exceeds MAX_REFERENCE_BYTES: it stays full."""
     NOT_A_PREFIX = "not_a_prefix"
     """It, or a revision referencing it, does not fit the base: it stays a full object."""
     INELIGIBLE = "ineligible"
@@ -190,6 +191,10 @@ class CompressionOutcome:
     """Physical bytes before."""
     after: int
     """Physical bytes after; equal to ``before`` unless the status is COMPRESSED."""
+
+
+def _publishable(reference: SpliceReference) -> bool:
+    return len(reference.model_dump_json()) <= MAX_REFERENCE_BYTES
 
 
 def _sync_directory(path: Path) -> None:
@@ -339,7 +344,7 @@ class LocalSessionTranscriptArchive:
             with (self._root / reference.sha256).open("rb") as source:
                 body = _read_object(source, reference)
         except FileNotFoundError:
-            spliced = self._spliced_locked(reference.sha256)
+            spliced = self._spliced_locked(reference.sha256, reference.size)
             if spliced is None:
                 return None
             body = spliced
@@ -414,9 +419,14 @@ class LocalSessionTranscriptArchive:
 
     def _reference(self, digest: str) -> SpliceReference | None:
         try:
-            stored = (self._root / f"{_REFERENCE}{digest}").read_bytes()
+            with (self._root / f"{_REFERENCE}{digest}").open("rb") as source:
+                # read(n) allocates n up front, so bound it by the file, then the limit.
+                found = os.fstat(source.fileno()).st_size
+                stored = source.read(min(found, MAX_REFERENCE_BYTES) + 1)
         except FileNotFoundError:
             return None
+        if len(stored) > MAX_REFERENCE_BYTES:
+            raise TranscriptIntegrityError("archived transcript reference is unreadable")
         try:
             reference = SpliceReference.model_validate_json(stored)
         except ValidationError:
@@ -470,7 +480,7 @@ class LocalSessionTranscriptArchive:
         window = self._window_locked(digest, 0, sys.maxsize)
         return None if window is None else bytes(window.kept)
 
-    def _spliced_locked(self, digest: str) -> bytes | None:
+    def _spliced_locked(self, digest: str, size: int | None = None) -> bytes | None:
         """The verified body a reference names; ``None`` when there is no reference.
 
         Only ``digest``'s stripe is held, not the base's. That is enough: the
@@ -481,6 +491,9 @@ class LocalSessionTranscriptArchive:
         reference = self._reference(digest)
         if reference is None:
             return None
+        if size is not None and reference.size != size:
+            # Before the base is read: the caller's receipt bounds what is kept.
+            raise TranscriptIntegrityError("archived transcript reference failed verification")
         end = reference.offset + reference.length
         base = self._window_locked(reference.base_sha256, reference.offset, end)
         body = None if base is None else assemble(reference, base.size, bytes(base.kept))
@@ -523,7 +536,7 @@ class LocalSessionTranscriptArchive:
             if body is None:
                 continue  # a deleted referrer, or a pin left by a crash before its reference
             move = plan_splice(body, base)
-            if move is None or reconstruct(move, base) != body:
+            if move is None or not _publishable(move) or reconstruct(move, base) != body:
                 return None
             moves.append(move)
         return moves
@@ -565,7 +578,7 @@ class LocalSessionTranscriptArchive:
             return SpliceOutcome(planned, before)
         plan, moves = planned
         after = len(plan.model_dump_json())
-        if before and after >= before:
+        if after > MAX_REFERENCE_BYTES or (before and after >= before):
             return SpliceOutcome(SpliceStatus.NO_SAVING, before)
         if apply:
             previous = None if existing is None else existing.base_sha256

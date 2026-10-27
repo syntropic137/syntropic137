@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_adapters.session_inventory import archive_stream
+from syn_adapters.session_inventory import archive_stream, local_archive
 from syn_adapters.session_inventory.archive_splice import (
+    MAX_REFERENCE_BYTES,
     SpliceReference,
     envelope_identity,
     plan_splice,
@@ -25,6 +26,7 @@ from syn_adapters.session_inventory.local_archive import (
 from syn_domain.contexts.agent_sessions import ArchivedTranscript, TranscriptIntegrityError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 pytestmark = pytest.mark.unit
@@ -370,3 +372,53 @@ async def test_a_short_body_starting_with_the_gzip_magic_is_summarised(tmp_path:
     for body in (b"\x1f\x8b", b"\x1f\x8b\x08 short"):
         ref = await archive.put(body)
         assert archive.envelope_summary(ref.sha256) is None
+
+
+def _peak(read: Callable[[], object]) -> int:
+    tracemalloc.start()
+    try:
+        with pytest.raises(TranscriptIntegrityError):
+            read()
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+async def test_a_damaged_slice_length_is_refused_before_the_base_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    older, newest = await archive.put(_envelope(40)), await archive.put(_envelope(30_000))
+    archive.splice_onto(older.sha256, newest.sha256, apply=True)
+    monkeypatch.setattr(archive_stream, "CHUNK", 64 * 1024)
+    path = tmp_path / f".ref-{older.sha256}"
+    good = SpliceReference.model_validate_json(path.read_bytes())
+    whole = {"offset": 0, "length": good.base_size}
+    # Inconsistent fields fail validation outright.
+    path.write_text(json.dumps({**json.loads(path.read_bytes()), **whole}))
+    assert _peak(lambda: archive._get(older)) < newest.size // 8
+    # A self-consistent enlargement is refused against the caller's receipt.
+    grown = good.model_copy(
+        update={**whole, "size": len(good.head) + good.base_size + len(good.tail)}
+    )
+    path.write_text(grown.model_dump_json())
+    assert _peak(lambda: archive._get(older)) < newest.size // 8
+
+
+async def test_a_reference_file_is_read_with_a_bound(tmp_path: Path) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    older, newest = await archive.put(_envelope(40)), await archive.put(_envelope(90))
+    archive.splice_onto(older.sha256, newest.sha256, apply=True)
+    (tmp_path / f".ref-{older.sha256}").write_bytes(b" " * (4 * MAX_REFERENCE_BYTES))
+    assert _peak(lambda: archive._get(older)) < 2 * MAX_REFERENCE_BYTES
+
+
+async def test_a_reference_over_the_bound_is_never_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    older, newest = await archive.put(_envelope(40)), await archive.put(_envelope(90))
+    monkeypatch.setattr(local_archive, "MAX_REFERENCE_BYTES", 64)
+    outcome = archive.splice_onto(older.sha256, newest.sha256, apply=True)
+    assert outcome.status is SpliceStatus.NO_SAVING
+    assert not list(tmp_path.glob(".ref-*"))
