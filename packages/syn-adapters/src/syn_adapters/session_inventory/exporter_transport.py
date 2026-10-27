@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -159,6 +160,10 @@ class ExporterCaptureTransport:
         if result is not None and result.storage_key != identity.storage_key():
             raise ExporterTransportError("exporter receipt identifies another capture")
         return result
+
+    async def discard(self) -> None:
+        """Drop everything this outbox still holds, unsent."""
+        await asyncio.to_thread(shutil.rmtree, self._config.outbox_dir, True)
 
     async def drain(self, limit: int = 1) -> CaptureDrain:
         if not 1 <= limit <= 50:

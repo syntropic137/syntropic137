@@ -10,13 +10,23 @@ drain acknowledgement count is attributable to it:
 
 The source-content hash comes from the delivery job, recorded before the body
 could reach the exporter, so propagation never needs local bytes.
+
+Only owner deletions and retractions propagate (#2107). Automatic local expiry
+(age, byte quota) never deletes the replica: the remote copy is what made local
+expiry safe. Legacy tombstones recorded before reasons existed default to
+``retention_age`` and are therefore never propagated either. An automatic
+delete already in flight (queued before this rule) is cancelled, not drained:
+its outbox is discarded and its checkpoint removed. An owner request on an
+automatically expired object promotes the tombstone, so it then propagates.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, get_args
 
 from apss_session_capture.inventory import QualifiedTranscript
+
+from syn_domain.contexts.agent_sessions import OwnerDeletionReason
 
 from .deletion_fence import try_deletion_lane
 
@@ -24,10 +34,14 @@ if TYPE_CHECKING:
     from .database import Connection, Pool
     from .exporter_transport import CaptureDrain, EnqueueReceipt
 
+# Allowlist, so an unknown or future automatic reason is never propagated.
+PROPAGATED_REASONS: tuple[str, ...] = get_args(OwnerDeletionReason)
+
 
 class CaptureDeletionTransport(Protocol):
     async def delete(self, identity: QualifiedTranscript, content_hash: str) -> EnqueueReceipt: ...
     async def drain(self, limit: int = 1) -> CaptureDrain: ...
+    async def discard(self) -> None: ...
 
 
 class CaptureDeletionWorker:
@@ -47,21 +61,34 @@ class CaptureDeletionWorker:
 
     async def _settle_in_flight(self, conn: Connection) -> bool:
         rows = await conn.fetch(
-            """SELECT producer_id,capture_id,acknowledgements::text AS acknowledgements
-            FROM session_capture_deletion_checkpoints
-            WHERE source_instance_id=$1 AND destination_id=$2 AND NOT acknowledged
-            ORDER BY producer_id,capture_id LIMIT 1""",
+            """SELECT k.producer_id,k.capture_id,k.acknowledgements::text AS acknowledgements,
+            COALESCE(bool_or(d.reason=ANY($3::text[])),FALSE)::text AS owner
+            FROM session_capture_deletion_checkpoints k
+            LEFT JOIN session_capture_catalog c ON c.source_instance_id=k.source_instance_id
+            AND c.producer_id=k.producer_id AND c.capture_id=k.capture_id
+            LEFT JOIN session_body_deletions d ON d.source_instance_id=c.source_instance_id
+            AND d.archive_sha256=c.payload->'archive'->>'sha256'
+            WHERE k.source_instance_id=$1 AND k.destination_id=$2 AND NOT k.acknowledged
+            GROUP BY k.producer_id,k.capture_id,k.acknowledgements
+            ORDER BY k.producer_id,k.capture_id LIMIT 1""",
             self._source,
             self._destination,
+            list(PROPAGATED_REASONS),
         )
         if not rows:
             return False
         row = rows[0]
-        drained = await self._transport.drain(limit=1)
-        acknowledgements = int(row["acknowledgements"]) + drained.acknowledged
         args = (self._source, self._destination, row["producer_id"], row["capture_id"])
         where = """WHERE source_instance_id=$1 AND destination_id=$2
             AND producer_id=$3 AND capture_id=$4"""
+        if row["owner"] != "true":
+            # Automatic expiry queued before #2107: cancel, never drain. The lane
+            # holds one delete per destination, so the outbox holds only this one.
+            await self._transport.discard()
+            await conn.execute(f"DELETE FROM session_capture_deletion_checkpoints {where}", *args)
+            return True
+        drained = await self._transport.drain(limit=1)
+        acknowledgements = int(row["acknowledgements"]) + drained.acknowledged
         if drained.remaining > 0:
             await conn.execute(
                 f"UPDATE session_capture_deletion_checkpoints SET acknowledgements=$5 {where}",
@@ -92,12 +119,14 @@ class CaptureDeletionWorker:
             AND c.payload->>'content_format'='envelope'
             AND (j.queued OR j.content_hash IS NOT NULL)
             AND COALESCE(j.content_hash,d.content_hash) IS NOT NULL
+            AND d.reason=ANY($3::text[])
             AND NOT EXISTS(SELECT 1 FROM session_capture_deletion_checkpoints k
                 WHERE k.source_instance_id=c.source_instance_id AND k.destination_id=$2
                 AND k.producer_id=c.producer_id AND k.capture_id=c.capture_id)
             ORDER BY d.requested_at,c.producer_id,c.capture_id LIMIT 1""",
             self._source,
             self._destination,
+            list(PROPAGATED_REASONS),
         )
         if not rows:
             return False

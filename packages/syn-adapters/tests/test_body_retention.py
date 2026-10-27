@@ -212,14 +212,16 @@ async def test_real_exporter_retains_deletion_key_before_body_removal(db_pool, t
         archive=ref,
     )
     await PostgresCaptureCatalog(db_pool).record(capture)
+    # Owner deletion: automatic expiry never propagates to replicas (#2107).
     async with db_pool.acquire() as conn:
         await conn.execute(
-            "UPDATE session_capture_catalog SET created_at=now()-interval '2 days' WHERE source_instance_id=$1",
+            """INSERT INTO session_body_deletions(source_instance_id,archive_sha256,archive,reason)
+            VALUES($1,$2,$3::jsonb,'deletion')""",
             source,
+            ref.sha256,
+            ref.model_dump_json(),
         )
-    retention = LocalBodyRetention(
-        db_pool, archive, source, age_seconds=86400, exporter_binary=Path(binary)
-    )
+    retention = LocalBodyRetention(db_pool, archive, source, exporter_binary=Path(binary))
     assert await retention.step()
     assert await archive.get(ref) is None
     transport = ExporterCaptureTransport(
