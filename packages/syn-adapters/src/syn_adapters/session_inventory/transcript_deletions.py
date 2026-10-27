@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Literal
 
 from syn_domain.contexts.agent_sessions import TranscriptDeletion, TranscriptDeletionReplica
 
+from .capture_deletion_worker import PROPAGATED_REASONS
+
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions import CataloguedCapture, OwnerDeletionReason
 
@@ -49,7 +51,10 @@ class PostgresTranscriptDeletions:
         Under the exclusive fence: in-flight replica drains and backfill reads
         finish first, then the archive marker (denies every local read and put)
         and the SQL tombstone (denies delivery and drains) take effect together.
-        An existing tombstone keeps its original reason.
+        An existing owner tombstone keeps its original reason. An automatic
+        expiry tombstone (pending or done) is promoted to this owner reason, so
+        the deletion now propagates to replicas (#2107); owner intent is never
+        downgraded, since retention only inserts. Promotion reports ``created``.
         """
         if capture.run.source_instance_id != self._source:
             raise PermissionError("transcript is outside this installation")
@@ -64,11 +69,15 @@ class PostgresTranscriptDeletions:
                         USING(source_instance_id,producer_id,capture_id)
                         WHERE c.source_instance_id=$1 AND c.payload->'archive'->>'sha256'=$2
                         AND j.content_hash IS NOT NULL LIMIT 1))
-                    ON CONFLICT DO NOTHING RETURNING archive_sha256""",
+                    ON CONFLICT (source_instance_id,archive_sha256) DO UPDATE
+                    SET reason=EXCLUDED.reason
+                    WHERE session_body_deletions.reason<>ALL($5::text[])
+                    RETURNING archive_sha256""",
                     self._source,
                     capture.archive.sha256,
                     capture.archive.model_dump_json(),
                     reason,
+                    list(PROPAGATED_REASONS),
                 )
                 # Stop retries now rather than at the next retention tick.
                 await conn.execute(
@@ -112,7 +121,9 @@ class PostgresTranscriptDeletions:
             if not rows:
                 return None
             counts: dict[str, int] = {}
-            if self._destination is not None:
+            # Automatic expiry keeps the replica copy (#2107): nothing to propagate.
+            propagates = rows[0]["reason"] in PROPAGATED_REASONS
+            if self._destination is not None and propagates:
                 # Only captures that reached (or may have reached) the exporter
                 # need replica deletion; others were never delivered.
                 rows_by_state = await conn.fetch(
