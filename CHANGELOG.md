@@ -11,6 +11,16 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-10-27
+
+### Added
+
+- feat(release): hotfix release path off the last release tag (ADR-077) (#2117)
+
+### Security
+
+- security(deps): pin cloudflared 2026.10.3 by digest (eMudhra cert compromise) (#2114)
+
 ## [1.0.4] - 2026-10-22
 
 ### Added
@@ -38,6 +48,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ### Changed
 
+- chore: bump version to v1.0.4 (#2069)
 - chore(deps): pin agentic-workspace c621d819 (release #90) and its image digests (#2054)
 - test: prove usage backfill does not block ingest by lock state, not throughput (#1952) (#2051)
 - ci(evidence): set SYN_CONTRACT_TEST_IMAGE for the Docker contract tests (#2047)
@@ -51,6 +62,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ### Fixed
 
+- fix(ci): release gate codegen installs the openclaw plugin; smoke test uses a current model (#2071)
 - fix(security): pin certifi 2026.10.19 (GHSA-6q48-6c7w-9gw2, critical) (#2067)
 - When an agent prints a credential value, it is now replaced with `[REDACTED:credential]` in agent output, logs and tool-event telemetry. This covers the platform API token, model API keys, the session-store token and GitHub installation tokens, including tokens renewed mid-run. It also applies when the value is printed base64-, URL- or JSON-encoded. (#1928)
 - fix(deps): vitest 4.1.12 for @vitest/mocker advisories (main OSV red) (#2061)
@@ -375,7 +387,8 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 - fix(#1519): pin the event-store INDEX digest, not a child manifest (#1522)
 
-[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.4...HEAD
+[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/syntropic137/syntropic137/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/syntropic137/syntropic137/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/syntropic137/syntropic137/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/syntropic137/syntropic137/compare/v1.0.0...v1.0.2
