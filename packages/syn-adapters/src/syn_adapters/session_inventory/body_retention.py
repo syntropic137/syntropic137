@@ -215,15 +215,7 @@ class LocalBodyRetention:
                 return True
             content_hash = rows[0]["content_hash"]
             if content_hash is None and rows[0]["legacy"] == "true":
-                # Deliveries queued before content hashes were recorded at enqueue
-                # time: derive the replica deletion key while bytes still exist.
-                body = await self._archive.get(archive)
-                if body is not None:
-                    if self._exporter is None:
-                        raise RuntimeError("Legacy envelope expiry requires the standard exporter")
-                    content_hash = await original_envelope_hash(self._exporter, body)
-                # Absent bytes cannot be hashed; the replica state reports it
-                # as unresolvable instead of blocking erasure forever.
+                content_hash = await self._legacy_hash(archive)
             if content_hash is not None:
                 await conn.execute(
                     """UPDATE session_body_deletions SET content_hash=$3
@@ -251,6 +243,19 @@ class LocalBodyRetention:
                 archive.sha256,
             )
         return True
+
+    async def _legacy_hash(self, archive: ArchivedTranscript) -> str | None:
+        """Deliveries queued before content hashes were recorded at enqueue time:
+        derive the replica deletion key while bytes still exist. Absent bytes
+        cannot be hashed; the replica state reports it as unresolvable instead
+        of blocking erasure forever.
+        """
+        body = await self._archive.get(archive)
+        if body is None:
+            return None
+        if self._exporter is None:
+            raise RuntimeError("Legacy envelope expiry requires the standard exporter")
+        return await original_envelope_hash(self._exporter, body)
 
     async def _confirmed(self, conn: Connection, archive: ArchivedTranscript) -> bool:
         """Gate one automatic expiry; on a hold, withdraw it and keep the bytes."""

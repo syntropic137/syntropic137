@@ -104,25 +104,9 @@ class SeshMagicArchiveSink:
             return ArchiveUnavailable()
 
     async def _confirm(self, revision: UploadedRevision) -> RevisionConfirmation:
-        capabilities = await self._request("GET", CAPABILITIES_PATH, None)
-        verifies_body: bool
-        match capabilities.status_code:
-            case 200:
-                try:
-                    advertised = _Capabilities.model_validate_json(capabilities.content)
-                except ValidationError:
-                    return ConfirmUnexpectedResponse(status=200)
-                if not advertised.revision_confirm:
-                    return ConfirmNotAdvertised()
-                if advertised.confirm_verifies_body is None:
-                    # The draft requires both keys together.
-                    return ConfirmUnexpectedResponse(status=200)
-                verifies_body = advertised.confirm_verifies_body
-            case 404:
-                # No capability document: nothing optional is advertised.
-                return ConfirmNotAdvertised()
-            case status:
-                return _non_success(status)
+        verifies_body = await self._discover()
+        if not isinstance(verifies_body, bool):
+            return verifies_body
         response = await self._request(
             "HEAD",
             CONFIRM_PATH,
@@ -145,6 +129,28 @@ class SeshMagicArchiveSink:
                 return RevisionIntegrityFailure()
             case status:
                 return _non_success(status)
+
+    async def _discover(self) -> bool | RevisionConfirmation:
+        """``confirm_verifies_body`` when confirmation is advertised, else the outcome."""
+        response = await self._request("GET", CAPABILITIES_PATH, None)
+        match response.status_code:
+            case 200:
+                pass
+            case 404:
+                # No capability document: nothing optional is advertised.
+                return ConfirmNotAdvertised()
+            case status:
+                return _non_success(status)
+        try:
+            advertised = _Capabilities.model_validate_json(response.content)
+        except ValidationError:
+            return ConfirmUnexpectedResponse(status=200)
+        if not advertised.revision_confirm:
+            return ConfirmNotAdvertised()
+        if advertised.confirm_verifies_body is None:
+            # The draft requires both keys together.
+            return ConfirmUnexpectedResponse(status=200)
+        return advertised.confirm_verifies_body
 
     async def _request(
         self, method: str, path: str, params: dict[str, str] | None
