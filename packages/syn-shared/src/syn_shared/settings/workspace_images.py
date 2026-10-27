@@ -674,9 +674,10 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 # image carries agentic.image.channel=release and revision 896449c5, and
 # `cosign verify` (v3.1.3) passes for each against the
 # release-images.yml@refs/heads/release identity with the GitHub Actions OIDC
-# issuer. This release carries AW #109 (toolchain: libvulkan1, Mesa lavapipe
-# and vulkan-tools from bookworm-backports, for DreamShip's CPU render tests,
-# okrs-51p.30; toolchain manifest 1.7.0 -> 1.8.0), #112 (E2B nested-Docker
+# issuer. This release carries AW #109 (toolchain: libvulkan1 and vulkan-tools
+# from bookworm, Mesa lavapipe and its libdrm deps from bookworm-backports, for
+# DreamShip's CPU render tests, okrs-51p.30; toolchain manifest 1.7.0 ->
+# 1.8.0), #112 (E2B nested-Docker
 # template, agentic_isolation only) and #106 (sdlc PreToolUse hookEventName),
 # on top of #104 from release #105 (pinned by the superseded #2089).
 #
