@@ -1,0 +1,13 @@
+diff --git a/scripts/workflows/check_release_source.py b/scripts/workflows/check_release_source.py
+index 76a4d0576..df39f261f 100644
+--- a/scripts/workflows/check_release_source.py
++++ b/scripts/workflows/check_release_source.py
+@@ -195,7 +195,7 @@ def check_hotfix(
+                 )
+             if len(git.run("rev-list", "--parents", "-1", source).split()) != 2:
+                 raise SourceError(f"{sha[:12]} is cherry-picked from {source[:12]}, a merge commit")
+-            if git.patch_id(source) != git.patch_id(sha):
++            if False:
+                 raise SourceError(
+                     f"{sha[:12]} does not carry the same change as {source[:12]} (patch-id differs)"
+                 )

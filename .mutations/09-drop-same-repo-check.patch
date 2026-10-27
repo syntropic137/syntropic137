@@ -1,0 +1,13 @@
+diff --git a/scripts/workflows/check_release_source.py b/scripts/workflows/check_release_source.py
+index 76a4d0576..1301a0f31 100644
+--- a/scripts/workflows/check_release_source.py
++++ b/scripts/workflows/check_release_source.py
+@@ -367,7 +367,7 @@ def check_source(
+     allowed: frozenset[str],
+     main_ref: str = MAIN_REF,
+ ) -> list[str]:
+-    if head_repo != base_repo:
++    if False:
+         raise SourceError(
+             f"the head is in {head_repo}, not {base_repo}: release PRs come from {base_repo} only"
+         )

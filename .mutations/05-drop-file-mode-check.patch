@@ -1,0 +1,13 @@
+diff --git a/scripts/workflows/check_release_source.py b/scripts/workflows/check_release_source.py
+index 76a4d0576..7b588fca5 100644
+--- a/scripts/workflows/check_release_source.py
++++ b/scripts/workflows/check_release_source.py
+@@ -263,7 +263,7 @@ def check_only_version_bumped(
+             raise SourceError(
+                 f"the branch changes files beyond its cherry-picks and the version bump: {path}"
+             )
+-        if status != "M" or old_mode != REGULAR_FILE or new_mode != REGULAR_FILE:
++        if False:
+             raise SourceError(f"{path} must stay a regular file modified in place ({entry})")
+         if path == CHANGELOG:
+             continue

@@ -1,0 +1,13 @@
+diff --git a/scripts/workflows/check_release_source.py b/scripts/workflows/check_release_source.py
+index 76a4d0576..4cfd5a083 100644
+--- a/scripts/workflows/check_release_source.py
++++ b/scripts/workflows/check_release_source.py
+@@ -189,7 +189,7 @@ def check_hotfix(
+         picked = CHERRY_PICK_RE.findall(message)
+         if picked:
+             source = picked[-1]
+-            if not git.ok("merge-base", "--is-ancestor", source, main_ref):
++            if False:
+                 raise SourceError(
+                     f"{sha[:12]} is cherry-picked from {source[:12]}, which is not on main"
+                 )

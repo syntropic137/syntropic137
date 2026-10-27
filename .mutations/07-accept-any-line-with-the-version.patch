@@ -1,0 +1,13 @@
+diff --git a/scripts/workflows/check_release_source.py b/scripts/workflows/check_release_source.py
+index 76a4d0576..d06e7fc22 100644
+--- a/scripts/workflows/check_release_source.py
++++ b/scripts/workflows/check_release_source.py
+@@ -269,7 +269,7 @@ def check_only_version_bumped(
+             continue
+         for before, after in changed_line_pairs(git, expected, head_sha, path):
+             if (
+-                not VERSION_LINE_RE.match(before)
++                False
+                 or after != before.replace(old, new)
+                 or old not in before
+             ):
