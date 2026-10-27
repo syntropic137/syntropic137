@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py b/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py
+index 53ec5157d..592a430e9 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py
+@@ -60,7 +60,7 @@ class PostgresCaptureSpools:
+                     AND release_reason IS NULL
+                     AND (settled_at IS NOT NULL OR claimed_at IS NULL
+                         OR watermark IS NOT NULL OR child_watermark IS NOT NULL
+-                        OR claimed_at<=now()-$3::double precision*interval '1 second')
++                        OR $3::double precision<0)
+                     ORDER BY retry_at,source_instance_id,session_id FOR UPDATE SKIP LOCKED LIMIT 1
+                 ) UPDATE session_capture_spools s SET lease_token=s.lease_token+1,
+                     leased_until=now()+$1::double precision*interval '1 second',claimed_at=now()
