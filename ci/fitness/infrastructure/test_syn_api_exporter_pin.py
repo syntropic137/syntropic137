@@ -12,8 +12,10 @@ the two cannot share one literal; this test is the drift check that makes them
 one pin in effect. The host reads what the workspace exporter writes, so a
 silent split between the two is exactly the bug to catch.
 
-It also pins the install path to the runtime default, so the API resolves the
-image's binary without any operator configuration.
+It also pins that the image installs through the tested
+``scripts/install_apss_exporter.py`` with no shell around it, and that the
+script's install path is the runtime default, so the API resolves the image's
+binary without any operator configuration.
 
 Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 """
@@ -21,6 +23,7 @@ Standard: ADR-062 (docs/adrs/ADR-062-architectural-fitness-function-standard.md)
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -28,11 +31,20 @@ import pytest
 from syn_shared.settings.session_inventory import SessionInventorySettings
 from syn_shared.settings.workspace_images import PINNED_EXPORTER_VERSIONS
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from install_apss_exporter import DEFAULT_DEST  # noqa: E402
+
 _ROOT = Path(__file__).resolve().parents[3]
 _DOCKERFILE = _ROOT / "infra/docker/images/syn-api/Dockerfile"
 _IMAGE_BINARY = Path("/usr/local/bin/apss-session-exporter")
 _ARCHES = ("AMD64", "ARM64")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_INSTALLER = "install_apss_exporter.py"
+_INSTALL_RUN = (
+    "RUN --mount=type=bind,source=scripts/install_apss_exporter.py,"
+    "target=/tmp/install_apss_exporter.py "
+    '["python", "-I", "/tmp/install_apss_exporter.py"]'
+)
 
 
 def _runtime_stage() -> str:
@@ -74,8 +86,6 @@ def test_dockerfile_pins_a_checksum_per_arch(arch: str) -> None:
     name = f"APSS_EXPORTER_SHA256_{arch}"
     sha = _arg_defaults(stage).get(name)
     assert sha and _SHA256.fullmatch(sha), f"{name} is not a sha256 hex digest: {sha!r}"
-    # Declared is not used: the install step must select this arg for the arch.
-    assert f'{arch.lower()}) SHA="${name}"' in stage, f"{name} is never selected"
 
 
 @pytest.mark.architecture
@@ -88,17 +98,19 @@ def test_per_arch_checksums_differ() -> None:
 
 
 @pytest.mark.architecture
-def test_install_verifies_before_installing() -> None:
-    stage = _runtime_stage()
-    verify = stage.find("sha256sum -c")
-    install = stage.find(f"install -m 755 /tmp/apss-session-exporter {_IMAGE_BINARY}")
-    assert verify != -1, "the exporter download is never checksum-verified"
-    assert install != -1, f"the exporter is not installed at {_IMAGE_BINARY}"
-    assert verify < install, "the exporter is installed before it is verified"
-    assert "*) echo" in stage and "exit 1" in stage, "an unknown arch must fail the build"
+def test_install_runs_the_tested_script_with_no_shell() -> None:
+    # The verify-before-install behaviour is tested in
+    # scripts/tests/test_install_apss_exporter.py. That only holds for the
+    # image if the image runs that script and nothing can mask its exit code:
+    # an exec-form RUN has no shell, so no `|| true` and no missing `set -e`.
+    # Compared whole, after joining continuations, so any added token fails.
+    stage = re.sub(r"\\\n\s*", " ", _runtime_stage())
+    runs = [line for line in stage.splitlines() if _INSTALLER in line and line.startswith("RUN")]
+    assert runs == [_INSTALL_RUN], f"expected exactly {_INSTALL_RUN!r}, found {runs!r}"
 
 
 @pytest.mark.architecture
 def test_runtime_default_is_the_image_binary() -> None:
     field = SessionInventorySettings.model_fields["exporter_binary"]
     assert field.default == _IMAGE_BINARY
+    assert _IMAGE_BINARY == DEFAULT_DEST

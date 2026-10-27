@@ -109,31 +109,20 @@ RUN set -e; \
 
 # NOT optional: apss-session-exporter (AgentParadise/agentic-session-exporter).
 # Host-side capture replication and inventory delivery shell out to it at
-# SessionInventorySettings.exporter_binary, whose default is the path below, so
-# the image carries the binary instead of relying on an operator-provided one
-# (#2107). Exact version + sha256 per arch from the release's SHA256SUMS; the
-# build fails on a checksum mismatch or an unknown arch, never installs an
-# unverified binary. The version must equal PINNED_EXPORTER_VERSIONS (the
-# exporter baked into the workspace images):
+# SessionInventorySettings.exporter_binary, whose default is
+# /usr/local/bin/apss-session-exporter, so the image carries the binary instead
+# of relying on an operator-provided one (#2107). Exact version + sha256 per
+# arch from the release's SHA256SUMS. scripts/install_apss_exporter.py reads
+# these args from the environment, verifies the sha256 and --version before
+# installing, and fails the build otherwise; it is tested in
+# scripts/tests/test_install_apss_exporter.py. Exec form on purpose: no shell,
+# so nothing can swallow a failed check. The version must equal
+# PINNED_EXPORTER_VERSIONS (the exporter in the workspace images):
 # ci/fitness/infrastructure/test_syn_api_exporter_pin.py fails on drift.
 ARG APSS_EXPORTER_VERSION=0.6.0
 ARG APSS_EXPORTER_SHA256_AMD64=1ee6a4307d19d8dc253e993f0e5ed3575a726a6c961391e806557663178346d1
 ARG APSS_EXPORTER_SHA256_ARM64=b5a429608c2459d50221df7be7005da23f103e27c45ec9a5f9800dccf969fc11
-RUN set -e; \
-    ARCH="$(dpkg --print-architecture)"; \
-    case "$ARCH" in \
-      amd64) SHA="$APSS_EXPORTER_SHA256_AMD64" ;; \
-      arm64) SHA="$APSS_EXPORTER_SHA256_ARM64" ;; \
-      *) echo "apss-session-exporter: no pinned checksum for arch $ARCH" >&2; exit 1 ;; \
-    esac; \
-    apt-get update && apt-get install -y --no-install-recommends curl; \
-    curl -fsSL "https://github.com/AgentParadise/agentic-session-exporter/releases/download/v${APSS_EXPORTER_VERSION}/apss-session-exporter-linux-${ARCH}" \
-      -o /tmp/apss-session-exporter; \
-    echo "${SHA}  /tmp/apss-session-exporter" | sha256sum -c -; \
-    install -m 755 /tmp/apss-session-exporter /usr/local/bin/apss-session-exporter; \
-    rm /tmp/apss-session-exporter; \
-    /usr/local/bin/apss-session-exporter --version | grep -qx "apss-session-exporter ${APSS_EXPORTER_VERSION}.*"; \
-    apt-get purge -y curl; apt-get autoremove -y; rm -rf /var/lib/apt/lists/*
+RUN --mount=type=bind,source=scripts/install_apss_exporter.py,target=/tmp/install_apss_exporter.py ["python", "-I", "/tmp/install_apss_exporter.py"]
 
 WORKDIR /app
 
