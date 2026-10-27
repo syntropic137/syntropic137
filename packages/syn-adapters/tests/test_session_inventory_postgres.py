@@ -103,6 +103,91 @@ async def test_capture_delivery_jobs_fence_expired_workers_and_separate_destinat
         )
 
 
+async def test_capture_delivery_queues_only_the_newest_revision_per_run_transcript(
+    db_pool: asyncpg.Pool,
+    inventory: PostgresSessionInventory,
+) -> None:
+    """#2107: re-sweeps catalogue ~10 growing revisions per session; only the
+    newest may leave, or the destination stores the session again in full."""
+    from syn_adapters.session_inventory.capture_catalog import PostgresCaptureCatalog
+    from syn_adapters.session_inventory.capture_delivery_jobs import PostgresCaptureDeliveryJobs
+    from syn_domain.contexts.agent_sessions import CataloguedCapture
+    from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort import (
+        ArchivedTranscript,
+    )
+
+    source = str(uuid4())
+    base = CataloguedCapture(
+        run=RunIdentity(source_instance_id=source, execution_id="run-a"),
+        producer_id="spool",
+        capture_id="a-1",
+        harness="claude",
+        native_id="grows",
+        content_format="envelope",
+        archive=ArchivedTranscript(sha256="1" * 64, size=10),
+    )
+
+    def revision(capture_id: str, digit: str, size: int, **update: object) -> CataloguedCapture:
+        archive = ArchivedTranscript(sha256=digit * 64, size=size)
+        return base.model_copy(update={"capture_id": capture_id, "archive": archive, **update})
+
+    newest = revision("a-3", "3", 30)
+    other_run = revision(
+        "b-1", "4", 15, run=RunIdentity(source_instance_id=source, execution_id="run-b")
+    )
+    other_harness = revision("c-1", "5", 5, harness="codex")
+    withdrawn_newest = revision("d-2", "7", 70, native_id="withdrawn")
+    catalog = PostgresCaptureCatalog(db_pool)
+    # Catalogue order is not size order: the largest revision is not the last row.
+    for capture in (
+        base,
+        newest,
+        revision("a-2", "2", 20),
+        other_run,
+        other_harness,
+        revision("d-1", "6", 60, native_id="withdrawn"),
+        withdrawn_newest,
+    ):
+        await catalog.record(capture)
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO session_body_deletions(source_instance_id,archive_sha256,archive) VALUES($1,$2,$3)",
+            source,
+            withdrawn_newest.archive.sha256,
+            withdrawn_newest.archive.model_dump_json(),
+        )
+
+    async def claimed(jobs: PostgresCaptureDeliveryJobs) -> set[str]:
+        ids: set[str] = set()
+        while (lease := await jobs.claim()) is not None:
+            ids.add(lease.capture.capture_id)
+            await jobs.finish(lease, queued=True)
+        return ids
+
+    jobs = PostgresCaptureDeliveryJobs(db_pool, source, "replica")
+    try:
+        await jobs.discover()
+        # The same session in another run still gets its own delivery, so each
+        # run's inventory can record a remote receipt. A withdrawn newest
+        # revision is not replaced by an older one.
+        assert await claimed(jobs) == {"a-3", "b-1", "c-1"}
+        # A later, larger revision of a delivered transcript is queued once more;
+        # the older revisions never are.
+        await catalog.record(revision("a-4", "8", 40))
+        await jobs.discover()
+        assert await claimed(jobs) == {"a-4"}
+        await jobs.discover()
+        assert await claimed(jobs) == set()
+    finally:
+        async with db_pool.acquire() as conn:
+            for table in (
+                "session_capture_delivery_jobs",
+                "session_body_deletions",
+                "session_capture_catalog",
+            ):
+                await conn.execute(f"DELETE FROM {table} WHERE source_instance_id=$1", source)
+
+
 async def test_capture_catalog_survives_retry_and_rejects_changed_identity(
     db_pool: asyncpg.Pool,
     inventory: PostgresSessionInventory,

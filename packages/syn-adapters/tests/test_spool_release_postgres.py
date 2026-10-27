@@ -145,7 +145,15 @@ async def test_paused_non_terminal_spool_survives_age_drain_and_resumes(
     assert not await retention.after_drain(first, exclusive=True)
     assert await retention.step() == 0  # age expiry needs a terminal session too
     assert volumes.removed == [] and await _gaps(db_pool, source) == 0
-    # The workspace resumes; later bytes are still captured from the same volume.
+    # The workspace resumes; later bytes are still captured from the same volume,
+    # once the live re-sweep interval has passed (#2107).
+    assert await spools.claim(lease_seconds=60) is None
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE session_capture_spools SET drained_at=drained_at-interval '1 hour'
+            WHERE source_instance_id=$1""",
+            source,
+        )
     resumed = await spools.claim(lease_seconds=60)
     assert resumed is not None and resumed.token > first.token
     await spools.advance(resumed, after=0, watermark=None, retry_seconds=0, staged_bytes=50)

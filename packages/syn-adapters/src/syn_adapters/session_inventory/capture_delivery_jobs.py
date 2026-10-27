@@ -41,16 +41,31 @@ class PostgresCaptureDeliveryJobs:
         self._pool, self._source, self._destination = pool, source_instance_id, destination_id
 
     async def discover(self, limit: int = 100) -> None:
+        """Queue only the newest revision of each transcript in each run (#2107).
+
+        Revisions of one transcript grow by appending, so the largest archive is
+        the newest and contains every older one. Older revisions are never queued:
+        delivering them would store the same session again in full at the
+        destination. The newest is chosen before the deletion filter, so a
+        withdrawn newest revision never lets an older one take its place.
+        """
         if not 1 <= limit <= 500:
             raise ValueError("capture discovery limit must be 1..500")
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """INSERT INTO session_capture_delivery_jobs
                 (destination_id,source_instance_id,producer_id,capture_id)
-                SELECT $1,c.source_instance_id,c.producer_id,c.capture_id FROM session_capture_catalog c
-                WHERE c.source_instance_id=$2 AND c.payload->>'content_format'='envelope'
-                AND c.payload->>'native_id' IS NOT NULL
-                AND NOT EXISTS (SELECT 1 FROM session_body_deletions d
+                SELECT $1,c.source_instance_id,c.producer_id,c.capture_id FROM (
+                    SELECT DISTINCT ON (n.payload->'run'->>'execution_id',n.payload->>'harness',
+                        n.payload->>'native_id') n.*
+                    FROM session_capture_catalog n
+                    WHERE n.source_instance_id=$2 AND n.payload->>'content_format'='envelope'
+                    AND n.payload->>'native_id' IS NOT NULL
+                    ORDER BY n.payload->'run'->>'execution_id',n.payload->>'harness',
+                        n.payload->>'native_id',(n.payload->'archive'->>'size')::bigint DESC,
+                        n.created_at DESC,n.producer_id DESC,n.capture_id DESC
+                ) c
+                WHERE NOT EXISTS (SELECT 1 FROM session_body_deletions d
                     WHERE d.source_instance_id=c.source_instance_id
                     AND d.archive_sha256=c.payload->'archive'->>'sha256')
                 AND NOT EXISTS (
