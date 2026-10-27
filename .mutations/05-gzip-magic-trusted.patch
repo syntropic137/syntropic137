@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+index 494e0013b..9da6a7e7c 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+@@ -320,7 +320,7 @@ def _measure(digest: str, stored: bytes) -> _Measured:
+     """
+     before = len(stored)
+     if hashlib.sha256(stored).hexdigest() != digest:
+-        if stored[: len(_GZIP_MAGIC)] != _GZIP_MAGIC or _gzip_digest(stored) != digest:
++        if stored[: len(_GZIP_MAGIC)] != _GZIP_MAGIC:
+             raise TranscriptIntegrityError("archived transcript failed integrity verification")
+         return _Measured(
+             CompressionOutcome(CompressionStatus.ALREADY_COMPRESSED, before, before), None

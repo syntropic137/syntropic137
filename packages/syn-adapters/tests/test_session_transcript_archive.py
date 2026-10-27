@@ -240,3 +240,48 @@ async def test_compress_in_place_never_rewrites_a_corrupt_or_deleted_object(
     assert archive.compress_in_place("0" * 64, apply=True) is None
     with pytest.raises(ValueError, match="key"):
         archive.compress_in_place("../escape", apply=True)
+
+
+@pytest.mark.parametrize("damage", ["truncated", "trailing"])
+async def test_compress_in_place_verifies_a_gzip_object_before_reporting_it_done(
+    tmp_path: Path, damage: str
+) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    ref = await archive.put(_ENVELOPE)
+    stored = (tmp_path / ref.sha256).read_bytes()
+    damaged = stored[:-8] if damage == "truncated" else stored + b"\0garbage"
+    (tmp_path / ref.sha256).write_bytes(damaged)
+    with pytest.raises(TranscriptIntegrityError):
+        archive.compress_in_place(ref.sha256, apply=True)
+    assert (tmp_path / ref.sha256).read_bytes() == damaged
+
+
+async def test_uncompressed_body_starting_with_gzip_magic_is_still_compressed(
+    tmp_path: Path,
+) -> None:
+    body = b"\x1f\x8b" + _ENVELOPE
+    ref = await LocalSessionTranscriptArchive(tmp_path, compress=False).put(body)
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    outcome = archive.compress_in_place(ref.sha256, apply=True)
+    assert outcome is not None and outcome.status is CompressionStatus.COMPRESSED
+    assert gzip.decompress((tmp_path / ref.sha256).read_bytes()) == body
+    assert await archive.get(ref) == body
+
+
+async def test_temporaries_of_a_killed_writer_are_reclaimed(tmp_path: Path) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    ref = await archive.put(_ENVELOPE)
+    other = await archive.put(_ENVELOPE + b" ")
+    stale = [tmp_path / f"{prefix}{ref.sha256}-killed" for prefix in (".capture-", ".compress-")]
+    unrelated = tmp_path / f".compress-{other.sha256}-killed"
+    for path in [*stale, unrelated]:
+        path.write_bytes(b"orphaned transcript copy")
+    archive.compress_in_place(ref.sha256, apply=False)
+    assert not any(path.exists() for path in stale)
+    assert unrelated.exists()
+    for path in stale:
+        path.write_bytes(b"orphaned transcript copy")
+    await archive.delete(ref)
+    assert not any(path.exists() for path in stale)
+    await archive.put(_ENVELOPE + b" ")
+    assert not unrelated.exists()

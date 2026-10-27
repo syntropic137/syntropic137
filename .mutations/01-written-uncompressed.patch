@@ -1,9 +1,9 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
-index c781045cf..eb5c6783e 100644
+index 494e0013b..2cf850bfb 100644
 --- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
 +++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
-@@ -175,7 +175,7 @@ class LocalSessionTranscriptArchive:
-         descriptor, temporary = tempfile.mkstemp(prefix=".capture-", dir=self._root)
+@@ -192,7 +192,7 @@ class LocalSessionTranscriptArchive:
+         descriptor, temporary = tempfile.mkstemp(prefix=f".capture-{ref.sha256}-", dir=self._root)
          try:
              with os.fdopen(descriptor, "wb") as output:
 -                output.write(_encode(body) if self._compress else body)

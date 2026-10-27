@@ -39,6 +39,9 @@ from syn_domain.contexts.agent_sessions import (
 _GZIP_MAGIC = b"\x1f\x8b"
 _OBJECT_NAME = re.compile(r"[0-9a-f]{64}")
 _CHUNK = 1024 * 1024
+# Temporaries are named after their digest so a writer killed before its
+# cleanup ran leaves bytes the next locked operation on that digest reclaims.
+_TEMPORARY_PREFIXES = (".capture-", ".compress-")
 
 
 def _encode(body: bytes) -> bytes:
@@ -100,14 +103,21 @@ def _read_object(source: BinaryIO, reference: ArchivedTranscript) -> bytes:
     return body
 
 
-def _physical(target: Path) -> tuple[int, bool] | None:
-    """Stored size and whether the object is gzip; ``None`` when absent."""
+def _gzip_digest(stored: bytes) -> str | None:
+    """sha256 of one complete gzip stream, inflated in bounded chunks; ``None`` if damaged."""
+    inflater = zlib.decompressobj(wbits=31)
+    digest = hashlib.sha256()
+    pending = stored
     try:
-        with target.open("rb") as source:
-            size = os.fstat(source.fileno()).st_size
-            return size, source.read(len(_GZIP_MAGIC)) == _GZIP_MAGIC
-    except FileNotFoundError:
+        while pending and not inflater.eof:
+            digest.update(inflater.decompress(pending, _CHUNK))
+            pending = inflater.unconsumed_tail
+        digest.update(inflater.flush())
+    except zlib.error:
         return None
+    if not inflater.eof or inflater.unused_data:
+        return None
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -169,10 +179,17 @@ class LocalSessionTranscriptArchive:
                 raise TranscriptDeletedError("transcript body was permanently deleted")
             return self._put_locked(body)
 
+    def _reclaim_temporaries_locked(self, digest: str) -> None:
+        """Remove a killed writer's temporaries; every writer of ``digest`` holds its lock."""
+        for prefix in _TEMPORARY_PREFIXES:
+            for stale in self._root.glob(f"{prefix}{digest}-*"):
+                stale.unlink(missing_ok=True)
+
     def _put_locked(self, body: bytes) -> ArchivedTranscript:
         ref = ArchivedTranscript(sha256=hashlib.sha256(body).hexdigest(), size=len(body))
         target = self._root / ref.sha256
-        descriptor, temporary = tempfile.mkstemp(prefix=".capture-", dir=self._root)
+        self._reclaim_temporaries_locked(ref.sha256)
+        descriptor, temporary = tempfile.mkstemp(prefix=f".capture-{ref.sha256}-", dir=self._root)
         try:
             with os.fdopen(descriptor, "wb") as output:
                 output.write(_encode(body) if self._compress else body)
@@ -216,6 +233,7 @@ class LocalSessionTranscriptArchive:
             self._mark_locked(reference)
             # A crash before unlink still denies reads and subsequent puts.
             (self._root / reference.sha256).unlink(missing_ok=True)
+            self._reclaim_temporaries_locked(reference.sha256)
             _sync_directory(self._root)
 
     async def delete(self, reference: ArchivedTranscript) -> None:
@@ -251,7 +269,7 @@ class LocalSessionTranscriptArchive:
                 yield entry.name
 
     def _replace_locked(self, target: Path, encoded: bytes) -> None:
-        descriptor, temporary = tempfile.mkstemp(prefix=".compress-", dir=self._root)
+        descriptor, temporary = tempfile.mkstemp(prefix=f".compress-{target.name}-", dir=self._root)
         try:
             with os.fdopen(descriptor, "wb") as output:
                 output.write(encoded)
@@ -273,20 +291,45 @@ class LocalSessionTranscriptArchive:
             raise ValueError("not an archive object key")
         target = self._root / digest
         with self._lock(digest):
-            physical = None if self._deleted(digest) else _physical(target)
-            if physical is None:
+            self._reclaim_temporaries_locked(digest)
+            if self._deleted(digest):
                 return None
-            before, compressed = physical
-            if compressed:
-                return CompressionOutcome(CompressionStatus.ALREADY_COMPRESSED, before, before)
-            body = self._get_locked(ArchivedTranscript(sha256=digest, size=before))
-            if body is None:
+            try:
+                stored = target.read_bytes()
+            except FileNotFoundError:
                 return None
-            encoded = _encode(body)
-            if hashlib.sha256(gzip.decompress(encoded)).hexdigest() != digest:
-                raise TranscriptIntegrityError("re-encoded transcript failed verification")
-            if len(encoded) >= before:
-                return CompressionOutcome(CompressionStatus.INCOMPRESSIBLE, before, before)
-            if apply:
-                self._replace_locked(target, encoded)
-            return CompressionOutcome(CompressionStatus.COMPRESSED, before, len(encoded))
+            outcome = _measure(digest, stored)
+            if apply and outcome.encoded is not None:
+                self._replace_locked(target, outcome.encoded)
+            return outcome.result
+
+
+@dataclass(frozen=True)
+class _Measured:
+    result: CompressionOutcome
+    encoded: bytes | None
+    """The verified replacement, when the object should be rewritten."""
+
+
+def _measure(digest: str, stored: bytes) -> _Measured:
+    """Classify by content, never by magic alone.
+
+    A stored object whose own hash is its key is an uncompressed body, even one
+    that starts with the gzip magic. Otherwise it must be one complete gzip
+    stream inflating to that key; anything else is an integrity failure.
+    """
+    before = len(stored)
+    if hashlib.sha256(stored).hexdigest() != digest:
+        if stored[: len(_GZIP_MAGIC)] != _GZIP_MAGIC or _gzip_digest(stored) != digest:
+            raise TranscriptIntegrityError("archived transcript failed integrity verification")
+        return _Measured(
+            CompressionOutcome(CompressionStatus.ALREADY_COMPRESSED, before, before), None
+        )
+    encoded = _encode(stored)
+    if _gzip_digest(encoded) != digest:
+        raise TranscriptIntegrityError("re-encoded transcript failed verification")
+    if len(encoded) >= before:
+        return _Measured(CompressionOutcome(CompressionStatus.INCOMPRESSIBLE, before, before), None)
+    return _Measured(
+        CompressionOutcome(CompressionStatus.COMPRESSED, before, len(encoded)), encoded
+    )

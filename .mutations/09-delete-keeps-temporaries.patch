@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+index 494e0013b..86414b122 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+@@ -233,7 +233,6 @@ class LocalSessionTranscriptArchive:
+             self._mark_locked(reference)
+             # A crash before unlink still denies reads and subsequent puts.
+             (self._root / reference.sha256).unlink(missing_ok=True)
+-            self._reclaim_temporaries_locked(reference.sha256)
+             _sync_directory(self._root)
+ 
+     async def delete(self, reference: ArchivedTranscript) -> None:
