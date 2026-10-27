@@ -391,6 +391,9 @@ from syn_domain.contexts.orchestration.slices.tag_workflow import (
     AddWorkflowTagsHandler,
     RemoveWorkflowTagsHandler,
 )
+from syn_domain.contexts.orchestration.slices.update_eval.UpdateEvalHandler import (
+    UpdateEvalHandler,
+)
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
@@ -584,6 +587,7 @@ __all__ = [
     "TrialOutcome",
     "UnsupportedExecutionTypeError",
     "UnsupportedToolPolicyForProviderError",
+    "UpdateEvalHandler",
     "UpdatePhasePromptCommand",
     "UpdateWorkflowPhaseHandler",
     "UpdateWorkflowTemplateCommand",
