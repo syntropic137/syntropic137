@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_adapters.workspace_backends.service.workspace_lifecycle import (
+    ProvisionTrack,
     build_isolation_config,
     cleanup_workspace,
     create_workspace_aggregate,
@@ -63,6 +64,7 @@ if TYPE_CHECKING:
         LedgerReservation,
         WorkspaceMemoryLedger,
     )
+    from syn_adapters.workspace_backends.service.workspace_lifecycle import IsolationTeardown
     from syn_adapters.workspace_backends.tokens.token_injection_adapter import (
         SidecarTokenInjectionAdapter,
     )
@@ -157,6 +159,26 @@ class WorkspaceServiceConfig:
             cpu_limit_cores=settings.cpu_limit,
             runtime=settings.runtime,
         )
+
+
+def _not_shown_gone(
+    track: ProvisionTrack,
+    isolation_handle: IsolationHandle | None,
+    teardown: IsolationTeardown | None,
+) -> str | None:
+    """Why this workspace's container cannot be shown gone, or None when it can.
+
+    No container: ``create`` raised, which the backend reports as nothing
+    created - unless a cancel interrupted it, when one may exist unnamed.
+    A container: gone only when teardown ran to the end and reported no failure.
+    """
+    if isolation_handle is None:
+        return "create was interrupted" if track.create_interrupted else None
+    if teardown is None:
+        return "teardown was interrupted"
+    if teardown.failure is not None:
+        return f"teardown failed: {teardown.failure.kind}: {teardown.failure.message}"
+    return None
 
 
 def _refuse_credentials_under(
@@ -598,6 +620,22 @@ class WorkspaceService:
 
         return aggregate, isolation_config
 
+    @staticmethod
+    def _settle_reservation(
+        reservation: LedgerReservation,
+        execution_id: str,
+        workspace_id: str,
+        track: ProvisionTrack,
+        isolation_handle: IsolationHandle | None,
+        teardown: IsolationTeardown | None,
+    ) -> None:
+        """Release only when the container is shown gone; otherwise leave it charged."""
+        reason = _not_shown_gone(track, isolation_handle, teardown)
+        if reason is None:
+            reservation.release()
+        else:
+            reservation.leak(execution_id, workspace_id=workspace_id, reason=reason)
+
     async def _reserve_memory(self, memory_mb: int, workspace_id: str) -> LedgerReservation | None:
         """Hold ``memory_mb`` of this process's workspace memory, waiting if it is taken."""
         if self._memory_ledger is None:
@@ -684,6 +722,7 @@ class WorkspaceService:
         isolation_handle: IsolationHandle | None = None
         sidecar_handle: SidecarHandle | None = None
         workspace: ManagedWorkspace | None = None
+        track = ProvisionTrack()
 
         try:
             isolation_handle, sidecar_handle, image_manifest = await provision_workspace(
@@ -692,6 +731,7 @@ class WorkspaceService:
                 aggregate,
                 workspace_id,
                 with_sidecar=with_sidecar,
+                track=track,
             )
 
             workspace = ManagedWorkspace(
@@ -724,6 +764,11 @@ class WorkspaceService:
         finally:
             # After the caller's block, and so after the unpushed-work guard's
             # quarantine push: nothing left in the container needs a token (#725).
+            # The handle as soon as the container existed, not only once
+            # provisioning returned: a sidecar that failed to start used to
+            # leave the container undestroyed (okrs-51p.30, Codex on #2148).
+            isolation_handle = isolation_handle or track.isolation
+            teardown: IsolationTeardown | None = None
             try:
                 if workspace is not None:
                     await workspace.revoke_issued_credentials()
@@ -739,11 +784,14 @@ class WorkspaceService:
                     phase_id=phase_id,
                 )
             finally:
-                # After teardown: the memory is the container's until it is gone.
+                # The memory is the container's until it is SHOWN gone.
                 if reservation is not None:
-                    reservation.release()
+                    self._settle_reservation(
+                        reservation, execution_id, workspace_id, track, isolation_handle, teardown
+                    )
             # Handed back on the object every caller still holds after
             # `__aexit__`, so the frame that knows the session can record it.
-            if workspace is not None:
+            # (teardown is None only when cleanup raised, which never gets here.)
+            if workspace is not None and teardown is not None:
                 workspace.teardown_usage = teardown.usage
                 workspace.teardown_failure = teardown.failure

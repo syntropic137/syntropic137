@@ -103,3 +103,57 @@ async def test_release_is_idempotent() -> None:
 def test_a_ledger_without_capacity_is_refused() -> None:
     with pytest.raises(ValueError, match="at least 1 MB"):
         WorkspaceMemoryLedger(0)
+
+
+async def test_an_oversize_request_at_the_head_holds_back_later_smalls_then_runs_alone() -> None:
+    """Bigger than the whole ledger, queued behind live smalls: no barging, then alone."""
+    ledger = WorkspaceMemoryLedger(8192)
+    holders = [await ledger.reserve(4096, workspace_id=f"small-{i}") for i in range(2)]
+    huge = asyncio.create_task(ledger.reserve(16384, workspace_id="huge"))
+    await _settle()
+    late = [asyncio.create_task(ledger.reserve(4096, workspace_id=f"late-{i}")) for i in range(2)]
+    await _settle()
+    assert not huge.done()
+    assert not any(t.done() for t in late)
+
+    holders[0].release()
+    await _settle()
+    assert not huge.done(), "one small still holds memory: the oversize waits to run alone"
+    assert not any(t.done() for t in late), "a freed share must not go past the head"
+
+    holders[1].release()
+    huge_reservation = await asyncio.wait_for(huge, timeout=1)
+    await _settle()
+    assert ledger.reserved_mb == 16384
+    assert not any(t.done() for t in late), "nothing runs beside the oversize one"
+
+    huge_reservation.release()
+    for reservation in [await asyncio.wait_for(t, timeout=1) for t in late]:
+        reservation.release()
+    assert ledger.reserved_mb == 0
+
+
+async def test_a_leaked_reservation_stays_charged_until_settled() -> None:
+    ledger = WorkspaceMemoryLedger(8192)
+    reservation = await ledger.reserve(4096, workspace_id="ws")
+
+    reservation.leak("exec-1", workspace_id="ws", reason="teardown failed")
+    reservation.release()  # final: a leak is not undone by a later release
+
+    assert ledger.reserved_mb == 4096
+    assert ledger.settle_leaked("exec-other") == 0
+    assert ledger.settle_leaked("exec-1") == 4096
+    assert ledger.reserved_mb == 0
+    assert ledger.leaked_mb == 0
+
+
+async def test_settling_a_leak_admits_the_waiter_it_was_blocking() -> None:
+    ledger = WorkspaceMemoryLedger(4096)
+    (await ledger.reserve(4096, workspace_id="ws")).leak("exec-1", workspace_id="ws", reason="x")
+    waiter = asyncio.create_task(ledger.reserve(4096, workspace_id="next"))
+    await _settle()
+    assert not waiter.done()
+
+    ledger.settle_leaked("exec-1")
+
+    (await asyncio.wait_for(waiter, timeout=1)).release()

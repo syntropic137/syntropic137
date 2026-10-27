@@ -28,6 +28,19 @@ memory, so it runs alone rather than never.
 
 Per process and not durable, for the same reason as the budget: what it holds
 is the workspaces alive in THIS process, which a restart loses along with them.
+
+RELEASED ONLY WHEN THE CONTAINER IS SHOWN GONE. A teardown that failed, or was
+interrupted, leaves a container that may still be using its memory, so its
+reservation is LEAKED, not released: it stays charged, logged at ERROR, and is
+settled only by the paths that already prove a run's resources gone. With the
+Run Queue on, that is the host's labelled reap (``RunReaper.reap`` returning
+True for this host and execution, ADR-072 D3/D5), wired through
+``LedgerSettlingReaper``. With it off, it is the startup reap
+(``cleanup_orphaned_containers``): it removes every orphaned workspace before
+this process admits anything, and the ledger it starts with is empty. Holding
+memory for a container that may be dead is the conservative failure; freeing
+memory a live container still uses is the over-commit this module exists to
+prevent.
 """
 
 from __future__ import annotations
@@ -46,18 +59,36 @@ class _Waiter:
 
 
 class LedgerReservation:
-    """One workspace's share of the ledger. ``release`` is idempotent."""
+    """One workspace's share of the ledger. ``release`` and ``leak`` are idempotent, and final."""
 
     def __init__(self, ledger: WorkspaceMemoryLedger, memory_mb: int) -> None:
         self._ledger = ledger
         self.memory_mb = memory_mb
-        self._released = False
+        self._settled = False
 
     def release(self) -> None:
-        if self._released:
+        """The container is shown gone: give its memory back."""
+        if self._settled:
             return
-        self._released = True
+        self._settled = True
         self._ledger._give_back(self.memory_mb)
+
+    def leak(self, execution_id: str, *, workspace_id: str, reason: str) -> None:
+        """The container may still be running: keep its memory charged until a reap shows it gone."""
+        if self._settled:
+            return
+        self._settled = True
+        self._ledger._hold_leaked(execution_id, self.memory_mb)
+        logger.error(
+            "Workspace %s of %s may still be running (%s); its %d MB stay charged until a "
+            "reap shows it gone. %d MB of %d are held for possibly-live containers.",
+            workspace_id,
+            execution_id,
+            reason,
+            self.memory_mb,
+            self._ledger.leaked_mb,
+            self._ledger.capacity_mb,
+        )
 
 
 class WorkspaceMemoryLedger:
@@ -71,6 +102,8 @@ class WorkspaceMemoryLedger:
         self._reserved_mb = 0
         self._holders = 0
         self._waiting: list[_Waiter] = []
+        #: execution id -> MB held for its containers that may still be running.
+        self._leaked: dict[str, list[int]] = {}
 
     @property
     def capacity_mb(self) -> int:
@@ -85,6 +118,29 @@ class WorkspaceMemoryLedger:
     def waiting(self) -> int:
         """Workspaces queued for memory."""
         return len(self._waiting)
+
+    @property
+    def leaked_mb(self) -> int:
+        """Memory held for containers whose teardown was not shown to complete."""
+        return sum(sum(held) for held in self._leaked.values())
+
+    def settle_leaked(self, execution_id: str) -> int:
+        """A reap showed every resource of ``execution_id`` gone: free what it leaked.
+
+        Returns the MB freed. Only a path that PROVES the containers gone may
+        call this; see the module docstring.
+        """
+        held = self._leaked.pop(execution_id, [])
+        for memory_mb in held:
+            self._give_back(memory_mb)
+        if held:
+            logger.warning(
+                "Reap showed %s's leaked workspaces gone: %d MB returned", execution_id, sum(held)
+            )
+        return sum(held)
+
+    def _hold_leaked(self, execution_id: str, memory_mb: int) -> None:
+        self._leaked.setdefault(execution_id, []).append(memory_mb)
 
     async def reserve(self, memory_mb: int, *, workspace_id: str) -> LedgerReservation:
         """Wait for ``memory_mb`` to be free, then hold it until the reservation is released.

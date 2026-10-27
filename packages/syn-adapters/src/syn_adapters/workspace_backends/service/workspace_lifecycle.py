@@ -8,6 +8,7 @@ See ADR-021, ADR-023, ADR-024.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 from typing import TYPE_CHECKING
@@ -190,6 +191,23 @@ async def _read_image_manifest(
     return reading
 
 
+@dataclasses.dataclass
+class ProvisionTrack:
+    """What provisioning has created so far, readable however provisioning ends (okrs-51p.30).
+
+    ``provision_workspace`` returns its handles only when it finishes. A raise
+    after the container exists (a sidecar that would not start, a cancel)
+    used to lose the handle, so teardown never destroyed the container and
+    the memory it held was released anyway. The caller passes one of these
+    and reads it in its ``finally``.
+    """
+
+    isolation: IsolationHandle | None = None
+    #: A cancel arrived while ``create`` was awaited: a container may exist
+    #: that no handle names, so its memory cannot be shown free.
+    create_interrupted: bool = False
+
+
 async def provision_workspace(
     service: WorkspaceService,
     isolation_config: IsolationConfig,
@@ -197,6 +215,7 @@ async def provision_workspace(
     workspace_id: str,
     *,
     with_sidecar: bool,
+    track: ProvisionTrack | None = None,
 ) -> tuple[IsolationHandle, SidecarHandle | None, ImageManifestReading]:
     """Provision isolation container and optional sidecar.
 
@@ -206,6 +225,8 @@ async def provision_workspace(
         aggregate: WorkspaceAggregate to record events on
         workspace_id: Workspace ID
         with_sidecar: Whether to start sidecar proxy
+        track: Filled in as resources are created, so a caller can tear down
+            what exists when this raises part-way
 
     Returns:
         Tuple of (isolation_handle, sidecar_handle or None, the image manifest reading)
@@ -216,7 +237,14 @@ async def provision_workspace(
         workspace_id,
         isolation_config.execution_id,
     )
-    isolation_handle = await service._isolation.create(isolation_config)
+    try:
+        isolation_handle = await service._isolation.create(isolation_config)
+    except asyncio.CancelledError:
+        if track is not None:
+            track.create_interrupted = True
+        raise
+    if track is not None:
+        track.isolation = isolation_handle
     _log_runtime(
         isolation_handle.runtime,
         execution_id=isolation_config.execution_id,
