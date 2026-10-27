@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 import threading
 import tracemalloc
 from typing import TYPE_CHECKING
@@ -422,3 +423,26 @@ async def test_a_reference_over_the_bound_is_never_written(
     outcome = archive.splice_onto(older.sha256, newest.sha256, apply=True)
     assert outcome.status is SpliceStatus.NO_SAVING
     assert not list(tmp_path.glob(".ref-*"))
+
+
+async def test_splice_materialize_and_re_put_keep_when_a_revision_was_archived(
+    tmp_path: Path,
+) -> None:
+    """/health reads growth from mtimes: moving a revision between forms is not growth."""
+    archived = 1_700_000_000.0
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    older_body, newest_body = _envelope(40), _envelope(60)
+    older = await archive.put(older_body)
+    os.utime(tmp_path / older.sha256, (archived, archived))
+    newest = await archive.put(newest_body)
+
+    archive.splice_onto(older.sha256, newest.sha256, apply=True)
+    assert not (tmp_path / older.sha256).exists()
+    assert (tmp_path / f".ref-{older.sha256}").stat().st_mtime == archived
+
+    await archive.put(older_body)
+    assert (tmp_path / older.sha256).stat().st_mtime == archived
+    (tmp_path / older.sha256).unlink()
+
+    await archive.delete(newest)
+    assert (tmp_path / older.sha256).stat().st_mtime == archived

@@ -5740,6 +5740,8 @@ export interface components {
             cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
             /** @description The execution budget sized from host capacity and measured per-run demand, the term that bound it, and the starts admitted, running and queued in this process or the Run Queue (#1715). Omitted before startup has sized it, and when the Run Queue cannot be read. */
             execution_budget?: components["schemas"]["ExecutionBudgetHealth"] | null;
+            /** @description Size and growth of the session archive (#2107). Omitted when the archive directory does not exist or could not be measured, and until the first background measurement completes. */
+            session_store?: components["schemas"]["SessionStoreHealth"] | null;
         };
         /**
          * HeatmapDayBucketResponse
@@ -8432,6 +8434,66 @@ export interface components {
              * @description The model for humans: the reported id verbatim, or '<alias> (requested)', or 'unknown' (ADR-067 D9).
              */
             readonly agent_model_display: string;
+        };
+        /**
+         * SessionStoreHealth
+         * @description Size and growth of the host session archive, as /health reports it (#2107).
+         *
+         *     Measured by walking the archive directory at most once per cache window,
+         *     off the event loop. Informational: it never degrades /health.
+         */
+        SessionStoreHealth: {
+            /**
+             * Path
+             * @description The archive directory, SYN_SESSION_INVENTORY_ARCHIVE_DIR.
+             */
+            path: string;
+            /**
+             * Measured At
+             * Format: date-time
+             * @description When the directory was walked (UTC).
+             */
+            measured_at: string;
+            /**
+             * Stored Bytes
+             * @description Allocated bytes (st_blocks) of every file in the archive directory, as the disk sees them: compressed objects, splice references, markers and temporaries.
+             */
+            stored_bytes: number;
+            /**
+             * Object Count
+             * @description Full transcript objects, compressed or not.
+             */
+            object_count: number;
+            /**
+             * Reference Count
+             * @description Older revisions stored as splice references to a newer object.
+             */
+            reference_count: number;
+            /**
+             * Added Bytes 24H
+             * @description Current allocated bytes of objects and references first archived in the last 24 hours, by file mtime. Bytes since deleted are not counted.
+             */
+            added_bytes_24h: number;
+            /**
+             * Added Bytes Per Day 7D
+             * @description The same over the last 7 days, divided by 7: the daily growth rate.
+             */
+            added_bytes_per_day_7d: number;
+            /**
+             * Filesystem Free Bytes
+             * @description Bytes available on the archive's filesystem.
+             */
+            filesystem_free_bytes: number;
+            /**
+             * Days Until Full
+             * @description filesystem_free_bytes / added_bytes_per_day_7d; null when nothing was added in the last 7 days.
+             */
+            days_until_full: number | null;
+            /**
+             * Detail
+             * @description One line for an operator: size, growth and runway.
+             */
+            detail: string;
         };
         /**
          * SessionSummaryResponse

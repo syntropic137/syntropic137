@@ -46,7 +46,11 @@ from syn_api.services.execution_posture import (
     log_execution_concurrency_posture,
 )
 from syn_api.services.feedback_lifecycle import init_ui_feedback, shutdown_ui_feedback
-from syn_api.services.health_probes import describe_codex_auth_health, describe_disk_health
+from syn_api.services.health_probes import (
+    describe_codex_auth_health,
+    describe_disk_health,
+    describe_session_store,
+)
 from syn_api.services.process_role import current_role, resolve_previous_world, role_services
 from syn_api.services.read_path_health import _judge_read_path
 from syn_api.services.request_latency_lifecycle import start_request_latency, stop_request_latency
@@ -379,6 +383,7 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             db_pools=db_pools,
             cpu_throttling=cpu_throttling.read_cpu_throttling(),
             execution_budget=await execution_capacity.describe_execution_budget(),
+            session_store=await describe_session_store(),
         )
     )
 
