@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/eval_runs.py b/apps/syn-api/src/syn_api/routes/eval_runs.py
+index 9b1afb006..3795aaa16 100644
+--- a/apps/syn-api/src/syn_api/routes/eval_runs.py
++++ b/apps/syn-api/src/syn_api/routes/eval_runs.py
+@@ -239,7 +239,7 @@ class RunReads:
+             total_tokens=row.total_tokens,
+             final_phase_model=final_model,
+             own_models=own,
+-            failure_classification=row.failure_classification if failed else None,
++            failure_classification=None,
+             association_kind=_association(row.association_kind),
+             inherited_tags=row.inherited_tags,
+             starting_checkout=() if detail is None else detail.starting_checkout,

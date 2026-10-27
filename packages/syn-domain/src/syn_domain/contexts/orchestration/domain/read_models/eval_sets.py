@@ -21,6 +21,9 @@ from dataclasses import dataclass
 from statistics import fmean
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+    ImageManifestState,
+)
 from syn_domain.contexts.orchestration.domain.read_models.eval_trial_metrics import (
     Bounds,
     CaseMetrics,
@@ -32,7 +35,9 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
     CohortKey,
     EvalTag,
     TrialExclusion,
+    TrialOutcome,
     classify_trial,
+    declared_models_of,
     single_tag,
     tag_values,
 )
@@ -40,6 +45,9 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+        ImageManifestContent,
+    )
     from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunFacts
 
 
@@ -99,18 +107,51 @@ def classify_roster_trials(
     runs_by_eval: Mapping[str, Sequence[EvalRunFacts]],
     declared_models: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, list[ClassifiedTrial]]:
-    """Every rostered case's member runs, classified. ``declared_models`` is keyed by models digest."""
-    out: dict[str, list[ClassifiedTrial]] = {}
-    for case in roster.cases:
-        trials = []
-        for run in runs_by_eval.get(case.eval_id, ()):
-            declared = None
-            if declared_models is not None:
-                digest = single_tag(run.inherited_tags, EvalTag.MODELS)
-                declared = declared_models.get(digest or "")
-            trials.append(classify_trial(run, declared))
-        out[case.eval_id] = trials
-    return out
+    """Every rostered case's member runs, classified.
+
+    ``declared_models`` is keyed by models digest; when it is None each run is
+    checked against the ``model:<phase>:<id>`` tags it launched with.
+    """
+    return {
+        case.eval_id: [
+            classify_trial(run, _declared(run, declared_models))
+            for run in runs_by_eval.get(case.eval_id, ())
+        ]
+        for case in roster.cases
+    }
+
+
+def _declared(
+    run: EvalRunFacts, declared_models: Mapping[str, Mapping[str, str]] | None
+) -> Mapping[str, str] | None:
+    if declared_models is None:
+        return declared_models_of(run.inherited_tags)
+    return declared_models.get(single_tag(run.inherited_tags, EvalTag.MODELS) or "")
+
+
+@dataclass(frozen=True)
+class CaseCohort:
+    """One eval's figures in one cohort."""
+
+    cohort: CohortKey
+    metrics: CaseMetrics
+
+
+def summarize_case(
+    eval_id: str,
+    runs: Iterable[EvalRunFacts],
+    k: int,
+    declared_models: Mapping[str, Mapping[str, str]] | None = None,
+) -> tuple[CaseCohort, ...]:
+    """One eval's figures in every cohort it has trials in, in key order.
+
+    A run that is no trial (attached, launch tags missing) belongs to none.
+    """
+    require_k(k)
+    roster = Roster("", "", None, (RosterCase(eval_id, None, None),))
+    trials = classify_roster_trials(roster, {eval_id: list(runs)}, declared_models)[eval_id]
+    cohorts = sorted({t.cohort for t in trials if t.cohort is not None})
+    return tuple(CaseCohort(c, case_metrics(eval_id, in_cohort(trials, c), k)) for c in cohorts)
 
 
 def in_cohort(trials: Iterable[ClassifiedTrial], cohort: CohortKey) -> list[ClassifiedTrial]:
@@ -126,6 +167,35 @@ class Coverage:
     short: int
     """Launched, but fewer than k judged trials."""
     never_launched: int
+
+
+@dataclass(frozen=True)
+class ImageProvenance:
+    """Which workspace images a cohort's trials ran: one cohort may span several."""
+
+    manifests: tuple[ImageManifestContent, ...]
+    """Every distinct manifest a phase of a trial read, in a stable order."""
+    trials_without_manifest: int
+    """Trials no phase of which read a manifest: absent, unreadable, or never provisioned."""
+
+
+def image_provenance(trials: Iterable[ClassifiedTrial]) -> ImageProvenance:
+    """The images of the counted trials (``TrialOutcome``), not of excluded runs."""
+    distinct: dict[str, ImageManifestContent] = {}
+    without = 0
+    for trial in trials:
+        if not isinstance(trial.result, TrialOutcome):
+            continue
+        read = [
+            m.manifest
+            for m in trial.run.image_manifests
+            if m.state is ImageManifestState.READ and m.manifest is not None
+        ]
+        if not read:
+            without += 1
+        for manifest in read:
+            distinct.setdefault(manifest.model_dump_json(), manifest)
+    return ImageProvenance(tuple(distinct[key] for key in sorted(distinct)), without)
 
 
 @dataclass(frozen=True)
@@ -153,6 +223,7 @@ class CohortSummary:
     """Infra errors over resolved trials (judged + infra); None when nothing resolved."""
     base_mismatch_count: int
     treatment_mismatch_count: int
+    images: ImageProvenance
 
 
 @dataclass(frozen=True)
@@ -161,6 +232,8 @@ class EvalSetSummary:
     cohorts: tuple[CohortSummary, ...]
     not_a_trial_count: int
     """Member runs of rostered cases that belong to no cohort: attached, or launch tags missing."""
+    trials: Mapping[str, Sequence[ClassifiedTrial]]
+    """Every rostered case's member runs, classified: what a paired comparison reads."""
 
 
 def _mean(values: Sequence[float]) -> float | None:
@@ -172,10 +245,8 @@ def summarize_cohort(
 ) -> CohortSummary:
     """One cohort over the whole roster; ``trials`` is ``classify_roster_trials`` output."""
     require_k(k)
-    cases = tuple(
-        case_metrics(c.eval_id, in_cohort(trials.get(c.eval_id, ()), cohort), k)
-        for c in roster.cases
-    )
+    by_case = {c.eval_id: in_cohort(trials.get(c.eval_id, ()), cohort) for c in roster.cases}
+    cases = tuple(case_metrics(c.eval_id, by_case[c.eval_id], k) for c in roster.cases)
     complete = [c for c in cases if c.complete]
     at = _mean([c.pass_at_k for c in complete if c.pass_at_k is not None])
     hat = _mean([c.pass_hat_k for c in complete if c.pass_hat_k is not None])
@@ -198,6 +269,7 @@ def summarize_cohort(
         infra_share=infra / resolved if resolved else None,
         base_mismatch_count=sum(c.counts.base_mismatch for c in cases),
         treatment_mismatch_count=sum(c.counts.treatment_mismatch for c in cases),
+        images=image_provenance(t for ts in by_case.values() for t in ts),
     )
 
 
@@ -228,4 +300,5 @@ def summarize_eval_set(
         roster=roster,
         cohorts=tuple(summarize_cohort(roster, trials, c, k) for c in cohorts),
         not_a_trial_count=sum(1 for t in flat if t.result is TrialExclusion.NOT_A_TRIAL),
+        trials=trials,
     )

@@ -25,7 +25,7 @@ REPO = "syntropic137/syntropic137"
 PIN = "a" * 40
 OTHER_SHA = "b" * 40
 PROTOCOL = "keyword-v1"
-MODELS = "m" * 64
+MODELS = "m" * 32
 WORKFLOW = "verify-v1"
 BASELINE = (EvalBaselinePin(repository=REPO, requested_ref="main", commit_sha=PIN),)
 CHECKOUT = (SourceCommit(repository=REPO, sha=PIN),)

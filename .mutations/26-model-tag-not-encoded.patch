@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
+index 3529a26ff..2076f29b2 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
+@@ -130,7 +130,7 @@ def declared_model_tags(models: Iterable[DeclaredModel]) -> list[str]:
+     return [
+         f"{EvalTag.MODELS}:{models_digest(ordered)}",
+         *(
+-            f"{EvalTag.MODEL}:{encode_tag_value(m.phase_id)}:{encode_tag_value(m.model)}"
++            f"{EvalTag.MODEL}:{m.phase_id}:{m.model}"
+             for m in ordered
+         ),
+     ]

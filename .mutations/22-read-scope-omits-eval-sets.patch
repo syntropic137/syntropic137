@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/platform_access/__init__.py b/packages/syn-adapters/src/syn_adapters/platform_access/__init__.py
+index de88b1024..0250bf647 100644
+--- a/packages/syn-adapters/src/syn_adapters/platform_access/__init__.py
++++ b/packages/syn-adapters/src/syn_adapters/platform_access/__init__.py
+@@ -53,7 +53,7 @@ _REDIS_KEY_PREFIX = "syn:platform-token:"
+ # paths the app itself routes. Anything absent here is denied, including
+ # routes added later: the allowlist fails closed.
+ _READ_RESOURCES = frozenset(
+-    {"executions", "sessions", "artifacts", "evals", "eval-sets", "insights", "health"}
++    {"executions", "sessions", "artifacts", "evals", "insights", "health"}
+ )
+ _READ_METHODS = frozenset({"GET", "HEAD"})
+ 

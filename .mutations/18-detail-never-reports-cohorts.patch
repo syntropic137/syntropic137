@@ -1,0 +1,15 @@
+diff --git a/apps/syn-api/src/syn_api/routes/evals.py b/apps/syn-api/src/syn_api/routes/evals.py
+index 9890bde85..08214e833 100644
+--- a/apps/syn-api/src/syn_api/routes/evals.py
++++ b/apps/syn-api/src/syn_api/routes/evals.py
+@@ -410,9 +410,7 @@ async def get_eval_endpoint(
+     return EvalDetailResponse(
+         **row.model_dump(),
+         read_model_status=await read_model_status(EvalListProjection.PROJECTION_NAME),
+-        cohorts=None
+-        if k is None
+-        else await eval_case_cohorts(manager, eval_id, k, detail.runs.total),
++        cohorts=None,
+     )
+ 
+ 

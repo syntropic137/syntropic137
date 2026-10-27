@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
+index 6cc83d77a..37b88b21d 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
+@@ -77,7 +77,7 @@ def declared_models_of(tags: Iterable[str]) -> dict[str, str] | None:
+             by_phase.setdefault(phase, set()).add(model)
+     if not by_phase:
+         return None
+-    return {phase: next(iter(ids)) if len(ids) == 1 else "" for phase, ids in by_phase.items()}
++    return {phase: sorted(ids)[0] for phase, ids in by_phase.items()}
+ 
+ 
+ @dataclass(frozen=True, order=True)

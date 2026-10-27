@@ -1,0 +1,15 @@
+diff --git a/apps/syn-api/src/syn_api/routes/eval_sets.py b/apps/syn-api/src/syn_api/routes/eval_sets.py
+index 986acb5e1..2eaf9c529 100644
+--- a/apps/syn-api/src/syn_api/routes/eval_sets.py
++++ b/apps/syn-api/src/syn_api/routes/eval_sets.py
+@@ -217,9 +217,7 @@ async def eval_set_summary(
+     members = await manager.eval_list.members_of(eval_ids)
+     # The members' scores only: an eval's score history also holds detached
+     # runs, which the run count above does not bound.
+-    scores = await manager.eval_list.scores_of(
+-        [(e, row.workflow_execution_id) for e, rows in members.items() for row in rows]
+-    )
++    scores = await manager.eval_list.scores_in(eval_ids)
+     execution_ids = {row.workflow_execution_id for rows in members.values() for row in rows}
+     reads = await RunReads.load(manager, sorted(execution_ids))
+     runs_by_eval = {

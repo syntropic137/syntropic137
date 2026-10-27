@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/eval_sets.py b/apps/syn-api/src/syn_api/routes/eval_sets.py
+index 9b9837837..0903a734d 100644
+--- a/apps/syn-api/src/syn_api/routes/eval_sets.py
++++ b/apps/syn-api/src/syn_api/routes/eval_sets.py
+@@ -168,7 +168,7 @@ def eval_set_response(summary: EvalSetSummary, k: int) -> EvalSetMetricsResponse
+             for c in roster.cases
+         ],
+         cohorts=[_cohort_summary(c) for c in summary.cohorts],
+-        comparison=_comparison(compare_pair(summary)),
++        comparison=None,
+         not_a_trial_count=summary.not_a_trial_count,
+     )
+ 
