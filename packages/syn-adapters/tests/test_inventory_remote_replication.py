@@ -29,7 +29,10 @@ from syn_adapters.session_inventory.capture_delivery_jobs import (
     PostgresCaptureDeliveryJobs,
 )
 from syn_adapters.session_inventory.capture_delivery_worker import CaptureDeliveryWorker
-from syn_adapters.session_inventory.capture_outboxes import ExporterCaptureOutboxes
+from syn_adapters.session_inventory.capture_outboxes import (
+    ExporterCaptureOutboxes,
+    ExporterDeletionOutbox,
+)
 from syn_adapters.session_inventory.deletion_fence import DeletionFence
 from syn_adapters.session_inventory.evidence_reader import PostgresSessionEvidence
 from syn_adapters.session_inventory.exporter_transport import (
@@ -519,7 +522,7 @@ async def test_real_capture_delivery_preserves_versions_and_survives_revocation(
         # Deletes travel through their own outbox and count as propagated only
         # after the replica acknowledges them. Withdrawn upload outboxes are
         # discarded, never sent.
-        deletion_transport = ExporterCaptureTransport(
+        deletion_transport = ExporterDeletionOutbox(
             ExporterConfig(
                 binary=binary,
                 outbox_dir=tmp_path / "deletion-outbox",

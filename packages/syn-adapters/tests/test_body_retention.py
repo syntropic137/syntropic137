@@ -178,10 +178,8 @@ async def test_real_exporter_retains_deletion_key_before_body_removal(db_pool, t
     from pydantic import SecretStr
 
     from syn_adapters.session_inventory.capture_deletion_worker import CaptureDeletionWorker
-    from syn_adapters.session_inventory.exporter_transport import (
-        ExporterCaptureTransport,
-        ExporterConfig,
-    )
+    from syn_adapters.session_inventory.capture_outboxes import ExporterDeletionOutbox
+    from syn_adapters.session_inventory.exporter_transport import ExporterConfig
 
     binary = os.environ.get("SYN_TEST_EXPORTER_BINARY")
     if not binary:
@@ -224,7 +222,7 @@ async def test_real_exporter_retains_deletion_key_before_body_removal(db_pool, t
     retention = LocalBodyRetention(db_pool, archive, source, exporter_binary=Path(binary))
     assert await retention.step()
     assert await archive.get(ref) is None
-    transport = ExporterCaptureTransport(
+    transport = ExporterDeletionOutbox(
         ExporterConfig(
             binary=Path(binary),
             outbox_dir=tmp_path / "queue",

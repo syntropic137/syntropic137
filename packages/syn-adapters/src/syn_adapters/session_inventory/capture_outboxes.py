@@ -86,3 +86,19 @@ class ExporterCaptureOutboxes:
 
     async def retire_legacy(self) -> None:
         await asyncio.to_thread(shutil.rmtree, self._legacy, True)
+
+
+class ExporterDeletionOutbox(ExporterCaptureTransport):
+    """A destination's replica-deletion outbox, which can be withdrawn unsent.
+
+    The deletion lane keeps one delete in flight per destination, so discarding
+    the directory withdraws exactly that delete (#2107: an automatic expiry
+    queued by an older build must never reach the replica).
+    """
+
+    def __init__(self, config: ExporterConfig) -> None:
+        super().__init__(config)
+        self._outbox = config.outbox_dir
+
+    async def discard(self) -> None:
+        await asyncio.to_thread(shutil.rmtree, self._outbox, True)
