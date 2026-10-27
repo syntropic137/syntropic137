@@ -159,6 +159,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
     ExecutionAlreadyRequestedError,
     ExecutionRequestAggregate,
+    execution_id_for_key,
     execution_request_id,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
@@ -630,6 +631,7 @@ __all__ = [
     "declared_model_tags",
     "declared_models_of",
     "deployment_memory_ceiling_mb",
+    "execution_id_for_key",
     "execution_request_id",
     "guard_orphaned_workspace",
     "guard_stale_workspace_dir",

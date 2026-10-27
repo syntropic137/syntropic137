@@ -22,10 +22,16 @@ _openapi:
       - content: List Active Executions Endpoint
         id: list-active-executions-endpoint
     contents:
-      - content: |-
+      - content: >-
           Start workflow execution in background.
 
+
           Returns 409 while maintenance mode is active; no execution is started.
+
+          With `idempotency_key`, a start already accepted is answered again,
+          not
+
+          repeated (#2129).
         heading: execute-workflow-endpoint
       - content: Get the status of a workflow execution.
         heading: get-execution-status-endpoint

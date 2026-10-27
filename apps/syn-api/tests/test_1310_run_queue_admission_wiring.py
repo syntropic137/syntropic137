@@ -105,6 +105,7 @@ class _Request:
     inputs: ClassVar[dict[str, str]] = {}
     repos: ClassVar[list[str]] = ["https://github.com/syntropic137/syntropic137"]
     task: str | None = None
+    idempotency_key: str | None = None
     tags = TagSet()
     eval_id: None = None
     no_eval = False

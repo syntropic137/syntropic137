@@ -316,6 +316,8 @@ export interface paths {
          * @description Start workflow execution in background.
          *
          *     Returns 409 while maintenance mode is active; no execution is started.
+         *     With `idempotency_key`, a start already accepted is answered again, not
+         *     repeated (#2129).
          */
         post: operations["execute_workflow_endpoint_workflows__workflow_id__execute_post"];
         delete?: never;
@@ -4597,6 +4599,11 @@ export interface components {
              */
             no_eval: boolean;
             /**
+             * Idempotency Key
+             * @description Makes the start idempotent (#2129): the execution id is derived from the workflow and this key, so every start with the same key, concurrent ones included, answers with the one execution and `replayed: true` after the first. A start that differs from the one that made it is refused with 409.
+             */
+            idempotency_key?: string | null;
+            /**
              * Provider
              * @deprecated
              * @description Agent provider to use. Currently ignored by execute(); sending this field has no effect.
@@ -4629,6 +4636,11 @@ export interface components {
              * @default Workflow execution started
              */
             message: string;
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
         };
         /**
          * ExecutionBudgetHealth
