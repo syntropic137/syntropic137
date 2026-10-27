@@ -103,6 +103,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import fcntl
 import hashlib
 import math
 import os
@@ -111,10 +112,11 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 import httpx
 import yaml
@@ -139,6 +141,9 @@ from syn_domain.contexts.orchestration import (
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_shared.observed_model import is_model_alias
 from syn_shared.settings.dev_tooling import get_dev_api_url
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUITE = ROOT / "evals" / "verifier-seed-v1"
@@ -1286,6 +1291,49 @@ class _Started(_Read):
     execution_id: str
 
 
+class TrialStart(_Frozen):
+    """The body of `POST /workflows/{id}/execute` for one trial."""
+
+    task: str
+    repos: list[str]
+    eval_id: str
+    tags: list[str]
+
+
+class _ExecutionRow(_Read):
+    workflow_execution_id: str
+
+
+class _ExecutionList(_Read):
+    executions: list[_ExecutionRow]
+
+
+def start_trial(client: httpx.Client, workflow_id: str, body: TrialStart, trial_tag: str) -> str:
+    """POST one trial and return its run id, even when the answer is lost.
+
+    A timeout, a dropped connection or a 5xx says nothing about whether the
+    run started. The trial tag is unique to this batch and index, so the run
+    is looked up by it: one match is the run, none means it never started
+    (refused, safe to launch again), several is refused for a human.
+    """
+    try:
+        response = client.post(f"/workflows/{workflow_id}/execute", json=body.model_dump())
+        if response.status_code < 500:
+            response.raise_for_status()
+            return _Started.model_validate(response.json()).execution_id
+        lost = f"{response.status_code} {_detail(response)}"
+    except httpx.TransportError as exc:
+        lost = f"{type(exc).__name__}: {exc}"
+    found = _get(client, _ExecutionList, "/executions", tag=trial_tag)
+    runs = [r.workflow_execution_id for r in found.executions]
+    if len(runs) == 1:
+        return runs[0]
+    raise RuntimeError(
+        f"execute for {trial_tag} failed ({lost}) and {len(runs)} runs carry that tag "
+        f"({', '.join(runs) or 'none'}); nothing ledgered for it"
+    )
+
+
 class Launch(_Frozen):
     """One run `launch` started: the only association `score` trusts."""
 
@@ -1317,6 +1365,28 @@ def read_launches(path: Path) -> list[Launch]:
         return []
     lines = path.read_text(encoding="utf-8").splitlines()
     return [Launch.model_validate_json(line) for line in lines if line.strip()]
+
+
+@contextmanager
+def ledger_lock(ledger: Path) -> Iterator[None]:
+    """Hold `<ledger>.lock` for a whole `--trials` launch; refuse if another launcher holds it.
+
+    Two top-ups racing on one ledger would each read the same `trials_short`
+    and each launch it. The server reserves nothing (#2108 plan sec 8), so one
+    operator launches a suite at a time, and this lock enforces it on one host.
+    """
+    lock = ledger.with_name(ledger.name + ".lock")
+    with lock.open("w") as fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(
+                f"another launch holds {lock}: one launcher per suite at a time, nothing launched"
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def _append_launch(path: Path, launch: Launch) -> None:
@@ -2177,12 +2247,15 @@ def set_metrics(
 def own_cohort(loaded: LoadedSuite, metrics: _SetMetrics, protocol: str) -> _CohortMetrics | None:
     """This launch's cohort in the server's answer; None when it has launched nothing yet.
 
-    Matched on every declared part. Two blocks that differ only in workflow
-    version are refused: a top-up cannot tell which treatment it continues.
+    Matched on every declared part, the workflow version included: the
+    version this launch installs (`install_provenance`). A cohort of the same
+    workflow at another version is another treatment, so its shortfall is
+    never read for this one: the top-up is refused instead.
     """
     digest = declared_model_tags(declared(loaded))[0].removeprefix(f"{EvalTag.MODELS}:")
+    version = f"{loaded.suite.version}.{loaded.workflow.revision}.0"
     want = (str(loaded.version), loaded.workflow.id, digest, protocol)
-    mine = [
+    same = [
         c
         for c in metrics.cohorts
         if (
@@ -2193,11 +2266,18 @@ def own_cohort(loaded: LoadedSuite, metrics: _SetMetrics, protocol: str) -> _Coh
         )
         == want
     ]
-    if len(mine) > 1:
-        versions = sorted(c.cohort.workflow_version for c in mine)
+    mine = [c for c in same if c.cohort.workflow_version == version]
+    if same and not mine:
+        others = sorted(c.cohort.workflow_version for c in same)
         raise RuntimeError(
-            f"{len(mine)} cohorts of {loaded.workflow.id} under scorer {protocol} "
-            f"(workflow versions {versions}); bump the suite version instead of topping up"
+            f"{loaded.workflow.id} has cohorts at workflow versions {others}, and this launch "
+            f"installs {version}: a top-up would launch another treatment. Launch --trials K "
+            "for a new cohort, or bump the suite version"
+        )
+    if len(mine) > 1:
+        raise RuntimeError(
+            f"{len(mine)} cohorts of {loaded.workflow.id} {version} under scorer {protocol}; "
+            "bump the suite version instead of topping up"
         )
     return mine[0] if mine else None
 
@@ -2250,46 +2330,48 @@ def launch_trials(
     except InvalidTagsError as exc:
         raise RuntimeError(f"cohort tags are not valid tags: {exc}") from exc
 
-    out = register_roster(roster or loaded, client)
-    evals = {case.id: stable_eval(loaded, case, client).eval_id for case in loaded.cases}
-    if top_up:
-        metrics = set_metrics(loaded, client, k, split)
-        counts = top_up_counts(own_cohort(loaded, metrics, protocol), evals)
-    else:
-        counts = dict.fromkeys(evals, k)
-    out.append(install_workflow(loaded, client, root))
-    s, w = loaded.suite, loaded.workflow
-    for case in loaded.cases:
-        if not counts[case.id]:
-            out.append(f"{case.id}: no trial short, none launched")
-        for i in range(1, counts[case.id] + 1):
-            response = client.post(
-                f"/workflows/{w.id}/execute",
-                json={
-                    "task": case.task,
-                    "repos": [s.repository],
-                    "eval_id": evals[case.id],
-                    "tags": [*tags, f"{EvalTag.TRIAL}:{batch}/{i}"],
-                },
-            )
-            response.raise_for_status()
-            started = _Started.model_validate(response.json())
-            _append_launch(
-                ledger,
-                Launch(
-                    suite=loaded.tag,
-                    case=case.id,
-                    eval_id=evals[case.id],
-                    run_id=started.execution_id,
-                    commit=case.commit,
-                    workflow_id=w.id,
-                    batch=batch,
-                    trial=i,
-                    scorer=protocol,
-                ),
-            )
-            out.append(f"{case.id}: trial {batch}/{i} -> run {started.execution_id}")
-    return out
+    with ledger_lock(ledger):
+        out = register_roster(roster or loaded, client)
+        evals = {case.id: stable_eval(loaded, case, client).eval_id for case in loaded.cases}
+        if top_up:
+            metrics = set_metrics(loaded, client, k, split)
+            counts = top_up_counts(own_cohort(loaded, metrics, protocol), evals)
+        else:
+            counts = dict.fromkeys(evals, k)
+        out.append(install_workflow(loaded, client, root))
+        s, w = loaded.suite, loaded.workflow
+        for case in loaded.cases:
+            if not counts[case.id]:
+                out.append(f"{case.id}: no trial short, none launched")
+            for i in range(1, counts[case.id] + 1):
+                trial_tag = f"{EvalTag.TRIAL}:{batch}/{i}"
+                run_id = start_trial(
+                    client,
+                    w.id,
+                    TrialStart(
+                        task=case.task,
+                        repos=[s.repository],
+                        eval_id=evals[case.id],
+                        tags=[*tags, trial_tag],
+                    ),
+                    trial_tag,
+                )
+                _append_launch(
+                    ledger,
+                    Launch(
+                        suite=loaded.tag,
+                        case=case.id,
+                        eval_id=evals[case.id],
+                        run_id=run_id,
+                        commit=case.commit,
+                        workflow_id=w.id,
+                        batch=batch,
+                        trial=i,
+                        scorer=protocol,
+                    ),
+                )
+                out.append(f"{case.id}: trial {batch}/{i} -> run {run_id}")
+        return out
 
 
 def _eval_names(loaded: LoadedSuite, client: httpx.Client) -> dict[str, str]:

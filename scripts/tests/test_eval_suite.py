@@ -3820,6 +3820,12 @@ class _TrialServer(_Server):
         self.roster: dict[str, list[str]] = {}
         self.metrics: dict[str, object] = {}
         self.started = 0
+        self.run_tags: dict[str, list[str]] = {}
+        self.lose_answer: set[int] = set()
+        """Start attempts (from 1) that start the run but answer 504."""
+        self.refuse: set[int] = set()
+        """Start attempts (from 1) that answer 503 and start nothing."""
+        self.attempts = 0
 
     def _stable(self, case_id: str) -> dict[str, object]:
         # Keyed by case, as the real stable key is: two cases may share a pin.
@@ -3841,10 +3847,23 @@ class _TrialServer(_Server):
             return httpx.Response(200, json=self.metrics)
         if request.method == "POST" and path.endswith("/execute") and self.installed:
             self.requests.append(request)
+            self.attempts += 1
+            if self.attempts in self.refuse:
+                return httpx.Response(503, json={"detail": "unavailable"})
             self.started += 1
-            return httpx.Response(
-                200, json={"execution_id": f"exec-{self.started}", "workflow_id": self.installed}
-            )
+            run_id = f"exec-{self.started}"
+            self.run_tags[run_id] = json.loads(request.content)["tags"]
+            if self.attempts in self.lose_answer:
+                return httpx.Response(504, json={"detail": "gateway timeout"})
+            return httpx.Response(200, json={"execution_id": run_id, "workflow_id": self.installed})
+        if request.method == "GET" and path == "/executions":
+            wanted = request.url.params.get_list("tag")
+            rows = [
+                {"workflow_execution_id": run_id}
+                for run_id, tags in self.run_tags.items()
+                if all(t in tags for t in wanted)
+            ]
+            return httpx.Response(200, json={"executions": rows, "total": len(rows)})
         return super().handle(request)
 
     def posts(self, suffix: str) -> list[httpx.Request]:
@@ -3874,9 +3893,16 @@ def _case_metrics(
 
 
 def _figures(
-    loaded: LoadedSuite, cases: list[dict[str, object]], scorer_protocol: str = "8"
+    loaded: LoadedSuite,
+    cases: list[dict[str, object]],
+    scorer_protocol: str = "8",
+    workflow_version: str | None = None,
 ) -> dict[str, object]:
-    """`GET /eval-sets/metrics` for one cohort: the one `launch --trials` declares, by default."""
+    """`GET /eval-sets/metrics` for one cohort: the one `launch --trials` declares, by default.
+
+    The default workflow version is the one launch installs, `<suite>.<revision>.0`.
+    """
+    installs = f"{loaded.suite.version}.{loaded.workflow.revision}.0"
     digest = eval_suite.declared_model_tags(eval_suite.declared(loaded))[0].split(":", 1)[1]
     bounds = {"lower": 0.0, "upper": 1.0, "display": "0% to 100%"}
     return {
@@ -3890,7 +3916,7 @@ def _figures(
                 "cohort": {
                     "suite_version": "8",
                     "workflow_id": loaded.workflow.id,
-                    "workflow_version": "8.0.0",
+                    "workflow_version": workflow_version or installs,
                     "models_digest": digest,
                     "scorer_protocol": scorer_protocol,
                 },
@@ -4053,6 +4079,68 @@ def test_top_up_of_a_cohort_that_launched_nothing_is_refused(tmp_path: Path) -> 
     with pytest.raises(RuntimeError, match="launched nothing yet"):
         eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3, top_up=True)
     assert server.posts("/execute") == []
+
+
+@pytest.mark.unit
+def test_top_up_never_continues_a_cohort_of_another_workflow_version(tmp_path: Path) -> None:
+    """The 8.0.0 cohort's shortfall is not this launch's: it installs 8.1.0 (codex #2126 P1)."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    assert loaded.workflow.revision == 1  # installs 8.1.0
+    server = _TrialServer(loaded)
+    server.metrics = _figures(
+        loaded,
+        [_case_metrics(_eval_of(loaded, c.id), short=2) for c in loaded.cases],
+        workflow_version="8.0.0",
+    )
+
+    with pytest.raises(RuntimeError, match="another treatment"):
+        eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3, top_up=True)
+    assert server.posts("/execute") == []
+
+
+@pytest.mark.unit
+def test_a_second_launcher_on_the_same_ledger_is_refused(tmp_path: Path) -> None:
+    """Two top-ups would each launch the same trials_short (codex #2126 P2)."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    with eval_suite.ledger_lock(ledger), pytest.raises(RuntimeError, match="another launch holds"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert server.posts("/execute") == []
+    assert read_launches(ledger) == []
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 1)  # released: the next one runs
+    assert len(read_launches(ledger)) == len(loaded.cases)
+
+
+@pytest.mark.unit
+def test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered(tmp_path: Path) -> None:
+    """A 504 after the run started must not leave an unledgered trial (codex #2126 P2)."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.lose_answer = {2}
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+
+    lines = read_launches(ledger)
+    assert [x.run_id for x in lines] == [f"exec-{i}" for i in range(1, server.started + 1)]
+    assert len(lines) == 3 * len(loaded.cases)
+
+
+@pytest.mark.unit
+def test_a_trial_that_never_started_stops_the_launch_and_ledgers_nothing_for_it(
+    tmp_path: Path,
+) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.refuse = {2}
+    ledger = tmp_path / "launches.jsonl"
+
+    with pytest.raises(RuntimeError, match="0 runs carry that tag"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert [x.run_id for x in read_launches(ledger)] == ["exec-1"]
 
 
 @pytest.mark.unit
