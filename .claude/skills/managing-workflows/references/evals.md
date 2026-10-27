@@ -85,6 +85,10 @@ Launches cost real quota.
   identity when `--llm-judge`); the server counts a score only when its
   scorer_version matches, so `score` refuses another protocol. Switching judge
   means a new cohort, not a re-score.
+- **A comparison uses one judge for both arms.** The two-family `PanelJudge`
+  (one Claude, one codex model, pinned) is one scoring protocol; a split
+  between its members is `unclear`. Not yet selectable from the CLI (see
+  #2139).
 - **Eval subjects stay on their pin (#2055).** `check` refuses a workflow
   whose prompts `git pull` or merge/rebase the default branch, and with
   `--trials` refuses model aliases (cohort `model:` tags must be explicit ids).

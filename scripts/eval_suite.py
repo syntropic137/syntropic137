@@ -59,6 +59,9 @@ blocking finding names an expected file and every keyword group) and, with
 given the case's ``expected.defect`` root cause, asked whether a finding
 identifies THIS defect: match / no_match / unclear, with the finding it quotes). The headline catch rate counts a run caught when
 the keyword judge OR the LLM judge says ``match``; ``unclear`` is not caught.
+The LLM judge may be a ``PanelJudge``: one Claude and one codex judge, whose
+verdict stands only when both agree (a split is ``unclear``), recorded under
+``<suite version>+panel:<claude>+<codex>@prompt-v<n>``.
 Both judges' rates are printed beside it. An LLM-judged score is recorded
 under scorer_version ``<suite version>+llm:<model>@prompt-v<n>``, so it never
 silently replaces a keyword-only score's meaning; without ``--llm-judge`` the
@@ -1028,6 +1031,11 @@ JUDGE_MODELS = frozenset({"claude-sonnet-5-5", "claude-opus-5-5"})
 
 The one policy, checked by `require_judge_model` both where a judge is built and
 in `HeadlessJudgeClient` before any call reaches the transport."""
+CODEX_JUDGE_MODEL = "gpt-6.1-sol"
+"""The judge panel's second family (#2108 S5): a pinned explicit id, as `JUDGE_MODEL` is."""
+CODEX_JUDGE_MODELS = frozenset({CODEX_JUDGE_MODEL})
+"""The only codex model ids a judge may call. Apart from `JUDGE_MODELS`, which is also the
+Claude transport's allow-list, so a gpt id never reaches `claude -p`."""
 JUDGE_SAMPLES = 3
 """Independent answers per judgement. Odd, so two verdicts cannot tie on a two-way split."""
 JUDGE_EFFORT = "medium"
@@ -1045,11 +1053,11 @@ verdict is the strict majority of `JUDGE_SAMPLES` schema-constrained answers at
 moving to agentic-workspace's `ClaudeHeadless` (#2036) changed no prompt or vote."""
 
 
-def require_judge_model(model: str) -> str:
-    """`model` if it is in `JUDGE_MODELS`; a `JudgeError` before any call otherwise."""
-    if model not in JUDGE_MODELS:
+def require_judge_model(model: str, allowed: frozenset[str] = JUDGE_MODELS) -> str:
+    """`model` if it is in `allowed`; a `JudgeError` before any call otherwise."""
+    if model not in allowed:
         raise JudgeError(
-            f"the LLM judge never calls {model!r}: allowed models are {sorted(JUDGE_MODELS)}"
+            f"the LLM judge never calls {model!r}: allowed models are {sorted(allowed)}"
         )
     return model
 
@@ -1103,7 +1111,11 @@ class LlmJudge:
 
     def __init__(self, client: ModelClient, model: str = JUDGE_MODEL) -> None:
         self._client = client
-        self._model = require_judge_model(model)
+        self._model = require_judge_model(model, JUDGE_MODELS | CODEX_JUDGE_MODELS)
+
+    @property
+    def model(self) -> str:
+        return self._model
 
     @property
     def identity(self) -> str:
@@ -1148,6 +1160,41 @@ class LlmJudge:
                 reason=f"quote not found in any finding; judge said: {reply.reason}",
             )
         return reply
+
+
+class PanelJudge:
+    """Two LLM judges of different families, one Claude and one codex, as one judge (#2108 S5).
+
+    One ruler for every arm of a comparison: the identity names both pinned
+    models and the prompt version, so it is the cohort's scoring protocol and a
+    change to either member is a new protocol. The verdict is the members' when
+    they agree; any disagreement is `unclear`, so neither family alone credits a
+    catch. Each member still votes over its own `JUDGE_SAMPLES` answers.
+    """
+
+    def __init__(self, claude: LlmJudge, codex: LlmJudge) -> None:
+        if claude.model not in JUDGE_MODELS or codex.model not in CODEX_JUDGE_MODELS:
+            raise JudgeError(
+                "a judge panel is one Claude and one codex model,"
+                f" not {claude.model!r} and {codex.model!r}"
+            )
+        self._members = (claude, codex)
+
+    @property
+    def identity(self) -> str:
+        claude, codex = self._members
+        return f"panel:{claude.model}+{codex.model}@prompt-v{JUDGE_PROMPT_VERSION}"
+
+    def judge(self, expected: Expected, findings: list[str]) -> Judgement:
+        answers = [m.judge(expected, findings) for m in self._members]
+        said = "; ".join(f"{a.judge} {a.verdict}: {a.reason}" for a in answers)
+        if len({a.verdict for a in answers}) != 1:
+            return Judgement(
+                judge=self.identity, verdict="unclear", quote="", reason=f"panel split: {said}"
+            )
+        return Judgement(
+            judge=self.identity, verdict=answers[0].verdict, quote=answers[0].quote, reason=said
+        )
 
 
 def judge_problems(loaded: LoadedSuite) -> list[str]:
