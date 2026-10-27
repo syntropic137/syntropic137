@@ -1226,6 +1226,14 @@ The model that produced a Score, when a model did (`judge_model` on
 Not the Scorer: the scorer is the program and its version, the judge model is
 the model that program asked.
 
+## Judge Panel
+
+One Claude and one codex model, pinned ids, judging as one (`PanelJudge` in
+`scripts/eval_suite.py`, #2108 S5). Its identity names both models and the
+prompt version and is the Cohort's scoring protocol, so every arm of a
+comparison is judged by the same ruler. The members must agree for a verdict;
+a split is `unclear`, which is never a catch.
+
 ## Verifier Model
 
 On a trend point, the model the Run's last reporting phase OBSERVED running:

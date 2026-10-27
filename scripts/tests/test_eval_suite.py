@@ -4304,6 +4304,126 @@ def test_the_llm_scoring_protocol_is_a_tag_the_server_can_compare() -> None:
     assert eval_suite.scorer_protocol(loaded, None) == eval_suite.scorer_version(loaded, None)
 
 
+_ANY_FAMILY = eval_suite.JUDGE_MODELS | eval_suite.CODEX_JUDGE_MODELS
+
+
+def _panel(
+    claude_reply: str, codex_reply: str
+) -> tuple[eval_suite.PanelJudge, _FakeModel, _FakeModel]:
+    claude, codex = _FakeModel(claude_reply), _FakeModel(codex_reply)
+    panel = eval_suite.PanelJudge(
+        eval_suite.LlmJudge(claude),
+        eval_suite.LlmJudge(
+            codex, model=eval_suite.CODEX_JUDGE_MODEL, allowed=eval_suite.CODEX_JUDGE_MODELS
+        ),
+    )
+    return panel, claude, codex
+
+
+@pytest.mark.unit
+def test_both_arms_of_a_comparison_score_under_one_panel_protocol() -> None:
+    """One ruler: the protocol names the panel, never the arm, and fits a `scorer:` tag."""
+    panel, _, _ = _panel(_reply("no_match"), _reply("no_match"))
+    a = eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_CODEX_WF), panel)
+    b = eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_SONNET_WF), panel)
+
+    assert a == b
+    assert panel.identity == (
+        f"panel:{eval_suite.JUDGE_MODEL}+{eval_suite.CODEX_JUDGE_MODEL}"
+        f"@prompt-v{eval_suite.JUDGE_PROMPT_VERSION}"
+    )
+    assert a.endswith(
+        f"panel-{eval_suite.JUDGE_MODEL}-{eval_suite.CODEX_JUDGE_MODEL}"
+        f"-prompt-v{eval_suite.JUDGE_PROMPT_VERSION}"
+    )
+    assert list(TagSet([f"scorer:{a}"])) == [f"scorer:{a}"]
+    single = eval_suite.LlmJudge(_FakeModel(_reply("no_match")))
+    assert a != eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_CODEX_WF), single)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("claude_says", "codex_says"),
+    [
+        (_reply("match", _PARAPHRASE_QUOTE), _reply("no_match")),
+        (_reply("no_match"), _reply("match", _PARAPHRASE_QUOTE)),
+        (_reply("match", _PARAPHRASE_QUOTE), _reply("unclear")),
+    ],
+    ids=["claude-only", "codex-only", "match-and-unclear"],
+)
+def test_a_panel_that_disagrees_is_unclear_and_not_caught(
+    claude_says: str, codex_says: str
+) -> None:
+    panel, _, _ = _panel(claude_says, codex_says)
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
+    assert score.llm is not None and score.llm.verdict == "unclear"
+    assert score.llm.reason.startswith("panel split")
+    assert score.llm.quote == "", "a split quotes no member, so no one family's finding stands"
+    assert not score.caught
+
+
+@pytest.mark.unit
+def test_a_panel_that_agrees_on_no_match_says_no_match() -> None:
+    panel, _, _ = _panel(_reply("no_match"), _reply("no_match"))
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
+    assert score.llm is not None and score.llm.verdict == "no_match"
+    assert not score.caught
+
+
+@pytest.mark.unit
+def test_a_panel_that_agrees_credits_the_catch_and_asks_each_family_its_own_model() -> None:
+    panel, claude, codex = _panel(
+        _reply("match", _PARAPHRASE_QUOTE), _reply("match", _PARAPHRASE_QUOTE)
+    )
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
+    assert score.llm is not None and (score.llm.verdict, score.llm.quote) == (
+        "match",
+        _PARAPHRASE_QUOTE,
+    )
+    assert score.llm.judge == panel.identity and score.caught
+    assert {c["model"] for c in claude.calls} == {eval_suite.JUDGE_MODEL}
+    assert {c["model"] for c in codex.calls} == {eval_suite.CODEX_JUDGE_MODEL}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("claude_model", "codex_model"),
+    [
+        (eval_suite.JUDGE_MODEL, "claude-opus-5-5"),
+        (eval_suite.CODEX_JUDGE_MODEL, eval_suite.CODEX_JUDGE_MODEL),
+        (eval_suite.CODEX_JUDGE_MODEL, eval_suite.JUDGE_MODEL),
+    ],
+    ids=["two-claude", "two-codex", "swapped"],
+)
+def test_a_panel_is_one_claude_and_one_codex_judge(claude_model: str, codex_model: str) -> None:
+    with pytest.raises(eval_suite.JudgeError, match="one Claude and one codex"):
+        eval_suite.PanelJudge(
+            eval_suite.LlmJudge(_FakeModel(""), model=claude_model, allowed=_ANY_FAMILY),
+            eval_suite.LlmJudge(_FakeModel(""), model=codex_model, allowed=_ANY_FAMILY),
+        )
+
+
+@pytest.mark.unit
+def test_a_codex_judge_is_refused_at_construction_unless_its_client_is_codex() -> None:
+    """Refused before any launch, not at the first finding: an unusable scorer never tags a cohort."""
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient(), model=eval_suite.CODEX_JUDGE_MODEL)
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(
+            _FakeModel(""), model=eval_suite.JUDGE_MODEL, allowed=eval_suite.CODEX_JUDGE_MODELS
+        )
+
+
+@pytest.mark.unit
+def test_the_claude_transport_never_carries_a_codex_model() -> None:
+    transport = _FakeTransport(["ok"])
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.HeadlessJudgeClient(transport=transport).complete(
+            model=eval_suite.CODEX_JUDGE_MODEL, system="s", prompt="p"
+        )
+    assert transport.models == []
+
+
 @pytest.mark.unit
 def test_a_trial_is_scored_under_the_protocol_it_launched_with_and_no_other() -> None:
     loaded = load_suite(DEFAULT_SUITE)
