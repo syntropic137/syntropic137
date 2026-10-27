@@ -30,10 +30,10 @@ _DIGEST = "sha256:" + "a" * 64
     [
         ("redis:7.2.5-alpine", "registry-1.docker.io", "library/redis", "7.2.5-alpine", None),
         (
-            "cloudflare/cloudflared:2026.2.0",
+            "cloudflare/cloudflared:2026.10.3",
             "registry-1.docker.io",
             "cloudflare/cloudflared",
-            "2026.2.0",
+            "2026.10.3",
             None,
         ),
         ("docker.io/library/redis", "registry-1.docker.io", "library/redis", None, None),
