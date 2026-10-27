@@ -843,9 +843,11 @@ key (`execution_id_for_key`), so every start with that key writes the same
 Execution Request stream and its NoStream guard admits exactly one. A later
 start with the key is a **replay**: it answers with the recorded execution
 (`replayed: true`) and admits nothing, even while maintenance holds the gate.
-A start whose request differs from the recorded one (`same_request`: workflow,
-inputs, task, repos, tags, and the eval as chosen, not as resolved) reused the
-key and is refused with 409. Scoped per workflow: one key on two workflows is
+A start whose request differs from the recorded one (`same_request`: the key
+itself, workflow, inputs, task, repos, tags, and the eval as chosen, not as
+resolved) reused the key and is refused with 409. The request records the key,
+and the derived id keeps 128 digest bits, so two keys that shared an id would
+still be two starts, never a replay. Scoped per workflow: one key on two workflows is
 two starts. The eval trial launcher's key is its trial tag.
 
 ## Withdraw

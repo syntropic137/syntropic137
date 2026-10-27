@@ -42,10 +42,11 @@ class TestTheKeyedId:
             WORKFLOW_ID, "trial:b1/1"
         )
 
-    def test_it_has_the_shape_of_a_minted_id(self) -> None:
+    def test_it_keeps_128_digest_bits(self) -> None:
+        # 48 bits fell to a chosen-key collision in ~2^24 hashes (codex #2155).
         derived = execution_id_for_key(WORKFLOW_ID, "trial:b1/1")
         assert derived.startswith("exec-")
-        assert len(derived) == len("exec-") + 12
+        assert len(derived) == len("exec-") + 32
         int(derived.removeprefix("exec-"), 16)
 
     def test_two_keys_are_two_ids(self) -> None:
@@ -87,6 +88,7 @@ async def _stored(launch: LaunchEval) -> ExecutionRequestAggregate:
             task="do it",
             repos=[REPO],
             tags=TagSet(["trial:b1/1", "team-a"]),
+            idempotency_key="trial:b1/1",
             launch_eval=launch,
         )
     )
@@ -100,6 +102,7 @@ async def _stored(launch: LaunchEval) -> ExecutionRequestAggregate:
 class _Ask:
     """What a retry asks for; the default is exactly what `_stored` recorded."""
 
+    idempotency_key: str = "trial:b1/1"
     workflow_id: str = WORKFLOW_ID
     inputs: tuple[tuple[str, str], ...] = (("depth", "2"),)
     task: str | None = "do it"
@@ -109,6 +112,7 @@ class _Ask:
 
     def of(self, stored: ExecutionRequestAggregate) -> bool:
         return stored.same_request(
+            idempotency_key=self.idempotency_key,
             workflow_id=self.workflow_id,
             inputs=dict(self.inputs),
             task=self.task,
@@ -130,6 +134,7 @@ class TestARetryIsTheSameRequest:
     @pytest.mark.parametrize(
         "ask",
         [
+            pytest.param(replace(_Ask(), idempotency_key="trial:b1/2"), id="key"),
             pytest.param(replace(_Ask(), workflow_id="wf-other"), id="workflow"),
             pytest.param(replace(_Ask(), inputs=(("depth", "3"),)), id="input-value"),
             pytest.param(replace(_Ask(), inputs=()), id="inputs-dropped"),

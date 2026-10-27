@@ -26,7 +26,7 @@ import syn_adapters.storage.repositories as repositories
 import syn_api._wiring_admission as admission
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_adapters.storage.repositories import RepositoryAdapter
-from syn_api.routes.executions import commands
+from syn_api.routes.executions import commands, keyed_start
 from syn_api.routes.executions.commands import (
     ExecuteWorkflowRequest,
     ExecuteWorkflowResponse,
@@ -38,6 +38,7 @@ from syn_domain.contexts.orchestration import (
     execution_id_for_key,
     execution_request_id,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import EvalId
 from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
     ExecutionRequestAggregate,
 )
@@ -214,6 +215,20 @@ class TestAReusedKeyIsRefused:
         assert first.execution_id in str(refused.value.detail)
         assert api.starts.ids == [first.execution_id]
 
+    @pytest.mark.asyncio
+    async def test_two_keys_that_share_an_id_are_never_a_replay(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The request records its key: a colliding key is compared, not trusted (codex #2155).
+        api = _Api(monkeypatch)
+        monkeypatch.setattr(keyed_start, "execution_id_for_key", lambda _w, _k: "exec-collide")
+        first = await api.post(_keyed())
+        with pytest.raises(HTTPException) as refused:
+            await api.post(_keyed(idempotency_key="trial:b2129/2"))
+
+        assert refused.value.status_code == 409
+        assert api.starts.ids == [first.execution_id]
+
 
 class TestKeysAreIndependent:
     @pytest.mark.asyncio
@@ -256,6 +271,11 @@ class TestTheKeyIsValidated:
     def test_an_unusable_key_is_a_validation_error(self, key: str) -> None:
         with pytest.raises(ValidationError, match="idempotency_key"):
             ExecuteWorkflowRequest(idempotency_key=key)
+
+    def test_eval_id_with_no_eval_is_a_validation_error(self) -> None:
+        # On the model, so a keyed retry is a 422 before its replay lookup, not a 500.
+        with pytest.raises(ValidationError, match="not both"):
+            ExecuteWorkflowRequest(idempotency_key=KEY, eval_id=EvalId("eval-2129"), no_eval=True)
 
     def test_the_longest_key_is_accepted(self) -> None:
         assert ExecuteWorkflowRequest(idempotency_key="k" * 200).idempotency_key == "k" * 200

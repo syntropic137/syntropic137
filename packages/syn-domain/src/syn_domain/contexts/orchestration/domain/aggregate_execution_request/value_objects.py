@@ -23,9 +23,11 @@ def execution_id_for_key(workflow_id: str, idempotency_key: str) -> str:
     Two starts with the same key derive the same id, so they write the same
     request stream and its NoStream guard admits exactly one; the other finds
     the winner. Scoped by workflow, so one key on two workflows is two starts.
-    Same shape as a minted id (``exec-`` and 12 hex).
+    128 digest bits (``exec-`` and 32 hex), so finding two keys that share an
+    id is out of reach; the request also records the key and a replay
+    compares it, so a collision could never pass as a retry anyway.
     """
     if not idempotency_key:
         raise ValueError("an idempotency key must not be empty")
     digest = hashlib.sha256(f"{workflow_id}\0{idempotency_key}".encode()).hexdigest()
-    return f"exec-{digest[:12]}"
+    return f"exec-{digest[:32]}"

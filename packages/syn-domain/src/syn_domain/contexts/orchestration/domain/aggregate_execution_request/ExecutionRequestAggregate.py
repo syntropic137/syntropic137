@@ -81,6 +81,7 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
         self._task: str | None = None
         self._repos: tuple[RepositoryRef, ...] = ()
         self._tags: TagSet = TagSet()
+        self._idempotency_key: str | None = None
         self._requested_at: datetime | None = None
         self._eval_choice: EvalChoice = EvalChoice()
         self._launch_eval: LaunchEval | None = None
@@ -136,6 +137,7 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
     def same_request(
         self,
         *,
+        idempotency_key: str,
         workflow_id: str,
         inputs: dict[str, str],
         task: str | None,
@@ -146,12 +148,14 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
         """Whether a keyed retry asks for what this request recorded (#2129).
 
         A retry that differs is not a retry: its key was reused for another
-        start. The eval is compared as the caller chose it, never as it was
+        start. The key itself is compared too, so two keys that derived the
+        same id are two starts, never a replay of each other. The eval is compared as the caller chose it, never as it was
         resolved: a launch that named none took the workflow default at the
         time, and a later retry naming none still asks for the same thing.
         """
         return (
-            self._workflow_id == workflow_id
+            self._idempotency_key == idempotency_key
+            and self._workflow_id == workflow_id
             and self._inputs == inputs
             and self._task == task
             and [r.slug for r in self._repos] == [r.slug for r in repos]
@@ -186,6 +190,7 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
                 task=command.task,
                 repos=[r.slug for r in command.repos],
                 tags=list(command.tags),
+                idempotency_key=command.idempotency_key,
                 eval_id=None if launch.eval_id is None else str(launch.eval_id),
                 eval_ordinary=launch.selection is EvalSelection.ORDINARY,
                 eval_selection=launch.selection.value,
@@ -230,6 +235,7 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
         self._task = event.task
         self._repos = tuple(RepositoryRef.from_slug(r) for r in event.repos)
         self._tags = TagSet.recorded(event.tags)
+        self._idempotency_key = event.idempotency_key
         self._requested_at = event.requested_at
         eval_id = EvalId.recorded(event.eval_id) if event.eval_id is not None else None
         if event.eval_selection is None:

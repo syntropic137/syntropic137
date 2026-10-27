@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from event_sourcing import ConcurrencyConflictError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from syn_api._wiring import (
     ensure_connected,
@@ -334,6 +334,17 @@ class ExecuteWorkflowRequest(BaseModel):
         if task is not None and not task.strip():
             raise ValueError("task is empty; describe the work, or omit task to run without one")
         return task
+
+    @model_validator(mode="after")
+    def _one_eval_choice(self) -> ExecuteWorkflowRequest:
+        """``eval_id`` and ``no_eval`` contradict each other: 422 before anything reads them.
+
+        Checked on the model, not in the handler, so a keyed retry is refused
+        before its replay lookup compares the choice (#2129).
+        """
+        if self.no_eval and self.eval_id is not None:
+            raise ValueError("Pass either eval_id or no_eval, not both")
+        return self
 
 
 class ExecuteWorkflowResponse(BaseModel):
@@ -673,8 +684,6 @@ async def _launch_eval(
     missing (404) or archived (409) eval is an answer to the request rather
     than a 200 followed by an execution that never starts.
     """
-    if request.no_eval and request.eval_id is not None:
-        raise HTTPException(status_code=422, detail="Pass either eval_id or no_eval, not both")
     choice = EvalChoice(eval_id=request.eval_id, ordinary=request.no_eval)
     try:
         return await launch_eval_for(get_eval_repo(), choice, workflow.default_eval_id)
@@ -857,6 +866,7 @@ async def execute_workflow_endpoint(
                 task=request.task,
                 repos=typed_repos,
                 tags=request.tags,
+                idempotency_key=request.idempotency_key,
                 launch_eval=launch_eval,
             ),
             admitted,

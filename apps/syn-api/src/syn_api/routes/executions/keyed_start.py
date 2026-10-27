@@ -56,7 +56,11 @@ async def already_started(
         repos = [RepositoryRef.parse(r) for r in request.repos]
     except ValueError:
         return False
+    key = request.idempotency_key
+    if key is None:
+        return False
     if not recorded.same_request(
+        idempotency_key=key,
         workflow_id=workflow_id,
         inputs=dict(request.inputs),
         task=request.task,
