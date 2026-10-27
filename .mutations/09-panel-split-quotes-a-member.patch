@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index f0b71731f..23ef9ed78 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1194,7 +1194,7 @@ class PanelJudge:
+         said = "; ".join(f"{a.judge} {a.verdict}: {a.reason}" for a in answers)
+         if len({a.verdict for a in answers}) != 1:
+             return Judgement(
+-                judge=self.identity, verdict="unclear", quote="", reason=f"panel split: {said}"
++                judge=self.identity, verdict="unclear", quote=answers[0].quote, reason=f"panel split: {said}"
+             )
+         return Judgement(
+             judge=self.identity, verdict=answers[0].verdict, quote=answers[0].quote, reason=said

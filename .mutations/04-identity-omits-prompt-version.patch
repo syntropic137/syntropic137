@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index f0b71731f..8aa2f284d 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1187,7 +1187,7 @@ class PanelJudge:
+     @property
+     def identity(self) -> str:
+         claude, codex = self._members
+-        return f"panel:{claude.model}+{codex.model}@prompt-v{JUDGE_PROMPT_VERSION}"
++        return f"panel:{claude.model}+{codex.model}"
+ 
+     def judge(self, expected: Expected, findings: list[str]) -> Judgement:
+         answers = [m.judge(expected, findings) for m in self._members]

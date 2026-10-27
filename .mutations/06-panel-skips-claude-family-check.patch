@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index f0b71731f..e8ec5aefa 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1177,7 +1177,7 @@ class PanelJudge:
+     """
+ 
+     def __init__(self, claude: LlmJudge, codex: LlmJudge) -> None:
+-        if claude.model not in JUDGE_MODELS or codex.model not in CODEX_JUDGE_MODELS:
++        if codex.model not in CODEX_JUDGE_MODELS:
+             raise JudgeError(
+                 "a judge panel is one Claude and one codex model,"
+                 f" not {claude.model!r} and {codex.model!r}"
