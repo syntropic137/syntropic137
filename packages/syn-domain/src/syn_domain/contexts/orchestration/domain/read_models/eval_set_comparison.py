@@ -15,6 +15,7 @@ here so every reader gets the same interval.
 from __future__ import annotations
 
 import random
+from collections import Counter
 from dataclasses import dataclass
 from math import comb
 from statistics import fmean
@@ -127,6 +128,16 @@ def paired_bootstrap(
     return Interval(fmean(diffs), low, high)
 
 
+def _require_roster_version(roster: Roster, *cohorts: CohortKey) -> None:
+    for side in cohorts:
+        if side.suite_version != roster.version:
+            msg = (
+                f"cohort of suite version {side.suite_version} cannot be paired on "
+                f"the version {roster.version} roster"
+            )
+            raise ValueError(msg)
+
+
 def compare_cohorts(
     roster: Roster,
     trials: Mapping[str, Sequence[ClassifiedTrial]],
@@ -143,13 +154,7 @@ def compare_cohorts(
     a v2 roster would silently drop every case v1 does not have.
     """
     require_k(k)
-    for side in (a, b):
-        if side.suite_version != roster.version:
-            msg = (
-                f"cohort of suite version {side.suite_version} cannot be paired on "
-                f"the version {roster.version} roster"
-            )
-            raise ValueError(msg)
+    _require_roster_version(roster, a, b)
     paired: list[tuple[str, bool, bool]] = []
     short: list[str] = []
     adverse_to_a: list[float] = []
@@ -166,8 +171,8 @@ def compare_cohorts(
         b_low, b_high = first_k_bounds(tb, k)
         adverse_to_a.append(a_low - b_high)
         adverse_to_b.append(a_high - b_low)
-    a_only = sum(1 for _, pa, pb in paired if pa and not pb)
-    b_only = sum(1 for _, pa, pb in paired if pb and not pa)
+    tally = Counter((pa, pb) for _, pa, pb in paired)
+    a_only, b_only = tally[True, False], tally[False, True]
     return PairedComparison(
         a=a,
         b=b,
@@ -177,8 +182,8 @@ def compare_cohorts(
         coverage_complete=not short,
         a_only=a_only,
         b_only=b_only,
-        both=sum(1 for _, pa, pb in paired if pa and pb),
-        neither=sum(1 for _, pa, pb in paired if not pa and not pb),
+        both=tally[True, True],
+        neither=tally[False, False],
         mcnemar_p=mcnemar_exact_p(a_only, b_only),
         difference=paired_bootstrap(
             [float(pa) - float(pb) for _, pa, pb in paired], resamples, seed
