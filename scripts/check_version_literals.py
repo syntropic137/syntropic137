@@ -190,8 +190,9 @@ def _owner(scope: _Scope, name: str) -> _Scope | None:
         if first or not current.is_class:
             if name in current.declared_global:
                 return current.module()
-            if name in current.declared_nonlocal:
-                return _nonlocal_owner(current.parent, name)
+            # A ``nonlocal`` name is not local here, so the walk goes on to
+            # the nearest function that binds it: its target, in any program
+            # Python compiles.
             if current.is_local(name):
                 return current
         elif name == _CLASS_CELL and current.cell is not None:
