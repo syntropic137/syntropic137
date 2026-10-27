@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+index 462c8f516..9da6cedfe 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+@@ -496,7 +496,7 @@ class LocalSessionTranscriptArchive:
+             raise TranscriptIntegrityError("archived transcript reference failed verification")
+         end = reference.offset + reference.length
+         base = self._window_locked(reference.base_sha256, reference.offset, end)
+-        body = None if base is None else assemble(reference, base.size, bytes(base.kept))
++        body = None if base is None else reference.head + bytes(base.kept) + reference.tail
+         if body is None:
+             raise TranscriptIntegrityError("archived transcript reference failed verification")
+         return body

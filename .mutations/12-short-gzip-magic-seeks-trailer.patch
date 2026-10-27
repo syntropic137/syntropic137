@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+index 462c8f516..a1097d3bf 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+@@ -174,7 +174,7 @@ def _head_and_size(source: BinaryIO) -> tuple[bytes, int] | None:
+     head = source.read(_IDENTITY_PREFIX)
+     size = os.fstat(source.fileno()).st_size
+     # Shorter than gzip framing: an uncompressed body that starts with the magic.
+-    if head[: len(_GZIP_MAGIC)] != _GZIP_MAGIC or size < _GZIP_FRAMING:
++    if head[: len(_GZIP_MAGIC)] != _GZIP_MAGIC:
+         return head, size
+     source.seek(-4, os.SEEK_END)
+     size = int.from_bytes(source.read(4), "little")

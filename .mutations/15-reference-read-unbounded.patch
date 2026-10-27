@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+index 462c8f516..2cfff2433 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+@@ -422,7 +422,7 @@ class LocalSessionTranscriptArchive:
+             with (self._root / f"{_REFERENCE}{digest}").open("rb") as source:
+                 # read(n) allocates n up front, so bound it by the file, then the limit.
+                 found = os.fstat(source.fileno()).st_size
+-                stored = source.read(min(found, MAX_REFERENCE_BYTES) + 1)
++                stored = source.read()
+         except FileNotFoundError:
+             return None
+         if len(stored) > MAX_REFERENCE_BYTES:

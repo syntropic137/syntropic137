@@ -1,0 +1,14 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+index 462c8f516..13bee2312 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+@@ -507,8 +507,7 @@ class LocalSessionTranscriptArchive:
+ 
+     def _drop_reference_locked(self, digest: str, base: str | None) -> None:
+         (self._root / f"{_REFERENCE}{digest}").unlink(missing_ok=True)
+-        if base is not None:
+-            (self._root / f"{_PIN}{base}-{digest}").unlink(missing_ok=True)
++        pass
+ 
+     def _materialize_locked(self, digest: str, base: str) -> None:
+         """Store a referrer of ``base`` as a full object again, then drop its reference."""

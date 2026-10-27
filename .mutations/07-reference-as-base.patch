@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+index 462c8f516..9086af703 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+@@ -589,7 +589,7 @@ class LocalSessionTranscriptArchive:
+         self, digest: str, base: str, existing: SpliceReference | None, before: int
+     ) -> SpliceStatus | None:
+         """Why there is nothing to do, before reading any body."""
+-        if self._deleted(digest) or self._deleted(base) or self._reference(base) is not None:
++        if self._deleted(digest) or self._deleted(base):
+             return SpliceStatus.INELIGIBLE
+         if existing is not None and existing.base_sha256 == base and before == 0:
+             return SpliceStatus.ALREADY_REFERENCED
