@@ -874,11 +874,14 @@ run at once by the same factor (docs/north-star.md).
    a `create` that was cancelled (its `docker run` carries on) - leaks the
    reservation: it stays charged, logged at ERROR. The one path that settles a
    leak, Run Queue on or off, is `WorkspaceMemoryReconciler`: every 30 s it
-   lists containers by `syn.workspace_id` and frees a leak only when none is
-   listed AND no create for it was in flight when the listing started or is
-   now. A cancelled create is shielded, not abandoned: it runs to its end and
-   whatever it made is destroyed before its in-flight mark clears. A listing
-   that fails settles nothing. Holding memory for a dead container costs
+   lists containers by `syn.workspace_id` and frees a leak only when it was
+   already leaked when the listing started, none is listed, AND no create for
+   it was in flight when the listing started or is now (a leak recorded during
+   the listing may own a container the listing's snapshot predates). A
+   cancelled create is shielded, not abandoned: it runs to its end and whatever
+   it made is destroyed before its in-flight mark clears; shutdown waits for
+   those (30 s) before the event loop is torn down. A listing that fails
+   settles nothing. Holding memory for a dead container costs
    capacity; freeing it for a live one over-commits the host.
 4. **Recorded in the domain.** The request is part of what an execution IS, so it
    lives here, not in agentic-workspace: on the template event, pinned on
