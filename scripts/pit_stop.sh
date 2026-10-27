@@ -516,7 +516,8 @@ refuse_drift() {
 # value: it forwards the host's .env, unset for a new key, so the default
 # applies, as on a fresh install. Any other drift is left for refuse_drift,
 # which still stops the pit stop for the owner. The write is compare-and-swap
-# against the file read, backed up first, checked by sha256, and read back.
+# against the file read (checked before the backup and again just before the
+# rename), backed up first, checked by sha256, and read back.
 apply_null_keys() {
     local keys sum was bak
     keys="$(python3 "$REPOINT_PY" --add-null-keys "$TMP/compose.published" "$TMP/compose.deployed" "$TMP/compose.keyed")" \
@@ -532,7 +533,7 @@ apply_null_keys() {
     sum="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.keyed")"
     was="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.deployed")"
     bak="$COMPOSE.bak-$(date -u +%Y%m%dT%H%M%SZ)-pitstop-keys"
-    remote "cd $COMPOSE_DIR && echo '$was  $COMPOSE' | sha256sum -c --status - && cp -p $COMPOSE $bak && cat > $COMPOSE.pit-stop-keys && echo '$sum  $COMPOSE.pit-stop-keys' | sha256sum -c --status - && chmod --reference=$COMPOSE $COMPOSE.pit-stop-keys && mv $COMPOSE.pit-stop-keys $COMPOSE || { rm -f $COMPOSE.pit-stop-keys; exit 1; }" < "$TMP/compose.keyed" \
+    remote "cd $COMPOSE_DIR && echo '$was  $COMPOSE' | sha256sum -c --status - && cp -p $COMPOSE $bak && cp -p $COMPOSE $COMPOSE.pit-stop-keys && cat > $COMPOSE.pit-stop-keys && echo '$sum  $COMPOSE.pit-stop-keys' | sha256sum -c --status - && echo '$was  $COMPOSE' | sha256sum -c --status - && mv $COMPOSE.pit-stop-keys $COMPOSE || { rm -f $COMPOSE.pit-stop-keys; exit 1; }" < "$TMP/compose.keyed" \
         || die "could not add the env keys: $COMPOSE on $HOST changed since it was read, or the write failed. Nothing was built, shipped or staged"
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not re-read the deployed compose file"
     cmp -s "$TMP/compose.deployed" "$TMP/compose.keyed" \

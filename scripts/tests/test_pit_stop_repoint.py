@@ -528,7 +528,7 @@ class TestAddNullKeys:
         )
         deployed = _DEPLOYED.replace("    environment:\n", labels + "    environment:\n", 1)
         rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
-        assert rc == 1 and "SYN_LABEL_ONLY is not in an environment: map" in stderr
+        assert rc == 1 and "SYN_LABEL_ONLY is not in a services.<name>.environment: map" in stderr
         assert not out.exists()
 
     def test_a_new_service_is_refused(self, tmp_path: Path) -> None:
@@ -541,4 +541,38 @@ class TestAddNullKeys:
         deployed = _PUBLISHED.replace("${SYN_VERSION:-latest}", "v1.0.5")
         rc, stdout, _, out = _add_keys(tmp_path, _PUBLISHED, deployed)
         assert (rc, stdout) == (0, "")
+        assert not out.exists()
+
+    def test_a_key_line_inside_a_block_scalar_is_refused(self, tmp_path: Path) -> None:
+        """Codex on #2156: `environment:` text inside `command: |` is not a map,
+        and an added line there changes the command."""
+        block = "    command: |\n      run\n      environment:\n        X: null\n"
+        added = block.replace("        X: null\n", "        X: null\n        ADDED: null\n")
+        published = _PUBLISHED.replace("    environment:\n", added + "    environment:\n", 1)
+        deployed = _DEPLOYED.replace("    environment:\n", block + "    environment:\n", 1)
+        rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
+        assert rc == 1 and "ADDED is not in a services.<name>.environment: map" in stderr
+        assert not out.exists()
+
+    def test_a_null_that_would_override_an_existing_value_is_refused(self, tmp_path: Path) -> None:
+        secret = "SYN_WORKSPACE_CPU_LIMIT: secret"
+        deployed = _DEPLOYED.replace("SYN_WORKSPACE_CPU_LIMIT: null", secret, 1)
+        published = _PUBLISHED.replace(
+            "SYN_WORKSPACE_CPU_LIMIT: null", secret + "\n      SYN_WORKSPACE_CPU_LIMIT: null", 1
+        )
+        rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
+        assert rc == 1 and "set more than once" in stderr
+        assert not out.exists()
+
+    def test_a_null_beside_a_merge_key_is_refused(self, tmp_path: Path) -> None:
+        merge = "      <<: *common-env\n"
+        deployed = _DEPLOYED.replace("    environment:\n", "    environment:\n" + merge, 1)
+        published = _PUBLISHED.replace("    environment:\n", "    environment:\n" + merge, 1)
+        rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
+        assert rc == 1 and "merge key" in stderr
+        assert not out.exists()
+
+    def test_a_crlf_file_is_refused_not_rewritten(self, tmp_path: Path) -> None:
+        rc, _, stderr, out = _add_keys(tmp_path, _PUBLISHED, _DEPLOYED.replace("\n", "\r\n"))
+        assert rc == 1 and "CR line endings" in stderr
         assert not out.exists()

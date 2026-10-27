@@ -78,6 +78,8 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 #: An env passthrough with no value. Literally `null`: `""`, `~`, `${X}` or a
 #: trailing comment is not this shape and stays the owner's.
 _NULL_KEY = re.compile(r"(?P<indent>[ \t]+)(?P<key>[A-Z][A-Z0-9_]*):[ \t]*null[ \t]*")
+#: A mapping key that opens a nested block: no value, anchor, alias or block scalar.
+_PLAIN_PARENT = re.compile(r"[A-Za-z0-9._-]+:")
 
 
 class RepointError(Exception):
@@ -216,22 +218,60 @@ def drift(published: str, deployed: str) -> str:
     )
 
 
-def _parent_key(lines: list[str], at: int) -> str:
-    """The mapping key line `at` sits under: the nearest significant line above
-    it that is indented less."""
-    indent = len(lines[at]) - len(lines[at].lstrip())
-    for line in reversed(lines[:at]):
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _parent(lines: list[str], at: int) -> int:
+    """The index of the line `at` sits under: the nearest significant line
+    above it that is indented less, or -1."""
+    for i in range(at - 1, -1, -1):
+        line = lines[i]
+        if (
+            line.strip()
+            and not line.lstrip().startswith("#")
+            and _indent(line) < _indent(lines[at])
+        ):
+            return i
+    return -1
+
+
+def _check_env_line(lines: list[str], at: int, key: str) -> None:
+    """Raise unless line `at` is a key of `services.<name>.environment`, reached
+    through plain mapping keys only (so never text inside a block scalar such
+    as `command: |`), in a map with no merge key and no other `key`."""
+    env = _parent(lines, at)
+    svc = _parent(lines, env) if env >= 0 else -1
+    root = _parent(lines, svc) if svc >= 0 else -1
+    chain = [lines[i] for i in (env, svc, root) if i >= 0]
+    if (
+        len(chain) != 3
+        or chain[0].strip() != "environment:"
+        or not _PLAIN_PARENT.fullmatch(chain[1].strip())
+        or chain[2].rstrip("\n") != "services:"
+        or _parent(lines, root) != -1
+    ):
+        raise RepointError(f"{key} is not in a services.<name>.environment: map")
+    siblings: list[str] = []
+    for line in lines[env + 1 :]:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        if len(line) - len(line.lstrip()) < indent:
-            return line.strip()
-    return ""
+        if _indent(line) <= _indent(lines[env]):
+            break
+        if _indent(line) == _indent(lines[at]):
+            siblings.append(line.strip().partition(":")[0])
+    if any(s.startswith("<<") for s in siblings):
+        raise RepointError(f"{key}'s environment: map has a merge key; a null could override it")
+    if siblings.count(key) != 1:
+        raise RepointError(f"{key} would be set more than once in its environment: map")
 
 
 def add_null_keys(published: str, deployed: str) -> tuple[str, tuple[str, ...]]:
     """`deployed` with the `KEY: null` env lines `published` adds, and those keys.
 
     Raises RepointError unless every difference, pins aside, is such a line."""
+    if "\r" in published or "\r" in deployed:
+        raise RepointError("a compose file has CR line endings; not rewriting it")
     pub_lines = published.splitlines(keepends=True)
     dep_lines = deployed.splitlines(keepends=True)
     pub, dep = _significant(pub_lines), _significant(dep_lines)
@@ -252,8 +292,7 @@ def add_null_keys(published: str, deployed: str) -> tuple[str, tuple[str, ...]]:
             m = _NULL_KEY.fullmatch(pub_lines[j].rstrip("\r\n"))
             if not m:
                 raise RepointError(f"not a KEY: null passthrough: {pub_lines[j].strip()}")
-            if _parent_key(pub_lines, j) != "environment:":
-                raise RepointError(f"{m['key']} is not in an environment: map")
+            _check_env_line(pub_lines, j, m["key"])
             keys.append(m["key"])
             after.setdefault(dep[i1 - 1][1], []).append(pub_lines[j])
     out: list[str] = []
@@ -277,12 +316,15 @@ def main(argv: list[str]) -> int:
     if len(argv) == 4 and argv[0] == "--add-null-keys":
         _, published, deployed, out = argv
         try:
-            text, keys = add_null_keys(Path(published).read_text(), Path(deployed).read_text())
+            # Bytes, not read_text(): universal newlines would hide a CRLF file.
+            text, keys = add_null_keys(
+                Path(published).read_bytes().decode(), Path(deployed).read_bytes().decode()
+            )
         except RepointError as e:
             print(f"   cannot add env keys: {e}", file=sys.stderr)
             return 1
         if keys:
-            Path(out).write_text(text)
+            Path(out).write_bytes(text.encode())
             print("\n".join(keys))
         return 0
     if len(argv) == 4 and argv[0] == "--on-tag":
