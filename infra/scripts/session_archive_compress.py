@@ -59,7 +59,7 @@ def validated(flags: Sequence[str]) -> list[str]:
     return out
 
 
-def command(host: str, flags: Sequence[str]) -> list[str]:
+def command(host: str, flags: Sequence[str], module: str = MODULE) -> list[str]:
     """The argv run locally. Every flag is validated, so none can inject a shell word."""
     return [
         "ssh",
@@ -71,18 +71,25 @@ def command(host: str, flags: Sequence[str]) -> list[str]:
         API_CONTAINER,
         "python",
         "-m",
-        MODULE,
+        module,
         *validated(flags),
     ]
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    module: str = MODULE,
+    name: str = "session-archive-compress",
+    usage: str | None = __doc__,
+) -> int:
+    """Shared by every archive operator tool: same host, container and flags."""
     args = list(sys.argv[1:] if argv is None else argv)
     try:
-        argv_out = command(os.environ.get("SYN_PIT_HOST", DEFAULT_HOST), args)
+        argv_out = command(os.environ.get("SYN_PIT_HOST", DEFAULT_HOST), args, module)
     except UsageError as exc:
-        print(f"session-archive-compress: {exc}", file=sys.stderr)
-        print(__doc__, file=sys.stderr)
+        print(f"{name}: {exc}", file=sys.stderr)
+        print(usage, file=sys.stderr)
         return 2
     return subprocess.run(argv_out, check=False).returncode
 

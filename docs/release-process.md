@@ -718,8 +718,8 @@ process: do not trigger it.
 
 A hotfix ships one already-merged fix on top of the last release, without the
 beta. Design and rationale: [ADR-077](adrs/ADR-077-hotfix-release-path.md).
-`release-source.yml` enforces the shape below with the `release` branch's own
-copy of the checker, so a hotfix PR cannot rewrite it.
+`release-source.yml` enforces the shape below with `main`'s copy of the
+checker (`pull_request_target`), so a hotfix PR cannot rewrite it.
 
 ### Hotfix or beta-gated release?
 
@@ -838,8 +838,8 @@ the `--check` that follows the bump.
 ```
 PR: main → release, or hotfix/vX.Y.Z → release
   ├── ci.yml (full CI suite)
-  ├── release-source.yml (pull_request_target: the release branch's copy judges
-  │                       the head as git objects; hotfix secret scan; ADR-077)
+  ├── release-source.yml (pull_request_target: main's copy judges the head
+  │                       as git objects; hotfix secret scan; ADR-077)
   └── release-gate.yml  (thin orchestrator - 4 reusable checks + 3 inline security scans)
         ├── checks/version-check.yml       - every version file consistent, version > release
         ├── checks/changelog-check.yml     - PR body >= 20 chars
@@ -876,7 +876,7 @@ Merge to release
 |------|---------|
 | `.github/workflows/release-gate.yml` | Thin orchestrator - calls checks + inline security scans |
 | `.github/workflows/release-create.yml` | Release pipeline - create tag/release, publish containers + CLI |
-| `.github/workflows/release-source.yml` | `pull_request_target`, trusted base copy: the head is `main` (on `origin/main`) or a hotfix cut from the last release tag, same repository; gitleaks on hotfix commits (ADR-077) |
+| `.github/workflows/release-source.yml` | `pull_request_target`, main's trusted copy: the head is `main` (on `origin/main`) or a hotfix cut from the last release tag, same repository; gitleaks on hotfix commits (ADR-077) |
 | `.github/workflows/_check-version.yml` | Version consistency: every version file matches, bumped vs release |
 | `.github/workflows/_check-changelog.yml` | PR body length validation (takes `pr_body` input) |
 | `.github/workflows/_check-codegen-sync.yml` | Runs `just codegen`, checks for drift (CLI types, API docs, CLI docs) |
