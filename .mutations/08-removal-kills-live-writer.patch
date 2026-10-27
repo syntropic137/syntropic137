@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-index 060dd55ce..8004a30fb 100644
+index f6295b387..6a8e59eb2 100644
 --- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
 +++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-@@ -165,7 +165,7 @@ class SandboxSpoolRecovery:
+@@ -171,7 +171,7 @@ class SandboxSpoolRecovery:
          # Evicting bytes is not permission to end a run: a quota or age limit
          # reaching a sandbox whose agent still runs keeps it until that stops.
          sandbox_id, executor_id = _route(spool)

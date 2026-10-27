@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-index 060dd55ce..3ace03afa 100644
+index f6295b387..163c8c694 100644
 --- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
 +++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-@@ -130,10 +130,8 @@ class SandboxSpoolRecovery:
+@@ -136,10 +136,8 @@ class SandboxSpoolRecovery:
              # Resuming resumes the agent too. A run in fencing or a disconnected
              # stream says nothing about whether it still writes: only the
              # provider's confirmation makes this traversal exclusive.

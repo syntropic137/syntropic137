@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-index 060dd55ce..4b8024908 100644
+index f6295b387..5592b3718 100644
 --- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
 +++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-@@ -133,7 +133,7 @@ class SandboxSpoolRecovery:
+@@ -139,7 +139,7 @@ class SandboxSpoolRecovery:
              try:
                  exclusive = await sandbox.stop_writers()
              except Exception:

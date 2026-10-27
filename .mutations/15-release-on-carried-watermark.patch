@@ -1,0 +1,10 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
+index e25beac97..875cce62f 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
+@@ -175,4 +175,4 @@ def _exclusive_traversal(lease: CaptureSpoolLease, readers: RecoveryReaders) ->
+     archived none of them: releasing now would delete them. Only a traversal
+     whose watermarks this exclusive claim froze itself may release; the next
+     claim starts a fresh one."""
+-    return readers.exclusive and lease.watermark is None and lease.child_watermark is None
++    return readers.exclusive

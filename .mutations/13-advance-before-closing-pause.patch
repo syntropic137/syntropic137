@@ -1,5 +1,5 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
-index 9493c4769..d62e605cf 100644
+index e25beac97..5b83c79ac 100644
 --- a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
 +++ b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
 @@ -114,17 +114,15 @@ class CaptureRecoveryWorker:

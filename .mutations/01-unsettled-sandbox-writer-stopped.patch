@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-index 060dd55ce..b664ce26b 100644
+index f6295b387..37dab310b 100644
 --- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
 +++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-@@ -107,7 +107,7 @@ class SandboxSpoolRecovery:
+@@ -113,7 +113,7 @@ class SandboxSpoolRecovery:
      ) -> AsyncIterator[RecoveryReaders]:
          spool = lease.spool
          sandbox_id, executor_id = _route(spool)

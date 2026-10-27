@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-index 060dd55ce..06f66c0c8 100644
+index f6295b387..c56101df1 100644
 --- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
 +++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-@@ -146,6 +146,9 @@ class SandboxSpoolRecovery:
+@@ -152,6 +152,9 @@ class SandboxSpoolRecovery:
          except CaptureSpoolLeaseLost:
              lost = True
              raise

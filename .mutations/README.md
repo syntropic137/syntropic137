@@ -31,7 +31,7 @@ where `ids.txt` is the space-separated union of `killers.tsv`'s second column.
 | 12-release-before-mark-drained | release (kill) before `mark_drained` |
 | 13-advance-before-closing-pause | progress recorded inside the context, giving the lease up before the pause |
 | 14-missing-executor-accepted | a remote row without `executor_id` validates |
-| 15-profile-backend-mismatch-accepted | profile and backend may disagree |
+| 15-release-on-carried-watermark | a traversal frozen by an earlier, non-exclusive claim releases (codex review 1) |
 | 16-claim-ignores-backend | the store's claim ignores the backend filter |
 | 17-unsettled-remote-spool-claimable | the store leases an unsettled sandbox spool |
 | 18-byte-quota-spans-backends | the byte quota counts and evicts across backends |
