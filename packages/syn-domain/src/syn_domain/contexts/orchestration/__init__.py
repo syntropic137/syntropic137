@@ -227,7 +227,9 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
     TrialExclusion,
     TrialOutcome,
     classify_trial,
+    declared_model_tags,
     declared_models_of,
+    models_digest,
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_plan import PlannedPhase
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
@@ -608,6 +610,7 @@ __all__ = [
     "classify_trial",
     "compare_pair",
     "created_pull_requests",
+    "declared_model_tags",
     "declared_models_of",
     "execution_request_id",
     "guard_orphaned_workspace",
@@ -618,6 +621,7 @@ __all__ = [
     "judge_owner",
     "launch_eval_for",
     "mint_wrapper_name",
+    "models_digest",
     "open_eval",
     "read_record",
     "read_start_record",

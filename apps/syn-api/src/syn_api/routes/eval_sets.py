@@ -9,9 +9,10 @@ in the CLI or in the UI.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.routes.eval_runs import RunReads, baseline_pins, eval_run_facts, pass_rate_display
@@ -54,6 +55,20 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.eval_trials import CohortKey
 
 router = APIRouter(tags=["evals"])
+
+MAX_EVAL_SET_CASES = 500
+"""The most evals one set read loads. A larger roster is refused, never truncated:
+a figure over part of a roster would read as the whole one."""
+MAX_EVAL_SET_RUNS = 5_000
+"""The most member runs one set or cohort read loads; refused past it, never truncated."""
+
+
+def _too_large(what: str, count: int, limit: int) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail=f"{what} has {count}, more than the {limit} one metrics read loads; "
+        "narrow it (e.g. by split) rather than read part of it",
+    )
 
 
 def _bounds(bounds: Bounds) -> EvalBoundsResponse:
@@ -179,14 +194,23 @@ async def eval_set_summary(
     """The roster of ``suite`` version ``version`` and every cohort's figures over it.
 
     Each source is read once for the whole roster, never per case or run (#1811).
+    Every read is bounded: a roster over ``MAX_EVAL_SET_CASES`` evals, or whose
+    evals hold over ``MAX_EVAL_SET_RUNS`` runs (counted from the eval rows,
+    before any run is loaded), is refused with 422. The figures are computed
+    off the event loop: the paired comparison bootstraps.
     """
     tags = [f"{EvalTag.SUITE}:{suite}", f"{EvalTag.SUITE_VERSION}:{version}"]
-    evals = await manager.eval_list.page(tags=tags)
+    evals = await manager.eval_list.page(tags=tags, limit=MAX_EVAL_SET_CASES)
+    if evals.total > MAX_EVAL_SET_CASES:
+        raise _too_large(f"eval set {suite} v{version}", evals.total, MAX_EVAL_SET_CASES)
     records = {row.record.eval_id: row.record for row in evals.rows}
     roster = roster_of(
         (TaggedEval(r.eval_id, r.tags) for r in records.values()), suite, version, split
     )
     eval_ids = [c.eval_id for c in roster.cases]
+    run_counts = {row.record.eval_id: row.run_count for row in evals.rows}
+    if (runs := sum(run_counts[e] for e in eval_ids)) > MAX_EVAL_SET_RUNS:
+        raise _too_large(f"eval set {suite} v{version}", runs, MAX_EVAL_SET_RUNS)
     members = await manager.eval_list.members_of(eval_ids)
     scores = await manager.eval_list.scores_in(eval_ids)
     execution_ids = {row.workflow_execution_id for rows in members.values() for row in rows}
@@ -202,17 +226,20 @@ async def eval_set_summary(
         ]
         for eval_id, rows in members.items()
     }
-    return summarize_eval_set(roster, runs_by_eval, k)
+    return await asyncio.to_thread(summarize_eval_set, roster, runs_by_eval, k)
 
 
 async def eval_case_cohorts(
     manager: ProjectionManager, eval_id: str, k: int
 ) -> list[EvalCaseCohortResponse]:
-    """One eval's figures in every cohort it has trials in."""
-    runs, _ = await eval_run_facts(manager, eval_id)
+    """One eval's figures in every cohort it has trials in; refused past ``MAX_EVAL_SET_RUNS``."""
+    runs, total = await eval_run_facts(manager, eval_id, limit=MAX_EVAL_SET_RUNS)
+    if total > MAX_EVAL_SET_RUNS:
+        raise _too_large(f"eval {eval_id}", total, MAX_EVAL_SET_RUNS)
+    cohorts = await asyncio.to_thread(summarize_case, eval_id, runs, k)
     return [
         EvalCaseCohortResponse(cohort=_cohort(c.cohort), metrics=case_metrics_response(c.metrics))
-        for c in summarize_case(eval_id, runs, k)
+        for c in cohorts
     ]
 
 
@@ -236,4 +263,5 @@ async def get_eval_set_metrics_endpoint(
     await ensure_connected()
     manager = get_projection_mgr()
     summary = await eval_set_summary(manager, suite, version, split, k)
-    return eval_set_response(summary, k)
+    # compare_pair runs three bootstraps: keep them off the event loop.
+    return await asyncio.to_thread(eval_set_response, summary, k)

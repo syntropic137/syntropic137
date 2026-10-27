@@ -110,7 +110,7 @@ def classify_roster_trials(
     """Every rostered case's member runs, classified.
 
     ``declared_models`` is keyed by models digest; when it is None each run is
-    checked against the ``model:<phase>=<id>`` tags it launched with.
+    checked against the ``model:<phase>:<id>`` tags it launched with.
     """
     return {
         case.eval_id: [

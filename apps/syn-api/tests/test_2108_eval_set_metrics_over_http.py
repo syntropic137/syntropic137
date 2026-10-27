@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from syn_api.routes.executions.commands import ExecuteWorkflowRequest
 from syn_api.types import EvalDetailResponse, EvalRunListResponse, EvalSetMetricsResponse
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
@@ -32,6 +33,10 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalR
 from syn_domain.contexts.orchestration.domain.read_models.eval_summary import (
     EvalBaselineRepo,
     EvalRecord,
+)
+from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
+    declared_model_tags,
+    models_digest,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     PhaseExecutionDetail,
@@ -53,7 +58,7 @@ OPUS = "claude-opus-5-5"
 REPO_OWNER, REPO_NAME = "syntropic137", "syntropic137"
 PIN = "a" * 40
 SUITE = "verifier-seed-v1"
-MODELS = "m" * 64
+MODELS = "m" * 32
 PROTOCOL_A, PROTOCOL_B = "keyword-v1", "panel-v1"
 _seq = iter(range(1_000_000))
 
@@ -159,7 +164,10 @@ async def _run(
     n = next(_seq)
     execution_id = f"exec-{n:04d}"
     started = f"2026-10-27T00:{n // 60:02d}:{n % 60:02d}+00:00"
-    launch = _launch_tags(scorer) if inherited is None else inherited
+    # Through the execute request's own TagSet, so no test holds a launch tag
+    # a real launch would refuse (codex #2123: `=` and a 71-char tag did).
+    raw = _launch_tags(scorer) if inherited is None else inherited
+    launch = list(ExecuteWorkflowRequest(tags=raw).tags)
     summary = WorkflowExecutionSummary(
         workflow_execution_id=execution_id,
         workflow_id="verify-v1",
@@ -381,12 +389,84 @@ async def test_each_run_row_says_what_it_counts_as(client: AsyncClient) -> None:
 async def test_a_phase_that_ran_another_model_than_declared_is_excluded(
     client: AsyncClient,
 ) -> None:
-    """The facts mapping hands the domain each phase's OWN observed model (Lane 2)."""
+    """The facts mapping hands the domain each phase's OWN observed model (Lane 2).
+
+    Launch tags come from ``declared_model_tags``, the writer the harness uses,
+    so the declared models are in the grammar a real launch accepts.
+    """
+    base = [f"suite:{SUITE}", "suite-version:1", f"scorer:{PROTOCOL_A}"]
+    as_declared, swapped = {"verify": OPUS}, {"verify": "gpt-6.1-sol"}
     await _eval("eval-a", "suite-version:1")
-    await _run("eval-a", inherited=[*_launch_tags(), f"model:verify={OPUS}"])
-    await _run("eval-a", inherited=[*_launch_tags(), "model:verify=gpt-6.1-sol"])
+    await _run("eval-a", inherited=[*base, *declared_model_tags(as_declared)])
+    await _run("eval-a", inherited=[*base, *declared_model_tags(swapped)])
 
     body = await _metrics(client, k=1)
 
-    case = body.cohorts[0].cases[0]
-    assert (case.n, case.treatment_mismatch_count) == (1, 1)
+    by_models = {
+        c.cohort.models_digest: (c.cases[0].n, c.cases[0].treatment_mismatch_count)
+        for c in body.cohorts
+    }
+    assert by_models == {
+        models_digest(as_declared): (1, 0),
+        models_digest(swapped): (0, 1),
+    }
+
+
+async def test_a_roster_over_the_case_limit_is_refused_not_truncated(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from syn_api.routes import eval_sets
+
+    monkeypatch.setattr(eval_sets, "MAX_EVAL_SET_CASES", 2)
+    for eval_id in ("eval-a", "eval-b", "eval-c"):
+        await _eval(eval_id, "suite-version:1")
+
+    response = await client.get(
+        "/eval-sets/metrics", params={"suite": SUITE, "version": "1", "k": 1}
+    )
+
+    assert response.status_code == 422
+    assert "has 3, more than the 2" in response.json()["detail"]
+
+
+async def test_a_set_over_the_run_limit_is_refused_before_its_runs_load(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from syn_api.routes import eval_sets
+
+    monkeypatch.setattr(eval_sets, "MAX_EVAL_SET_RUNS", 2)
+    loaded: list[int] = []
+
+    async def _refuse_load(*_: object, **__: object) -> None:
+        loaded.append(1)
+        raise AssertionError("runs were loaded past the limit")
+
+    monkeypatch.setattr(eval_sets.RunReads, "load", _refuse_load)
+    await _eval("eval-a", "suite-version:1")
+    await _eval("eval-b", "suite-version:1")
+    for eval_id in ("eval-a", "eval-a", "eval-b"):
+        await _run(eval_id)
+
+    response = await client.get(
+        "/eval-sets/metrics", params={"suite": SUITE, "version": "1", "k": 1}
+    )
+
+    assert response.status_code == 422
+    assert "has 3, more than the 2" in response.json()["detail"]
+    assert loaded == []
+
+
+async def test_one_eval_over_the_run_limit_refuses_its_cohorts(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from syn_api.routes import eval_sets
+
+    monkeypatch.setattr(eval_sets, "MAX_EVAL_SET_RUNS", 1)
+    await _eval("eval-a", "suite-version:1")
+    await _run("eval-a")
+    await _run("eval-a")
+
+    response = await client.get("/evals/eval-a", params={"k": 1})
+
+    assert response.status_code == 422
+    assert "eval eval-a has 2, more than the 1" in response.json()["detail"]

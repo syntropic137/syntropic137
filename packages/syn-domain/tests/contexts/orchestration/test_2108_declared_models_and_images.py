@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import pytest
 
+from syn_domain.contexts.orchestration._shared.tags import MAX_TAG_LENGTH, TagSet
 from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import Verdict
 from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
     ImageManifestContent,
@@ -27,10 +28,13 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_sets import (
 )
 from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
     TrialExclusion,
+    cohort_of,
+    declared_model_tags,
     declared_models_of,
+    models_digest,
 )
 
-from .eval_trial_builders import OTHER_SHA, REPO, cohort, cohort_tags, run
+from .eval_trial_builders import OTHER_SHA, PROTOCOL, REPO, cohort, cohort_tags, run
 
 pytestmark = pytest.mark.unit
 
@@ -43,10 +47,30 @@ def _with_models(*declared: str) -> tuple[str, ...]:
 
 
 def test_declared_models_are_read_per_phase() -> None:
-    assert declared_models_of(_with_models(f"build={OPUS}", f"verify={SOL}")) == {
+    assert declared_models_of(_with_models(f"build:{OPUS}", f"verify:{SOL}")) == {
         "build": OPUS,
         "verify": SOL,
     }
+
+
+def test_declared_model_tags_survive_the_launch_tag_rules_and_read_back() -> None:
+    """The writer's tags pass TagSet (what every execute request validates through) unchanged."""
+    models = {"verify": SOL, "implement-and-self-review": OPUS}
+    written = [*cohort_tags()[:1], f"scorer:{PROTOCOL}", *declared_model_tags(models)]
+
+    launched = list(TagSet(written))
+
+    assert sorted(launched) == sorted(written)
+    assert max(len(t) for t in launched) <= MAX_TAG_LENGTH
+    assert declared_models_of(launched) == models
+    key = cohort_of(run(tags=tuple(launched)))
+    assert key is not None and key.models_digest == models_digest(models)
+
+
+def test_the_models_digest_ignores_map_order_and_sees_every_phase() -> None:
+    assert models_digest({"a": OPUS, "b": SOL}) == models_digest({"b": SOL, "a": OPUS})
+    assert models_digest({"a": OPUS}) != models_digest({"a": OPUS, "b": SOL})
+    assert models_digest({"a": OPUS, "b": SOL}) != models_digest({"a": SOL, "b": OPUS})
 
 
 def test_no_model_tags_declare_nothing_so_no_check_applies() -> None:
@@ -54,19 +78,19 @@ def test_no_model_tags_declare_nothing_so_no_check_applies() -> None:
 
 
 def test_a_phase_declared_twice_differently_can_never_match() -> None:
-    declared = declared_models_of(_with_models(f"build={OPUS}", f"build={SOL}"))
+    declared = declared_models_of(_with_models(f"build:{OPUS}", f"build:{SOL}"))
 
     assert declared == {"build": ""}
 
 
 def test_a_malformed_model_tag_is_not_a_declaration() -> None:
-    assert declared_models_of(_with_models("build", "=x", "build=")) is None
+    assert declared_models_of(_with_models("build", ":x", "build:")) is None
 
 
 def test_a_set_checks_each_trial_against_the_models_it_launched_with() -> None:
     roster = roster_of([TaggedEval("eval-1", ("suite:s", "suite-version:1"))], "s", "1")
-    matched = run(tags=_with_models(f"build={OPUS}"), own_models=(PhaseModel("build", OPUS),))
-    swapped = run(tags=_with_models(f"build={OPUS}"), own_models=(PhaseModel("build", SOL),))
+    matched = run(tags=_with_models(f"build:{OPUS}"), own_models=(PhaseModel("build", OPUS),))
+    swapped = run(tags=_with_models(f"build:{OPUS}"), own_models=(PhaseModel("build", SOL),))
 
     summary = summarize_eval_set(roster, {"eval-1": [matched, swapped]}, k=1)
 

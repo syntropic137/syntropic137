@@ -1563,7 +1563,7 @@ class EvalCohortKeyResponse(_EvalTrialsModel):
     workflow_version: str
     """``""`` when unrecorded: unrecorded runs group together."""
     models_digest: str
-    """sha256 of the suite's declared models map, from the ``models:`` launch tag."""
+    """``models_digest`` of the suite's declared models map (32 hex of sha256), from the ``models:`` launch tag."""
     scorer_protocol: str
 
 

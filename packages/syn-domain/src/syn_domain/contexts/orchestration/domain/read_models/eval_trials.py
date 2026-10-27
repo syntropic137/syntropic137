@@ -12,6 +12,7 @@ re-classification changes the outcome on the next read with no migration.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -42,11 +43,20 @@ class EvalTag(StrEnum):
     SPLIT = "split"
     POLARITY = "polarity"
     MODELS = "models"
-    """sha256 of the suite's declared models map: declared, so an early failure still joins."""
+    """``models_digest`` of the suite's declared models map: declared, so an early failure still joins."""
     SCORER = "scorer"
-    """The scoring protocol id: a different judge is a different ruler."""
+    """The scoring protocol id: a different judge is a different ruler.
+
+    Compared to a score's ``scorer_version`` exactly, so a launcher must score
+    under a ``scorer_version`` that is itself a valid tag (``TAG_CHARACTERS``,
+    lowercase, at most 64 with the prefix), or no trial is ever judged.
+    """
     MODEL = "model"
-    """``model:<phase>=<explicit id>``, one per phase: the declared models a trial is checked against."""
+    """``model:<phase>:<explicit id>``, one per phase: the declared models a trial is checked against.
+
+    A phase id never holds a colon (``PHASE_ID_PATTERN``), so the first colon
+    after the prefix splits phase from model. ``=`` is not a tag character.
+    """
     TRIAL = "trial"
 
 
@@ -62,8 +72,30 @@ def single_tag(tags: Iterable[str], prefix: EvalTag) -> str | None:
     return next(iter(values)) if len(values) == 1 else None
 
 
+MODELS_DIGEST_HEX = 32
+"""Hex digits of sha256 a ``models:`` tag keeps: 128 bits, and the tag fits ``MAX_TAG_LENGTH``."""
+
+
+def models_digest(models: Mapping[str, str]) -> str:
+    """The cohort's declared-models identity: sha256 of ``phase=model`` lines in phase order."""
+    canonical = "".join(f"{phase}={models[phase]}\n" for phase in sorted(models))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:MODELS_DIGEST_HEX]
+
+
+def declared_model_tags(models: Mapping[str, str]) -> list[str]:
+    """The launch tags that declare ``models``: ``models:<digest>`` and one ``model:`` per phase.
+
+    The one writer of the grammar ``declared_models_of`` and ``cohort_of``
+    read, so a launcher cannot spell a tag the read side does not parse.
+    """
+    return [
+        f"{EvalTag.MODELS}:{models_digest(models)}",
+        *(f"{EvalTag.MODEL}:{phase}:{models[phase]}" for phase in sorted(models)),
+    ]
+
+
 def declared_models_of(tags: Iterable[str]) -> dict[str, str] | None:
-    """Phase id to declared model id, from ``model:<phase>=<id>`` launch tags.
+    """Phase id to declared model id, from ``model:<phase>:<id>`` launch tags.
 
     None when the run declared none (launched before the harness wrote them),
     so the treatment check is not applied. A phase declared twice with
@@ -72,7 +104,7 @@ def declared_models_of(tags: Iterable[str]) -> dict[str, str] | None:
     """
     by_phase: dict[str, set[str]] = {}
     for value in tag_values(tags, EvalTag.MODEL):
-        phase, sep, model = value.partition("=")
+        phase, sep, model = value.partition(":")
         if sep and phase and model:
             by_phase.setdefault(phase, set()).add(model)
     if not by_phase:
