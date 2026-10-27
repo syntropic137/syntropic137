@@ -1,0 +1,16 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py b/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py
+index 049fe5fa0..8be18b755 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py
+@@ -79,7 +79,10 @@ class CaptureDeletionWorker:
+             return False
+         # Raises on a failed removal: the transaction rolls back, so the purge
+         # is not recorded and no checkpoint is dropped or drained.
+-        await self._transport.discard()
++        try:
++            await self._transport.discard()
++        except OSError:
++            pass
+         await conn.execute(
+             """DELETE FROM session_capture_deletion_checkpoints
+             WHERE source_instance_id=$1 AND destination_id=$2 AND NOT acknowledged""",

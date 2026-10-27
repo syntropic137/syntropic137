@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py b/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py
+index 049fe5fa0..350a3d438 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py
+@@ -135,7 +135,7 @@ class CaptureDeletionWorker:
+             AND c.payload->>'content_format'='envelope'
+             AND (j.queued OR j.content_hash IS NOT NULL)
+             AND COALESCE(j.content_hash,d.content_hash) IS NOT NULL
+-            AND d.reason=ANY($3::text[])
++            AND (d.reason=ANY($3::text[]) OR TRUE)
+             AND NOT EXISTS(SELECT 1 FROM session_capture_deletion_checkpoints k
+                 WHERE k.source_instance_id=c.source_instance_id AND k.destination_id=$2
+                 AND k.producer_id=c.producer_id AND k.capture_id=c.capture_id)

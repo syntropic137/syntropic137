@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py b/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py
+index 049fe5fa0..6563e95af 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/capture_deletion_worker.py
+@@ -82,7 +82,7 @@ class CaptureDeletionWorker:
+         await self._transport.discard()
+         await conn.execute(
+             """DELETE FROM session_capture_deletion_checkpoints
+-            WHERE source_instance_id=$1 AND destination_id=$2 AND NOT acknowledged""",
++            WHERE source_instance_id=$1 AND destination_id=$2 AND FALSE""",
+             self._source,
+             self._destination,
+         )
