@@ -46,10 +46,11 @@ class PostgresCaptureSpools:
                 raise ValueError("Capture spool identity was rebound to a different session scope")
 
     async def claim(self, *, lease_seconds: int) -> CaptureSpoolLease | None:
-        """A caught-up spool of a live session is re-swept at most once per
-        live re-sweep interval (#2107): every sweep of a changed transcript
-        archives a full new revision. Settlement, a first claim and an
-        unfinished traversal are claimed as soon as they are due."""
+        """A live session's spool is re-swept at most once per live re-sweep
+        interval after its last complete traversal (#2107): every sweep of a
+        changed transcript archives a full new revision. Settlement, a spool
+        never fully traversed, and a failed or abandoned traversal (which never
+        stamps ``drained_at``) are claimed as soon as they are due."""
         if lease_seconds < 1:
             raise ValueError("Lease duration must be positive")
         async with self._pool.acquire() as conn:
@@ -58,9 +59,8 @@ class PostgresCaptureSpools:
                     SELECT source_instance_id,session_id FROM session_capture_spools
                     WHERE leased_until<=now() AND retry_at<=now() AND source_instance_id=$2
                     AND release_reason IS NULL
-                    AND (settled_at IS NOT NULL OR claimed_at IS NULL
-                        OR watermark IS NOT NULL OR child_watermark IS NOT NULL
-                        OR claimed_at<=now()-$3::double precision*interval '1 second')
+                    AND (settled_at IS NOT NULL OR drained_at IS NULL
+                        OR drained_at<=now()-$3::double precision*interval '1 second')
                     ORDER BY retry_at,source_instance_id,session_id FOR UPDATE SKIP LOCKED LIMIT 1
                 ) UPDATE session_capture_spools s SET lease_token=s.lease_token+1,
                     leased_until=now()+$1::double precision*interval '1 second',claimed_at=now()

@@ -150,7 +150,7 @@ async def test_paused_non_terminal_spool_survives_age_drain_and_resumes(
     assert await spools.claim(lease_seconds=60) is None
     async with db_pool.acquire() as conn:
         await conn.execute(
-            """UPDATE session_capture_spools SET claimed_at=now()-interval '1 hour'
+            """UPDATE session_capture_spools SET drained_at=drained_at-interval '1 hour'
             WHERE source_instance_id=$1""",
             source,
         )
