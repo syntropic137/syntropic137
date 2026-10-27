@@ -53,6 +53,16 @@ class SessionInventorySettings(BaseSettings):
         le=3600,
         description="Delay before retrying an interrupted inventory step.",
     )
+    live_resweep_seconds: int = Field(
+        default=900,
+        ge=10,
+        le=86400,
+        description=(
+            "Longest a live session's caught-up capture spool waits between host re-sweeps. "
+            "Each re-sweep of a changed transcript archives a full new revision, so this "
+            "bounds revisions per live session; a settled session is swept as soon as it is due."
+        ),
+    )
     park_safety_seconds: int = Field(
         default=900,
         ge=30,
