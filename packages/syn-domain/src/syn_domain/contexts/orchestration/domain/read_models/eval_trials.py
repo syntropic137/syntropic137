@@ -122,8 +122,12 @@ def _base_mismatch(run: EvalRunFacts) -> bool:
 
 
 def _treatment_mismatch(run: EvalRunFacts, declared: Mapping[str, str]) -> bool:
-    """A phase's own observed model contradicts its declared id. A silent phase never does."""
-    return any(declared.get(m.phase_id, m.model) != m.model for m in run.own_models)
+    """A phase's own observed model is not its declared id, or the phase declared none.
+
+    A silent phase never mismatches; an observed phase with no declaration does,
+    or an undeclared phase could run any model and still pass validation.
+    """
+    return any(declared.get(m.phase_id) != m.model for m in run.own_models)
 
 
 def _current_score(run: EvalRunFacts, cohort: CohortKey) -> EvalRunScore | None:

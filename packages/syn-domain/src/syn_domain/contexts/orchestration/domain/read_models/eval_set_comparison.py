@@ -21,6 +21,7 @@ from statistics import fmean
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration.domain.read_models.eval_sets import in_cohort
+from syn_domain.contexts.orchestration.domain.read_models.eval_trial_metrics import require_k
 from syn_domain.contexts.orchestration.domain.read_models.eval_trials import TrialOutcome
 
 if TYPE_CHECKING:
@@ -75,6 +76,7 @@ def _by_start(trials: Sequence[ClassifiedTrial]) -> list[ClassifiedTrial]:
 
 def first_k_all_pass(trials: Sequence[ClassifiedTrial], k: int) -> bool | None:
     """Whether the first k JUDGED trials all passed; None when fewer than k are judged."""
+    require_k(k)
     judged = [
         t.result for t in _by_start(trials) if t.result in (TrialOutcome.PASS, TrialOutcome.FAIL)
     ]
@@ -89,6 +91,7 @@ def first_k_bounds(trials: Sequence[ClassifiedTrial], k: int) -> tuple[float, fl
     Over the first k RESOLVED trials (judged or infra error); a case with fewer
     is 0 and 1.
     """
+    require_k(k)
     resolved = [
         t.result
         for t in _by_start(trials)
@@ -134,7 +137,19 @@ def compare_cohorts(
     resamples: int = BOOTSTRAP_RESAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> PairedComparison:
-    """Paired comparison of cohorts A and B; ``trials`` is ``classify_roster_trials`` output."""
+    """Paired comparison of cohorts A and B; ``trials`` is ``classify_roster_trials`` output.
+
+    Both cohorts must be of the roster's version: pairing a v1 cohort against
+    a v2 roster would silently drop every case v1 does not have.
+    """
+    require_k(k)
+    for side in (a, b):
+        if side.suite_version != roster.version:
+            msg = (
+                f"cohort of suite version {side.suite_version} cannot be paired on "
+                f"the version {roster.version} roster"
+            )
+            raise ValueError(msg)
     paired: list[tuple[str, bool, bool]] = []
     short: list[str] = []
     adverse_to_a: list[float] = []

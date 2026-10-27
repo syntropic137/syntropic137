@@ -180,3 +180,10 @@ def test_t1b_cohort_identity_is_read_from_launch_tags_only() -> None:
     assert cohort_of(launched) == cohort()
     assert cohort_of(launched) == cohort_of(run())
     assert cohort().models_digest == MODELS
+
+
+def test_t1_an_observed_phase_with_no_declaration_is_a_treatment_mismatch() -> None:
+    # Codex #2116: an undeclared phase could otherwise run any model and pass.
+    trial = run(Verdict.PASS, own_models=(PhaseModel("review", "claude-sonnet-5-5"),))
+    result = classify_trial(trial, {"verify": "claude-opus-5-5"}).result
+    assert result is TrialExclusion.TREATMENT_MISMATCH

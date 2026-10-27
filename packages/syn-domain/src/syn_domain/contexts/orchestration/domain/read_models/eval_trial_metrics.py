@@ -52,6 +52,13 @@ def pass_hat_k(n: int, c: int, k: int) -> float | None:
     return comb(c, k) / comb(n, k)
 
 
+def require_k(k: int) -> None:
+    """Refuse k < 1: with no trials to take, "all k passed" is vacuously true."""
+    if k < 1:
+        msg = f"k must be at least 1, got {k}"
+        raise ValueError(msg)
+
+
 @dataclass(frozen=True)
 class Bounds:
     """A figure with every infra error a fail (lower) and every one a pass (upper)."""
@@ -140,6 +147,7 @@ def _bounds(counts: TrialCounts, k: int) -> tuple[Bounds, Bounds]:
 
 def case_metrics(eval_id: str, trials: Iterable[ClassifiedTrial], k: int) -> CaseMetrics:
     """The figures of one case in one cohort; ``trials`` are that case's trials in that cohort."""
+    require_k(k)
     counts = TrialCounts.of(trials)
     exhausted = counts.infra_errors >= k
     short = 0 if exhausted else max(0, k - counts.judged - counts.pending)

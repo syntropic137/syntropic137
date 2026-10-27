@@ -24,7 +24,9 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_sets import (
     TaggedEval,
     classify_roster_trials,
     roster_of,
+    summarize_eval_set,
 )
+from syn_domain.contexts.orchestration.domain.read_models.eval_trial_metrics import case_metrics
 from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
     ClassifiedTrial,
     classify_trial,
@@ -138,3 +140,31 @@ def test_mcnemar_exact_two_sided(b: int, c: int, p: float) -> None:
 def test_no_paired_case_has_no_interval() -> None:
     assert paired_bootstrap([]) is None
     assert paired_bootstrap([0.0, 0.0]) == Interval(0.0, 0.0, 0.0)
+
+
+def test_cohorts_of_another_suite_version_are_refused_not_silently_paired() -> None:
+    # Codex #2116: v1 {x} against a v2 {x, y} roster dropped y without a word.
+    evals = [TaggedEval(e, ("suite:s", "suite-version:2")) for e in ("x", "y")]
+    roster = roster_of(evals, "s", "2")
+    v1, v2 = cohort(version="1"), cohort(version="2", models=B_MODELS)
+    with pytest.raises(ValueError, match="suite version 1"):
+        compare_cohorts(roster, {}, v1, v2, 3)
+    with pytest.raises(ValueError, match="suite version 1"):
+        compare_cohorts(roster, {}, v2, v1, 3)
+
+
+@pytest.mark.parametrize("k", [0, -1])
+def test_k_below_one_is_refused_at_every_entry_point(k: int) -> None:
+    # Codex #2116: with k = 0, "all of the first k passed" is vacuously true.
+    evals = [TaggedEval("x", ("suite:s", "suite-version:1"))]
+    roster = roster_of(evals, "s", "1")
+    with pytest.raises(ValueError, match="k must be at least 1"):
+        compare_cohorts(roster, {}, A, B, k)
+    with pytest.raises(ValueError, match="k must be at least 1"):
+        first_k_all_pass([], k)
+    with pytest.raises(ValueError, match="k must be at least 1"):
+        first_k_bounds([], k)
+    with pytest.raises(ValueError, match="k must be at least 1"):
+        summarize_eval_set(roster, {}, k)
+    with pytest.raises(ValueError, match="k must be at least 1"):
+        case_metrics("x", [], k)

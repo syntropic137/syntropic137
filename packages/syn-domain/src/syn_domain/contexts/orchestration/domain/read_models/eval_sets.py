@@ -25,6 +25,7 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_trial_metrics imp
     Bounds,
     CaseMetrics,
     case_metrics,
+    require_k,
 )
 from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
     ClassifiedTrial,
@@ -170,6 +171,7 @@ def summarize_cohort(
     roster: Roster, trials: Mapping[str, Sequence[ClassifiedTrial]], cohort: CohortKey, k: int
 ) -> CohortSummary:
     """One cohort over the whole roster; ``trials`` is ``classify_roster_trials`` output."""
+    require_k(k)
     cases = tuple(
         case_metrics(c.eval_id, in_cohort(trials.get(c.eval_id, ()), cohort), k)
         for c in roster.cases
@@ -212,6 +214,7 @@ def summarize_eval_set(
     declared_models: Mapping[str, Mapping[str, str]] | None = None,
 ) -> EvalSetSummary:
     """Every cohort that launched into this roster version, one block each, in key order."""
+    require_k(k)
     trials = classify_roster_trials(roster, runs_by_eval, declared_models)
     flat = [t for ts in trials.values() for t in ts]
     cohorts = sorted(
