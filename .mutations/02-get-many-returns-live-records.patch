@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py b/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py
+index ec85f6846..e753aa1f6 100644
+--- a/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py
++++ b/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py
+@@ -112,7 +112,7 @@ class InMemoryProjectionStore:
+         """
+         stored = self._data.get(projection, {})
+         found = ((pg_safe(key), stored.get(pg_safe(key))) for key in keys)
+-        return {key: _detached(document) for key, document in found if document is not None}
++        return {key: document for key, document in found if document is not None}
+ 
+     async def get_all(self, projection: str) -> list[dict[str, Any]]:
+         """Get all records for a projection."""

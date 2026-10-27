@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py b/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py
+index ec85f6846..7e67817a2 100644
+--- a/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py
++++ b/packages/syn-adapters/src/syn_adapters/projection_stores/memory_store.py
+@@ -194,7 +194,7 @@ class InMemoryProjectionStore:
+             return []
+         prefix = pg_safe(prefix)
+         return [
+-            (key, _detached(data))
++            (key, data.copy())
+             for key, data in self._data[projection].items()
+             if key.startswith(prefix)
+         ][:10]
