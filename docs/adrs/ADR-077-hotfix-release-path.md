@@ -39,12 +39,14 @@ latest release tag, carrying only the fix.
 A projection `VERSION` change opens a read-path rebuild window that only a
 rehearsal measures, which is why it is never a hotfix however small the diff.
 
-### The shape, enforced by `_check-release-source.yml`
+### The shape, enforced by `release-source.yml`
 
 `scripts/workflows/check_release_source.py` (tests beside it) refuses the PR
 unless every one of these holds:
 
-1. **The head is `main` or `hotfix/vX.Y.Z`.** Any other branch is refused.
+1. **The head is `main` or `hotfix/vX.Y.Z`, in this repository.** Any other
+   branch, and any head from a fork, is refused: a fork's branch named `main`
+   is not `main`. A `main` head's SHA must also be on `origin/main`.
 2. **Cut from the latest release.** The `release` head is the commit tagged
    `v<release version>`, and the branch's merge-base with `release` is that commit.
 3. **Exactly the next patch.** `X.Y.Z` is the release's patch + 1, and the
@@ -56,11 +58,33 @@ unless every one of these holds:
    hotfix branch, which is what puts it in `CHANGELOG.md`.
 5. **Nothing else in the tree.** The checker replays the cherry-picks onto the
    tag in a scratch worktree. The branch may differ from that only in the files
-   `just bump-version` rewrites, and outside `CHANGELOG.md` only on lines that
-   carry the old or new version. An extra edit, a hand-adapted conflict or an
-   evil merge fails here.
+   `just bump-version` rewrites, each still a regular file (mode 100644)
+   modified in place. Outside `CHANGELOG.md`, every changed line must be a
+   version field (`version = "..."`, `"version": "..."`, `"$id": "..."`)
+   whose only edit is old version -> new version, and the parsed document must
+   be equal except at that file kind's version key (`project.version`,
+   `version`, `info.version`, `$id`; in `uv.lock`, the `version` of a
+   workspace package). A line that merely contains the version, such as an npm
+   `preinstall` script or a `dep==1.0.5` pin, fails, as do an extra edit, a
+   hand-adapted conflict and an evil merge.
 6. **Secret scan of the added commits** (gitleaks, pinned by digest, range
    `release..head` only).
+
+### The checker runs trusted code only
+
+`release-source.yml` triggers on `pull_request_target`, so GitHub runs the
+copy of the workflow on `release`, and it checks out the base commit. The head
+is fetched as git objects (`refs/pull/N/head`) and is only read: never checked
+out, imported or executed. A PR that rewrites the checker or the workflow is
+still judged by the release branch's copies. A `pull_request` workflow (as
+`release-gate.yml` is) runs the PR's own copy, which is why the source rule
+does not live there. The job uses no secret and a read-only token.
+
+Bootstrapping: a `pull_request_target` workflow exists for a PR only once it is
+on the base branch. The release that first carries this file (v1.0.5) is
+checked by `release-gate.yml` alone; the owner then adds `Release Source` to
+the `release` ruleset's required status checks, and from then on every PR into
+`release` needs it.
 
 The rule's first half: a fix lands on `main` first, always, through the normal
 PR and review. A hotfix never carries code `main` has not merged.
