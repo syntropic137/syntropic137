@@ -337,11 +337,7 @@ class ExecuteWorkflowRequest(BaseModel):
 
     @model_validator(mode="after")
     def _one_eval_choice(self) -> ExecuteWorkflowRequest:
-        """``eval_id`` and ``no_eval`` contradict each other: 422 before anything reads them.
-
-        Checked on the model, not in the handler, so a keyed retry is refused
-        before its replay lookup compares the choice (#2129).
-        """
+        """On the model, so a keyed retry is a 422 before its replay lookup (#2129)."""
         if self.no_eval and self.eval_id is not None:
             raise ValueError("Pass either eval_id or no_eval, not both")
         return self
