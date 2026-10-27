@@ -32,6 +32,7 @@ from syn_adapters.workspace_backends.memory.memory_adapter import MemoryIsolatio
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_adapters.workspace_backends.service.memory_ledger import WorkspaceMemoryLedger
 from syn_adapters.workspace_backends.service.memory_reconciler import WorkspaceMemoryReconciler
+from syn_adapters.workspace_backends.service.workspace_lifecycle import drain_abandoned_creates
 from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
 from syn_domain.contexts.orchestration import WorkspaceResourceRequest
 
@@ -260,6 +261,56 @@ async def test_a_container_the_listing_missed_mid_create_is_not_settled() -> Non
     assert len(isolation._instances) == 1, "the container lives"
     assert freed == 0
     assert ledger.reserved_mb == 4096
+
+
+async def test_a_workspace_that_leaks_during_the_listing_is_not_settled_by_it() -> None:
+    """Codex pass 3 P1 1: a whole create, failed teardown and leak fit inside one
+    listing. Docker's snapshot predates the container, so only a leak that
+    existed before the listing may be judged by it."""
+    ledger = WorkspaceMemoryLedger(8192)
+    service, isolation = _service(ledger)
+    (await ledger.reserve(4096, workspace_id="old")).leak("exec-0", reason="x")
+
+    async def refuse(handle: IsolationHandle) -> None:
+        raise _Boom("docker rm timed out")
+
+    class _SlowListing:
+        async def listed(self) -> frozenset[str]:
+            snapshot = await _Listing(isolation).listed()
+            with patch.object(isolation, "destroy", refuse):
+                await _use(service)
+            return snapshot
+
+    freed = await WorkspaceMemoryReconciler(ledger, _SlowListing()).run_once()
+
+    assert len(isolation._instances) == 1, "the new workspace's container lives"
+    assert freed == 4096, "only the old leak"
+    assert ledger.reserved_mb == 4096
+
+
+async def test_shutdown_drains_an_abandoned_create_through_its_destroy() -> None:
+    """Codex pass 3 P1 2: shutdown waits for the finisher instead of letting
+    loop teardown cancel it between ``docker run`` and the destroy."""
+    ledger = WorkspaceMemoryLedger(4096)
+    service, isolation = _service(ledger)
+    real_create = isolation.create
+    creating = asyncio.Event()
+
+    async def slow_create(config: object) -> IsolationHandle:
+        creating.set()
+        await asyncio.sleep(0.05)
+        return await real_create(config)  # type: ignore[arg-type]  # IsolationConfig, typed loosely by patch
+
+    with patch.object(isolation, "create", slow_create):
+        task = asyncio.create_task(_use(service))
+        await creating.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await drain_abandoned_creates(timeout_s=5) == 0
+
+    assert isolation._instances == {}, "what the abandoned create made was destroyed"
+    assert ledger.creating() == frozenset(), "the in-flight mark is cleared"
 
 
 async def test_a_create_that_made_a_container_and_raised_keeps_the_memory_charged() -> None:

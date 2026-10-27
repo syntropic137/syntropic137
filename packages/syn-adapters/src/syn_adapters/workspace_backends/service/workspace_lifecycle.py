@@ -266,6 +266,30 @@ def finish_abandoned_create(
     task.add_done_callback(_ABANDONED_CREATES.discard)
 
 
+async def drain_abandoned_creates(timeout_s: float) -> int:
+    """Wait for every abandoned create to be seen through; how many were not.
+
+    Called at shutdown after the workspaces' owners are cancelled, so loop
+    teardown does not cancel a finisher between ``docker run`` and the destroy
+    of what it made (Codex on #2148). Shielded: a cancel of this wait leaves
+    the finishers running. One still running at the deadline leaves its
+    in-flight mark, so its memory stays charged while the process lives.
+    """
+    pending = set(_ABANDONED_CREATES)
+    if not pending:
+        return 0
+    _done, still_running = await asyncio.wait(
+        {asyncio.shield(task) for task in pending}, timeout=timeout_s
+    )
+    if still_running:
+        logger.error(
+            "%d abandoned workspace create(s) still running at shutdown; "
+            "their containers are left to the next start's reap",
+            len(still_running),
+        )
+    return len(still_running)
+
+
 async def provision_workspace(
     service: WorkspaceService,
     isolation_config: IsolationConfig,

@@ -143,19 +143,28 @@ class WorkspaceMemoryLedger:
         """The workspaces with a create in flight."""
         return frozenset(self._creating)
 
-    def settle_absent(self, listed: frozenset[str], creating_before: frozenset[str]) -> int:
+    def settle_absent(
+        self,
+        listed: frozenset[str],
+        *,
+        leaked_before: frozenset[str],
+        creating_before: frozenset[str],
+    ) -> int:
         """Free each leak whose container is shown gone. Returns the MB freed.
 
-        ``listed`` is every workspace id a listing found a container for, and
-        ``creating_before`` the creates in flight when that listing STARTED: a
-        create that ended after it could have made a container the listing
-        missed. A leak is settled only when its workspace is in neither, and
-        has no create in flight now.
+        ``listed`` is every workspace id a listing found a container for;
+        ``leaked_before`` and ``creating_before`` are the leaks and the creates
+        in flight when that listing STARTED. Only a leak that already existed
+        then can be judged: one whose create began and ended during the listing
+        may own a container the listing never saw (Codex on #2148). A leak is
+        settled only when it was leaked before, is not listed, was not being
+        created before, and has no create in flight now.
         """
         settled = [
             workspace_id
             for workspace_id in self._leaked
-            if workspace_id not in listed
+            if workspace_id in leaked_before
+            and workspace_id not in listed
             and workspace_id not in creating_before
             and workspace_id not in self._creating
         ]

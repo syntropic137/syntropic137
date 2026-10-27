@@ -29,6 +29,7 @@ from syn_adapters.workspace_backends.host_labels import (
     LABEL_HOST_ID,
     host_labels,
 )
+from syn_adapters.workspace_backends.service.workspace_lifecycle import drain_abandoned_creates
 from syn_api._wiring import get_execution_processor, get_execution_run_queue
 from syn_api._wiring_admission import get_execution_budget
 from syn_api.services import workspace_memory_reconcile as memory_reconcile
@@ -52,6 +53,9 @@ if TYPE_CHECKING:
     from syn_adapters.execution_host import RunReaper
 
 logger = logging.getLogger(__name__)
+
+#: How long shutdown waits for abandoned creates to finish and be destroyed.
+_ABANDONED_CREATE_DRAIN_S = 30.0
 
 _host_task: asyncio.Task[None] | None = None
 _executor: ExecutionHost | None = None
@@ -153,13 +157,15 @@ async def stop_execution_host() -> None:
     await memory_reconcile.stop()
     task, _host_task = _host_task, None
     executor, _executor = _executor, None
-    if task is None:
-        return
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError, Exception):
-        await task
-    if executor is not None:
-        await executor.leave()
+    if task is not None:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+        if executor is not None:
+            await executor.leave()
+    # The cancelled runs' abandoned creates, Run Queue on or off: see them
+    # through before loop teardown cancels them mid-destroy.
+    await drain_abandoned_creates(_ABANDONED_CREATE_DRAIN_S)
 
 
 def _report_exit(task: asyncio.Task[None]) -> None:

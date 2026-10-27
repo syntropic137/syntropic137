@@ -82,10 +82,12 @@ class WorkspaceMemoryReconciler:
 
         Never raises. A failed listing is not "0 MB freed": nothing was decided.
         """
-        if not self._ledger.leaked():
-            return 0
         # Read BEFORE listing: a create that ends during the listing may have
-        # made a container the listing did not see.
+        # made a container the listing did not see, and a leak recorded during
+        # it may be that create's.
+        leaked_before = self._ledger.leaked()
+        if not leaked_before:
+            return 0
         creating_before = self._ledger.creating()
         try:
             listed = await self._presence.listed()
@@ -97,7 +99,9 @@ class WorkspaceMemoryReconciler:
                 exc_info=True,
             )
             return None
-        return self._ledger.settle_absent(listed, creating_before)
+        return self._ledger.settle_absent(
+            listed, leaked_before=leaked_before, creating_before=creating_before
+        )
 
     async def run_on_a_clock(self, interval_seconds: float) -> None:
         while True:
