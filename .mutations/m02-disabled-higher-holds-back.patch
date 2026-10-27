@@ -1,5 +1,5 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
-index 434ac4ec8..b6d6709fb 100644
+index e7b294d5f..6a4070143 100644
 --- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
 +++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
 @@ -91,7 +91,7 @@ _CLAIM_SQL = f"""WITH me AS (

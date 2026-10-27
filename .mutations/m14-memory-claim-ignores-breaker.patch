@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py b/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py
-index 8adce164c..ec9cce523 100644
+index 8f420b7ee..3e1952cd3 100644
 --- a/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py
 +++ b/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py
-@@ -179,7 +179,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
+@@ -180,7 +180,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
          async with self._lock:
              now = self._now()
              entry = self._hosts.get(host_id)

@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py b/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py
-index 8adce164c..51848e209 100644
+index 8f420b7ee..1a6ce247b 100644
 --- a/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py
 +++ b/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py
-@@ -424,7 +424,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
+@@ -438,7 +438,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
      def _in_scope(self, row: _Run, reconciler: _Host) -> bool:
          """The Postgres ``in_reach``: its own scope or one it holds a Recovery Kit for (C8)."""
          claimer = self._hosts.get(row.executor_id or "")

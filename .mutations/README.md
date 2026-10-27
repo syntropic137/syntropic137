@@ -6,8 +6,8 @@ runs every killing test on clean HEAD (all must pass), then for each patch:
 applies it, asserts the source changed, runs its test (must fail), reverts.
 
 Docker: the `test_1917_outage_breaker_and_recovery_postgres.py` killers
-(m01-m09) are `integration` and need Postgres (test stack on 15432 or
-testcontainers). m10-m18 are `unit`, no docker.
+(m01-m09, m19) are `integration` and need Postgres (test stack on 15432 or
+testcontainers). m10-m18 and m20 are `unit`, no docker.
 
 | Patch | Check it removes |
 |---|---|
@@ -29,3 +29,5 @@ testcontainers). m10-m18 are `unit`, no docker.
 | m16 | E2B executor's pool declares host credentials |
 | m17 | local executor with SYN_E2B_RECOVERY_API_KEY holds no kit |
 | m18 | production wiring bypasses the breaker client |
+| m19 | after the cooldown every claim gets through, not one probe |
+| m20 | memory double: same as m19 |

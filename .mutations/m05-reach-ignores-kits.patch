@@ -1,5 +1,5 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
-index 434ac4ec8..e56ab6857 100644
+index e7b294d5f..f8baeb549 100644
 --- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
 +++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
 @@ -61,7 +61,7 @@ def in_reach(claimer: str, reconciler: str) -> str:

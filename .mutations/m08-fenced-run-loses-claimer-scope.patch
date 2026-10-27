@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
-index 434ac4ec8..b4a5b6d73 100644
+index e7b294d5f..f8d62361a 100644
 --- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
 +++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
-@@ -386,7 +386,7 @@ class PostgresExecutionRunQueue:
+@@ -394,7 +394,7 @@ class PostgresExecutionRunQueue:
                  AND r.state='claimed' AND r.leased_until<now() AND r.writer_epoch<=h.epoch
                  RETURNING jsonb_build_object('execution_id',r.execution_id,
                      'executor_id',r.executor_id,'reconciler',r.reconciler,

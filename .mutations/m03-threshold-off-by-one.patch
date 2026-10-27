@@ -1,13 +1,13 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
-index 434ac4ec8..e013092d7 100644
+index e7b294d5f..344a49eb1 100644
 --- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
 +++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
-@@ -308,7 +308,7 @@ class PostgresExecutionRunQueue:
+@@ -315,7 +315,7 @@ class PostgresExecutionRunQueue:
              # reaches the threshold disables claims. Capacity is never written.
              disabled = await conn.fetchval(
                  """UPDATE execution_budget SET create_failures=create_failures+1,
 -                claims_disabled_until=CASE WHEN create_failures+1>=$2
 +                claims_disabled_until=CASE WHEN create_failures+1>$2
                      THEN clock_timestamp()+$3::double precision*interval '1 second'
-                     ELSE claims_disabled_until END
-                 WHERE executor_id=$1
+                     ELSE claims_disabled_until END,
+                 breaker_cooldown_s=$3
