@@ -1,11 +1,11 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/commands.py b/apps/syn-api/src/syn_api/routes/executions/commands.py
-index 89b3636f5..105ea7773 100644
+index f280c23a5..37743c272 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/commands.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/commands.py
-@@ -342,7 +342,7 @@ class ExecuteWorkflowRequest(BaseModel):
-         Checked on the model, not in the handler, so a keyed retry is refused
-         before its replay lookup compares the choice (#2129).
-         """
+@@ -338,7 +338,7 @@ class ExecuteWorkflowRequest(BaseModel):
+     @model_validator(mode="after")
+     def _one_eval_choice(self) -> ExecuteWorkflowRequest:
+         """On the model, so a keyed retry is a 422 before its replay lookup (#2129)."""
 -        if self.no_eval and self.eval_id is not None:
 +        if False:
              raise ValueError("Pass either eval_id or no_eval, not both")
