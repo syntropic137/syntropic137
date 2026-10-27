@@ -1,6 +1,6 @@
 ---
 name: devops
-description: Use for pull-request, merge, version and release mechanics in the Syntropic137 repo, and for CI or release-pipeline failures. Trigger phrases include "open a PR", "submit my changes", "address the review comments", "Copilot left comments", "merge this PR", "push this nit straight to main", "CI is red", "the release gate failed", "smoke test broke", "why is this PR BLOCKED", "bump the version", "cut a release", "release v1.x", "write the release notes", "main -> release PR", "approve the release gate", "the release published a bad asset", "triage the open PRs", "PR backlog", "which PRs are ready to merge", "merge order", "DORA metrics", "deploy frequency", "lead time", "change failure rate", "time to restore", "why didn't the issue auto-close". Covers trunk-based `main`, the `release` branch, local gates (`just qa-ci`, `just preflight`), GitHub Actions gates, review and merge policy, and post-release verification. Do NOT use for deciding what to dispatch, running the orchestrator loop, or deciding when to deploy a beta or run a pit stop (see `orchestrating`); for whether a task belongs in a workspace or locally (see `dogfooding`); for using the `syn` CLI as an end user (see the syntropic137 plugin skills).
+description: Use for pull-request, merge, version and release mechanics in the Syntropic137 repo, and for CI or release-pipeline failures. Trigger phrases include "open a PR", "submit my changes", "address the review comments", "Copilot left comments", "merge this PR", "push this nit straight to main", "CI is red", "the release gate failed", "smoke test broke", "why is this PR BLOCKED", "bump the version", "cut a release", "release v1.x", "hotfix release", "ship this security fix now", "patch release off the last tag", "write the release notes", "main -> release PR", "approve the release gate", "the release published a bad asset", "triage the open PRs", "PR backlog", "which PRs are ready to merge", "merge order", "DORA metrics", "deploy frequency", "lead time", "change failure rate", "time to restore", "why didn't the issue auto-close". Covers trunk-based `main`, the `release` branch, local gates (`just qa-ci`, `just preflight`), GitHub Actions gates, review and merge policy, and post-release verification. Do NOT use for deciding what to dispatch, running the orchestrator loop, or deciding when to deploy a beta or run a pit stop (see `orchestrating`); for whether a task belongs in a workspace or locally (see `dogfooding`); for using the `syn` CLI as an end user (see the syntropic137 plugin skills).
 ---
 
 # DevOps: Syntropic137 PR, merge and release
@@ -8,7 +8,8 @@ description: Use for pull-request, merge, version and release mechanics in the S
 ## Overview
 
 Trunk-based, two branches. Every PR targets `main`. `release` accepts PRs from
-`main` only, and the merge itself is the release trigger (`release-create.yml`
+`main` (the beta-gated release) or from `hotfix/vX.Y.Z` (one already-merged
+fix off the last release tag, ADR-077), and the merge itself is the release trigger (`release-create.yml`
 fires on push to `release`). History is append-only: merge commits everywhere,
 no squash, no rebase of anything pushed, no force-push. This file routes; each
 `agent_*.md` holds one self-contained procedure. The canonical process lives in
@@ -50,6 +51,7 @@ Do NOT use when:
 | A red check: PR CI, `main`, release gate, release pipeline | `agent_ci_triage.md` |
 | Prove a PR's tests kill its bug (mutation patches, GitHub runner, no local Docker) | `agent_mutation_evidence.md` |
 | Version bump, release PR, approval gate, post-release verification | `agent_release.md` |
+| Security fix or quick bug patch to self-hosters now, without the beta | `agent_hotfix_release.md` |
 | Triage every open PR: merge main in, rerun flakes, ready/blocked table, merge order | `agent_pr_backlog.md` |
 | DORA four-keys snapshot from merged PRs, releases and runs | `agent_dora_snapshot.md` |
 
@@ -89,7 +91,7 @@ failure. Each signal is a command; [agent_dora_snapshot.md](agent_dora_snapshot.
 | A pushed commit must change | new branch, new PR, close the old one | no force-push, ever |
 | `gh pr merge --auto` | not used | it merged before every check reported |
 | Who merges | the agent, once the review bar in `agent_pr.md` is met; owner-gated PRs (CODEOWNERS) wait for the owner | parking a green, reviewed PR on the owner stalled seven PRs for a day |
-| Approve the `release-publish` environment | owner only; ask, then wait | it is the last human checkpoint before tags, images and npm |
+| Approve the `release-publish` environment | owner only; page them (agent-pager), then wait | it is the last human checkpoint before tags, images and npm |
 
 Staging is by explicit path (`git add <files>`), never `-A` or `.`: the main
 checkout routinely carries untracked research docs and handoff folders, and the
@@ -104,9 +106,10 @@ hand-rolled list missed gates CI then failed on.
 | `ci.yml` | push to `main` (one run per commit, never cancelled); PRs to `main`/`release` (superseded PR runs cancel); weekly | Python QA (format, lint, pyright, domain events, vsa, test debt, OpenAPI drift), architectural fitness, unit + integration tests, dashboard, docs site, CLI, submodule check, default workspace image, OSV, pip-audit, dependency review; `ci-success` aggregates |
 | `docs-lint.yml` | every PR; push to `main`/`release` | docs content lint |
 | `syn-ui.yml`, `syn-landing.yml` | PRs and `main` pushes touching Skyline / landing paths | UI build, tests, size budget, gateway serving |
-| `smoke-test.yml` | push to `main`/`release` only (PR trigger disabled) | full selfhost compose stack comes up healthy; a red smoke on `main` is found after merge |
+| `smoke-test.yml` | push to `main`/`release`/`hotfix/**` only (PR trigger disabled) | full selfhost compose stack comes up healthy; a red smoke on `main` is found after merge |
 | `e2e-container.yml` | PRs and `main` pushes touching workspace code, the AW gitlink or image pins; `workflow_dispatch` | automatic runs build and probe the workspace image from source; a real agent run (live API calls) happens only on manual dispatch with `run_full_e2e=true` |
 | `docs-drift.yml` | push to `main`/`release` | generated docs match source |
+| `release-source.yml` | PRs into `release` (`pull_request_target`: main's copy runs, checked out at `github.workflow_sha`) | the head is `main` (on `origin/main`) or a hotfix of the last tag, same repository; only cherry-picks + exact version substitutions; gitleaks on hotfix commits (ADR-077) |
 | `release-gate.yml` | PRs into `release` | `_check-version`, `_check-changelog` (PR body >= 20 chars, read from the frozen event payload), `_check-codegen-sync`, `_check-docker-dry-run`, OSV, pip-audit, dependency review |
 | `release-create.yml` | push to `release` | `create-release` (waits on `release-publish` approval) -> tag + Release -> codegen re-check -> `release-containers.yaml` + `release-cli.yaml` |
 | `release-beta.yaml` | a published GitHub prerelease | beta images + CLI on `next`; exists, but the owner does not want GitHub prereleases (see `agent_release.md`) |

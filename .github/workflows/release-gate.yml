@@ -1,8 +1,12 @@
 # =============================================================================
-# Release Gate — Pre-merge validation for main → release PRs
+# Release Gate — Pre-merge validation for PRs into release
 # =============================================================================
 #
 # Runs on PRs targeting the `release` branch. All jobs must pass before merge.
+# Two heads may open one (ADR-077): `main` (the beta-gated release) and
+# `hotfix/vX.Y.Z` (a hotfix cut from the latest release tag). WHICH head may
+# release is decided by release-source.yml, not here: this workflow runs the
+# PR's own copy, so a PR could rewrite any check in it.
 #
 # Checks:
 #   1. Version consistency — all 11 package files match and are bumped

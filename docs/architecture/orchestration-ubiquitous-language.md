@@ -1227,6 +1227,58 @@ case's Eval, and that Eval is reused by every version of the suite and every
 verifier (`scripts/eval_suite.py`). What differs between Runs goes on the Run
 as tags: `suite-version:<n>` and `verifier:<workflow id>`.
 
+## Trial
+
+One Run LAUNCHED into an Eval (`association_kind = launched`). An attached
+Run is a member of the Eval, not a Trial. A Trial's identity (its Cohort and
+`trial:<batch>/<i>`) is read from its launch tags (`inherited_tags`), never
+from its editable tags, so a retag cannot move it (#2108).
+
+## Eval Set
+
+The Evals that carry one Suite tag (`suite:<name>`). Not a record: it is read
+from tags, like a Suite.
+
+## Roster
+
+The cases of one Eval Set version, written onto the Evals as tags
+(`suite-version:<n>`, `split:<s>`, `polarity:<defect|clean>`) before anything
+is launched. Coverage, bounds and pairing are computed against it, so a case
+never launched counts as n = 0, never as absent (`read_models/eval_sets.py`).
+
+## Cohort
+
+The Trials of one Roster that share a declared treatment and scoring
+protocol: suite version, workflow id and version, the digest of the declared
+models (`models:<sha256>`) and the scoring protocol (`scorer:<id>`). Declared,
+not observed, so a Trial that failed before any model ran still belongs to
+its Cohort. Trials never pool across Cohorts.
+
+## Trial Outcome
+
+`pass`, `fail`, `infra_error` or `pending`, derived at read time by one
+ordered rule (`classify_trial`) from status, Failure Classification, the
+Starting Checkout against the baseline, and the Score. Distinct from Verdict,
+the scorer's word. A Run that is not a Trial, ran off the baseline, or ran a
+model other than the one declared is an exclusion (`not_a_trial`,
+`base_mismatch`, `treatment_mismatch`), counted and never scored.
+
+## Infra Error
+
+A Trial whose result says nothing about the agent: cancelled, interrupted, a
+`platform` or `unclassified` failure, completed on an unverified base, or
+scored ERROR. Out of n in the conditional figures; a fail in the lower bound
+and a pass in the upper. Never scored as 0.
+
+## pass@k / pass^k / Flaky Case
+
+Per case and Cohort with n judged Trials and c passes: pass@k = 1 - C(n-c, k)
+/ C(n, k), pass^k = C(c, k) / C(n, k). A case is Flaky when pass@k > 0 and
+pass^k < 1. With n < k there is no figure: the case is short, and
+`trials_short` says how many more Trials it needs. Set figures are reported
+conditional (over complete cases, labelled partial) and as Roster-wide bounds;
+decisions read the bounds.
+
 ## Goal
 
 What an Eval sets out to measure, in a sentence or a paragraph. Trimmed, never
@@ -1645,6 +1697,10 @@ a person-started Resume is a new decision. Code:
   transaction; there is no routing process, and a central one was rejected
   (ADR-072 D13).
 
+- **Attempt, Sweep** (for a Trial). "Attempt" already means trigger limits and
+  "sweep" the admission opening sweep. A launched Run of an Eval is a Trial.
+- **Variant** (for a Cohort). Variant keeps its meaning: Runs grouped by
+  OBSERVED models. A Cohort is grouped by DECLARED models and scoring protocol.
 - **Suite** (as a record or an aggregate). A suite is a tag on Evals. There is
   no Suite stream, and a second aggregate for it was rejected (evals v2).
 

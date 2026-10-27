@@ -11,6 +11,74 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ## [Unreleased]
 
+### Added
+
+- feat(session-inventory): envelope-splice dedupe of older revisions (#2107 S3) (#2119)
+- feat(evals): #2108 S1 trial outcome, pass@k/pass^k, bounds, paired A/B (domain) (#2116)
+- feat(session-inventory): store archive objects gzip-compressed at rest (#2107) (#2115)
+- feat(release): hotfix release path off the last release tag (ADR-077) (#2112)
+- feat(orchestration): reject the retired can_open_pr phase key at authoring time (#1502) (#2099)
+- When a workspace starts with session capture switched off because the session store is unreachable, the execution now shows **Capture degraded** and names the failed check (for example `store_reachable failed`). This appears in the execution header and on the affected phase, and it shows up as soon as the agent launches. Before, it looked like an unexplained capture loss. (#2092)
+- Workspace image provenance (`/opt/agentic/version.json`) is now read on Docker and E2B alike, and recorded durably on each phase's provisioning event. A workspace without a manifest is recorded as **absent**, and a failed read as **unreadable** with its reason, instead of being silently dropped. (#2074)
+- feat(workflows): sdlc-implement-v7, capability gaps + evidence declarations + rulesets-first required checks (#2060) (#2063)
+- When Claude stops a phase because its weekly limit is reached, the execution's error now begins `claude quota exhausted until <UTC reset time>`. It used to say `unknown - not recognised`. The phase is not retried, and it runs the phase's `fallback_agent` if one is set. This also covers a weekly limit reported inside an HTTP 429 error. (#2077)
+- Run Queue (opt-in): a reconciler on another machine can no longer free a slot whose workspace may still be running. Fencing and takeover are limited to executors on the same Docker daemon (its engine ID). Executors also close a run only once its containers are shown gone; otherwise the run stays charged until reconciliation reaps it. (#2072)
+- **Experimental, off by default:** workspaces can be backed by E2B cloud sandboxes instead of local Docker. Set `SYN_E2B_ENABLED=true` with `SYN_E2B_API_KEY` and `SYN_E2B_TEMPLATE`. See `docs/deployment/e2b.md`. (#2068)
+
+### Changed
+
+- docs(plans): k trials per eval case, pass@k / pass^k, infra errors apart (#2108) (#2109)
+- chore(deps): bump claude-plugin + skills pins for #1502 docs (#2101)
+- Docs: the real-time communication architecture doc now describes how the system actually works. Execution progress and activity arrive over SSE (`/sse/executions/{id}`, `/sse/activity`, `/sse/health`), and executions are controlled over HTTP (`cancel`, `inject`, `state`). The removed WebSocket control plane and pause/resume are now marked as history, with links to ADR-049 and #1471. (#2094)
+- docs(experiments): v7 A/B amendment 2 and stop note (#2091)
+- refactor(#1144): bring AgentExecutionHandler._run_headless under max-loc-function (#2080)
+- chore(deps): pin agentic-workspace fb696fd8 (release #102) and its image digests (#2076)
+- docs(research): model selection for SDLC phases (eval research) (#2019)
+- docs(skills): managing-workflows skill for the workflow manager role (#2052)
+- docs(experiments): refresh CURRENT-BESTS with evidence per default (#2059) (#2066)
+- test(1952): count only ingest waits the backfill causes; pause compression in the test DB (#2065)
+
+### Removed
+
+- refactor(api): drop dead _YamlCreateOutcome.warnings; CLI test that can_open_pr is refused (#2100) (#2102)
+- chore(syn-domain): delete orphaned vsa-manifest.json (#2073)
+
+### Fixed
+
+- fix(release): release-source checks out main's trusted commit, not the PR base (#2121)
+- fix(session-inventory): re-sweep a live capture spool at most once per live interval (#2107) (#2113)
+- fix(session-inventory): deliver only the newest capture revision per run transcript (#2107) (#2110)
+- fix(fitness): scope-aware version-literal detector (#2104) (#2105)
+- fix(versions): one home per release number; reject literal versions (#1389) (#2103)
+- fix(reclaim): pytest temp trees no longer pin a workspace dir (#2095) (#2098)
+- E2B workspaces (still behind `SYN_E2B_ENABLED`) can now launch an agent that is given a launch credential. The provider delivers the credential into the sandbox environment, never argv. (#2097)
+- fix(ci): no bare python in workflow run steps; the parity gate fails on one (#1242) (#2096)
+- `just pit-stop` now refuses to stage a release when the host's compose differs from that release's published compose (image pins aside), and prints the diff. Bring the host compose up to date, then re-run. (#2088)
+- Internal: the API's execution and session models now share one `total_cost_usd` type, an exact decimal sent as a JSON string such as `"0.11584"`. API responses, the CLI and the dashboard are unchanged. (#2083)
+- Fixed: when two runs warmed the same lockfile at the same moment, the dependency seed store could record the losing run's size for the seed it kept, so the retention budget miscounted. The kept seed's size is now always recorded. (#2075)
+- The verifier eval's LLM judge (`eval_suite.py score --llm-judge`, `eval_judge_calibrate.py`) now uses `claude-sonnet-5-5` instead of the pre-5 `claude-sonnet-4-6`. It runs through Claude Code on your existing Claude login, using agentic-workspace's headless Claude transport. It never reads or accepts `ANTHROPIC_API_KEY`, and it refuses to run if the CLI would authenticate with a key, a bearer token or a third-party provider. (#2036)
+
+### Security
+
+- security(deps): pin cloudflared 2026.10.3 by digest (eMudhra cert compromise) (#2111)
+- security(deps): fast-uri 3.1.9, undici 7.30.1 / 8.12.3 for today's advisories (#2090)
+- security(deps): zod >=4.6.6 for GHSA-mrhx-c7xc-m3w5 (#2086) (#2087)
+
+## [1.0.5] - 2026-10-27
+
+### Added
+
+- feat(release): hotfix release path off the last release tag (ADR-077) (#2117)
+
+### Changed
+
+- Release v1.0.5 (hotfix: cloudflared eMudhra + JS dependency advisories) (#2118)
+
+### Security
+
+- security(deps): next 16.4.1, dompurify 3.4.17, zod 4.6.6, fast-uri 3.1.9, undici 7.30.1/8.12.3 (#2120)
+- security(deps): pin cloudflared 2026.10.3 by digest (eMudhra cert compromise) (#2114)
+
 ## [1.0.4] - 2026-10-22
 
 ### Added
@@ -38,6 +106,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ### Changed
 
+- chore: bump version to v1.0.4 (#2069)
 - chore(deps): pin agentic-workspace c621d819 (release #90) and its image digests (#2054)
 - test: prove usage backfill does not block ingest by lock state, not throughput (#1952) (#2051)
 - ci(evidence): set SYN_CONTRACT_TEST_IMAGE for the Docker contract tests (#2047)
@@ -51,6 +120,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ### Fixed
 
+- fix(ci): release gate codegen installs the openclaw plugin; smoke test uses a current model (#2071)
 - fix(security): pin certifi 2026.10.19 (GHSA-6q48-6c7w-9gw2, critical) (#2067)
 - When an agent prints a credential value, it is now replaced with `[REDACTED:credential]` in agent output, logs and tool-event telemetry. This covers the platform API token, model API keys, the session-store token and GitHub installation tokens, including tokens renewed mid-run. It also applies when the value is printed base64-, URL- or JSON-encoded. (#1928)
 - fix(deps): vitest 4.1.12 for @vitest/mocker advisories (main OSV red) (#2061)
@@ -375,7 +445,8 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 - fix(#1519): pin the event-store INDEX digest, not a child manifest (#1522)
 
-[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.4...HEAD
+[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/syntropic137/syntropic137/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/syntropic137/syntropic137/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/syntropic137/syntropic137/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/syntropic137/syntropic137/compare/v1.0.0...v1.0.2
