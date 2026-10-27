@@ -207,18 +207,22 @@ class ProvisionTrack:
     #: The backend's ``create``, run as its own task and shielded: a cancel of
     #: the provision does not stop a ``docker run`` that is already under way,
     #: so the create is left to finish and the caller removes what it made.
-    create: asyncio.Future[IsolationHandle] | None = None
+    create_task: asyncio.Future[IsolationHandle] | None = None
 
     def created(self) -> IsolationHandle | None:
         """The container ``create`` named, once it has; None while running or when it raised."""
-        done = self.create is not None and self.create.done() and not self.create.cancelled()
-        if not done or self.create is None or self.create.exception() is not None:
+        done = (
+            self.create_task is not None
+            and self.create_task.done()
+            and not self.create_task.cancelled()
+        )
+        if not done or self.create_task is None or self.create_task.exception() is not None:
             return None
-        return self.create.result()
+        return self.create_task.result()
 
     def still_creating(self) -> bool:
         """The create was left running by a cancel, and may yet make a container."""
-        return self.create is not None and not self.create.done()
+        return self.create_task is not None and not self.create_task.done()
 
 
 #: Abandoned creates being seen through: the loop holds tasks weakly.
@@ -293,7 +297,7 @@ async def provision_workspace(
     )
     create = asyncio.ensure_future(service._isolation.create(isolation_config))
     if track is not None:
-        track.create = create
+        track.create_task = create
     isolation_handle = await asyncio.shield(create)
     _log_runtime(
         isolation_handle.runtime,

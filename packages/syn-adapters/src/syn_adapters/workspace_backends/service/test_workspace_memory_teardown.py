@@ -308,7 +308,7 @@ async def test_a_listing_that_fails_settles_nothing() -> None:
         async def listed(self) -> frozenset[str]:
             raise RuntimeError("Cannot connect to the Docker daemon")
 
-    assert await WorkspaceMemoryReconciler(ledger, _Down()).run_once() == 0
+    assert await WorkspaceMemoryReconciler(ledger, _Down()).run_once() is None, "unknown, not 0 MB"
     assert ledger.reserved_mb == 4096
 
 

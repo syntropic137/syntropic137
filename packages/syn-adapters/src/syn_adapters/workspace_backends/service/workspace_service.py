@@ -175,7 +175,7 @@ def _not_shown_gone(
     memory reconciler decides from a listing (Codex on #2148).
     """
     if isolation_handle is None:
-        if track.create is None:
+        if track.create_task is None:
             return None
         if track.still_creating():
             return "create was abandoned while running"
@@ -781,12 +781,12 @@ class WorkspaceService:
             # provisioning returned: a sidecar that failed to start used to
             # leave the container undestroyed (okrs-51p.30, Codex on #2148).
             isolation_handle = isolation_handle or track.created()
-            if track.create is not None and track.still_creating():
+            if track.create_task is not None and track.still_creating():
                 # Cancelled mid-create: the `docker run` carries on. See it
                 # through and destroy what it makes, off this frame.
                 finish_abandoned_create(
                     self,
-                    track.create,
+                    track.create_task,
                     execution_id=execution_id,
                     on_end=reservation.create_ended if reservation is not None else _nothing,
                 )

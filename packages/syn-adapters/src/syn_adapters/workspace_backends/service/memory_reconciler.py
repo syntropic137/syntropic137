@@ -77,8 +77,11 @@ class WorkspaceMemoryReconciler:
         self._ledger = ledger
         self._presence = presence
 
-    async def run_once(self) -> int:
-        """Settle what can be shown gone; the MB freed. Never raises."""
+    async def run_once(self) -> int | None:
+        """Settle what can be shown gone; the MB freed, or None when the listing failed.
+
+        Never raises. A failed listing is not "0 MB freed": nothing was decided.
+        """
         if not self._ledger.leaked():
             return 0
         # Read BEFORE listing: a create that ends during the listing may have
@@ -93,7 +96,7 @@ class WorkspaceMemoryReconciler:
                 self._ledger.leaked_mb,
                 exc_info=True,
             )
-            return 0
+            return None
         return self._ledger.settle_absent(listed, creating_before)
 
     async def run_on_a_clock(self, interval_seconds: float) -> None:
