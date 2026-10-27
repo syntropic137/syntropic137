@@ -21,6 +21,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        StartResumeCommand,
+    )
     from syn_domain.contexts.orchestration.ports import WorkflowExecutionRepositoryPort
 
 logger = logging.getLogger(__name__)
@@ -85,6 +88,26 @@ async def _free_child_id(executions: WorkflowExecutionRepositoryPort, attempts: 
     raise HTTPException(status_code=503, detail=msg)
 
 
+def _refuse_over_todays_ceiling(command: StartResumeCommand) -> None:
+    """422 when a phase the resume runs asks for more memory than today's ceiling (okrs-51p.30).
+
+    The parent's pinned requests were admitted under the ceiling of its own
+    start. An operator may have lowered it since; admitting anyway would spend
+    the parent's one resume on a child whose workspace creation is refused,
+    possibly after running the phases before it.
+    """
+    from syn_domain.contexts.orchestration import (
+        WorkspaceMemoryOverCapError,
+        phases_the_resume_runs,
+        require_phases_within_cap,
+    )
+
+    try:
+        require_phases_within_cap(phases_the_resume_runs(command))
+    except WorkspaceMemoryOverCapError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 async def resume(execution_id: str, request: ResumeRequest) -> ResumeResponse:
     """Admit a resume of ``execution_id``, or raise why not.
 
@@ -105,11 +128,8 @@ async def resume(execution_id: str, request: ResumeRequest) -> ResumeResponse:
         ExecutionResumedEvent,
         InheritanceUnavailableError,
         ResumeExecutionCommand,
-        WorkspaceMemoryOverCapError,
         inherited_outputs,
-        phases_the_resume_runs,
         refuse_resume_start,
-        require_phases_within_cap,
     )
 
     executions = get_workflow_execution_repository()
@@ -155,14 +175,7 @@ async def resume(execution_id: str, request: ResumeRequest) -> ResumeResponse:
     start_refusal = refuse_resume_start(command)
     if start_refusal is not None:
         raise HTTPException(status_code=409, detail=start_refusal)
-    # okrs-51p.30: the parent's pinned memory requests against TODAY's ceiling.
-    # An operator may have lowered it since the parent started; admitting
-    # anyway would spend the parent's one resume on a child whose workspace
-    # creation is refused, possibly after running the phases before it.
-    try:
-        require_phases_within_cap(phases_the_resume_runs(command))
-    except WorkspaceMemoryOverCapError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _refuse_over_todays_ceiling(command)
     try:
         await inherited_outputs(get_artifact_query(), command.resumed_from)
     except InheritanceUnavailableError as exc:
