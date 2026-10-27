@@ -209,6 +209,7 @@ _NOT_A_CHECK: dict[str, frozenset[str]] = {
             "selfhost-up-tunnel",
             "selfhost-update",
             "vps-reclaim",
+            "session-archive-compress",
             "apparmor-setup",
             "pit-stop",
             "github-reconfigure",
