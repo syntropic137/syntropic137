@@ -285,8 +285,8 @@ async def test_owner_deletion_is_never_gated(db_pool, tmp_path: Path) -> None:
 async def test_owner_deletion_onto_a_pending_expiry_is_finished_not_withdrawn(
     db_pool, tmp_path: Path
 ) -> None:
-    """Codex P1: the owner request finds the automatic row (ON CONFLICT keeps
-    its reason). Its archive marker is the owner intent, so the refusing gate
+    """Codex P1: the owner request finds the automatic row and promotes it to
+    owner intent (#2128); its archive marker says so too. The refusing gate
     must not withdraw it."""
     source = str(uuid4())
     archive = LocalSessionTranscriptArchive(tmp_path)
@@ -299,7 +299,7 @@ async def test_owner_deletion_onto_a_pending_expiry_is_finished_not_withdrawn(
     sink = _Sink(RevisionAbsent())
     worker, _ = _retention(db_pool, archive, source, sink)
     assert await worker.step()
-    assert await _deletions(db_pool, source) == [("retention_age", True)]
+    assert await _deletions(db_pool, source) == [("deletion", True)]
     assert await _hold(db_pool, source) is None
     assert sink.asked == []
 
@@ -321,7 +321,7 @@ async def test_owner_deletion_during_the_confirmation_is_not_withdrawn(
     worker, _ = _retention(db_pool, archive, source, _Sink(RevisionAbsent(), owner_deletes))
     assert await worker.step()
     assert await _hold(db_pool, source) is None
-    assert await _deletions(db_pool, source) == [("retention_age", True)]
+    assert await _deletions(db_pool, source) == [("deletion", True)]
     assert await archive.get(capture.archive) is None
 
 
