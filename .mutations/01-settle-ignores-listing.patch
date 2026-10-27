@@ -1,0 +1,14 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/memory_ledger.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/memory_ledger.py
+index 219f0d9ca..1303b5bc0 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/memory_ledger.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/memory_ledger.py
+@@ -155,8 +155,7 @@ class WorkspaceMemoryLedger:
+         settled = [
+             workspace_id
+             for workspace_id in self._leaked
+-            if workspace_id not in listed
+-            and workspace_id not in creating_before
++            if workspace_id not in creating_before
+             and workspace_id not in self._creating
+         ]
+         freed = 0

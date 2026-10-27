@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
+index 680d56cd7..5cebd746c 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
+@@ -241,6 +241,7 @@ def finish_abandoned_create(
+ 
+     async def finish() -> None:
+         try:
++            on_end()
+             handle = await create
+         except Exception:
+             # The backend's own failure path removes what it made, or leaves

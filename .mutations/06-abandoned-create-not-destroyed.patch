@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
+index 680d56cd7..5e1dbc7ac 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_lifecycle.py
+@@ -247,7 +247,7 @@ def finish_abandoned_create(
+             # it listed; either way the listing decides.
+             logger.warning("Abandoned create for execution %s raised", execution_id, exc_info=True)
+         else:
+-            teardown = await _destroy_isolation(service, handle)
++            teardown = IsolationTeardown()
+             if teardown.failure is not None:
+                 logger.error(
+                     "Could not destroy the container an abandoned create made for %s: %s: %s",
