@@ -180,3 +180,49 @@ async def _claim_all(spools: PostgresCaptureSpools) -> list[CaptureSpoolLease]:
     while (lease := await spools.claim(lease_seconds=60, backends=("docker",))) is not None:
         leases.append(lease)
     return leases
+
+
+async def test_claim_takes_only_reachable_backends_and_only_settled_sandboxes(
+    db_pool: asyncpg.Pool,
+) -> None:
+    """#1916: the store, not the worker, keeps a spool from a worker that cannot reach it.
+
+    A Docker-only worker never leases a sandbox row, a legacy row with no
+    ``backend`` key is Docker, and a sandbox row is leased only once settled:
+    recovering one stops its agent, which a live executor may still resume."""
+    await PostgresSessionEvidence(db_pool).ensure_ready()
+    source = str(uuid4())
+    spools = PostgresCaptureSpools(db_pool, source)
+    run = RunIdentity(source_instance_id=source, execution_id="run")
+    for session in ("sandbox", "running-sandbox"):
+        await spools.project(
+            CaptureSpool(
+                run=run,
+                session_id=session,
+                phase_id="phase",
+                profile="sandbox-spool/1",
+                backend="e2b",
+                executor_id="executor",
+                sandbox_id=f"sbx-{session}",
+            )
+        )
+    await spools.project(CaptureSpool(run=run, session_id="legacy", phase_id="phase"))
+    async with db_pool.acquire() as conn:
+        # A row written before remote backends existed carries no backend key.
+        await conn.execute(
+            """UPDATE session_capture_spools SET payload=payload-'backend'
+            WHERE source_instance_id=$1 AND session_id='legacy'""",
+            source,
+        )
+    await spools.settle("sandbox")
+
+    assert await spools.claim(lease_seconds=60, backends=()) is None
+    docker = await spools.claim(lease_seconds=60, backends=("docker",))
+    assert docker is not None and docker.spool.session_id == "legacy"
+    assert docker.spool.backend == "docker"
+    assert await spools.claim(lease_seconds=60, backends=("docker",)) is None
+
+    remote = await spools.claim(lease_seconds=60, backends=("e2b",))
+    assert remote is not None and remote.spool.session_id == "sandbox" and remote.settled
+    # The unsettled sandbox stays with its executor.
+    assert await spools.claim(lease_seconds=60, backends=("docker", "e2b")) is None
