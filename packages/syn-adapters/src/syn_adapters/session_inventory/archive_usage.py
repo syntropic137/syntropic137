@@ -46,8 +46,13 @@ class ArchiveUsage:
     filesystem_free_bytes: int
 
 
-def _files(root: Path) -> Iterator[tuple[str, os.stat_result]]:
-    """Every regular file directly in ``root``, each inode once; one removed mid-walk is skipped."""
+def _files(root: Path) -> Iterator[tuple[str, os.stat_result, bool]]:
+    """Every regular file directly in ``root``, and whether its inode is new to the walk.
+
+    Every name is yielded, so an object linked to a capture temporary is still
+    classified whichever name comes first; only its bytes are counted once.
+    One removed mid-walk is skipped.
+    """
     linked: set[tuple[int, int]] = set()
     with os.scandir(root) as entries:
         for entry in entries:
@@ -57,11 +62,11 @@ def _files(root: Path) -> Iterator[tuple[str, os.stat_result]]:
                 stat = entry.stat(follow_symlinks=False)
             except FileNotFoundError:
                 continue
+            inode = (stat.st_dev, stat.st_ino)
+            first = stat.st_nlink == 1 or inode not in linked
             if stat.st_nlink > 1:
-                if (stat.st_dev, stat.st_ino) in linked:
-                    continue
-                linked.add((stat.st_dev, stat.st_ino))
-            yield entry.name, stat
+                linked.add(inode)
+            yield entry.name, stat, first
 
 
 def measure_archive_usage(root: Path, now: float) -> ArchiveUsage | None:
@@ -69,9 +74,9 @@ def measure_archive_usage(root: Path, now: float) -> ArchiveUsage | None:
     if not root.is_dir():
         return None
     stored = objects = references = day = week = 0
-    for name, stat in _files(root):
+    for name, stat, first in _files(root):
         size = stat.st_blocks * _BLOCK
-        stored += size
+        stored += size if first else 0
         is_object = _OBJECT_NAME.fullmatch(name) is not None
         is_reference = _REFERENCE.fullmatch(name) is not None
         objects += is_object

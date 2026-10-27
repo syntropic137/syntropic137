@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.session_inventory import archive_usage
 from syn_adapters.session_inventory.archive_usage import measure_archive_usage
 from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 pytestmark = pytest.mark.unit
@@ -44,15 +47,32 @@ def test_counts_objects_and_references_and_windows_growth_by_mtime(tmp_path: Pat
     assert usage.filesystem_free_bytes > 0
 
 
-def test_bytes_are_allocated_blocks_and_a_linked_file_counts_once(tmp_path: Path) -> None:
-    """A 10-byte reference occupies a block, and a capture mid-link is one file."""
+@pytest.mark.parametrize("temporary_first", [True, False])
+def test_bytes_are_allocated_blocks_and_a_linked_file_counts_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, temporary_first: bool
+) -> None:
+    """A 10-byte reference occupies a block; a capture mid-link is one file, still an object.
+
+    The walk is forced to meet the temporary before, then after, the object.
+    """
     ref = _write(tmp_path, f".ref-{'d' * 64}", 10, 0.1)
     obj = _write(tmp_path, ".capture-tmp", 300, 0.1)
     os.link(tmp_path / ".capture-tmp", tmp_path / ("a" * 64))
+    scandir = os.scandir
+
+    @contextlib.contextmanager
+    def ordered(path: Path) -> Iterator[list[os.DirEntry[str]]]:
+        with scandir(path) as entries:
+            yield sorted(
+                entries, key=lambda e: e.name.startswith(".capture"), reverse=temporary_first
+            )
+
+    monkeypatch.setattr(archive_usage.os, "scandir", ordered)
     usage = measure_archive_usage(tmp_path, NOW)
     assert usage is not None
     assert ref > 10
     assert usage.stored_bytes == ref + obj
+    assert (usage.object_count, usage.added_bytes_24h) == (1, ref + obj)
 
 
 def test_a_missing_archive_is_not_measured(tmp_path: Path) -> None:
