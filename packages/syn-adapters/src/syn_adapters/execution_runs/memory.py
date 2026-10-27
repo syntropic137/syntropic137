@@ -46,6 +46,8 @@ class _Host(BaseModel):
     successor_id: str | None = None
     claim_checked_at: datetime = _NEVER
     full_since: datetime | None = None
+    create_failures: int = 0
+    claims_disabled_until: datetime | None = None
 
 
 class _Run(BaseModel):
@@ -177,7 +179,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         async with self._lock:
             now = self._now()
             entry = self._hosts.get(host_id)
-            if entry is None or not self._live(entry, now):
+            if entry is None or not self._live(entry, now) or not self._claims_enabled(entry, now):
                 return None
             entry = self._budget(host_id, entry, claim_checked_at=now)
             if entry.in_use >= entry.capacity:
@@ -210,6 +212,24 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
                 pool_id=pool.pool_id,
                 overflowed=overflowed,
             )
+
+    async def record_create_failure(
+        self, host_id: str, *, threshold: int, cooldown: timedelta
+    ) -> bool:
+        if threshold < 1 or cooldown <= timedelta(0):
+            raise ValueError("breaker threshold and cooldown must be positive")
+        entry = self._hosts.get(host_id)
+        if entry is None:
+            return False
+        now, failures = self._now(), entry.create_failures + 1
+        until = now + cooldown if failures >= threshold else entry.claims_disabled_until
+        self._budget(host_id, entry, create_failures=failures, claims_disabled_until=until)
+        return until is not None and until > now
+
+    async def record_create_success(self, host_id: str) -> None:
+        entry = self._hosts.get(host_id)
+        if entry is not None:
+            self._budget(host_id, entry, create_failures=0, claims_disabled_until=None)
 
     async def renew(self, run: ClaimedRun) -> None:
         row = self._held(run.execution_id, run.token, "claimed")
@@ -326,6 +346,11 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         """Registered, not draining and a fresh heartbeat: the Postgres claim's step 1."""
         return entry.registered and not entry.draining and entry.heartbeat_at > now - self._stale
 
+    @staticmethod
+    def _claims_enabled(entry: _Host, now: datetime) -> bool:
+        """The Postgres ``claims_enabled``: the Outage Breaker has not disabled it (#1917)."""
+        return entry.claims_disabled_until is None or entry.claims_disabled_until <= now
+
     def _eligible(self, row: _Run, entry: _Host, higher: list[_Host], now: datetime) -> bool:
         """The Postgres claim's candidate predicate, for the claimer ``entry`` (D13)."""
         pool = self._pools[entry.host.pool.pool_id]
@@ -349,6 +374,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             for other in self._hosts.values()
             if self._pools[other.host.pool.pool_id].priority < pool.priority
             and self._live(other, now)
+            and self._claims_enabled(other, now)
         ]
 
     def _registered_higher(self, pool: ExecutorPool) -> list[_Host]:
@@ -396,18 +422,20 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         return (left is None or not left.registered) and row.writer_epoch <= epoch
 
     def _in_scope(self, row: _Run, reconciler: _Host) -> bool:
-        """The Postgres scope predicate: the claimer's reaper reaches what this one does (D13)."""
+        """The Postgres ``in_reach``: its own scope or one it holds a Recovery Kit for (C8)."""
         claimer = self._hosts.get(row.executor_id or "")
-        return claimer is not None and claimer.host.reap_scope == reconciler.host.reap_scope
+        reach = {reconciler.host.reap_scope, *reconciler.host.recovery_scopes}
+        return claimer is not None and claimer.host.reap_scope in reach
 
-    @staticmethod
-    def _fenced(row: _Run, reconciler: str) -> FencedRun:
+    def _fenced(self, row: _Run, reconciler: str) -> FencedRun:
+        claimer = self._hosts.get(row.executor_id or "")
         return FencedRun(
             execution_id=row.execution_id,
             executor_id=row.executor_id or "",
             reconciler=reconciler,
             token=row.token,
             reaped=row.state == "reaped",
+            claimer_scope=None if claimer is None else claimer.host.reap_scope,
         )
 
     def _promote(self, execution_id: str) -> bool:

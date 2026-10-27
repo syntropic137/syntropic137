@@ -46,6 +46,28 @@ def can_run(pool: str) -> str:
     return f"({pool}.supplies_credentials OR r.workload='scripted')"
 
 
+def claims_enabled(budget: str) -> str:
+    """SQL: the Outage Breaker has not disabled the budget row aliased ``budget`` (#1917)."""
+    return (
+        f"({budget}.claims_disabled_until IS NULL"
+        f" OR {budget}.claims_disabled_until<=clock_timestamp())"
+    )
+
+
+def in_reach(claimer: str, reconciler: str) -> str:
+    """SQL: the reconciler ``reconciler`` (an id) can reap what ``claimer`` (an id) created.
+
+    Its own reap scope, or one it holds a Recovery Kit for (D5, D13, C8). A
+    claimer with no scope is NULL, which equals nothing, so no one fences it.
+    """
+    return f"""(SELECT reap_scope FROM execution_budget WHERE executor_id={claimer})
+        IN (SELECT unnest(array_prepend(reap_scope,recovery_scopes)) FROM execution_budget
+            WHERE executor_id={reconciler})"""
+
+
+_CLAIMER_SCOPE = "(SELECT reap_scope FROM execution_budget WHERE executor_id=r.executor_id)"
+
+
 def can_take(executor: str) -> str:
     """SQL: the executor aliased ``executor`` (epoch and pool columns) could take run ``r``."""
     return f"({executor}.epoch>=r.writer_epoch AND {can_run(executor)})"
@@ -69,7 +91,7 @@ _CLAIM_SQL = f"""WITH me AS (
             AS recently_full
     FROM execution_budget b JOIN executor_hosts h ON h.host_id=b.executor_id
     JOIN executor_pools p ON p.pool_id=b.pool_id, me
-    WHERE p.priority<me.priority AND NOT h.draining
+    WHERE p.priority<me.priority AND NOT h.draining AND {claims_enabled("b")}
     AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second'
 ), registered_higher AS (
     -- Every registered higher executor, live or not: an unbudgeted pool waits on
@@ -256,9 +278,9 @@ class PostgresExecutionRunQueue:
             # not draining, with or without room, so it commits even when no run
             # is then found. Placement trusts it, not the heartbeat, to say room.
             has_room = await conn.fetchval(
-                """UPDATE execution_budget b SET claim_checked_at=clock_timestamp()
+                f"""UPDATE execution_budget b SET claim_checked_at=clock_timestamp()
                 FROM executor_hosts h WHERE b.executor_id=$1 AND h.host_id=b.executor_id
-                AND NOT h.draining
+                AND NOT h.draining AND {claims_enabled("b")}
                 AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second'
                 RETURNING (b.in_use<b.capacity)::text""",
                 host_id,
@@ -275,6 +297,35 @@ class PostgresExecutionRunQueue:
                 "UPDATE execution_budget SET in_use=in_use+1 WHERE executor_id=$1", host_id
             )
         return ClaimedRun.model_validate_json(raw)
+
+    async def record_create_failure(
+        self, host_id: str, *, threshold: int, cooldown: timedelta
+    ) -> bool:
+        if threshold < 1 or cooldown <= timedelta(0):
+            raise ValueError("breaker threshold and cooldown must be positive")
+        async with self._pool.acquire() as conn:
+            # One statement: concurrent failures each count, and the row that
+            # reaches the threshold disables claims. Capacity is never written.
+            disabled = await conn.fetchval(
+                """UPDATE execution_budget SET create_failures=create_failures+1,
+                claims_disabled_until=CASE WHEN create_failures+1>=$2
+                    THEN clock_timestamp()+$3::double precision*interval '1 second'
+                    ELSE claims_disabled_until END
+                WHERE executor_id=$1
+                RETURNING (claims_disabled_until>clock_timestamp())::text""",
+                host_id,
+                threshold,
+                cooldown.total_seconds(),
+            )
+        return disabled == "true"
+
+    async def record_create_success(self, host_id: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE execution_budget SET create_failures=0,claims_disabled_until=NULL
+                WHERE executor_id=$1 AND (create_failures<>0 OR claims_disabled_until IS NOT NULL)""",
+                host_id,
+            )
 
     async def renew(self, run: ClaimedRun) -> None:
         async with self._pool.acquire() as conn, conn.transaction():
@@ -321,12 +372,11 @@ class PostgresExecutionRunQueue:
             # pick is a MATERIALIZED CTE because an IN (... LIMIT) subquery may
             # be rescanned once per outer row, each rescan locking LIMIT more.
             rows = await conn.fetch(
-                """WITH picked AS MATERIALIZED (
+                f"""WITH picked AS MATERIALIZED (
                     SELECT c.execution_id FROM execution_runs c
                     WHERE c.state='claimed' AND c.leased_until<now()
                     AND c.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
-                    AND (SELECT reap_scope FROM execution_budget WHERE executor_id=c.executor_id)
-                        =(SELECT reap_scope FROM execution_budget WHERE executor_id=$1)
+                    AND {in_reach("c.executor_id", "$1")}
                     ORDER BY c.leased_until, c.execution_id
                     FOR UPDATE OF c SKIP LOCKED LIMIT $2
                 ) UPDATE execution_runs r SET state='fencing',lease_token=r.lease_token+1,
@@ -336,7 +386,7 @@ class PostgresExecutionRunQueue:
                 AND r.state='claimed' AND r.leased_until<now() AND r.writer_epoch<=h.epoch
                 RETURNING jsonb_build_object('execution_id',r.execution_id,
                     'executor_id',r.executor_id,'reconciler',r.reconciler,
-                    'token',r.lease_token)::text AS run""",
+                    'token',r.lease_token,'claimer_scope',{_CLAIMER_SCOPE})::text AS run""",
                 reconciler,
                 limit,
             )
@@ -352,13 +402,12 @@ class PostgresExecutionRunQueue:
             # so a second adopter finds a live owner and takes nothing. The pick
             # is a MATERIALIZED CTE for the same reason as fence_expired's.
             rows = await conn.fetch(
-                """WITH picked AS MATERIALIZED (
+                f"""WITH picked AS MATERIALIZED (
                     SELECT o.execution_id FROM execution_runs o
                     WHERE o.state IN ('fencing','reaped') AND o.reconciler IS DISTINCT FROM $1
                     AND o.writer_epoch<=(SELECT epoch FROM executor_hosts WHERE host_id=$1)
                     AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=o.reconciler)
-                    AND (SELECT reap_scope FROM execution_budget WHERE executor_id=o.executor_id)
-                        =(SELECT reap_scope FROM execution_budget WHERE executor_id=$1)
+                    AND {in_reach("o.executor_id", "$1")}
                     ORDER BY o.leased_until, o.execution_id
                     FOR UPDATE OF o SKIP LOCKED LIMIT $2
                 ) UPDATE execution_runs r SET reconciler=me.host_id,lease_token=r.lease_token+1
@@ -369,7 +418,8 @@ class PostgresExecutionRunQueue:
                 AND NOT EXISTS (SELECT 1 FROM executor_hosts h WHERE h.host_id=r.reconciler)
                 RETURNING jsonb_build_object('execution_id',r.execution_id,
                     'executor_id',r.executor_id,'reconciler',r.reconciler,
-                    'token',r.lease_token,'reaped',r.state='reaped')::text AS run""",
+                    'token',r.lease_token,'reaped',r.state='reaped',
+                    'claimer_scope',{_CLAIMER_SCOPE})::text AS run""",
                 reconciler,
                 limit,
             )
@@ -378,10 +428,11 @@ class PostgresExecutionRunQueue:
     async def reconciling(self, reconciler: str) -> list[FencedRun]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                """SELECT jsonb_build_object('execution_id',execution_id,
+                f"""SELECT jsonb_build_object('execution_id',execution_id,
                     'executor_id',executor_id,'reconciler',reconciler,
-                    'token',lease_token,'reaped',state='reaped')::text AS run
-                FROM execution_runs WHERE reconciler=$1 AND state IN ('fencing','reaped')
+                    'token',lease_token,'reaped',state='reaped',
+                    'claimer_scope',{_CLAIMER_SCOPE})::text AS run
+                FROM execution_runs r WHERE reconciler=$1 AND state IN ('fencing','reaped')
                 ORDER BY execution_id""",
                 reconciler,
             )
@@ -523,13 +574,16 @@ class PostgresExecutionRunQueue:
             host.host_id,
         )
         inserted = await conn.fetchval(
-            """INSERT INTO execution_budget (executor_id,container_id,capacity,pool_id,reap_scope)
-            VALUES ($1,$2,$3,$4,$5) ON CONFLICT (executor_id) DO NOTHING RETURNING executor_id""",
+            """INSERT INTO execution_budget
+            (executor_id,container_id,capacity,pool_id,reap_scope,recovery_scopes)
+            VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (executor_id) DO NOTHING
+            RETURNING executor_id""",
             host.host_id,
             host.container_id,
             int(free or 0) if held else capacity,
             host.pool.pool_id,
             host.reap_scope,
+            sorted(host.recovery_scopes),
         )
         # Rows from before the scope column (D13): one container runs on one
         # daemon, so a successor in the same container proves the same scope.

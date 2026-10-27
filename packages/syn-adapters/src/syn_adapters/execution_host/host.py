@@ -42,7 +42,7 @@ from syn_adapters.execution_host.reconciler import Reconciler
 from syn_domain.contexts.orchestration.ports import RunLeaseLost
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
     from syn_adapters.execution_host.ports import ClaimedRunDrainer, RunInterrupter, RunReaper
     from syn_domain.contexts.orchestration.ports import (
@@ -99,7 +99,15 @@ class ExecutionHost:
         timing: HostTiming | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
+        recovery: Sequence[RunReaper] = (),
     ) -> None:
+        held = frozenset(kit.scope() for kit in recovery)
+        if held != host.recovery_scopes:
+            # The row would advertise a reach the reconciler cannot reap (C8).
+            raise ValueError(
+                f"host {host.host_id!r} declares recovery scopes {sorted(host.recovery_scopes)} "
+                f"but holds Recovery Kits for {sorted(held)}"
+            )
         self._queue = queue
         self._host = host
         self._capacity = capacity
@@ -117,6 +125,7 @@ class ExecutionHost:
             concurrency=self._timing.reconcile_concurrency,
             lease_ttl=self._timing.lease_ttl.total_seconds(),
             clock=clock,
+            kits=recovery,
         )
         self._runs: dict[str, asyncio.Task[None]] = {}
         self._sweep: asyncio.Task[None] | None = None
