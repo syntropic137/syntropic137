@@ -18,21 +18,20 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import eval_implementer
+import implementer_scorer
 import yaml
 from eval_implementer import (
     DEFAULT_SUITE,
     ROOT,
     ImplementerCase,
-    _outcome_of,
     asserted_contracts,
     check_commits,
     fix_patch,
     load_suite,
     main,
-    score_patch,
 )
 from eval_suite import DefinitionError
+from implementer_scorer import _outcome_of, score_patch
 
 pytestmark = pytest.mark.unit
 
@@ -348,8 +347,8 @@ def two_hidden_files(
     The real worktree, `git apply` and pytest subprocess run; only the uv
     environment is this interpreter's, so the test needs no lockfile or network.
     """
-    monkeypatch.setattr(eval_implementer, "SYNC", ("true",))
-    monkeypatch.setattr(eval_implementer, "PYTEST", (sys.executable, "-m", "pytest"))
+    monkeypatch.setattr(implementer_scorer, "SYNC", ("true",))
+    monkeypatch.setattr(implementer_scorer, "PYTEST", (sys.executable, "-m", "pytest"))
     repo = tmp_path / "repo"
     repo.mkdir()
 
@@ -418,7 +417,7 @@ def test_scoring_in_a_worktree_never_writes_the_shared_submodule_config(
     pinned = case.model_copy(update={"commit": git(repo, "rev-parse", "HEAD")})
     before = git(repo, "config", "--get-regexp", "submodule")
 
-    with eval_implementer._worktree(repo, pinned.commit) as tree:
+    with implementer_scorer._worktree(repo, pinned.commit) as tree:
         assert git(tree / "lib/dep", "rev-parse", "HEAD") == git(lib, "rev-parse", "HEAD")
 
     assert git(repo, "config", "--get-regexp", "submodule") == before
@@ -428,8 +427,8 @@ def test_the_bug_left_in_place_fails_and_the_fix_passes(
     two_hidden_files: tuple[ImplementerCase, Path],
 ) -> None:
     case, repo = two_hidden_files
-    assert score_patch(case, "", repo).outcome == "FAIL"
-    fixed = score_patch(case, fix_patch(case, repo), repo)
+    assert score_patch(case.pin(), "", repo).outcome == "FAIL"
+    fixed = score_patch(case.pin(), fix_patch(case, repo), repo)
     assert fixed.outcome == "PASS", fixed.detail
 
 
@@ -459,7 +458,7 @@ def test_a_change_that_hides_the_bug_from_pytest_is_not_a_pass(
 ) -> None:
     # Every one of these leaves the bug in place and, unchecked, exits pytest 0.
     case, repo = two_hidden_files
-    run = score_patch(case, patch, repo)
+    run = score_patch(case.pin(), patch, repo)
     assert run.outcome == "FAIL", run.detail
     assert "test_second" in run.detail
 
@@ -468,5 +467,5 @@ def test_a_fix_plus_a_harmless_conftest_still_passes(
     two_hidden_files: tuple[ImplementerCase, Path],
 ) -> None:
     case, repo = two_hidden_files
-    run = score_patch(case, fix_patch(case, repo) + _conftest("FIXTURE = 1"), repo)
+    run = score_patch(case.pin(), fix_patch(case, repo) + _conftest("FIXTURE = 1"), repo)
     assert run.outcome == "PASS", run.detail
