@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 4998f163e..d7ca104b5 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -2247,7 +2247,7 @@ def new_batch() -> str:
+     Trial tags must never repeat across launches: a lost execute answer is
+     found again by its trial tag alone (`start_trial`).
+     """
+-    return time.strftime("%Y%m%dt%H%M%Sz", time.gmtime()) + "-" + secrets.token_hex(3)
++    return time.strftime("%Y%m%dt%H%M%Sz", time.gmtime()) + "-" + "000000"
+ 
+ 
+ class _CohortKey(_Read):

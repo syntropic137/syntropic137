@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 167c2b3a9..5098750a9 100644
+index 4998f163e..712179741 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -2291,7 +2291,7 @@ def top_up_counts(cohort: _CohortMetrics | None, evals: dict[str, str]) -> dict[
+@@ -2379,7 +2379,7 @@ def top_up_counts(cohort: _CohortMetrics | None, evals: dict[str, str]) -> dict[
      """
      if cohort is None:
          raise RuntimeError("this cohort has launched nothing yet: launch --trials K first")

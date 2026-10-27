@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 167c2b3a9..6b5407ba2 100644
+index 4998f163e..ca28a3361 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -2290,7 +2290,7 @@ def top_up_counts(cohort: _CohortMetrics | None, evals: dict[str, str]) -> dict[
+@@ -2378,7 +2378,7 @@ def top_up_counts(cohort: _CohortMetrics | None, evals: dict[str, str]) -> dict[
      An exhausted case reports 0 short, so it launches none.
      """
      if cohort is None:

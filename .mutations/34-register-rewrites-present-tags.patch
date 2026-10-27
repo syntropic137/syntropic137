@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 167c2b3a9..af7b1fc9b 100644
+index 4998f163e..94306fe0e 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -2068,7 +2068,7 @@ def register_roster(loaded: LoadedSuite, client: httpx.Client) -> list[str]:
+@@ -2152,7 +2152,7 @@ def register_roster(loaded: LoadedSuite, client: httpx.Client) -> list[str]:
          raise RuntimeError("roster conflicts, nothing tagged:\n  " + "\n  ".join(problems))
      out: list[str] = []
      for case, ev in found:

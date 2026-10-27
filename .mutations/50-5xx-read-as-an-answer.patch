@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 167c2b3a9..55ec67385 100644
+index 4998f163e..a144d854b 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -1318,7 +1318,7 @@ def start_trial(client: httpx.Client, workflow_id: str, body: TrialStart, trial_
+@@ -1346,7 +1346,7 @@ def start_trial(client: httpx.Client, workflow_id: str, body: TrialStart, trial_
      """
      try:
          response = client.post(f"/workflows/{workflow_id}/execute", json=body.model_dump())

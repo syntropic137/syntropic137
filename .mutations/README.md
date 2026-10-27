@@ -22,6 +22,11 @@ Each patch re-introduces one bug; the named tests must kill it.
 | 48 | ledger lock is shared, two launchers both run | test_a_second_launcher_on_the_same_ledger_is_refused |
 | 49 | lost execute answer not reconciled | test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered |
 | 50 | a 5xx read as an answer | test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered |
+| 51 | batch id not unique across launches | test_no_two_trials_share_a_trial_tag_across_cases_or_launches |
+| 52 | trial numbers restart per case | test_no_two_trials_share_a_trial_tag_across_cases_or_launches, test_launch_trials_starts_k_tagged_trials_per_case_with_one_ledger_line_each |
+| 53 | no intent written before execute | test_an_unresolved_intent_blocks_every_later_launch_until_its_run_is_visible |
+| 54 | launch ignores pending intents | test_an_unresolved_intent_blocks_every_later_launch_until_its_run_is_visible |
+| 55 | recovered run's workflow not checked (inverted) | test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered |
 
 Retired as equivalent: 45 (route skips `sync_published_events_to_projections`).
 The eval read model is not fed by that in-memory dispatch (the tag-filter test

@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 167c2b3a9..91f21ac30 100644
+index 4998f163e..54e4deee4 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -2135,7 +2135,7 @@ def alias_problems(loaded: LoadedSuite) -> list[str]:
+@@ -2219,7 +2219,7 @@ def alias_problems(loaded: LoadedSuite) -> list[str]:
          f"workflow {loaded.workflow.id} phase {phase}: declares {model!r}, not an explicit "
          "model id; replace it in the workflow and suite.yaml and bump the suite version"
          for phase, model in loaded.workflow.models.items()

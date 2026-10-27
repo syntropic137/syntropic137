@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 167c2b3a9..7864944e4 100644
+index 4998f163e..a474920ca 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -2064,7 +2064,7 @@ def register_roster(loaded: LoadedSuite, client: httpx.Client) -> list[str]:
+@@ -2148,7 +2148,7 @@ def register_roster(loaded: LoadedSuite, client: httpx.Client) -> list[str]:
      split or polarity conflict anywhere writes nothing at all.
      """
      found = [(case, stable_eval(loaded, case, client)) for case in loaded.cases]

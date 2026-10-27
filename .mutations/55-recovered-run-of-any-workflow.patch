@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 4998f163e..c6769378a 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1331,7 +1331,7 @@ def find_trial_run(client: httpx.Client, trial_tag: str, workflow_id: str) -> li
+             return [
+                 r
+                 for r in runs
+-                if _get(client, _Execution, f"/executions/{r}").workflow_id == workflow_id
++                if _get(client, _Execution, f"/executions/{r}").workflow_id != workflow_id
+             ]
+     return []
+ 

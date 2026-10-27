@@ -4164,14 +4164,17 @@ def test_a_trial_that_never_started_stops_the_launch_and_ledgers_nothing_for_it(
 
 
 @pytest.mark.unit
-def test_no_two_trials_share_a_trial_tag_across_cases_or_launches(tmp_path: Path) -> None:
+def test_no_two_trials_share_a_trial_tag_across_cases_or_launches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A lost answer is found again by its trial tag alone (codex #2126 pass 2)."""
+    monkeypatch.setattr(eval_suite.time, "strftime", lambda *_: "20261027t000000z")  # one second
     loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
     server = _TrialServer(loaded)
     ledger = tmp_path / "launches.jsonl"
 
     eval_suite.launch_trials(loaded, server.client(), ledger, 2)
-    eval_suite.launch_trials(loaded, server.client(), ledger, 2)  # same second, new batch
+    eval_suite.launch_trials(loaded, server.client(), ledger, 2)  # same second, still a new batch
 
     trial_tags = [t for tags in server.run_tags.values() for t in tags if t.startswith("trial:")]
     assert len(trial_tags) == 4 * len(loaded.cases)
