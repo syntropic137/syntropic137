@@ -404,3 +404,203 @@ class TestDrift:
         published = "services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:latest\n"
         deployed = "services:\n  api:\n    image: ghcr.io/syntropic137/syn-gateway:latest\n"
         assert _drift(tmp_path, published, deployed)[0] == 1
+
+
+def _add_keys(tmp_path: Path, published: str, deployed: str) -> tuple[int, str, str, Path]:
+    (tmp_path / "published.yaml").write_text(published)
+    (tmp_path / "deployed.yaml").write_text(deployed)
+    out = tmp_path / "keyed.yaml"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(_HELPER),
+            "--add-null-keys",
+            str(tmp_path / "published.yaml"),
+            str(tmp_path / "deployed.yaml"),
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode, proc.stdout, proc.stderr, out
+
+
+_PUBLISHED = (
+    "services:\n"
+    "  api:\n"
+    "    image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}\n"
+    "    environment:\n"
+    "      SYN_WORKSPACE_MEMORY_LIMIT_MB: null\n"
+    "      SYN_WORKSPACE_MEMORY_MAX_MB: null\n"
+    "      SYN_WORKSPACE_CPU_LIMIT: null\n"
+    "  executor:\n"
+    "    image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}\n"
+    "    environment:\n"
+    "      SYN_WORKSPACE_MEMORY_LIMIT_MB: null\n"
+    "      SYN_WORKSPACE_MEMORY_MAX_MB: null\n"
+    "      SYN_WORKSPACE_CPU_LIMIT: null\n"
+)
+_DEPLOYED = (
+    "# installed from v1.0.5\n"
+    "services:\n"
+    "  api:\n"
+    f"    image: ghcr.io/syntropic137/syn-api@sha256:{'a' * 64}\n"
+    "    environment:\n"
+    "      SYN_WORKSPACE_MEMORY_LIMIT_MB: null\n"
+    "      SYN_WORKSPACE_CPU_LIMIT: null\n"
+    "  executor:\n"
+    f"    image: ghcr.io/syntropic137/syn-api@sha256:{'b' * 64}\n"
+    "    environment:\n"
+    "      SYN_WORKSPACE_MEMORY_LIMIT_MB: null\n"
+    "      SYN_WORKSPACE_CPU_LIMIT: null\n"
+)
+
+
+class TestAddNullKeys:
+    """#2154: added `KEY: null` env passthroughs are the one drift the pit stop
+    applies itself; every other difference is still refused, and nothing is written."""
+
+    def test_adds_only_the_missing_null_keys_and_keeps_every_other_byte(
+        self, tmp_path: Path
+    ) -> None:
+        rc, stdout, _, out = _add_keys(tmp_path, _PUBLISHED, _DEPLOYED)
+        assert rc == 0
+        assert stdout.split() == ["SYN_WORKSPACE_MEMORY_MAX_MB", "SYN_WORKSPACE_MEMORY_MAX_MB"]
+        keyed = out.read_text()
+        assert _drift(tmp_path, _PUBLISHED, keyed) == (0, "")
+        # The host's own comment and digest pins survive; exactly two lines were added.
+        assert keyed.splitlines()[0] == "# installed from v1.0.5"
+        assert f"syn-api@sha256:{'a' * 64}" in keyed and f"syn-api@sha256:{'b' * 64}" in keyed
+        assert len(keyed.splitlines()) == len(_DEPLOYED.splitlines()) + 2
+        parsed = yaml.safe_load(keyed)["services"]
+        for svc in ("api", "executor"):
+            assert parsed[svc]["environment"] == {
+                "SYN_WORKSPACE_MEMORY_LIMIT_MB": None,
+                "SYN_WORKSPACE_MEMORY_MAX_MB": None,
+                "SYN_WORKSPACE_CPU_LIMIT": None,
+            }
+
+    def test_running_it_again_adds_nothing(self, tmp_path: Path) -> None:
+        _, _, _, out = _add_keys(tmp_path, _PUBLISHED, _DEPLOYED)
+        keyed = out.read_text()
+        out.unlink()
+        rc, stdout, _, out = _add_keys(tmp_path, _PUBLISHED, keyed)
+        assert (rc, stdout) == (0, "")
+        assert not out.exists()
+
+    @pytest.mark.parametrize(
+        "value",
+        ['""', "~", "${SYN_WORKSPACE_MEMORY_MAX_MB}", "16384", "null # set me", "'null'"],
+    )
+    def test_a_key_added_with_anything_but_a_bare_null_is_refused(
+        self, tmp_path: Path, value: str
+    ) -> None:
+        published = _PUBLISHED.replace(
+            "SYN_WORKSPACE_MEMORY_MAX_MB: null", f"SYN_WORKSPACE_MEMORY_MAX_MB: {value}"
+        )
+        rc, stdout, stderr, out = _add_keys(tmp_path, published, _DEPLOYED)
+        assert rc == 1 and stdout == "" and "not a KEY: null passthrough" in stderr
+        assert not out.exists()
+
+    def test_a_removed_key_is_refused(self, tmp_path: Path) -> None:
+        published = _PUBLISHED.replace("      SYN_WORKSPACE_CPU_LIMIT: null\n", "", 1)
+        rc, _, stderr, out = _add_keys(tmp_path, published, _DEPLOYED)
+        assert rc == 1 and "differs from the published compose" in stderr
+        assert not out.exists()
+
+    def test_a_changed_value_is_refused(self, tmp_path: Path) -> None:
+        deployed = _DEPLOYED.replace(
+            "SYN_WORKSPACE_CPU_LIMIT: null", "SYN_WORKSPACE_CPU_LIMIT: 4", 1
+        )
+        rc, _, _, out = _add_keys(tmp_path, _PUBLISHED, deployed)
+        assert rc == 1
+        assert not out.exists()
+
+    def test_a_null_key_outside_an_environment_map_is_refused(self, tmp_path: Path) -> None:
+        labels = "    labels:\n      com.example.role: api\n"
+        published = _PUBLISHED.replace(
+            "    environment:\n", labels + "    environment:\n", 1
+        ).replace(
+            "      com.example.role: api\n",
+            "      com.example.role: api\n      SYN_LABEL_ONLY: null\n",
+            1,
+        )
+        deployed = _DEPLOYED.replace("    environment:\n", labels + "    environment:\n", 1)
+        rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
+        assert rc == 1 and "SYN_LABEL_ONLY is not in a services.<name>.environment: map" in stderr
+        assert not out.exists()
+
+    def test_a_new_service_is_refused(self, tmp_path: Path) -> None:
+        published = _PUBLISHED + "  sidecar:\n    image: ghcr.io/syntropic137/syn-sidecar:latest\n"
+        rc, _, _, out = _add_keys(tmp_path, published, _DEPLOYED)
+        assert rc == 1
+        assert not out.exists()
+
+    def test_pins_alone_are_no_drift_and_write_nothing(self, tmp_path: Path) -> None:
+        deployed = _PUBLISHED.replace("${SYN_VERSION:-latest}", "v1.0.5")
+        rc, stdout, _, out = _add_keys(tmp_path, _PUBLISHED, deployed)
+        assert (rc, stdout) == (0, "")
+        assert not out.exists()
+
+    def test_a_key_line_inside_a_block_scalar_is_refused(self, tmp_path: Path) -> None:
+        """Codex on #2156: `environment:` text inside `command: |` is not a map,
+        and an added line there changes the command."""
+        block = "    command: |\n      run\n      environment:\n        X: null\n"
+        added = block.replace("        X: null\n", "        X: null\n        ADDED: null\n")
+        published = _PUBLISHED.replace("    environment:\n", added + "    environment:\n", 1)
+        deployed = _DEPLOYED.replace("    environment:\n", block + "    environment:\n", 1)
+        rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
+        assert rc == 1 and "ADDED is not in a services.<name>.environment: map" in stderr
+        assert not out.exists()
+
+    def test_a_null_that_would_override_an_existing_value_is_refused(self, tmp_path: Path) -> None:
+        secret = "SYN_WORKSPACE_CPU_LIMIT: secret"
+        deployed = _DEPLOYED.replace("SYN_WORKSPACE_CPU_LIMIT: null", secret, 1)
+        published = _PUBLISHED.replace(
+            "SYN_WORKSPACE_CPU_LIMIT: null", secret + "\n      SYN_WORKSPACE_CPU_LIMIT: null", 1
+        )
+        rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
+        assert rc == 1 and "set more than once" in stderr
+        assert not out.exists()
+
+    def test_a_null_beside_a_merge_key_is_refused(self, tmp_path: Path) -> None:
+        merge = "      <<: *common-env\n"
+        deployed = _DEPLOYED.replace("    environment:\n", "    environment:\n" + merge, 1)
+        published = _PUBLISHED.replace("    environment:\n", "    environment:\n" + merge, 1)
+        rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
+        assert rc == 1 and "not bare" in stderr
+        assert not out.exists()
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            "'SYN_WORKSPACE_MEMORY_MAX_MB': secret",
+            '"SYN_WORKSPACE_MEMORY_MAX_MB": secret',
+            "!!merge '<<': *base",
+            "? SYN_WORKSPACE_MEMORY_MAX_MB",
+        ],
+    )
+    def test_a_null_beside_a_key_that_is_not_bare_is_refused(
+        self, tmp_path: Path, entry: str
+    ) -> None:
+        """Codex pass 2 on #2156: a quoted or tagged spelling of the same key, or
+        of a merge, overrides or duplicates just as the bare one would."""
+        deployed = _DEPLOYED.replace("    environment:\n", f"    environment:\n      {entry}\n", 1)
+        published = _PUBLISHED.replace(
+            "    environment:\n", f"    environment:\n      {entry}\n", 1
+        )
+        rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
+        assert rc == 1 and "not bare" in stderr
+        assert not out.exists()
+
+    def test_services_with_trailing_spaces_is_still_the_root(self, tmp_path: Path) -> None:
+        published = _PUBLISHED.replace("services:\n", "services:  \n", 1)
+        deployed = _DEPLOYED.replace("services:\n", "services:  \n", 1)
+        rc, stdout, _, _ = _add_keys(tmp_path, published, deployed)
+        assert rc == 0 and stdout.split() == ["SYN_WORKSPACE_MEMORY_MAX_MB"] * 2
+
+    def test_a_crlf_file_is_refused_not_rewritten(self, tmp_path: Path) -> None:
+        rc, _, stderr, out = _add_keys(tmp_path, _PUBLISHED, _DEPLOYED.replace("\n", "\r\n"))
+        assert rc == 1 and "CR line endings" in stderr
+        assert not out.exists()

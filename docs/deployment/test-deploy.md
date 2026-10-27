@@ -151,6 +151,17 @@ the build cannot slip past it. There is no flag to stage the published compose
 wholesale, and no way to compare against any file but `--ref`'s: the release
 asset the host was installed from lacks exactly the config a newer image needs.
 
+**One drift is applied, not refused: added `KEY: null` env keys (#2154).** When
+every difference is an env key that `--ref`'s compose adds inside an
+`environment:` map as exactly `KEY: null`, the pit stop adds those lines
+itself before the check: a null passthrough forwards only the host's `.env`,
+unset for a key the host has never had, so the setting's default applies, as on
+a fresh install. It prints the diff, refuses if the file changed since it was
+read, backs it up to `<compose>.bak-<ts>-pitstop-keys`, writes with a sha256
+check and reads it back. `--dry-run` prints the diff and writes nothing. A
+valued key (`""`, `~`, `${X}`, a number), a removed or changed line, or a key
+outside an `environment:` map is still refused, and still needs the owner.
+
 The sections below remain the reference for what each stage does and why.
 
 ## 1. Drain check - first, last, and unskippable

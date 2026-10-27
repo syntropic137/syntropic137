@@ -511,6 +511,38 @@ refuse_drift() {
     fi
 }
 
+# Add to the deployed compose the `KEY: null` env passthroughs $REF's compose
+# has and it lacks, and nothing else (#2154). A null passthrough carries no
+# value: it forwards the host's .env, unset for a new key, so the default
+# applies, as on a fresh install. Any other drift is left for refuse_drift,
+# which still stops the pit stop for the owner. The write is compare-and-swap
+# against the file read (checked before the backup and again just before the
+# rename), backed up first, checked by sha256, and read back. Not atomic
+# against a hand edit landing between that last check and the rename; the
+# swap lock covers every other pit stop, and the backup keeps what was read.
+apply_null_keys() {
+    local keys sum was bak
+    keys="$(python3 "$REPOINT_PY" --add-null-keys "$TMP/compose.published" "$TMP/compose.deployed" "$TMP/compose.keyed")" \
+        || return 0
+    [ -n "$keys" ] || return 0
+    echo "   adding $(printf '%s\n' "$keys" | wc -l | tr -d ' ') KEY: null env passthrough line(s):"
+    diff "$TMP/compose.deployed" "$TMP/compose.keyed" | sed 's/^/     /' || true
+    if [ "$DRY" = 1 ]; then
+        echo "   (dry-run) not written; continuing as if it were"
+        cp "$TMP/compose.keyed" "$TMP/compose.deployed"
+        return 0
+    fi
+    sum="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.keyed")"
+    was="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.deployed")"
+    bak="$COMPOSE.bak-$(date -u +%Y%m%dT%H%M%SZ)-pitstop-keys"
+    remote "cd $COMPOSE_DIR && echo '$was  $COMPOSE' | sha256sum -c --status - && cp -p $COMPOSE $bak && cp -p $COMPOSE $COMPOSE.pit-stop-keys && cat > $COMPOSE.pit-stop-keys && echo '$sum  $COMPOSE.pit-stop-keys' | sha256sum -c --status - && echo '$was  $COMPOSE' | sha256sum -c --status - && mv $COMPOSE.pit-stop-keys $COMPOSE || { rm -f $COMPOSE.pit-stop-keys; exit 1; }" < "$TMP/compose.keyed" \
+        || die "could not add the env keys: $COMPOSE on $HOST changed since it was read, or the write failed. Nothing was built, shipped or staged"
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not re-read the deployed compose file"
+    cmp -s "$TMP/compose.deployed" "$TMP/compose.keyed" \
+        || die "the compose on $HOST is not the one written; the backup is $COMPOSE_DIR/$bak"
+    echo "   backed up to $COMPOSE_DIR/$bak"
+}
+
 if [ "$MODE" != "swap" ]; then
     # Before anything is built: a pit stop repoints image pins and nothing else,
     # so a compose the new image's startup depends on would never reach the
@@ -524,6 +556,7 @@ if [ "$MODE" != "swap" ]; then
     git -C "$REPO_TOP" show "$REF:$PUBLISHED" > "$TMP/compose.published" \
         || die "could not read $PUBLISHED at $REF"
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
+    apply_null_keys
     refuse_drift "Nothing was built, shipped or staged"
     echo "   no drift"
 
@@ -590,7 +623,10 @@ if [ "$MODE" != "swap" ]; then
     # build undrained, ungated and unverified (#1511). apply_staged moves it in.
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
     # Checked again on the bytes actually repointed: the precheck read was
-    # before the build, and the host's file may have changed since.
+    # before the build, and the host's file may have changed since. Null keys
+    # again first: a no-op after the precheck wrote them, and under --dry-run,
+    # which wrote nothing, it re-adds them to this fresh read.
+    apply_null_keys
     refuse_drift "The $TAG images are on the host, but nothing was staged"
     BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged" --service "$SERVICE")" \
         || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
