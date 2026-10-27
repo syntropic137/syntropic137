@@ -1,7 +1,7 @@
 """Run the workspace memory reconciler on a clock (okrs-51p.30, #2148).
 
-Started in every role, Run Queue on or off: whichever process creates
-workspaces holds the ledger, and a tick with nothing leaked lists nothing.
+Started with the execution host, so in every process that creates
+workspaces, Run Queue on or off; a tick with nothing leaked lists nothing.
 Docker only: the listing reads this host's daemon, and an E2B sandbox is
 neither listed there nor charged to this host's memory.
 """

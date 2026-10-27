@@ -31,6 +31,7 @@ from syn_adapters.workspace_backends.host_labels import (
 )
 from syn_api._wiring import get_execution_processor, get_execution_run_queue
 from syn_api._wiring_admission import get_execution_budget
+from syn_api.services import workspace_memory_reconcile as memory_reconcile
 from syn_api.services.dead_host_reaper import DockerDeadHostReaper
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -77,13 +78,16 @@ async def resolve_previous_process(*, started_before: datetime) -> None:
 
 
 async def start_execution_host() -> None:
-    """Join the Executor Pool, then start the claim loop, once; a no-op with the Run Queue off.
+    """Join the Executor Pool, then start the claim loop, once; with the Run Queue off, only
+    the workspace memory reconciler starts.
 
     Raises ``PoolDefinitionConflict`` when live members of the pool declare a
     different definition, before any loop starts. The host id is the ``syn.host_id`` label this process stamps on its
     containers, so a reconciler's reap of this host finds exactly them.
     """
     global _host_task, _executor
+    # okrs-51p.30: wherever workspaces are created, Run Queue on or off.
+    memory_reconcile.start()
     if _host_task is not None and not _host_task.done():
         return
     queue = await get_execution_run_queue()
@@ -146,6 +150,7 @@ async def stop_execution_host() -> None:
     was reported by ``_report_exit``.
     """
     global _host_task, _executor
+    await memory_reconcile.stop()
     task, _host_task = _host_task, None
     executor, _executor = _executor, None
     if task is None:

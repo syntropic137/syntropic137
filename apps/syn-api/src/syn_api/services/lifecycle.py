@@ -29,7 +29,6 @@ from syn_api._wiring import (
 )
 from syn_api.build_info import get_build_info
 from syn_api.services import cpu_throttling, execution_capacity, inventory_lifecycle
-from syn_api.services import workspace_memory_reconcile as memory_reconcile
 from syn_api.services.admission_announcement import (
     announce_admission_if_open,
     start_disk_recovery_watch,
@@ -214,7 +213,6 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # narrowing it; the started_before cutoff below is defence in depth.
     role = current_role()
     await resolve_previous_world(role, started_before=datetime.now(UTC))
-    memory_reconcile.start()  # okrs-51p.30: every role, Run Queue on or off
 
     for entry in role_services(_SERVICE_REGISTRY, role):
         try:
@@ -319,7 +317,6 @@ async def shutdown() -> Result[None, LifecycleError]:
     try:
         _state._shutting_down = True
         await stop_execution_host()
-        await memory_reconcile.stop()
 
         if _state._recovery_task is not None:
             _state._recovery_task.cancel()
