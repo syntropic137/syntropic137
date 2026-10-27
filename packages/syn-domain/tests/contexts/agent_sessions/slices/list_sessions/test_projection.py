@@ -6,39 +6,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
     SessionListProjection,
 )
-
-
-class _FakeStore:
-    """Minimal in-memory projection store stand-in for testing."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, dict] = {}
-
-    async def save(self, projection: str, key: str, data: dict) -> None:
-        self._data[key] = data
-
-    async def get(self, projection: str, key: str) -> dict | None:
-        return self._data.get(key)
-
-    async def get_all(self, projection: str) -> list[dict]:
-        return list(self._data.values())
-
-    async def query(
-        self,
-        projection: str,
-        filters: dict | None = None,
-        order_by: str | None = None,
-        limit: int | None = None,
-        offset: int = 0,
-    ) -> list[dict]:
-        results = list(self._data.values())
-        if filters:
-            for key, value in filters.items():
-                results = [r for r in results if r.get(key) == value]
-        return results[offset : offset + limit] if limit else results[offset:]
 
 
 def _session_started_event(session_id: str, parent_session_id: str | None = None) -> dict:
@@ -59,7 +30,7 @@ def _session_started_event(session_id: str, parent_session_id: str | None = None
 @pytest.mark.asyncio
 async def test_on_session_started_persists_parent_and_root_session_id() -> None:
     """on_session_started persists parent_session_id and root_session_id from event data."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     projection = SessionListProjection(store)
 
     await projection.on_session_started(
@@ -76,7 +47,7 @@ async def test_on_session_started_persists_parent_and_root_session_id() -> None:
 @pytest.mark.asyncio
 async def test_on_session_started_without_parent_yields_none() -> None:
     """A top-level session (no parent) persists None for parent_session_id."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     projection = SessionListProjection(store)
 
     await projection.on_session_started(_session_started_event("parent-1"))
@@ -90,7 +61,7 @@ async def test_on_session_started_without_parent_yields_none() -> None:
 @pytest.mark.asyncio
 async def test_query_filters_by_parent_session_id() -> None:
     """query(parent_session_id=...) returns only that parent's children."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     projection = SessionListProjection(store)
 
     await projection.on_session_started(_session_started_event("parent-1"))
@@ -136,7 +107,7 @@ def _seed_rows() -> list[dict]:
 
 
 async def _paged_projection() -> SessionListProjection:
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     for row in _seed_rows():
         await store.save("session_summaries", row["id"], row)
     return SessionListProjection(store)
@@ -200,7 +171,7 @@ async def test_page_facets_ignore_the_status_filter_and_honour_the_window() -> N
 @pytest.mark.asyncio
 async def test_page_excludes_an_undated_session_from_rows_total_and_facets_alike() -> None:
     """A row that cannot be placed in time is out of a bounded window everywhere."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     await store.save(
         "session_summaries",
         "dated",
@@ -246,7 +217,7 @@ async def test_a_nonsense_execution_id_returns_nothing() -> None:
     which is why asserting that would not have caught it. Only the empty answer
     distinguishes a filter that works from one that is ignored.
     """
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     projection = SessionListProjection(store)
     await projection.on_session_started(_session_in("exec-real", "s-1"))
     await projection.on_session_started(_session_in("exec-real", "s-2"))
@@ -261,7 +232,7 @@ async def test_a_nonsense_execution_id_returns_nothing() -> None:
 @pytest.mark.asyncio
 async def test_the_filter_selects_only_its_own_execution() -> None:
     """Two executions, and the filter must not leak one into the other."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     projection = SessionListProjection(store)
     await projection.on_session_started(_session_in("exec-a", "s-a1"))
     await projection.on_session_started(_session_in("exec-a", "s-a2"))
@@ -277,7 +248,7 @@ async def test_the_filter_selects_only_its_own_execution() -> None:
 @pytest.mark.asyncio
 async def test_no_filter_still_returns_everything() -> None:
     """The filter must be opt-in; omitting it cannot start narrowing."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     projection = SessionListProjection(store)
     await projection.on_session_started(_session_in("exec-a", "s-a1"))
     await projection.on_session_started(_session_in("exec-b", "s-b1"))

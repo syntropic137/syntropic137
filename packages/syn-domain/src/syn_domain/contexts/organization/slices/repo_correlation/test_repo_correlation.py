@@ -2,43 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.organization.slices.repo_correlation.projection import (
     RepoCorrelationProjection,
     _extract_repo_name,
 )
 
 
-class FakeProjectionStore:
-    """Minimal in-memory store for unit tests (no settings dependency)."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, dict[str, dict[str, Any]]] = {}
-
-    async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
-        self._data.setdefault(projection, {})[key] = data
-
-    async def get(self, projection: str, key: str) -> dict[str, Any] | None:
-        return self._data.get(projection, {}).get(key)
-
-    async def get_all(self, projection: str) -> list[dict[str, Any]]:
-        return list(self._data.get(projection, {}).values())
-
-    async def delete(self, projection: str, key: str) -> None:
-        self._data.get(projection, {}).pop(key, None)
-
-    async def delete_all(self, projection: str) -> None:
-        self._data.pop(projection, None)
-
-
 @pytest.mark.unit
 class TestRepoCorrelationProjection:
     @pytest.mark.asyncio
     async def test_trigger_fired_creates_correlation(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCorrelationProjection(store)
 
         await proj.on_trigger_fired(
@@ -57,7 +34,7 @@ class TestRepoCorrelationProjection:
 
     @pytest.mark.asyncio
     async def test_execution_started_creates_correlation_from_inputs(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCorrelationProjection(store)
 
         await proj.on_workflow_execution_started(
@@ -75,7 +52,7 @@ class TestRepoCorrelationProjection:
 
     @pytest.mark.asyncio
     async def test_trigger_fired_skips_empty_repository(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCorrelationProjection(store)
 
         await proj.on_trigger_fired(
@@ -90,7 +67,7 @@ class TestRepoCorrelationProjection:
 
     @pytest.mark.asyncio
     async def test_multi_repo_execution(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCorrelationProjection(store)
 
         await proj.on_trigger_fired(
@@ -115,7 +92,7 @@ class TestRepoCorrelationProjection:
 
     @pytest.mark.asyncio
     async def test_get_executions_for_repo(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCorrelationProjection(store)
 
         await proj.on_trigger_fired(
@@ -140,7 +117,7 @@ class TestRepoCorrelationProjection:
 
     @pytest.mark.asyncio
     async def test_no_duplicate_correlation_from_trigger_and_template(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCorrelationProjection(store)
 
         # First from trigger
@@ -167,7 +144,7 @@ class TestRepoCorrelationProjection:
     @pytest.mark.asyncio
     async def test_uses_projection_store(self) -> None:
         """Verify the projection uses ProjectionStore (not in-memory singleton)."""
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCorrelationProjection(store)
 
         await proj.on_trigger_fired(
