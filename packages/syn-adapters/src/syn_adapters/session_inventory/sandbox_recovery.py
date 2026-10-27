@@ -54,10 +54,14 @@ class RecoverySandbox(Protocol):
         """Stop every agent process; True only once the provider confirms none remain.
 
         Any failure or ambiguity is False. FIXME(#1916): no production
-        adapter yet. The pinned agentic-workspace E2B ``SupportsOperations``
-        (#2076) keeps its operations in the starting process only and has no
-        reattach, so a recovery worker's ``cancel`` of the dead executor's
-        operation is ``unknown_operation``. Needs operation reattach upstream.
+        adapter yet. At the pinned agentic-workspace (fb696fd8) E2B operations
+        live only in the starting process ("There is no reattach",
+        ``e2b_operations.py``), so a fresh worker's ``cancel`` of the dead
+        executor's operation is ``unknown_operation``, and the provider has no
+        public pause. AW#103 added ``SupportsOperationReattach`` and
+        ``SupportsWorkspaceSuspend`` (release 896449c5, pinned by #2149). The
+        adapter then also needs the executor to persist the writer's
+        ``OperationRef`` and reattach token, a credential, on this row.
         """
         ...
 
@@ -77,8 +81,8 @@ class RecoverySandboxes(Protocol):
         """True only when the provider confirms no agent process remains.
 
         A status query: it never resumes, stops or pauses anything. Unknown is
-        False. FIXME(#1916): ``SupportsOperations.status`` has the same
-        process-local registry as ``stop_writers``.
+        False. FIXME(#1916): the same reattach gap as ``stop_writers``:
+        ``SupportsOperations.status`` answers only in the starting process.
         """
         ...
 

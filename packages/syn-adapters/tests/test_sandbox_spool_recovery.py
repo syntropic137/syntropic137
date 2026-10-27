@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import gzip
 import json
 import shlex
 from dataclasses import dataclass, field
@@ -525,14 +526,18 @@ async def _row(pool: asyncpg.Pool, source: str) -> asyncpg.Record:
 
 
 def _archived(archive: Path) -> str:
-    return "".join(
-        json.loads(path.read_bytes())["raw"]
+    """Every archived object's ``raw``, gzip-compressed or not (#2107 compresses by default)."""
+    objects = (
+        _object_bytes(path)
         for path in archive.rglob("*")
-        if path.is_file()
-        and path.suffix != ".tmp"
-        and path.stat().st_size
-        and path.read_bytes()[:1] == b"{"
+        if path.is_file() and path.suffix != ".tmp" and path.stat().st_size
     )
+    return "".join(json.loads(data)["raw"] for data in objects if data[:1] == b"{")
+
+
+def _object_bytes(path: Path) -> bytes:
+    data = path.read_bytes()
+    return gzip.decompress(data) if data[:2] == b"\x1f\x8b" else data
 
 
 @pytest.mark.integration
