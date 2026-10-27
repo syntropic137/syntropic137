@@ -7,6 +7,7 @@ interface as the production PostgreSQL store.
 See ADR-060 (docs/adrs/ADR-060-restart-safe-trigger-deduplication.md).
 """
 
+import copy
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -67,10 +68,16 @@ class InMemoryProjectionStore:
     # SELF-consistent and production-inconsistent: a read with a hostile id
     # would find its row here and find nothing in Postgres, so the one place
     # the difference shows up is a passing test for a broken query (#1241).
+    #
+    # The same goes for WHO OWNS a record. Postgres hands every read a fresh
+    # document and keeps its own copy of every write, so an edit that is never
+    # saved is lost. Sharing the stored dict with callers would let a handler
+    # that forgets to `save` pass here and lose the write in production (#2124),
+    # so every write stores, and every read returns, a detached copy.
 
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         """Save or update a projection record."""
-        self._data.setdefault(projection, {})[pg_safe(key)] = pg_safe(data.copy())
+        self._data.setdefault(projection, {})[pg_safe(key)] = pg_safe(copy.deepcopy(data))
         self._update_state(projection)
 
     async def save_if(
@@ -94,7 +101,7 @@ class InMemoryProjectionStore:
         """Get a single projection record by key."""
         if projection not in self._data:
             return None
-        return self._data[projection].get(pg_safe(key))
+        return _detached(self._data[projection].get(pg_safe(key)))
 
     async def get_many(self, projection: str, keys: Sequence[str]) -> dict[str, ProjectionRecord]:
         """The documents stored under ``keys``, by stored key, in one call (#1816).
@@ -104,13 +111,13 @@ class InMemoryProjectionStore:
         """
         stored = self._data.get(projection, {})
         found = ((pg_safe(key), stored.get(pg_safe(key))) for key in keys)
-        return {key: document for key, document in found if document is not None}
+        return {key: _detached(document) for key, document in found if document is not None}
 
     async def get_all(self, projection: str) -> list[dict[str, Any]]:
         """Get all records for a projection."""
         if projection not in self._data:
             return []
-        return list(self._data[projection].values())
+        return [_detached(record) for record in self._data[projection].values()]
 
     async def count(self, projection: str, filters: dict[str, str] | None = None) -> int:
         """Count records, with the same equality semantics the Postgres store uses.
@@ -151,7 +158,7 @@ class InMemoryProjectionStore:
         results = list(self._data[projection].values())
         results = apply_filters(results, filters)
         results = apply_sorting(results, order_by)
-        return apply_pagination(results, offset, limit)
+        return [_detached(record) for record in apply_pagination(results, offset, limit)]
 
     async def newest_per_group(
         self,
@@ -176,7 +183,7 @@ class InMemoryProjectionStore:
             flag_field=flag_field,
         )
         return {
-            group: {name: record.get(name) for name in fields}
+            group: {name: _detached(record.get(name)) for name in fields}
             for group, (_, record) in newest.items()
         }
 
@@ -186,7 +193,7 @@ class InMemoryProjectionStore:
             return []
         prefix = pg_safe(prefix)
         return [
-            (key, data.copy())
+            (key, _detached(data))
             for key, data in self._data[projection].items()
             if key.startswith(prefix)
         ][:10]
@@ -230,3 +237,8 @@ class InMemoryProjectionStore:
     def clear_projection(self, projection: str) -> None:
         """Clear data for a specific projection."""
         _clear_projection(self, projection)
+
+
+def _detached[T](value: T) -> T:
+    """A copy the caller may mutate without touching the store (#2124)."""
+    return copy.deepcopy(value)
