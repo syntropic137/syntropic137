@@ -15601,6 +15601,17 @@
               }
             ],
             "description": "The execution budget sized from host capacity and measured per-run demand, the term that bound it, and the starts admitted, running and queued in this process or the Run Queue (#1715). Omitted before startup has sized it, and when the Run Queue cannot be read."
+          },
+          "session_store": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionStoreHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Size and growth of the session archive (#2107). Omitted when the archive directory does not exist or could not be measured, and until the first background measurement completes."
           }
         },
         "additionalProperties": false,
@@ -21114,6 +21125,84 @@
         ],
         "title": "SessionResponse",
         "description": "Detailed session response.\n\nDisplay fields (``*_display``) are produced server-side so all clients\nshare identical human-readable output. Raw fields remain for programmatic\nconsumers.\n\nSee: docs/adrs/ADR-064-observability-monitor-ui.md"
+      },
+      "SessionStoreHealth": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "The archive directory, SYN_SESSION_INVENTORY_ARCHIVE_DIR."
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Measured At",
+            "description": "When the directory was walked (UTC)."
+          },
+          "stored_bytes": {
+            "type": "integer",
+            "title": "Stored Bytes",
+            "description": "Allocated bytes (st_blocks) of every file in the archive directory, as the disk sees them: compressed objects, splice references, markers and temporaries."
+          },
+          "object_count": {
+            "type": "integer",
+            "title": "Object Count",
+            "description": "Full transcript objects, compressed or not."
+          },
+          "reference_count": {
+            "type": "integer",
+            "title": "Reference Count",
+            "description": "Older revisions stored as splice references to a newer object."
+          },
+          "added_bytes_24h": {
+            "type": "integer",
+            "title": "Added Bytes 24H",
+            "description": "Current allocated bytes of objects and references first archived in the last 24 hours, by file mtime. Bytes since deleted are not counted."
+          },
+          "added_bytes_per_day_7d": {
+            "type": "integer",
+            "title": "Added Bytes Per Day 7D",
+            "description": "The same over the last 7 days, divided by 7: the daily growth rate."
+          },
+          "filesystem_free_bytes": {
+            "type": "integer",
+            "title": "Filesystem Free Bytes",
+            "description": "Bytes available on the archive's filesystem."
+          },
+          "days_until_full": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Until Full",
+            "description": "filesystem_free_bytes / added_bytes_per_day_7d; null when nothing was added in the last 7 days."
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "One line for an operator: size, growth and runway."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "path",
+          "measured_at",
+          "stored_bytes",
+          "object_count",
+          "reference_count",
+          "added_bytes_24h",
+          "added_bytes_per_day_7d",
+          "filesystem_free_bytes",
+          "days_until_full",
+          "detail"
+        ],
+        "title": "SessionStoreHealth",
+        "description": "Size and growth of the host session archive, as /health reports it (#2107).\n\nMeasured by walking the archive directory at most once per cache window,\noff the event loop. Informational: it never degrades /health."
       },
       "SessionSummaryResponse": {
         "properties": {
