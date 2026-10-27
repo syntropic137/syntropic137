@@ -81,6 +81,7 @@ AGGREGATOR_ONLY: Final[frozenset[str]] = frozenset(
 NOT_RUN_ON_FEATURE_PR: Final[dict[str, str]] = {
     "ci.yml:python-integration-tests": "runs only for PRs with base_ref == release",
     "e2e-container.yml:e2e-container": "gated on the run_full_e2e workflow_dispatch input",
+    "release-gate.yml:release-source": "release-gate.yml targets the release branch only",
     "release-gate.yml:version-check": "release-gate.yml targets the release branch only",
     "release-gate.yml:codegen-sync": "release-gate.yml targets the release branch only",
     "release-gate.yml:docker-dry-run": "release-gate.yml targets the release branch only",

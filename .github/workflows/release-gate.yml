@@ -1,10 +1,13 @@
 # =============================================================================
-# Release Gate — Pre-merge validation for main → release PRs
+# Release Gate — Pre-merge validation for PRs into release
 # =============================================================================
 #
 # Runs on PRs targeting the `release` branch. All jobs must pass before merge.
+# Two heads may open one (ADR-077): `main` (the beta-gated release) and
+# `hotfix/vX.Y.Z` (a hotfix cut from the latest release tag).
 #
 # Checks:
+#   0. Release source — the head is main or a well-formed hotfix branch
 #   1. Version consistency — all 11 package files match and are bumped
 #   2. Release notes — PR body must contain meaningful release notes
 #   3. Codegen sync — CLI types, CLI docs, API docs all match source
@@ -37,6 +40,9 @@ jobs:
   # prefix visually groups them and signals they only fire via workflow_call
   # (they appear as greyed-out entries in the Actions sidebar).
   # ---------------------------------------------------------------------------
+  release-source:
+    uses: ./.github/workflows/_check-release-source.yml
+
   version-check:
     uses: ./.github/workflows/_check-version.yml
 
@@ -107,6 +113,7 @@ jobs:
     name: Release Gate
     if: always()
     needs:
+      - release-source
       - version-check
       - changelog-check
       - codegen-sync
@@ -118,6 +125,7 @@ jobs:
     steps:
       - name: Check all gates passed
         run: |
+          echo "release-source:   ${{ needs.release-source.result }}"
           echo "version-check:    ${{ needs.version-check.result }}"
           echo "changelog-check:  ${{ needs.changelog-check.result }}"
           echo "codegen-sync:     ${{ needs.codegen-sync.result }}"
@@ -134,6 +142,7 @@ jobs:
               FAILED=1
             fi
           }
+          check "release-source"   "${{ needs.release-source.result }}"
           check "version-check"    "${{ needs.version-check.result }}"
           check "changelog-check"  "${{ needs.changelog-check.result }}"
           check "codegen-sync"     "${{ needs.codegen-sync.result }}"

@@ -1,0 +1,70 @@
+# =============================================================================
+# Check: Release Source
+# =============================================================================
+# Decides whether the PR's head may release at all (ADR-077):
+#
+#   main            the normal, beta-gated release. Refused while `release`
+#                   carries a hotfix commit main does not (forward-merge first).
+#   hotfix/vX.Y.Z   a hotfix: cut from the latest release tag, only
+#                   `git cherry-pick -x` copies of main commits plus one
+#                   version bump, exactly one patch above the release.
+#
+# Any other head is refused. The logic lives in
+# scripts/workflows/check_release_source.py, tested by
+# scripts/workflows/test_check_release_source.py.
+#
+# A hotfix also gets a secret scan of exactly the commits it adds.
+#
+# Called by: release-gate.yml
+# =============================================================================
+
+name: Check - Release Source
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  release-source:
+    name: Release Source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0  # tags, origin/main and the hotfix branch's history
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Check the head may release
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          uv run --no-project python scripts/workflows/check_release_source.py \
+            --head-ref "$HEAD_REF" --head-sha "$HEAD_SHA" --base-sha "$BASE_SHA"
+
+      # Only the commits the hotfix adds: a main -> release PR carries weeks of
+      # history whose fixtures were never scanned, and this gate must not start
+      # failing ordinary releases on them.
+      - name: Secret scan the hotfix commits
+        if: startsWith(github.head_ref, 'hotfix/')
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        # safe.directory: the container's git refuses a checkout owned by
+        # another uid, logs it, scans 0 commits and exits 0. The grep turns
+        # that silent pass into a failure.
+        run: |
+          set -o pipefail
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+            -v "$PWD:/repo" -w /repo \
+            zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --redact --no-banner --no-color --log-opts="$BASE_SHA..$HEAD_SHA" /repo 2>&1 \
+            | tee gitleaks.log
+          if grep -q ' 0 commits scanned' gitleaks.log; then
+            echo "::error::gitleaks scanned no commits"; exit 1
+          fi
