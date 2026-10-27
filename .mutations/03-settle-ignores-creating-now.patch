@@ -1,10 +1,10 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/memory_ledger.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/memory_ledger.py
-index 219f0d9ca..5aaac0dc8 100644
+index 1d06716ba..9fc2b6293 100644
 --- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/memory_ledger.py
 +++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/memory_ledger.py
-@@ -157,7 +157,6 @@ class WorkspaceMemoryLedger:
-             for workspace_id in self._leaked
-             if workspace_id not in listed
+@@ -166,7 +166,6 @@ class WorkspaceMemoryLedger:
+             if workspace_id in leaked_before
+             and workspace_id not in listed
              and workspace_id not in creating_before
 -            and workspace_id not in self._creating
          ]
