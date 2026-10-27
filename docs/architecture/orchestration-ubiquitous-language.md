@@ -1254,6 +1254,21 @@ models (`models:<sha256>`) and the scoring protocol (`scorer:<id>`). Declared,
 not observed, so a Trial that failed before any model ran still belongs to
 its Cohort. Trials never pool across Cohorts.
 
+## Declared Models
+
+The explicit model id each phase of a Trial was launched to run, as
+`model:<phase>=<id>` launch tags (`declared_models_of`). The treatment check
+compares each phase's own observed model against them; a Trial launched with
+none is not checked, and a phase declared twice with different ids can never
+match.
+
+## Image Provenance
+
+Which workspace images a Cohort's Trials ran: every distinct Image Manifest a
+phase of a counted Trial read, and how many Trials read none (absent,
+unreadable, or never provisioned). Reported beside the figures, never a part of
+the Cohort key: one Cohort may span several images.
+
 ## Trial Outcome
 
 `pass`, `fail`, `infra_error` or `pending`, derived at read time by one

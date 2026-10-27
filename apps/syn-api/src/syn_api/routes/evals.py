@@ -51,6 +51,7 @@ from syn_api.routes.eval_runs import (
     stats_response,
     variant_responses,
 )
+from syn_api.routes.eval_sets import eval_case_cohorts
 from syn_api.routes.trends import eval_trend
 from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
@@ -378,8 +379,17 @@ async def list_evals_endpoint(
 
 
 @router.get("/evals/{eval_id}", response_model=EvalDetailResponse, responses=_EVAL_RESPONSES)
-async def get_eval_endpoint(eval_id: str) -> EvalDetailResponse:
-    """One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`."""
+async def get_eval_endpoint(
+    eval_id: str,
+    k: int | None = Query(
+        None, ge=1, description="Add this eval's pass@k / pass^k in every cohort, over k trials"
+    ),
+) -> EvalDetailResponse:
+    """One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`.
+
+    With ``k``, ``cohorts`` carries the eval's trial figures in every cohort
+    it has trials in (#2108); without it, ``cohorts`` is null.
+    """
     from syn_api.prefix_resolver import resolve_or_raise
 
     await ensure_connected()
@@ -397,6 +407,7 @@ async def get_eval_endpoint(eval_id: str) -> EvalDetailResponse:
     return EvalDetailResponse(
         **row.model_dump(),
         read_model_status=await read_model_status(EvalListProjection.PROJECTION_NAME),
+        cohorts=None if k is None else await eval_case_cohorts(manager, eval_id, k),
     )
 
 

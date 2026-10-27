@@ -45,6 +45,8 @@ class EvalTag(StrEnum):
     """sha256 of the suite's declared models map: declared, so an early failure still joins."""
     SCORER = "scorer"
     """The scoring protocol id: a different judge is a different ruler."""
+    MODEL = "model"
+    """``model:<phase>=<explicit id>``, one per phase: the declared models a trial is checked against."""
     TRIAL = "trial"
 
 
@@ -58,6 +60,24 @@ def single_tag(tags: Iterable[str], prefix: EvalTag) -> str | None:
     """The one value of ``prefix``; None when it is missing or conflicting."""
     values = tag_values(tags, prefix)
     return next(iter(values)) if len(values) == 1 else None
+
+
+def declared_models_of(tags: Iterable[str]) -> dict[str, str] | None:
+    """Phase id to declared model id, from ``model:<phase>=<id>`` launch tags.
+
+    None when the run declared none (launched before the harness wrote them),
+    so the treatment check is not applied. A phase declared twice with
+    different ids maps to ``""``, which no observed model equals: a conflicting
+    declaration is a mismatch, never a pass.
+    """
+    by_phase: dict[str, set[str]] = {}
+    for value in tag_values(tags, EvalTag.MODEL):
+        phase, sep, model = value.partition("=")
+        if sep and phase and model:
+            by_phase.setdefault(phase, set()).add(model)
+    if not by_phase:
+        return None
+    return {phase: next(iter(ids)) if len(ids) == 1 else "" for phase, ids in by_phase.items()}
 
 
 @dataclass(frozen=True, order=True)

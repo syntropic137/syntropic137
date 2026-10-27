@@ -98,6 +98,8 @@ from syn_domain.contexts.orchestration import (
     ReviewVerdict,
     SideEffectStatus,
     TagSet,
+    TrialExclusion,
+    TrialOutcome,
     Verdict,
 )
 
@@ -1280,6 +1282,8 @@ class EvalRunResponse(BaseModel):
     scored_at: str | None
     judge_model: ObservedModelId | None = None
     """The model that judged the run; null for a deterministic scorer or an older score."""
+    trial_result: TrialOutcome | TrialExclusion | None = None
+    """What the run counts as in its cohort (#2108): an outcome, or why it is no trial."""
 
 
 class EvalRunListResponse(BaseModel):
@@ -1538,6 +1542,194 @@ class ReadModelStatus(BaseModel):
     )
 
 
+class _EvalTrialsModel(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class EvalBoundsResponse(_EvalTrialsModel):
+    """A figure with every infra error a fail (lower) and every one a pass (upper)."""
+
+    lower: float
+    upper: float
+    display: str
+    """e.g. ``"40% to 90%"``."""
+
+
+class EvalCohortKeyResponse(_EvalTrialsModel):
+    """The trials of one roster that share a declared treatment and scoring protocol."""
+
+    suite_version: str
+    workflow_id: str
+    workflow_version: str
+    """``""`` when unrecorded: unrecorded runs group together."""
+    models_digest: str
+    """sha256 of the suite's declared models map, from the ``models:`` launch tag."""
+    scorer_protocol: str
+
+
+class EvalCaseMetricsResponse(_EvalTrialsModel):
+    """One case's pass@k, pass^k and flakiness in one cohort (#2108).
+
+    Computed by the domain; a client never recomputes them.
+    """
+
+    eval_id: str
+    k: int
+    n: int
+    """Judged trials (pass + fail). Infra errors and pending are not in n."""
+    c: int
+    """Passing trials."""
+    pending: int
+    infra_error_count: int
+    base_mismatch_count: int
+    """Runs excluded: they started from a checkout that is not the eval's baseline."""
+    treatment_mismatch_count: int
+    """Runs excluded: a phase ran a model other than its declared one."""
+    trials_short: int
+    """Trials still to launch to reach k; in-flight trials are reserved. 0 once exhausted."""
+    exhausted: bool
+    """Infra errors reached k: the harness launches no more for this case."""
+    complete: bool
+    """At least k judged trials: the case has a conditional metric."""
+    never_launched: bool
+    pass_at_k: float | None
+    """Conditional over judged trials; null while the case is short."""
+    pass_at_k_display: str
+    pass_hat_k: float | None
+    pass_hat_k_display: str
+    flaky: bool | None
+    pass_at_k_bounds: EvalBoundsResponse
+    pass_hat_k_bounds: EvalBoundsResponse
+
+
+class EvalCaseCohortResponse(_EvalTrialsModel):
+    """One eval's figures in one cohort."""
+
+    cohort: EvalCohortKeyResponse
+    metrics: EvalCaseMetricsResponse
+
+
+class EvalRosterCaseResponse(_EvalTrialsModel):
+    eval_id: str
+    split: str | None
+    """Null when the eval carries no split tag, or conflicting ones."""
+    polarity: str | None
+    """``defect`` or ``clean``; null when untagged or conflicting."""
+
+
+class EvalSetCoverageResponse(_EvalTrialsModel):
+    """How much of the roster a cohort has judged."""
+
+    roster_size: int
+    complete: int
+    short: int
+    """Launched, but fewer than k judged trials."""
+    never_launched: int
+
+
+class EvalImageManifestResponse(_EvalTrialsModel):
+    """A workspace image's ``version.json`` as a trial's phase read it (#1913)."""
+
+    provider: str
+    provider_version: str
+    components: dict[str, str]
+    build_commit: str
+    built_at: str
+    manifest_digest: str
+    """Hash of the manifest.yaml used for the build. Not an OCI image digest."""
+
+
+class EvalSetCohortResponse(_EvalTrialsModel):
+    """One cohort's figures over one roster (#2108, plan section 7).
+
+    The means cover complete cases only and are descriptive; decisions read
+    the roster-wide bounds, where a short or never-launched case is 0 in the
+    lower bound and 1 in the upper.
+    """
+
+    cohort: EvalCohortKeyResponse
+    k: int
+    cases: list[EvalCaseMetricsResponse]
+    """One per rostered case, in roster order; a never-launched case has zero counts."""
+    coverage: EvalSetCoverageResponse
+    mean_pass_at_k: float | None
+    mean_pass_at_k_display: str
+    mean_pass_hat_k: float | None
+    mean_pass_hat_k_display: str
+    flakiness: float | None
+    """mean pass@k - mean pass^k."""
+    partial: bool
+    """The means cover fewer than every rostered case: descriptive, never a decision."""
+    flaky_cases: list[str]
+    pass_at_k_bounds: EvalBoundsResponse
+    pass_hat_k_bounds: EvalBoundsResponse
+    infra_error_count: int
+    infra_share: float | None
+    """Infra errors over resolved trials; null when nothing resolved."""
+    base_mismatch_count: int
+    treatment_mismatch_count: int
+    image_manifests: list[EvalImageManifestResponse]
+    """Every distinct image manifest the cohort's trials read."""
+    trials_without_image_manifest: int
+    """Trials no phase of which read a manifest: absent, unreadable, or never provisioned."""
+
+
+class EvalIntervalResponse(_EvalTrialsModel):
+    """A 95% paired bootstrap percentile interval on a difference in means."""
+
+    estimate: float
+    low: float
+    high: float
+
+
+class EvalSetComparisonResponse(_EvalTrialsModel):
+    """A paired A/B of the roster's two cohorts (#2108, plan section 11).
+
+    The estimand is each case's pass^k from its first k judged trials.
+    """
+
+    a: EvalCohortKeyResponse
+    b: EvalCohortKeyResponse
+    k: int
+    paired_cases: list[str]
+    short_cases: list[str]
+    """Fewer than k judged trials in either cohort: out of the pair."""
+    coverage_complete: bool
+    """Every rostered case is paired; otherwise the call is inconclusive."""
+    a_only: int
+    b_only: int
+    both: int
+    neither: int
+    mcnemar_p: float
+    """Exact two-sided McNemar p over the discordant cases; 1.0 when there are none."""
+    difference: EvalIntervalResponse | None
+    """Mean pass^k A - B over the paired cases; null when no case is paired."""
+    a_lower_minus_b_upper: EvalIntervalResponse | None
+    """Whole roster, the assignment most adverse to A."""
+    a_upper_minus_b_lower: EvalIntervalResponse | None
+
+
+class EvalSetMetricsResponse(_EvalTrialsModel):
+    """An eval set's roster and what each cohort scored over it (#2108).
+
+    Every figure comes from the domain read model at query time.
+    """
+
+    suite: str
+    version: str
+    split: str | None
+    k: int
+    roster: list[EvalRosterCaseResponse]
+    cohorts: list[EvalSetCohortResponse]
+    """One block per cohort that launched into this roster version, in key order."""
+    comparison: EvalSetComparisonResponse | None
+    """Present exactly when two cohorts launched into the roster."""
+    not_a_trial_count: int
+    """Member runs of rostered cases that belong to no cohort: attached, or launch tags missing."""
+    isolation: Literal["unproven"] = "unproven"
+    """Whether a trial could read another's results. Unproven until #2056."""
+
+
 class EvalDetailResponse(EvalResponse):
     """One eval, as `GET /evals/{eval_id}` returns it.
 
@@ -1548,6 +1740,8 @@ class EvalDetailResponse(EvalResponse):
 
     read_model_status: ReadModelStatus | None = None
     """Whether the evals read model is rebuilding."""
+    cohorts: list[EvalCaseCohortResponse] | None = None
+    """This eval's trial figures in every cohort it has trials in, when asked with ``k``."""
 
 
 class EvalListResponse(BaseModel):

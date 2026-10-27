@@ -2645,7 +2645,7 @@
           "evals"
         ],
         "summary": "Get Eval Endpoint",
-        "description": "One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`.",
+        "description": "One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`.\n\nWith ``k``, ``cohorts`` carries the eval's trial figures in every cohort\nit has trials in (#2108); without it, ``cohorts`` is null.",
         "operationId": "get_eval_endpoint_evals__eval_id__get",
         "parameters": [
           {
@@ -2656,6 +2656,25 @@
               "type": "string",
               "title": "Eval Id"
             }
+          },
+          {
+            "name": "k",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Add this eval's pass@k / pass^k in every cohort, over k trials",
+              "title": "K"
+            },
+            "description": "Add this eval's pass@k / pass^k in every cohort, over k trials"
           }
         ],
         "responses": {
@@ -2916,6 +2935,94 @@
           },
           "422": {
             "description": "The eval id is not a valid eval id"
+          }
+        }
+      }
+    },
+    "/eval-sets/metrics": {
+      "get": {
+        "tags": [
+          "evals"
+        ],
+        "summary": "Get Eval Set Metrics Endpoint",
+        "description": "pass@k, pass^k and flakiness of every cohort over one eval-set roster (#2108).\n\nOne block per cohort (suite version, workflow and version, declared\nmodels, scoring protocol), each with per-case rows, coverage, roster-wide\nbounds with infra errors and missing trials counted both ways, and the\nimages its trials ran. When exactly two cohorts launched into the roster,\na paired comparison is added. An unknown suite is an empty roster.",
+        "operationId": "get_eval_set_metrics_endpoint_eval_sets_metrics_get",
+        "parameters": [
+          {
+            "name": "suite",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The eval set: evals tagged suite:<suite>",
+              "title": "Suite"
+            },
+            "description": "The eval set: evals tagged suite:<suite>"
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The roster version: evals tagged suite-version:<version>",
+              "title": "Version"
+            },
+            "description": "The roster version: evals tagged suite-version:<version>"
+          },
+          {
+            "name": "k",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Trials per case the figures are computed over",
+              "title": "K"
+            },
+            "description": "Trials per case the figures are computed over"
+          },
+          {
+            "name": "split",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only cases of this split, e.g. holdout",
+              "title": "Split"
+            },
+            "description": "Keep only cases of this split, e.g. holdout"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalSetMetricsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
         }
       }
@@ -10943,6 +11050,208 @@
         "title": "EvalBaselineRepoResponse",
         "description": "One repository of an eval's Baseline: the ref asked for and the SHA it pinned to."
       },
+      "EvalBoundsResponse": {
+        "properties": {
+          "lower": {
+            "type": "number",
+            "title": "Lower"
+          },
+          "upper": {
+            "type": "number",
+            "title": "Upper"
+          },
+          "display": {
+            "type": "string",
+            "title": "Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lower",
+          "upper",
+          "display"
+        ],
+        "title": "EvalBoundsResponse",
+        "description": "A figure with every infra error a fail (lower) and every one a pass (upper)."
+      },
+      "EvalCaseCohortResponse": {
+        "properties": {
+          "cohort": {
+            "$ref": "#/components/schemas/EvalCohortKeyResponse"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/EvalCaseMetricsResponse"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cohort",
+          "metrics"
+        ],
+        "title": "EvalCaseCohortResponse",
+        "description": "One eval's figures in one cohort."
+      },
+      "EvalCaseMetricsResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "k": {
+            "type": "integer",
+            "title": "K"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "c": {
+            "type": "integer",
+            "title": "C"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "infra_error_count": {
+            "type": "integer",
+            "title": "Infra Error Count"
+          },
+          "base_mismatch_count": {
+            "type": "integer",
+            "title": "Base Mismatch Count"
+          },
+          "treatment_mismatch_count": {
+            "type": "integer",
+            "title": "Treatment Mismatch Count"
+          },
+          "trials_short": {
+            "type": "integer",
+            "title": "Trials Short"
+          },
+          "exhausted": {
+            "type": "boolean",
+            "title": "Exhausted"
+          },
+          "complete": {
+            "type": "boolean",
+            "title": "Complete"
+          },
+          "never_launched": {
+            "type": "boolean",
+            "title": "Never Launched"
+          },
+          "pass_at_k": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass At K"
+          },
+          "pass_at_k_display": {
+            "type": "string",
+            "title": "Pass At K Display"
+          },
+          "pass_hat_k": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pass Hat K"
+          },
+          "pass_hat_k_display": {
+            "type": "string",
+            "title": "Pass Hat K Display"
+          },
+          "flaky": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flaky"
+          },
+          "pass_at_k_bounds": {
+            "$ref": "#/components/schemas/EvalBoundsResponse"
+          },
+          "pass_hat_k_bounds": {
+            "$ref": "#/components/schemas/EvalBoundsResponse"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eval_id",
+          "k",
+          "n",
+          "c",
+          "pending",
+          "infra_error_count",
+          "base_mismatch_count",
+          "treatment_mismatch_count",
+          "trials_short",
+          "exhausted",
+          "complete",
+          "never_launched",
+          "pass_at_k",
+          "pass_at_k_display",
+          "pass_hat_k",
+          "pass_hat_k_display",
+          "flaky",
+          "pass_at_k_bounds",
+          "pass_hat_k_bounds"
+        ],
+        "title": "EvalCaseMetricsResponse",
+        "description": "One case's pass@k, pass^k and flakiness in one cohort (#2108).\n\nComputed by the domain; a client never recomputes them."
+      },
+      "EvalCohortKeyResponse": {
+        "properties": {
+          "suite_version": {
+            "type": "string",
+            "title": "Suite Version"
+          },
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "workflow_version": {
+            "type": "string",
+            "title": "Workflow Version"
+          },
+          "models_digest": {
+            "type": "string",
+            "title": "Models Digest"
+          },
+          "scorer_protocol": {
+            "type": "string",
+            "title": "Scorer Protocol"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "suite_version",
+          "workflow_id",
+          "workflow_version",
+          "models_digest",
+          "scorer_protocol"
+        ],
+        "title": "EvalCohortKeyResponse",
+        "description": "The trials of one roster that share a declared treatment and scoring protocol."
+      },
       "EvalCreatedResponse": {
         "properties": {
           "eval_id": {
@@ -11136,6 +11445,20 @@
                 "type": "null"
               }
             ]
+          },
+          "cohorts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EvalCaseCohortResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cohorts"
           }
         },
         "type": "object",
@@ -11161,6 +11484,74 @@
         "type": "string",
         "title": "EvalId",
         "description": "The identity of one eval, and the id of its stream."
+      },
+      "EvalImageManifestResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "provider_version": {
+            "type": "string",
+            "title": "Provider Version"
+          },
+          "components": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Components"
+          },
+          "build_commit": {
+            "type": "string",
+            "title": "Build Commit"
+          },
+          "built_at": {
+            "type": "string",
+            "title": "Built At"
+          },
+          "manifest_digest": {
+            "type": "string",
+            "title": "Manifest Digest"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "provider_version",
+          "components",
+          "build_commit",
+          "built_at",
+          "manifest_digest"
+        ],
+        "title": "EvalImageManifestResponse",
+        "description": "A workspace image's ``version.json`` as a trial's phase read it (#1913)."
+      },
+      "EvalIntervalResponse": {
+        "properties": {
+          "estimate": {
+            "type": "number",
+            "title": "Estimate"
+          },
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "estimate",
+          "low",
+          "high"
+        ],
+        "title": "EvalIntervalResponse",
+        "description": "A 95% paired bootstrap percentile interval on a difference in means."
       },
       "EvalListResponse": {
         "properties": {
@@ -11363,6 +11754,44 @@
         ],
         "title": "EvalResponse",
         "description": "An eval as the eval read model holds it, with its run tally (#967)."
+      },
+      "EvalRosterCaseResponse": {
+        "properties": {
+          "eval_id": {
+            "type": "string",
+            "title": "Eval Id"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split"
+          },
+          "polarity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Polarity"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eval_id",
+          "split",
+          "polarity"
+        ],
+        "title": "EvalRosterCaseResponse"
       },
       "EvalRunListResponse": {
         "properties": {
@@ -11575,6 +12004,20 @@
               }
             ],
             "title": "Judge Model"
+          },
+          "trial_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrialOutcome"
+              },
+              {
+                "$ref": "#/components/schemas/TrialExclusion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Result"
           }
         },
         "type": "object",
@@ -11792,6 +12235,351 @@
         ],
         "title": "EvalRunStatsResponse",
         "description": "How long a set of an eval's runs took and what it cost, over EVERY run in the set.\n\nMedians, not means: one runaway run should not make a variant look slow."
+      },
+      "EvalSetCohortResponse": {
+        "properties": {
+          "cohort": {
+            "$ref": "#/components/schemas/EvalCohortKeyResponse"
+          },
+          "k": {
+            "type": "integer",
+            "title": "K"
+          },
+          "cases": {
+            "items": {
+              "$ref": "#/components/schemas/EvalCaseMetricsResponse"
+            },
+            "type": "array",
+            "title": "Cases"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/EvalSetCoverageResponse"
+          },
+          "mean_pass_at_k": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Pass At K"
+          },
+          "mean_pass_at_k_display": {
+            "type": "string",
+            "title": "Mean Pass At K Display"
+          },
+          "mean_pass_hat_k": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Pass Hat K"
+          },
+          "mean_pass_hat_k_display": {
+            "type": "string",
+            "title": "Mean Pass Hat K Display"
+          },
+          "flakiness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flakiness"
+          },
+          "partial": {
+            "type": "boolean",
+            "title": "Partial"
+          },
+          "flaky_cases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Flaky Cases"
+          },
+          "pass_at_k_bounds": {
+            "$ref": "#/components/schemas/EvalBoundsResponse"
+          },
+          "pass_hat_k_bounds": {
+            "$ref": "#/components/schemas/EvalBoundsResponse"
+          },
+          "infra_error_count": {
+            "type": "integer",
+            "title": "Infra Error Count"
+          },
+          "infra_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infra Share"
+          },
+          "base_mismatch_count": {
+            "type": "integer",
+            "title": "Base Mismatch Count"
+          },
+          "treatment_mismatch_count": {
+            "type": "integer",
+            "title": "Treatment Mismatch Count"
+          },
+          "image_manifests": {
+            "items": {
+              "$ref": "#/components/schemas/EvalImageManifestResponse"
+            },
+            "type": "array",
+            "title": "Image Manifests"
+          },
+          "trials_without_image_manifest": {
+            "type": "integer",
+            "title": "Trials Without Image Manifest"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cohort",
+          "k",
+          "cases",
+          "coverage",
+          "mean_pass_at_k",
+          "mean_pass_at_k_display",
+          "mean_pass_hat_k",
+          "mean_pass_hat_k_display",
+          "flakiness",
+          "partial",
+          "flaky_cases",
+          "pass_at_k_bounds",
+          "pass_hat_k_bounds",
+          "infra_error_count",
+          "infra_share",
+          "base_mismatch_count",
+          "treatment_mismatch_count",
+          "image_manifests",
+          "trials_without_image_manifest"
+        ],
+        "title": "EvalSetCohortResponse",
+        "description": "One cohort's figures over one roster (#2108, plan section 7).\n\nThe means cover complete cases only and are descriptive; decisions read\nthe roster-wide bounds, where a short or never-launched case is 0 in the\nlower bound and 1 in the upper."
+      },
+      "EvalSetComparisonResponse": {
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/EvalCohortKeyResponse"
+          },
+          "b": {
+            "$ref": "#/components/schemas/EvalCohortKeyResponse"
+          },
+          "k": {
+            "type": "integer",
+            "title": "K"
+          },
+          "paired_cases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Paired Cases"
+          },
+          "short_cases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Short Cases"
+          },
+          "coverage_complete": {
+            "type": "boolean",
+            "title": "Coverage Complete"
+          },
+          "a_only": {
+            "type": "integer",
+            "title": "A Only"
+          },
+          "b_only": {
+            "type": "integer",
+            "title": "B Only"
+          },
+          "both": {
+            "type": "integer",
+            "title": "Both"
+          },
+          "neither": {
+            "type": "integer",
+            "title": "Neither"
+          },
+          "mcnemar_p": {
+            "type": "number",
+            "title": "Mcnemar P"
+          },
+          "difference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalIntervalResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "a_lower_minus_b_upper": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalIntervalResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "a_upper_minus_b_lower": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalIntervalResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "a",
+          "b",
+          "k",
+          "paired_cases",
+          "short_cases",
+          "coverage_complete",
+          "a_only",
+          "b_only",
+          "both",
+          "neither",
+          "mcnemar_p",
+          "difference",
+          "a_lower_minus_b_upper",
+          "a_upper_minus_b_lower"
+        ],
+        "title": "EvalSetComparisonResponse",
+        "description": "A paired A/B of the roster's two cohorts (#2108, plan section 11).\n\nThe estimand is each case's pass^k from its first k judged trials."
+      },
+      "EvalSetCoverageResponse": {
+        "properties": {
+          "roster_size": {
+            "type": "integer",
+            "title": "Roster Size"
+          },
+          "complete": {
+            "type": "integer",
+            "title": "Complete"
+          },
+          "short": {
+            "type": "integer",
+            "title": "Short"
+          },
+          "never_launched": {
+            "type": "integer",
+            "title": "Never Launched"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "roster_size",
+          "complete",
+          "short",
+          "never_launched"
+        ],
+        "title": "EvalSetCoverageResponse",
+        "description": "How much of the roster a cohort has judged."
+      },
+      "EvalSetMetricsResponse": {
+        "properties": {
+          "suite": {
+            "type": "string",
+            "title": "Suite"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split"
+          },
+          "k": {
+            "type": "integer",
+            "title": "K"
+          },
+          "roster": {
+            "items": {
+              "$ref": "#/components/schemas/EvalRosterCaseResponse"
+            },
+            "type": "array",
+            "title": "Roster"
+          },
+          "cohorts": {
+            "items": {
+              "$ref": "#/components/schemas/EvalSetCohortResponse"
+            },
+            "type": "array",
+            "title": "Cohorts"
+          },
+          "comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvalSetComparisonResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "not_a_trial_count": {
+            "type": "integer",
+            "title": "Not A Trial Count"
+          },
+          "isolation": {
+            "type": "string",
+            "const": "unproven",
+            "title": "Isolation",
+            "default": "unproven"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "suite",
+          "version",
+          "split",
+          "k",
+          "roster",
+          "cohorts",
+          "comparison",
+          "not_a_trial_count"
+        ],
+        "title": "EvalSetMetricsResponse",
+        "description": "An eval set's roster and what each cohort scored over it (#2108).\n\nEvery figure comes from the domain read model at query time."
       },
       "EvalTrendPointResponse": {
         "properties": {
@@ -23360,6 +24148,27 @@
         ],
         "title": "TranscriptRevocationResponse",
         "description": "Access to the exact bytes is withheld; stored bytes are retained."
+      },
+      "TrialExclusion": {
+        "type": "string",
+        "enum": [
+          "not_a_trial",
+          "base_mismatch",
+          "treatment_mismatch"
+        ],
+        "title": "TrialExclusion",
+        "description": "Why a member run is not counted as a trial. Exclusions are counted, never dropped."
+      },
+      "TrialOutcome": {
+        "type": "string",
+        "enum": [
+          "pass",
+          "fail",
+          "infra_error",
+          "pending"
+        ],
+        "title": "TrialOutcome",
+        "description": "What a trial says about the agent. Distinct from the scorer's Verdict."
       },
       "TriggerActionResponse": {
         "properties": {
