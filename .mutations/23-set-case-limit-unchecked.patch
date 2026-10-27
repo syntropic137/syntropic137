@@ -1,10 +1,10 @@
 diff --git a/apps/syn-api/src/syn_api/routes/eval_sets.py b/apps/syn-api/src/syn_api/routes/eval_sets.py
-index 25d05cec8..4d08a3a62 100644
+index 986acb5e1..5a78a90f1 100644
 --- a/apps/syn-api/src/syn_api/routes/eval_sets.py
 +++ b/apps/syn-api/src/syn_api/routes/eval_sets.py
-@@ -201,7 +201,7 @@ async def eval_set_summary(
-     """
-     tags = [f"{EvalTag.SUITE}:{suite}", f"{EvalTag.SUITE_VERSION}:{version}"]
+@@ -204,7 +204,7 @@ async def eval_set_summary(
+         # In the query, so the case limit counts the split's cases, not the suite's.
+         tags.append(f"{EvalTag.SPLIT}:{split}")
      evals = await manager.eval_list.page(tags=tags, limit=MAX_EVAL_SET_CASES)
 -    if evals.total > MAX_EVAL_SET_CASES:
 +    if False:

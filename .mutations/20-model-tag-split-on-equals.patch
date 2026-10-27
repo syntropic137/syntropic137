@@ -1,13 +1,13 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
-index 7bacc46f8..5875c6f3c 100644
+index 3529a26ff..afe6bcf55 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
-@@ -113,7 +113,7 @@ def declared_models_of(tags: Iterable[str]) -> dict[str, str] | None:
+@@ -146,7 +146,7 @@ def declared_models_of(tags: Iterable[str]) -> dict[str, str] | None:
      """
      by_phase: dict[str, set[str]] = {}
      for value in tag_values(tags, EvalTag.MODEL):
--        phase, sep, model = value.partition(":")
-+        phase, sep, model = value.partition("=")
+-        raw_phase, sep, raw_model = value.partition(":")
++        raw_phase, sep, raw_model = value.partition("=")
+         phase, model = decode_tag_value(raw_phase), decode_tag_value(raw_model)
          if sep and phase and model:
              by_phase.setdefault(phase, set()).add(model)
-     if not by_phase:

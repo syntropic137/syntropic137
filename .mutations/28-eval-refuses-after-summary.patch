@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/evals.py b/apps/syn-api/src/syn_api/routes/evals.py
+index 9890bde85..55bab3fd4 100644
+--- a/apps/syn-api/src/syn_api/routes/evals.py
++++ b/apps/syn-api/src/syn_api/routes/evals.py
+@@ -400,7 +400,7 @@ async def get_eval_endpoint(
+         raise HTTPException(status_code=404, detail=f"Eval not found: {eval_id}")
+     if k is not None:
+         # Before the summary below loads every run, not after.
+-        refuse_oversized_eval(eval_id, detail.runs.total)
++        pass
+     row = _response(
+         detail.record,
+         detail.runs.total,

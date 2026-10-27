@@ -27,3 +27,9 @@
 | 23-set-case-limit-unchecked.patch | `apps/syn-api/src/syn_api/routes/eval_sets.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
 | 24-set-run-limit-unchecked.patch | `apps/syn-api/src/syn_api/routes/eval_sets.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
 | 25-eval-run-limit-unchecked.patch | `apps/syn-api/src/syn_api/routes/eval_sets.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
+| 26-model-tag-not-encoded.patch | `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py` | `packages/syn-domain/tests/contexts/orchestration/test_2108_declared_models_and_images.py` | killed |
+| 27-model-tag-not-decoded.patch | `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py` | `packages/syn-domain/tests/contexts/orchestration/test_2108_declared_models_and_images.py` | killed |
+| 28-eval-refuses-after-summary.patch | `apps/syn-api/src/syn_api/routes/evals.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
+| 29-set-reads-every-score.patch | `apps/syn-api/src/syn_api/routes/eval_sets.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
+| 30-summary-reads-every-score.patch | `apps/syn-api/src/syn_api/routes/eval_runs.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
+| 31-split-not-in-roster-query.patch | `apps/syn-api/src/syn_api/routes/eval_sets.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
