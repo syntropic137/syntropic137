@@ -133,27 +133,60 @@ async def test_an_oversize_request_at_the_head_holds_back_later_smalls_then_runs
     assert ledger.reserved_mb == 0
 
 
-async def test_a_leaked_reservation_stays_charged_until_settled() -> None:
+_NONE: frozenset[str] = frozenset()
+
+
+async def test_a_leaked_reservation_stays_charged_until_shown_absent() -> None:
     ledger = WorkspaceMemoryLedger(8192)
     reservation = await ledger.reserve(4096, workspace_id="ws")
 
-    reservation.leak("exec-1", workspace_id="ws", reason="teardown failed")
+    reservation.leak("exec-1", reason="teardown failed")
     reservation.release()  # final: a leak is not undone by a later release
 
     assert ledger.reserved_mb == 4096
-    assert ledger.settle_leaked("exec-other") == 0
-    assert ledger.settle_leaked("exec-1") == 4096
+    assert ledger.settle_absent(frozenset({"ws"}), _NONE) == 0, "still listed"
+    assert ledger.settle_absent(_NONE, _NONE) == 4096
     assert ledger.reserved_mb == 0
     assert ledger.leaked_mb == 0
 
 
+async def test_a_leak_with_a_create_in_flight_is_not_settled() -> None:
+    ledger = WorkspaceMemoryLedger(8192)
+    reservation = await ledger.reserve(4096, workspace_id="ws")
+    reservation.create_started()
+    reservation.leak("exec-1", reason="create abandoned")
+
+    assert ledger.settle_absent(_NONE, _NONE) == 0, "the create may yet make a container"
+    reservation.create_ended()
+    assert ledger.settle_absent(_NONE, _NONE) == 4096
+
+
+async def test_a_create_in_flight_when_the_listing_started_blocks_settling() -> None:
+    """It ended mid-listing, so the listing may have missed the container it made."""
+    ledger = WorkspaceMemoryLedger(8192)
+    reservation = await ledger.reserve(4096, workspace_id="ws")
+    reservation.leak("exec-1", reason="create abandoned")
+
+    assert ledger.settle_absent(_NONE, frozenset({"ws"})) == 0
+    assert ledger.leaked_mb == 4096
+
+
+async def test_settling_one_leak_leaves_the_listed_one_charged() -> None:
+    ledger = WorkspaceMemoryLedger(8192)
+    (await ledger.reserve(4096, workspace_id="gone")).leak("exec-1", reason="x")
+    (await ledger.reserve(4096, workspace_id="alive")).leak("exec-1", reason="x")
+
+    assert ledger.settle_absent(frozenset({"alive"}), _NONE) == 4096
+    assert ledger.leaked() == frozenset({"alive"})
+
+
 async def test_settling_a_leak_admits_the_waiter_it_was_blocking() -> None:
     ledger = WorkspaceMemoryLedger(4096)
-    (await ledger.reserve(4096, workspace_id="ws")).leak("exec-1", workspace_id="ws", reason="x")
+    (await ledger.reserve(4096, workspace_id="ws")).leak("exec-1", reason="x")
     waiter = asyncio.create_task(ledger.reserve(4096, workspace_id="next"))
     await _settle()
     assert not waiter.done()
 
-    ledger.settle_leaked("exec-1")
+    ledger.settle_absent(_NONE, _NONE)
 
     (await asyncio.wait_for(waiter, timeout=1)).release()

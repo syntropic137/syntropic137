@@ -20,7 +20,6 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from syn_adapters.execution_host import AggregateRunInterrupter, ExecutionHost
-from syn_adapters.execution_host.ledger_settling_reaper import LedgerSettlingReaper
 from syn_adapters.storage.repositories import (
     get_execution_event_stream,
     get_workflow_execution_repository,
@@ -32,7 +31,6 @@ from syn_adapters.workspace_backends.host_labels import (
 )
 from syn_api._wiring import get_execution_processor, get_execution_run_queue
 from syn_api._wiring_admission import get_execution_budget
-from syn_api._wiring_workspace_memory import get_workspace_memory_ledger
 from syn_api.services.dead_host_reaper import DockerDeadHostReaper
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -108,9 +106,7 @@ async def start_execution_host() -> None:
         # limit the in-process claim path enforces.
         capacity=get_execution_budget().limit,
         drainer=await get_execution_processor(),
-        # okrs-51p.30: the reap that proves a run's containers gone also frees
-        # the workspace memory a failed teardown left charged.
-        reaper=LedgerSettlingReaper(reaper, get_workspace_memory_ledger(), host.host_id),
+        reaper=reaper,
         interrupter=AggregateRunInterrupter(get_workflow_execution_repository()),
         streams=get_execution_event_stream(),
     )

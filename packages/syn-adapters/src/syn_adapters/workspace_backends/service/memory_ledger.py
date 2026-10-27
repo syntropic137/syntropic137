@@ -29,18 +29,18 @@ memory, so it runs alone rather than never.
 Per process and not durable, for the same reason as the budget: what it holds
 is the workspaces alive in THIS process, which a restart loses along with them.
 
-RELEASED ONLY WHEN THE CONTAINER IS SHOWN GONE. A teardown that failed, or was
-interrupted, leaves a container that may still be using its memory, so its
-reservation is LEAKED, not released: it stays charged, logged at ERROR, and is
-settled only by the paths that already prove a run's resources gone. With the
-Run Queue on, that is the host's labelled reap (``RunReaper.reap`` returning
-True for this host and execution, ADR-072 D3/D5), wired through
-``LedgerSettlingReaper``. With it off, it is the startup reap
-(``cleanup_orphaned_containers``): it removes every orphaned workspace before
-this process admits anything, and the ledger it starts with is empty. Holding
-memory for a container that may be dead is the conservative failure; freeing
-memory a live container still uses is the over-commit this module exists to
-prevent.
+RELEASED ONLY WHEN THE CONTAINER IS SHOWN GONE. A clean teardown of a named
+container is that proof, and releases at once. Anything else LEAKS the
+reservation instead: it stays charged, logged at ERROR, until the
+``WorkspaceMemoryReconciler`` settles it. That covers a teardown that failed
+or was interrupted, a create that raised (a backend may have made the
+container and failed to remove it), and a create that was cancelled (the
+``docker run`` it started carries on). The reconciler is the ONE path that
+settles a leak, with the Run Queue on or off: it frees a workspace's memory
+only when no container labelled with its ``syn.workspace_id`` is listed AND
+no create for it is in flight. Holding memory for a container that may be
+dead is the conservative failure; freeing memory a live container still uses
+is the over-commit this module exists to prevent.
 """
 
 from __future__ import annotations
@@ -61,9 +61,10 @@ class _Waiter:
 class LedgerReservation:
     """One workspace's share of the ledger. ``release`` and ``leak`` are idempotent, and final."""
 
-    def __init__(self, ledger: WorkspaceMemoryLedger, memory_mb: int) -> None:
+    def __init__(self, ledger: WorkspaceMemoryLedger, memory_mb: int, workspace_id: str) -> None:
         self._ledger = ledger
         self.memory_mb = memory_mb
+        self.workspace_id = workspace_id
         self._settled = False
 
     def release(self) -> None:
@@ -73,22 +74,30 @@ class LedgerReservation:
         self._settled = True
         self._ledger._give_back(self.memory_mb)
 
-    def leak(self, execution_id: str, *, workspace_id: str, reason: str) -> None:
-        """The container may still be running: keep its memory charged until a reap shows it gone."""
+    def leak(self, execution_id: str, *, reason: str) -> None:
+        """The container may still exist: keep its memory charged until the reconciler shows it gone."""
         if self._settled:
             return
         self._settled = True
-        self._ledger._hold_leaked(execution_id, self.memory_mb)
+        self._ledger._hold_leaked(self.workspace_id, self.memory_mb)
         logger.error(
-            "Workspace %s of %s may still be running (%s); its %d MB stay charged until a "
-            "reap shows it gone. %d MB of %d are held for possibly-live containers.",
-            workspace_id,
+            "Workspace %s of %s may still exist (%s); its %d MB stay charged until no "
+            "container of it is listed. %d MB of %d are held for possibly-live containers.",
+            self.workspace_id,
             execution_id,
             reason,
             self.memory_mb,
             self._ledger.leaked_mb,
             self._ledger.capacity_mb,
         )
+
+    def create_started(self) -> None:
+        """A create for this workspace is running: no listing can show it gone until it ends."""
+        self._ledger._creating.add(self.workspace_id)
+
+    def create_ended(self) -> None:
+        """The create, and any removal of what it made, has finished."""
+        self._ledger._creating.discard(self.workspace_id)
 
 
 class WorkspaceMemoryLedger:
@@ -102,8 +111,10 @@ class WorkspaceMemoryLedger:
         self._reserved_mb = 0
         self._holders = 0
         self._waiting: list[_Waiter] = []
-        #: execution id -> MB held for its containers that may still be running.
-        self._leaked: dict[str, list[int]] = {}
+        #: workspace id -> MB held for a container that may still exist.
+        self._leaked: dict[str, int] = {}
+        #: Workspaces whose create has started and not yet ended.
+        self._creating: set[str] = set()
 
     @property
     def capacity_mb(self) -> int:
@@ -121,26 +132,47 @@ class WorkspaceMemoryLedger:
 
     @property
     def leaked_mb(self) -> int:
-        """Memory held for containers whose teardown was not shown to complete."""
-        return sum(sum(held) for held in self._leaked.values())
+        """Memory held for containers not yet shown gone."""
+        return sum(self._leaked.values())
 
-    def settle_leaked(self, execution_id: str) -> int:
-        """A reap showed every resource of ``execution_id`` gone: free what it leaked.
+    def leaked(self) -> frozenset[str]:
+        """The workspaces whose memory waits on the reconciler."""
+        return frozenset(self._leaked)
 
-        Returns the MB freed. Only a path that PROVES the containers gone may
-        call this; see the module docstring.
+    def creating(self) -> frozenset[str]:
+        """The workspaces with a create in flight."""
+        return frozenset(self._creating)
+
+    def settle_absent(self, listed: frozenset[str], creating_before: frozenset[str]) -> int:
+        """Free each leak whose container is shown gone. Returns the MB freed.
+
+        ``listed`` is every workspace id a listing found a container for, and
+        ``creating_before`` the creates in flight when that listing STARTED: a
+        create that ended after it could have made a container the listing
+        missed. A leak is settled only when its workspace is in neither, and
+        has no create in flight now.
         """
-        held = self._leaked.pop(execution_id, [])
-        for memory_mb in held:
+        settled = [
+            workspace_id
+            for workspace_id in self._leaked
+            if workspace_id not in listed
+            and workspace_id not in creating_before
+            and workspace_id not in self._creating
+        ]
+        freed = 0
+        for workspace_id in settled:
+            memory_mb = self._leaked.pop(workspace_id)
+            freed += memory_mb
             self._give_back(memory_mb)
-        if held:
             logger.warning(
-                "Reap showed %s's leaked workspaces gone: %d MB returned", execution_id, sum(held)
+                "No container of workspace %s is listed: its %d MB are returned",
+                workspace_id,
+                memory_mb,
             )
-        return sum(held)
+        return freed
 
-    def _hold_leaked(self, execution_id: str, memory_mb: int) -> None:
-        self._leaked.setdefault(execution_id, []).append(memory_mb)
+    def _hold_leaked(self, workspace_id: str, memory_mb: int) -> None:
+        self._leaked[workspace_id] = memory_mb
 
     async def reserve(self, memory_mb: int, *, workspace_id: str) -> LedgerReservation:
         """Wait for ``memory_mb`` to be free, then hold it until the reservation is released.
@@ -169,7 +201,7 @@ class WorkspaceMemoryLedger:
             elif waiter.granted.done() and not waiter.granted.cancelled():
                 self._give_back(memory_mb)
             raise
-        return LedgerReservation(self, memory_mb)
+        return LedgerReservation(self, memory_mb, workspace_id)
 
     def _fits(self, memory_mb: int) -> bool:
         return self._holders == 0 or self._reserved_mb + memory_mb <= self._capacity_mb

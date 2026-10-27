@@ -60,6 +60,10 @@ from syn_api.services.workspace_dir_reclaim import (
     start_workspace_reclaim,
     stop_workspace_reclaim,
 )
+from syn_api.services.workspace_memory_reconcile import (
+    start_workspace_memory_reconciler,
+    stop_workspace_memory_reconciler,
+)
 from syn_api.types import (
     DbPoolHealth,
     Err,
@@ -213,6 +217,9 @@ async def _init_degradable_services(state: LifecycleState) -> None:
     # narrowing it; the started_before cutoff below is defence in depth.
     role = current_role()
     await resolve_previous_world(role, started_before=datetime.now(UTC))
+    # okrs-51p.30: every role, flag on or off - the one path that frees
+    # workspace memory a teardown could not show free.
+    start_workspace_memory_reconciler()
 
     for entry in role_services(_SERVICE_REGISTRY, role):
         try:
@@ -317,6 +324,7 @@ async def shutdown() -> Result[None, LifecycleError]:
     try:
         _state._shutting_down = True
         await stop_execution_host()
+        await stop_workspace_memory_reconciler()
 
         if _state._recovery_task is not None:
             _state._recovery_task.cancel()

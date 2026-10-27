@@ -31,6 +31,7 @@ from syn_adapters.workspace_backends.service.workspace_lifecycle import (
     build_isolation_config,
     cleanup_workspace,
     create_workspace_aggregate,
+    finish_abandoned_create,
     provision_workspace,
 )
 from syn_domain.contexts.orchestration import (
@@ -168,17 +169,26 @@ def _not_shown_gone(
 ) -> str | None:
     """Why this workspace's container cannot be shown gone, or None when it can.
 
-    No container: ``create`` raised, which the backend reports as nothing
-    created - unless a cancel interrupted it, when one may exist unnamed.
-    A container: gone only when teardown ran to the end and reported no failure.
+    Only a clean teardown of a NAMED container is proof. A create that never
+    started made nothing. A create that raised or was abandoned names nothing,
+    yet the backend may have made a container and failed to remove it, so the
+    memory reconciler decides from a listing (Codex on #2148).
     """
     if isolation_handle is None:
-        return "create was interrupted" if track.create_interrupted else None
+        if track.create is None:
+            return None
+        if track.still_creating():
+            return "create was abandoned while running"
+        return "create named no container"
     if teardown is None:
         return "teardown was interrupted"
     if teardown.failure is not None:
         return f"teardown failed: {teardown.failure.kind}: {teardown.failure.message}"
     return None
+
+
+def _nothing() -> None:
+    pass
 
 
 def _refuse_credentials_under(
@@ -624,7 +634,6 @@ class WorkspaceService:
     def _settle_reservation(
         reservation: LedgerReservation,
         execution_id: str,
-        workspace_id: str,
         track: ProvisionTrack,
         isolation_handle: IsolationHandle | None,
         teardown: IsolationTeardown | None,
@@ -634,7 +643,7 @@ class WorkspaceService:
         if reason is None:
             reservation.release()
         else:
-            reservation.leak(execution_id, workspace_id=workspace_id, reason=reason)
+            reservation.leak(execution_id, reason=reason)
 
     async def _reserve_memory(self, memory_mb: int, workspace_id: str) -> LedgerReservation | None:
         """Hold ``memory_mb`` of this process's workspace memory, waiting if it is taken."""
@@ -723,6 +732,10 @@ class WorkspaceService:
         sidecar_handle: SidecarHandle | None = None
         workspace: ManagedWorkspace | None = None
         track = ProvisionTrack()
+        if reservation is not None:
+            # Until the create and whatever removes its container are over,
+            # no listing can show this workspace gone.
+            reservation.create_started()
 
         try:
             isolation_handle, sidecar_handle, image_manifest = await provision_workspace(
@@ -767,7 +780,18 @@ class WorkspaceService:
             # The handle as soon as the container existed, not only once
             # provisioning returned: a sidecar that failed to start used to
             # leave the container undestroyed (okrs-51p.30, Codex on #2148).
-            isolation_handle = isolation_handle or track.isolation
+            isolation_handle = isolation_handle or track.created()
+            if track.create is not None and track.still_creating():
+                # Cancelled mid-create: the `docker run` carries on. See it
+                # through and destroy what it makes, off this frame.
+                finish_abandoned_create(
+                    self,
+                    track.create,
+                    execution_id=execution_id,
+                    on_end=reservation.create_ended if reservation is not None else _nothing,
+                )
+            elif reservation is not None:
+                reservation.create_ended()
             teardown: IsolationTeardown | None = None
             try:
                 if workspace is not None:
@@ -787,7 +811,7 @@ class WorkspaceService:
                 # The memory is the container's until it is SHOWN gone.
                 if reservation is not None:
                     self._settle_reservation(
-                        reservation, execution_id, workspace_id, track, isolation_handle, teardown
+                        reservation, execution_id, track, isolation_handle, teardown
                     )
             # Handed back on the object every caller still holds after
             # `__aexit__`, so the frame that knows the session can record it.

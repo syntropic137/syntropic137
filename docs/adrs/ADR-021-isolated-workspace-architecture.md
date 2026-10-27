@@ -867,13 +867,19 @@ run at once by the same factor (docs/north-star.md).
    SYN_WORKSPACE_MEMORY_LIMIT_MB` before its container is created, and returns it
    after teardown. Default workspaces never wait on it; a 16 GB phase waits for
    four default shares. FIFO, no barging; a request larger than the whole ledger
-   runs alone. Memory is returned only when teardown shows the container gone.
-   A failed or interrupted teardown (or a cancel mid-`create`) leaks the
-   reservation: it stays charged and is logged at ERROR until an existing reap
-   proves the container gone - `RunReaper.reap` for this host and execution with
-   the Run Queue on (`LedgerSettlingReaper`), the startup reap before a fresh
-   ledger with it off. Holding memory for a dead container costs capacity;
-   freeing it for a live one over-commits the host.
+   runs alone. Local Docker only: an E2B sandbox spends none of this host's
+   memory. Memory is returned at once only when a clean teardown shows a named
+   container gone. Anything else - a failed or interrupted teardown, a `create`
+   that raised (the backend may have made a container and failed to remove it),
+   a `create` that was cancelled (its `docker run` carries on) - leaks the
+   reservation: it stays charged, logged at ERROR. The one path that settles a
+   leak, Run Queue on or off, is `WorkspaceMemoryReconciler`: every 30 s it
+   lists containers by `syn.workspace_id` and frees a leak only when none is
+   listed AND no create for it was in flight when the listing started or is
+   now. A cancelled create is shielded, not abandoned: it runs to its end and
+   whatever it made is destroyed before its in-flight mark clears. A listing
+   that fails settles nothing. Holding memory for a dead container costs
+   capacity; freeing it for a live one over-commits the host.
 4. **Recorded in the domain.** The request is part of what an execution IS, so it
    lives here, not in agentic-workspace: on the template event, pinned on
    `WorkflowExecutionStarted.pinned_phases`, and the effective limit on

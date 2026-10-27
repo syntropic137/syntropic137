@@ -31,6 +31,8 @@ from syn_domain.contexts.orchestration import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from syn_adapters.workspace_backends.service.workspace_service import (
         WorkspaceService,
         WorkspaceServiceConfig,
@@ -202,10 +204,62 @@ class ProvisionTrack:
     and reads it in its ``finally``.
     """
 
-    isolation: IsolationHandle | None = None
-    #: A cancel arrived while ``create`` was awaited: a container may exist
-    #: that no handle names, so its memory cannot be shown free.
-    create_interrupted: bool = False
+    #: The backend's ``create``, run as its own task and shielded: a cancel of
+    #: the provision does not stop a ``docker run`` that is already under way,
+    #: so the create is left to finish and the caller removes what it made.
+    create: asyncio.Future[IsolationHandle] | None = None
+
+    def created(self) -> IsolationHandle | None:
+        """The container ``create`` named, once it has; None while running or when it raised."""
+        done = self.create is not None and self.create.done() and not self.create.cancelled()
+        if not done or self.create is None or self.create.exception() is not None:
+            return None
+        return self.create.result()
+
+    def still_creating(self) -> bool:
+        """The create was left running by a cancel, and may yet make a container."""
+        return self.create is not None and not self.create.done()
+
+
+#: Abandoned creates being seen through: the loop holds tasks weakly.
+_ABANDONED_CREATES: set[asyncio.Task[None]] = set()
+
+
+def finish_abandoned_create(
+    service: WorkspaceService,
+    create: asyncio.Future[IsolationHandle],
+    *,
+    execution_id: str,
+    on_end: Callable[[], None],
+) -> None:
+    """Let a create the caller stopped waiting for finish, then destroy what it made.
+
+    ``on_end`` runs only once that is over, so the memory reconciler never
+    reads "no container" while one may still appear. A destroy that fails
+    leaves the container listed, which keeps its memory charged.
+    """
+
+    async def finish() -> None:
+        try:
+            handle = await create
+        except Exception:
+            # The backend's own failure path removes what it made, or leaves
+            # it listed; either way the listing decides.
+            logger.warning("Abandoned create for execution %s raised", execution_id, exc_info=True)
+        else:
+            teardown = await _destroy_isolation(service, handle)
+            if teardown.failure is not None:
+                logger.error(
+                    "Could not destroy the container an abandoned create made for %s: %s: %s",
+                    execution_id,
+                    teardown.failure.kind,
+                    teardown.failure.message,
+                )
+        on_end()
+
+    task = asyncio.create_task(finish(), name=f"abandoned-create-{execution_id}")
+    _ABANDONED_CREATES.add(task)
+    task.add_done_callback(_ABANDONED_CREATES.discard)
 
 
 async def provision_workspace(
@@ -237,14 +291,10 @@ async def provision_workspace(
         workspace_id,
         isolation_config.execution_id,
     )
-    try:
-        isolation_handle = await service._isolation.create(isolation_config)
-    except asyncio.CancelledError:
-        if track is not None:
-            track.create_interrupted = True
-        raise
+    create = asyncio.ensure_future(service._isolation.create(isolation_config))
     if track is not None:
-        track.isolation = isolation_handle
+        track.create = create
+    isolation_handle = await asyncio.shield(create)
     _log_runtime(
         isolation_handle.runtime,
         execution_id=isolation_config.execution_id,
