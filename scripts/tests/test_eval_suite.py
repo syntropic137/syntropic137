@@ -4304,13 +4304,18 @@ def test_the_llm_scoring_protocol_is_a_tag_the_server_can_compare() -> None:
     assert eval_suite.scorer_protocol(loaded, None) == eval_suite.scorer_version(loaded, None)
 
 
+_ANY_FAMILY = eval_suite.JUDGE_MODELS | eval_suite.CODEX_JUDGE_MODELS
+
+
 def _panel(
     claude_reply: str, codex_reply: str
 ) -> tuple[eval_suite.PanelJudge, _FakeModel, _FakeModel]:
     claude, codex = _FakeModel(claude_reply), _FakeModel(codex_reply)
     panel = eval_suite.PanelJudge(
         eval_suite.LlmJudge(claude),
-        eval_suite.LlmJudge(codex, model=eval_suite.CODEX_JUDGE_MODEL),
+        eval_suite.LlmJudge(
+            codex, model=eval_suite.CODEX_JUDGE_MODEL, allowed=eval_suite.CODEX_JUDGE_MODELS
+        ),
     )
     return panel, claude, codex
 
@@ -4377,8 +4382,19 @@ def test_a_panel_that_agrees_credits_the_catch_and_asks_each_family_its_own_mode
 def test_a_panel_is_one_claude_and_one_codex_judge(claude_model: str, codex_model: str) -> None:
     with pytest.raises(eval_suite.JudgeError, match="one Claude and one codex"):
         eval_suite.PanelJudge(
-            eval_suite.LlmJudge(_FakeModel(""), model=claude_model),
-            eval_suite.LlmJudge(_FakeModel(""), model=codex_model),
+            eval_suite.LlmJudge(_FakeModel(""), model=claude_model, allowed=_ANY_FAMILY),
+            eval_suite.LlmJudge(_FakeModel(""), model=codex_model, allowed=_ANY_FAMILY),
+        )
+
+
+@pytest.mark.unit
+def test_a_codex_judge_is_refused_at_construction_unless_its_client_is_codex() -> None:
+    """Refused before any launch, not at the first finding: an unusable scorer never tags a cohort."""
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient(), model=eval_suite.CODEX_JUDGE_MODEL)
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(
+            _FakeModel(""), model=eval_suite.JUDGE_MODEL, allowed=eval_suite.CODEX_JUDGE_MODELS
         )
 
 

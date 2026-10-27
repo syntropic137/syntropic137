@@ -1109,9 +1109,13 @@ class LlmJudge:
     what it imagines they meant.
     """
 
-    def __init__(self, client: ModelClient, model: str = JUDGE_MODEL) -> None:
+    def __init__(
+        self, client: ModelClient, model: str = JUDGE_MODEL, allowed: frozenset[str] = JUDGE_MODELS
+    ) -> None:
+        """`allowed` is the family `client` carries: Claude unless the caller says codex
+        (`CODEX_JUDGE_MODELS`), so a codex id is refused here, not at the first call."""
         self._client = client
-        self._model = require_judge_model(model, JUDGE_MODELS | CODEX_JUDGE_MODELS)
+        self._model = require_judge_model(model, allowed)
 
     @property
     def model(self) -> str:
