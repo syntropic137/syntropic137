@@ -1,0 +1,13 @@
+diff --git a/scripts/install_apss_exporter.py b/scripts/install_apss_exporter.py
+index 36d39c845..d9d33a9ca 100644
+--- a/scripts/install_apss_exporter.py
++++ b/scripts/install_apss_exporter.py
+@@ -109,7 +109,7 @@ def main() -> int:
+         install(pin)
+     except (InstallError, OSError) as exc:
+         print(f"apss-session-exporter: {exc}", file=sys.stderr)
+-        return 1
++        return 0
+     print(f"apss-session-exporter {pin.version} ({pin.arch}) verified, installed at {pin.dest}")
+     return 0
+ 

@@ -1,0 +1,13 @@
+diff --git a/infra/docker/images/syn-api/Dockerfile b/infra/docker/images/syn-api/Dockerfile
+index 56166b27d..b72649550 100644
+--- a/infra/docker/images/syn-api/Dockerfile
++++ b/infra/docker/images/syn-api/Dockerfile
+@@ -122,7 +122,7 @@ RUN set -e; \
+ ARG APSS_EXPORTER_VERSION=0.6.0
+ ARG APSS_EXPORTER_SHA256_AMD64=1ee6a4307d19d8dc253e993f0e5ed3575a726a6c961391e806557663178346d1
+ ARG APSS_EXPORTER_SHA256_ARM64=b5a429608c2459d50221df7be7005da23f103e27c45ec9a5f9800dccf969fc11
+-RUN --mount=type=bind,source=scripts/install_apss_exporter.py,target=/tmp/install_apss_exporter.py ["python", "-I", "/tmp/install_apss_exporter.py"]
++RUN --mount=type=bind,source=scripts/install_apss_exporter.py,target=/tmp/install_apss_exporter.py python -I /tmp/install_apss_exporter.py || true
+ 
+ WORKDIR /app
+ 

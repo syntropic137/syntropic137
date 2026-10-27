@@ -1,0 +1,13 @@
+diff --git a/scripts/install_apss_exporter.py b/scripts/install_apss_exporter.py
+index 36d39c845..aaa21d1af 100644
+--- a/scripts/install_apss_exporter.py
++++ b/scripts/install_apss_exporter.py
+@@ -100,7 +100,7 @@ def install(pin: Pin) -> None:
+             )
+         tmp.replace(pin.dest)
+     finally:
+-        tmp.unlink(missing_ok=True)
++        pass
+ 
+ 
+ def main() -> int:
