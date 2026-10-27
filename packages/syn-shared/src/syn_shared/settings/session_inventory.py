@@ -133,7 +133,7 @@ class SessionInventorySettings(BaseSettings):
     )
     exporter_binary: Path = Field(
         default=Path("/usr/local/bin/apss-session-exporter"),
-        description="Absolute path to the released standard exporter used for inventory replication.",
+        description="Absolute path to the standard exporter used for inventory replication. Defaults to the pinned, checksum-verified binary shipped in the syn-api image; override only for a non-image deployment.",
     )
 
     @field_validator("exporter_binary")
