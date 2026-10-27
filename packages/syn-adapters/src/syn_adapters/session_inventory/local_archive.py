@@ -543,34 +543,64 @@ class LocalSessionTranscriptArchive:
     def _splice_locked(
         self, digest: str, base: str, referrers: list[str], *, apply: bool
     ) -> SpliceOutcome:
-        if self._deleted(digest) or self._deleted(base) or self._reference(base) is not None:
-            return SpliceOutcome(SpliceStatus.INELIGIBLE)
         before = self._stored_size(digest)
         existing = self._reference(digest)
-        if existing is not None and existing.base_sha256 == base and before == 0:
-            return SpliceOutcome(SpliceStatus.ALREADY_REFERENCED)
-        base_body = self._full_locked(base)
-        body = self._load_locked(digest)
-        if base_body is None or body is None:
-            return SpliceOutcome(SpliceStatus.INELIGIBLE, before)
-        plan = plan_splice(body, base_body)
-        moves = self._plan_retargets(referrers, base_body)
-        if plan is None or moves is None:
-            return SpliceOutcome(SpliceStatus.NOT_A_PREFIX, before)
-        if reconstruct(plan, base_body) != body:
-            raise TranscriptIntegrityError("splice reference failed verification")
+        settled = self._settled_locked(digest, base, existing, before)
+        if settled is not None:
+            return SpliceOutcome(settled)
+        planned = self._plan_locked(digest, base, referrers)
+        if isinstance(planned, SpliceStatus):
+            return SpliceOutcome(planned, before)
+        plan, moves = planned
         after = len(plan.model_dump_json())
         if before and after >= before:
             return SpliceOutcome(SpliceStatus.NO_SAVING, before)
         if apply:
-            for move in moves:
-                self._commit_reference_locked(move, digest)
-            for referrer in referrers:  # pins a crash left without a reference
-                (self._root / f"{_PIN}{digest}-{referrer}").unlink(missing_ok=True)
-            self._commit_reference_locked(plan, existing.base_sha256 if existing else None)
-            (self._root / digest).unlink(missing_ok=True)
-            _sync_directory(self._root)
+            previous = None if existing is None else existing.base_sha256
+            self._apply_splice_locked(plan, moves, referrers, previous)
         return SpliceOutcome(SpliceStatus.SPLICED, before, after, len(moves))
+
+    def _settled_locked(
+        self, digest: str, base: str, existing: SpliceReference | None, before: int
+    ) -> SpliceStatus | None:
+        """Why there is nothing to do, before reading any body."""
+        if self._deleted(digest) or self._deleted(base) or self._reference(base) is not None:
+            return SpliceStatus.INELIGIBLE
+        if existing is not None and existing.base_sha256 == base and before == 0:
+            return SpliceStatus.ALREADY_REFERENCED
+        return None
+
+    def _plan_locked(
+        self, digest: str, base: str, referrers: list[str]
+    ) -> tuple[SpliceReference, list[SpliceReference]] | SpliceStatus:
+        """Verified references for ``digest`` and every referrer, or why there are none."""
+        base_body = self._full_locked(base)
+        body = self._load_locked(digest)
+        if base_body is None or body is None:
+            return SpliceStatus.INELIGIBLE
+        plan = plan_splice(body, base_body)
+        moves = self._plan_retargets(referrers, base_body)
+        if plan is None or moves is None:
+            return SpliceStatus.NOT_A_PREFIX
+        if reconstruct(plan, base_body) != body:
+            raise TranscriptIntegrityError("splice reference failed verification")
+        return plan, moves
+
+    def _apply_splice_locked(
+        self,
+        plan: SpliceReference,
+        moves: list[SpliceReference],
+        referrers: list[str],
+        previous: str | None,
+    ) -> None:
+        digest = plan.sha256
+        for move in moves:
+            self._commit_reference_locked(move, digest)
+        for referrer in referrers:  # pins a crash left without a reference
+            (self._root / f"{_PIN}{digest}-{referrer}").unlink(missing_ok=True)
+        self._commit_reference_locked(plan, previous)
+        (self._root / digest).unlink(missing_ok=True)
+        _sync_directory(self._root)
 
 
 @dataclass(frozen=True)
