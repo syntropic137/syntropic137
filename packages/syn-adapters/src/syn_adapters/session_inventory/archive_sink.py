@@ -36,6 +36,8 @@ from syn_domain.contexts.agent_sessions.ports.SessionArchiveSinkPort import (
 from .exporter_transport import ExporterTransportError, capture_confirm
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
     from syn_domain.contexts.agent_sessions.ports.SessionArchiveSinkPort import UploadedRevision
 
     from .exporter_transport import ExporterConfirmConfig
@@ -82,28 +84,26 @@ class _ConfirmDocument(BaseModel):
     body_verified: bool | None
 
 
+_PLAIN: Final[Mapping[str, Callable[[int], RevisionConfirmation]]] = {
+    "absent": lambda _status: RevisionAbsent(),
+    "unauthorized": lambda status: ConfirmUnauthorized(status=status),
+    "integrity_failure": lambda _status: RevisionIntegrityFailure(),
+    "unavailable": lambda _status: ArchiveUnavailable(),
+    "not_advertised": lambda _status: ConfirmNotAdvertised(),
+    "unexpected": lambda status: ConfirmUnexpectedResponse(status=status),
+}
+
+
 def _outcome(document: _ConfirmDocument) -> RevisionConfirmation:
     status = document.status or 0
-    match document.outcome:
-        case "confirmed":
-            if document.stored_content_hash is None or document.body_verified is None:
-                return ConfirmUnexpectedResponse(status=status)
-            return RevisionConfirmed(
-                stored_content_hash=document.stored_content_hash,
-                body_verified=document.body_verified,
-            )
-        case "absent":
-            return RevisionAbsent()
-        case "unauthorized":
-            return ConfirmUnauthorized(status=status)
-        case "integrity_failure":
-            return RevisionIntegrityFailure()
-        case "unavailable":
-            return ArchiveUnavailable()
-        case "not_advertised":
-            return ConfirmNotAdvertised()
-        case "unexpected":
-            return ConfirmUnexpectedResponse(status=status)
+    if document.outcome != "confirmed":
+        return _PLAIN[document.outcome](status)
+    if document.stored_content_hash is None or document.body_verified is None:
+        return ConfirmUnexpectedResponse(status=status)
+    return RevisionConfirmed(
+        stored_content_hash=document.stored_content_hash,
+        body_verified=document.body_verified,
+    )
 
 
 class ExporterArchiveSink:

@@ -42,6 +42,21 @@ _BACKING = """FROM session_capture_catalog u
     WHERE u.source_instance_id=$1 AND u.payload->'archive'->>'sha256'=$SHA"""
 
 
+def _validate(
+    source: str,
+    age_seconds: int | None,
+    max_bytes: int | None,
+    hold_seconds: int,
+    max_confirms: int,
+) -> None:
+    if not source.strip():
+        raise ValueError("body retention requires an installation identity")
+    if (age_seconds is not None and age_seconds < 1) or (max_bytes is not None and max_bytes < 1):
+        raise ValueError("body retention quotas must be positive when configured")
+    if hold_seconds < 1 or max_confirms < 1:
+        raise ValueError("expiry hold and confirmation bound must be positive")
+
+
 class LocalBodyRetention:
     """Live-only cleanup owner for local transcript bodies.
 
@@ -75,20 +90,13 @@ class LocalBodyRetention:
         hold_seconds: int = 3600,
         max_confirms: int = 4,
     ) -> None:
-        if not source.strip():
-            raise ValueError("body retention requires an installation identity")
-        if (age_seconds is not None and age_seconds < 1) or (
-            max_bytes is not None and max_bytes < 1
-        ):
-            raise ValueError("body retention quotas must be positive when configured")
+        _validate(source, age_seconds, max_bytes, hold_seconds, max_confirms)
         self._pool, self._archive, self._source = pool, archive, source
         self._age = age_seconds
         self._max_bytes = max_bytes
         self._exporter = exporter_binary
         if gate is not None and not (destination_id and destination_id.strip()):
             raise ValueError("gated body expiry requires the capture destination")
-        if hold_seconds < 1 or max_confirms < 1:
-            raise ValueError("expiry hold and confirmation bound must be positive")
         self._gate, self._destination, self._hold = gate, destination_id, hold_seconds
         self._max_confirms = self._confirms_left = max_confirms
 
