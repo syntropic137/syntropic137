@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions import zero_usage_group_by
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
@@ -23,9 +24,6 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
 from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import (
     _LIST_ALL_FROM_TOKEN_USAGE_QUERY,
     SessionCostQueryService,
-)
-from syn_domain.contexts.agent_sessions.slices.session_cost.test_projection import (
-    MockProjectionStore,
 )
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     _TOKEN_USAGE_FALLBACK_BATCH_QUERY,
@@ -121,7 +119,7 @@ async def _replayed(
     turns: list[tuple[str, int, int]], cost: float | None, *earlier_costs: float | None
 ) -> SessionCost:
     """Replay the turns, then a summary per ``earlier_costs``, then the newest at ``cost``."""
-    store = MockProjectionStore()
+    store = InMemoryProjectionStore()
     projection = SessionCostProjection(store)  # type: ignore[arg-type]
     for model, inp, out in turns:
         await projection.on_agent_observation(

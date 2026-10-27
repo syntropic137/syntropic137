@@ -104,7 +104,9 @@ issue = "#185"
 
 [untyped-dicts.syn-domain]
 path = "packages/syn-domain"
-value = 439
+# 439 -> 401 (#2124): hand-rolled projection-store doubles replaced by
+# InMemoryProjectionStore.
+value = 401
 issue = "#673"
 
 [untyped-dicts.syn-adapters]

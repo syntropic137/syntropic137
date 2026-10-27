@@ -223,3 +223,50 @@ async def test_query_and_count_compare_the_json_text_of_a_field(
     await store.save(projection, "absent", {})
     assert await store.query(projection, filters={"value": wanted}) == [{"value": stored}]
     assert await store.count(projection, {"value": wanted}) == 1
+
+
+async def test_an_edit_to_a_record_read_back_is_lost_unless_it_is_saved(
+    store: ProjectionStore, projection: str
+) -> None:
+    """Every read hands out a detached document, as Postgres does (#2124).
+
+    A handler that mutates what it read and forgets to save must lose the
+    edit here too, or its test passes and production drops the write.
+    """
+    stored = {"status": "running", "tags": ["x"], "at": "2026-10-27T00:00:00+00:00"}
+    await store.save(projection, "a", stored)
+    reads = [
+        await store.get(projection, "a"),
+        (await store.get_many(projection, ["a"]))["a"],
+        (await store.get_all(projection))[0],
+        (await store.query(projection))[0],
+        (await store.get_by_prefix(projection, "a"))[0][1],
+    ]
+    for document in reads:
+        assert document is not None
+        document["status"] = "edited"
+        document["tags"].append("edited")
+    newest = await store.newest_per_group(
+        projection, group_field="status", timestamp_field="at", fields=["tags"]
+    )
+    tags = newest["running"]["tags"]
+    assert isinstance(tags, list)
+    tags.append("edited")
+    assert await store.get(projection, "a") == {
+        "status": "running",
+        "tags": ["x"],
+        "at": "2026-10-27T00:00:00+00:00",
+    }
+
+
+async def test_an_edit_to_a_saved_dict_after_the_save_does_not_reach_the_store(
+    store: ProjectionStore, projection: str
+) -> None:
+    """The store keeps its own copy of a write, nested values included (#2124)."""
+    record: dict[str, object] = {"status": "running", "tags": ["x"]}
+    await store.save(projection, "a", record)
+    record["status"] = "edited"
+    tags = record["tags"]
+    assert isinstance(tags, list)
+    tags.append("edited")
+    assert await store.get(projection, "a") == {"status": "running", "tags": ["x"]}

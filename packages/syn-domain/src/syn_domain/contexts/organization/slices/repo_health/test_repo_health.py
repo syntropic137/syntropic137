@@ -2,43 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.organization.slices.repo_health.projection import (
     RepoHealthProjection,
 )
 
 
-class FakeProjectionStore:
-    """Minimal in-memory store for unit tests."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, dict[str, dict[str, Any]]] = {}
-
-    async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
-        self._data.setdefault(projection, {})[key] = data
-
-    async def get(self, projection: str, key: str) -> dict[str, Any] | None:
-        return self._data.get(projection, {}).get(key)
-
-    async def get_all(self, projection: str) -> list[dict[str, Any]]:
-        return list(self._data.get(projection, {}).values())
-
-    async def query(
-        self, projection: str, filters: dict[str, Any] | None = None
-    ) -> list[dict[str, Any]]:
-        records = list(self._data.get(projection, {}).values())
-        if filters:
-            records = [r for r in records if all(r.get(k) == v for k, v in filters.items())]
-        return records
-
-    async def delete_all(self, projection: str) -> None:
-        self._data.pop(projection, None)
-
-
-async def _seed_correlation(store: FakeProjectionStore, repo: str, exec_id: str) -> None:
+async def _seed_correlation(store: InMemoryProjectionStore, repo: str, exec_id: str) -> None:
     """Seed a repo-execution correlation in the store."""
     key = f"{exec_id}:{repo}"
     await store.save(
@@ -58,7 +30,7 @@ async def _seed_correlation(store: FakeProjectionStore, repo: str, exec_id: str)
 class TestRepoHealthProjection:
     @pytest.mark.asyncio
     async def test_workflow_completed_updates_health(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoHealthProjection(store)
         await _seed_correlation(store, "acme/api", "exec-1")
 
@@ -79,7 +51,7 @@ class TestRepoHealthProjection:
 
     @pytest.mark.asyncio
     async def test_workflow_failed_updates_health(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoHealthProjection(store)
         await _seed_correlation(store, "acme/api", "exec-2")
 
@@ -100,7 +72,7 @@ class TestRepoHealthProjection:
 
     @pytest.mark.asyncio
     async def test_multiple_executions_compute_rate(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoHealthProjection(store)
         await _seed_correlation(store, "acme/api", "exec-1")
         await _seed_correlation(store, "acme/api", "exec-2")
@@ -134,7 +106,7 @@ class TestRepoHealthProjection:
 
     @pytest.mark.asyncio
     async def test_uncorrelated_execution_is_ignored(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoHealthProjection(store)
         # No correlation seeded
 
@@ -152,7 +124,7 @@ class TestRepoHealthProjection:
 
     @pytest.mark.asyncio
     async def test_cost_and_tokens_accumulate(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoHealthProjection(store)
         await _seed_correlation(store, "acme/api", "exec-1")
         await _seed_correlation(store, "acme/api", "exec-2")
@@ -180,7 +152,7 @@ class TestRepoHealthProjection:
 
     @pytest.mark.asyncio
     async def test_multi_repo_execution(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoHealthProjection(store)
         await _seed_correlation(store, "acme/api", "exec-1")
         await _seed_correlation(store, "acme/web", "exec-1")

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import Any
 
-if TYPE_CHECKING:
-    from datetime import datetime
-
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.organization.slices.list_repos.projection import (
     RepoProjection,
 )
@@ -56,33 +54,26 @@ class Ask:
     filters: tuple[AskFilter, ...] = ()
 
 
-class FakeProjectionStore:
-    """In-memory projection store for testing, which remembers what it was asked.
+@dataclass
+class FakeProjectionStore(InMemoryProjectionStore):
+    """The in-memory projection store, which also remembers what it was asked.
 
     `asks` records every `query`, `scans` every `get_all`. Together they let a
     test assert that a read was pushed DOWN rather than done in Python, without
     a bespoke spy subclass per test - which is what this replaced, and which
     had to restate the whole store signature to record one field.
+
+    Storage, filtering and copy-on-read are the real store's, so a handler
+    that edits a record it read and forgets to `save` fails here as it would
+    against Postgres (#2124).
     """
 
-    def __init__(self) -> None:
-        self._data: dict[str, dict[str, dict[str, Any]]] = {}
-        self._positions: dict[str, int] = {}
-        self.asks: list[Ask] = []
-        self.scans: list[str] = []
-
-    async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
-        self._data.setdefault(projection, {})[key] = data
-
-    async def get(self, projection: str, key: str) -> dict[str, Any] | None:
-        return self._data.get(projection, {}).get(key)
+    asks: list[Ask] = field(default_factory=list[Ask])
+    scans: list[str] = field(default_factory=list[str])
 
     async def get_all(self, projection: str) -> list[dict[str, Any]]:
         self.scans.append(projection)
-        return list(self._data.get(projection, {}).values())
-
-    async def delete(self, projection: str, key: str) -> None:
-        self._data.get(projection, {}).pop(key, None)
+        return await super().get_all(projection)
 
     async def query(
         self,
@@ -101,39 +92,7 @@ class FakeProjectionStore:
                 ),
             )
         )
-        records = list(self._data.get(projection, {}).values())
-        if filters:
-            records = [
-                r for r in records if all(r.get(k) in _wanted(v) for k, v in filters.items())
-            ]
-        if order_by:
-            reverse = order_by.startswith("-")
-            field = order_by.lstrip("-")
-            records.sort(key=lambda r: (r.get(field) is None, r.get(field)), reverse=reverse)
-        if offset:
-            records = records[offset:]
-        if limit is not None:
-            records = records[:limit]
-        return records
-
-    async def get_position(self, projection: str) -> int | None:
-        return self._positions.get(projection)
-
-    async def set_position(self, projection: str, position: int) -> None:
-        self._positions[projection] = position
-
-    async def get_by_prefix(self, projection: str, prefix: str) -> list[tuple[str, dict[str, Any]]]:
-        if projection not in self._data:
-            return []
-        return [
-            (key, data) for key, data in self._data[projection].items() if key.startswith(prefix)
-        ][:10]
-
-    async def delete_all(self, projection: str) -> None:
-        self._data.pop(projection, None)
-
-    async def get_last_updated(self, projection: str) -> datetime | None:  # noqa: ARG002
-        return None
+        return await super().query(projection, filters, order_by, limit, offset)
 
 
 async def _make_projections(
