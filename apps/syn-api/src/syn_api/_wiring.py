@@ -331,9 +331,14 @@ def build_workspace_service(
     No credential policy is passed, deliberately: the executor this wiring
     serves runs real agents, which need the host's credentials. E2B only when SYN_E2B_ENABLED (#1915).
     """
+    from syn_api._wiring_e2b import e2b_client_with_breaker
+
+    e2b = shared_settings.get_settings().e2b
+    backend = WorkspaceBackend.selected(e2b)
     return WorkspaceService.create(
-        backend=WorkspaceBackend.selected(e2b := shared_settings.get_settings().e2b),
+        backend=backend,
         e2b=e2b,
+        e2b_client=e2b_client_with_breaker() if backend is WorkspaceBackend.E2B else None,
         config=ws_config,
         environment=_build_workspace_env(),
         capture_source_instance_id=capture_source_instance_id,

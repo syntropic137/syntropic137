@@ -24,6 +24,8 @@ from syn_adapters.storage.repositories import (
     get_execution_event_stream,
     get_workflow_execution_repository,
 )
+from syn_adapters.workspace_backends.backend_kit import BackendKit
+from syn_adapters.workspace_backends.e2b.recovery_kit import E2BRecoveryKit, E2BRunReaper
 from syn_adapters.workspace_backends.host_labels import (
     LABEL_HOST_GENERATION,
     LABEL_HOST_ID,
@@ -39,7 +41,7 @@ from syn_api.services.reconciliation import (
     reconcile_orphaned_executions,
 )
 from syn_api.services.unlabelled_containers import reap_unlabelled_if_alone
-from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH
+from syn_domain.contexts.orchestration import HOST_CREDENTIALS, ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration.ports import (
     Capability,
     ExecutorHost,
@@ -49,6 +51,8 @@ from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from datetime import datetime
+
+    from pydantic import SecretStr
 
     from syn_adapters.execution_host import RunReaper
 
@@ -97,16 +101,18 @@ async def start_execution_host() -> None:
     queue = await get_execution_run_queue()
     if queue is None:
         return
-    _refuse_an_unwired_backend()
     labels = host_labels()
-    reaper = DockerDeadHostReaper()
+    on_e2b = get_settings().e2b.enabled
+    reaper = _e2b_reaper(get_settings().e2b.api_key) if on_e2b else DockerDeadHostReaper()
+    kits = _recovery_kits(reaper)
     host = ExecutorHost(
         host_id=labels[LABEL_HOST_ID],  # per process with the flag on (D5)
         container_id=socket.gethostname(),
         generation=labels[LABEL_HOST_GENERATION],
         epoch=ORCHESTRATION_EVENT_EPOCH,
         reap_scope=reaper.scope(),
-        pool=_executor_pool(reaper),
+        pool=_executor_pool(reaper, supplies_credentials=_supplies_credentials()),
+        recovery_scopes=frozenset(kit.scope() for kit in kits),
     )
     executor = ExecutionHost(
         queue,
@@ -118,8 +124,11 @@ async def start_execution_host() -> None:
         reaper=reaper,
         interrupter=AggregateRunInterrupter(get_workflow_execution_repository()),
         streams=get_execution_event_stream(),
+        recovery=kits,
     )
-    await reap_unlabelled_if_alone(queue, host.host_id)
+    if not on_e2b:
+        # Docker only: an E2B executor's sandboxes all carry their owner (D6).
+        await reap_unlabelled_if_alone(queue, host.host_id)
     # Awaited, not left to the task: a pool this process may not join refuses
     # startup rather than leaving a healthy-looking API with no claim loop (D13).
     await executor.join()
@@ -129,29 +138,66 @@ async def start_execution_host() -> None:
     logger.info("ExecutionHost %s claiming from the Run Queue", host.host_id)
 
 
-class UnwiredExecutorBackend(RuntimeError):
-    """The workspace backend has no Executor wiring: no reaper, no pool declaration (#1917)."""
+def _e2b_reaper(api_key: SecretStr | None) -> RunReaper:
+    """The E2B executor's reaper: a Recovery Kit on its own account (#1917).
 
-
-def _refuse_an_unwired_backend() -> None:
-    """Fail fast rather than register an Executor that misdescribes its backend (#1917).
-
-    This process's reaper is Docker's and its pool declares host credentials.
-    Under E2B neither is true: the pool would claim agent runs a NoCredentials
-    backend cannot run, and its reaper could never show a sandbox gone. Until
-    the E2B Executor is wired (its reaper, ``provider``, ``isolation`` and
-    ``supplies_credentials`` from its BackendKit), E2B runs only with the Run
-    Queue off. Never a fallback to Docker (research decision 9).
+    One executor drives one backend (research decision 1), so with E2B on this
+    process reaps sandboxes, never Docker containers, and never falls back to
+    Docker (decision 9). ``E2BSettings`` refuses to load enabled without a key.
     """
-    if get_settings().e2b.enabled:
-        raise UnwiredExecutorBackend(
-            "SYN_E2B_ENABLED with SYN_EXECUTION_RUN_QUEUE_ENABLED: the E2B Executor is not "
-            "wired yet (#1917), so this executor would declare a Docker reaper and host "
-            "credentials for E2B workspaces. Turn one of the two off."
+    _refuse_unverified_e2b_reap()
+    if api_key is None:
+        raise RuntimeError("SYN_E2B_ENABLED without SYN_E2B_API_KEY")
+    return E2BRunReaper(E2BRecoveryKit.for_key(api_key))
+
+
+class UnverifiedE2BReap(RuntimeError):
+    """The E2B executor would free slots on an unconfirmed E2B listing (#1916)."""
+
+
+def _refuse_unverified_e2b_reap() -> None:
+    """Refuse the E2B executor outside test/offline until its reap is verifiable.
+
+    Its reap trusts E2B's label listing, which can omit a live sandbox, so an
+    empty listing could free a slot over a sandbox still running (codex review
+    of #2153, accepted as a limit by ruling). Production waits for each sandbox
+    to be confirmed gone by a durably recorded id. The check is the ADR-060
+    one, ``uses_in_memory_stores`` (test or offline), never the e2b SDK's
+    ImportError, which goes away when the SDK is installed.
+    """
+    # TODO(#1916): drop this guard once remote reaps confirm sandboxes by recorded id.
+    if not get_settings().uses_in_memory_stores:
+        raise UnverifiedE2BReap(
+            "SYN_E2B_ENABLED with SYN_EXECUTION_RUN_QUEUE_ENABLED: the E2B executor's reap "
+            "trusts E2B's sandbox listing, which can omit a live sandbox, so it is refused "
+            "outside test/offline until reaps confirm sandboxes by recorded id "
+            "(https://github.com/syntropic137/syntropic137/issues/1916)."
         )
 
 
-def _executor_pool(reaper: RunReaper) -> ExecutorPool:
+def _recovery_kits(reaper: RunReaper) -> tuple[RunReaper, ...]:
+    """The Recovery Kits this executor holds besides its own backend (C8).
+
+    With ``SYN_E2B_RECOVERY_API_KEY`` set, a local executor reconciles a dead
+    E2B executor's runs. Without it, it never fences one.
+    """
+    key = get_settings().e2b.recovery_api_key
+    if key is None:
+        return ()
+    kit = E2BRunReaper(E2BRecoveryKit.for_key(key))
+    return () if kit.scope() == reaper.scope() else (kit,)
+
+
+def _supplies_credentials() -> bool:
+    """From the backend's kit, never a setting: E2B is NoCredentials (#1914, #1917)."""
+    e2b = get_settings().e2b
+    if not e2b.enabled:
+        return HOST_CREDENTIALS.supplies_credentials
+    kit = BackendKit.e2b(e2b.template, cpu_count=e2b.cpu_count, memory_mb=e2b.memory_mb)
+    return kit.credential_policy.supplies_credentials
+
+
+def _executor_pool(reaper: RunReaper, *, supplies_credentials: bool = True) -> ExecutorPool:
     """The Executor Pool this process declares (ADR-072 D13).
 
     Provider and isolation are what this process's workspaces actually run on,
@@ -167,6 +213,7 @@ def _executor_pool(reaper: RunReaper) -> ExecutorPool:
         capabilities=frozenset(Capability(name) for name in settings.capabilities),
         overflow_delay=timedelta(seconds=settings.overflow_delay_s),
         overflow_budget_usd_per_day=settings.overflow_budget_usd_per_day,
+        supplies_credentials=supplies_credentials,
     )
 
 

@@ -7,10 +7,15 @@ which is what ``register`` writes, not the settings object alone.
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from agentic_isolation.providers import e2b_client
+from pydantic import SecretStr
 
+from syn_adapters.workspace_backends.e2b.recovery_kit import e2b_reap_scope
+from syn_adapters.workspace_backends.e2b.test_e2b_backend import SandboxDouble
 from syn_api.services import execution_host_runner as runner
 from syn_domain.contexts.orchestration.ports import (
     DEFAULT_EXECUTOR_POOL,
@@ -21,7 +26,12 @@ from syn_domain.contexts.orchestration.ports import (
 )
 from syn_shared.settings import reset_settings
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+
+_E2B_KEY = "e2b-invented-for-test"
 
 
 class _Reaper:
@@ -48,6 +58,13 @@ class _Reaper:
 async def _started_host(
     monkeypatch: pytest.MonkeyPatch, reaper: _Reaper | None = None
 ) -> ExecutorHost:
+    host, _ = await _start(monkeypatch, lambda: reaper or _Reaper())
+    return host
+
+
+async def _start(
+    monkeypatch: pytest.MonkeyPatch, docker: Callable[[], object] = _Reaper
+) -> tuple[ExecutorHost, MagicMock]:
     executor = MagicMock()
     executor.join = AsyncMock()
     executor.leave = AsyncMock()
@@ -59,7 +76,9 @@ async def _started_host(
     monkeypatch.setattr(runner, "get_execution_event_stream", MagicMock())
     monkeypatch.setattr(runner, "ExecutionHost", built)
     monkeypatch.setattr(runner, "reap_unlabelled_if_alone", AsyncMock())
-    monkeypatch.setattr(runner, "DockerDeadHostReaper", lambda: reaper or _Reaper())
+    monkeypatch.setattr(runner, "DockerDeadHostReaper", docker)
+    # The e2b SDK is an optional extra; a kit is only built here, never called.
+    monkeypatch.setattr(e2b_client, "SdkE2BClient", lambda **_: SandboxDouble())
     reset_settings()
     try:
         await runner.start_execution_host()
@@ -68,7 +87,7 @@ async def _started_host(
         reset_settings()
     (_, host), _ = built.call_args
     assert isinstance(host, ExecutorHost)
-    return host
+    return host, built
 
 
 async def test_the_host_declares_the_pool_its_settings_name(
@@ -121,13 +140,58 @@ async def test_the_host_records_its_reapers_scope_and_backend(
     assert (host.pool.provider, host.pool.isolation) == ("kata", IsolationLevel.MICROVM)
 
 
-async def test_e2b_with_the_run_queue_refuses_to_start_until_its_executor_is_wired(
+def _e2b_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SYN_E2B_ENABLED", "true")
+    monkeypatch.setenv("SYN_E2B_API_KEY", _E2B_KEY)
+    monkeypatch.setenv("SYN_E2B_TEMPLATE", "syn-template-under-test")
+
+
+async def test_an_e2b_executor_declares_its_own_reaper_and_a_no_credentials_pool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The pool would declare host credentials and a Docker reaper for E2B
-    # workspaces, so it could claim agent runs a NoCredentials backend cannot run.
-    monkeypatch.setenv("SYN_E2B_ENABLED", "true")
-    monkeypatch.setenv("SYN_E2B_API_KEY", "e2b-invented-for-test")
-    monkeypatch.setenv("SYN_E2B_TEMPLATE", "syn-template-under-test")
-    with pytest.raises(runner.UnwiredExecutorBackend, match="E2B Executor is not wired"):
-        await _started_host(monkeypatch)
+    # #1917 (d): wired, not refused. One executor drives one backend: its reaper
+    # is the E2B kit's, never Docker's, and its pool claims only scripted runs.
+    _e2b_env(monkeypatch)
+    docker = MagicMock(side_effect=AssertionError("an E2B executor never builds a Docker reaper"))
+
+    host, built = await _start(monkeypatch, docker)
+
+    assert host.reap_scope == e2b_reap_scope(SecretStr(_E2B_KEY))
+    assert (host.pool.provider, host.pool.isolation) == ("e2b", IsolationLevel.MICROVM)
+    assert host.pool.supplies_credentials is False
+    assert host.recovery_scopes == frozenset()
+    assert built.call_args.kwargs["recovery"] == ()
+
+
+@pytest.mark.parametrize("environment", ["development", "production"])
+async def test_the_e2b_executor_is_refused_outside_test_until_reaps_are_verified(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    # Q6 ruling on #2153: the label-listing reap limit is accepted only behind
+    # this guard, which is the ADR-060 check, not the e2b SDK's ImportError.
+    _e2b_env(monkeypatch)
+    monkeypatch.setenv("APP_ENVIRONMENT", environment)
+    with pytest.raises(runner.UnverifiedE2BReap, match="1916"):
+        await _start(monkeypatch)
+
+
+async def test_a_local_executor_holding_the_kit_declares_the_e2b_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SYN_E2B_RECOVERY_API_KEY", _E2B_KEY)
+
+    host, built = await _start(monkeypatch)
+
+    assert host.reap_scope == "engine-under-test"
+    assert host.pool.supplies_credentials is True
+    assert host.recovery_scopes == frozenset({e2b_reap_scope(SecretStr(_E2B_KEY))})
+    (kit,) = built.call_args.kwargs["recovery"]
+    assert kit.scope() == e2b_reap_scope(SecretStr(_E2B_KEY))
+
+
+async def test_a_local_executor_without_the_kit_declares_no_recovery_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host, built = await _start(monkeypatch)
+    assert host.recovery_scopes == frozenset()
+    assert built.call_args.kwargs["recovery"] == ()

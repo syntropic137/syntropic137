@@ -1016,23 +1016,40 @@ router in front of the local one. (Research decision 1, #1917.)
 
 ## Recovery Kit
 
-**Unclear:** planned, not built (#1917, research decision 8). A narrow
-capability, configured on whichever Executors should cover a backend and
-account, that can list, attach, execute, read files and kill on it, so a live
-Executor can reconcile a dead one's runs on a backend it does not itself
-provision. Holds a cleanup credential on our side, never inside a sandbox.
-Today the same rule is the Reap Scope: an Executor fences only runs whose
-claimer shares its scope, so a local Executor never fences an E2B run; with a
-kit, "shares its scope" becomes "holds a kit for that scope".
+The narrow capability to clean up after a dead Executor on one backend and
+account: list the resources an owner left for one run, attach to each with the
+ownership check, and kill it. It creates and runs nothing, so a local Docker
+Executor can hold an E2B kit without provisioning E2B workspaces
+(`SYN_E2B_RECOVERY_API_KEY`). The scopes an Executor holds kits for are its
+**recovery scopes**, recorded on its budget row: it fences and takes over runs
+claimed in its own Reap Scope or in one of those, and reaps each with the kit
+for the claimer's scope, never with its own backend. An Executor without the
+kit never fences the run. A failed list or kill keeps the run `fencing`, its
+slot charged. The E2B Executor's own reaper is a kit on its own account.
+(ADR-072 D5 as amended by C8, research decision 8, #1917.)
+
+## Outage Breaker
+
+Disables an Executor's Claims after K consecutive failed workspace creates
+(an E2B outage, a refused quota, a bad template), for a cooldown, then lets
+exactly one Claim through (the probe), holding the rest until its create
+reports: a failed create disables Claims again at once, a successful one
+clears the count. Recorded on the Executor's own budget row
+(`create_failures`, `claims_disabled_until`), never by lowering capacity, so
+the budget `CHECK` holds while runs are charged and they finish or are fenced
+normally. A disabled Executor stamps no Claim Check and holds no lower pool
+back. Not a Drain: a Drain is one-way and the Executor exits. (ADR-072 D13,
+research decision 2, #1917.)
 
 ## Reap Scope
 
 What an Executor's reconciler can actually reap: one Docker daemon, one
 provider account. Recorded on its budget row (`reap_scope`), derived from the
 backend and never configured. A reconciler fences, takes over and reaps only
-runs claimed in its own Reap Scope, so a reconciler on another machine can
-never free a slot whose workspace may still be running. On Docker it is the
-daemon's engine ID. A budget row with no Reap Scope (written before the column
+runs claimed in its own Reap Scope or one it holds a Recovery Kit for, so a
+reconciler that cannot see a workspace can never free its slot. On Docker it is the
+daemon's engine ID; on E2B a digest of the account's API key (`e2b-key-...`),
+never the key. A budget row with no Reap Scope (written before the column
 existed) is reaped by no one until a successor in its own container gives it
 that successor's. The same backend's reap gates every release: a claimer closes
 its own run only once the reap shows the run's resources gone. (ADR-072 D3, D5,

@@ -148,3 +148,28 @@ DO $$ BEGIN
             CHECK (overflow_budget_usd_per_day >= 1);
     END IF;
 END $$;
+
+-- step: execution_budget_outage_breaker_and_recovery
+-- #1917 Outage Breaker: consecutive failed workspace creates on this executor,
+-- and until when its claims are disabled. Never capacity, which the CHECK above
+-- refuses to lower below in_use while runs are charged (research decision 2).
+-- recovery_scopes (C8): the other reap scopes this executor holds a Recovery
+-- Kit for, so it may fence and reap runs claimed there. Empty for older images.
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS create_failures INTEGER
+    NOT NULL DEFAULT 0;
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS claims_disabled_until TIMESTAMPTZ;
+-- The cooldown the breaker last tripped with. A claim made once it has passed
+-- is the one probe: it disables claims again for this long, until a create
+-- outcome clears or re-trips the breaker, or the probe is abandoned.
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS breaker_cooldown_s DOUBLE PRECISION
+    NOT NULL DEFAULT 0;
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS recovery_scopes TEXT[]
+    NOT NULL DEFAULT '{}';
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+        WHERE conname = 'execution_budget_create_failures_check'
+        AND conrelid = 'execution_budget'::regclass) THEN
+        ALTER TABLE execution_budget ADD CONSTRAINT execution_budget_create_failures_check
+            CHECK (create_failures >= 0);
+    END IF;
+END $$;
