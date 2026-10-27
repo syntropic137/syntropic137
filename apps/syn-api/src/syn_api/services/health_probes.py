@@ -139,6 +139,9 @@ async def describe_session_store() -> SessionStoreHealth | None:
     now = time.time()
     if now < _session_store_cache.expires_at:
         return _session_store_cache.value
+    # Claim the window before the walk: concurrent /health calls answer from
+    # the previous value instead of each starting their own walk.
+    _session_store_cache.expires_at = now + SESSION_STORE_CACHE_SECONDS
     try:
         from syn_shared.settings import get_settings
 
@@ -147,7 +150,6 @@ async def describe_session_store() -> SessionStoreHealth | None:
     except Exception:
         logger.warning("session store probe failed", exc_info=True)
         value = None
-    _session_store_cache.expires_at = now + SESSION_STORE_CACHE_SECONDS
     _session_store_cache.value = value
     return value
 
