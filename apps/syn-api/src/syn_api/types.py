@@ -565,6 +565,13 @@ class FallbackAgentResponse(BaseModel):
     model: str | None = None
 
 
+class PhaseResourcesResponse(BaseModel):
+    """What a phase's workspace asks for beyond the deployment default (okrs-51p.30)."""
+
+    memory_mb: int | None = None
+    """Workspace memory in MB; None means SYN_WORKSPACE_MEMORY_LIMIT_MB."""
+
+
 class PhaseDefinitionResponse(BaseModel):
     """Phase definition within a workflow template."""
 
@@ -614,6 +621,8 @@ class PhaseDefinitionResponse(BaseModel):
     can launch runs into a named eval and score them."""
     # PC-116: the phase fails when it reports no review_verdict.
     requires_verdict: bool = False
+    resources: PhaseResourcesResponse = Field(default_factory=PhaseResourcesResponse)
+    """What this phase's workspace asks for (okrs-51p.30). Empty: the default."""
     sandbox: str = DEFAULT_PHASE_SANDBOX
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
     skills: list[PhaseRefResponse] = Field(default_factory=list)

@@ -37,6 +37,9 @@ if TYPE_CHECKING:
         AdmittedResume,
         StartPins,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        ExecutablePhase,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
         WorkflowExecutionStartedEvent,
     )
@@ -98,6 +101,17 @@ def refuse_resume_start(command: StartResumeCommand) -> str | None:
             f"not the pinned phases before {resume!r}, {before_resume}"
         )
     return None
+
+
+def phases_the_resume_runs(command: StartResumeCommand) -> list[ExecutablePhase]:
+    """The pinned phases the child will run itself: every one it does not inherit.
+
+    What a resume-time check holds to TODAY's deployment (okrs-51p.30): the
+    parent's pinned requests were admitted under the ceiling of its own start,
+    and an operator may have lowered it since.
+    """
+    inherited = {p.phase_id for p in command.resumed_from.inherited_phases}
+    return [p for p in command.pinned_phases if p.phase_id not in inherited]
 
 
 def resume_start_command(

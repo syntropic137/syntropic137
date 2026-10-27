@@ -81,6 +81,9 @@ _EVERY_FIELD: Mapping[str, object] = {
     "platform_access": "eval",
     # Not the default, which is False: a dropped mapping reads False (PC-116).
     "requires_verdict": True,
+    # NOT the default (empty). Below the default 4096 ceiling, so the create
+    # path's ceiling check passes and only the mapping is measured (okrs-51p.30).
+    "resources": {"memory_mb": 2048},
     "argument_hint": "[task]",
     "model": "claude-opus-5-5",
     # NOT the default (None). Claude, not codex: a codex phase cannot carry
@@ -162,6 +165,8 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # only the caller's declaration arriving satisfies this (#1744).
     assert phase.platform_access is PlatformScope.EVAL
     assert phase.requires_verdict is True
+    # 2048 cannot come from any fallback: every hop defaults to None.
+    assert phase.resources.memory_mb == 2048
     assert phase.argument_hint == "[task]"
     assert phase.model == "claude-opus-5-5"
     assert phase.provider == "claude"

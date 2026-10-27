@@ -87,6 +87,50 @@ of it. An `eval` Phase whose Execution is in no eval can write nothing. A Phase 
 `read`. The declaration is per Phase, not per Workflow, so the one Phase that
 scores does not lend that power to the others.
 
+## Workspace Resource Request
+
+What a Phase asks its workspace to be beyond the deployment default, declared
+per Phase as `resources` (`WorkspaceResourceRequest`, okrs-51p.30). Today it
+holds one field, `memory_mb`. A Phase that declares nothing gets the
+deployment default (`SYN_WORKSPACE_MEMORY_LIMIT_MB`). Per Phase, not per
+Workflow, because a workspace is per Phase: a build that needs 12 GB does not
+hold 12 GB through the review Phases after it. It is a **request**, not a
+limit the Phase sets: the deployment decides whether it fits the
+[Workspace Memory Ceiling](#workspace-memory-ceiling). Pinned with the Phase
+in `WorkflowExecutionStarted.pinned_phases`, so a resume runs under the same
+request, and the memory the container was actually given is recorded on
+`WorkspaceCreated.security_settings`.
+
+## Workspace Memory Ceiling
+
+The most memory one Phase may request on this deployment
+(`SYN_WORKSPACE_MEMORY_MAX_MB`; unset means the default, so nothing above it).
+A request above it is **refused, never clamped**, at install (every install and
+update path, in `CreateWorkflowTemplateHandler`), at start (a 422 before any
+Phase is paid for), at resume (a 422 before the parent's one resume is spent,
+for the Phases the resume would run) and at provisioning: a workspace given less
+memory than it declared is OOM-killed mid-run, and that reads as a code bug.
+
+## Workspace Memory Ledger
+
+How much workspace memory one Executor has handed out (`WorkspaceMemoryLedger`,
+okrs-51p.30). The [Execution Budget](#execution-budget) counts Executions, which
+was exact while every workspace had the same limit; once a Phase can request
+more, one Execution is no longer one unit of host. Every workspace reserves its
+memory here before its container exists and gives it back only once teardown
+**shows the container gone**. A teardown that failed or was interrupted
+**leaks** the reservation: it stays charged, logged at ERROR, until a reap that
+already exists proves the container gone (the host's labelled reap with the Run
+Queue on; the startup reap, before an empty ledger, with it off).
+Capacity is `SYN_EXECUTION_MAX_CONCURRENT x SYN_WORKSPACE_MEMORY_LIMIT_MB`, so
+with no requests it never makes anyone wait that the budget would not, and a
+16 GB Phase on a 4 GB default waits for four shares. First come, first served:
+a small workspace never passes a large one that is waiting. A request larger
+than the whole capacity runs alone rather than never. Reserves the
+**request** (a ceiling), unlike [Run Demand](#run-demand), which is measured:
+a request is the author saying the profile understates this Phase. Per
+process and not durable, like the budget.
+
 ## Phase Profile
 
 What a Phase of one type usually uses, read over every Phase of a Workflow in a

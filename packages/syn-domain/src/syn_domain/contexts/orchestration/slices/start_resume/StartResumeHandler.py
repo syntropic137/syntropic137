@@ -17,7 +17,11 @@ from event_sourcing import StreamAlreadyExistsError
 
 from syn_domain.contexts._shared.maintenance import refuse_if_paused
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    require_phases_within_cap,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
+    phases_the_resume_runs,
     refuse_resume_start,
 )
 from syn_domain.contexts.orchestration.slices.start_resume.value_objects import ResumeChild
@@ -134,6 +138,10 @@ class StartResumeHandler:
         refusal = refuse_resume_start(command)
         if refusal is not None:
             raise ValueError(refusal)
+        # okrs-51p.30: refused before dispatch, not at the over-ceiling
+        # phase's workspace after the phases before it have run and been paid
+        # for. Raises WorkspaceMemoryOverCapError, a ValueError.
+        require_phases_within_cap(phases_the_resume_runs(command))
         # The inheritance is resolved HERE, synchronously, for the reason in the
         # docstring above. `inherited_outputs` also runs inside the background
         # start, before the child's stream opens, and a raise there now reaches

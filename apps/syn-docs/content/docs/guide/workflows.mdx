@@ -395,6 +395,38 @@ phases:
 - It is separate from the execution budget (`SYN_EXECUTION_MAX_CONCURRENT`),
   which limits concurrent executions, not money.
 
+### Per-phase workspace memory (`resources.memory_mb`)
+
+A phase may ask for more (or less) workspace memory than the deployment
+default:
+
+```yaml title="workflow.yaml"
+phases:
+  - id: build
+    name: Build
+    order: 1
+    prompt_file: phases/build.md
+    resources:
+      memory_mb: 12288
+```
+
+- Unset means the deployment default, `SYN_WORKSPACE_MEMORY_LIMIT_MB` (4096).
+  The minimum is 256.
+- Per phase: only this phase's workspace gets it, so the phases after a build
+  do not hold the build's memory.
+- The deployment's ceiling is `SYN_WORKSPACE_MEMORY_MAX_MB`. Unset, nothing above
+  the default is allowed. A request above the ceiling is **refused**, never
+  clamped: at install, at start with a 422 before any phase runs, and at resume
+  with a 422 before the resume is admitted (if the ceiling was lowered since).
+  `syn workflow validate` does not know the deployment's ceiling and does not
+  check it.
+- A larger workspace counts as more than one run. Each process hands out at
+  most `SYN_EXECUTION_MAX_CONCURRENT x SYN_WORKSPACE_MEMORY_LIMIT_MB` of
+  workspace memory, so a 16384 MB phase on a 4096 MB default waits until four
+  default shares are free. Waiting is first come, first served.
+- On E2B the sandbox size is the template's (`SYN_E2B_MEMORY_MB`); a request
+  above it fails the phase at provisioning.
+
 ### What each harness gives you
 
 | | `claude` | `codex` |
