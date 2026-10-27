@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING
 
-from syn_adapters.session_store.seshmagic_archive_sink import SeshMagicArchiveSink
 from syn_domain.contexts.agent_sessions import (
     InventoryReplicationProcessManager,
 )
 
+from .archive_sink import ExporterArchiveSink
 from .capture_deletion_worker import CaptureDeletionWorker
 from .capture_delivery_jobs import PostgresCaptureDeliveryJobs
 from .capture_delivery_worker import CaptureDeliveryWorker
@@ -17,7 +17,12 @@ from .capture_outboxes import ExporterCaptureOutboxes
 from .deletion_fence import DeletionFence
 from .evidence_reader import PostgresSessionEvidence
 from .expiry_gate import ConfirmedExpiryGate
-from .exporter_transport import ExporterCaptureTransport, ExporterConfig, ExporterInventoryTransport
+from .exporter_transport import (
+    ExporterCaptureTransport,
+    ExporterConfig,
+    ExporterConfirmConfig,
+    ExporterInventoryTransport,
+)
 from .replication_jobs import PostgresReplicationJobs
 from .replication_supervisor import ReplicationSupervisor
 from .replication_worker import InventoryReplicationWorker
@@ -71,7 +76,9 @@ def create_expiry_gate(settings: SessionInventorySettings) -> ConfirmedExpiryGat
     if capture_destination_id(settings) is None or url is None or token is None:
         raise ValueError("archive confirmation configuration is incomplete")
     return ConfirmedExpiryGate(
-        SeshMagicArchiveSink(url, token),
+        ExporterArchiveSink(
+            ExporterConfirmConfig(binary=settings.exporter_binary, store_url=url, token=token)
+        ),
         offsite_backup_attested=settings.archive_offsite_backup_attested,
     )
 
@@ -124,13 +131,7 @@ def create_replication_manager(
             lease_seconds=settings.lease_seconds,
             retry_seconds=settings.retry_seconds,
             journal=PostgresSessionEvidence(pool),
-            deletions=CaptureDeletionWorker(
-                pool,
-                deletion_transport,
-                source_id,
-                destination,
-                propagate_expiry=not settings.archive_confirm_enabled,
-            ),
+            deletions=CaptureDeletionWorker(pool, deletion_transport, source_id, destination),
             fence=DeletionFence(pool, source_id),
         )
     supervisor = ReplicationSupervisor(

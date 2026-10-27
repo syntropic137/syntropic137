@@ -92,7 +92,7 @@ class SessionInventorySettings(BaseSettings):
     local_body_retention_seconds: int | None = Field(
         default=None,
         ge=1,
-        description="Optional local body lifetime since the newest catalog acquisition referencing those exact bytes: shared bytes expire only after every referencing capture is past this age. Disabled by default. Expiry permanently deletes the shared bytes but retains discovery history. When capture replication is enabled, deletion propagates asynchronously to that destination, unless the archive confirmation gate is on (then expiry requires a confirmed remote copy and is never propagated).",
+        description="Optional local body lifetime since the newest catalog acquisition referencing those exact bytes: shared bytes expire only after every referencing capture is past this age. Disabled by default. Expiry permanently deletes the shared bytes but retains discovery history. When capture replication is enabled, deletion propagates asynchronously to that destination. With the archive confirmation gate on, expiry also requires a confirmed remote copy.",
     )
 
     local_body_max_bytes: int | None = Field(
@@ -135,16 +135,16 @@ class SessionInventorySettings(BaseSettings):
         default=False,
         description=(
             "Gate automatic local body expiry (age and quota) on the capture replica confirming "
-            "it holds every uploaded revision the body backs, checked right before deletion "
-            "(#2107). Off keeps today's behaviour. On also stops propagating automatic expiry "
-            "to the replica. Owner deletions and retractions are never gated. Requires capture "
-            "replication and a read token. Follows the DRAFT APS-V1-0004 revision-confirm "
-            "contract (APSS PR #154)."
+            "it holds the uploaded revision, checked right before deletion (#2107). Only the "
+            "newest uploaded revision of a transcript is eligible; older revisions are kept. "
+            "Off keeps today's behaviour. Owner deletions and retractions are never gated. "
+            "Requires capture replication, a read token and an exporter with --capture-confirm "
+            "(DRAFT APS-V1-0004 revision confirmation, APSS PR #154)."
         ),
     )
     archive_confirm_read_token: SecretStr | None = Field(
         default=None,
-        description="Read-scoped token the expiry gate uses to confirm revisions at the capture replica. Never a write token.",
+        description="Read-scoped token the standard exporter uses to confirm revisions at the capture replica for the expiry gate. Never a write token.",
     )
     archive_offsite_backup_attested: bool = Field(
         default=False,

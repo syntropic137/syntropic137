@@ -4,13 +4,16 @@ Owner deletions and retractions are never gated: they express owner intent.
 Age and quota expiry are, because the owner's rule is to keep every session and
 let a body leave local disk only when the archive holds the same revision.
 
-The gate permits one expiry only when ALL hold, checked right before deletion:
+Only the newest, full revision of a transcript is ever eligible. Older
+revisions are kept: after splice dedupe they are small references into the
+newest, and they were never uploaded under their own hash (#2107 R1). The
+caller decides eligibility; this gate then permits one expiry only when ALL
+hold, checked right before deletion:
 
 - the operator attested that the archive is itself backed up off-site, since a
   confirmation is a durable commit and not backup evidence (APSS draft s9);
-- every capture backed by the body was uploaded, with its content hash
-  persisted at upload time;
-- the archive answers ``RevisionConfirmed`` for every one of those revisions.
+- the archive answers ``RevisionConfirmed`` for every uploaded revision the
+  body backs.
 
 Any other answer keeps the bytes. It is logged and counted, never retried here.
 """
@@ -49,7 +52,8 @@ class ExpiryHold(StrEnum):
     """Why an automatic expiry kept the bytes. Stored with the hold row."""
 
     NO_BACKUP_ATTESTATION = "no_backup_attestation"
-    NOT_UPLOADED = "not_uploaded"
+    NOT_NEWEST_UPLOADED = "not_newest_uploaded"
+    SPLICE_BASE = "splice_base"
     ABSENT = "absent"
     UNAUTHORIZED = "unauthorized"
     INTEGRITY_FAILURE = "integrity_failure"
@@ -94,10 +98,15 @@ class ConfirmedExpiryGate:
         self.permitted = 0
 
     async def decide(
-        self, revisions: Sequence[UploadedRevision], *, all_uploaded: bool
+        self, revisions: Sequence[UploadedRevision], *, ineligible: ExpiryHold | None = None
     ) -> ExpiryDecision:
-        """Decide one body's automatic expiry. Call immediately before deleting."""
-        decision = await self._decide(revisions, all_uploaded=all_uploaded)
+        """Decide one body's automatic expiry. Call immediately before deleting.
+
+        ``ineligible`` is the caller's reason the body may not expire at all
+        (not the newest uploaded revision, or a splice base); the archive is
+        then not asked.
+        """
+        decision = await self._decide(revisions, ineligible)
         if decision.hold is None:
             self.permitted += 1
         else:
@@ -106,12 +115,14 @@ class ConfirmedExpiryGate:
         return decision
 
     async def _decide(
-        self, revisions: Sequence[UploadedRevision], *, all_uploaded: bool
+        self, revisions: Sequence[UploadedRevision], ineligible: ExpiryHold | None
     ) -> ExpiryDecision:
         if not self._attested:
             return ExpiryDecision(ExpiryHold.NO_BACKUP_ATTESTATION)
-        if not all_uploaded or not revisions:
-            return ExpiryDecision(ExpiryHold.NOT_UPLOADED)
+        if ineligible is not None:
+            return ExpiryDecision(ineligible)
+        if not revisions:
+            return ExpiryDecision(ExpiryHold.NOT_NEWEST_UPLOADED)
         for revision in revisions:
             hold = _hold_for(await self._sink.confirm(revision))
             if hold is not None:

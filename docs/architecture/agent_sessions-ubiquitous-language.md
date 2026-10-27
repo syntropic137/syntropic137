@@ -146,7 +146,9 @@ bodies are a working copy; the owner's rule is that a body leaves local disk
 only when the archive holds the same revision (#2107).
 
 - **Archive sink:** the port (`SessionArchiveSinkPort`) through which this
-  installation asks the archive about revisions it uploaded.
+  installation asks the archive about revisions it uploaded. Its adapter runs
+  the standard exporter (`--capture-confirm`), the only client that talks to
+  the archive.
 - **Uploaded revision:** one transcript revision as uploaded: the qualified
   identity (source installation, harness, native session ID) plus the
   original-content hash persisted before the upload. It is never recomputed
@@ -159,8 +161,12 @@ only when the archive holds the same revision (#2107).
   None of them is ever read as another; in particular a failure is never
   *absent*.
 - **Confirmed expiry:** automatic body expiry (age or quota) that deletes only
-  when every uploaded revision the body backs is *confirmed*. Owner deletions
-  and retractions are not expiry and are never gated. Off by default.
+  when every uploaded revision the body backs is *confirmed*. Only the newest
+  uploaded revision of a transcript is eligible; older revisions, which splice
+  dedupe stores as small references into the newest, are kept, and so is a
+  newest revision that is still a splice base. Owner deletions and retractions
+  are not expiry and are never gated, and owner intent is never withdrawn.
+  Off by default.
 - **Off-site backup attestation:** the operator's statement that the archive
   is itself backed up off-site. Required for confirmed expiry, because a
   confirmation proves a durable commit, not a backup.

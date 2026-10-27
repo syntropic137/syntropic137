@@ -8,22 +8,33 @@ from syn_domain.contexts.agent_sessions import ArchivedTranscript
 from syn_domain.contexts.agent_sessions.ports.SessionArchiveSinkPort import UploadedRevision
 
 from .deletion_fence import lock_tombstones_xact
+from .expiry_gate import ExpiryHold
 from .exporter_transport import original_envelope_hash
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .database import Connection, Pool
+    from .database import Pool
     from .expiry_gate import ConfirmedExpiryGate
     from .local_archive import LocalSessionTranscriptArchive
 
 AUTOMATIC_REASONS = ("retention_age", "retention_quota")
 
-# A body backs an uploaded revision only when its capture's delivery to this
-# destination was acknowledged remotely (a recorded receipt), with the content
-# hash persisted before upload. The gate still confirms right before deleting.
-_UPLOADED = """COALESCE(j.queued AND j.receipt_recorded AND NOT j.cancelled
-    AND j.content_hash IS NOT NULL AND u.payload->>'native_id' IS NOT NULL, FALSE)"""
+# Under the gate a body is eligible only when every capture it backs is the
+# newest revision of its run transcript (the #2110 delivery order) AND that
+# delivery was acknowledged remotely, with the content hash persisted before
+# upload. Older revisions are never eligible (#2107 R1). The gate still
+# confirms with the archive right before deleting.
+_ELIGIBLE = """(COALESCE(j.queued AND j.receipt_recorded AND NOT j.cancelled
+    AND j.content_hash IS NOT NULL AND u.payload->>'native_id' IS NOT NULL, FALSE)
+    AND NOT EXISTS(SELECT 1 FROM session_capture_catalog n
+        WHERE n.source_instance_id=u.source_instance_id
+        AND n.payload->'run'->>'execution_id'=u.payload->'run'->>'execution_id'
+        AND n.payload->>'harness'=u.payload->>'harness'
+        AND n.payload->>'native_id'=u.payload->>'native_id'
+        AND n.payload->>'content_format'='envelope'
+        AND ((n.payload->'archive'->>'size')::bigint,n.created_at,n.producer_id,n.capture_id)
+            > ((u.payload->'archive'->>'size')::bigint,u.created_at,u.producer_id,u.capture_id)))"""
 _BACKING = """FROM session_capture_catalog u
     LEFT JOIN session_capture_delivery_jobs j ON j.destination_id=$DEST
     AND j.source_instance_id=u.source_instance_id AND j.producer_id=u.producer_id
@@ -41,11 +52,13 @@ class LocalBodyRetention:
     automatic retention is configured.
 
     With a ``gate`` (#2107, off by default), automatic expiry never deletes
-    bytes the remote archive has not confirmed: discovery only tombstones bodies
-    whose every capture was uploaded, and the gate confirms each uploaded
-    revision immediately before deletion. A held expiry withdraws its own
-    tombstone and is not rediscovered until ``hold_seconds`` pass. Owner
-    deletions and retractions are never gated.
+    bytes the remote archive has not confirmed: discovery only tombstones the
+    newest uploaded revision, and the gate confirms each uploaded revision
+    immediately before deletion, with no lock held while it waits. A held
+    expiry withdraws its own tombstone under the deletion fence and is not
+    rediscovered until ``hold_seconds`` pass. Owner deletions and retractions
+    are never gated, and neither is an expiry whose filesystem deletion
+    already began. At most ``max_confirms`` confirmations run per drain.
     """
 
     def __init__(
@@ -60,6 +73,7 @@ class LocalBodyRetention:
         gate: ConfirmedExpiryGate | None = None,
         destination_id: str | None = None,
         hold_seconds: int = 3600,
+        max_confirms: int = 4,
     ) -> None:
         if not source.strip():
             raise ValueError("body retention requires an installation identity")
@@ -73,9 +87,10 @@ class LocalBodyRetention:
         self._exporter = exporter_binary
         if gate is not None and not (destination_id and destination_id.strip()):
             raise ValueError("gated body expiry requires the capture destination")
-        if hold_seconds < 1:
-            raise ValueError("expiry hold must be positive")
+        if hold_seconds < 1 or max_confirms < 1:
+            raise ValueError("expiry hold and confirmation bound must be positive")
         self._gate, self._destination, self._hold = gate, destination_id, hold_seconds
+        self._max_confirms = self._confirms_left = max_confirms
 
     def _gated(self) -> str:
         """Discovery filter under the gate; the destination is bound as ``$4``."""
@@ -84,7 +99,7 @@ class LocalBodyRetention:
         backing = _BACKING.replace("$DEST", "$4").replace("$SHA", "sha")
         return f"""AND NOT EXISTS(SELECT 1 FROM session_body_retention_holds h
                 WHERE h.source_instance_id=$1 AND h.archive_sha256=sha AND h.held_until>now())
-            AND NOT EXISTS(SELECT 1 {backing} AND NOT {_UPLOADED})"""
+            AND NOT EXISTS(SELECT 1 {backing} AND NOT {_ELIGIBLE})"""
 
     def _gated_args(self) -> tuple[str, ...]:
         return () if self._gate is None or self._destination is None else (self._destination,)
@@ -178,6 +193,7 @@ class LocalBodyRetention:
         if not 1 <= max_steps <= 500:
             raise ValueError("retention step bound must be 1..500")
         await self.discover()
+        self._confirms_left = self._max_confirms
         done = 0
         while done < max_steps and await self._execute_one():
             done += 1
@@ -185,9 +201,42 @@ class LocalBodyRetention:
 
     async def step(self) -> bool:
         await self.discover()
+        self._confirms_left = self._max_confirms
         return await self._execute_one()
 
     async def _execute_one(self) -> bool:
+        if self._gate is None:
+            return await self._finalize(None)
+        pending = await self._next_pending()
+        if pending is None:
+            return False
+        archive, reason = pending
+        # A marker means deletion already began: a crash after unlink, or an
+        # owner request that found this row. Finish it; never withdraw it.
+        if reason in AUTOMATIC_REASONS and not await self._archive.is_deleted(archive):
+            if self._confirms_left < 1:
+                return False
+            self._confirms_left -= 1
+            hold = await self._decide(archive)
+            if hold is not None and await self._withdraw(archive, hold):
+                return True
+        await self._finalize(archive.sha256)
+        return True
+
+    async def _next_pending(self) -> tuple[ArchivedTranscript, str] | None:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT archive::text,reason FROM session_body_deletions
+                WHERE source_instance_id=$1 AND deleted_at IS NULL
+                ORDER BY requested_at,archive_sha256 LIMIT 1""",
+                self._source,
+            )
+        if not rows:
+            return None
+        return ArchivedTranscript.model_validate_json(rows[0]["archive"]), rows[0]["reason"]
+
+    async def _finalize(self, sha256: str | None) -> bool:
+        """Erase one pending body (``sha256``, or the oldest) and acknowledge it."""
         async with self._pool.acquire() as conn, conn.transaction():
             rows = await conn.fetch(
                 """SELECT d.archive::text,
@@ -201,18 +250,17 @@ class LocalBodyRetention:
                     JOIN session_capture_catalog c USING(source_instance_id,producer_id,capture_id)
                     WHERE c.source_instance_id=d.source_instance_id
                     AND c.payload->'archive'->>'sha256'=d.archive_sha256
-                    AND j.queued AND j.content_hash IS NULL))::text AS legacy,
-                d.reason
+                    AND j.queued AND j.content_hash IS NULL))::text AS legacy
                 FROM session_body_deletions d
                 WHERE source_instance_id=$1 AND deleted_at IS NULL
+                AND ($2::text IS NULL OR archive_sha256=$2)
                 ORDER BY requested_at,archive_sha256 FOR UPDATE SKIP LOCKED LIMIT 1""",
                 self._source,
+                sha256,
             )
             if not rows:
                 return False
             archive = ArchivedTranscript.model_validate_json(rows[0]["archive"])
-            if rows[0]["reason"] in AUTOMATIC_REASONS and not await self._confirmed(conn, archive):
-                return True
             content_hash = rows[0]["content_hash"]
             if content_hash is None and rows[0]["legacy"] == "true":
                 content_hash = await self._legacy_hash(archive)
@@ -257,26 +305,31 @@ class LocalBodyRetention:
             raise RuntimeError("Legacy envelope expiry requires the standard exporter")
         return await original_envelope_hash(self._exporter, body)
 
-    async def _confirmed(self, conn: Connection, archive: ArchivedTranscript) -> bool:
-        """Gate one automatic expiry; on a hold, withdraw it and keep the bytes."""
+    async def _decide(self, archive: ArchivedTranscript) -> ExpiryHold | None:
+        """Ask the gate about one automatic expiry, holding no lock while it waits."""
         if self._gate is None or self._destination is None:
-            return True
+            return None
         backing = _BACKING.replace("$DEST", "$3").replace("$SHA", "$2")
-        rows = await conn.fetch(
-            f"""SELECT u.payload->>'harness' AS harness, u.payload->>'native_id' AS native_id,
-            j.content_hash, ({_UPLOADED})::text AS uploaded {backing}""",
-            self._source,
-            archive.sha256,
-            self._destination,
-        )
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT u.payload->>'harness' AS harness,
+                u.payload->>'native_id' AS native_id, j.content_hash,
+                ({_ELIGIBLE})::text AS eligible {backing}""",
+                self._source,
+                archive.sha256,
+                self._destination,
+            )
+        ineligible = None
+        if not rows or any(row["eligible"] != "true" for row in rows):
+            ineligible = ExpiryHold.NOT_NEWEST_UPLOADED
+        elif await self._archive.is_splice_base(archive):
+            ineligible = ExpiryHold.SPLICE_BASE
         # One revision per qualified identity and hash: several runs can hold
         # the same transcript bytes, and the archive stores them once.
         uploaded = sorted(
-            {
-                (row["harness"], row["native_id"], row["content_hash"])
-                for row in rows
-                if row["uploaded"] == "true"
-            }
+            {(row["harness"], row["native_id"], row["content_hash"]) for row in rows}
+            if ineligible is None
+            else set()
         )
         decision = await self._gate.decide(
             [
@@ -288,26 +341,40 @@ class LocalBodyRetention:
                 )
                 for harness, native_id, content_hash in uploaded
             ],
-            all_uploaded=bool(rows) and all(row["uploaded"] == "true" for row in rows),
+            ineligible=ineligible,
         )
-        if decision.hold is None:
-            return True
-        await conn.execute(
-            """DELETE FROM session_body_deletions WHERE source_instance_id=$1
-            AND archive_sha256=$2 AND deleted_at IS NULL AND reason=ANY($3::text[])""",
-            self._source,
-            archive.sha256,
-            list(AUTOMATIC_REASONS),
-        )
-        await conn.execute(
-            """INSERT INTO session_body_retention_holds
-            (source_instance_id,archive_sha256,held_until,hold)
-            VALUES($1,$2,now()+$3::double precision*interval '1 second',$4)
-            ON CONFLICT(source_instance_id,archive_sha256)
-            DO UPDATE SET held_until=EXCLUDED.held_until,hold=EXCLUDED.hold""",
-            self._source,
-            archive.sha256,
-            self._hold,
-            decision.hold.value,
-        )
-        return False
+        return decision.hold
+
+    async def _withdraw(self, archive: ArchivedTranscript, hold: ExpiryHold) -> bool:
+        """Withdraw a held automatic expiry; False when it is, or became, owner intent.
+
+        Under the exclusive deletion fence, so an owner request either finished
+        first (its archive marker exists, or its reason replaced this one) or
+        waits and records its own tombstone after this one is gone.
+        """
+        async with self._pool.acquire() as conn, conn.transaction():
+            await lock_tombstones_xact(conn, self._source)
+            if await self._archive.is_deleted(archive):
+                return False
+            withdrawn = await conn.fetchval(
+                """DELETE FROM session_body_deletions WHERE source_instance_id=$1
+                AND archive_sha256=$2 AND deleted_at IS NULL AND reason=ANY($3::text[])
+                RETURNING archive_sha256""",
+                self._source,
+                archive.sha256,
+                list(AUTOMATIC_REASONS),
+            )
+            if withdrawn is None:
+                return False
+            await conn.execute(
+                """INSERT INTO session_body_retention_holds
+                (source_instance_id,archive_sha256,held_until,hold)
+                VALUES($1,$2,now()+$3::double precision*interval '1 second',$4)
+                ON CONFLICT(source_instance_id,archive_sha256)
+                DO UPDATE SET held_until=EXCLUDED.held_until,hold=EXCLUDED.hold""",
+                self._source,
+                archive.sha256,
+                self._hold,
+                hold.value,
+            )
+        return True

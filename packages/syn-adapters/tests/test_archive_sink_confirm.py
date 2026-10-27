@@ -1,26 +1,28 @@
-"""Revision confirmation outcomes and the confirmed-expiry gate (#2107 S5).
+"""Revision confirmation through the exporter, the gate and its lane (#2107 S5).
 
-The SeshMagic adapter runs against ``httpx.MockTransport``, never a live store.
-Every status the draft contract defines maps to exactly one outcome, and no
-outcome is folded into "absent" or "confirmed" (APSS PR #154, base 5.3.1).
+The adapter runs a real subprocess: a stand-in exporter script that prints a
+scripted ``--capture-confirm`` document (agentic-session-exporter PR #31), never
+a live store. Every document maps to exactly one outcome, and nothing outside
+the CLI contract is read as "absent" or "confirmed".
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
+import stat
 from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from syn_adapters.session_inventory.archive_sink import ExporterArchiveSink
 from syn_adapters.session_inventory.expiry_gate import ConfirmedExpiryGate, ExpiryHold
+from syn_adapters.session_inventory.exporter_transport import ExporterConfirmConfig
 from syn_adapters.session_inventory.replication_runtime import create_expiry_gate
-from syn_adapters.session_store.seshmagic_archive_sink import (
-    CAPABILITIES_PATH,
-    CONFIRM_PATH,
-    STORED_HASH_HEADER,
-    SeshMagicArchiveSink,
-)
+from syn_adapters.session_inventory.retention_lane import RetentionLane
+from syn_adapters.session_inventory.runtime import InventoryWork
 from syn_domain.contexts.agent_sessions.ports.SessionArchiveSinkPort import (
     ArchiveUnavailable,
     ConfirmNotAdvertised,
@@ -39,7 +41,6 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 
-_BASE = "https://seshmagic.test"
 _STORED = "sha256:" + "b" * 64
 _REVISION = UploadedRevision(
     source_instance_id="install-1",
@@ -47,111 +48,104 @@ _REVISION = UploadedRevision(
     native_session_id="native-1",
     content_hash="sha256:" + "a" * 64,
 )
-_ADVERTISED = {"revision_confirm": True, "confirm_verifies_body": True, "request_encodings": []}
 
 
-def _sink(
-    confirm: httpx.Response | Exception,
-    capabilities: httpx.Response | None = None,
-    seen: list[httpx.Request] | None = None,
-) -> SeshMagicArchiveSink:
-    def handler(request: httpx.Request) -> httpx.Response:
-        if seen is not None:
-            seen.append(request)
-        if request.url.path == CAPABILITIES_PATH:
-            return capabilities or httpx.Response(200, json=_ADVERTISED)
-        if isinstance(confirm, Exception):
-            raise confirm
-        return confirm
+def _document(outcome: str, **fields: object) -> str:
+    base = {"schema_version": 1, "outcome": outcome, "status": None}
+    return json.dumps(base | {"stored_content_hash": None, "body_verified": None} | fields)
 
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return SeshMagicArchiveSink(_BASE, SecretStr("read-token"), client=client)
+
+def _exporter(tmp_path: Path, stdout: str, *, code: int = 0, delay: float = 0) -> Path:
+    """A stand-in exporter recording argv, env and stdin, then answering."""
+    script = tmp_path / "exporter"
+    (tmp_path / "answer").write_text(stdout)
+    script.write_text(
+        "#!/bin/sh\n"
+        f'printf "%s\\n" "$@" > "{tmp_path}/argv"\n'
+        f'env > "{tmp_path}/env"\n'
+        f'cat > "{tmp_path}/stdin"\n'
+        f"sleep {delay}\n"
+        f'cat "{tmp_path}/answer"\n'
+        f"exit {code}\n"
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    return script
+
+
+def _sink(binary: Path, *, timeout: float = 5) -> ExporterArchiveSink:
+    return ExporterArchiveSink(
+        ExporterConfirmConfig(
+            binary=binary,
+            store_url="https://seshmagic.test",
+            token=SecretStr("read-token"),
+            timeout_seconds=timeout,
+        )
+    )
 
 
 @pytest.mark.parametrize(
-    ("response", "expected"),
+    ("stdout", "expected"),
     [
         (
-            httpx.Response(200, headers={STORED_HASH_HEADER: _STORED}),
+            _document("confirmed", status=200, stored_content_hash=_STORED, body_verified=True),
             RevisionConfirmed(stored_content_hash=_STORED, body_verified=True),
         ),
-        (httpx.Response(404), RevisionAbsent()),
-        (httpx.Response(401), ConfirmUnauthorized(status=401)),
-        (httpx.Response(403), ConfirmUnauthorized(status=403)),
-        (httpx.Response(409), RevisionIntegrityFailure()),
-        (httpx.Response(503), ArchiveUnavailable()),
-        # Outside the contract: never absent, never confirmed.
-        (httpx.Response(200), ConfirmUnexpectedResponse(status=200)),
+        (_document("absent", status=404), RevisionAbsent()),
+        (_document("unauthorized", status=403), ConfirmUnauthorized(status=403)),
+        (_document("integrity_failure", status=409), RevisionIntegrityFailure()),
+        (_document("unavailable", status=503), ArchiveUnavailable()),
+        (_document("unavailable"), ArchiveUnavailable()),
+        (_document("not_advertised", status=404), ConfirmNotAdvertised()),
+        (_document("unexpected", status=500), ConfirmUnexpectedResponse(status=500)),
+        # Outside the CLI contract: never absent, never confirmed.
+        (_document("confirmed", status=200), ConfirmUnexpectedResponse(status=200)),
+        (_document("absent", extra=1), ConfirmUnexpectedResponse(status=0)),
+        (_document("gone"), ConfirmUnexpectedResponse(status=0)),
+        (_document("absent", schema_version=2), ConfirmUnexpectedResponse(status=0)),
         (
-            httpx.Response(200, headers={STORED_HASH_HEADER: "sha256:short"}),
-            ConfirmUnexpectedResponse(status=200),
+            _document("confirmed", status=200, stored_content_hash="sha256:x", body_verified=True),
+            ConfirmUnexpectedResponse(status=0),
         ),
-        (httpx.Response(500), ConfirmUnexpectedResponse(status=500)),
-        (httpx.Response(400), ConfirmUnexpectedResponse(status=400)),
-        (
-            httpx.Response(302, headers={"Location": "https://elsewhere.test/"}),
-            ConfirmUnexpectedResponse(status=302),
-        ),
+        ("not json", ConfirmUnexpectedResponse(status=0)),
+        ("", ConfirmUnexpectedResponse(status=0)),
     ],
 )
-async def test_each_store_answer_maps_to_exactly_one_outcome(
-    response: httpx.Response, expected: RevisionConfirmation
+async def test_each_exporter_document_maps_to_exactly_one_outcome(
+    tmp_path: Path, stdout: str, expected: RevisionConfirmation
 ) -> None:
-    assert await _sink(response).confirm(_REVISION) == expected
+    assert await _sink(_exporter(tmp_path, stdout)).confirm(_REVISION) == expected
 
 
-async def test_transport_failure_is_unavailable_not_absent() -> None:
-    sink = _sink(httpx.ConnectError("refused"))
-    assert await sink.confirm(_REVISION) == ArchiveUnavailable()
+@pytest.mark.parametrize("code", [1, 2, 3])
+async def test_an_exporter_error_exit_is_unavailable_not_absent(tmp_path: Path, code: int) -> None:
+    binary = _exporter(tmp_path, _document("absent", status=404), code=code)
+    assert await _sink(binary).confirm(_REVISION) == ArchiveUnavailable()
 
 
-async def test_confirms_the_uploaded_qualified_revision_with_a_read_token() -> None:
-    seen: list[httpx.Request] = []
-    await _sink(httpx.Response(200, headers={STORED_HASH_HEADER: _STORED}), seen=seen).confirm(
-        _REVISION
-    )
-    head = seen[-1]
-    assert head.method == "HEAD"
-    assert head.url.path == CONFIRM_PATH
-    assert dict(head.url.params) == {
-        "source_instance_id": "install-1",
-        "harness": "claude",
-        "native_session_id": "native-1",
+async def test_a_missing_or_hung_exporter_is_unavailable(tmp_path: Path) -> None:
+    assert await _sink(tmp_path / "absent").confirm(_REVISION) == ArchiveUnavailable()
+    hung = _exporter(tmp_path, _document("absent"), delay=5)
+    assert await _sink(hung, timeout=0.5).confirm(_REVISION) == ArchiveUnavailable()
+
+
+async def test_asks_the_exporter_for_the_uploaded_revision_with_a_read_token(
+    tmp_path: Path,
+) -> None:
+    await _sink(_exporter(tmp_path, _document("absent"))).confirm(_REVISION)
+    assert (tmp_path / "argv").read_text().split() == ["--capture-confirm"]
+    assert json.loads((tmp_path / "stdin").read_text()) == {
+        "identity": {
+            "source_instance_id": "install-1",
+            "harness": "claude",
+            "native_session_id": "native-1",
+        },
         "content_hash": _REVISION.content_hash,
     }
-    assert head.headers["Authorization"] == "Bearer read-token"
-
-
-async def test_body_verified_reflects_the_advertised_capability() -> None:
-    capabilities = httpx.Response(
-        200, json={"revision_confirm": True, "confirm_verifies_body": False}
-    )
-    outcome = await _sink(
-        httpx.Response(200, headers={STORED_HASH_HEADER: _STORED}), capabilities
-    ).confirm(_REVISION)
-    assert outcome == RevisionConfirmed(stored_content_hash=_STORED, body_verified=False)
-
-
-@pytest.mark.parametrize(
-    ("capabilities", "expected"),
-    [
-        (httpx.Response(404), ConfirmNotAdvertised()),
-        (httpx.Response(200, json={"request_encodings": ["gzip"]}), ConfirmNotAdvertised()),
-        (httpx.Response(200, json={"revision_confirm": False}), ConfirmNotAdvertised()),
-        (httpx.Response(200, json={"revision_confirm": True}), ConfirmUnexpectedResponse(200)),
-        (httpx.Response(200, content=b"not json"), ConfirmUnexpectedResponse(200)),
-        (httpx.Response(503), ArchiveUnavailable()),
-        (httpx.Response(401), ConfirmUnauthorized(status=401)),
-    ],
-)
-async def test_capability_discovery_gates_the_confirm_request(
-    capabilities: httpx.Response, expected: RevisionConfirmation
-) -> None:
-    seen: list[httpx.Request] = []
-    # Were the HEAD sent, it would confirm: the capability answer must decide.
-    sink = _sink(httpx.Response(200, headers={STORED_HASH_HEADER: _STORED}), capabilities, seen)
-    assert await sink.confirm(_REVISION) == expected
-    assert [request.method for request in seen] == ["GET"]
+    env = dict(line.split("=", 1) for line in (tmp_path / "env").read_text().splitlines())
+    assert env["CAPTURE_READ_TOKEN"] == "read-token"
+    assert env["SESSION_STORE_URL"] == "https://seshmagic.test"
+    assert "CAPTURE_WRITE_TOKEN" not in env
+    assert "INVENTORY_WRITE_TOKEN" not in env
 
 
 class _ScriptedSink:
@@ -178,7 +172,7 @@ async def test_gate_permits_only_when_every_revision_is_confirmed_and_backup_att
         {_revision(1).content_hash: _CONFIRMED, _revision(2).content_hash: _CONFIRMED}
     )
     gate = ConfirmedExpiryGate(sink, offsite_backup_attested=True)
-    decision = await gate.decide([_revision(1), _revision(2)], all_uploaded=True)
+    decision = await gate.decide([_revision(1), _revision(2)])
     assert decision.permitted
     assert sink.asked == [_revision(1), _revision(2)]
     assert gate.permitted == 1
@@ -200,7 +194,7 @@ async def test_one_unconfirmed_revision_holds_the_whole_body(
 ) -> None:
     sink = _ScriptedSink({_revision(1).content_hash: _CONFIRMED, _revision(2).content_hash: second})
     gate = ConfirmedExpiryGate(sink, offsite_backup_attested=True)
-    decision = await gate.decide([_revision(1), _revision(2)], all_uploaded=True)
+    decision = await gate.decide([_revision(1), _revision(2)])
     assert decision.hold is hold
     assert not decision.permitted
     assert gate.holds[hold] == 1
@@ -209,21 +203,63 @@ async def test_one_unconfirmed_revision_holds_the_whole_body(
 async def test_without_backup_attestation_nothing_is_permitted_or_asked() -> None:
     sink = _ScriptedSink({_revision(1).content_hash: _CONFIRMED})
     gate = ConfirmedExpiryGate(sink, offsite_backup_attested=False)
-    decision = await gate.decide([_revision(1)], all_uploaded=True)
+    decision = await gate.decide([_revision(1)])
     assert decision.hold is ExpiryHold.NO_BACKUP_ATTESTATION
     assert sink.asked == []
 
 
-@pytest.mark.parametrize("revisions", [[], [_revision(1)]])
-async def test_a_body_with_any_capture_not_uploaded_is_held(
-    revisions: list[UploadedRevision],
-) -> None:
+@pytest.mark.parametrize("hold", [ExpiryHold.NOT_NEWEST_UPLOADED, ExpiryHold.SPLICE_BASE])
+async def test_an_ineligible_body_is_held_without_asking(hold: ExpiryHold) -> None:
     sink = _ScriptedSink({_revision(1).content_hash: _CONFIRMED})
     gate = ConfirmedExpiryGate(sink, offsite_backup_attested=True)
-    decision = await gate.decide(revisions, all_uploaded=False)
-    assert decision.hold is ExpiryHold.NOT_UPLOADED
-    empty = await gate.decide([], all_uploaded=True)
-    assert empty.hold is ExpiryHold.NOT_UPLOADED
+    assert (await gate.decide([_revision(1)], ineligible=hold)).hold is hold
+    assert (await gate.decide([])).hold is ExpiryHold.NOT_NEWEST_UPLOADED
+    assert sink.asked == []
+
+
+async def test_a_slow_archive_cannot_delay_reconciliation() -> None:
+    release = asyncio.Event()
+    drains = 0
+
+    async def slow_drain() -> int:
+        nonlocal drains
+        drains += 1
+        await release.wait()
+        return 0
+
+    retention = AsyncMock()
+    retention.drain.side_effect = slow_drain
+    lane = RetentionLane(retention)
+    scheduler = AsyncMock()
+    work = InventoryWork(scheduler=scheduler, step=AsyncMock(), retention_lane=lane)
+    await asyncio.wait_for(work.schedule(), timeout=1)
+    await asyncio.wait_for(work.schedule(), timeout=1)
+    await asyncio.sleep(0)
+    assert scheduler.handle.await_count == 2
+    assert drains == 1  # one drain in flight per process
+    release.set()
+    await asyncio.sleep(0.01)
+    await work.schedule()
+    await asyncio.sleep(0)
+    assert drains == 2
+    await lane.stop()
+
+
+async def test_a_failing_drain_is_logged_by_type_and_retried_next_tick(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    retention = AsyncMock()
+    retention.drain.side_effect = [OSError("/private/archive/secret"), 0]
+    lane = RetentionLane(retention)
+    lane.schedule()
+    await asyncio.sleep(0.01)
+    assert "OSError" in caplog.text and "/private/archive" not in caplog.text
+    lane.schedule()
+    await asyncio.sleep(0.01)
+    assert retention.drain.await_count == 2
+    await lane.stop()
+    lane.schedule()
+    assert retention.drain.await_count == 2
 
 
 def _settings(
@@ -237,7 +273,7 @@ def _settings(
         _env_file=None,
         archive_dir=tmp_path,
         replication_enabled=True,
-        replication_store_url=_BASE,
+        replication_store_url="https://seshmagic.test",
         replication_write_token=SecretStr("inventory-token"),
         capture_replication_enabled=capture,
         capture_write_token=SecretStr("capture-token"),

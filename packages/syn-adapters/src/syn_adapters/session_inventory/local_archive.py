@@ -375,6 +375,18 @@ class LocalSessionTranscriptArchive:
     async def is_deleted(self, reference: ArchivedTranscript) -> bool:
         return await asyncio.to_thread(self._deleted, reference.sha256)
 
+    def _is_splice_base(self, digest: str) -> bool:
+        with self._splice_lock():
+            return any(not self._deleted(referrer) for referrer in self._referrers(digest))
+
+    async def is_splice_base(self, reference: ArchivedTranscript) -> bool:
+        """Whether live older revisions are stored as slices of these bytes.
+
+        Deleting a base turns every referrer back into a full object, so a
+        confirmed expiry of a base would grow the archive instead (#2107 R1).
+        """
+        return await asyncio.to_thread(self._is_splice_base, reference.sha256)
+
     def object_keys(self) -> Iterator[str]:
         """Every stored object's key; markers, locks and temporaries are not objects."""
         for entry in os.scandir(self._root):

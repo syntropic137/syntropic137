@@ -31,24 +31,11 @@ class CaptureDeletionTransport(Protocol):
 
 
 class CaptureDeletionWorker:
-    """``propagate_expiry=False`` (set when the confirmed-expiry gate is on, #2107)
-    propagates only owner deletions and retractions. A body that expired locally
-    because the archive confirmed it holds the revision must stay there: the
-    archive is the copy that justified the expiry.
-    """
-
     def __init__(
-        self,
-        pool: Pool,
-        transport: CaptureDeletionTransport,
-        source: str,
-        destination: str,
-        *,
-        propagate_expiry: bool = True,
+        self, pool: Pool, transport: CaptureDeletionTransport, source: str, destination: str
     ) -> None:
         self._pool, self._transport = pool, transport
         self._source, self._destination = source, destination
-        self._owner_only = "" if propagate_expiry else ("AND d.reason IN ('deletion','retraction')")
 
     async def step(self) -> bool:
         async with self._pool.acquire() as conn, conn.transaction():
@@ -93,7 +80,7 @@ class CaptureDeletionWorker:
 
     async def _queue_next(self, conn: Connection) -> bool:
         rows = await conn.fetch(
-            f"""SELECT c.producer_id,c.capture_id,c.payload->>'harness' AS harness,
+            """SELECT c.producer_id,c.capture_id,c.payload->>'harness' AS harness,
             c.payload->>'native_id' AS native_id,
             COALESCE(j.content_hash,d.content_hash) AS content_hash
             FROM session_body_deletions d JOIN session_capture_catalog c
@@ -104,7 +91,7 @@ class CaptureDeletionWorker:
             WHERE d.source_instance_id=$1 AND c.payload->>'native_id' IS NOT NULL
             AND c.payload->>'content_format'='envelope'
             AND (j.queued OR j.content_hash IS NOT NULL)
-            AND COALESCE(j.content_hash,d.content_hash) IS NOT NULL {self._owner_only}
+            AND COALESCE(j.content_hash,d.content_hash) IS NOT NULL
             AND NOT EXISTS(SELECT 1 FROM session_capture_deletion_checkpoints k
                 WHERE k.source_instance_id=c.source_instance_id AND k.destination_id=$2
                 AND k.producer_id=c.producer_id AND k.capture_id=c.capture_id)

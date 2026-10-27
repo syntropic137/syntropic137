@@ -63,6 +63,7 @@ if TYPE_CHECKING:
         PostgresMaintenanceAdapter,
         RedisMaintenanceAdapter,
     )
+    from syn_adapters.session_inventory.archive_sink import ExporterArchiveSink
     from syn_adapters.session_inventory.capture_catalog import PostgresCaptureCatalog
     from syn_adapters.session_inventory.capture_delivery_worker import CaptureDeliveryWorker
     from syn_adapters.session_inventory.capture_outboxes import (
@@ -99,7 +100,6 @@ if TYPE_CHECKING:
         AgenticTranscriptConversation,
     )
     from syn_adapters.session_store.http_store import HttpSessionStore
-    from syn_adapters.session_store.seshmagic_archive_sink import SeshMagicArchiveSink
     from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
     from syn_adapters.storage.repositories import (
@@ -460,7 +460,7 @@ if TYPE_CHECKING:
         settlements: PostgresSettlementDeadlines,
         spool_release: CaptureSpoolRetention,
         outboxes: ExporterCaptureOutboxes,
-        archive_sink: SeshMagicArchiveSink,
+        archive_sink: ExporterArchiveSink,
     ) -> None:
         """Workflow-run session discovery and local capture (#1398).
 
