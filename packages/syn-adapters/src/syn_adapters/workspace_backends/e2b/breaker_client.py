@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from pydantic import SecretStr
 
     from syn_adapters.execution_host.outage_breaker import OutageBreaker
+    from syn_adapters.workspace_backends.e2b.listing import SandboxListings
 
 
 class BreakerE2BClient:
@@ -44,7 +45,7 @@ class BreakerE2BClient:
         await self._breaker.succeeded()
         return sandbox_id
 
-    async def list(self, metadata: Mapping[str, str]) -> list[SandboxListing]:
+    async def list(self, metadata: Mapping[str, str]) -> SandboxListings:
         return await self._client.list(metadata)
 
     async def lookup(self, sandbox_id: str) -> SandboxListing | None:
