@@ -1,0 +1,13 @@
+diff --git a/scripts/pit_stop_repoint.py b/scripts/pit_stop_repoint.py
+index 1073a976a..445a8139d 100644
+--- a/scripts/pit_stop_repoint.py
++++ b/scripts/pit_stop_repoint.py
+@@ -77,7 +77,7 @@ _IMAGE_LINE = re.compile(r"^(?P<lead>[ \t]*image:[ \t]*[\"']?)(?P<ref>[^\s\"'#]+
+ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+ #: An env passthrough with no value. Literally `null`: `""`, `~`, `${X}` or a
+ #: trailing comment is not this shape and stays the owner's.
+-_NULL_KEY = re.compile(r"(?P<indent>[ \t]+)(?P<key>[A-Z][A-Z0-9_]*):[ \t]*null[ \t]*")
++_NULL_KEY = re.compile(r"(?P<indent>[ \t]+)(?P<key>[A-Z][A-Z0-9_]*):[ \t]*.*")
+ #: A mapping key that opens a nested block: no value, anchor, alias or block scalar.
+ _PLAIN_PARENT = re.compile(r"[A-Za-z0-9._-]+:")
+ #: An env map entry this will sit beside: a bare key. A quoted (`'FOO':`),

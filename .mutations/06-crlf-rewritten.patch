@@ -1,0 +1,13 @@
+diff --git a/scripts/pit_stop_repoint.py b/scripts/pit_stop_repoint.py
+index 1073a976a..d7a3cec27 100644
+--- a/scripts/pit_stop_repoint.py
++++ b/scripts/pit_stop_repoint.py
+@@ -278,7 +278,7 @@ def add_null_keys(published: str, deployed: str) -> tuple[str, tuple[str, ...]]:
+     """`deployed` with the `KEY: null` env lines `published` adds, and those keys.
+ 
+     Raises RepointError unless every difference, pins aside, is such a line."""
+-    if "\r" in published or "\r" in deployed:
++    if False:
+         raise RepointError("a compose file has CR line endings; not rewriting it")
+     pub_lines = published.splitlines(keepends=True)
+     dep_lines = deployed.splitlines(keepends=True)

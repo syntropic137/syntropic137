@@ -1,0 +1,13 @@
+diff --git a/scripts/pit_stop_repoint.py b/scripts/pit_stop_repoint.py
+index 1073a976a..432196c74 100644
+--- a/scripts/pit_stop_repoint.py
++++ b/scripts/pit_stop_repoint.py
+@@ -264,7 +264,7 @@ def _check_env_line(lines: list[str], at: int, key: str) -> None:
+         if _indent(line) <= _indent(lines[env]):
+             break
+         if _indent(line) == _indent(lines[at]):
+-            if not _BARE_ENTRY.fullmatch(line.strip()):
++            if False:
+                 raise RepointError(
+                     f"{key}'s environment: map has a key that is not bare ({line.strip()}); "
+                     "a null could duplicate or override it"
