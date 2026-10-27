@@ -1,5 +1,5 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
-index 65809302e..a80a93511 100644
+index c781045cf..0725ba5ec 100644
 --- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
 +++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
 @@ -65,7 +65,7 @@ def _decode(source: BinaryIO, size: int) -> bytes:
