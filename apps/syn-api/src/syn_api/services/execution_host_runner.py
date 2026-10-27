@@ -31,8 +31,10 @@ from syn_adapters.workspace_backends.host_labels import (
     LABEL_HOST_ID,
     host_labels,
 )
+from syn_adapters.workspace_backends.service.workspace_lifecycle import drain_abandoned_creates
 from syn_api._wiring import get_execution_processor, get_execution_run_queue
 from syn_api._wiring_admission import get_execution_budget
+from syn_api.services import workspace_memory_reconcile as memory_reconcile
 from syn_api.services.dead_host_reaper import DockerDeadHostReaper
 from syn_api.services.reconciliation import (
     cleanup_orphaned_containers,
@@ -55,6 +57,9 @@ if TYPE_CHECKING:
     from syn_adapters.execution_host import RunReaper
 
 logger = logging.getLogger(__name__)
+
+#: How long shutdown waits for abandoned creates to finish and be destroyed.
+_ABANDONED_CREATE_DRAIN_S = 30.0
 
 _host_task: asyncio.Task[None] | None = None
 _executor: ExecutionHost | None = None
@@ -81,13 +86,16 @@ async def resolve_previous_process(*, started_before: datetime) -> None:
 
 
 async def start_execution_host() -> None:
-    """Join the Executor Pool, then start the claim loop, once; a no-op with the Run Queue off.
+    """Join the Executor Pool, then start the claim loop, once; with the Run Queue off, only
+    the workspace memory reconciler starts.
 
     Raises ``PoolDefinitionConflict`` when live members of the pool declare a
     different definition, before any loop starts. The host id is the ``syn.host_id`` label this process stamps on its
     containers, so a reconciler's reap of this host finds exactly them.
     """
     global _host_task, _executor
+    # okrs-51p.30: wherever workspaces are created, Run Queue on or off.
+    memory_reconcile.start()
     if _host_task is not None and not _host_task.done():
         return
     queue = await get_execution_run_queue()
@@ -217,15 +225,18 @@ async def stop_execution_host() -> None:
     was reported by ``_report_exit``.
     """
     global _host_task, _executor
+    await memory_reconcile.stop()
     task, _host_task = _host_task, None
     executor, _executor = _executor, None
-    if task is None:
-        return
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError, Exception):
-        await task
-    if executor is not None:
-        await executor.leave()
+    if task is not None:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+        if executor is not None:
+            await executor.leave()
+    # The cancelled runs' abandoned creates, Run Queue on or off: see them
+    # through before loop teardown cancels them mid-destroy.
+    await drain_abandoned_creates(_ABANDONED_CREATE_DRAIN_S)
 
 
 def _report_exit(task: asyncio.Task[None]) -> None:

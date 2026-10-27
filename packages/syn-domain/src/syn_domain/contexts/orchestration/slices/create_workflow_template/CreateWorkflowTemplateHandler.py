@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    require_phases_within_cap,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
 )
@@ -88,10 +91,14 @@ class CreateWorkflowTemplateHandler:
         event_publisher: EventPublisher,
         *,
         model_defaults: PhaseModelDefaults,
+        memory_ceiling_mb: int | None = None,
     ) -> None:
         self._repository = repository
         self._event_publisher = event_publisher
         self._model_defaults = model_defaults
+        #: The workspace memory ceiling every phase request is held to before
+        #: anything persists (okrs-51p.30). None: the deployment's.
+        self._memory_ceiling_mb = memory_ceiling_mb
 
     async def handle(self, command: CreateWorkflowTemplateCommand) -> InstallOutcome:
         """Handle the CreateWorkflowTemplateCommand.
@@ -105,6 +112,11 @@ class CreateWorkflowTemplateHandler:
         Returns:
             The workflow ID and whether anything actually changed.
         """
+        # Before anything is loaded or written, and HERE because every install
+        # and update path goes through this handler (API create, YAML and
+        # package install, seeding): a request above the deployment ceiling
+        # never persists, whichever door it came in by (okrs-51p.30).
+        require_phases_within_cap(command.phases, self._memory_ceiling_mb)
         aggregate = await self._repository.get_by_id(command.aggregate_id)
         defaulted = command.model_copy(
             update={"phases": _with_default_models(command.phases, self._model_defaults)}

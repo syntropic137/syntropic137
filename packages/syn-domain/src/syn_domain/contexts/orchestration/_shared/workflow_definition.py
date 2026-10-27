@@ -38,6 +38,7 @@ from syn_domain.contexts.orchestration._shared.skill_ref import (
     expand_skill_entry,
 )
 from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration._shared.workspace_resources import WorkspaceResourceRequest
 from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import (  # noqa: TC001 - pydantic field type
     EvalId,
 )
@@ -458,6 +459,16 @@ class PhaseYamlDefinition(BaseModel):
     phase that never judges anything cannot be asked to report a judgement.
     Declare it on every verify and reverify phase."""
 
+    resources: WorkspaceResourceRequest = Field(default_factory=WorkspaceResourceRequest)
+    """What this phase's workspace needs beyond the deployment default (okrs-51p.30).
+
+    ``resources: {memory_mb: 12288}`` gives this phase's workspace 12 GB. Per
+    phase because a workspace is per phase: a build that needs it does not
+    hold it through the review phases after it. Omitted means the deployment
+    default (``SYN_WORKSPACE_MEMORY_LIMIT_MB``). A request above the
+    deployment ceiling (``SYN_WORKSPACE_MEMORY_MAX_MB``) is refused at
+    install and at start, never clamped."""
+
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
@@ -696,6 +707,7 @@ class PhaseYamlDefinition(BaseModel):
             delivers_repo_changes=self.delivers_repo_changes,
             platform_access=self.platform_access,
             requires_verdict=self.requires_verdict,
+            resources=self.resources,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,
