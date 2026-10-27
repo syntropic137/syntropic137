@@ -1,0 +1,13 @@
+diff --git a/scripts/check_version_literals.py b/scripts/check_version_literals.py
+index b746f6a4a..58065d1f9 100644
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -195,7 +195,7 @@ def _owners(scope: _Scope, name: str) -> tuple[_Scope, ...]:
+     if owner is None:
+         return ()
+     if owner is scope and scope.is_class and scope.parent is not None:
+-        module = scope.module()
++        module = scope.parent
+         return (owner, module) if module.is_local(name) else (owner,)
+     return (owner,)
+ 
