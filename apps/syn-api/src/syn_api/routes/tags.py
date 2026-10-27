@@ -45,15 +45,15 @@ from syn_domain.contexts.orchestration import (
     AddExecutionTagsHandler,
     AddWorkflowTagsCommand,
     AddWorkflowTagsHandler,
+    EvalId,
     InvalidTagsError,
     RemoveExecutionTagsCommand,
     RemoveExecutionTagsHandler,
     RemoveWorkflowTagsCommand,
     RemoveWorkflowTagsHandler,
     TagSet,
+    UpdateEvalHandler,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import EvalId
-from syn_domain.contexts.orchestration.slices.update_eval import UpdateEvalHandler
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.tag_edit import TagEditResult
