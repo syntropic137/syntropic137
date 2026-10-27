@@ -95,7 +95,7 @@ Two environments are needed across the two repos:
    gh api repos/syntropic137/syntropic137/git/refs --method POST \
      -f ref=refs/heads/release -f sha=$(git rev-parse main)
    ```
-2. Branch ruleset: PR required, merge commits only (no squash, no rebase), Release Gate + CI Success checks, admin bypass.
+2. Branch ruleset: PR required, merge commits only (no squash, no rebase), required checks `Release Gate`, `CI Success`, `Compose Stack Smoke Test` and `Release Source`, admin bypass.
 3. Vercel: set production branch to `release` in project settings.
 
 ### Docker / Container Setup
@@ -739,7 +739,7 @@ When in doubt, it is a beta-gated release.
 
 Skips: the beta (pit stop, live run) and the upgrade rehearsal. Keeps: every
 required check on the PR into `release` (`CI Success`, `Release Gate`,
-`Compose Stack Smoke Test`), and the owner's `release-publish` approval.
+`Compose Stack Smoke Test`, `Release Source`), and the owner's `release-publish` approval.
 
 ### Steps (example: v1.0.5 off v1.0.4)
 
@@ -890,7 +890,8 @@ Merge to release
 ## Branch Protection (release)
 
 - Require PR (no direct push)
-- Required status checks: `Release Gate` + `CI Success`
+- Required status checks: `Release Gate`, `CI Success`, `Compose Stack Smoke Test`, `Release Source` (all GitHub Actions, integration 15368). `Release Source` is required since 2026-10-27 (ADR-077).
+- The checks are matched by job name. Renaming any of these jobs must update the ruleset in the same change, or every PR into `release` blocks on a check that never reports.
 - Merge commits only (no squash, no rebase — squashing rewrites history and forces rebasing main on every release)
 - No force pushes, no deletions
 - Admin bypass for emergencies

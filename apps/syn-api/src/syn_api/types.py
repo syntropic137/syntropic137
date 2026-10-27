@@ -1011,7 +1011,7 @@ class ArtifactSummary(BaseModel):
 
 
 class AddTagsRequest(BaseModel):
-    """Tags to add to an execution or a workflow. Adds only: never replaces the set."""
+    """Tags to add to an execution, a workflow or an eval. Adds only: never replaces the set."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1039,6 +1039,14 @@ class WorkflowTagsResponse(BaseModel):
     workflow_id: str
     tags: list[str]
     """The workflow's tags, normalised and sorted. Future runs inherit them."""
+
+
+class EvalTagsResponse(BaseModel):
+    """An eval's tags after an edit, read from the aggregate, not a projection (#2108)."""
+
+    eval_id: str
+    tags: list[str]
+    """The eval's tags, normalised and sorted."""
 
 
 class AttachEvalRequest(BaseModel):

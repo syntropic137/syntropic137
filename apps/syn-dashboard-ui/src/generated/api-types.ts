@@ -681,6 +681,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evals/{eval_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Eval Tags Endpoint
+         * @description Add tags to an eval: how a harness writes an eval-set roster (suite-version, split, polarity).
+         *
+         *     Tags already present are a no-op, so a roster is re-registered safely.
+         *     An archived eval refuses the edit (422).
+         */
+        post: operations["add_eval_tags_endpoint_evals__eval_id__tags_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/executions/{execution_id}/eval": {
         parameters: {
             query?: never;
@@ -2670,7 +2693,7 @@ export interface components {
         };
         /**
          * AddTagsRequest
-         * @description Tags to add to an execution or a workflow. Adds only: never replaces the set.
+         * @description Tags to add to an execution, a workflow or an eval. Adds only: never replaces the set.
          */
         AddTagsRequest: {
             /**
@@ -4371,6 +4394,16 @@ export interface components {
              * @constant
              */
             isolation: "unproven";
+        };
+        /**
+         * EvalTagsResponse
+         * @description An eval's tags after an edit, read from the aggregate, not a projection (#2108).
+         */
+        EvalTagsResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Tags */
+            tags: string[];
         };
         /**
          * EvalTrendPointResponse
@@ -11983,7 +12016,7 @@ export interface operations {
                     "application/json": components["schemas"]["ExecutionTagsResponse"];
                 };
             };
-            /** @description No execution or workflow has this id */
+            /** @description No execution, workflow or eval has this id */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -12029,7 +12062,7 @@ export interface operations {
                     "application/json": components["schemas"]["ExecutionTagsResponse"];
                 };
             };
-            /** @description No execution or workflow has this id */
+            /** @description No execution, workflow or eval has this id */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -12076,7 +12109,7 @@ export interface operations {
                     "application/json": components["schemas"]["WorkflowTagsResponse"];
                 };
             };
-            /** @description No execution or workflow has this id */
+            /** @description No execution, workflow or eval has this id */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -12122,7 +12155,54 @@ export interface operations {
                     "application/json": components["schemas"]["WorkflowTagsResponse"];
                 };
             };
-            /** @description No execution or workflow has this id */
+            /** @description No execution, workflow or eval has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_eval_tags_endpoint_evals__eval_id__tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalTagsResponse"];
+                };
+            };
+            /** @description No execution, workflow or eval has this id */
             404: {
                 headers: {
                     [name: string]: unknown;

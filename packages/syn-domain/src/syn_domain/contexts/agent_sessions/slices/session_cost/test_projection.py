@@ -2,10 +2,10 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import CostField
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
@@ -16,47 +16,14 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
 pytestmark = pytest.mark.unit
 
 
-class MockProjectionStore:
-    """Mock projection store for testing."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, dict[str, Any]] = {}
-
-    async def save(self, projection_name: str, key: str, data: dict[str, Any]) -> None:
-        """Save data to the store."""
-        if projection_name not in self._data:
-            self._data[projection_name] = {}
-        self._data[projection_name][key] = data
-
-    async def get(self, projection_name: str, key: str) -> dict[str, Any] | None:
-        """Get data from the store."""
-        return self._data.get(projection_name, {}).get(key)
-
-    async def query(
-        self,
-        projection_name: str,
-        filters: dict[str, Any] | None = None,
-        **_kwargs: Any,  # noqa: ANN401
-    ) -> list[dict[str, Any]]:
-        """Query data from the store."""
-        results = list(self._data.get(projection_name, {}).values())
-        if filters:
-            results = [r for r in results if all(r.get(k) == v for k, v in filters.items())]
-        return results
-
-    async def get_all(self, projection_name: str) -> list[dict[str, Any]]:
-        """Get all data from the store."""
-        return list(self._data.get(projection_name, {}).values())
-
-
 @pytest.fixture
-def store() -> MockProjectionStore:
+def store() -> InMemoryProjectionStore:
     """Create a mock projection store."""
-    return MockProjectionStore()
+    return InMemoryProjectionStore()
 
 
 @pytest.fixture
-def projection(store: MockProjectionStore) -> SessionCostProjection:
+def projection(store: InMemoryProjectionStore) -> SessionCostProjection:
     """Create a SessionCostProjection with mock store."""
     return SessionCostProjection(store)
 
@@ -667,7 +634,7 @@ class TestGetSessionCosts:
 
     @pytest.mark.asyncio
     async def test_without_a_pool_it_is_get_session_cost_per_id(
-        self, projection: SessionCostProjection, store: MockProjectionStore
+        self, projection: SessionCostProjection, store: InMemoryProjectionStore
     ) -> None:
         await store.save(
             "session_cost", "s-1", {"session_id": "s-1", "agent_model": "claude-opus-5-5"}
@@ -680,11 +647,11 @@ class TestGetSessionCosts:
 
     @pytest.mark.asyncio
     async def test_without_a_pool_it_is_one_keyed_lookup_not_a_read_per_id(
-        self, store: MockProjectionStore
+        self, store: InMemoryProjectionStore
     ) -> None:
         reads: list[list[str]] = []
 
-        class _KeyedStore(MockProjectionStore):
+        class _KeyedStore(InMemoryProjectionStore):
             async def get_many(
                 self, projection_name: str, keys: list[str]
             ) -> dict[str, dict[str, str]]:
@@ -712,7 +679,7 @@ class TestGetSessionCosts:
 
     @pytest.mark.asyncio
     async def test_with_a_pool_it_is_one_calculate_many_keyed_by_the_given_id(
-        self, store: MockProjectionStore, monkeypatch: pytest.MonkeyPatch
+        self, store: InMemoryProjectionStore, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
         from syn_domain.contexts.agent_sessions.slices.session_cost import projection as module
