@@ -1,0 +1,15 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
+index 0268f64e4..f5f44a622 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
+@@ -47,9 +47,7 @@ class E2BTemplateDriftError(ValueError):
+ 
+ def pinned_docker_engine() -> DockerEngine:
+     """agentic-workspace's engine at its pinned versions, with Syn137's pre-pulls."""
+-    return DockerEngine(
+-        pre_pull=tuple(PrePull(pin.reference, pin.digest) for pin in E2B_DOCKER_PRE_PULLS)
+-    )
++    return DockerEngine()
+ 
+ 
+ def engine_hash(engine: DockerEngine) -> str:

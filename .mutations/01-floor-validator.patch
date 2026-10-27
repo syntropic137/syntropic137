@@ -1,0 +1,13 @@
+diff --git a/packages/syn-shared/src/syn_shared/settings/e2b.py b/packages/syn-shared/src/syn_shared/settings/e2b.py
+index 152c6f7df..ed0b5f723 100644
+--- a/packages/syn-shared/src/syn_shared/settings/e2b.py
++++ b/packages/syn-shared/src/syn_shared/settings/e2b.py
+@@ -120,7 +120,7 @@ class E2BSettings(BaseSettings):
+ 
+     @model_validator(mode="after")
+     def _nested_docker_fits_the_floor(self) -> Self:
+-        if not self.nested_docker:
++        if True:
+             return self
+         if (
+             self.cpu_count < NESTED_DOCKER_MIN_CPU_COUNT

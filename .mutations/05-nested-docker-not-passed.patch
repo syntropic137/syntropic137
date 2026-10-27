@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+index 841360b54..62e68cece 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+@@ -407,7 +407,6 @@ class WorkspaceService:
+                 client=sandboxes,
+                 lifetime_seconds=e2b.timeout_seconds,
+                 credentials=credentials,
+-                nested_docker=e2b.nested_docker,
+                 docker_ready_seconds=e2b.docker_ready_seconds,
+             ),
+         )

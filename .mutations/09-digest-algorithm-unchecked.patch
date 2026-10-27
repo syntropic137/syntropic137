@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
+index 0268f64e4..6ad9b42c2 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
+@@ -60,7 +60,7 @@ def engine_hash(engine: DockerEngine) -> str:
+ 
+ def template_name(provider: WorkspaceImageProvider, digest: str, engine: DockerEngine) -> str:
+     """``syn137-<image>-<digest12>-docker-<engine-hash8>`` for these inputs."""
+-    if not digest.startswith(_DIGEST_PREFIX):
++    if not digest:
+         msg = f"base digest {digest!r} is not sha256:<hex>"
+         raise ValueError(msg)
+     digest12 = digest.removeprefix(_DIGEST_PREFIX)[:12]

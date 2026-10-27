@@ -1,0 +1,12 @@
+diff --git a/scripts/e2b_template_build.py b/scripts/e2b_template_build.py
+index 52b903363..6c829f9f0 100644
+--- a/scripts/e2b_template_build.py
++++ b/scripts/e2b_template_build.py
+@@ -164,7 +164,6 @@ async def build(
+         built_at=datetime.now(UTC).isoformat(),
+     )
+     receipt_dir.mkdir(parents=True, exist_ok=True)
+-    (receipt_dir / f"{spec.name}.json").write_text(receipt.model_dump_json(indent=2) + "\n")
+     return receipt
+ 
+ 

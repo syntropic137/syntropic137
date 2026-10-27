@@ -1,0 +1,12 @@
+diff --git a/packages/syn-shared/src/syn_shared/settings/e2b.py b/packages/syn-shared/src/syn_shared/settings/e2b.py
+index 152c6f7df..910a27a64 100644
+--- a/packages/syn-shared/src/syn_shared/settings/e2b.py
++++ b/packages/syn-shared/src/syn_shared/settings/e2b.py
+@@ -89,7 +89,6 @@ class E2BSettings(BaseSettings):
+     )
+     docker_ready_seconds: float = Field(
+         default=30.0,
+-        gt=0,
+         le=600,
+         description=(
+             "With SYN_E2B_NESTED_DOCKER: how long a new sandbox may take for `docker info` "

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-shared/src/syn_shared/settings/workspace_images.py b/packages/syn-shared/src/syn_shared/settings/workspace_images.py
+index df852da09..3fe0c6ef6 100644
+--- a/packages/syn-shared/src/syn_shared/settings/workspace_images.py
++++ b/packages/syn-shared/src/syn_shared/settings/workspace_images.py
+@@ -881,7 +881,7 @@ E2B_DOCKER_PRE_PULLS: Final[tuple[PinnedPrePull, ...]] = (
+     # scripts/resolve_event_store_digest.py: a multi-arch index, amd64 + arm64.
+     # A digest, never `${SYN_VERSION:-latest}` (AW#91).
+     PinnedPrePull(
+-        "ghcr.io/syntropic137/event-store:v0.18.0",
++        "ghcr.io/syntropic137/event-store:${SYN_VERSION:-latest}",
+         "sha256:355523ad5b5d7e50484b911f9a2ac9b359353943b2367c5d4ce644e96e3096bb",
+     ),
+ )

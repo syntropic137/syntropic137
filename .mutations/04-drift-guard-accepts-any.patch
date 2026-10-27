@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
+index 0268f64e4..192cbb2b5 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
+@@ -99,7 +99,7 @@ def pinned_template_spec(
+ def require_current_template(template: str) -> None:
+     """Refuse a nested-Docker template that the current pins did not name."""
+     expected = expected_template_name()
+-    if template != expected:
++    if not template:
+         msg = (
+             f"SYN_E2B_NESTED_DOCKER is true but SYN_E2B_TEMPLATE={template!r} is not the "
+             f"template the current pins derive ({expected!r}). It was built from other "
