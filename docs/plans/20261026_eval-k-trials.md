@@ -91,7 +91,7 @@ or a scorer still belongs to its cohort:
 |---|---|---|
 | roster (eval set + version) | trial tag `suite-version:<n>` | a case changed between versions is another question |
 | workflow id + workflow version | execution summary | an edited workflow is another treatment |
-| declared models | trial tag `models:<sha256 of the suite.yaml models map>` | the model is part of the measurement; declared, not observed, so early failures still join |
+| declared models | trial tag `models:<models_digest>` (first 32 hex of sha256 of the models map, so the tag fits 64 chars) plus `model:<phase>:<id>` per phase, both written by `declared_model_tags` | the model is part of the measurement; declared, not observed, so early failures still join |
 | scoring protocol | trial tag `scorer:<scorer protocol id>` | a different judge is a different ruler |
 
 All cohort and trial identity is read from the execution's

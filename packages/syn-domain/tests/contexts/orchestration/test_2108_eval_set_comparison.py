@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.unit
 
 P, F = Verdict.PASS, Verdict.FAIL
-B_MODELS = "n" * 64
+B_MODELS = "n" * 32
 A, B = cohort(), cohort(models=B_MODELS)
 
 

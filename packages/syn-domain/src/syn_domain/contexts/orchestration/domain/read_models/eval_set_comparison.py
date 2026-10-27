@@ -28,7 +28,10 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_trials import Tri
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from syn_domain.contexts.orchestration.domain.read_models.eval_sets import Roster
+    from syn_domain.contexts.orchestration.domain.read_models.eval_sets import (
+        EvalSetSummary,
+        Roster,
+    )
     from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
         ClassifiedTrial,
         CohortKey,
@@ -191,3 +194,15 @@ def compare_cohorts(
         a_lower_minus_b_upper=paired_bootstrap(adverse_to_a, resamples, seed),
         a_upper_minus_b_lower=paired_bootstrap(adverse_to_b, resamples, seed),
     )
+
+
+def compare_pair(summary: EvalSetSummary) -> PairedComparison | None:
+    """The paired comparison of the set's cohorts when exactly two launched into it.
+
+    A is the first cohort in key order. With one cohort there is nothing to
+    pair; with three or more no single pair is the question, so none is chosen.
+    """
+    if len(summary.cohorts) != 2:
+        return None
+    a, b = summary.cohorts
+    return compare_cohorts(summary.roster, summary.trials, a.cohort, b.cohort, a.k)
