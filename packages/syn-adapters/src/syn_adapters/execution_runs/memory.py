@@ -19,6 +19,7 @@ from syn_domain.contexts.orchestration.ports import (
     PoolDefinitionConflict,
     RunCounts,
     RunLeaseLost,
+    RunWorkload,
     StreamPresence,
 )
 
@@ -43,6 +44,8 @@ class _Host(BaseModel):
     draining: bool = False
     registered: bool = True
     successor_id: str | None = None
+    claim_checked_at: datetime = _NEVER
+    full_since: datetime | None = None
 
 
 class _Run(BaseModel):
@@ -63,6 +66,10 @@ class _Run(BaseModel):
     admitted_at: datetime | None = None
     reader_epoch: int | None = None
     reason: str | None = None
+    workload: RunWorkload = RunWorkload.AGENT
+    placed_pool: str | None = None
+    overflowed: bool | None = None
+    claimed_at: datetime | None = None
 
 
 class InMemoryExecutionRunQueue(InMemoryAdapter):
@@ -92,14 +99,13 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         if host.host_id not in self._hosts and held:
             capacity = sum(other.capacity - other.in_use for other in held.values())
             for other_id, other in held.items():
-                self._hosts[other_id] = other.model_copy(
-                    update={"capacity": other.in_use, "successor_id": host.host_id}
-                )
+                self._budget(other_id, other, capacity=other.in_use, successor_id=host.host_id)
         for other_id in held:
             self._hosts[other_id] = self._hosts[other_id].model_copy(update={"registered": False})
-        self._hosts.setdefault(
-            host.host_id, _Host(host=host, capacity=capacity, registered_at=self._now())
-        )
+        if host.host_id not in self._hosts:
+            self._budget(
+                host.host_id, _Host(host=host, capacity=capacity, registered_at=self._now())
+            )
 
     def _join_pool(self, host: ExecutorHost, retired: Iterable[str]) -> None:
         """Postgres's rule (D13); ``retired`` are this container's predecessors, already gone."""
@@ -145,7 +151,14 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             for other_id, entry in self._hosts.items()
         )
 
-    async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
+    async def reserve(
+        self,
+        execution_id: str,
+        writer_epoch: int,
+        *,
+        is_resume: bool,
+        workload: RunWorkload = RunWorkload.AGENT,
+    ) -> bool:
         if execution_id in self._runs:
             return False
         self._runs[execution_id] = _Run(
@@ -153,6 +166,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             is_resume=is_resume,
             writer_epoch=writer_epoch,
             opened_at=self._now(),
+            workload=workload,
         )
         return True
 
@@ -163,17 +177,27 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
         async with self._lock:
             now = self._now()
             entry = self._hosts.get(host_id)
-            if entry is None or not self._has_room(entry, now):
+            if entry is None or not self._live(entry, now):
                 return None
+            entry = self._budget(host_id, entry, claim_checked_at=now)
+            if entry.in_use >= entry.capacity:
+                return None
+            pool = self._pools[entry.host.pool.pool_id]
+            higher = self._higher(pool, now)
             epoch = entry.host.epoch
             ready = [
                 r
                 for r in self._runs.values()
-                if r.state == "admitted" and r.retry_at <= now and r.writer_epoch <= epoch
+                if r.state == "admitted"
+                and r.retry_at <= now
+                and r.writer_epoch <= epoch
+                and self._can_run(pool, r)
+                and not any(self._can_take(x, r) and self._holds_back(x, pool, now) for x in higher)
             ]
             if not ready:
                 return None
             oldest = min(ready, key=lambda r: (r.admitted_at or _NEVER, r.execution_id))
+            overflowed = any(self._can_take(x, oldest) for x in higher)
             run = self._put(
                 oldest,
                 state="claimed",
@@ -181,13 +205,18 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
                 reader_epoch=epoch,
                 token=oldest.token + 1,
                 leased_until=now + self._ttl,
+                placed_pool=pool.pool_id,
+                overflowed=overflowed,
+                claimed_at=now,
             )
-            self._hosts[host_id] = entry.model_copy(update={"in_use": entry.in_use + 1})
+            self._budget(host_id, entry, in_use=entry.in_use + 1)
             return ClaimedRun(
                 execution_id=run.execution_id,
                 executor_id=host_id,
                 token=run.token,
                 is_resume=run.is_resume,
+                pool_id=pool.pool_id,
+                overflowed=overflowed,
             )
 
     async def renew(self, run: ClaimedRun) -> None:
@@ -301,14 +330,49 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
     async def in_use(self) -> RunCounts:
         return RunCounts.model_validate(Counter(r.state for r in self._runs.values()))
 
-    def _has_room(self, entry: _Host, now: datetime) -> bool:
-        """The budget-row predicate of the Postgres claim's step 1."""
-        return (
-            entry.registered
-            and not entry.draining
-            and entry.in_use < entry.capacity
-            and entry.heartbeat_at > now - self._stale
+    def _live(self, entry: _Host, now: datetime) -> bool:
+        """Registered, not draining and a fresh heartbeat: the Postgres claim's step 1."""
+        return entry.registered and not entry.draining and entry.heartbeat_at > now - self._stale
+
+    def _higher(self, pool: ExecutorPool, now: datetime) -> list[_Host]:
+        """Live executors in higher-priority pools: the Postgres claim's ``higher`` (D13)."""
+        return [
+            other
+            for other in self._hosts.values()
+            if self._pools[other.host.pool.pool_id].priority < pool.priority
+            and self._live(other, now)
+        ]
+
+    def _holds_back(self, other: _Host, pool: ExecutorPool, now: datetime) -> bool:
+        """Claiming with room, or full for less than ``pool``'s Overflow Delay (D13)."""
+        claiming_with_room = (
+            other.in_use < other.capacity and other.claim_checked_at > now - self._stale
         )
+        recently_full = (
+            other.full_since is not None and other.full_since > now - pool.overflow_delay
+        )
+        return claiming_with_room or recently_full
+
+    @staticmethod
+    def _can_run(pool: ExecutorPool, row: _Run) -> bool:
+        """The Postgres ``can_run``: a NoCredentials pool runs only scripted work (#1917)."""
+        return pool.supplies_credentials or row.workload is RunWorkload.SCRIPTED
+
+    def _can_take(self, other: _Host, row: _Run) -> bool:
+        """The Postgres ``can_take``: the executor reads the run's epoch and its pool can run it."""
+        return other.host.epoch >= row.writer_epoch and self._can_run(
+            self._pools[other.host.pool.pool_id], row
+        )
+
+    def _budget(self, host_id: str, entry: _Host, **changes: object) -> _Host:
+        """Replace a budget row, keeping ``full_since`` as the Postgres trigger does."""
+        updated = entry.model_copy(update=changes)
+        full_since = (
+            None if updated.in_use < updated.capacity else (updated.full_since or self._now())
+        )
+        updated = updated.model_copy(update={"full_since": full_since})
+        self._hosts[host_id] = updated
+        return updated
 
     def _adoptable(self, row: _Run, epoch: int) -> bool:
         """The Postgres takeover predicate: its reconciler has left, and the epoch is readable."""
@@ -355,12 +419,13 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             raise RunLeaseLost(f"{execution_id} is no longer {held} under token {token}")
         charged = self._hosts[row.executor_id]
         moved = int(charged.successor_id is not None)
-        self._hosts[row.executor_id] = charged.model_copy(
-            update={"in_use": charged.in_use - 1, "capacity": charged.capacity - moved}
+        self._budget(
+            row.executor_id,
+            charged,
+            in_use=charged.in_use - 1,
+            capacity=charged.capacity - moved,
         )
         if charged.successor_id is not None:
             heir = self._hosts[charged.successor_id]
-            self._hosts[charged.successor_id] = heir.model_copy(
-                update={"capacity": heir.capacity + 1}
-            )
+            self._budget(charged.successor_id, heir, capacity=heir.capacity + 1)
         return self._put(row, state=to, executor_id=None, leased_until=_NEVER)

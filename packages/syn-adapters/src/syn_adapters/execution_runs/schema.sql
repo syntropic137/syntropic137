@@ -84,3 +84,53 @@ CREATE INDEX IF NOT EXISTS execution_runs_state_admitted_idx
 -- only runs whose claimer shares it. Rows from before the column stay NULL,
 -- which equals nothing, until a successor in their own container scopes them.
 ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS reap_scope TEXT;
+
+-- step: execution_budget_claim_signals
+-- D13 claim signals. claim_checked_at: the claim ran to its decision on this
+-- row recently (a Claim Check), the only signal placement trusts to advertise
+-- room. full_since: when this row last became full, NULL while it has room.
+-- A trigger keeps full_since, so an older image's claim and release, which
+-- know nothing of it, still keep it right during a rolling deploy. An explicit
+-- write of full_since on a full row is kept (tests age it that way).
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS claim_checked_at TIMESTAMPTZ
+    NOT NULL DEFAULT '-infinity';
+ALTER TABLE execution_budget ADD COLUMN IF NOT EXISTS full_since TIMESTAMPTZ;
+CREATE OR REPLACE FUNCTION execution_budget_full_since() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.full_since := CASE WHEN NEW.in_use < NEW.capacity THEN NULL
+        ELSE COALESCE(NEW.full_since, clock_timestamp()) END;
+    RETURN NEW;
+END $$;
+-- Created only when absent, so a restart takes no table lock once it exists.
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'execution_budget_full_since'
+        AND tgrelid = 'execution_budget'::regclass) THEN
+        CREATE TRIGGER execution_budget_full_since BEFORE INSERT OR UPDATE ON execution_budget
+            FOR EACH ROW EXECUTE FUNCTION execution_budget_full_since();
+    END IF;
+END $$;
+UPDATE execution_budget SET full_since = clock_timestamp()
+    WHERE in_use >= capacity AND full_since IS NULL;
+
+-- step: execution_runs_placement
+-- D13 Placement, as Lane 2 telemetry on the row: never an event. Written at
+-- claim, kept after release, overwritten by a later claim.
+ALTER TABLE execution_runs ADD COLUMN IF NOT EXISTS placed_pool TEXT;
+ALTER TABLE execution_runs ADD COLUMN IF NOT EXISTS overflowed BOOLEAN;
+ALTER TABLE execution_runs ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+
+-- step: credential_free_placement
+-- #1917: an Executor Pool whose backend supplies no credentials (NoCredentials,
+-- E2B) claims only runs whose workload needs none. Every run is 'agent' until
+-- a start says otherwise (issue H), and every existing pool supplies them.
+ALTER TABLE executor_pools ADD COLUMN IF NOT EXISTS supplies_credentials BOOLEAN
+    NOT NULL DEFAULT TRUE;
+ALTER TABLE execution_runs ADD COLUMN IF NOT EXISTS workload TEXT NOT NULL DEFAULT 'agent';
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'execution_runs_workload_check'
+        AND conrelid = 'execution_runs'::regclass) THEN
+        ALTER TABLE execution_runs ADD CONSTRAINT execution_runs_workload_check
+            CHECK (workload IN ('agent','scripted'));
+    END IF;
+END $$;

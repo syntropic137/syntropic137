@@ -23,6 +23,7 @@ from syn_domain.contexts.orchestration.ports import (
     PoolDefinitionConflict,
     RunCounts,
     RunLeaseLost,
+    RunWorkload,
     StreamPresence,
 )
 
@@ -31,6 +32,61 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.ports import ExecutionStreamProbe
 
 _START_NOT_RECORDED = "start not recorded"
+
+
+def can_run(pool: str) -> str:
+    """SQL: the Executor Pool aliased ``pool`` can run the run aliased ``r`` (D13).
+
+    The one place what a pool can run is spelled; the claim uses it for the
+    claimer and for every higher executor, so the two can never disagree.
+    Today it is the credential clause (#1917): a NoCredentials pool runs only
+    scripted work. Run Requirements (provider, region, isolation, capabilities,
+    #2060) join here.
+    """
+    return f"({pool}.supplies_credentials OR r.workload='scripted')"
+
+
+def can_take(executor: str) -> str:
+    """SQL: the executor aliased ``executor`` (epoch and pool columns) could take run ``r``."""
+    return f"({executor}.epoch>=r.writer_epoch AND {can_run(executor)})"
+
+
+# D3 steps 2-3 with D13 placement. $1 the claimer, $2 the staleness window, $3
+# the lease TTL. Higher executors' rows are read, never locked: capacity comes
+# only from the claimer's own locked row, so preference is decided on a
+# snapshot and capacity is still exact (D3, D13).
+_CLAIM_SQL = f"""WITH me AS (
+    SELECT b.executor_id, h.epoch, p.pool_id, p.priority, p.overflow_delay_s,
+        p.supplies_credentials
+    FROM execution_budget b JOIN executor_hosts h ON h.host_id=b.executor_id
+    JOIN executor_pools p ON p.pool_id=b.pool_id WHERE b.executor_id=$1
+), higher AS (
+    SELECT h.epoch, p.supplies_credentials,
+        (b.in_use<b.capacity
+            AND b.claim_checked_at>clock_timestamp()-$2::double precision*interval '1 second')
+            AS claiming_with_room,
+        COALESCE(b.full_since>clock_timestamp()-me.overflow_delay_s*interval '1 second', FALSE)
+            AS recently_full
+    FROM execution_budget b JOIN executor_hosts h ON h.host_id=b.executor_id
+    JOIN executor_pools p ON p.pool_id=b.pool_id, me
+    WHERE p.priority<me.priority AND NOT h.draining
+    AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second'
+), candidate AS (
+    SELECT r.execution_id, EXISTS (SELECT 1 FROM higher x WHERE {can_take("x")}) AS overflowed
+    FROM execution_runs r, me
+    WHERE r.state='admitted' AND r.retry_at<=clock_timestamp() AND r.writer_epoch<=me.epoch
+    AND {can_run("me")}
+    AND NOT EXISTS (SELECT 1 FROM higher x WHERE {can_take("x")}
+        AND (x.claiming_with_room OR x.recently_full))
+    ORDER BY r.admitted_at, r.execution_id FOR UPDATE OF r SKIP LOCKED LIMIT 1
+) UPDATE execution_runs r SET state='claimed', executor_id=me.executor_id,
+    lease_token=r.lease_token+1, reader_epoch=me.epoch, reason=NULL,
+    leased_until=clock_timestamp()+$3::double precision*interval '1 second',
+    placed_pool=me.pool_id, overflowed=c.overflowed, claimed_at=clock_timestamp()
+FROM candidate c, me WHERE r.execution_id=c.execution_id
+RETURNING jsonb_build_object('execution_id',r.execution_id,'executor_id',r.executor_id,
+    'token',r.lease_token,'is_resume',r.is_resume,'pool_id',r.placed_pool,
+    'overflowed',r.overflowed)::text"""
 
 
 @dataclass(frozen=True)
@@ -154,15 +210,23 @@ class PostgresExecutionRunQueue:
             )
         return bool(live)
 
-    async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
+    async def reserve(
+        self,
+        execution_id: str,
+        writer_epoch: int,
+        *,
+        is_resume: bool,
+        workload: RunWorkload = RunWorkload.AGENT,
+    ) -> bool:
         async with self._pool.acquire() as conn:
             inserted = await conn.fetchval(
-                """INSERT INTO execution_runs (execution_id,state,is_resume,writer_epoch)
-                VALUES ($1,'opening',$2,$3) ON CONFLICT (execution_id) DO NOTHING
+                """INSERT INTO execution_runs (execution_id,state,is_resume,writer_epoch,workload)
+                VALUES ($1,'opening',$2,$3,$4) ON CONFLICT (execution_id) DO NOTHING
                 RETURNING execution_id""",
                 execution_id,
                 is_resume,
                 writer_epoch,
+                str(workload),
             )
         return inserted is not None
 
@@ -178,33 +242,22 @@ class PostgresExecutionRunQueue:
             await conn.execute(
                 "SELECT 1 FROM execution_budget WHERE executor_id=$1 FOR UPDATE", host_id
             )
-            epoch = await conn.fetchval(
-                """SELECT h.epoch::text FROM execution_budget b
-                JOIN executor_hosts h ON h.host_id=b.executor_id
-                WHERE b.executor_id=$1 AND b.in_use<b.capacity AND NOT h.draining
-                AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second'""",
+            # The Claim Check (D13): stamped whenever this executor is live and
+            # not draining, with or without room, so it commits even when no run
+            # is then found. Placement trusts it, not the heartbeat, to say room.
+            has_room = await conn.fetchval(
+                """UPDATE execution_budget b SET claim_checked_at=clock_timestamp()
+                FROM executor_hosts h WHERE b.executor_id=$1 AND h.host_id=b.executor_id
+                AND NOT h.draining
+                AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second'
+                RETURNING (b.in_use<b.capacity)::text""",
                 host_id,
                 self._stale_seconds,
             )
-            if epoch is None:
+            if has_room != "true":
                 return None
-            # 2-3. The oldest claimable run this host can read, charged to it.
-            raw = await conn.fetchval(
-                """WITH candidate AS (
-                    SELECT execution_id FROM execution_runs
-                    WHERE state='admitted' AND retry_at<=clock_timestamp() AND writer_epoch<=$2
-                    ORDER BY admitted_at,execution_id FOR UPDATE SKIP LOCKED LIMIT 1
-                ) UPDATE execution_runs r SET state='claimed',executor_id=$1,
-                    lease_token=r.lease_token+1, reader_epoch=$2, reason=NULL,
-                    leased_until=clock_timestamp()+$3::double precision*interval '1 second'
-                FROM candidate c WHERE r.execution_id=c.execution_id
-                RETURNING jsonb_build_object('execution_id',r.execution_id,
-                    'executor_id',r.executor_id,'token',r.lease_token,
-                    'is_resume',r.is_resume)::text""",
-                host_id,
-                int(epoch),
-                self._lease_seconds,
-            )
+            # 2-3. The oldest run this executor may take now (D13), charged to it.
+            raw = await conn.fetchval(_CLAIM_SQL, host_id, self._stale_seconds, self._lease_seconds)
             if raw is None:
                 return None
             # 4. Same transaction as step 1's lock, so in_use never passes capacity.
@@ -395,17 +448,19 @@ class PostgresExecutionRunQueue:
             int(declared.isolation),
             sorted(declared.capabilities),
             int(declared.overflow_delay.total_seconds()),
+            declared.supplies_credentials,
         )
         await conn.execute(
-            """INSERT INTO executor_pools
-            (pool_id,priority,provider,region,isolation,capabilities,overflow_delay_s)
-            VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (pool_id) DO NOTHING""",
+            """INSERT INTO executor_pools (pool_id,priority,provider,region,isolation,
+            capabilities,overflow_delay_s,supplies_credentials)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (pool_id) DO NOTHING""",
             *values,
         )
         raw = await conn.fetchval(
             """SELECT jsonb_build_object('pool_id',pool_id,'priority',priority,
                 'provider',provider,'region',region,'isolation',isolation,
-                'capabilities',capabilities,'overflow_delay',overflow_delay_s)::text
+                'capabilities',capabilities,'overflow_delay',overflow_delay_s,
+                'supplies_credentials',supplies_credentials)::text
             FROM executor_pools WHERE pool_id=$1 FOR UPDATE""",
             declared.pool_id,
         )
@@ -429,7 +484,8 @@ class PostgresExecutionRunQueue:
             )
         await conn.execute(
             """UPDATE executor_pools SET priority=$2,provider=$3,region=$4,isolation=$5,
-            capabilities=$6,overflow_delay_s=$7,defined_at=now() WHERE pool_id=$1""",
+            capabilities=$6,overflow_delay_s=$7,supplies_credentials=$8,defined_at=now()
+            WHERE pool_id=$1""",
             *values,
         )
 

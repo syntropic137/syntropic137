@@ -69,6 +69,7 @@ from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
     ReapScope,
     RunCounts,
     RunLeaseLost,
+    RunWorkload,
     StreamPresence,
 )
 from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositoryPort import (
@@ -134,6 +135,7 @@ __all__ = [
     "RemoteTreePort",
     "RunCounts",
     "RunLeaseLost",
+    "RunWorkload",
     "SessionRepositoryPort",
     "SourceCommitResolverPort",
     "StoredClaudePluginTree",
