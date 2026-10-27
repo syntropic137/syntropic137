@@ -1,0 +1,12 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 992a443df..03fcf60fe 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -2674,6 +2674,7 @@ def main(argv: list[str] | None = None) -> int:
+             if args.command not in ("check", "launch"):
+                 raise DefinitionError("--case narrows `check` and `launch` only")
+             loaded = select_cases(loaded, args.case)
++            roster = select_cases(roster, args.case)
+         if args.command == "score":
+             versions = (
+                 [args.version]

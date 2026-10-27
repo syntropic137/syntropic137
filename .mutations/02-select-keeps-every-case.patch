@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 992a443df..be5faa09c 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -522,7 +522,7 @@ def select_cases(loaded: LoadedSuite, ids: list[str]) -> LoadedSuite:
+     known = {c.id for c in loaded.cases}
+     if unknown := sorted(set(ids) - known):
+         raise DefinitionError(f"--case {unknown} not among the loaded cases {sorted(known)}")
+-    return loaded.model_copy(update={"cases": tuple(c for c in loaded.cases if c.id in ids)})
++    return loaded
+ 
+ 
+ def _history_problems(suite: Suite, case_ids: set[str]) -> list[str]:

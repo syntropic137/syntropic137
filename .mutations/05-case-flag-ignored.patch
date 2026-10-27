@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 992a443df..e72718118 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -2670,7 +2670,7 @@ def main(argv: list[str] | None = None) -> int:
+         loaded = load_suite(args.suite, workflow=args.workflow, split=args.split)
+         # The roster is the whole version, whichever split a launch runs.
+         roster = load_suite(args.suite, workflow=loaded.workflow.id)
+-        if args.case is not None:
++        if args.case is not None and False:
+             if args.command not in ("check", "launch"):
+                 raise DefinitionError("--case narrows `check` and `launch` only")
+             loaded = select_cases(loaded, args.case)
