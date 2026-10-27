@@ -30,6 +30,7 @@ uv run python scripts/eval_suite.py score  --suite evals/<suite-id>    # catch r
 uv run python scripts/eval_suite.py register --suite evals/<suite-id>  # roster tags on each case eval; idempotent; a conflict writes nothing
 uv run python scripts/eval_suite.py launch --suite evals/<suite-id> --trials 3  # k runs per case, one cohort
 uv run python scripts/eval_suite.py launch --suite evals/<suite-id> --trials 3 --top-up  # only trials_short; refused while any trial is pending
+uv run python scripts/eval_suite.py launch --suite evals/<suite-id> --trials 3 --split train --case <defect-id> --case <clean-id>  # dry run first: 2 cases, 6 runs
 uv run python scripts/eval_suite.py score  --suite evals/<suite-id> --trials 3  # pass@k / pass^k with bounds from GET /eval-sets/metrics
 # verifier-seed-aw-v1 pins agentic-workspace commits: add --repo lib/agentic-workspace to check and launch, or every pin reports missing
 
@@ -92,7 +93,7 @@ Launches cost real quota.
 - **Eval subjects stay on their pin (#2055).** `check` refuses a workflow
   whose prompts `git pull` or merge/rebase the default branch, and with
   `--trials` refuses model aliases (cohort `model:` tags must be explicit ids).
-  `launch --trials` registers the whole roster first, whatever `--split`.
+  `launch --trials` registers the whole roster first, whatever `--split` or `--case`.
 - **One launcher per suite.** `launch --trials` holds `<ledger>.lock` for the
   whole launch and refuses a second one: two top-ups would each launch the same
   `trials_short`. The lock is per host; the server reserves nothing. A top-up

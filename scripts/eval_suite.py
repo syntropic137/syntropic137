@@ -511,6 +511,20 @@ def load_suite(
     )
 
 
+def select_cases(loaded: LoadedSuite, ids: list[str]) -> LoadedSuite:
+    """`loaded` narrowed to the named cases, for a dry run of a few (plan sec 13).
+
+    Only what a launch runs: the roster stays the whole version, so a dry run
+    leaves the other cases rostered and never launched, never unregistered.
+    A name outside the loaded cases is refused, not skipped, so a typo or a
+    case of the other split never launches a smaller dry run than was asked.
+    """
+    known = {c.id for c in loaded.cases}
+    if unknown := sorted(set(ids) - known):
+        raise DefinitionError(f"--case {unknown} not among the loaded cases {sorted(known)}")
+    return loaded.model_copy(update={"cases": tuple(c for c in loaded.cases if c.id in ids)})
+
+
 def _history_problems(suite: Suite, case_ids: set[str]) -> list[str]:
     """Where `history` contradicts itself, the current version or the case files."""
     problems: list[str] = []
@@ -2599,6 +2613,14 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="launch or score only these cases (default: all); tune on train only",
     )
+    parser.add_argument(
+        "--case",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="check or launch only this case (repeatable), after --split; a dry run "
+        "before a full cohort. The roster stays the whole version",
+    )
     parser.add_argument("--api-url", default=None, help="defaults to DEV__API_URL / localhost")
     parser.add_argument(
         "--llm-judge",
@@ -2648,6 +2670,10 @@ def main(argv: list[str] | None = None) -> int:
         loaded = load_suite(args.suite, workflow=args.workflow, split=args.split)
         # The roster is the whole version, whichever split a launch runs.
         roster = load_suite(args.suite, workflow=loaded.workflow.id)
+        if args.case is not None:
+            if args.command not in ("check", "launch"):
+                raise DefinitionError("--case narrows `check` and `launch` only")
+            loaded = select_cases(loaded, args.case)
         if args.command == "score":
             versions = (
                 [args.version]

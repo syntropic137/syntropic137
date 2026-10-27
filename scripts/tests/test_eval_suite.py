@@ -4028,6 +4028,87 @@ def test_launch_trials_starts_k_tagged_trials_per_case_with_one_ledger_line_each
         assert start["eval_id"] == line.eval_id
 
 
+def _dry_run_pair(loaded: LoadedSuite) -> list[str]:
+    """One train defect and one train clean case: the plan sec 13 dry run's shape."""
+    train = [c for c in loaded.cases if c.split == "train"]
+    defect = next(c for c in train if c.polarity == "defect")
+    clean = next(c for c in train if c.polarity == "clean")
+    return [defect.id, clean.id]
+
+
+@pytest.mark.unit
+def test_a_dry_run_launches_k_trials_of_the_named_cases_and_rosters_every_case(
+    tmp_path: Path,
+) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    pair = _dry_run_pair(loaded)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(
+        eval_suite.select_cases(loaded, pair), server.client(), ledger, 3, roster=loaded
+    )
+
+    recorded = read_launches(ledger)
+    assert Counter(x.case for x in recorded) == dict.fromkeys(pair, 3)
+    assert len(server.posts("/execute")) == 6
+    tagged = {r.url.path.split("/")[2] for r in server.posts("/tags")}
+    assert tagged == {_eval_of(loaded, c.id) for c in loaded.cases}  # roster is the whole version
+
+
+@pytest.mark.unit
+def test_the_case_flag_narrows_what_check_and_launch_hand_on(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pair = _dry_run_pair(load_suite(DEFAULT_SUITE))
+    checked: list[LoadedSuite] = []
+    launched: list[tuple[LoadedSuite, LoadedSuite | None]] = []
+
+    def record(loaded: LoadedSuite, repo: Path) -> list[str]:
+        checked.append(loaded)
+        return []
+
+    def launch(
+        loaded: LoadedSuite, *_: object, roster: LoadedSuite | None = None, **__: object
+    ) -> list[str]:
+        launched.append((loaded, roster))
+        return []
+
+    monkeypatch.setattr(eval_suite, "check_commits", record)
+    monkeypatch.setattr(eval_suite, "launch_trials", launch)
+    cases = [a for c in pair for a in ("--case", c)]
+    assert main(["check", "--split", "train", *cases]) == 0
+    assert [c.id for c in checked[0].cases] == pair
+    assert ": 2 case(s)" in capsys.readouterr().out
+
+    args = ["launch", "--trials", "3", "--workflow", _TRIAL_WF, "--split", "train"]
+    args += ["--api-url", "http://x.invalid"]
+    assert main([*args, *cases]) == 0
+    loaded, roster = launched[0]
+    assert [c.id for c in loaded.cases] == pair
+    assert roster is not None and len(roster.cases) == len(load_suite(DEFAULT_SUITE).cases)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        (["check", "--case", "no-such-case"], "not among the loaded cases"),
+        (["check", "--split", "holdout", "--case", "<train>"], "not among the loaded cases"),
+        (["score", "--case", "<train>"], "narrows `check` and `launch` only"),
+        (["register", "--case", "<train>"], "narrows `check` and `launch` only"),
+    ],
+    ids=["unknown", "other-split", "score", "register"],
+)
+def test_the_case_flag_refuses_what_it_cannot_narrow(
+    argv: list[str], error: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Refused, never skipped: a typo must not launch a smaller dry run than was asked."""
+    train = _dry_run_pair(load_suite(DEFAULT_SUITE))[0]
+    assert main([a.replace("<train>", train) for a in argv]) == 1
+    assert error in capsys.readouterr().err
+
+
 @pytest.mark.unit
 def test_top_up_launches_exactly_the_servers_trials_short(tmp_path: Path) -> None:
     loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
