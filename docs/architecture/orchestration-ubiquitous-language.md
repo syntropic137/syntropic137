@@ -854,17 +854,39 @@ short word is left to it. (ADR-072 D13.)
 
 ## Pool Priority
 
-The order Executor Pools are tried in: an integer, 0 first. A lower-priority
-pool takes a run only by Overflow. Never "tier". (ADR-072 D13.)
+The order Executor Pools are tried in: an integer an operator sets per pool
+(`SYN_EXECUTOR_POOL_PRIORITY`), 0 first. Local Docker is 0; a second host and
+a remote backend such as E2B take higher numbers. A lower-priority pool takes a
+run only by Overflow, and a run every pool is too full for stays Queued. Never
+"tier", though the owner's direction of 2026-10-14 used that word for it.
+(ADR-072 D13, #1917.)
 
 ## Overflow
 
 An Executor in a lower-priority Executor Pool claiming a run because every
 higher-priority Executor that could take it is full for longer than the
-Overflow Delay, draining, stale, or not claiming. A run that overflowed is
+Overflow Delay, draining, stale, or not claiming, and only when the claiming
+pool has an Overflow Budget. A run that overflowed is
 recorded as such on its row (`overflowed`), as telemetry, never as an event.
-Placement is decided in the claim itself, never by a separate process.
-(ADR-072 D13; lands after the pool model.)
+Placement is decided in the claim itself, never by a separate process. A run
+that a higher Executor could not take anyway (another Event Epoch, or a
+NoCredentials pool and an `agent` Workload) did not overflow. (ADR-072 D13,
+#1917.)
+
+## Overflow Budget
+
+The operator's daily spend cap for an Executor Pool's Overflow, in whole USD
+(`overflow_budget_usd_per_day`, `SYN_EXECUTOR_POOL_OVERFLOW_BUDGET_USD_PER_DAY`).
+Fail-closed: a pool with no Overflow Budget claims only runs that no
+**registered** higher-priority Executor could take, live or not. A higher
+Executor that is draining (a pit stop), stale or dead keeps it idle, and the
+runs wait; only `leave` (deregistration) or a restart in the same container
+removes one. So an unbudgeted pool claims only when it is the top pool for the
+run. A crashed higher host that never returns and never deregisters keeps it
+idle for good. Declaring it is what
+lets a paid pool such as E2B overflow. Recorded with the pool and not yet
+metered; counting spend against it is #2024. Not the Execution Budget, which
+is slots, not money. (ADR-072 D13, #1917.)
 
 ## Overflow Delay
 
@@ -872,8 +894,7 @@ How long a higher-priority Executor must have been **full** before a lower
 pool may overflow past it: saturation duration, measured from that
 Executor's `full_since`, not the run's age. Defined per Executor Pool
 (`overflow_delay_s`, `SYN_EXECUTOR_POOL_OVERFLOW_DELAY_S`, default 60 s).
-Recorded with the pool now; the claim reads it once Overflow lands.
-(ADR-072 D13.)
+The claim reads the **claiming** pool's delay. (ADR-072 D13.)
 
 ## Claim Check
 
@@ -881,8 +902,8 @@ The claim statement's stamp on the claiming Executor's own row,
 `claim_checked_at`, written each time the claim decides, with or without a
 run. A Heartbeat says the loop turned; a Claim Check says the claim ran.
 Placement trusts only the Claim Check to advertise room, so an Executor whose
-claim keeps failing stops holding work back from lower pools. (ADR-072 D4,
-D13; lands after the pool model.)
+claim keeps failing stops holding work back from lower pools. Stamped only
+while the Executor is live and not draining. (ADR-072 D4, D13.)
 
 ## Capability
 
@@ -920,6 +941,45 @@ Which Executor Pool an admitted run is claimed into, and whether it got there
 by Overflow, decided inside the claim transaction. Recorded on the run row
 (`placed_pool`, `overflowed`, `claimed_at`) as infrastructure telemetry.
 (ADR-072 D13.)
+
+## Workload
+
+What a run needs its workspace to hold, as the claim reads it
+(`RunWorkload`, `execution_runs.workload`): `agent`, a real agent that needs
+the host's credentials, or `scripted`, a Scripted Agent that needs none.
+Written at `reserve`; every run is `agent` until a start names a Scripted
+Agent profile (#1918). Infrastructure state on the run row, not an event.
+(#1917, research decision 5.)
+
+## Credential Clause
+
+The part of the claim that keeps credential-free backends away from work that
+needs credentials. An Executor Pool records whether its backend's
+[Workspace Credential Policy](#workspace-credential-policy) supplies
+credentials (`supplies_credentials`, from the Backend Kit, never a setting). A
+pool that supplies none claims only `scripted` Workloads, and is never counted
+as able to take an `agent` run, so it never holds one back. The research
+doc's "Credential policy" is this plus the Workspace Credential Policy itself.
+(ADR-072 D13, #1917.)
+
+## Executor Backend
+
+The workspace backend one Executor drives: Docker today, E2B behind
+`SYN_E2B_ENABLED`. One Executor drives exactly one, so no code path branches on
+backend per run; its value on the Run Queue is the Executor Pool's `provider`.
+A remote backend is an Executor in its own, higher-priority pool, never a
+router in front of the local one. (Research decision 1, #1917.)
+
+## Recovery Kit
+
+**Unclear:** planned, not built (#1917, research decision 8). A narrow
+capability, configured on whichever Executors should cover a backend and
+account, that can list, attach, execute, read files and kill on it, so a live
+Executor can reconcile a dead one's runs on a backend it does not itself
+provision. Holds a cleanup credential on our side, never inside a sandbox.
+Today the same rule is the Reap Scope: an Executor fences only runs whose
+claimer shares its scope, so a local Executor never fences an E2B run; with a
+kit, "shares its scope" becomes "holds a kit for that scope".
 
 ## Reap Scope
 

@@ -233,6 +233,14 @@ class ExecutionHost:
         await self._queue.sweep_opening(self._timing.opening_older_than, self._streams)
 
     def _spawn(self, claimed: ClaimedRun) -> None:
+        if claimed.overflowed:
+            # Lane 2 telemetry: the run spilled past a full higher-priority pool (D13).
+            logger.info(
+                "ExecutionHost %s claimed %s by overflow into Executor Pool %s",
+                self._host.host_id,
+                claimed.execution_id,
+                claimed.pool_id,
+            )
         task = asyncio.create_task(self._drive(claimed), name=f"run:{claimed.execution_id}")
         self._runs[claimed.execution_id] = task
         task.add_done_callback(lambda _: self._runs.pop(claimed.execution_id, None))

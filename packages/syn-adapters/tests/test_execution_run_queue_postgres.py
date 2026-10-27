@@ -848,7 +848,9 @@ async def test_upgrading_a_pre_pool_schema_keeps_rows_assigns_default_and_drops_
             """SELECT reap_scope IS NULL FROM execution_budget WHERE executor_id='old'"""
         )
     await queue.close(
-        ClaimedRun(execution_id="exec-held", executor_id="old", token=1, is_resume=False)
+        ClaimedRun(
+            execution_id="exec-held", executor_id="old", token=1, is_resume=False, pool_id="default"
+        )
     )
     async with pre_pool.acquire() as conn:
         assert (
