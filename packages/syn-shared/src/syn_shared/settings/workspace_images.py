@@ -121,6 +121,7 @@ pulled from Docker Hub. See
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
@@ -835,4 +836,52 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:885be5de3793dc838a391fb7338695f3acc2693b4c196e39e182f05765a2a1fd",  # 87fec3c8
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:5ba2b2ac8e9a4af525decabd5205b7ca841921642328ca7397fa8dc8ac1d481c",  # 9904354d
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:143be61422f6efbf47d4f6f1e1ce26078e1a39949dc1990d027333a9a8c95e7f",  # 7cc793c2
+)
+
+
+# ---------------------------------------------------------------------------
+# Nested-Docker E2B template inputs (AgentParadise/agentic-workspace#91)
+#
+# An E2B template lives in the operator's E2B account, so no template id is
+# pinned here. What is pinned are the INPUTS: the base image (an entry of
+# PINNED_DIGESTS above, so it moves with every bump) and the images the
+# template pre-pulls by digest. The Docker engine versions come from
+# agentic-workspace's `DockerEngine` defaults at the vendored commit.
+# `just e2b-template-build` builds from these; the template name is derived
+# from them (syn_adapters.workspace_backends.e2b.template_ref), so any change
+# here yields a new name and a stale template is refused at startup.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PinnedPrePull:
+    """An image an E2B Docker template pulls by ``digest``, then tags ``reference``.
+
+    Compose files name tags, so the tag makes the cached image usable; the
+    digest makes it the image that was meant.
+    """
+
+    reference: str
+    digest: str
+
+
+#: The provider whose PINNED_DIGESTS entry the nested-Docker template is built FROM.
+E2B_DOCKER_TEMPLATE_PROVIDER: Final[WorkspaceImageProvider] = DEFAULT_WORKSPACE_PROVIDER
+
+#: Images pre-pulled into the nested-Docker template, by digest.
+E2B_DOCKER_PRE_PULLS: Final[tuple[PinnedPrePull, ...]] = (
+    # Docker Hub index digest, read 2026-10-27; the one agentic-workspace's live
+    # nested-Docker test (test_e2b_live.py) proved.
+    PinnedPrePull(
+        "postgres:16",
+        "sha256:9e2cf6287f25c3151f4c9421ccce2b17f3e60061c111a29165e0d2cdd9ff0a97",
+    ),
+    # The event store for the ESP version at the lib/event-sourcing-platform
+    # gitlink (v0.18.0, 2f50a28c), resolved 2026-10-27 by
+    # scripts/resolve_event_store_digest.py: a multi-arch index, amd64 + arm64.
+    # A digest, never `${SYN_VERSION:-latest}` (AW#91).
+    PinnedPrePull(
+        "ghcr.io/syntropic137/event-store:v0.18.0",
+        "sha256:355523ad5b5d7e50484b911f9a2ac9b359353943b2367c5d4ce644e96e3096bb",
+    ),
 )

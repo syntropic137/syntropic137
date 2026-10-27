@@ -289,6 +289,25 @@ sandbox by its template, not per request, so the template's CPU and memory are
 a ceiling, not a request. Not an OCI image reference: nothing is
 cosign-verified when a workspace starts from it.
 
+### Nested-Docker Template
+
+An [E2B Template](#e2b-template) built with agentic-workspace's `DockerEngine`,
+so the sandbox runs a Docker daemon the workspace user can reach
+(`SYN_E2B_NESTED_DOCKER`, AgentParadise/agentic-workspace#91). The template
+lives in the operator's E2B account, so Syn137 pins its **template inputs**,
+never its id: the base image's `PINNED_DIGESTS` entry and the digest-pinned
+**pre-pulls** (`E2B_DOCKER_PRE_PULLS`, images pulled by digest at build time
+and tagged so compose can name them). The **derived template name**,
+`syn137-<image>-<digest12>-docker-<engine-hash8>`, is computed from those inputs
+and agentic-workspace's engine, so any input change yields a new name.
+`just e2b-template-build` builds it and writes a **template receipt**: what E2B
+named the build and every input it came from.
+
+**Template drift** is a configured template whose name the current inputs do
+not derive. With nested Docker on, the E2B backend refuses to start on it rather
+than run a stale template. The check is by name only: it does not prove the
+template behind the name was built from those inputs.
+
 ## Image Manifest
 
 What a workspace image says about itself: `/opt/agentic/version.json`, read

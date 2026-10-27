@@ -227,3 +227,6 @@ evals/*/migration-journal.jsonl
 
 # Local artifact storage (SYN_STORAGE_LOCAL_PATH default)
 /.artifacts/
+
+# Receipts of local nested-Docker E2B template builds (just e2b-template-build)
+/.e2b-templates/

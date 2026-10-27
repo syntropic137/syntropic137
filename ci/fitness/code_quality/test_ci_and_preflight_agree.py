@@ -116,6 +116,9 @@ _NOT_A_GATE: dict[str, str] = {
     "test-e2e-container": _TESTS,
     "test-e2e-container-build": _TESTS,
     "test-e2b": "drives real E2B sandboxes with the operator's own key; no key exists in CI (#1915)",
+    "e2b-template-build": (
+        "builds a template in the operator's own E2B account; no key exists in CI (AW#91)"
+    ),
     "fitness-report": "a verbose re-run of fitness-invariants, which preflight already runs",
     "check-docs-drift": (
         "prints the full list behind test_docs_drift.py, which fitness-invariants already runs"

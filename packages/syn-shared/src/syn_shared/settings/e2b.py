@@ -7,12 +7,22 @@ load, so a process that asked for E2B never starts on Docker instead.
 
 The API key is a ``SecretStr``: it is unwrapped only where the E2B client is
 constructed, and never logged or written into an event.
+
+``SYN_E2B_NESTED_DOCKER`` says the template runs a Docker daemon (built with
+agentic-workspace's ``DockerEngine``, AW#91). The floor below is that engine's
+own, so a template too small for Docker refuses to load rather than failing
+inside a run; a test in syn-adapters holds the two equal.
 """
 
 from typing import Self
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+#: agentic-workspace ``DockerEngine.min_cpu_count``: the smallest sandbox Docker runs in.
+NESTED_DOCKER_MIN_CPU_COUNT = 2
+#: agentic-workspace ``DockerEngine.min_memory_mb``.
+NESTED_DOCKER_MIN_MEMORY_MB = 4096
 
 
 class E2BSettings(BaseSettings):
@@ -68,6 +78,24 @@ class E2BSettings(BaseSettings):
         le=86400,
         description="Sandbox lifetime: E2B kills a sandbox this long after it was created.",
     )
+    nested_docker: bool = Field(
+        default=False,
+        description=(
+            "The template runs a Docker daemon (built by `just e2b-template-build`). Every "
+            "sandbox then waits for `docker info` before use and advertises nested_docker. "
+            "Needs SYN_E2B_CPU_COUNT>=2 and SYN_E2B_MEMORY_MB>=4096, and SYN_E2B_TEMPLATE "
+            "must be the name derived from the current pins, or startup is refused."
+        ),
+    )
+    docker_ready_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=600,
+        description=(
+            "With SYN_E2B_NESTED_DOCKER: how long a new sandbox may take for `docker info` "
+            "to answer before its creation fails."
+        ),
+    )
 
     @model_validator(mode="after")
     def _complete_when_enabled(self) -> Self:
@@ -86,6 +114,24 @@ class E2BSettings(BaseSettings):
                 f"SYN_E2B_ENABLED is true but {' and '.join(missing)} is unset. "
                 "E2B workspaces cannot start without them, and Syn137 does not fall "
                 "back to Docker when E2B was asked for. Set them, or unset SYN_E2B_ENABLED."
+            )
+            raise ValueError(msg)  # pydantic reports it as a ValidationError
+        return self
+
+    @model_validator(mode="after")
+    def _nested_docker_fits_the_floor(self) -> Self:
+        if not self.nested_docker:
+            return self
+        if (
+            self.cpu_count < NESTED_DOCKER_MIN_CPU_COUNT
+            or self.memory_mb < NESTED_DOCKER_MIN_MEMORY_MB
+        ):
+            msg = (
+                "SYN_E2B_NESTED_DOCKER is true but the template is "
+                f"{self.cpu_count} vCPU / {self.memory_mb} MB; nested Docker needs at least "
+                f"{NESTED_DOCKER_MIN_CPU_COUNT} vCPU and {NESTED_DOCKER_MIN_MEMORY_MB} MB. "
+                "Set SYN_E2B_CPU_COUNT and SYN_E2B_MEMORY_MB to what the template was built "
+                "with, or unset SYN_E2B_NESTED_DOCKER."
             )
             raise ValueError(msg)  # pydantic reports it as a ValidationError
         return self

@@ -777,6 +777,14 @@ test-unit:
 test-e2b:
     uv run --frozen --with e2b==2.52.0 --exclude-newer 2026-10-02T00:00:00Z pytest -m e2b -rA --tb=short packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/live_e2b_suite.py
 
+# Build the nested-Docker E2B template from the current pins in YOUR E2B account
+# (AW#91). Local only, never CI: needs SYN_E2B_API_KEY, cosign and docker. Prints
+# the derived name to set as SYN_E2B_TEMPLATE and writes a receipt under
+# .e2b-templates/. `just e2b-template-build --name-only` prints the name alone.
+# Same e2b SDK as test-e2b, added for this run only.
+e2b-template-build *ARGS:
+    uv run --frozen --with e2b==2.52.0 --exclude-newer 2026-10-02T00:00:00Z python scripts/e2b_template_build.py {{ARGS}}
+
 # Integration tests (uses test-stack if running, else testcontainers)
 test-integration:
     @echo "🧪 Running integration tests..."
