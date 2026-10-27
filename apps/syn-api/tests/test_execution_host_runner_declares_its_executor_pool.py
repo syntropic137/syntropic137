@@ -117,3 +117,15 @@ async def test_the_host_records_its_reapers_scope_and_backend(
     host = await _started_host(monkeypatch, _Reaper("kata", IsolationLevel.MICROVM))
     assert host.reap_scope == "engine-under-test"
     assert (host.pool.provider, host.pool.isolation) == ("kata", IsolationLevel.MICROVM)
+
+
+async def test_e2b_with_the_run_queue_refuses_to_start_until_its_executor_is_wired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The pool would declare host credentials and a Docker reaper for E2B
+    # workspaces, so it could claim agent runs a NoCredentials backend cannot run.
+    monkeypatch.setenv("SYN_E2B_ENABLED", "true")
+    monkeypatch.setenv("SYN_E2B_API_KEY", "e2b-invented-for-test")
+    monkeypatch.setenv("SYN_E2B_TEMPLATE", "syn-template-under-test")
+    with pytest.raises(runner.UnwiredExecutorBackend, match="E2B Executor is not wired"):
+        await _started_host(monkeypatch)

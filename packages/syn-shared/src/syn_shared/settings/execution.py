@@ -258,10 +258,10 @@ class ExecutorPoolSettings(BaseSettings):
         ge=0,
         le=32767,
         description=(
-            "The pool's priority; 0 is tried first. An executor claims only when no live "
-            "executor in a higher-priority pool that could take the run has room or has "
-            "been full for less than this pool's overflow delay; otherwise the run stays "
-            "queued (ADR-072 D13)."
+            "The pool's priority; 0 is tried first. An executor claims only when no live, "
+            "non-draining executor in a higher-priority pool that could take the run is "
+            "claiming with room or has been full for less than this pool's overflow delay; "
+            "otherwise the run stays queued (ADR-072 D13)."
         ),
     )
     region: str | None = Field(

@@ -44,13 +44,18 @@ class _Clock:
 
 
 async def _join(
-    queue: InMemoryExecutionRunQueue, host_id: str, pool: ExecutorPool, capacity: int
+    queue: InMemoryExecutionRunQueue,
+    host_id: str,
+    pool: ExecutorPool,
+    capacity: int,
+    *,
+    epoch: int = 1,
 ) -> None:
     host = ExecutorHost(
         host_id=host_id,
         container_id=f"c-{host_id}",
         generation="g1",
-        epoch=1,
+        epoch=epoch,
         reap_scope=f"scope-{pool.pool_id}",
         pool=pool,
     )
@@ -122,3 +127,14 @@ async def test_a_no_credentials_higher_pool_never_holds_an_agent_run_back() -> N
     await _admit(queue, "agent-1", workload=RunWorkload.AGENT)
 
     assert _placed(await queue.claim("second-1")) == ("agent-1", "second-box", False)
+
+
+async def test_a_higher_executor_that_cannot_read_the_runs_epoch_never_holds_it_back() -> None:
+    queue = InMemoryExecutionRunQueue(clock=_Clock())
+    await _join(queue, "local-1", LOCAL, capacity=2, epoch=1)
+    await _join(queue, "second-1", SECOND, capacity=1, epoch=2)
+    assert await queue.claim("local-1") is None
+    assert await queue.reserve("run-1", 2, is_resume=False, workload=RunWorkload.AGENT)
+    await queue.mark_admitted("run-1")
+
+    assert _placed(await queue.claim("second-1")) == ("run-1", "second-box", False)

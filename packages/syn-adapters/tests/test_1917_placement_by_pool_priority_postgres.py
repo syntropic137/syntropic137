@@ -45,29 +45,37 @@ E2B = ExecutorPool(
 )
 
 
-def _executor(host_id: str, pool: ExecutorPool) -> ExecutorHost:
+def _executor(host_id: str, pool: ExecutorPool, epoch: int = 1) -> ExecutorHost:
     return ExecutorHost(
         host_id=host_id,
         container_id=f"c-{host_id}",
         generation="g1",
-        epoch=1,
+        epoch=epoch,
         reap_scope=f"scope-{pool.pool_id}",
         pool=pool,
     )
 
 
 async def _join(
-    queue: PostgresExecutionRunQueue, host_id: str, pool: ExecutorPool, capacity: int
+    queue: PostgresExecutionRunQueue,
+    host_id: str,
+    pool: ExecutorPool,
+    capacity: int,
+    *,
+    epoch: int = 1,
 ) -> None:
-    await queue.register(_executor(host_id, pool), capacity)
+    await queue.register(_executor(host_id, pool, epoch), capacity)
     await queue.heartbeat(host_id)
 
 
 async def _admit(
-    queue: PostgresExecutionRunQueue, *ids: str, workload: RunWorkload = RunWorkload.SCRIPTED
+    queue: PostgresExecutionRunQueue,
+    *ids: str,
+    workload: RunWorkload = RunWorkload.SCRIPTED,
+    writer_epoch: int = 1,
 ) -> None:
     for execution_id in ids:
-        assert await queue.reserve(execution_id, 1, is_resume=False, workload=workload)
+        assert await queue.reserve(execution_id, writer_epoch, is_resume=False, workload=workload)
         await queue.mark_admitted(execution_id)
 
 
@@ -230,6 +238,19 @@ async def test_a_no_credentials_higher_pool_never_holds_an_agent_run_back(
     await _admit(queue, "agent-1", workload=RunWorkload.AGENT)
 
     assert _placed(await queue.claim("second-1")) == ("agent-1", "second-box", False)
+
+
+async def test_a_higher_executor_that_cannot_read_the_runs_epoch_never_holds_it_back(
+    pools: list[asyncpg.Pool],  # noqa: F811
+) -> None:
+    patient = SECOND.model_copy(update={"overflow_delay": timedelta(seconds=60)})
+    queue = PostgresExecutionRunQueue(pools[0])
+    await _join(queue, "local-1", LOCAL, capacity=2, epoch=1)
+    await _join(queue, "second-1", patient, capacity=1, epoch=2)
+    assert await queue.claim("local-1") is None
+    await _admit(queue, "run-1", writer_epoch=2)
+
+    assert _placed(await queue.claim("second-1")) == ("run-1", "second-box", False)
 
 
 async def test_equal_priority_pools_both_claim_without_delay(

@@ -185,15 +185,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             pool = self._pools[entry.host.pool.pool_id]
             higher = self._higher(pool, now)
             epoch = entry.host.epoch
-            ready = [
-                r
-                for r in self._runs.values()
-                if r.state == "admitted"
-                and r.retry_at <= now
-                and r.writer_epoch <= epoch
-                and self._can_run(pool, r)
-                and not any(self._can_take(x, r) and self._holds_back(x, pool, now) for x in higher)
-            ]
+            ready = [r for r in self._runs.values() if self._eligible(r, entry, higher, now)]
             if not ready:
                 return None
             oldest = min(ready, key=lambda r: (r.admitted_at or _NEVER, r.execution_id))
@@ -333,6 +325,17 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
     def _live(self, entry: _Host, now: datetime) -> bool:
         """Registered, not draining and a fresh heartbeat: the Postgres claim's step 1."""
         return entry.registered and not entry.draining and entry.heartbeat_at > now - self._stale
+
+    def _eligible(self, row: _Run, entry: _Host, higher: list[_Host], now: datetime) -> bool:
+        """The Postgres claim's candidate predicate, for the claimer ``entry`` (D13)."""
+        pool = self._pools[entry.host.pool.pool_id]
+        return (
+            row.state == "admitted"
+            and row.retry_at <= now
+            and row.writer_epoch <= entry.host.epoch
+            and self._can_run(pool, row)
+            and not any(self._can_take(x, row) and self._holds_back(x, pool, now) for x in higher)
+        )
 
     def _higher(self, pool: ExecutorPool, now: datetime) -> list[_Host]:
         """Live executors in higher-priority pools: the Postgres claim's ``higher`` (D13)."""

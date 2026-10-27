@@ -787,7 +787,11 @@ so an older image's writes keep it right), priority and overflow, the
 `placed_pool`/`overflowed`/`claimed_at` columns and the credential clause, in
 both adapters. Still to come: the published drain (`drain(host_id)`, which
 is also the claim-disable path), Run Requirements (#2060) and the placement
-read, as the plan sets out.
+read, as the plan sets out. No production Executor declares
+`supplies_credentials = false` yet: until the E2B Executor is wired (its
+reaper and its pool from its BackendKit), an executor refuses to start with
+both `SYN_E2B_ENABLED` and the Run Queue on, rather than register a Docker
+reaper and host credentials for E2B workspaces.
 
 **Applying the schema (#1965).** The api and every executor apply the Run Queue
 schema as they start, so they apply it concurrently. `ensure_ready` therefore
