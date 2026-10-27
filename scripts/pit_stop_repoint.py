@@ -235,7 +235,9 @@ def add_null_keys(published: str, deployed: str) -> tuple[str, tuple[str, ...]]:
     pub_lines = published.splitlines(keepends=True)
     dep_lines = deployed.splitlines(keepends=True)
     pub, dep = _significant(pub_lines), _significant(dep_lines)
-    matcher = difflib.SequenceMatcher(None, [s for s, _ in dep], [s for s, _ in pub], autojunk=False)
+    matcher = difflib.SequenceMatcher(
+        None, [s for s, _ in dep], [s for s, _ in pub], autojunk=False
+    )
     after: dict[int, list[str]] = {}
     keys: list[str] = []
     for op, i1, _i2, j1, j2 in matcher.get_opcodes():

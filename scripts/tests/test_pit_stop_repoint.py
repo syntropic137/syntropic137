@@ -496,7 +496,9 @@ class TestAddNullKeys:
     def test_a_key_added_with_anything_but_a_bare_null_is_refused(
         self, tmp_path: Path, value: str
     ) -> None:
-        published = _PUBLISHED.replace("SYN_WORKSPACE_MEMORY_MAX_MB: null", f"SYN_WORKSPACE_MEMORY_MAX_MB: {value}")
+        published = _PUBLISHED.replace(
+            "SYN_WORKSPACE_MEMORY_MAX_MB: null", f"SYN_WORKSPACE_MEMORY_MAX_MB: {value}"
+        )
         rc, stdout, stderr, out = _add_keys(tmp_path, published, _DEPLOYED)
         assert rc == 1 and stdout == "" and "not a KEY: null passthrough" in stderr
         assert not out.exists()
@@ -508,15 +510,21 @@ class TestAddNullKeys:
         assert not out.exists()
 
     def test_a_changed_value_is_refused(self, tmp_path: Path) -> None:
-        deployed = _DEPLOYED.replace("SYN_WORKSPACE_CPU_LIMIT: null", "SYN_WORKSPACE_CPU_LIMIT: 4", 1)
+        deployed = _DEPLOYED.replace(
+            "SYN_WORKSPACE_CPU_LIMIT: null", "SYN_WORKSPACE_CPU_LIMIT: 4", 1
+        )
         rc, _, _, out = _add_keys(tmp_path, _PUBLISHED, deployed)
         assert rc == 1
         assert not out.exists()
 
     def test_a_null_key_outside_an_environment_map_is_refused(self, tmp_path: Path) -> None:
         labels = "    labels:\n      com.example.role: api\n"
-        published = _PUBLISHED.replace("    environment:\n", labels + "    environment:\n", 1).replace(
-            "      com.example.role: api\n", "      com.example.role: api\n      SYN_LABEL_ONLY: null\n", 1
+        published = _PUBLISHED.replace(
+            "    environment:\n", labels + "    environment:\n", 1
+        ).replace(
+            "      com.example.role: api\n",
+            "      com.example.role: api\n      SYN_LABEL_ONLY: null\n",
+            1,
         )
         deployed = _DEPLOYED.replace("    environment:\n", labels + "    environment:\n", 1)
         rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
