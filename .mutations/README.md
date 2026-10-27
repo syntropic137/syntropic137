@@ -7,7 +7,7 @@ applies it, asserts the source changed, runs its test (must fail), reverts.
 
 Docker: the `test_1917_outage_breaker_and_recovery_postgres.py` killers
 (m01-m09, m19) are `integration` and need Postgres (test stack on 15432 or
-testcontainers). m10-m18 and m20 are `unit`, no docker.
+testcontainers). m10-m14, m16-m18, m20 and m21 are `unit`, no docker.
 
 | Patch | Check it removes |
 |---|---|
@@ -25,9 +25,11 @@ testcontainers). m10-m18 and m20 are `unit`, no docker.
 | m12 | E2B reaper kills nothing |
 | m13 | E2B create failures never reach the breaker |
 | m14 | memory double: claim ignores the breaker |
-| m15 | memory double: reach ignores kits |
 | m16 | E2B executor's pool declares host credentials |
 | m17 | local executor with SYN_E2B_RECOVERY_API_KEY holds no kit |
 | m18 | production wiring bypasses the breaker client |
 | m19 | after the cooldown every claim gets through, not one probe |
 | m20 | memory double: same as m19 |
+| m21 | the E2B executor starts outside test/offline on an unverified (label-listing) reap (#1916 guard) |
+
+m15 (memory double: reach ignores kits) was dropped to stay within 20 patches: it mirrors m05, which the Postgres test kills.

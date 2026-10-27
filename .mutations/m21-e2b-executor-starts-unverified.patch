@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/execution_host_runner.py b/apps/syn-api/src/syn_api/services/execution_host_runner.py
+index 0b9cc1d62..1cd0dd8f8 100644
+--- a/apps/syn-api/src/syn_api/services/execution_host_runner.py
++++ b/apps/syn-api/src/syn_api/services/execution_host_runner.py
+@@ -158,7 +158,7 @@ def _refuse_unverified_e2b_reap() -> None:
+     ImportError, which goes away when the SDK is installed.
+     """
+     # TODO(#1916): drop this guard once remote reaps confirm sandboxes by recorded id.
+-    if not get_settings().uses_in_memory_stores:
++    if False:
+         raise UnverifiedE2BReap(
+             "SYN_E2B_ENABLED with SYN_EXECUTION_RUN_QUEUE_ENABLED: the E2B executor's reap "
+             "trusts E2B's sandbox listing, which can omit a live sandbox, so it is refused "
