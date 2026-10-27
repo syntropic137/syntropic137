@@ -371,6 +371,12 @@ class LocalSessionTranscriptArchive:
                 output.write(encoded)
                 output.flush()
                 os.fsync(output.fileno())
+            # A re-encode keeps when the object was archived: growth reads mtimes.
+            try:
+                kept = target.stat()
+                os.utime(temporary, ns=(kept.st_atime_ns, kept.st_mtime_ns))
+            except FileNotFoundError:
+                pass
             Path(temporary).replace(target)
             _sync_directory(self._root)
         finally:

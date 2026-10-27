@@ -3220,6 +3220,40 @@ class DiskSpaceHealth(BaseModel):
     )
 
 
+class SessionStoreHealth(BaseModel):
+    """Size and growth of the host session archive, as /health reports it (#2107).
+
+    Measured by walking the archive directory at most once per cache window,
+    off the event loop. Informational: it never degrades /health.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str = Field(description="The archive directory, SYN_SESSION_INVENTORY_ARCHIVE_DIR.")
+    measured_at: datetime = Field(description="When the directory was walked (UTC).")
+    stored_bytes: int = Field(
+        description="Physical bytes of every file in the archive directory, as the disk sees "
+        "them: compressed objects, splice references, markers and temporaries."
+    )
+    object_count: int = Field(description="Full transcript objects, compressed or not.")
+    reference_count: int = Field(
+        description="Older revisions stored as splice references to a newer object."
+    )
+    added_bytes_24h: int = Field(
+        description="Current physical bytes of objects and references first archived in the "
+        "last 24 hours, by file mtime. Bytes since deleted are not counted."
+    )
+    added_bytes_per_day_7d: int = Field(
+        description="The same over the last 7 days, divided by 7: the daily growth rate."
+    )
+    filesystem_free_bytes: int = Field(description="Bytes available on the archive's filesystem.")
+    days_until_full: float | None = Field(
+        description="filesystem_free_bytes / added_bytes_per_day_7d; null when nothing was "
+        "added in the last 7 days."
+    )
+    detail: str = Field(description="One line for an operator: size, growth and runway.")
+
+
 class DbPoolHealth(BaseModel):
     """One Postgres connection pool in this API process, at the moment of asking (#1583).
 
@@ -3317,6 +3351,11 @@ class HealthResponse(_OmitsAbsentFields):
         "demand, the term that bound it, and the starts admitted, running and queued in "
         "this process or the Run Queue (#1715). Omitted before startup has sized it, "
         "and when the Run Queue cannot be read.",
+    )
+    session_store: SessionStoreHealth | None = Field(
+        default=None,
+        description="Size and growth of the session archive (#2107). Omitted when the "
+        "archive directory does not exist or could not be measured.",
     )
 
 
@@ -4284,7 +4323,7 @@ INSUFFICIENT = "insufficient"
 """Rendered for a percentile computed over fewer phases than it needs."""
 
 
-def _format_bytes(n: float) -> str:
+def format_bytes(n: float) -> str:
     for unit, size in (("GiB", 1 << 30), ("MiB", 1 << 20), ("KiB", 1 << 10)):
         if n >= size:
             return f"{n / size:.1f} {unit}"
@@ -4301,7 +4340,7 @@ def _display(
     if kind == "cost":
         return format_cost(Decimal(str(value)))
     if kind == "bytes":
-        return _format_bytes(value)
+        return format_bytes(value)
     if kind == "seconds":
         return f"{value:.1f}s"
     return f"{value:.2f}"
