@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+index 65809302e..4d2674cbe 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+@@ -248,7 +248,7 @@ class LocalSessionTranscriptArchive:
+             raise ValueError("not an archive object key")
+         target = self._root / digest
+         with self._lock(digest):
+-            if self._deleted(digest):
++            if False:
+                 return None
+             try:
+                 with target.open("rb") as source:
