@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
+index bf9348f05..fd6cffd90 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
+@@ -54,7 +54,7 @@ def pass_hat_k(n: int, c: int, k: int) -> float | None:
+ 
+ def require_k(k: int) -> None:
+     """Refuse k < 1: with no trials to take, "all k passed" is vacuously true."""
+-    if k < 1:
++    if k < 0:
+         msg = f"k must be at least 1, got {k}"
+         raise ValueError(msg)
+ 

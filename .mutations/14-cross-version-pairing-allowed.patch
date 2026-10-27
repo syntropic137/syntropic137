@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
+index 82877d31c..635898da9 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
+@@ -144,7 +144,7 @@ def compare_cohorts(
+     """
+     require_k(k)
+     for side in (a, b):
+-        if side.suite_version != roster.version:
++        if False:
+             msg = (
+                 f"cohort of suite version {side.suite_version} cannot be paired on "
+                 f"the version {roster.version} roster"

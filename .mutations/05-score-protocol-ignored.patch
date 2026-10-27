@@ -1,8 +1,8 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
-index bc0fb3dd9..13048f899 100644
+index dcee5dd48..88129bb37 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
-@@ -129,7 +129,7 @@ def _treatment_mismatch(run: EvalRunFacts, declared: Mapping[str, str]) -> bool:
+@@ -133,7 +133,7 @@ def _treatment_mismatch(run: EvalRunFacts, declared: Mapping[str, str]) -> bool:
  def _current_score(run: EvalRunFacts, cohort: CohortKey) -> EvalRunScore | None:
      """The score, if it was made under the cohort's protocol; else the trial is unscored."""
      score = run.score

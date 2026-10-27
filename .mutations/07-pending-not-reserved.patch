@@ -1,9 +1,9 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
-index a330255e9..2a506bc0d 100644
+index bf9348f05..54956cd18 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
-@@ -142,7 +142,7 @@ def case_metrics(eval_id: str, trials: Iterable[ClassifiedTrial], k: int) -> Cas
-     """The figures of one case in one cohort; ``trials`` are that case's trials in that cohort."""
+@@ -150,7 +150,7 @@ def case_metrics(eval_id: str, trials: Iterable[ClassifiedTrial], k: int) -> Cas
+     require_k(k)
      counts = TrialCounts.of(trials)
      exhausted = counts.infra_errors >= k
 -    short = 0 if exhausted else max(0, k - counts.judged - counts.pending)

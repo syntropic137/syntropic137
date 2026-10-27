@@ -1,5 +1,5 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
-index bc0fb3dd9..a539392c3 100644
+index dcee5dd48..4bfdf11e6 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
 @@ -109,7 +109,7 @@ def cohort_of(run: EvalRunFacts) -> CohortKey | None:

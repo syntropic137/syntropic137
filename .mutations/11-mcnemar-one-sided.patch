@@ -1,8 +1,8 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
-index 760c90c8c..e11ab9579 100644
+index 82877d31c..39bde0c24 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
-@@ -107,7 +107,7 @@ def mcnemar_exact_p(b: int, c: int) -> float:
+@@ -110,7 +110,7 @@ def mcnemar_exact_p(b: int, c: int) -> float:
      if n == 0:
          return 1.0
      tail = sum(comb(n, i) for i in range(min(b, c) + 1)) / 2**n

@@ -1,8 +1,8 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
-index a330255e9..7f51e4a85 100644
+index bf9348f05..e8b13ece9 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
-@@ -143,8 +143,8 @@ def case_metrics(eval_id: str, trials: Iterable[ClassifiedTrial], k: int) -> Cas
+@@ -151,8 +151,8 @@ def case_metrics(eval_id: str, trials: Iterable[ClassifiedTrial], k: int) -> Cas
      counts = TrialCounts.of(trials)
      exhausted = counts.infra_errors >= k
      short = 0 if exhausted else max(0, k - counts.judged - counts.pending)

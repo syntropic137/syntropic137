@@ -19,3 +19,6 @@ must kill it. Tests: `packages/syn-domain/tests/contexts/orchestration/test_2108
 | 11-mcnemar-one-sided | McNemar p not doubled | T9, mcnemar |
 | 12-last-k-judged | paired estimand from the last k trials | first-k test |
 | 13-same-direction-bounds | A_lower - B_lower reported as the adverse bound | T9 |
+| 14-cross-version-pairing-allowed | a v1 cohort paired on a v2 roster (codex r1) | cross-version refusal test |
+| 15-undeclared-phase-passes | an observed phase with no declaration validates (codex r1) | T1 undeclared phase |
+| 16-k-zero-accepted | k = 0 accepted, all([]) is true (codex r1) | k below one test |

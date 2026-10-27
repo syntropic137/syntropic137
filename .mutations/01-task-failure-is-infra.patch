@@ -1,8 +1,8 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
-index bc0fb3dd9..8f81f82db 100644
+index dcee5dd48..83b7184db 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
-@@ -153,8 +153,6 @@ def _outcome(run: EvalRunFacts, cohort: CohortKey) -> TrialOutcome:
+@@ -157,8 +157,6 @@ def _outcome(run: EvalRunFacts, cohort: CohortKey) -> TrialOutcome:
          return TrialOutcome.INFRA_ERROR
      if status == ExecutionStatus.FAILED:
          # The agent stopped without the deliverable, whatever the score says.

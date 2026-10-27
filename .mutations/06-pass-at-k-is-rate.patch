@@ -1,5 +1,5 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
-index a330255e9..9ac6bcf92 100644
+index bf9348f05..ea5b6f6d4 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trial_metrics.py
 @@ -42,7 +42,7 @@ def pass_at_k(n: int, c: int, k: int) -> float | None:
