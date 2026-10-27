@@ -81,7 +81,7 @@ def test_an_uppercase_phase_id_survives_the_lowercasing_launch_tags() -> None:
     launched = tuple(TagSet(declared_model_tags(models)))
 
     assert declared_models_of(launched) == {"Verify": SOL, "review_Final": OPUS, "plain": OPUS}
-    tags = (*cohort_tags(), *launched)
+    tags = (*cohort_tags(models=models_digest(models)), *launched)
     as_ran = run(tags=tags, own_models=(PhaseModel("Verify", SOL),))
     assert classify_trial(as_ran, declared_models_of(tags)).result is TrialOutcome.PASS
 
