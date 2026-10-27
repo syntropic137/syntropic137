@@ -15611,7 +15611,7 @@
                 "type": "null"
               }
             ],
-            "description": "Size and growth of the session archive (#2107). Omitted when the archive directory does not exist or could not be measured."
+            "description": "Size and growth of the session archive (#2107). Omitted when the archive directory does not exist or could not be measured, and until the first background measurement completes."
           }
         },
         "additionalProperties": false,
@@ -21142,7 +21142,7 @@
           "stored_bytes": {
             "type": "integer",
             "title": "Stored Bytes",
-            "description": "Physical bytes of every file in the archive directory, as the disk sees them: compressed objects, splice references, markers and temporaries."
+            "description": "Allocated bytes (st_blocks) of every file in the archive directory, as the disk sees them: compressed objects, splice references, markers and temporaries."
           },
           "object_count": {
             "type": "integer",
@@ -21157,7 +21157,7 @@
           "added_bytes_24h": {
             "type": "integer",
             "title": "Added Bytes 24H",
-            "description": "Current physical bytes of objects and references first archived in the last 24 hours, by file mtime. Bytes since deleted are not counted."
+            "description": "Current allocated bytes of objects and references first archived in the last 24 hours, by file mtime. Bytes since deleted are not counted."
           },
           "added_bytes_per_day_7d": {
             "type": "integer",

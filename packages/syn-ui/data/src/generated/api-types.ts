@@ -5740,7 +5740,7 @@ export interface components {
             cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
             /** @description The execution budget sized from host capacity and measured per-run demand, the term that bound it, and the starts admitted, running and queued in this process or the Run Queue (#1715). Omitted before startup has sized it, and when the Run Queue cannot be read. */
             execution_budget?: components["schemas"]["ExecutionBudgetHealth"] | null;
-            /** @description Size and growth of the session archive (#2107). Omitted when the archive directory does not exist or could not be measured. */
+            /** @description Size and growth of the session archive (#2107). Omitted when the archive directory does not exist or could not be measured, and until the first background measurement completes. */
             session_store?: components["schemas"]["SessionStoreHealth"] | null;
         };
         /**
@@ -8428,7 +8428,7 @@ export interface components {
             measured_at: string;
             /**
              * Stored Bytes
-             * @description Physical bytes of every file in the archive directory, as the disk sees them: compressed objects, splice references, markers and temporaries.
+             * @description Allocated bytes (st_blocks) of every file in the archive directory, as the disk sees them: compressed objects, splice references, markers and temporaries.
              */
             stored_bytes: number;
             /**
@@ -8443,7 +8443,7 @@ export interface components {
             reference_count: number;
             /**
              * Added Bytes 24H
-             * @description Current physical bytes of objects and references first archived in the last 24 hours, by file mtime. Bytes since deleted are not counted.
+             * @description Current allocated bytes of objects and references first archived in the last 24 hours, by file mtime. Bytes since deleted are not counted.
              */
             added_bytes_24h: number;
             /**

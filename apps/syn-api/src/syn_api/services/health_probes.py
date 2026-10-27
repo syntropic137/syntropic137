@@ -125,33 +125,46 @@ SESSION_STORE_CACHE_SECONDS = 300.0
 
 @dataclass
 class _SessionStoreCache:
-    """The last measurement, refreshed once per window. A cache, never state."""
+    """The last measurement and the one walk refreshing it. A cache, never state."""
 
-    expires_at: float = 0.0
+    refreshed_at: float | None = None
+    """``time.monotonic()`` when ``value`` was published; ``None`` before the first."""
     value: SessionStoreHealth | None = None
+    refresh: asyncio.Task[None] | None = None
 
 
 _session_store_cache = _SessionStoreCache()
 
 
 async def describe_session_store() -> SessionStoreHealth | None:
-    """Session archive size and growth (#2107), cached. Never raises."""
-    now = time.time()
-    if now < _session_store_cache.expires_at:
-        return _session_store_cache.value
-    # Claim the window before the walk: concurrent /health calls answer from
-    # the previous value instead of each starting their own walk.
-    _session_store_cache.expires_at = now + SESSION_STORE_CACHE_SECONDS
+    """Session archive size and growth (#2107) as last measured. Never raises, never waits.
+
+    A stale or missing value starts one background walk and is returned as is:
+    /health answers within its probe timeout however slow the disk, a
+    cancelled request cannot strand the walk, and a walk slower than the
+    window never overlaps another.
+    """
+    cache = _session_store_cache
+    stale = (
+        cache.refreshed_at is None
+        or time.monotonic() - cache.refreshed_at >= SESSION_STORE_CACHE_SECONDS
+    )
+    if stale and (cache.refresh is None or cache.refresh.done()):
+        cache.refresh = asyncio.create_task(_refresh_session_store(cache))
+    return cache.value
+
+
+async def _refresh_session_store(cache: _SessionStoreCache) -> None:
     try:
         from syn_shared.settings import get_settings
 
         root = get_settings().session_inventory.archive_dir
-        value = await asyncio.to_thread(_measure_session_store, root, now)
+        value = await asyncio.to_thread(_measure_session_store, root, time.time())
     except Exception:
         logger.warning("session store probe failed", exc_info=True)
         value = None
-    _session_store_cache.value = value
-    return value
+    cache.value = value
+    cache.refreshed_at = time.monotonic()
 
 
 def _measure_session_store(root: Path, now: float) -> SessionStoreHealth | None:

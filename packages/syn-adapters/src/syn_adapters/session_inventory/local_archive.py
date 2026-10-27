@@ -197,6 +197,21 @@ def _publishable(reference: SpliceReference) -> bool:
     return len(reference.model_dump_json()) <= MAX_REFERENCE_BYTES
 
 
+def _keep_archived_time(temporary: str, *sources: Path) -> None:
+    """Give ``temporary`` the mtime of the first source that exists.
+
+    Growth in /health is read from mtimes (#2107), so a rewrite of a revision
+    already archived, as an object or as a reference, must not look new.
+    """
+    for source in sources:
+        try:
+            kept = source.stat()
+        except FileNotFoundError:
+            continue
+        os.utime(temporary, ns=(kept.st_atime_ns, kept.st_mtime_ns))
+        return
+
+
 def _sync_directory(path: Path) -> None:
     fd = os.open(path, os.O_RDONLY)
     try:
@@ -278,6 +293,8 @@ class LocalSessionTranscriptArchive:
                 output.write(_encode(body) if self._compress else body)
                 output.flush()
                 os.fsync(output.fileno())
+            # Materializing a referrer, or re-putting a spliced body.
+            _keep_archived_time(temporary, self._root / f"{_REFERENCE}{ref.sha256}")
             try:
                 os.link(temporary, target)
             except FileExistsError:
@@ -364,19 +381,17 @@ class LocalSessionTranscriptArchive:
             if _OBJECT_NAME.fullmatch(entry.name) and entry.is_file(follow_symlinks=False):
                 yield entry.name
 
-    def _replace_locked(self, target: Path, encoded: bytes, prefix: str = ".compress-") -> None:
+    def _replace_locked(
+        self, target: Path, encoded: bytes, prefix: str = ".compress-", *archived: Path
+    ) -> None:
+        """Atomically rewrite ``target``, keeping its mtime, else the first of ``archived``'s."""
         descriptor, temporary = tempfile.mkstemp(prefix=f"{prefix}{target.name}-", dir=self._root)
         try:
             with os.fdopen(descriptor, "wb") as output:
                 output.write(encoded)
                 output.flush()
                 os.fsync(output.fileno())
-            # A re-encode keeps when the object was archived: growth reads mtimes.
-            try:
-                kept = target.stat()
-                os.utime(temporary, ns=(kept.st_atime_ns, kept.st_mtime_ns))
-            except FileNotFoundError:
-                pass
+            _keep_archived_time(temporary, target, *archived)
             Path(temporary).replace(target)
             _sync_directory(self._root)
         finally:
@@ -528,7 +543,12 @@ class LocalSessionTranscriptArchive:
         """Pin the base, publish atomically, re-verify from disk, then release the old pin."""
         self._touch(f"{_PIN}{reference.base_sha256}-{reference.sha256}")
         target = self._root / f"{_REFERENCE}{reference.sha256}"
-        self._replace_locked(target, reference.model_dump_json().encode(), ".reference-")
+        self._replace_locked(
+            target,
+            reference.model_dump_json().encode(),
+            ".reference-",
+            self._root / reference.sha256,
+        )
         if self._spliced_locked(reference.sha256) is None:
             raise TranscriptIntegrityError("archived transcript reference was not published")
         if previous is not None and previous != reference.base_sha256:

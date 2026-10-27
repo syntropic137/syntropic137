@@ -3232,7 +3232,7 @@ class SessionStoreHealth(BaseModel):
     path: str = Field(description="The archive directory, SYN_SESSION_INVENTORY_ARCHIVE_DIR.")
     measured_at: datetime = Field(description="When the directory was walked (UTC).")
     stored_bytes: int = Field(
-        description="Physical bytes of every file in the archive directory, as the disk sees "
+        description="Allocated bytes (st_blocks) of every file in the archive directory, as the disk sees "
         "them: compressed objects, splice references, markers and temporaries."
     )
     object_count: int = Field(description="Full transcript objects, compressed or not.")
@@ -3240,7 +3240,7 @@ class SessionStoreHealth(BaseModel):
         description="Older revisions stored as splice references to a newer object."
     )
     added_bytes_24h: int = Field(
-        description="Current physical bytes of objects and references first archived in the "
+        description="Current allocated bytes of objects and references first archived in the "
         "last 24 hours, by file mtime. Bytes since deleted are not counted."
     )
     added_bytes_per_day_7d: int = Field(
@@ -3355,7 +3355,8 @@ class HealthResponse(_OmitsAbsentFields):
     session_store: SessionStoreHealth | None = Field(
         default=None,
         description="Size and growth of the session archive (#2107). Omitted when the "
-        "archive directory does not exist or could not be measured.",
+        "archive directory does not exist or could not be measured, and until the "
+        "first background measurement completes.",
     )
 
 
