@@ -12,9 +12,8 @@ import re
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
-from event_sourcing import ConcurrencyConflictError, StreamAlreadyExistsError
+from event_sourcing import ConcurrencyConflictError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -25,10 +24,11 @@ from syn_api._wiring import (
     get_workflow_repo,
 )
 from syn_api.routes.executions.admission_gate import admit_or_409, refuse_while_paused
-from syn_api.routes.executions.direct_start import (
-    queue_direct_start,
-    record_execution_request,
-    start_direct_now,
+from syn_api.routes.executions.direct_start import queue_direct_start, start_direct_now
+from syn_api.routes.executions.keyed_start import (
+    already_started,
+    record_unless_started,
+    start_execution_id,
 )
 from syn_api.routes.executions.repo_access import (
     _parse_repo_from_url,
@@ -56,8 +56,6 @@ from syn_domain.contexts.orchestration import (
     TagSet,
     UnsupportedExecutionTypeError,
     UnsupportedToolPolicyForProviderError,
-    execution_id_for_key,
-    execution_request_id,
     launch_eval_for,
     validate_phase_declarations,
 )
@@ -763,48 +761,10 @@ async def _validate_execution_request(
     return workflow, effective_inputs, typed_repos
 
 
-async def _replay(
-    workflow_id: str, execution_id: str, request: ExecuteWorkflowRequest
-) -> ExecuteWorkflowResponse | None:
-    """The answer to a keyed start already accepted, or None when there is none (#2129).
-
-    Read from the request stream, the record written before the first caller
-    heard 200, never from a projection that may not have applied it yet. A
-    start that differs from the recorded one reused its key: 409, and nothing
-    starts. A repository that does not parse cannot have been accepted, so it
-    is no replay; validation answers it.
-    """
-    from syn_adapters.storage.repositories import get_execution_request_repository
-
-    await ensure_connected()
-    recorded = await get_execution_request_repository().get_by_id(
-        execution_request_id(execution_id)
-    )
-    if recorded is None or recorded.workflow_id is None:
-        return None
-    try:
-        repos = [RepositoryRef.parse(r) for r in request.repos]
-    except ValueError:
-        return None
-    if not recorded.same_request(
-        workflow_id=workflow_id,
-        inputs=dict(request.inputs),
-        task=request.task,
-        repos=repos,
-        tags=request.tags,
-        choice=EvalChoice(eval_id=request.eval_id, ordinary=request.no_eval),
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"idempotency_key already started execution {execution_id} "
-                "with a different request; use a new key for a new start"
-            ),
-        )
+def _replayed(workflow_id: str, execution_id: str) -> ExecuteWorkflowResponse:
     return ExecuteWorkflowResponse(
         execution_id=execution_id,
         workflow_id=workflow_id,
-        status="started",
         message=f"Execution {execution_id} was already started with this idempotency_key",
         replayed=True,
     )
@@ -822,14 +782,13 @@ async def execute_workflow_endpoint(
     With `idempotency_key`, a start already accepted is answered again, not
     repeated (#2129).
     """
-    keyed = request.idempotency_key
-    execution_id = (
-        f"exec-{uuid4().hex[:12]}" if keyed is None else execution_id_for_key(workflow_id, keyed)
-    )
+    execution_id = start_execution_id(workflow_id, request.idempotency_key)
     # Before the maintenance gate: a replay admits nothing, and a retry during
     # a deploy should hear about the start it already has.
-    if keyed is not None and (replay := await _replay(workflow_id, execution_id, request)):
-        return replay
+    if request.idempotency_key is not None:
+        await ensure_connected()
+        if await already_started(workflow_id, execution_id, request):
+            return _replayed(workflow_id, execution_id)
     # #1387, SYNCHRONOUS and first: everything below the `add_task` line runs
     # after the response has been sent, so a refusal discovered there would
     # arrive as a 200 followed by an execution that never happened. Before
@@ -886,29 +845,20 @@ async def execute_workflow_endpoint(
     async with admit_or_409() as admitted:
         # #1557: durable BEFORE the 200, so a start waiting for a budget slot
         # survives a restart; the request ProcessManager starts it from here.
-        try:
-            await record_execution_request(
-                RequestExecutionCommand(
-                    execution_id=execution_id,
-                    workflow_id=workflow_id,
-                    inputs=effective_inputs,
-                    task=request.task,
-                    repos=typed_repos,
-                    tags=request.tags,
-                    launch_eval=launch_eval,
-                ),
-                admitted,
-            )
-        except StreamAlreadyExistsError:
-            # #2129: a concurrent start with the same key won the stream. The
-            # ticket is already given back and nothing was queued, so this
-            # start answers with the winner's execution instead.
-            if (
-                keyed is None
-                or (replay := await _replay(workflow_id, execution_id, request)) is None
-            ):
-                raise
-            return replay
+        if await record_unless_started(
+            RequestExecutionCommand(
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                inputs=effective_inputs,
+                task=request.task,
+                repos=typed_repos,
+                tags=request.tags,
+                launch_eval=launch_eval,
+            ),
+            admitted,
+            request,
+        ):
+            return _replayed(workflow_id, execution_id)
         from syn_shared.settings import get_settings
 
         if get_settings().execution.run_queue_enabled:
