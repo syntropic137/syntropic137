@@ -81,8 +81,12 @@ Launches cost real quota.
   whole launch and refuses a second one: two top-ups would each launch the same
   `trials_short`. The lock is per host; the server reserves nothing. A top-up
   continues only the cohort of the workflow version this launch installs.
-  An execute call whose answer is lost (timeout, 5xx) is looked up by its
-  unique `trial:<batch>/<i>` tag and ledgered; if no run carries it, launch stops.
+  Each trial's intent is written to `<ledger stem>.pending.jsonl` before its
+  execute call. A lost answer (timeout, 5xx) is looked up by the trial's tag
+  (`trial:<batch>/<i>`, batch unique per launch, `i` numbered across the batch);
+  unresolved, the launch stops, and every later launch first resolves pending
+  intents and refuses while any stays unknown. Delete an intent's line only for
+  a trial that provably never started. Server-side idempotency: #2129.
 - **Call a cheaper arm "quality-neutral" only when the paired difference's
   interval excludes the drop you would tolerate** (say -5pp). Inconclusive is
   not neutral.

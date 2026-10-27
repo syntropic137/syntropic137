@@ -85,8 +85,11 @@ K TRIALS PER CASE (#2108). ``register`` writes the roster onto each case's
 eval (``suite-version:<n>``, ``split:<s>``, ``polarity:<p>``; idempotent, and
 a split or polarity conflict anywhere writes nothing). ``launch --trials K``
 registers the whole roster, then starts K runs per case as one cohort: every run carries the declared
-``model:`` tags, ``scorer:<protocol>`` and ``trial:<batch>/<i>``, and the
-ledger line records batch, trial and scorer. ``--top-up`` launches only the
+``model:`` tags, ``scorer:<protocol>`` and ``trial:<batch>/<i>`` (batch unique
+per launch, ``i`` across the batch), and the ledger line records batch, trial
+and scorer. Each trial's intent is written first to ``<ledger stem>.pending.jsonl``;
+a launch resolves pending intents before it starts and refuses while any is
+unresolved, so a lost execute answer is never replaced by a duplicate. ``--top-up`` launches only the
 server's ``trials_short`` per case, and is refused while any trial is
 pending or for a cohort never launched. ``score --trials K`` scores each
 trial under its launch's scorer protocol (another protocol is refused) and
@@ -108,6 +111,7 @@ import hashlib
 import math
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -1308,13 +1312,37 @@ class _ExecutionList(_Read):
     executions: list[_ExecutionRow]
 
 
+RECONCILE_ATTEMPTS = 3
+RECONCILE_PAUSE_S = 2.0
+
+
+def find_trial_run(client: httpx.Client, trial_tag: str, workflow_id: str) -> list[str]:
+    """The runs carrying `trial_tag`, asked up to RECONCILE_ATTEMPTS times while none is visible.
+
+    The list read lags the write, so one empty answer proves nothing. A run of
+    another workflow is never this trial's.
+    """
+    for attempt in range(RECONCILE_ATTEMPTS):
+        if attempt:
+            time.sleep(RECONCILE_PAUSE_S)
+        found = _get(client, _ExecutionList, "/executions", tag=trial_tag)
+        runs = [r.workflow_execution_id for r in found.executions]
+        if runs:
+            return [
+                r
+                for r in runs
+                if _get(client, _Execution, f"/executions/{r}").workflow_id == workflow_id
+            ]
+    return []
+
+
 def start_trial(client: httpx.Client, workflow_id: str, body: TrialStart, trial_tag: str) -> str:
     """POST one trial and return its run id, even when the answer is lost.
 
     A timeout, a dropped connection or a 5xx says nothing about whether the
-    run started. The trial tag is unique to this batch and index, so the run
-    is looked up by it: one match is the run, none means it never started
-    (refused, safe to launch again), several is refused for a human.
+    run started. The trial tag is unique (`new_batch`), so the run is looked
+    up by it: one match is the run. Otherwise the launch stops and the trial's
+    intent stays pending, so no later launch replaces it until it is resolved.
     """
     try:
         response = client.post(f"/workflows/{workflow_id}/execute", json=body.model_dump())
@@ -1324,13 +1352,12 @@ def start_trial(client: httpx.Client, workflow_id: str, body: TrialStart, trial_
         lost = f"{response.status_code} {_detail(response)}"
     except httpx.TransportError as exc:
         lost = f"{type(exc).__name__}: {exc}"
-    found = _get(client, _ExecutionList, "/executions", tag=trial_tag)
-    runs = [r.workflow_execution_id for r in found.executions]
+    runs = find_trial_run(client, trial_tag, workflow_id)
     if len(runs) == 1:
         return runs[0]
     raise RuntimeError(
         f"execute for {trial_tag} failed ({lost}) and {len(runs)} runs carry that tag "
-        f"({', '.join(runs) or 'none'}); nothing ledgered for it"
+        f"({', '.join(runs) or 'none'}); its intent stays pending, launch stopped"
     )
 
 
@@ -1365,6 +1392,63 @@ def read_launches(path: Path) -> list[Launch]:
         return []
     lines = path.read_text(encoding="utf-8").splitlines()
     return [Launch.model_validate_json(line) for line in lines if line.strip()]
+
+
+class TrialIntent(_Frozen):
+    """A trial about to be started, written to `<ledger>.pending.jsonl` BEFORE its execute call.
+
+    Resolved once the ledger holds a Launch with the same batch and trial.
+    """
+
+    launch: Launch
+    """The ledger line it becomes; its `run_id` is empty until resolved."""
+    trial_tag: str
+
+
+def intents_path(ledger: Path) -> Path:
+    return ledger.with_name(ledger.stem + ".pending.jsonl")
+
+
+def unresolved_intents(ledger: Path) -> list[TrialIntent]:
+    path = intents_path(ledger)
+    if not path.exists():
+        return []
+    done = {(x.batch, x.trial) for x in read_launches(ledger)}
+    intents = [
+        TrialIntent.model_validate_json(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    return [i for i in intents if (i.launch.batch, i.launch.trial) not in done]
+
+
+def _append_intent(ledger: Path, intent: TrialIntent) -> None:
+    with intents_path(ledger).open("a", encoding="utf-8") as fh:
+        fh.write(intent.model_dump_json() + "\n")
+
+
+def resolve_intents(client: httpx.Client, ledger: Path) -> list[str]:
+    """Ledger every pending intent whose run is now visible; refuse while any stays unresolved.
+
+    A launch never starts a replacement for a trial whose fate is unknown.
+    """
+    out: list[str] = []
+    stuck: list[str] = []
+    for intent in unresolved_intents(ledger):
+        runs = find_trial_run(client, intent.trial_tag, intent.launch.workflow_id)
+        if len(runs) == 1:
+            _append_launch(ledger, intent.launch.model_copy(update={"run_id": runs[0]}))
+            out.append(f"{intent.launch.case}: pending {intent.trial_tag} -> run {runs[0]}")
+        else:
+            stuck.append(f"{intent.trial_tag} ({intent.launch.case}): {len(runs)} runs")
+    if stuck:
+        raise RuntimeError(
+            "unresolved trial intents, nothing launched:\n  "
+            + "\n  ".join(stuck)
+            + f"\nRe-run once the server lists them; if a trial provably never started, "
+            f"delete its line from {intents_path(ledger)}"
+        )
+    return out
 
 
 @contextmanager
@@ -2158,8 +2242,12 @@ def cohort_tags(loaded: LoadedSuite, protocol: str) -> list[str]:
 
 
 def new_batch() -> str:
-    """A batch id: the UTC launch time, tag-safe and sortable."""
-    return time.strftime("%Y%m%dt%H%M%Sz", time.gmtime())
+    """A batch id: the UTC launch time plus a random suffix, tag-safe, sortable and unique.
+
+    Trial tags must never repeat across launches: a lost execute answer is
+    found again by its trial tag alone (`start_trial`).
+    """
+    return time.strftime("%Y%m%dt%H%M%Sz", time.gmtime()) + "-" + secrets.token_hex(3)
 
 
 class _CohortKey(_Read):
@@ -2326,12 +2414,13 @@ def launch_trials(
     batch = new_batch()
     tags = cohort_tags(loaded, protocol)
     try:
-        TagSet([*tags, f"{EvalTag.TRIAL}:{batch}/{k}"])
+        TagSet([*tags, f"{EvalTag.TRIAL}:{batch}/{k * len(loaded.cases)}"])
     except InvalidTagsError as exc:
         raise RuntimeError(f"cohort tags are not valid tags: {exc}") from exc
 
     with ledger_lock(ledger):
-        out = register_roster(roster or loaded, client)
+        out = resolve_intents(client, ledger)
+        out += register_roster(roster or loaded, client)
         evals = {case.id: stable_eval(loaded, case, client).eval_id for case in loaded.cases}
         if top_up:
             metrics = set_metrics(loaded, client, k, split)
@@ -2340,11 +2429,25 @@ def launch_trials(
             counts = dict.fromkeys(evals, k)
         out.append(install_workflow(loaded, client, root))
         s, w = loaded.suite, loaded.workflow
+        i = 0  # numbered across the batch, so no two cases share a trial tag
         for case in loaded.cases:
             if not counts[case.id]:
                 out.append(f"{case.id}: no trial short, none launched")
-            for i in range(1, counts[case.id] + 1):
+            for _ in range(counts[case.id]):
+                i += 1
                 trial_tag = f"{EvalTag.TRIAL}:{batch}/{i}"
+                launch = Launch(
+                    suite=loaded.tag,
+                    case=case.id,
+                    eval_id=evals[case.id],
+                    run_id="",
+                    commit=case.commit,
+                    workflow_id=w.id,
+                    batch=batch,
+                    trial=i,
+                    scorer=protocol,
+                )
+                _append_intent(ledger, TrialIntent(launch=launch, trial_tag=trial_tag))
                 run_id = start_trial(
                     client,
                     w.id,
@@ -2356,20 +2459,7 @@ def launch_trials(
                     ),
                     trial_tag,
                 )
-                _append_launch(
-                    ledger,
-                    Launch(
-                        suite=loaded.tag,
-                        case=case.id,
-                        eval_id=evals[case.id],
-                        run_id=run_id,
-                        commit=case.commit,
-                        workflow_id=w.id,
-                        batch=batch,
-                        trial=i,
-                        scorer=protocol,
-                    ),
-                )
+                _append_launch(ledger, launch.model_copy(update={"run_id": run_id}))
                 out.append(f"{case.id}: trial {batch}/{i} -> run {run_id}")
         return out
 

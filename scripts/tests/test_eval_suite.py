@@ -3826,6 +3826,8 @@ class _TrialServer(_Server):
         self.refuse: set[int] = set()
         """Start attempts (from 1) that answer 503 and start nothing."""
         self.attempts = 0
+        self.lagging_lookups = 0
+        """How many tag lookups still answer empty, as a lagging list read does."""
 
     def _stable(self, case_id: str) -> dict[str, object]:
         # Keyed by case, as the real stable key is: two cases may share a pin.
@@ -3856,7 +3858,24 @@ class _TrialServer(_Server):
             if self.attempts in self.lose_answer:
                 return httpx.Response(504, json={"detail": "gateway timeout"})
             return httpx.Response(200, json={"execution_id": run_id, "workflow_id": self.installed})
+        if (
+            request.method == "GET"
+            and path.startswith("/executions/")
+            and path[12:] in self.run_tags
+        ):
+            run_id = path[12:]
+            return httpx.Response(
+                200,
+                json={
+                    "workflow_execution_id": run_id,
+                    "workflow_id": self.installed,
+                    "status": "running",
+                },
+            )
         if request.method == "GET" and path == "/executions":
+            if self.lagging_lookups:
+                self.lagging_lookups -= 1
+                return httpx.Response(200, json={"executions": [], "total": 0})
             wanted = request.url.params.get_list("tag")
             rows = [
                 {"workflow_execution_id": run_id}
@@ -3992,8 +4011,8 @@ def test_launch_trials_starts_k_tagged_trials_per_case_with_one_ledger_line_each
     assert Counter(x.case for x in recorded) == {c.id: 3 for c in loaded.cases}
     assert {x.scorer for x in recorded} == {"8"}
     assert len({x.batch for x in recorded}) == 1
-    for case in loaded.cases:
-        assert sorted(x.trial for x in recorded if x.case == case.id) == [1, 2, 3]
+    # numbered across the batch, so no two cases share a trial tag
+    assert sorted(x.trial or 0 for x in recorded) == list(range(1, 3 * len(loaded.cases) + 1))
     starts = [json.loads(r.content) for r in server.posts("/execute")]
     batch = recorded[0].batch
     cohort = {
@@ -4131,16 +4150,64 @@ def test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered(tmp_path
 
 @pytest.mark.unit
 def test_a_trial_that_never_started_stops_the_launch_and_ledgers_nothing_for_it(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
     server = _TrialServer(loaded)
     server.refuse = {2}
     ledger = tmp_path / "launches.jsonl"
+    monkeypatch.setattr(eval_suite, "RECONCILE_PAUSE_S", 0)
 
     with pytest.raises(RuntimeError, match="0 runs carry that tag"):
         eval_suite.launch_trials(loaded, server.client(), ledger, 3)
     assert [x.run_id for x in read_launches(ledger)] == ["exec-1"]
+
+
+@pytest.mark.unit
+def test_no_two_trials_share_a_trial_tag_across_cases_or_launches(tmp_path: Path) -> None:
+    """A lost answer is found again by its trial tag alone (codex #2126 pass 2)."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 2)
+    eval_suite.launch_trials(loaded, server.client(), ledger, 2)  # same second, new batch
+
+    trial_tags = [t for tags in server.run_tags.values() for t in tags if t.startswith("trial:")]
+    assert len(trial_tags) == 4 * len(loaded.cases)
+    assert len(set(trial_tags)) == len(trial_tags)
+
+
+@pytest.mark.unit
+def test_an_unresolved_intent_blocks_every_later_launch_until_its_run_is_visible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The intent is written before the POST; a lagging list never makes a duplicate (pass 2)."""
+    monkeypatch.setattr(eval_suite, "RECONCILE_PAUSE_S", 0)
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+    server.lose_answer = {2}
+    server.lagging_lookups = eval_suite.RECONCILE_ATTEMPTS
+
+    with pytest.raises(RuntimeError, match="intent stays pending"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert [x.run_id for x in read_launches(ledger)] == ["exec-1"]
+    [pending] = eval_suite.unresolved_intents(ledger)
+    assert pending.launch.trial == 2
+
+    server.lagging_lookups = eval_suite.RECONCILE_ATTEMPTS  # still not listed
+    with pytest.raises(RuntimeError, match="unresolved trial intents"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert server.started == 2  # nothing replaced it
+
+    eval_suite.launch_trials(
+        loaded, server.client(), ledger, 1
+    )  # now listed: resolved, then launched
+    runs = [x.run_id for x in read_launches(ledger)]
+    assert runs[:2] == ["exec-1", "exec-2"]
+    assert eval_suite.unresolved_intents(ledger) == []
+    assert len(runs) == 2 + len(loaded.cases)
 
 
 @pytest.mark.unit
