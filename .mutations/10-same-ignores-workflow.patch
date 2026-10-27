@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
+index 81d487254..0349dd013 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
+@@ -151,7 +151,7 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
+         time, and a later retry naming none still asks for the same thing.
+         """
+         return (
+-            self._workflow_id == workflow_id
++            True
+             and self._inputs == inputs
+             and self._task == task
+             and [r.slug for r in self._repos] == [r.slug for r in repos]

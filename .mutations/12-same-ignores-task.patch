@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
+index 81d487254..38b8d7277 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
+@@ -153,7 +153,6 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
+         return (
+             self._workflow_id == workflow_id
+             and self._inputs == inputs
+-            and self._task == task
+             and [r.slug for r in self._repos] == [r.slug for r in repos]
+             and list(self._tags) == list(tags)
+             and self._recorded_choice() == choice

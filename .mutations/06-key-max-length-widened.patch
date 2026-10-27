@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/executions/commands.py b/apps/syn-api/src/syn_api/routes/executions/commands.py
+index 49631e15d..b9a377f79 100644
+--- a/apps/syn-api/src/syn_api/routes/executions/commands.py
++++ b/apps/syn-api/src/syn_api/routes/executions/commands.py
+@@ -296,7 +296,7 @@ class ExecuteWorkflowRequest(BaseModel):
+     idempotency_key: str | None = Field(
+         default=None,
+         min_length=1,
+-        max_length=200,
++        max_length=2000,
+         pattern=r"^[^\x00]+$",
+         description=(
+             "Makes the start idempotent (#2129): the execution id is derived from the "

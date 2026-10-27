@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
+index 81d487254..78f0ea960 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/ExecutionRequestAggregate.py
+@@ -166,7 +166,7 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
+             return self._eval_choice
+         if launch.selection is EvalSelection.EXPLICIT:
+             return EvalChoice(eval_id=launch.eval_id)
+-        return EvalChoice(ordinary=launch.selection is EvalSelection.ORDINARY)
++        return EvalChoice()
+ 
+     @command_handler("RequestExecutionCommand")
+     def request(self, command: RequestExecutionCommand) -> None:

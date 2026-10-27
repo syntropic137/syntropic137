@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/executions/commands.py b/apps/syn-api/src/syn_api/routes/executions/commands.py
+index 49631e15d..d59c027f1 100644
+--- a/apps/syn-api/src/syn_api/routes/executions/commands.py
++++ b/apps/syn-api/src/syn_api/routes/executions/commands.py
+@@ -766,7 +766,7 @@ def _replayed(workflow_id: str, execution_id: str) -> ExecuteWorkflowResponse:
+         execution_id=execution_id,
+         workflow_id=workflow_id,
+         message=f"Execution {execution_id} was already started with this idempotency_key",
+-        replayed=True,
++        replayed=False,
+     )
+ 
+ 
