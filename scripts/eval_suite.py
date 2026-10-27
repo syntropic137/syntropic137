@@ -19,9 +19,10 @@ every version and every verifier adds runs to the same eval - the eval's run
 list is the case's history. What differs between runs goes on the RUN as tags:
 ``suite-version:<n>`` and ``verifier:<workflow id>``.
 
-    uv run python scripts/eval_suite.py check  [--suite DIR]   # offline dry run
-    uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--split S] [--api-url URL]
-    uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--version N] [--split S] [--api-url URL]
+    uv run python scripts/eval_suite.py check    [--suite DIR] [--trials]  # offline dry run
+    uv run python scripts/eval_suite.py register [--suite DIR] [--api-url URL]
+    uv run python scripts/eval_suite.py launch   [--suite DIR] [--workflow ID] [--split S] [--trials [K]] [--top-up] [--api-url URL]
+    uv run python scripts/eval_suite.py score    [--suite DIR] [--workflow ID] [--version N] [--split S] [--trials [K]] [--api-url URL]
 
 SAME CASES, DIFFERENT VERIFIER. A suite lists one or more workflows; each
 differs from the others only in who verifies. ``--workflow`` picks one (the
@@ -80,6 +81,24 @@ workflow. An eval's run list cannot tell a run launched into it from one
 attached afterwards - attach never copies the baseline - so a run found only
 by tag is reported and never scored.
 
+K TRIALS PER CASE (#2108). ``register`` writes the roster onto each case's
+eval (``suite-version:<n>``, ``split:<s>``, ``polarity:<p>``; idempotent, and
+a split or polarity conflict anywhere writes nothing). ``launch --trials K``
+registers the whole roster, then starts K runs per case as one cohort: every run carries the declared
+``model:`` tags, ``scorer:<protocol>`` and ``trial:<batch>/<i>`` (batch unique
+per launch, ``i`` across the batch), and the ledger line records batch, trial
+and scorer. Each trial's intent is written first to ``<ledger stem>.pending.jsonl``;
+a launch resolves pending intents before it starts and refuses while any is
+unresolved, so a lost execute answer is never replaced by a duplicate. ``--top-up`` launches only the
+server's ``trials_short`` per case, and is refused while any trial is
+pending or for a cohort never launched. ``score --trials K`` scores each
+trial under its launch's scorer protocol (another protocol is refused) and
+prints the server's pass@k / pass^k with roster-wide bounds
+(``GET /eval-sets/metrics``). ``check`` always refuses a workflow prompt that
+moves a run off its pinned baseline (``git pull``, merging the default
+branch); with ``--trials`` it also refuses model aliases, because a cohort's
+``model:`` tags are matched against observed explicit ids.
+
 Exit status: 0 on success (for ``score``: every case scored pass), 1 otherwise.
 """
 
@@ -87,18 +106,21 @@ from __future__ import annotations
 
 import argparse
 import ast
+import fcntl
 import hashlib
 import math
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 import httpx
 import yaml
@@ -113,8 +135,19 @@ from pydantic import (
     field_validator,
 )
 
+from syn_domain.contexts.orchestration import (
+    DeclaredModel,
+    EvalTag,
+    InvalidTagsError,
+    TagSet,
+    declared_model_tags,
+)
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
+from syn_shared.observed_model import is_model_alias
 from syn_shared.settings.dev_tooling import get_dev_api_url
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUITE = ROOT / "evals" / "verifier-seed-v1"
@@ -1162,6 +1195,20 @@ def scorer_version(loaded: LoadedSuite, llm: Judge | None) -> str:
     return str(loaded.version) if llm is None else f"{loaded.version}+{llm.identity}"
 
 
+def scorer_protocol(loaded: LoadedSuite, llm: Judge | None) -> str:
+    """The tag-safe id of the scoring protocol a `--trials` cohort declares (`scorer:<id>`).
+
+    The server judges a trial for its cohort only when the score's
+    scorer_version equals the cohort's `scorer:` tag, so this is also the
+    scorer_version a trial is scored under. `scorer_version` is not used for
+    trials: the LLM spelling holds `+` and `@`, which are not tag characters.
+    Keyword-only, it is the same plain suite version.
+    """
+    if llm is None:
+        return str(loaded.version)
+    return re.sub(r"[^a-z0-9._-]+", "-", f"{loaded.version}-{llm.identity}".lower())
+
+
 # ---------------------------------------------------------------------------
 # API reads (only the fields this script uses; extra fields ignored)
 # ---------------------------------------------------------------------------
@@ -1241,10 +1288,77 @@ class _Installed(_Read):
 class _Created(_Read):
     eval_id: str
     baseline_repos: list[_BaselineRepo]
+    tags: list[str] = Field(default_factory=list)
 
 
 class _Started(_Read):
     execution_id: str
+
+
+class TrialStart(_Frozen):
+    """The body of `POST /workflows/{id}/execute` for one trial."""
+
+    task: str
+    repos: list[str]
+    eval_id: str
+    tags: list[str]
+
+
+class _ExecutionRow(_Read):
+    workflow_execution_id: str
+
+
+class _ExecutionList(_Read):
+    executions: list[_ExecutionRow]
+
+
+RECONCILE_ATTEMPTS = 3
+RECONCILE_PAUSE_S = 2.0
+
+
+def find_trial_run(client: httpx.Client, trial_tag: str, workflow_id: str) -> list[str]:
+    """The runs carrying `trial_tag`, asked up to RECONCILE_ATTEMPTS times while none is visible.
+
+    The list read lags the write, so one empty answer proves nothing. A run of
+    another workflow is never this trial's.
+    """
+    for attempt in range(RECONCILE_ATTEMPTS):
+        if attempt:
+            time.sleep(RECONCILE_PAUSE_S)
+        found = _get(client, _ExecutionList, "/executions", tag=trial_tag)
+        runs = [r.workflow_execution_id for r in found.executions]
+        if runs:
+            return [
+                r
+                for r in runs
+                if _get(client, _Execution, f"/executions/{r}").workflow_id == workflow_id
+            ]
+    return []
+
+
+def start_trial(client: httpx.Client, workflow_id: str, body: TrialStart, trial_tag: str) -> str:
+    """POST one trial and return its run id, even when the answer is lost.
+
+    A timeout, a dropped connection or a 5xx says nothing about whether the
+    run started. The trial tag is unique (`new_batch`), so the run is looked
+    up by it: one match is the run. Otherwise the launch stops and the trial's
+    intent stays pending, so no later launch replaces it until it is resolved.
+    """
+    try:
+        response = client.post(f"/workflows/{workflow_id}/execute", json=body.model_dump())
+        if response.status_code < 500:
+            response.raise_for_status()
+            return _Started.model_validate(response.json()).execution_id
+        lost = f"{response.status_code} {_detail(response)}"
+    except httpx.TransportError as exc:
+        lost = f"{type(exc).__name__}: {exc}"
+    runs = find_trial_run(client, trial_tag, workflow_id)
+    if len(runs) == 1:
+        return runs[0]
+    raise RuntimeError(
+        f"execute for {trial_tag} failed ({lost}) and {len(runs)} runs carry that tag "
+        f"({', '.join(runs) or 'none'}); its intent stays pending, launch stopped"
+    )
 
 
 class Launch(_Frozen):
@@ -1257,6 +1371,16 @@ class Launch(_Frozen):
     run_id: str
     commit: str
     workflow_id: str
+    batch: str | None = None
+    """`launch --trials`: the batch this trial was launched in; None for a single run."""
+    trial: int | None = None
+    """`launch --trials`: the trial's index within its batch, from 1."""
+    scorer: str | None = None
+    """`launch --trials`: the scoring protocol id the trial's cohort declared (`scorer:` tag).
+
+    `score` records the trial's score under exactly this scorer_version, or the
+    server never judges it for its cohort.
+    """
 
 
 def launches_path(suite_dir: Path) -> Path:
@@ -1268,6 +1392,85 @@ def read_launches(path: Path) -> list[Launch]:
         return []
     lines = path.read_text(encoding="utf-8").splitlines()
     return [Launch.model_validate_json(line) for line in lines if line.strip()]
+
+
+class TrialIntent(_Frozen):
+    """A trial about to be started, written to `<ledger>.pending.jsonl` BEFORE its execute call.
+
+    Resolved once the ledger holds a Launch with the same batch and trial.
+    """
+
+    launch: Launch
+    """The ledger line it becomes; its `run_id` is empty until resolved."""
+    trial_tag: str
+
+
+def intents_path(ledger: Path) -> Path:
+    return ledger.with_name(ledger.stem + ".pending.jsonl")
+
+
+def unresolved_intents(ledger: Path) -> list[TrialIntent]:
+    path = intents_path(ledger)
+    if not path.exists():
+        return []
+    done = {(x.batch, x.trial) for x in read_launches(ledger)}
+    intents = [
+        TrialIntent.model_validate_json(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    return [i for i in intents if (i.launch.batch, i.launch.trial) not in done]
+
+
+def _append_intent(ledger: Path, intent: TrialIntent) -> None:
+    with intents_path(ledger).open("a", encoding="utf-8") as fh:
+        fh.write(intent.model_dump_json() + "\n")
+
+
+def resolve_intents(client: httpx.Client, ledger: Path) -> list[str]:
+    """Ledger every pending intent whose run is now visible; refuse while any stays unresolved.
+
+    A launch never starts a replacement for a trial whose fate is unknown.
+    """
+    out: list[str] = []
+    stuck: list[str] = []
+    for intent in unresolved_intents(ledger):
+        runs = find_trial_run(client, intent.trial_tag, intent.launch.workflow_id)
+        if len(runs) == 1:
+            _append_launch(ledger, intent.launch.model_copy(update={"run_id": runs[0]}))
+            out.append(f"{intent.launch.case}: pending {intent.trial_tag} -> run {runs[0]}")
+        else:
+            stuck.append(f"{intent.trial_tag} ({intent.launch.case}): {len(runs)} runs")
+    if stuck:
+        raise RuntimeError(
+            "unresolved trial intents, nothing launched:\n  "
+            + "\n  ".join(stuck)
+            + f"\nRe-run once the server lists them; if a trial provably never started, "
+            f"delete its line from {intents_path(ledger)}"
+        )
+    return out
+
+
+@contextmanager
+def ledger_lock(ledger: Path) -> Iterator[None]:
+    """Hold `<ledger>.lock` for a whole `--trials` launch; refuse if another launcher holds it.
+
+    Two top-ups racing on one ledger would each read the same `trials_short`
+    and each launch it. The server reserves nothing (#2108 plan sec 8), so one
+    operator launches a suite at a time, and this lock enforces it on one host.
+    """
+    lock = ledger.with_name(ledger.name + ".lock")
+    with lock.open("w") as fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(
+                f"another launch holds {lock}: one launcher per suite at a time, nothing launched"
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def _append_launch(path: Path, launch: Launch) -> None:
@@ -1381,9 +1584,22 @@ def score_suite(
             if problem:
                 rows.append(_row(case.id, ev.eval_id, launch.run_id, f"rejected: {problem}"))
                 continue
+            protocol = scorer_protocol(loaded, llm)
+            if launch.scorer is not None and launch.scorer != protocol:
+                rows.append(
+                    _row(
+                        case.id,
+                        ev.eval_id,
+                        launch.run_id,
+                        f"rejected: launched for scorer {launch.scorer}, scoring as {protocol}; "
+                        "score it with the judge it was launched for",
+                    )
+                )
+                continue
             report = _report_of(client, run)
             score = score_case(case, run.review_verdict, report, llm)
-            _record_score(client, loaded, case, ev.eval_id, run, score, scorer_version(loaded, llm))
+            version = launch.scorer or scorer_version(loaded, llm)
+            _record_score(client, loaded, case, ev.eval_id, run, score, version)
             rows.append(
                 ScoredRun(
                     case=case.id,
@@ -1819,7 +2035,9 @@ def stable_eval(loaded: LoadedSuite, case: Case, client: httpx.Client) -> _Creat
             f"({', '.join(e.eval_id for e in found)}); run scripts/migrate_eval_suite_duplicates.py"
         )
     if found:
-        created = _Created(eval_id=found[0].eval_id, baseline_repos=found[0].baseline_repos)
+        created = _Created(
+            eval_id=found[0].eval_id, baseline_repos=found[0].baseline_repos, tags=found[0].tags
+        )
     else:
         response = create_stable_eval(loaded, case, client)
         response.raise_for_status()
@@ -1892,6 +2110,414 @@ def describe_launch(loaded: LoadedSuite) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# k trials per case (#2108, docs/plans/20261026_eval-k-trials.md sections 5, 8, 9)
+# ---------------------------------------------------------------------------
+
+DEFAULT_TRIALS = 3
+"""`--trials` with no count: k = 3 (plan section 15 leaves 3 vs 5 for holdout to the owner)."""
+
+
+def roster_tags(loaded: LoadedSuite, case: Case) -> list[str]:
+    """What `register` writes onto a case's eval: the roster of `loaded.version` (plan 5.1).
+
+    Version tags accumulate, so a case in v7 and v8 carries both. Split and
+    polarity never change, so a disagreeing tag is refused, never replaced.
+    """
+    return [
+        f"{EvalTag.SUITE_VERSION}:{loaded.version}",
+        f"{EvalTag.SPLIT}:{case.split}",
+        f"{EvalTag.POLARITY}:{case.polarity}",
+    ]
+
+
+def _roster_conflicts(case: Case, tags: list[str]) -> list[str]:
+    problems: list[str] = []
+    for prefix, want in ((EvalTag.SPLIT, case.split), (EvalTag.POLARITY, case.polarity)):
+        have = sorted({t.removeprefix(f"{prefix}:") for t in tags if t.startswith(f"{prefix}:")})
+        if have and have != [want]:
+            problems.append(
+                f"{case.id}: its eval is tagged {prefix}:{have}, the case file says {want}"
+            )
+    return problems
+
+
+def register_roster(loaded: LoadedSuite, client: httpx.Client) -> list[str]:
+    """Create every case's stable eval and tag it with the roster. Idempotent.
+
+    Every eval is found or created and checked before any tag is written, so a
+    split or polarity conflict anywhere writes nothing at all.
+    """
+    found = [(case, stable_eval(loaded, case, client)) for case in loaded.cases]
+    if problems := [p for case, ev in found for p in _roster_conflicts(case, ev.tags)]:
+        raise RuntimeError("roster conflicts, nothing tagged:\n  " + "\n  ".join(problems))
+    out: list[str] = []
+    for case, ev in found:
+        missing = [t for t in roster_tags(loaded, case) if t not in ev.tags]
+        if missing:
+            response = client.post(f"/evals/{ev.eval_id}/tags", json={"tags": missing})
+            if response.is_error:
+                raise RuntimeError(
+                    f"tagging {case.id} (eval {ev.eval_id}): "
+                    f"{response.status_code} {_detail(response)}"
+                )
+        out.append(f"{case.id}: eval {ev.eval_id} " + (f"+{missing}" if missing else "rostered"))
+    return out
+
+
+_GIT_INTEGRATE = re.compile(r"\bgit\s+(merge|pull|rebase)(?![\w-])([^\n`;&|)]*)")
+_DEFAULT_BRANCH = re.compile(
+    r"(?<![\w/-])(?:origin/)?(?:main|master|HEAD|<base>|<default[ _-]?branch>)(?![\w/-])"
+    r"|\$\{?\w*(?:BASE|DEFAULT)\w*\}?",
+    re.IGNORECASE,
+)
+_PROSE_INTEGRATE = re.compile(
+    r"\b(?:merge|rebase(?:\s+(?:onto|on))?)\s+`?origin/(?:main|master|HEAD|<base>)`?",
+    re.IGNORECASE,
+)
+
+
+def default_branch_integrations(prompt: str) -> list[str]:
+    """Every command in `prompt` that moves a checkout onto the default branch (plan section 9).
+
+    `git pull` in any form (it integrates the upstream), and `git merge` or
+    `git rebase` naming the default branch (`origin/main`, `origin/<base>`,
+    `$BASE`...), and prose asking for one ("merge `origin/main` into your
+    branch"). `git merge --abort` and `git merge-base` move nothing, and a
+    prohibition that names no default branch ("do not fetch, pull...") is
+    not an instruction to integrate.
+    """
+    hits: list[str] = []
+    for match in _GIT_INTEGRATE.finditer(prompt):
+        verb, rest = match.group(1), match.group(2)
+        if verb == "pull" or _DEFAULT_BRANCH.search(rest):
+            hits.append(match.group(0).strip())
+    commands = [m.span() for m in _GIT_INTEGRATE.finditer(prompt)]
+    for match in _PROSE_INTEGRATE.finditer(prompt):
+        if not any(start <= match.start() < end for start, end in commands):
+            hits.append(match.group(0).strip())
+    return hits
+
+
+def pin_safety_problems(ref: WorkflowRef, root: Path = ROOT) -> list[str]:
+    """Where a suite workflow's prompts would move a run off its pinned baseline."""
+    definition = WorkflowDefinition.from_file(root / ref.path)
+    return [
+        f"workflow {ref.id} phase {phase.id}: `{hit}` moves the run off its pinned baseline; "
+        "an eval subject must stay on the pin (#2055)"
+        for phase in definition.phases
+        for hit in default_branch_integrations(phase.prompt_template or "")
+    ]
+
+
+def alias_problems(loaded: LoadedSuite) -> list[str]:
+    """Declared models a `--trials` cohort cannot carry: aliases, or no model at all.
+
+    A cohort's `model:` tags are checked against what each phase observed,
+    which is always an explicit id, so an alias would mismatch every trial.
+    """
+    return [
+        f"workflow {loaded.workflow.id} phase {phase}: declares {model!r}, not an explicit "
+        "model id; replace it in the workflow and suite.yaml and bump the suite version"
+        for phase, model in loaded.workflow.models.items()
+        if is_model_alias(model) or model == "(platform default)"
+    ]
+
+
+def trial_problems(loaded: LoadedSuite, root: Path = ROOT) -> list[str]:
+    """Why the selected workflow cannot be measured with `--trials`; empty when it can."""
+    return alias_problems(loaded) + pin_safety_problems(loaded.workflow, root)
+
+
+def declared(loaded: LoadedSuite) -> list[DeclaredModel]:
+    return [DeclaredModel(phase, model) for phase, model in loaded.workflow.models.items()]
+
+
+def cohort_tags(loaded: LoadedSuite, protocol: str) -> list[str]:
+    """The launch tags every trial of the cohort carries (plan 5.2); the trial tag is per run."""
+    return [
+        *loaded.run_tags,
+        f"{EvalTag.SCORER}:{protocol}",
+        *declared_model_tags(declared(loaded)),
+    ]
+
+
+def new_batch() -> str:
+    """A batch id: the UTC launch time plus a random suffix, tag-safe, sortable and unique.
+
+    Trial tags must never repeat across launches: a lost execute answer is
+    found again by its trial tag alone (`start_trial`).
+    """
+    return time.strftime("%Y%m%dt%H%M%Sz", time.gmtime()) + "-" + secrets.token_hex(3)
+
+
+class _CohortKey(_Read):
+    suite_version: str
+    workflow_id: str
+    workflow_version: str
+    models_digest: str
+    scorer_protocol: str
+
+
+class _CaseMetrics(_Read):
+    eval_id: str
+    n: int
+    c: int
+    pending: int
+    infra_error_count: int
+    trials_short: int
+    exhausted: bool
+    pass_at_k_display: str
+    pass_hat_k_display: str
+    flaky: bool | None
+
+
+class _Bounds(_Read):
+    display: str
+
+
+class _Coverage(_Read):
+    roster_size: int
+    complete: int
+    short: int
+    never_launched: int
+
+
+class _CohortMetrics(_Read):
+    cohort: _CohortKey
+    cases: list[_CaseMetrics]
+    coverage: _Coverage
+    mean_pass_at_k_display: str
+    mean_pass_hat_k_display: str
+    partial: bool
+    flaky_cases: list[str]
+    pass_at_k_bounds: _Bounds
+    pass_hat_k_bounds: _Bounds
+    infra_error_count: int
+    base_mismatch_count: int
+    treatment_mismatch_count: int
+
+
+class _Comparison(_Read):
+    a: _CohortKey
+    b: _CohortKey
+    paired_cases: list[str]
+    coverage_complete: bool
+    a_only: int
+    b_only: int
+    both: int
+    neither: int
+    mcnemar_p: float
+
+
+class _SetMetrics(_Read):
+    suite: str
+    version: str
+    k: int
+    cohorts: list[_CohortMetrics]
+    comparison: _Comparison | None = None
+    not_a_trial_count: int
+
+
+def set_metrics(
+    loaded: LoadedSuite, client: httpx.Client, k: int, split: Split | None = None
+) -> _SetMetrics:
+    """The server's figures for this suite version's roster: `GET /eval-sets/metrics`."""
+    params: dict[str, str | int] = {
+        "suite": loaded.suite.suite_tag.removeprefix(f"{EvalTag.SUITE}:"),
+        "version": str(loaded.version),
+        "k": k,
+    }
+    if split is not None:
+        params["split"] = split
+    return _get(client, _SetMetrics, "/eval-sets/metrics", **params)
+
+
+def own_cohort(loaded: LoadedSuite, metrics: _SetMetrics, protocol: str) -> _CohortMetrics | None:
+    """This launch's cohort in the server's answer; None when it has launched nothing yet.
+
+    Matched on every declared part, the workflow version included: the
+    version this launch installs (`install_provenance`). A cohort of the same
+    workflow at another version is another treatment, so its shortfall is
+    never read for this one: the top-up is refused instead.
+    """
+    digest = declared_model_tags(declared(loaded))[0].removeprefix(f"{EvalTag.MODELS}:")
+    version = f"{loaded.suite.version}.{loaded.workflow.revision}.0"
+    want = (str(loaded.version), loaded.workflow.id, digest, protocol)
+    same = [
+        c
+        for c in metrics.cohorts
+        if (
+            c.cohort.suite_version,
+            c.cohort.workflow_id,
+            c.cohort.models_digest,
+            c.cohort.scorer_protocol,
+        )
+        == want
+    ]
+    mine = [c for c in same if c.cohort.workflow_version == version]
+    if same and not mine:
+        others = sorted(c.cohort.workflow_version for c in same)
+        raise RuntimeError(
+            f"{loaded.workflow.id} has cohorts at workflow versions {others}, and this launch "
+            f"installs {version}: a top-up would launch another treatment. Launch --trials K "
+            "for a new cohort, or bump the suite version"
+        )
+    if len(mine) > 1:
+        raise RuntimeError(
+            f"{len(mine)} cohorts of {loaded.workflow.id} {version} under scorer {protocol}; "
+            "bump the suite version instead of topping up"
+        )
+    return mine[0] if mine else None
+
+
+def top_up_counts(cohort: _CohortMetrics | None, evals: dict[str, str]) -> dict[str, int]:
+    """Trials to launch per case id: exactly the server's `trials_short`. Refused while any is pending.
+
+    The server's count already reserves a pending trial, but a top-up started
+    while trials run would launch against figures about to change: refused.
+    An exhausted case reports 0 short, so it launches none.
+    """
+    if cohort is None:
+        raise RuntimeError("this cohort has launched nothing yet: launch --trials K first")
+    if pending := [c.eval_id for c in cohort.cases if c.pending]:
+        raise RuntimeError(
+            f"{len(pending)} case(s) have pending trials ({', '.join(pending)}); "
+            "top up after they finish and are scored, nothing launched"
+        )
+    short = {c.eval_id: c.trials_short for c in cohort.cases}
+    return {case: short.get(eval_id, 0) for case, eval_id in evals.items()}
+
+
+def launch_trials(
+    loaded: LoadedSuite,
+    client: httpx.Client,
+    ledger: Path,
+    k: int,
+    *,
+    roster: LoadedSuite | None = None,
+    split: Split | None = None,
+    top_up: bool = False,
+    llm: Judge | None = None,
+    root: Path = ROOT,
+) -> list[str]:
+    """Register the roster, then launch k trials per case (or the server's shortfall) as one cohort.
+
+    `roster` is the whole version (default `loaded`): a `--split` launch still
+    registers every case, so the roster never depends on which split ran first.
+    Each run is tagged with the cohort key and `trial:<batch>/<i>`, and gets
+    one ledger line as it starts, so a launch that dies part way still records
+    what it began.
+    """
+    if problems := trial_problems(loaded, root):
+        raise RuntimeError("cannot measure with --trials:\n  " + "\n  ".join(problems))
+    protocol = scorer_protocol(loaded, llm)
+    batch = new_batch()
+    tags = cohort_tags(loaded, protocol)
+    try:
+        TagSet([*tags, f"{EvalTag.TRIAL}:{batch}/{k * len(loaded.cases)}"])
+    except InvalidTagsError as exc:
+        raise RuntimeError(f"cohort tags are not valid tags: {exc}") from exc
+
+    with ledger_lock(ledger):
+        out = resolve_intents(client, ledger)
+        out += register_roster(roster or loaded, client)
+        evals = {case.id: stable_eval(loaded, case, client).eval_id for case in loaded.cases}
+        if top_up:
+            metrics = set_metrics(loaded, client, k, split)
+            counts = top_up_counts(own_cohort(loaded, metrics, protocol), evals)
+        else:
+            counts = dict.fromkeys(evals, k)
+        out.append(install_workflow(loaded, client, root))
+        s, w = loaded.suite, loaded.workflow
+        i = 0  # numbered across the batch, so no two cases share a trial tag
+        for case in loaded.cases:
+            if not counts[case.id]:
+                out.append(f"{case.id}: no trial short, none launched")
+            for _ in range(counts[case.id]):
+                i += 1
+                trial_tag = f"{EvalTag.TRIAL}:{batch}/{i}"
+                launch = Launch(
+                    suite=loaded.tag,
+                    case=case.id,
+                    eval_id=evals[case.id],
+                    run_id="",
+                    commit=case.commit,
+                    workflow_id=w.id,
+                    batch=batch,
+                    trial=i,
+                    scorer=protocol,
+                )
+                _append_intent(ledger, TrialIntent(launch=launch, trial_tag=trial_tag))
+                run_id = start_trial(
+                    client,
+                    w.id,
+                    TrialStart(
+                        task=case.task,
+                        repos=[s.repository],
+                        eval_id=evals[case.id],
+                        tags=[*tags, trial_tag],
+                    ),
+                    trial_tag,
+                )
+                _append_launch(ledger, launch.model_copy(update={"run_id": run_id}))
+                out.append(f"{case.id}: trial {batch}/{i} -> run {run_id}")
+        return out
+
+
+def _eval_names(loaded: LoadedSuite, client: httpx.Client) -> dict[str, str]:
+    """Eval id to case id, for labelling the server's rows."""
+    return {
+        ev.eval_id: case.id for case in loaded.cases for ev in _case_evals(client, loaded, case)
+    }
+
+
+def render_metrics(metrics: _SetMetrics, case_of: dict[str, str]) -> str:
+    """The server's figures, as the server computed them. Nothing here is a calculation.
+
+    `case_of` maps an eval id to its case id, for the row labels only.
+    """
+    lines = [f"## {metrics.suite} v{metrics.version}, k = {metrics.k} (GET /eval-sets/metrics)"]
+    if not metrics.cohorts:
+        lines.append("no cohort has launched into this roster")
+    for c in metrics.cohorts:
+        key = c.cohort
+        lines += [
+            "",
+            f"### {key.workflow_id} {key.workflow_version or '(unversioned)'}, "
+            f"models {key.models_digest[:12]}, scorer {key.scorer_protocol}",
+            f"coverage {c.coverage.complete}/{c.coverage.roster_size} complete, "
+            f"{c.coverage.short} short, {c.coverage.never_launched} never launched"
+            + (" (partial: the means are descriptive)" if c.partial else ""),
+            f"pass@k {c.mean_pass_at_k_display} (bounds {c.pass_at_k_bounds.display}); "
+            f"pass^k {c.mean_pass_hat_k_display} (bounds {c.pass_hat_k_bounds.display})",
+            f"infra errors {c.infra_error_count}, base mismatches {c.base_mismatch_count}, "
+            f"treatment mismatches {c.treatment_mismatch_count}, "
+            f"flaky {', '.join(case_of.get(e, e) for e in c.flaky_cases) or 'none'}",
+            "",
+            "| case | n | pass | pending | infra | short | pass@k | pass^k | flaky |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for m in c.cases:
+            short = "exhausted" if m.exhausted else str(m.trials_short)
+            lines.append(
+                f"| {case_of.get(m.eval_id, m.eval_id)} | {m.n} | {m.c} | {m.pending} | "
+                f"{m.infra_error_count} | {short} | {m.pass_at_k_display} | "
+                f"{m.pass_hat_k_display} | {'yes' if m.flaky else '-'} |"
+            )
+    if cmp := metrics.comparison:
+        lines += [
+            "",
+            f"### paired: {cmp.a.workflow_id} vs {cmp.b.workflow_id}",
+            f"{len(cmp.paired_cases)} paired; a only {cmp.a_only}, b only {cmp.b_only}, "
+            f"both {cmp.both}, neither {cmp.neither}; McNemar p = {cmp.mcnemar_p:.3g}"
+            + ("" if cmp.coverage_complete else " (coverage incomplete: inconclusive)"),
+        ]
+    if metrics.not_a_trial_count:
+        lines.append(f"\n{metrics.not_a_trial_count} member run(s) are not trials of any cohort")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1900,7 +2526,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("command", choices=("check", "launch", "score"))
+    parser.add_argument("command", choices=("check", "register", "launch", "score"))
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     parser.add_argument(
         "--repo", type=Path, default=ROOT, help="git checkout holding the pinned commits"
@@ -1939,11 +2565,38 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="launch ledger launch appends to and score reads (default <suite>/launches.jsonl)",
     )
+    parser.add_argument(
+        "--trials",
+        type=int,
+        nargs="?",
+        const=DEFAULT_TRIALS,
+        default=None,
+        metavar="K",
+        help=(
+            f"k trials per case (default {DEFAULT_TRIALS}): launch k runs per case as one "
+            "cohort; score then prints the server's pass@k / pass^k; check refuses model "
+            "aliases"
+        ),
+    )
+    parser.add_argument(
+        "--top-up",
+        action="store_true",
+        help="launch --trials: launch only the server's trials_short per case; "
+        "refused while any trial is pending",
+    )
     args = parser.parse_args(argv)
+    if args.top_up and not (args.command == "launch" and args.trials):
+        print("❌ --top-up is for `launch --trials K`", file=sys.stderr)
+        return 1
+    if args.trials is not None and args.trials < 1:
+        print("❌ --trials K needs K >= 1", file=sys.stderr)
+        return 1
 
     to_score: list[LoadedSuite] = []
     try:
         loaded = load_suite(args.suite, workflow=args.workflow, split=args.split)
+        # The roster is the whole version, whichever split a launch runs.
+        roster = load_suite(args.suite, workflow=loaded.workflow.id)
         if args.command == "score":
             versions = (
                 [args.version]
@@ -1966,6 +2619,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in ("check", "launch"):
         problems = check_commits(loaded, args.repo)
+        problems += [p for ref in loaded.suite.workflows for p in pin_safety_problems(ref)]
+        if args.trials is not None:
+            problems += alias_problems(loaded)
         if problems:
             print("❌ " + "\n❌ ".join(problems), file=sys.stderr)
             return 1
@@ -1975,7 +2631,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     llm: Judge | None = None
-    if args.llm_judge and args.command == "score":
+    if args.llm_judge and (args.command == "score" or args.trials is not None):
         if problems := [p for v in to_score for p in judge_problems(v)]:
             print("❌ the LLM judge cannot score:\n  " + "\n  ".join(problems), file=sys.stderr)
             return 1
@@ -1984,13 +2640,47 @@ def main(argv: list[str] | None = None) -> int:
     with httpx.Client(
         base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
     ) as client:
+        if args.command == "register":
+            try:
+                print("\n".join(register_roster(roster, client)))
+            except RuntimeError as exc:
+                print(f"❌ {exc}", file=sys.stderr)
+                return 1
+            return 0
         if args.command == "launch":
-            print("\n".join(launch_suite(loaded, client, ledger)))
+            if args.trials is None:
+                print("\n".join(launch_suite(loaded, client, ledger)))
+            else:
+                try:
+                    out = launch_trials(
+                        loaded,
+                        client,
+                        ledger,
+                        args.trials,
+                        roster=roster,
+                        split=args.split,
+                        top_up=args.top_up,
+                        llm=llm,
+                    )
+                except RuntimeError as exc:
+                    print(f"❌ {exc}", file=sys.stderr)
+                    return 1
+                print("\n".join(out))
             print(f"recorded in {ledger}: commit it, `score` reads only the runs it names")
             return 0
         launches = read_launches(ledger)
         tables = [(v, *score_suite(v, client, launches, llm)) for v in to_score]
+        figures = (
+            [
+                (set_metrics(v, client, args.trials, args.split), _eval_names(v, client))
+                for v in to_score
+            ]
+            if args.trials is not None
+            else []
+        )
     print("\n\n".join(render(v, rows, unrecorded) for v, rows, unrecorded in tables))
+    for metrics, names in figures:
+        print("\n" + render_metrics(metrics, names))
     return (
         0
         if all(rows and all(r.score and r.score.passed for r in rows) for _, rows, _ in tables)
