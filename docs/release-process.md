@@ -718,8 +718,8 @@ process: do not trigger it.
 
 A hotfix ships one already-merged fix on top of the last release, without the
 beta. Design and rationale: [ADR-077](adrs/ADR-077-hotfix-release-path.md).
-`release-gate.yml`'s `release-source` job enforces the shape below; it cannot be
-skipped.
+`release-source.yml` enforces the shape below with the `release` branch's own
+copy of the checker, so a hotfix PR cannot rewrite it.
 
 ### Hotfix or beta-gated release?
 
@@ -838,8 +838,9 @@ the `--check` that follows the bump.
 ```
 PR: main → release, or hotfix/vX.Y.Z → release
   ├── ci.yml (full CI suite)
-  └── release-gate.yml  (thin orchestrator - 5 reusable checks + 3 inline security scans)
-        ├── checks/release-source.yml      - head is main or a well-formed hotfix (+ hotfix secret scan)
+  ├── release-source.yml (pull_request_target: the release branch's copy judges
+  │                       the head as git objects; hotfix secret scan; ADR-077)
+  └── release-gate.yml  (thin orchestrator - 4 reusable checks + 3 inline security scans)
         ├── checks/version-check.yml       - every version file consistent, version > release
         ├── checks/changelog-check.yml     - PR body >= 20 chars
         ├── checks/codegen-sync.yml        - CLI types, CLI docs, API docs all current
@@ -875,7 +876,7 @@ Merge to release
 |------|---------|
 | `.github/workflows/release-gate.yml` | Thin orchestrator - calls checks + inline security scans |
 | `.github/workflows/release-create.yml` | Release pipeline - create tag/release, publish containers + CLI |
-| `.github/workflows/_check-release-source.yml` | The head is `main` or a hotfix cut from the last release tag; gitleaks on hotfix commits (ADR-077) |
+| `.github/workflows/release-source.yml` | `pull_request_target`, trusted base copy: the head is `main` (on `origin/main`) or a hotfix cut from the last release tag, same repository; gitleaks on hotfix commits (ADR-077) |
 | `.github/workflows/_check-version.yml` | Version consistency: every version file matches, bumped vs release |
 | `.github/workflows/_check-changelog.yml` | PR body length validation (takes `pr_body` input) |
 | `.github/workflows/_check-codegen-sync.yml` | Runs `just codegen`, checks for drift (CLI types, API docs, CLI docs) |
@@ -883,7 +884,7 @@ Merge to release
 | `.github/workflows/release-containers.yaml` | Multi-arch build, cosign sign, push to GHCR, release assets |
 | `.github/workflows/release-cli.yaml` | Build + publish `@syntropic137/cli` to npm (OIDC, provenance) |
 | `scripts/workflows/bump_version.py` | Version bump script; `--check` (consistency) and `--check-release` (semver vs release branch) |
-| `scripts/workflows/check_release_source.py` | Release-source rules; called by `_check-release-source.yml` |
+| `scripts/workflows/check_release_source.py` | Release-source rules; called by `release-source.yml` |
 | `scripts/workflows/check_drift.py` | Drift detection; called by `codegen-sync.yml` to check git diff + untracked files for generated paths |
 
 ## Branch Protection (release)

@@ -29,7 +29,7 @@ advisory relayed by opsec or the orchestrator with operator approval counts.
 4. For each fix: branch `hotfix/vX.Y.Z-<slug>` from the tag, `git cherry-pick -x <sha>` (unmodified; a conflict means it is not a hotfix), PR into `hotfix/vX.Y.Z` titled with the main PR's title, `gh pr merge --merge`. That PR gets no CI (ci.yml only gates PRs into `main`/`release`); the PR into `release` is where CI runs.
 5. On `hotfix/vX.Y.Z`: `just bump-version X.Y.Z`, stage by path, commit exactly `chore: bump version to vX.Y.Z`, push. The push fires `smoke-test.yml` on the head.
 6. Write `notes.md` FIRST (`## Security` or `## Fixed`: what, the advisory link, the self-host one-liner), then `gh pr create --base release --head hotfix/vX.Y.Z --body-file notes.md`.
-7. Wait for `Release Gate` (its `release-source` job prints each pick's main SHA and `tree = vX + N cherry-pick(s) + version bump`), `CI Success`, `Compose Stack Smoke Test`.
+7. Wait for `Release Source` (prints each pick's main SHA and `tree = vX + N cherry-pick(s) + version bump`), `Release Gate`, `CI Success`, `Compose Stack Smoke Test`. `Release Source` exists only once `release-source.yml` is on `release` (from v1.0.5); until then, run the checker yourself from `origin/main` and paste its output into the PR.
 8. Merge with `--merge`. `create-release` waits on `release-publish`: **page the operator** (below) and wait; never approve it yourself.
 9. Verify the published artifact (`agent_release.md` step 8), the npx chain (step 9), and that the changed service is what the release compose pins.
 10. Forward-merge: PR `hotfix/vX.Y.Z -> main`, merge commit. Version files take the hotfix version; regenerate `uv.lock` and `CHANGELOG.md`, do not hand-merge them. Until it lands every `main -> release` PR fails `release-source`.
@@ -57,4 +57,4 @@ Read `~/Code/dev-tools/herdr-atc/skills/agent-pager/SKILL.md` first. Never wait 
 
 ## Health check
 
-Depends on: `.github/workflows/_check-release-source.yml` and `scripts/workflows/check_release_source.py` (rules and messages above), `smoke-test.yml` firing on `hotfix/**`, the `release` ruleset's three required checks, `release-create.yml` reading the most recently merged PR into `release` for notes, the `chore: bump version to vX.Y.Z` subject, and the agent-pager script path. Fix this file on drift.
+Depends on: `.github/workflows/release-source.yml` (`pull_request_target`, base checkout) and `scripts/workflows/check_release_source.py` (rules and messages above), `smoke-test.yml` firing on `hotfix/**`, the `release` ruleset's required checks (plus `Release Source` once added), `release-create.yml` reading the most recently merged PR into `release` for notes, the `chore: bump version to vX.Y.Z` subject, and the agent-pager script path. Fix this file on drift.

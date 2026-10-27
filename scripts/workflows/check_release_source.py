@@ -14,21 +14,28 @@ Two sources may open a PR into `release` (ADR-077):
   (an extra edit, a hand-resolved conflict that changed more than versions, an
   evil merge) fails.
 
-Every other head branch is refused.
+Every other head branch is refused, and so is any head pushed from another
+repository: a fork's branch named `main` is not `main`.
 
-CI DEPENDENCY - called by .github/workflows/_check-release-source.yml:
+The checker never executes the candidate. CI runs the copy on the `release`
+branch (`pull_request_target`) and reads the head only as git objects.
+
+CI DEPENDENCY - called by .github/workflows/release-source.yml:
     uv run --no-project python scripts/workflows/check_release_source.py \\
-        --head-ref <head branch> --head-sha <sha> --base-sha <release sha>
+        --head-ref <head branch> --head-repo <owner/repo> --base-repo <owner/repo> \\
+        --head-sha <sha> --base-sha <release sha>
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -53,6 +60,22 @@ CHANGELOG: Final = "CHANGELOG.md"
 #: Rewritten by `just bump-version` beyond the version-carrying manifests: the
 #: changelog section and the OpenAPI spec, whose info.version is the package's.
 BUMP_EXTRA_FILES: Final = (CHANGELOG, "apps/syn-docs/openapi.json")
+#: The one mode a bumped file may have, before and after.
+REGULAR_FILE: Final = "100644"
+#: A line `just bump-version` rewrites: a version field and nothing else.
+VERSION_LINE_RE: Final = re.compile(
+    r'^\s*(version\s*=\s*"[^"]*"|"version"\s*:\s*"[^"]*",?|"\$id"\s*:\s*"[^"]*",?)\s*$'
+)
+#: Where each kind of bumped file keeps its version, as a key path.
+VERSION_FIELDS: Final[dict[str, tuple[str, ...]]] = {
+    "pyproject.toml": ("project", "version"),
+    "package.json": ("version",),
+    "openapi.json": ("info", "version"),
+    ".schema.json": ("$id",),
+}
+LOCKFILE_NAME: Final = "uv.lock"
+
+type Key = tuple[str | int, ...]
 
 
 class SourceError(Exception):
@@ -106,14 +129,16 @@ def bump_files() -> frozenset[str]:
     return frozenset(p.relative_to(ROOT).as_posix() for p in paths) | frozenset(BUMP_EXTRA_FILES)
 
 
-def check_main(git: Git, head_sha: str, base_sha: str) -> list[str]:
+def check_main(git: Git, head_sha: str, base_sha: str, main_ref: str = MAIN_REF) -> list[str]:
+    if not git.ok("merge-base", "--is-ancestor", head_sha, main_ref):
+        raise SourceError(f"head {head_sha[:12]} is not on {main_ref}")
     missing = git.lines("rev-list", "--no-merges", f"{head_sha}..{base_sha}")
     if missing:
         raise SourceError(
             f"release carries {len(missing)} commit(s) main does not, e.g. {missing[0][:12]}: "
             "a hotfix was not forward-merged. Merge its hotfix/vX.Y.Z branch into main first"
         )
-    return ["main carries every commit on release"]
+    return [f"head {head_sha[:12]} is on {main_ref}", "main carries every commit on release"]
 
 
 def next_patch(version: str) -> str:
@@ -188,27 +213,14 @@ def check_hotfix(
     if len(bumps) != 1:
         raise SourceError(f"expected one {bump_subject!r} commit, found {len(bumps)}")
 
-    residual = residual_diff(git, base_sha, head_sha, sources)
-    stray = sorted(set(residual) - allowed)
-    if stray:
-        raise SourceError(
-            "the branch changes files beyond its cherry-picks and the version bump: "
-            + ", ".join(stray)
-        )
-    for path, changed in residual.items():
-        if path == CHANGELOG:
-            continue
-        for line in changed:
-            if release_version not in line and head_version not in line:
-                raise SourceError(f"{path} changes more than the version: {line.strip()!r}")
+    expected_sha = replay(git, base_sha, sources)
+    check_only_version_bumped(git, expected_sha, head_sha, allowed, release_version, head_version)
     notes.append(f"tree = {tag} + {len(sources)} cherry-pick(s) + version bump")
     return notes
 
 
-def residual_diff(
-    git: Git, base_sha: str, head_sha: str, sources: list[str]
-) -> dict[str, list[str]]:
-    """Changed lines between the head and `base + every cherry-pick`, by path."""
+def replay(git: Git, base_sha: str, sources: list[str]) -> str:
+    """The commit `base + every cherry-pick`, built in a scratch worktree."""
     identity = {
         "GIT_AUTHOR_NAME": "release-source",
         "GIT_AUTHOR_EMAIL": "release-source@invalid",
@@ -224,36 +236,143 @@ def residual_diff(
                 picker.run(
                     "cherry-pick", "--allow-empty", "--keep-redundant-commits", source, env=identity
                 )
-            expected = picker.run("rev-parse", "HEAD").strip()
+            return picker.run("rev-parse", "HEAD").strip()
         except SourceError as err:
             raise SourceError(
                 f"the cherry-picks do not apply cleanly to {base_sha[:12]}: {err}"
             ) from err
         finally:
             git.run("worktree", "remove", "--force", str(tree))
-    changed: dict[str, list[str]] = {}
-    path = ""
-    for line in git.run("diff", "--no-color", "-U0", expected, head_sha).splitlines():
-        if line.startswith("diff --git "):
-            path = line.split(" b/", 1)[1]
-            changed.setdefault(path, [])
-        elif line.startswith(("+++", "---")):
+
+
+def check_only_version_bumped(
+    git: Git, expected: str, head_sha: str, allowed: frozenset[str], old: str, new: str
+) -> None:
+    """The head differs from `expected` only by `just bump-version`'s substitutions.
+
+    Every changed file must be a bumped file, modified in place as a regular
+    file. Outside the changelog, every changed line must be a version field
+    whose only edit is `old` -> `new`, and the parsed document must be equal
+    except at that file kind's version field: a lifecycle script, a dependency
+    pin or a duplicate key that happens to contain the version still fails.
+    """
+    for entry in git.lines("diff", "--raw", "--no-renames", expected, head_sha):
+        meta, path = entry.split("\t", 1)
+        old_mode, new_mode, _, _, status = meta.lstrip(":").split(" ")
+        if path not in allowed:
+            raise SourceError(
+                f"the branch changes files beyond its cherry-picks and the version bump: {path}"
+            )
+        if status != "M" or old_mode != REGULAR_FILE or new_mode != REGULAR_FILE:
+            raise SourceError(f"{path} must stay a regular file modified in place ({entry})")
+        if path == CHANGELOG:
             continue
-        elif line.startswith(("+", "-")):
-            changed[path].append(line[1:])
-    return changed
+        for before, after in changed_line_pairs(git, expected, head_sha, path):
+            if (
+                not VERSION_LINE_RE.match(before)
+                or after != before.replace(old, new)
+                or old not in before
+            ):
+                raise SourceError(f"{path} changes more than the version: {after.strip()!r}")
+        check_document(
+            path,
+            git.run("show", f"{expected}:{path}"),
+            git.run("show", f"{head_sha}:{path}"),
+            old,
+            new,
+        )
+
+
+def changed_line_pairs(git: Git, a: str, b: str, path: str) -> list[tuple[str, str]]:
+    """Removed and added lines of each `-U0` hunk, paired in order."""
+    pairs: list[tuple[str, str]] = []
+    removed: list[str] = []
+    added: list[str] = []
+
+    def flush() -> None:
+        if len(removed) != len(added):
+            raise SourceError(f"{path} adds or removes lines; a version bump only rewrites them")
+        pairs.extend(zip(removed, added, strict=True))
+        removed.clear()
+        added.clear()
+
+    for line in git.run("diff", "--no-color", "-U0", a, b, "--", path).splitlines():
+        if line.startswith("@@"):
+            flush()
+        elif line.startswith(("+++", "---", "diff ", "index ")):
+            continue
+        elif line.startswith("-"):
+            removed.append(line[1:])
+        elif line.startswith("+"):
+            added.append(line[1:])
+    flush()
+    return pairs
+
+
+def check_document(path: str, before: str, after: str, old: str, new: str) -> None:
+    name = path.rsplit("/", 1)[-1]
+    if name == LOCKFILE_NAME:
+        a, b = tomllib.loads(before), tomllib.loads(after)
+        permitted = {
+            ("package", i, "version")
+            for i, package in enumerate(a.get("package", []))
+            if isinstance(package.get("source"), dict)
+            and {"editable", "virtual"} & set(package["source"])
+        }
+    else:
+        field = next((f for suffix, f in VERSION_FIELDS.items() if name.endswith(suffix)), None)
+        if field is None:
+            raise SourceError(f"{path} is not a file kind `just bump-version` rewrites")
+        loads = tomllib.loads if name.endswith(".toml") else json.loads
+        a, b = loads(before), loads(after)
+        permitted = {field}
+    for key, was, now in differences(a, b, ()):
+        if key not in permitted:
+            raise SourceError(
+                f"{path} changes {'.'.join(map(str, key)) or 'its shape'}, not only the version"
+            )
+        if not (
+            isinstance(was, str)
+            and isinstance(now, str)
+            and old in was
+            and now == was.replace(old, new)
+        ):
+            raise SourceError(f"{path} {'.'.join(map(str, key))} is not a {old} -> {new} rewrite")
+
+
+def differences(a: object, b: object, key: Key) -> list[tuple[Key, object, object]]:
+    """Every leaf where two parsed documents differ, by key path."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        if a.keys() != b.keys():
+            return [(key, sorted(a), sorted(b))]
+        return [d for k in a for d in differences(a[k], b[k], (*key, k))]
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return [(key, len(a), len(b))]
+        return [
+            d
+            for i, (x, y) in enumerate(zip(a, b, strict=True))
+            for d in differences(x, y, (*key, i))
+        ]
+    return [] if a == b and type(a) is type(b) else [(key, a, b)]
 
 
 def check_source(
     git: Git,
     head_ref: str,
+    head_repo: str,
+    base_repo: str,
     head_sha: str,
     base_sha: str,
     allowed: frozenset[str],
     main_ref: str = MAIN_REF,
 ) -> list[str]:
+    if head_repo != base_repo:
+        raise SourceError(
+            f"the head is in {head_repo}, not {base_repo}: release PRs come from {base_repo} only"
+        )
     if head_ref == MAIN_HEAD:
-        return check_main(git, head_sha, base_sha)
+        return check_main(git, head_sha, base_sha, main_ref)
     match = HOTFIX_BRANCH_RE.match(head_ref)
     if match is None:
         raise SourceError(
@@ -265,11 +384,21 @@ def check_source(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument("--head-ref", required=True)
+    parser.add_argument("--head-repo", required=True)
+    parser.add_argument("--base-repo", required=True)
     parser.add_argument("--head-sha", required=True)
     parser.add_argument("--base-sha", required=True)
     args = parser.parse_args()
     try:
-        notes = check_source(Git(ROOT), args.head_ref, args.head_sha, args.base_sha, bump_files())
+        notes = check_source(
+            Git(ROOT),
+            args.head_ref,
+            args.head_repo,
+            args.base_repo,
+            args.head_sha,
+            args.base_sha,
+            bump_files(),
+        )
     except SourceError as err:
         print(f"::error::release source: {err}")
         return 1
