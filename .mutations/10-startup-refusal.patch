@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/services/execution_host_runner.py b/apps/syn-api/src/syn_api/services/execution_host_runner.py
+index 0edd3d435..5776b4565 100644
+--- a/apps/syn-api/src/syn_api/services/execution_host_runner.py
++++ b/apps/syn-api/src/syn_api/services/execution_host_runner.py
+@@ -89,7 +89,6 @@ async def start_execution_host() -> None:
+     queue = await get_execution_run_queue()
+     if queue is None:
+         return
+-    _refuse_an_unwired_backend()
+     labels = host_labels()
+     reaper = DockerDeadHostReaper()
+     host = ExecutorHost(

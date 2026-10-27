@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 80bbffb73..3651c0e2f 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -48,7 +48,7 @@ def can_run(pool: str) -> str:
+ 
+ def can_take(executor: str) -> str:
+     """SQL: the executor aliased ``executor`` (epoch and pool columns) could take run ``r``."""
+-    return f"({executor}.epoch>=r.writer_epoch AND {can_run(executor)})"
++    return f"({can_run(executor)})"
+ 
+ 
+ # D3 steps 2-3 with D13 placement. $1 the claimer, $2 the staleness window, $3
