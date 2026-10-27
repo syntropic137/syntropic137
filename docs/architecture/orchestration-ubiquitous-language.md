@@ -865,12 +865,23 @@ run only by Overflow, and a run every pool is too full for stays Queued. Never
 
 An Executor in a lower-priority Executor Pool claiming a run because every
 higher-priority Executor that could take it is full for longer than the
-Overflow Delay, draining, stale, or not claiming. A run that overflowed is
+Overflow Delay, draining, stale, or not claiming, and only when the claiming
+pool has an Overflow Budget. A run that overflowed is
 recorded as such on its row (`overflowed`), as telemetry, never as an event.
 Placement is decided in the claim itself, never by a separate process. A run
 that a higher Executor could not take anyway (another Event Epoch, or a
 NoCredentials pool and an `agent` Workload) did not overflow. (ADR-072 D13,
 #1917.)
+
+## Overflow Budget
+
+The operator's daily spend cap for an Executor Pool's Overflow, in whole USD
+(`overflow_budget_usd_per_day`, `SYN_EXECUTOR_POOL_OVERFLOW_BUDGET_USD_PER_DAY`).
+Fail-closed: a pool with no Overflow Budget never claims a run by Overflow,
+only runs no live higher-priority Executor could take. Declaring it is what
+lets a paid pool such as E2B overflow. Recorded with the pool and not yet
+metered; counting spend against it is #2024. Not the Execution Budget, which
+is slots, not money. (ADR-072 D13, #1917.)
 
 ## Overflow Delay
 

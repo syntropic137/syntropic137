@@ -276,6 +276,17 @@ class ExecutorPoolSettings(BaseSettings):
             "An unknown capability refuses startup."
         ),
     )
+    overflow_budget_usd_per_day: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "The Overflow Budget: this pool's daily spend cap for overflow, in whole USD. "
+            "Unset (the default): the pool never claims a run by overflow, only runs no "
+            "live higher-priority executor could take. Set it to let a paid pool (E2B) "
+            "overflow. Recorded with the pool; spend is not yet metered against it "
+            "(#2024)."
+        ),
+    )
     overflow_delay_s: int = Field(
         default=60,
         ge=0,

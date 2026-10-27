@@ -57,7 +57,7 @@ def can_take(executor: str) -> str:
 # snapshot and capacity is still exact (D3, D13).
 _CLAIM_SQL = f"""WITH me AS (
     SELECT b.executor_id, h.epoch, p.pool_id, p.priority, p.overflow_delay_s,
-        p.supplies_credentials
+        p.supplies_credentials, p.overflow_budget_usd_per_day
     FROM execution_budget b JOIN executor_hosts h ON h.host_id=b.executor_id
     JOIN executor_pools p ON p.pool_id=b.pool_id WHERE b.executor_id=$1
 ), higher AS (
@@ -78,6 +78,9 @@ _CLAIM_SQL = f"""WITH me AS (
     AND {can_run("me")}
     AND NOT EXISTS (SELECT 1 FROM higher x WHERE {can_take("x")}
         AND (x.claiming_with_room OR x.recently_full))
+    -- No Overflow Budget, no Overflow: only what no live higher executor could take.
+    AND (me.overflow_budget_usd_per_day IS NOT NULL
+        OR NOT EXISTS (SELECT 1 FROM higher x WHERE {can_take("x")}))
     ORDER BY r.admitted_at, r.execution_id FOR UPDATE OF r SKIP LOCKED LIMIT 1
 ) UPDATE execution_runs r SET state='claimed', executor_id=me.executor_id,
     lease_token=r.lease_token+1, reader_epoch=me.epoch, reason=NULL,
@@ -449,18 +452,20 @@ class PostgresExecutionRunQueue:
             sorted(declared.capabilities),
             int(declared.overflow_delay.total_seconds()),
             declared.supplies_credentials,
+            declared.overflow_budget_usd_per_day,
         )
         await conn.execute(
             """INSERT INTO executor_pools (pool_id,priority,provider,region,isolation,
-            capabilities,overflow_delay_s,supplies_credentials)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (pool_id) DO NOTHING""",
+            capabilities,overflow_delay_s,supplies_credentials,overflow_budget_usd_per_day)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (pool_id) DO NOTHING""",
             *values,
         )
         raw = await conn.fetchval(
             """SELECT jsonb_build_object('pool_id',pool_id,'priority',priority,
                 'provider',provider,'region',region,'isolation',isolation,
                 'capabilities',capabilities,'overflow_delay',overflow_delay_s,
-                'supplies_credentials',supplies_credentials)::text
+                'supplies_credentials',supplies_credentials,
+                'overflow_budget_usd_per_day',overflow_budget_usd_per_day)::text
             FROM executor_pools WHERE pool_id=$1 FOR UPDATE""",
             declared.pool_id,
         )
@@ -484,8 +489,8 @@ class PostgresExecutionRunQueue:
             )
         await conn.execute(
             """UPDATE executor_pools SET priority=$2,provider=$3,region=$4,isolation=$5,
-            capabilities=$6,overflow_delay_s=$7,supplies_credentials=$8,defined_at=now()
-            WHERE pool_id=$1""",
+            capabilities=$6,overflow_delay_s=$7,supplies_credentials=$8,
+            overflow_budget_usd_per_day=$9,defined_at=now() WHERE pool_id=$1""",
             *values,
         )
 

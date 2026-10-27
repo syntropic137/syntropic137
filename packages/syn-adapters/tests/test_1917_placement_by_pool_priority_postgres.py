@@ -34,7 +34,14 @@ pytestmark = pytest.mark.integration
 
 _NOW = timedelta(0)
 LOCAL = ExecutorPool(pool_id="local", priority=0, provider="docker")
-SECOND = ExecutorPool(pool_id="second-box", priority=1, provider="docker", overflow_delay=_NOW)
+# Overflow needs a declared Overflow Budget on the claiming pool (orchestrator ruling, #2143).
+SECOND = ExecutorPool(
+    pool_id="second-box",
+    priority=1,
+    provider="docker",
+    overflow_delay=_NOW,
+    overflow_budget_usd_per_day=20,
+)
 E2B = ExecutorPool(
     pool_id="e2b",
     priority=2,
@@ -42,7 +49,9 @@ E2B = ExecutorPool(
     isolation=IsolationLevel.MICROVM,
     supplies_credentials=False,
     overflow_delay=_NOW,
+    overflow_budget_usd_per_day=50,
 )
+UNBUDGETED_E2B = E2B.model_copy(update={"overflow_budget_usd_per_day": None})
 
 
 def _executor(host_id: str, pool: ExecutorPool, epoch: int = 1) -> ExecutorHost:
@@ -363,3 +372,35 @@ async def test_concurrent_claims_across_priorities_never_exceed_capacity_and_fil
 
     assert len({c.execution_id for c in claimed}) == len(claimed)
     assert len(claimed) == sum(capacities.values())
+
+
+async def test_without_an_overflow_budget_a_lower_pool_never_overflows_even_when_the_higher_is_full(
+    pools: list[asyncpg.Pool],  # noqa: F811
+) -> None:
+    queue = PostgresExecutionRunQueue(pools[0])
+    await _join(queue, "local-1", LOCAL, capacity=1)
+    await _join(queue, "e2b-1", UNBUDGETED_E2B, capacity=4)
+    await _admit(queue, "run-1", "run-2")
+    assert _placed(await queue.claim("local-1")) == ("run-1", "local", False)
+    async with pools[0].acquire() as conn:  # full for an hour: past any delay
+        await conn.execute(
+            """UPDATE execution_budget SET full_since=clock_timestamp()-interval '1 hour'
+            WHERE executor_id='local-1'"""
+        )
+
+    assert await queue.claim("e2b-1") is None
+    await _untouched(pools[0], "run-2")
+
+
+async def test_without_an_overflow_budget_a_pool_still_claims_what_no_higher_executor_could_take(
+    pools: list[asyncpg.Pool],  # noqa: F811
+) -> None:
+    queue = PostgresExecutionRunQueue(pools[0])
+    await _join(queue, "local-1", LOCAL, capacity=1)
+    await _join(queue, "e2b-1", UNBUDGETED_E2B, capacity=4)
+    await _admit(queue, "run-1")
+    assert _placed(await queue.claim("local-1")) == ("run-1", "local", False)
+    await queue.deregister("local-1")  # the higher pool has no live member
+    await _admit(queue, "run-2")
+
+    assert _placed(await queue.claim("e2b-1")) == ("run-2", "e2b", False)

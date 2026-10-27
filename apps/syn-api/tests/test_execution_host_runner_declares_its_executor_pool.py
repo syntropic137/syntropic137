@@ -79,6 +79,7 @@ async def test_the_host_declares_the_pool_its_settings_name(
     monkeypatch.setenv("SYN_EXECUTOR_POOL_REGION", "eu-central")
     monkeypatch.setenv("SYN_EXECUTOR_POOL_CAPABILITIES", '["nested_docker"]')
     monkeypatch.setenv("SYN_EXECUTOR_POOL_OVERFLOW_DELAY_S", "45")
+    monkeypatch.setenv("SYN_EXECUTOR_POOL_OVERFLOW_BUDGET_USD_PER_DAY", "30")
 
     host = await _started_host(monkeypatch)
 
@@ -90,6 +91,7 @@ async def test_the_host_declares_the_pool_its_settings_name(
         isolation=IsolationLevel.CONTAINER,
         capabilities=frozenset({Capability.NESTED_DOCKER}),
         overflow_delay=timedelta(seconds=45),
+        overflow_budget_usd_per_day=30,
     )
 
 

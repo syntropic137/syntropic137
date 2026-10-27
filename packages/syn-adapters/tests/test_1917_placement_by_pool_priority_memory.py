@@ -23,7 +23,11 @@ pytestmark = pytest.mark.unit
 
 LOCAL = ExecutorPool(pool_id="local", priority=0, provider="docker")
 SECOND = ExecutorPool(
-    pool_id="second-box", priority=1, provider="docker", overflow_delay=timedelta(seconds=60)
+    pool_id="second-box",
+    priority=1,
+    provider="docker",
+    overflow_delay=timedelta(seconds=60),
+    overflow_budget_usd_per_day=20,
 )
 E2B = ExecutorPool(
     pool_id="e2b",
@@ -32,6 +36,7 @@ E2B = ExecutorPool(
     isolation=IsolationLevel.MICROVM,
     supplies_credentials=False,
     overflow_delay=timedelta(0),
+    overflow_budget_usd_per_day=50,
 )
 
 
@@ -138,3 +143,21 @@ async def test_a_higher_executor_that_cannot_read_the_runs_epoch_never_holds_it_
     await queue.mark_admitted("run-1")
 
     assert _placed(await queue.claim("second-1")) == ("run-1", "second-box", False)
+
+
+async def test_without_an_overflow_budget_a_lower_pool_never_overflows_even_when_the_higher_is_full() -> (
+    None
+):
+    clock = _Clock()
+    queue = InMemoryExecutionRunQueue(clock=clock)
+    await _join(queue, "local-1", LOCAL, capacity=1)
+    unbudgeted = E2B.model_copy(update={"overflow_budget_usd_per_day": None})
+    await _join(queue, "e2b-1", unbudgeted, capacity=4)
+    await _admit(queue, "run-1", "run-2")
+    assert _placed(await queue.claim("local-1")) == ("run-1", "local", False)
+    clock.now += timedelta(hours=1)
+    for host_id in ("local-1", "e2b-1"):
+        await queue.heartbeat(host_id)
+
+    assert await queue.claim("e2b-1") is None
+    assert (await queue.in_use()).admitted == 1

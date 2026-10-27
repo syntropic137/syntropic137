@@ -335,6 +335,11 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             and row.writer_epoch <= entry.host.epoch
             and self._can_run(pool, row)
             and not any(self._can_take(x, row) and self._holds_back(x, pool, now) for x in higher)
+            # No Overflow Budget, no Overflow: only what no live higher executor could take.
+            and (
+                pool.overflow_budget_usd_per_day is not None
+                or not any(self._can_take(x, row) for x in higher)
+            )
         )
 
     def _higher(self, pool: ExecutorPool, now: datetime) -> list[_Host]:

@@ -103,6 +103,14 @@ class ExecutorPool(BaseModel):
     capabilities: frozenset[Capability] = frozenset()
     overflow_delay: timedelta = Field(default=timedelta(seconds=60), ge=timedelta(0))
     """How long this pool's executors wait on a full higher-priority pool before overflowing."""
+    overflow_budget_usd_per_day: int | None = Field(default=None, ge=1)
+    """The Overflow Budget: the operator's daily spend cap for this pool's overflow, in USD.
+
+    Fail-closed: ``None`` (the default) means this pool never claims a run by
+    Overflow, only runs no live higher-priority executor could take. Declaring
+    it is what allows a paid pool (E2B) to overflow. Recorded with the pool;
+    spend is not yet metered against it, which is #2024's.
+    """
     supplies_credentials: bool = True
     """Whether the backend's Workspace Credential Policy supplies host credentials.
 

@@ -134,3 +134,17 @@ DO $$ BEGIN
             CHECK (workload IN ('agent','scripted'));
     END IF;
 END $$;
+
+-- step: executor_pools_overflow_budget
+-- The Overflow Budget (orchestrator ruling on #2143): a pool with none never
+-- claims by Overflow. NULL, the default, is no budget, so every existing pool
+-- is fail-closed. Spend is metered against it later (#2024).
+ALTER TABLE executor_pools ADD COLUMN IF NOT EXISTS overflow_budget_usd_per_day INTEGER;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+        WHERE conname = 'executor_pools_overflow_budget_check'
+        AND conrelid = 'executor_pools'::regclass) THEN
+        ALTER TABLE executor_pools ADD CONSTRAINT executor_pools_overflow_budget_check
+            CHECK (overflow_budget_usd_per_day >= 1);
+    END IF;
+END $$;

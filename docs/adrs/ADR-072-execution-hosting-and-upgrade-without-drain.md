@@ -757,6 +757,20 @@ word for priority was "tier"; the vocabulary keeps Pool Priority. Disabling a
 pool's claims (an outage breaker, an operator) uses the drain state, never
 `capacity = 0`, which the `CHECK` refuses while a run is charged.
 
+**No Overflow Budget, no Overflow** (orchestrator ruling on #2143). A pool
+overflows only when the operator has declared its **Overflow Budget**, a daily
+spend cap in whole USD (`executor_pools.overflow_budget_usd_per_day`,
+`SYN_EXECUTOR_POOL_OVERFLOW_BUDGET_USD_PER_DAY`). The default is none, and
+none fails closed: the pool claims only runs that no live, non-draining
+higher-priority executor could take, which never includes a run it would claim
+by Overflow. So a paid pool (E2B) never takes an overflow run without a
+declared cap, however long the higher pool has been full. The Overflow Delay
+(default 60 s) applies only once a budget is declared. The budget is part of
+the pool's definition, so the conflict rule keeps members agreeing. It is
+recorded, not yet metered: counting spend against it, and stopping claims at
+the cap, is #2024 (with #2017's cost data). A budgeted pool's claims are the
+rule above unchanged.
+
 **Credential clause** (#1917, research decision 5). A pool records whether its
 backend's Workspace Credential Policy supplies host credentials
 (`executor_pools.supplies_credentials`, taken from the backend kit, never a

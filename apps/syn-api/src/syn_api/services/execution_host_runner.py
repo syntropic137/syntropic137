@@ -158,6 +158,7 @@ def _executor_pool(reaper: RunReaper) -> ExecutorPool:
         isolation=reaper.isolation(),
         capabilities=frozenset(Capability(name) for name in settings.capabilities),
         overflow_delay=timedelta(seconds=settings.overflow_delay_s),
+        overflow_budget_usd_per_day=settings.overflow_budget_usd_per_day,
     )
 
 
