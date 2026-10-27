@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 7b9e237ed..949d19542 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -2211,7 +2211,7 @@ def top_up_counts(cohort: _CohortMetrics | None, evals: dict[str, str]) -> dict[
+     """
+     if cohort is None:
+         raise RuntimeError("this cohort has launched nothing yet: launch --trials K first")
+-    if pending := [c.eval_id for c in cohort.cases if c.pending]:
++    if pending := [c.eval_id for c in cohort.cases if c.pending and False]:
+         raise RuntimeError(
+             f"{len(pending)} case(s) have pending trials ({', '.join(pending)}); "
+             "top up after they finish and are scored, nothing launched"

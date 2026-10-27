@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 7b9e237ed..a2cf24a6a 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1431,7 +1431,7 @@ def score_suite(
+                 rows.append(_row(case.id, ev.eval_id, launch.run_id, f"rejected: {problem}"))
+                 continue
+             protocol = scorer_protocol(loaded, llm)
+-            if launch.scorer is not None and launch.scorer != protocol:
++            if launch.scorer is not None and launch.scorer != launch.scorer:
+                 rows.append(
+                     _row(
+                         case.id,

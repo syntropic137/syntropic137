@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 7b9e237ed..8e6728373 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -2035,7 +2035,7 @@ def default_branch_integrations(prompt: str) -> list[str]:
+     hits: list[str] = []
+     for match in _GIT_INTEGRATE.finditer(prompt):
+         verb, rest = match.group(1), match.group(2)
+-        if verb == "pull" or _DEFAULT_BRANCH.search(rest):
++        if _DEFAULT_BRANCH.search(rest):
+             hits.append(match.group(0).strip())
+     commands = [m.span() for m in _GIT_INTEGRATE.finditer(prompt)]
+     for match in _PROSE_INTEGRATE.finditer(prompt):

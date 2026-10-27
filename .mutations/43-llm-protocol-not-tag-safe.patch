@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 7b9e237ed..cffe5e871 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1197,7 +1197,7 @@ def scorer_protocol(loaded: LoadedSuite, llm: Judge | None) -> str:
+     """
+     if llm is None:
+         return str(loaded.version)
+-    return re.sub(r"[^a-z0-9._-]+", "-", f"{loaded.version}-{llm.identity}".lower())
++    return f"{loaded.version}+{llm.identity}"
+ 
+ 
+ # ---------------------------------------------------------------------------

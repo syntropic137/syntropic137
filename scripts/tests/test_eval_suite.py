@@ -3873,8 +3873,10 @@ def _case_metrics(
     }
 
 
-def _figures(loaded: LoadedSuite, cases: list[dict[str, object]]) -> dict[str, object]:
-    """`GET /eval-sets/metrics` for one cohort: the one `launch --trials` declares."""
+def _figures(
+    loaded: LoadedSuite, cases: list[dict[str, object]], scorer_protocol: str = "8"
+) -> dict[str, object]:
+    """`GET /eval-sets/metrics` for one cohort: the one `launch --trials` declares, by default."""
     digest = eval_suite.declared_model_tags(eval_suite.declared(loaded))[0].split(":", 1)[1]
     bounds = {"lower": 0.0, "upper": 1.0, "display": "0% to 100%"}
     return {
@@ -3890,7 +3892,7 @@ def _figures(loaded: LoadedSuite, cases: list[dict[str, object]]) -> dict[str, o
                     "workflow_id": loaded.workflow.id,
                     "workflow_version": "8.0.0",
                     "models_digest": digest,
-                    "scorer_protocol": "8",
+                    "scorer_protocol": scorer_protocol,
                 },
                 "k": 3,
                 "cases": cases,
@@ -4047,6 +4049,22 @@ def test_top_up_of_a_cohort_that_launched_nothing_is_refused(tmp_path: Path) -> 
     loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
     server = _TrialServer(loaded)
     server.metrics = {**_figures(loaded, []), "cohorts": []}
+
+    with pytest.raises(RuntimeError, match="launched nothing yet"):
+        eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3, top_up=True)
+    assert server.posts("/execute") == []
+
+
+@pytest.mark.unit
+def test_top_up_never_continues_a_cohort_scored_under_another_protocol(tmp_path: Path) -> None:
+    """Only an LLM-judged cohort exists; a keyword top-up has nothing of its own to continue."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.metrics = _figures(
+        loaded,
+        [_case_metrics(_eval_of(loaded, c.id), short=2) for c in loaded.cases],
+        scorer_protocol="8-llm-judge",
+    )
 
     with pytest.raises(RuntimeError, match="launched nothing yet"):
         eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3, top_up=True)

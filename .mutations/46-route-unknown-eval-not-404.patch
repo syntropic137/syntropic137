@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/tags.py b/apps/syn-api/src/syn_api/routes/tags.py
+index ede9c46da..797deb68d 100644
+--- a/apps/syn-api/src/syn_api/routes/tags.py
++++ b/apps/syn-api/src/syn_api/routes/tags.py
+@@ -226,7 +226,7 @@ async def add_eval_tags_endpoint(eval_id: str, body: AddTagsRequest) -> EvalTags
+     handler = UpdateEvalHandler(repository, get_revision_resolver(), get_publisher())
+     result = await handler.handle(eval_id=target, add_tags=body.tags)
+     if result is None:
+-        raise HTTPException(status_code=404, detail=f"Eval not found: {eval_id}")
++        return EvalTagsResponse(eval_id=eval_id, tags=[])
+     if not result.success:
+         raise HTTPException(status_code=422, detail=result.error)
+     await sync_published_events_to_projections()
