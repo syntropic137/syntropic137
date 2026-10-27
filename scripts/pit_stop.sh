@@ -620,7 +620,10 @@ if [ "$MODE" != "swap" ]; then
     # build undrained, ungated and unverified (#1511). apply_staged moves it in.
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
     # Checked again on the bytes actually repointed: the precheck read was
-    # before the build, and the host's file may have changed since.
+    # before the build, and the host's file may have changed since. Null keys
+    # again first: a no-op after the precheck wrote them, and under --dry-run,
+    # which wrote nothing, it re-adds them to this fresh read.
+    apply_null_keys
     refuse_drift "The $TAG images are on the host, but nothing was staged"
     BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged" --service "$SERVICE")" \
         || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
