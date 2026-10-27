@@ -97,6 +97,7 @@ async def start_execution_host() -> None:
     queue = await get_execution_run_queue()
     if queue is None:
         return
+    _refuse_an_unwired_backend()
     labels = host_labels()
     reaper = DockerDeadHostReaper()
     host = ExecutorHost(
@@ -128,6 +129,28 @@ async def start_execution_host() -> None:
     logger.info("ExecutionHost %s claiming from the Run Queue", host.host_id)
 
 
+class UnwiredExecutorBackend(RuntimeError):
+    """The workspace backend has no Executor wiring: no reaper, no pool declaration (#1917)."""
+
+
+def _refuse_an_unwired_backend() -> None:
+    """Fail fast rather than register an Executor that misdescribes its backend (#1917).
+
+    This process's reaper is Docker's and its pool declares host credentials.
+    Under E2B neither is true: the pool would claim agent runs a NoCredentials
+    backend cannot run, and its reaper could never show a sandbox gone. Until
+    the E2B Executor is wired (its reaper, ``provider``, ``isolation`` and
+    ``supplies_credentials`` from its BackendKit), E2B runs only with the Run
+    Queue off. Never a fallback to Docker (research decision 9).
+    """
+    if get_settings().e2b.enabled:
+        raise UnwiredExecutorBackend(
+            "SYN_E2B_ENABLED with SYN_EXECUTION_RUN_QUEUE_ENABLED: the E2B Executor is not "
+            "wired yet (#1917), so this executor would declare a Docker reaper and host "
+            "credentials for E2B workspaces. Turn one of the two off."
+        )
+
+
 def _executor_pool(reaper: RunReaper) -> ExecutorPool:
     """The Executor Pool this process declares (ADR-072 D13).
 
@@ -143,6 +166,7 @@ def _executor_pool(reaper: RunReaper) -> ExecutorPool:
         isolation=reaper.isolation(),
         capabilities=frozenset(Capability(name) for name in settings.capabilities),
         overflow_delay=timedelta(seconds=settings.overflow_delay_s),
+        overflow_budget_usd_per_day=settings.overflow_budget_usd_per_day,
     )
 
 

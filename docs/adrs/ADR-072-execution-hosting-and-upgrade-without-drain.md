@@ -2,7 +2,7 @@
 
 - **Status**: Accepted (decision recorded; implementation lands in #1310 Phase 1, items 1.2-1.7, and Phase 2). D2, D4 and D10 revised in place 2026-10-15 for #1944.
 - **Date**: 2026-10-05 (first drafted in parked PR #1597; resumed 2026-10-08 against #1574 and #1651 as merged)
-- **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511, #1734 (implementation of multi-host placement, heartbeat and fencing, moved out of #1310 on 2026-10-07). #1734 also carries pools, priority and overflow (D13, amended 2026-10-14), #1944
+- **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511, #1734 (implementation of multi-host placement, heartbeat and fencing, moved out of #1310 on 2026-10-07). #1734 also carries pools, priority and overflow (D13, amended 2026-10-14), #1944, #1917 (placement by priority and the credential clause, D13)
 - **Related**: ADR-014 (section 7, resume; section 9, who runs an execution), ADR-025, ADR-055, ADR-057, ADR-060 (section 8, dispatch concurrency), ADR-070 (D4/D5, drain-aware rotation)
 - **Vocabulary**: `docs/architecture/orchestration-ubiquitous-language.md` (Executor, Run Queue, Claim, Lease, Heartbeat, Fencing, Drain (of an executor), Event Epoch, Queued, Execution Budget, Executor Pool, Pool Priority, Overflow, Overflow Delay, Claim Check, Capability, Isolation Level, Run Requirements, Unplaceable, Placement, Reap Scope; reserved: Adopt / Reattach, Router)
 
@@ -102,8 +102,7 @@ executor: its pool, capacity, slots in use, heartbeat, last claim check,
 full-since and reap scope; D3, D13), `executor_pools` (one row per Executor
 Pool: priority, provider, region, isolation, capabilities and overflow delay;
 D13) and `executor_hosts` (one row per registered host: its container,
-generation, epoch and drain flag, D5, D9, D10). The last claim check and
-full-since columns land with D13's later steps (see D13, Status). Production fails fast
+generation, epoch and drain flag, D5, D9, D10). Production fails fast
 without Postgres (ADR-060); the test double inherits `InMemoryAdapter`.
 
 **Row states.**
@@ -177,13 +176,11 @@ host wastes every larger host's capacity.
    read `in_use < capacity`, `NOT draining` and
    `heartbeat_at > clock_timestamp() - <stale>`. `now()` is the transaction's
    start and would judge liveness before the wait. No row (full, stale,
-   draining or absent) means no claim this turn. (The `claim_checked_at`
-   stamp lands with D13's claim signals; the rest is the code today.)
+   draining or absent) means no claim this turn. The stamp commits whether or
+   not the row has room and whether or not a run is then found.
 2. Take the oldest `admitted` row this executor's pool may take now (D13):
    `ORDER BY admitted_at, execution_id FOR UPDATE SKIP LOCKED LIMIT 1`. None
-   means no claim. (Until D13's placement step lands, every admitted row
-   whose `retry_at` has passed and whose `writer_epoch` this host can read
-   qualifies.)
+   means no claim.
 3. Set the run's `executor_id = <self>`, `lease_token = lease_token + 1`,
    `leased_until`, and `state = 'claimed'`.
 4. `in_use = in_use + 1` on the locked budget row.
@@ -742,8 +739,55 @@ stays `admitted` (D11 `queued`). Requirements whose phases conflict (an empty
 provider or region intersection) are refused at admission and never queued.
 
 Placement is recorded on the run row (`placed_pool`, `overflowed`,
-`claimed_at`) as infrastructure telemetry, never as an event. In this revision
-every run's requirements are empty, so placement is by priority alone.
+`claimed_at`) and returned on the `ClaimedRun`, as infrastructure telemetry,
+never as an event. `overflowed` means some live higher executor could have
+taken the run, which tells "spilled past a higher pool" from "nothing higher
+could take it". In this revision Run Requirements are empty, so placement is
+by priority and the credential clause below.
+
+**Placement by priority, then queue** (owner direction 2026-10-14, #1917).
+Priority is the one integer an operator sets per pool
+(`SYN_EXECUTOR_POOL_PRIORITY`): 0 for the local Docker host, higher for a
+second host, higher again for a remote backend such as E2B. Work fills
+priority 0, overflows pool by pool, and stays admitted when every pool is
+full. With priorities 0 and 1 both full, a priority 2 executor claims the
+oldest admitted run; with priority 1 free, it claims nothing. Nothing is
+preempted and nothing migrates back when a higher slot frees. The owner's
+word for priority was "tier"; the vocabulary keeps Pool Priority. Disabling a
+pool's claims (an outage breaker, an operator) uses the drain state, never
+`capacity = 0`, which the `CHECK` refuses while a run is charged.
+
+**No Overflow Budget, no Overflow** (orchestrator ruling on #2143). A pool
+overflows only when the operator has declared its **Overflow Budget**, a daily
+spend cap in whole USD (`executor_pools.overflow_budget_usd_per_day`,
+`SYN_EXECUTOR_POOL_OVERFLOW_BUDGET_USD_PER_DAY`). The default is none, and
+none fails closed: the pool claims only runs that no **registered**
+higher-priority executor could take (an `executor_hosts` row in a
+higher-priority pool, with the epoch and credentials to take the run), live or
+not. A higher executor that is draining (pit stops drain routinely), stale or
+dead does not push work onto an unbudgeted pool; the runs wait. So a paid pool
+(E2B) never takes an overflow run without a declared cap, and without one it
+claims only when it is the top pool for the run. A registered executor stops
+counting only when it leaves (`deregister`, from `leave`) or a restart in its
+container retires it (D5 Restart); nothing else deletes the row, so a crashed
+host whose machine never returns keeps an unbudgeted lower pool idle until an
+operator removes its row. The Overflow Delay
+(default 60 s) applies only once a budget is declared. The budget is part of
+the pool's definition, so the conflict rule keeps members agreeing. It is
+recorded, not yet metered: counting spend against it, and stopping claims at
+the cap, is #2024 (with #2017's cost data). A budgeted pool's claims are the
+rule above unchanged.
+
+**Credential clause** (#1917, research decision 5). A pool records whether its
+backend's Workspace Credential Policy supplies host credentials
+(`executor_pools.supplies_credentials`, taken from the backend kit, never a
+setting). A run records its workload (`execution_runs.workload`: `agent`, the
+default, or `scripted`, written at `reserve`). A pool that supplies no
+credentials claims only `scripted` runs, and the same predicate decides
+whether a higher executor "could take" a run, so a NoCredentials pool never
+holds an `agent` run back from a lower pool. Run Requirements join the same
+predicate (`can_run` in `postgres.py`), so capability matching is one more
+clause, not a second path.
 
 Rejected: a pool-level counter (a second accounting surface and a hot row);
 locking higher executors' rows (cross-executor contention, which D3 rules out);
@@ -758,10 +802,17 @@ dropped `backend` column, the port values, the registration conflict rule and
 `execution_budget.reap_scope` with the same-container backfill, scope-guarded
 fencing and takeover (D5), and the claimer's reap-before-close gate (D3). A
 pool's provider and isolation are now read from the reaper, never from
-settings. Placement is not yet in the claim: every executor still takes the
-oldest admitted run. The claim signals `claim_checked_at` and `full_since` (D3,
-D4), priority and overflow in the claim, run requirements, and the placement
-read follow in that order, as the plan sets out.
+settings. Placement is in the claim (#1917): the claim signals
+`claim_checked_at` (stamped by the claim) and `full_since` (kept by a trigger,
+so an older image's writes keep it right), priority and overflow, the
+`placed_pool`/`overflowed`/`claimed_at` columns and the credential clause, in
+both adapters. Still to come: the published drain (`drain(host_id)`, which
+is also the claim-disable path), Run Requirements (#2060) and the placement
+read, as the plan sets out. No production Executor declares
+`supplies_credentials = false` yet: until the E2B Executor is wired (its
+reaper and its pool from its BackendKit), an executor refuses to start with
+both `SYN_E2B_ENABLED` and the Run Queue on, rather than register a Docker
+reaper and host credentials for E2B workspaces.
 
 **Applying the schema (#1965).** The api and every executor apply the Run Queue
 schema as they start, so they apply it concurrently. `ensure_ready` therefore

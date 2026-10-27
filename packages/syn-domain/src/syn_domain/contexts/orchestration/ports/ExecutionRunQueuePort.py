@@ -61,6 +61,19 @@ class Capability(StrEnum):
     NESTED_DOCKER = "nested_docker"
 
 
+class RunWorkload(StrEnum):
+    """What a run needs its workspace to hold, as the claim reads it (#1917, decision 5).
+
+    Recorded on the run row at reserve. Every run is ``AGENT`` until a start
+    names a Scripted Agent profile (issue H).
+    """
+
+    AGENT = "agent"
+    """A real agent: it needs the host's credentials."""
+    SCRIPTED = "scripted"
+    """A Scripted Agent: it needs no credential, so a NoCredentials pool may run it."""
+
+
 class IsolationLevel(IntEnum):
     """How strongly a pool isolates one workspace from another; compared as a minimum (D13).
 
@@ -90,6 +103,22 @@ class ExecutorPool(BaseModel):
     capabilities: frozenset[Capability] = frozenset()
     overflow_delay: timedelta = Field(default=timedelta(seconds=60), ge=timedelta(0))
     """How long this pool's executors wait on a full higher-priority pool before overflowing."""
+    overflow_budget_usd_per_day: int | None = Field(default=None, ge=1)
+    """The Overflow Budget: the operator's daily spend cap for this pool's overflow, in USD.
+
+    Fail-closed: ``None`` (the default) means this pool claims only runs that no
+    registered higher-priority executor could take, live or not: a draining or
+    dead higher executor keeps it idle, so it never claims by Overflow. Declaring
+    it is what allows a paid pool (E2B) to overflow. Recorded with the pool;
+    spend is not yet metered against it, which is #2024's.
+    """
+    supplies_credentials: bool = True
+    """Whether the backend's Workspace Credential Policy supplies host credentials.
+
+    False for a NoCredentials backend (E2B): its executors claim only
+    ``SCRIPTED`` runs, and never hold an ``AGENT`` run back from a lower pool
+    (#1917). Taken from the backend kit, never a setting.
+    """
 
     @field_validator("overflow_delay")
     @classmethod
@@ -131,6 +160,10 @@ class ClaimedRun(BaseModel):
     executor_id: str
     token: int = Field(ge=1)
     is_resume: bool
+    pool_id: PoolId
+    """The Executor Pool the run was placed in (D13)."""
+    overflowed: bool = False
+    """A live higher-priority executor could have taken the run, and it spilled past (D13)."""
 
 
 class FencedRun(BaseModel):
@@ -204,7 +237,14 @@ class ExecutionRunQueue(Protocol):
         """Whether any executor other than ``host_id`` has a live heartbeat (D6)."""
         ...
 
-    async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
+    async def reserve(
+        self,
+        execution_id: str,
+        writer_epoch: int,
+        *,
+        is_resume: bool,
+        workload: RunWorkload = RunWorkload.AGENT,
+    ) -> bool:
         """Insert an ``opening`` row. False when the execution already has one."""
         ...
 
@@ -213,7 +253,15 @@ class ExecutionRunQueue(Protocol):
         ...
 
     async def claim(self, host_id: str) -> ClaimedRun | None:
-        """Take the oldest claimable run within this host's own capacity, in one transaction (D3)."""
+        """Take the oldest run this host may take now, within its own capacity (D3, D13).
+
+        One transaction. Stamps the host's Claim Check whenever it is live and
+        not draining, with or without room. A run is taken only when the host's
+        pool can run its workload and no live, non-draining executor in a
+        higher-priority pool that could take it is claiming with room or has
+        been full for less than this pool's Overflow Delay. Otherwise the run
+        stays ``admitted`` (queued); it is never claimed and deferred.
+        """
         ...
 
     async def renew(self, run: ClaimedRun) -> None:

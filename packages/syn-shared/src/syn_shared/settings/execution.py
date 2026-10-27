@@ -258,8 +258,10 @@ class ExecutorPoolSettings(BaseSettings):
         ge=0,
         le=32767,
         description=(
-            "The pool's priority; 0 is tried first. Placement does not read it yet: "
-            "every executor still claims the oldest admitted run (ADR-072 D13)."
+            "The pool's priority; 0 is tried first. An executor claims only when no live, "
+            "non-draining executor in a higher-priority pool that could take the run is "
+            "claiming with room or has been full for less than this pool's overflow delay; "
+            "otherwise the run stays queued (ADR-072 D13)."
         ),
     )
     region: str | None = Field(
@@ -274,11 +276,22 @@ class ExecutorPoolSettings(BaseSettings):
             "An unknown capability refuses startup."
         ),
     )
+    overflow_budget_usd_per_day: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "The Overflow Budget: this pool's daily spend cap for overflow, in whole USD. "
+            "Unset (the default): the pool claims only runs no registered higher-priority "
+            "executor could take, so it stays idle while a higher pool is registered, even "
+            "draining or dead. Set it to let a paid pool (E2B) overflow. Recorded with the pool; spend is not yet metered against it "
+            "(#2024)."
+        ),
+    )
     overflow_delay_s: int = Field(
         default=60,
         ge=0,
         description=(
             "Seconds this pool's executors wait on a full higher-priority pool before "
-            "overflowing to it. Recorded with the pool; placement does not use it yet."
+            "overflowing past it (ADR-072 D13)."
         ),
     )

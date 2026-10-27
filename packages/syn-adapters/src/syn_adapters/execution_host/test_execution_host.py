@@ -146,7 +146,11 @@ class _Streams:
 
 def _claimed(execution_id: str) -> ClaimedRun:
     return ClaimedRun(
-        execution_id=execution_id, executor_id=_HOST.host_id, token=1, is_resume=False
+        execution_id=execution_id,
+        executor_id=_HOST.host_id,
+        token=1,
+        is_resume=False,
+        pool_id="default",
     )
 
 
