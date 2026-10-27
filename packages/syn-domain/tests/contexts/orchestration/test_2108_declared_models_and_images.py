@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_sets import (
     summarize_eval_set,
 )
 from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
+    DeclaredModel,
     TrialExclusion,
     cohort_of,
     declared_model_tags,
@@ -53,24 +54,28 @@ def test_declared_models_are_read_per_phase() -> None:
     }
 
 
+def _declared(**models: str) -> list[DeclaredModel]:
+    return [DeclaredModel(phase, model) for phase, model in models.items()]
+
+
 def test_declared_model_tags_survive_the_launch_tag_rules_and_read_back() -> None:
     """The writer's tags pass TagSet (what every execute request validates through) unchanged."""
-    models = {"verify": SOL, "implement-and-self-review": OPUS}
+    models = _declared(verify=SOL, **{"implement-and-self-review": OPUS})
     written = [*cohort_tags()[:1], f"scorer:{PROTOCOL}", *declared_model_tags(models)]
 
     launched = list(TagSet(written))
 
     assert sorted(launched) == sorted(written)
     assert max(len(t) for t in launched) <= MAX_TAG_LENGTH
-    assert declared_models_of(launched) == models
+    assert declared_models_of(launched) == {m.phase_id: m.model for m in models}
     key = cohort_of(run(tags=tuple(launched)))
     assert key is not None and key.models_digest == models_digest(models)
 
 
-def test_the_models_digest_ignores_map_order_and_sees_every_phase() -> None:
-    assert models_digest({"a": OPUS, "b": SOL}) == models_digest({"b": SOL, "a": OPUS})
-    assert models_digest({"a": OPUS}) != models_digest({"a": OPUS, "b": SOL})
-    assert models_digest({"a": OPUS, "b": SOL}) != models_digest({"a": SOL, "b": OPUS})
+def test_the_models_digest_ignores_order_and_sees_every_phase() -> None:
+    assert models_digest(_declared(a=OPUS, b=SOL)) == models_digest(_declared(b=SOL, a=OPUS))
+    assert models_digest(_declared(a=OPUS)) != models_digest(_declared(a=OPUS, b=SOL))
+    assert models_digest(_declared(a=OPUS, b=SOL)) != models_digest(_declared(a=SOL, b=OPUS))
 
 
 def test_no_model_tags_declare_nothing_so_no_check_applies() -> None:

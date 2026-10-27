@@ -76,21 +76,30 @@ MODELS_DIGEST_HEX = 32
 """Hex digits of sha256 a ``models:`` tag keeps: 128 bits, and the tag fits ``MAX_TAG_LENGTH``."""
 
 
-def models_digest(models: Mapping[str, str]) -> str:
+@dataclass(frozen=True, order=True)
+class DeclaredModel:
+    """The explicit model id one phase of a trial was launched to run. Never an alias."""
+
+    phase_id: str
+    model: str
+
+
+def models_digest(models: Iterable[DeclaredModel]) -> str:
     """The cohort's declared-models identity: sha256 of ``phase=model`` lines in phase order."""
-    canonical = "".join(f"{phase}={models[phase]}\n" for phase in sorted(models))
+    canonical = "".join(f"{m.phase_id}={m.model}\n" for m in sorted(models))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:MODELS_DIGEST_HEX]
 
 
-def declared_model_tags(models: Mapping[str, str]) -> list[str]:
+def declared_model_tags(models: Iterable[DeclaredModel]) -> list[str]:
     """The launch tags that declare ``models``: ``models:<digest>`` and one ``model:`` per phase.
 
     The one writer of the grammar ``declared_models_of`` and ``cohort_of``
     read, so a launcher cannot spell a tag the read side does not parse.
     """
+    ordered = sorted(models)
     return [
-        f"{EvalTag.MODELS}:{models_digest(models)}",
-        *(f"{EvalTag.MODEL}:{phase}:{models[phase]}" for phase in sorted(models)),
+        f"{EvalTag.MODELS}:{models_digest(ordered)}",
+        *(f"{EvalTag.MODEL}:{m.phase_id}:{m.model}" for m in ordered),
     ]
 
 

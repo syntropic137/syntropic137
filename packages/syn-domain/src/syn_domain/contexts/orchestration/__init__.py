@@ -223,6 +223,7 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_sets import (
     summarize_eval_set,
 )
 from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
+    DeclaredModel,
     EvalTag,
     TrialExclusion,
     TrialOutcome,
@@ -451,6 +452,7 @@ __all__ = [
     "CreatedPullRequest",
     "CredentialFreePhaseRefusedError",
     "CredentialRenewalFailedError",
+    "DeclaredModel",
     "DefinitionChangeKind",
     "DelegationAttempt",
     "DelegationFailure",

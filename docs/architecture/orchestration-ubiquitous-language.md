@@ -1257,7 +1257,9 @@ its Cohort. Trials never pool across Cohorts.
 ## Declared Models
 
 The explicit model id each phase of a Trial was launched to run, as
-`model:<phase>:<id>` launch tags (`declared_models_of`). The treatment check
+`model:<phase>:<id>` launch tags, one `DeclaredModel` each, written with the
+`models:<digest>` cohort tag by `declared_model_tags` and read by
+`declared_models_of`. The treatment check
 compares each phase's own observed model against them; a Trial launched with
 none is not checked, and a phase declared twice with different ids can never
 match.

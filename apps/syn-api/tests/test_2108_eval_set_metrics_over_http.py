@@ -35,6 +35,7 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_summary import (
     EvalRecord,
 )
 from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
+    DeclaredModel,
     declared_model_tags,
     models_digest,
 )
@@ -395,7 +396,7 @@ async def test_a_phase_that_ran_another_model_than_declared_is_excluded(
     so the declared models are in the grammar a real launch accepts.
     """
     base = [f"suite:{SUITE}", "suite-version:1", f"scorer:{PROTOCOL_A}"]
-    as_declared, swapped = {"verify": OPUS}, {"verify": "gpt-6.1-sol"}
+    as_declared, swapped = [DeclaredModel("verify", OPUS)], [DeclaredModel("verify", "gpt-6.1-sol")]
     await _eval("eval-a", "suite-version:1")
     await _run("eval-a", inherited=[*base, *declared_model_tags(as_declared)])
     await _run("eval-a", inherited=[*base, *declared_model_tags(swapped)])
