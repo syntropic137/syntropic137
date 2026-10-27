@@ -404,3 +404,24 @@ async def test_holds_report_bodies_and_bytes_by_reason(db_pool, tmp_path: Path) 
     assert ExpiryHold.NOT_UPLOADED not in [
         c.hold for c in await PostgresExpiryHolds(db_pool, source).summary()
     ]
+
+
+async def test_deletion_begun_by_another_worker_during_the_confirmation_is_finished(
+    db_pool, tmp_path: Path
+) -> None:
+    """Another retention worker marks the body (its delete began) while this one
+    waits on the archive, and the row is still automatic. Withdrawing it now
+    would leave erased bytes with no tombstone; it must be finished instead."""
+    source = str(uuid4())
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    capture = await _aged_uploaded(db_pool, archive, source, "concurrent")
+
+    async def other_worker_began() -> None:
+        await archive.mark_deleted(capture.archive)
+
+    sink = _Sink(ArchiveUnavailable(), other_worker_began)
+    worker, _ = _retention(db_pool, archive, source, sink)
+    assert await worker.step()
+    assert await _hold(db_pool, source) is None
+    assert await _deletions(db_pool, source) == [("retention_age", True)]
+    assert await archive.get(capture.archive) is None
