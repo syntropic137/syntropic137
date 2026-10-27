@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/routes/executions/commands.py b/apps/syn-api/src/syn_api/routes/executions/commands.py
+index 89b3636f5..bbc0f3dc0 100644
+--- a/apps/syn-api/src/syn_api/routes/executions/commands.py
++++ b/apps/syn-api/src/syn_api/routes/executions/commands.py
+@@ -866,7 +866,6 @@ async def execute_workflow_endpoint(
+                 task=request.task,
+                 repos=typed_repos,
+                 tags=request.tags,
+-                idempotency_key=request.idempotency_key,
+                 launch_eval=launch_eval,
+             ),
+             admitted,

@@ -1,0 +1,10 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/value_objects.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/value_objects.py
+index 356c3df66..d3f93c584 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/value_objects.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution_request/value_objects.py
+@@ -30,4 +30,4 @@ def execution_id_for_key(workflow_id: str, idempotency_key: str) -> str:
+     if not idempotency_key:
+         raise ValueError("an idempotency key must not be empty")
+     digest = hashlib.sha256(f"{workflow_id}\0{idempotency_key}".encode()).hexdigest()
+-    return f"exec-{digest[:32]}"
++    return f"exec-{digest[:12]}"

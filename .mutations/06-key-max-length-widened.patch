@@ -1,8 +1,8 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/commands.py b/apps/syn-api/src/syn_api/routes/executions/commands.py
-index 49631e15d..b9a377f79 100644
+index 89b3636f5..7fa16d417 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/commands.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/commands.py
-@@ -296,7 +296,7 @@ class ExecuteWorkflowRequest(BaseModel):
+@@ -297,7 +297,7 @@ class ExecuteWorkflowRequest(BaseModel):
      idempotency_key: str | None = Field(
          default=None,
          min_length=1,

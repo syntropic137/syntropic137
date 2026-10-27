@@ -1,5 +1,5 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/keyed_start.py b/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
-index 667e9996e..9e5a740c3 100644
+index d0661cf1a..3622114a5 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
 @@ -33,7 +33,7 @@ def start_execution_id(workflow_id: str, idempotency_key: str | None) -> str:

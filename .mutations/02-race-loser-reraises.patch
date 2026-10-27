@@ -1,8 +1,8 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/keyed_start.py b/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
-index 667e9996e..7b799a9e9 100644
+index d0661cf1a..aaa8bd574 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
-@@ -86,7 +86,7 @@ async def record_unless_started(
+@@ -90,7 +90,7 @@ async def record_unless_started(
      try:
          await record_execution_request(command, admitted)
      except StreamAlreadyExistsError:

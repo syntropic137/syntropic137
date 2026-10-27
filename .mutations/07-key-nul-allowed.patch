@@ -1,8 +1,8 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/commands.py b/apps/syn-api/src/syn_api/routes/executions/commands.py
-index 49631e15d..01149701d 100644
+index 89b3636f5..6fb820d11 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/commands.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/commands.py
-@@ -297,7 +297,6 @@ class ExecuteWorkflowRequest(BaseModel):
+@@ -298,7 +298,6 @@ class ExecuteWorkflowRequest(BaseModel):
          default=None,
          min_length=1,
          max_length=200,

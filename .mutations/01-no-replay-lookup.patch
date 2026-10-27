@@ -1,8 +1,8 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/commands.py b/apps/syn-api/src/syn_api/routes/executions/commands.py
-index 49631e15d..86baaa039 100644
+index 89b3636f5..e423ac36d 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/commands.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/commands.py
-@@ -787,7 +787,7 @@ async def execute_workflow_endpoint(
+@@ -800,7 +800,7 @@ async def execute_workflow_endpoint(
      # a deploy should hear about the start it already has.
      if request.idempotency_key is not None:
          await ensure_connected()

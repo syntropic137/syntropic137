@@ -1,13 +1,13 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/keyed_start.py b/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
-index 667e9996e..731abcf65 100644
+index d0661cf1a..6d9b8199d 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/keyed_start.py
-@@ -56,7 +56,7 @@ async def already_started(
-         repos = [RepositoryRef.parse(r) for r in request.repos]
-     except ValueError:
+@@ -59,7 +59,7 @@ async def already_started(
+     key = request.idempotency_key
+     if key is None:
          return False
 -    if not recorded.same_request(
 +    if False and not recorded.same_request(
+         idempotency_key=key,
          workflow_id=workflow_id,
          inputs=dict(request.inputs),
-         task=request.task,

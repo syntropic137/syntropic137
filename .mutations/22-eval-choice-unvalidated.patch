@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/executions/commands.py b/apps/syn-api/src/syn_api/routes/executions/commands.py
+index 89b3636f5..105ea7773 100644
+--- a/apps/syn-api/src/syn_api/routes/executions/commands.py
++++ b/apps/syn-api/src/syn_api/routes/executions/commands.py
+@@ -342,7 +342,7 @@ class ExecuteWorkflowRequest(BaseModel):
+         Checked on the model, not in the handler, so a keyed retry is refused
+         before its replay lookup compares the choice (#2129).
+         """
+-        if self.no_eval and self.eval_id is not None:
++        if False:
+             raise ValueError("Pass either eval_id or no_eval, not both")
+         return self
+ 
