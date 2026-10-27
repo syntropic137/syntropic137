@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import ast
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -115,6 +115,8 @@ def _binds_literal_dunder(stmt: ast.stmt) -> bool:
 _Comprehension = ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp
 _FunctionLike = ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
 _NO_PATHS: frozenset[str] = frozenset()
+# The implicit closure cell every function in a class body can read.
+_CLASS_CELL = "__class__"
 # The modules that ``FastAPI`` is reachable from by attribute.
 _KNOWN_MODULES = frozenset({_FASTAPI_MODULE, f"{_FASTAPI_MODULE}.applications"})
 
@@ -146,12 +148,24 @@ class _Scope:
     bound: set[str] = field(default_factory=set[str])
     declared_global: set[str] = field(default_factory=set[str])
     declared_nonlocal: set[str] = field(default_factory=set[str])
+    # The class whose name mangles ``__x`` here: the class itself, or the one a
+    # function or comprehension sits in. ``None`` outside any class.
+    private: str | None = None
+    # A class's ``__class__`` cell, a scope of its own (see ``_visit_class``).
+    cell: _Scope | None = None
 
     def module(self) -> _Scope:
         scope = self
         while scope.parent is not None:
             scope = scope.parent
         return scope
+
+    def mangle(self, name: str) -> str:
+        """``__x`` in a class, or in a function inside one, is ``_Class__x``."""
+        if self.private is None or not name.startswith("__") or name.endswith("__"):
+            return name
+        stripped = self.private.lstrip("_")
+        return f"_{stripped}{name}" if stripped else name
 
     def is_local(self, name: str) -> bool:
         return (
@@ -165,18 +179,23 @@ def _owner(scope: _Scope, name: str) -> _Scope | None:
     """The scope a read of ``name`` in ``scope`` resolves to.
 
     The innermost scope that binds it, honoring ``global`` and ``nonlocal``.
-    A class body is visible only to itself, never to the functions, lambdas
-    and comprehensions nested in it. ``None`` is a builtin or an unbound name.
+    A class body, its bindings and its ``global`` and ``nonlocal`` declarations
+    alike, is visible only to itself, never to the functions, lambdas and
+    comprehensions nested in it; those see only its implicit ``__class__``
+    cell. ``None`` is a builtin or an unbound name.
     """
     current: _Scope | None = scope
     first = True
     while current is not None:
-        if name in current.declared_global:
-            return current.module()
-        if name in current.declared_nonlocal:
-            return _nonlocal_owner(current.parent, name)
-        if current.is_local(name) and (first or not current.is_class):
-            return current
+        if first or not current.is_class:
+            if name in current.declared_global:
+                return current.module()
+            if name in current.declared_nonlocal:
+                return _nonlocal_owner(current.parent, name)
+            if current.is_local(name):
+                return current
+        elif name == _CLASS_CELL and current.cell is not None:
+            return current.cell
         first = False
         current = current.parent
     return None
@@ -224,6 +243,8 @@ class _Binding:
     paths: frozenset[str] = _NO_PATHS
     alias_of: ast.expr | None = None
     bases: tuple[ast.expr, ...] = ()
+    # Where ``bases`` are read, when that is not ``scope``.
+    read_scope: _Scope | None = None
 
     def owner(self) -> _Scope:
         if self.name in self.scope.declared_global:
@@ -253,6 +274,7 @@ class _ScopeBuilder:
         self.calls: list[_ScopedCall] = []
 
     def _bind(self, binding: _Binding) -> None:
+        binding = replace(binding, name=binding.scope.mangle(binding.name))
         binding.scope.bound.add(binding.name)
         self.bindings.append(binding)
 
@@ -270,7 +292,7 @@ class _ScopeBuilder:
         for expr in outer:
             if expr is not None:
                 self.visit(expr, scope)
-        inner = _Scope(parent=scope)
+        inner = _Scope(parent=scope, private=scope.private)
         for param in _params(node.args):
             self._shadow(param.arg, inner)
         body: list[ast.stmt] | list[ast.expr] = (
@@ -282,13 +304,18 @@ class _ScopeBuilder:
     def _visit_class(self, node: ast.ClassDef, scope: _Scope) -> None:
         for expr in [*node.decorator_list, *node.bases, *node.keywords]:
             self.visit(expr, scope)
-        inner = _Scope(parent=scope, is_class=True)
+        # ``__class__`` is a scope of its own: the class body's reads skip it
+        # (LOAD_NAME), while every function nested in the body sees it.
+        cell = _Scope(parent=scope, private=scope.private)
+        inner = _Scope(parent=scope, is_class=True, private=node.name, cell=cell)
         for stmt in node.body:
             self.visit(stmt, inner)
-        self._bind(_Binding(node.name, scope, bases=tuple(node.bases)))
+        bases = tuple(node.bases)
+        self._bind(_Binding(node.name, scope, bases=bases))
+        self._bind(_Binding(_CLASS_CELL, cell, bases=bases, read_scope=scope))
 
     def _visit_comprehension(self, node: _Comprehension, scope: _Scope) -> None:
-        inner = _Scope(parent=scope, is_comprehension=True)
+        inner = _Scope(parent=scope, is_comprehension=True, private=scope.private)
         for index, gen in enumerate(node.generators):
             # The first iterable is evaluated in the enclosing scope.
             self.visit(gen.iter, scope if index == 0 else inner)
@@ -339,9 +366,9 @@ class _ScopeBuilder:
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
             self._shadow(node.id, scope)
         elif isinstance(node, ast.Global):
-            scope.declared_global.update(node.names)
+            scope.declared_global.update(scope.mangle(n) for n in node.names)
         elif isinstance(node, ast.Nonlocal):
-            scope.declared_nonlocal.update(node.names)
+            scope.declared_nonlocal.update(scope.mangle(n) for n in node.names)
         elif isinstance(node, ast.Call):
             self.calls.append(_ScopedCall(node, scope))
         elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name:
@@ -374,8 +401,9 @@ class _Resolution:
 
     def paths(self, node: ast.expr, scope: _Scope) -> frozenset[str]:
         if isinstance(node, ast.Name):
+            name = scope.mangle(node.id)
             return _NO_PATHS.union(
-                *(self.values.get((owner, node.id), _NO_PATHS) for owner in _owners(scope, node.id))
+                *(self.values.get((owner, name), _NO_PATHS) for owner in _owners(scope, name))
             )
         if isinstance(node, ast.Attribute):
             extended = (
@@ -396,7 +424,8 @@ class _Resolution:
     def binding_paths(self, binding: _Binding) -> frozenset[str]:
         if binding.alias_of is not None:
             return self.paths(binding.alias_of, binding.scope)
-        if any(self.is_constructor(base, binding.scope) for base in binding.bases):
+        read = binding.read_scope or binding.scope
+        if any(self.is_constructor(base, read) for base in binding.bases):
             return frozenset({f"{_FASTAPI_MODULE}.{_FASTAPI_CLASS}"})
         return binding.paths
 
