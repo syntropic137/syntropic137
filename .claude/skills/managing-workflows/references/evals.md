@@ -55,6 +55,15 @@ Launches cost real quota.
   State n and the interval with every rate.
 - **Consistency matters more than one success.** An unattended pipeline needs
   pass^k (all k trials pass), not pass@k. At 75% per trial, pass^3 is about 42%.
+- **An infra error is not a fail, and not dropped either (#2108).** The domain
+  derives each trial's outcome (`read_models/eval_trials.py`): cancelled,
+  interrupted, a `platform`/`unclassified` failure, an unverified base or an
+  ERROR score is `infra_error`; a `task`/`correct_refusal` failure is `fail`.
+  Every figure comes three ways: conditional (infra out of n), lower bound
+  (infra = fail) and upper bound (infra = pass), over the whole roster, where a
+  short or never-launched case is 0 and 1. Decide only when both bounds agree;
+  straddling means top up, not judge. An in-run verify verdict is part of the
+  treatment, never the eval score.
 - **Call a cheaper arm "quality-neutral" only when the paired difference's
   interval excludes the drop you would tolerate** (say -5pp). Inconclusive is
   not neutral.
