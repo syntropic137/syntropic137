@@ -10,12 +10,19 @@
 FROM python:3.12-slim AS builder
 
 # Install uv for fast package management
-COPY --from=ghcr.io/astral-sh/uv:0.10.6 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff /uv /usr/local/bin/uv
 
 WORKDIR /app
 
 # Copy root pyproject.toml and uv.lock for dependency resolution
 COPY pyproject.toml uv.lock ./
+
+# Install exactly what uv.lock pins. `uv pip install` does not read the lock, so
+# without these constraints every build resolved the newest release of every
+# dependency: what pip-audit and OSV audited (the lock) was not what shipped.
+RUN uv export --frozen --no-hashes --all-packages --all-extras --no-dev \
+      --no-emit-workspace --no-emit-local -o /tmp/uv-lock-constraints.txt
+ENV UV_CONSTRAINT=/tmp/uv-lock-constraints.txt
 
 # Shared inventory contract from the pinned APSS submodule.
 COPY lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python/ ./lib/agent-paradise-standards-system/standards/v1/APS-V1-0004-session-capture/python/
