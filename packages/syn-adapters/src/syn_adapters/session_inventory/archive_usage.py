@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 _OBJECT_NAME = re.compile(r"[0-9a-f]{64}")
@@ -38,33 +39,32 @@ class ArchiveUsage:
     filesystem_free_bytes: int
 
 
-def measure_archive_usage(root: Path, now: float) -> ArchiveUsage | None:
-    """One pass over ``root``; ``None`` when it does not exist."""
-    stored = objects = references = day = week = 0
-    try:
-        entries = os.scandir(root)
-    except FileNotFoundError:
-        return None
-    with entries:
+def _files(root: Path) -> Iterator[tuple[str, os.stat_result]]:
+    """Every regular file directly in ``root``; one removed mid-walk is skipped."""
+    with os.scandir(root) as entries:
         for entry in entries:
             try:
-                stat = entry.stat(follow_symlinks=False)
+                if entry.is_file(follow_symlinks=False):
+                    yield entry.name, entry.stat(follow_symlinks=False)
             except FileNotFoundError:
-                continue  # removed mid-walk
-            if not entry.is_file(follow_symlinks=False):
                 continue
-            stored += stat.st_size
-            is_object = _OBJECT_NAME.fullmatch(entry.name) is not None
-            is_reference = _REFERENCE.fullmatch(entry.name) is not None
-            objects += is_object
-            references += is_reference
-            if not (is_object or is_reference):
-                continue
-            age = now - stat.st_mtime
-            if age < _DAY:
-                day += stat.st_size
-            if age < _WEEK_DAYS * _DAY:
-                week += stat.st_size
+
+
+def measure_archive_usage(root: Path, now: float) -> ArchiveUsage | None:
+    """One pass over ``root``; ``None`` when it does not exist."""
+    if not root.is_dir():
+        return None
+    stored = objects = references = day = week = 0
+    for name, stat in _files(root):
+        stored += stat.st_size
+        is_object = _OBJECT_NAME.fullmatch(name) is not None
+        is_reference = _REFERENCE.fullmatch(name) is not None
+        objects += is_object
+        references += is_reference
+        age = now - stat.st_mtime
+        if (is_object or is_reference) and age < _WEEK_DAYS * _DAY:
+            week += stat.st_size
+            day += stat.st_size if age < _DAY else 0
     return ArchiveUsage(
         stored_bytes=stored,
         object_count=objects,
