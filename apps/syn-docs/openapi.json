@@ -18255,6 +18255,9 @@
             "title": "Requires Verdict",
             "default": false
           },
+          "resources": {
+            "$ref": "#/components/schemas/PhaseResourcesResponse"
+          },
           "sandbox": {
             "type": "string",
             "title": "Sandbox",
@@ -18996,6 +18999,24 @@
         ],
         "title": "PhaseResourceProfileResponse",
         "description": "One phase type's workspace resource use at teardown (cgroup counters)."
+      },
+      "PhaseResourcesResponse": {
+        "properties": {
+          "memory_mb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Mb"
+          }
+        },
+        "type": "object",
+        "title": "PhaseResourcesResponse",
+        "description": "What a phase's workspace asks for beyond the deployment default (okrs-51p.30)."
       },
       "PhaseSkillUseInfo": {
         "properties": {

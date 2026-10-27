@@ -6839,6 +6839,7 @@ export interface components {
              * @default false
              */
             requires_verdict: boolean;
+            resources?: components["schemas"]["PhaseResourcesResponse"];
             /**
              * Sandbox
              * @default full-access
@@ -7124,6 +7125,14 @@ export interface components {
             /** Oom Killed Phases */
             oom_killed_phases: components["schemas"]["OomKilledPhaseResponse"][];
             coverage: components["schemas"]["ResourceCoverageResponse"];
+        };
+        /**
+         * PhaseResourcesResponse
+         * @description What a phase's workspace asks for beyond the deployment default (okrs-51p.30).
+         */
+        PhaseResourcesResponse: {
+            /** Memory Mb */
+            memory_mb?: number | null;
         };
         /**
          * PhaseSkillUseInfo

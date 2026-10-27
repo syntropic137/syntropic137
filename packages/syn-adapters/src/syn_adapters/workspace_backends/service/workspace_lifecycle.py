@@ -8,6 +8,7 @@ See ADR-021, ADR-023, ADR-024.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 from typing import TYPE_CHECKING
@@ -30,6 +31,8 @@ from syn_domain.contexts.orchestration import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from syn_adapters.workspace_backends.service.workspace_service import (
         WorkspaceService,
         WorkspaceServiceConfig,
@@ -54,6 +57,7 @@ def create_workspace_aggregate(
     backend: IsolationBackendType,
     capabilities: tuple[CapabilityType, ...],
     image: str,
+    security_policy: SecurityPolicy | None = None,
 ) -> WorkspaceAggregate:
     """Create a WorkspaceAggregate and emit the creation event.
 
@@ -65,6 +69,8 @@ def create_workspace_aggregate(
         backend: Isolation backend type
         capabilities: Required capabilities
         image: Container image
+        security_policy: The limits the container is given, recorded on
+            WorkspaceCreated; the SecurityPolicy defaults when None
 
     Returns:
         Initialized WorkspaceAggregate
@@ -78,6 +84,7 @@ def create_workspace_aggregate(
         isolation_backend=backend,
         capabilities=capabilities,
         image=image,
+        security_policy=security_policy or SecurityPolicy(),
     )
     aggregate.create_workspace(create_cmd)
     return aggregate
@@ -99,6 +106,7 @@ def build_isolation_config(
     phase_id: str | None,
     extra_environment: dict[str, str] | None,
     capture_session_id: str | None = None,
+    memory_limit_mb: int | None = None,
 ) -> IsolationConfig:
     """Build IsolationConfig with merged environment variables.
 
@@ -109,6 +117,8 @@ def build_isolation_config(
         workflow_id: Optional workflow ID
         phase_id: Optional phase ID
         extra_environment: Additional environment variables
+        memory_limit_mb: This workspace's memory, as its phase requested
+            (okrs-51p.30); ``config.memory_limit_mb`` when None
 
     Returns:
         IsolationConfig for container creation
@@ -140,7 +150,9 @@ def build_isolation_config(
         capabilities=config.capabilities,
         image=config.image,
         security_policy=SecurityPolicy(
-            memory_limit_mb=config.memory_limit_mb,
+            memory_limit_mb=(
+                config.memory_limit_mb if memory_limit_mb is None else memory_limit_mb
+            ),
             cpu_limit_cores=config.cpu_limit_cores,
         ),
         environment=merged_environment,
@@ -181,6 +193,103 @@ async def _read_image_manifest(
     return reading
 
 
+@dataclasses.dataclass
+class ProvisionTrack:
+    """What provisioning has created so far, readable however provisioning ends (okrs-51p.30).
+
+    ``provision_workspace`` returns its handles only when it finishes. A raise
+    after the container exists (a sidecar that would not start, a cancel)
+    used to lose the handle, so teardown never destroyed the container and
+    the memory it held was released anyway. The caller passes one of these
+    and reads it in its ``finally``.
+    """
+
+    #: The backend's ``create``, run as its own task and shielded: a cancel of
+    #: the provision does not stop a ``docker run`` that is already under way,
+    #: so the create is left to finish and the caller removes what it made.
+    create_task: asyncio.Future[IsolationHandle] | None = None
+
+    def created(self) -> IsolationHandle | None:
+        """The container ``create`` named, once it has; None while running or when it raised."""
+        done = (
+            self.create_task is not None
+            and self.create_task.done()
+            and not self.create_task.cancelled()
+        )
+        if not done or self.create_task is None or self.create_task.exception() is not None:
+            return None
+        return self.create_task.result()
+
+    def still_creating(self) -> bool:
+        """The create was left running by a cancel, and may yet make a container."""
+        return self.create_task is not None and not self.create_task.done()
+
+
+#: Abandoned creates being seen through: the loop holds tasks weakly.
+_ABANDONED_CREATES: set[asyncio.Task[None]] = set()
+
+
+def finish_abandoned_create(
+    service: WorkspaceService,
+    create: asyncio.Future[IsolationHandle],
+    *,
+    execution_id: str,
+    on_end: Callable[[], None],
+) -> None:
+    """Let a create the caller stopped waiting for finish, then destroy what it made.
+
+    ``on_end`` runs only once that is over, so the memory reconciler never
+    reads "no container" while one may still appear. A destroy that fails
+    leaves the container listed, which keeps its memory charged.
+    """
+
+    async def finish() -> None:
+        try:
+            handle = await create
+        except Exception:
+            # The backend's own failure path removes what it made, or leaves
+            # it listed; either way the listing decides.
+            logger.warning("Abandoned create for execution %s raised", execution_id, exc_info=True)
+        else:
+            teardown = await _destroy_isolation(service, handle)
+            if teardown.failure is not None:
+                logger.error(
+                    "Could not destroy the container an abandoned create made for %s: %s: %s",
+                    execution_id,
+                    teardown.failure.kind,
+                    teardown.failure.message,
+                )
+        on_end()
+
+    task = asyncio.create_task(finish(), name=f"abandoned-create-{execution_id}")
+    _ABANDONED_CREATES.add(task)
+    task.add_done_callback(_ABANDONED_CREATES.discard)
+
+
+async def drain_abandoned_creates(timeout_s: float) -> int:
+    """Wait for every abandoned create to be seen through; how many were not.
+
+    Called at shutdown after the workspaces' owners are cancelled, so loop
+    teardown does not cancel a finisher between ``docker run`` and the destroy
+    of what it made (Codex on #2148). Shielded: a cancel of this wait leaves
+    the finishers running. One still running at the deadline leaves its
+    in-flight mark, so its memory stays charged while the process lives.
+    """
+    pending = set(_ABANDONED_CREATES)
+    if not pending:
+        return 0
+    _done, still_running = await asyncio.wait(
+        {asyncio.shield(task) for task in pending}, timeout=timeout_s
+    )
+    if still_running:
+        logger.error(
+            "%d abandoned workspace create(s) still running at shutdown; "
+            "their containers are left to the next start's reap",
+            len(still_running),
+        )
+    return len(still_running)
+
+
 async def provision_workspace(
     service: WorkspaceService,
     isolation_config: IsolationConfig,
@@ -188,6 +297,7 @@ async def provision_workspace(
     workspace_id: str,
     *,
     with_sidecar: bool,
+    track: ProvisionTrack | None = None,
 ) -> tuple[IsolationHandle, SidecarHandle | None, ImageManifestReading]:
     """Provision isolation container and optional sidecar.
 
@@ -197,6 +307,8 @@ async def provision_workspace(
         aggregate: WorkspaceAggregate to record events on
         workspace_id: Workspace ID
         with_sidecar: Whether to start sidecar proxy
+        track: Filled in as resources are created, so a caller can tear down
+            what exists when this raises part-way
 
     Returns:
         Tuple of (isolation_handle, sidecar_handle or None, the image manifest reading)
@@ -207,7 +319,10 @@ async def provision_workspace(
         workspace_id,
         isolation_config.execution_id,
     )
-    isolation_handle = await service._isolation.create(isolation_config)
+    create = asyncio.ensure_future(service._isolation.create(isolation_config))
+    if track is not None:
+        track.create_task = create
+    isolation_handle = await asyncio.shield(create)
     _log_runtime(
         isolation_handle.runtime,
         execution_id=isolation_config.execution_id,
