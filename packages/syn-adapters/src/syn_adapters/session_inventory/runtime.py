@@ -35,6 +35,7 @@ from .clock import InventoryRecoveryClock
 from .deletion_fence import DeletionFence
 from .docker_recovery import DockerSpoolRecovery
 from .evidence_reader import PostgresSessionEvidence
+from .expiry_holds import PostgresExpiryHolds
 from .history_receipts import PostgresBackfillReceipts, PostgresHistoryBackfillQueue
 from .history_source import PostgresHistoricalEvidenceSource
 from .installation_identity import installation_identity
@@ -48,8 +49,10 @@ from .recovery_worker import CaptureRecoveryWorker
 from .replication_runtime import (
     capture_destination_id,
     capture_outboxes,
+    create_expiry_gate,
     create_replication_manager,
 )
+from .retention_lane import RetentionLane
 from .spool_drain import LocalSpoolDrain
 from .spool_release import CaptureSpoolRetention
 from .transcript_access import InstallationTranscriptAccess
@@ -100,6 +103,10 @@ class InventoryRuntime:
     replication: InventoryReplicationProcessManager | None = None
     history: BackfillSessionInventoryHandler | None = None
     """None when no observability reader is wired; explicit backfill is then unavailable."""
+    retention_lane: RetentionLane | None = None
+    """Background gated retention, stopped with the runtime."""
+    expiry_holds: PostgresExpiryHolds | None = None
+    """What the confirmed-expiry gate keeps; None when the gate is off."""
 
 
 @dataclass(frozen=True)
@@ -108,10 +115,14 @@ class InventoryWork:
     step: InventoryStepHandler
     recovery: CaptureRecoveryWorker | None = None
     retention: LocalBodyRetention | None = None
+    retention_lane: RetentionLane | None = None
+    """Set instead of ``retention`` when expiry is gated: it waits on the archive."""
     history: ProcessHistoryBackfillQueueHandler | None = None
     spool_release: CaptureSpoolRetention | None = None
 
     async def schedule(self) -> None:
+        if self.retention_lane is not None:
+            self.retention_lane.schedule()
         if self.retention is not None:
             try:
                 await self.retention.drain()
@@ -217,6 +228,19 @@ async def create_inventory_runtime(
         if observations is not None
         else None
     )
+    gate = create_expiry_gate(settings)
+    retention = LocalBodyRetention(
+        pool,
+        archive,
+        source_id,
+        age_seconds=settings.local_body_retention_seconds,
+        max_bytes=settings.local_body_max_bytes,
+        exporter_binary=settings.exporter_binary,
+        gate=gate,
+        destination_id=capture_destination_id(settings),
+        hold_seconds=settings.archive_confirm_hold_seconds,
+    )
+    retention_lane = None if gate is None else RetentionLane(retention)
     work = InventoryWork(
         history=ProcessHistoryBackfillQueueHandler(
             history_queue,
@@ -229,14 +253,8 @@ async def create_inventory_runtime(
         if history is not None
         else None,
         # Always present: owner deletions run even without automatic retention.
-        retention=LocalBodyRetention(
-            pool,
-            archive,
-            source_id,
-            age_seconds=settings.local_body_retention_seconds,
-            max_bytes=settings.local_body_max_bytes,
-            exporter_binary=settings.exporter_binary,
-        ),
+        retention=retention if retention_lane is None else None,
+        retention_lane=retention_lane,
         spool_release=spool_release,
         recovery=CaptureRecoveryWorker(
             spools,
@@ -256,6 +274,8 @@ async def create_inventory_runtime(
     )
     return InventoryRuntime(
         source_instance_id=source_id,
+        retention_lane=retention_lane,
+        expiry_holds=None if gate is None else PostgresExpiryHolds(pool, source_id),
         replication=create_replication_manager(
             pool, inventory, source_id, settings, archive=archive
         ),

@@ -50,4 +50,6 @@ async def stop_inventory_runtime() -> None:
         await _runtime.clock.stop()
         if _runtime.replication is not None:
             await _runtime.replication.stop()
+        if _runtime.retention_lane is not None:
+            await _runtime.retention_lane.stop()
         _runtime = None

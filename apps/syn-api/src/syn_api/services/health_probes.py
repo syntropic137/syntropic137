@@ -18,6 +18,8 @@ from syn_api.services.workspace_reclaim_status import DELETE_FAILED_PASSES_TO_DE
 from syn_api.types import (
     DiskSpaceHealth,
     RetainedWorkspaceDirs,
+    SessionExpiryHoldCount,
+    SessionExpiryHoldsHealth,
     SessionStoreHealth,
     WorkspaceReclaimHealth,
     format_bytes,
@@ -163,8 +165,45 @@ async def _refresh_session_store(cache: _SessionStoreCache) -> None:
     except Exception:
         logger.warning("session store probe failed", exc_info=True)
         value = None
+    if value is not None:
+        holds = await _describe_expiry_holds()
+        if holds is not None:
+            value = value.model_copy(update={"expiry_holds": holds})
     cache.value = value
     cache.refreshed_at = time.monotonic()
+
+
+async def _describe_expiry_holds() -> SessionExpiryHoldsHealth | None:
+    """Bodies the confirmed-expiry gate keeps, by reason; None when the gate is off."""
+    try:
+        from syn_api._wiring_inventory import get_inventory_runtime
+
+        source = get_inventory_runtime().expiry_holds
+        if source is None:
+            return None
+        counts = await source.summary()
+    except Exception:
+        logger.warning("session expiry holds probe failed", exc_info=True)
+        return None
+    return expiry_holds_health(
+        [SessionExpiryHoldCount(hold=c.hold.value, bodies=c.bodies, bytes=c.bytes) for c in counts]
+    )
+
+
+def expiry_holds_health(counts: list[SessionExpiryHoldCount]) -> SessionExpiryHoldsHealth:
+    bodies = sum(count.bodies for count in counts)
+    total = sum(count.bytes for count in counts)
+    reasons = ", ".join(
+        f"{count.hold} {count.bodies} ({format_bytes(count.bytes)})" for count in counts
+    )
+    detail = (
+        f"expiry gate keeps {bodies} bodies ({format_bytes(total)}): {reasons}"
+        if counts
+        else "expiry gate keeps nothing"
+    )
+    return SessionExpiryHoldsHealth(
+        held_bodies=bodies, held_bytes=total, by_hold=counts, detail=detail
+    )
 
 
 def _measure_session_store(root: Path, now: float) -> SessionStoreHealth | None:

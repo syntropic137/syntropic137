@@ -37,6 +37,23 @@ class ExporterConfig:
 
 
 @dataclass(frozen=True)
+class ExporterConfirmConfig:
+    """Read-scoped revision confirmation: no outbox, no local exporter state."""
+
+    binary: Path
+    store_url: str
+    token: SecretStr
+    # Two bounded requests inside the exporter (10 s each), plus process start.
+    timeout_seconds: float = 25
+
+    def __post_init__(self) -> None:
+        if not self.binary.is_absolute():
+            raise ValueError("exporter binary must be absolute")
+        if self.timeout_seconds <= 0:
+            raise ValueError("exporter timeout must be positive")
+
+
+@dataclass(frozen=True)
 class LocalExporterConfig:
     binary: Path
     timeout_seconds: float = 45
@@ -46,6 +63,15 @@ class EnvelopeHash(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
     schema_version: int = Field(ge=1, le=1)
     content_hash: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
+
+
+async def capture_confirm(
+    config: ExporterConfirmConfig, arguments: tuple[str, ...], payload: bytes
+) -> tuple[int, bytes]:
+    """Run the exporter's read-scoped confirmation mode; the caller owns the contract."""
+    if len(payload) > 16 * 1024:
+        raise ExporterTransportError("confirmation input exceeds exporter limit")
+    return await _run_exporter(config, arguments, payload, channel="confirm")
 
 
 async def original_envelope_hash(binary: Path, envelope: bytes) -> str:
@@ -234,12 +260,34 @@ class ExporterInventoryTransport:
         return await _run_exporter(self._config, arguments, payload, channel="inventory")
 
 
+def _credentials(
+    config: ExporterConfig | LocalExporterConfig | ExporterConfirmConfig,
+    channel: Literal["inventory", "capture", "confirm"],
+) -> dict[str, str]:
+    """Deliberate process-environment mapping, not domain state."""
+    if isinstance(config, ExporterConfirmConfig):
+        return {
+            "SESSION_STORE_URL": config.store_url,
+            "CAPTURE_READ_TOKEN": config.token.get_secret_value(),
+        }
+    if isinstance(config, LocalExporterConfig):
+        return {}
+    capture = channel == "capture"
+    return {
+        "SESSION_STORE_URL": config.store_url,
+        ("CAPTURE_WRITE_TOKEN" if capture else "INVENTORY_WRITE_TOKEN"): (
+            config.token.get_secret_value()
+        ),
+        ("EXPORTER_CAPTURE_DIR" if capture else "EXPORTER_INVENTORY_DIR"): str(config.outbox_dir),
+    }
+
+
 async def _run_exporter(
-    config: ExporterConfig | LocalExporterConfig,
+    config: ExporterConfig | LocalExporterConfig | ExporterConfirmConfig,
     arguments: tuple[str, ...],
     payload: bytes,
     *,
-    channel: Literal["inventory", "capture"],
+    channel: Literal["inventory", "capture", "confirm"],
 ) -> tuple[int, bytes]:
     process: asyncio.subprocess.Process | None = None
     try:
@@ -252,23 +300,7 @@ async def _run_exporter(
                 stderr=asyncio.subprocess.PIPE,
                 # Deliberate process-environment mapping, not domain state.
                 env={
-                    **(
-                        {
-                            "SESSION_STORE_URL": config.store_url,
-                            (
-                                "CAPTURE_WRITE_TOKEN"
-                                if channel == "capture"
-                                else "INVENTORY_WRITE_TOKEN"
-                            ): config.token.get_secret_value(),
-                            (
-                                "EXPORTER_CAPTURE_DIR"
-                                if channel == "capture"
-                                else "EXPORTER_INVENTORY_DIR"
-                            ): str(config.outbox_dir),
-                        }
-                        if isinstance(config, ExporterConfig)
-                        else {}
-                    ),
+                    **_credentials(config, channel),
                     **(
                         {"SYSTEMROOT": os.environ["SYSTEMROOT"]}
                         if "SYSTEMROOT" in os.environ

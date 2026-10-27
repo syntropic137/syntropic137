@@ -138,3 +138,44 @@ Rebuilding one run's session inventory snapshot from host evidence, one durable
 - **Coalesce:** while a run has an open job, new evidence for that run waits.
   The next job picks up the latest watermark, so one job is minted per
   catch-up and not one per watermark.
+
+## Session Archive and Confirmed Expiry
+
+The remote store (SeshMagic) that keeps every captured session. Local transcript
+bodies are a working copy; the owner's rule is that a body leaves local disk
+only when the archive holds the same revision (#2107).
+
+- **Archive sink:** the port (`SessionArchiveSinkPort`) through which this
+  installation asks the archive about revisions it uploaded. Its adapter runs
+  the standard exporter (`--capture-confirm`), the only client that talks to
+  the archive.
+- **Uploaded revision:** one transcript revision as uploaded: the qualified
+  identity (source installation, harness, native session ID) plus the
+  original-content hash persisted before the upload. It is never recomputed
+  from a later local revision or a stored form.
+- **Revision confirmation:** the archive's answer for one uploaded revision,
+  asked immediately before acting on it. Exactly one of *confirmed* (durably
+  committed, with its stored-form hash), *absent* (not held, including
+  superseded), *unauthorized*, *integrity failure*, *unavailable*, *not
+  advertised* (the archive offers no confirmation) or *unexpected response*.
+  None of them is ever read as another; in particular a failure is never
+  *absent*.
+- **Confirmed expiry:** automatic body expiry (age or quota) that deletes only
+  when every uploaded revision the body backs is *confirmed*. Only the newest
+  uploaded revision of a transcript is eligible; older revisions, which splice
+  dedupe stores as small references into the newest, are kept, and so is a
+  newest revision that is still a splice base. Owner deletions and retractions
+  are not expiry and are never gated, and owner intent is never withdrawn.
+  Off by default.
+- **Off-site backup attestation:** the operator's statement that the archive
+  is itself backed up off-site. Required for confirmed expiry, because a
+  confirmation proves a durable commit, not a backup.
+- **Expiry hold:** the record that the gate kept a body automatic expiry would
+  have removed, with the reason and its logical size: *older revision* (kept
+  for good), *not uploaded*, *splice base*, *backup not attested*, or the
+  archive's confirmation outcome. A withdrawn tombstone is not reconsidered
+  until the hold lapses. `/health` reports holds by reason under
+  `session_store.expiry_holds`.
+
+**Unclear:** the confirmation route and spec version are a draft until the
+owner rules on APSS PR #154 (tracked in #2107).

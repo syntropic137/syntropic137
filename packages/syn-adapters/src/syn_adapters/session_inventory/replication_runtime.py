@@ -9,13 +9,15 @@ from syn_domain.contexts.agent_sessions import (
     InventoryReplicationProcessManager,
 )
 
+from .archive_sink import ExporterArchiveSink
 from .capture_deletion_worker import CaptureDeletionWorker
 from .capture_delivery_jobs import PostgresCaptureDeliveryJobs
 from .capture_delivery_worker import CaptureDeliveryWorker
 from .capture_outboxes import ExporterCaptureOutboxes, ExporterDeletionOutbox
 from .deletion_fence import DeletionFence
 from .evidence_reader import PostgresSessionEvidence
-from .exporter_transport import ExporterConfig, ExporterInventoryTransport
+from .expiry_gate import ConfirmedExpiryGate
+from .exporter_transport import ExporterConfig, ExporterConfirmConfig, ExporterInventoryTransport
 from .replication_jobs import PostgresReplicationJobs
 from .replication_supervisor import ReplicationSupervisor
 from .replication_worker import InventoryReplicationWorker
@@ -58,6 +60,21 @@ def capture_outboxes(
         legacy_root=settings.archive_dir / "capture-delivery" / destination / source,
         store_url=url,
         token=token,
+    )
+
+
+def create_expiry_gate(settings: SessionInventorySettings) -> ConfirmedExpiryGate | None:
+    """The confirmed-expiry gate (#2107), or None when it is off (the default)."""
+    if not settings.archive_confirm_enabled:
+        return None
+    url, token = settings.replication_store_url, settings.archive_confirm_read_token
+    if capture_destination_id(settings) is None or url is None or token is None:
+        raise ValueError("archive confirmation configuration is incomplete")
+    return ConfirmedExpiryGate(
+        ExporterArchiveSink(
+            ExporterConfirmConfig(binary=settings.exporter_binary, store_url=url, token=token)
+        ),
+        offsite_backup_attested=settings.archive_offsite_backup_attested,
     )
 
 
