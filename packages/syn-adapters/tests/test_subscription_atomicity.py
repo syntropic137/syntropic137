@@ -10,6 +10,7 @@ See: ADR-017, ADR-018, PROJECT-PLAN_20251209_observability-unification.md
 """
 
 import asyncio
+import copy
 import os
 from typing import Any
 from unittest.mock import MagicMock
@@ -144,10 +145,10 @@ class FailingProjectionStore:
         self._saved_event_positions.append(event_position)
 
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
-        return self._projection_data.get(projection, {}).get(key)
+        return copy.deepcopy(self._projection_data.get(projection, {}).get(key))
 
     async def get_all(self, projection: str) -> list[dict[str, Any]]:
-        return list(self._projection_data.get(projection, {}).values())
+        return copy.deepcopy(list(self._projection_data.get(projection, {}).values()))
 
     def has_projection_data_for_event(self, event_position: int) -> bool:
         """Check if projection data exists for a specific event position."""

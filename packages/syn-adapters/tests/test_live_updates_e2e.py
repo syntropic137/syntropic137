@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_adapters.subscriptions.service import (
     SUBSCRIPTION_POSITION_KEY,
     EventSubscriptionService,
@@ -115,48 +116,6 @@ class MockEventStore:
 
 
 # ============================================================================
-# Mock Projection Store
-# ============================================================================
-
-
-class MockProjectionStore:
-    """Mock projection store for testing."""
-
-    def __init__(self):
-        """Initialize."""
-        if os.getenv("APP_ENVIRONMENT", "").lower() != "test":
-            raise RuntimeError("Mocks only allowed in test environment")
-        self._projections: dict[str, dict[str, dict]] = {}
-        self._positions: dict[str, int] = {}
-
-    async def save(self, projection: str, key: str, data: dict) -> None:
-        """Save projection record."""
-        if projection not in self._projections:
-            self._projections[projection] = {}
-        self._projections[projection][key] = data
-
-    async def get(self, projection: str, key: str) -> dict | None:
-        """Get projection record."""
-        return self._projections.get(projection, {}).get(key)
-
-    async def get_all(self, projection: str) -> list[dict]:
-        """Get all records for projection."""
-        return list(self._projections.get(projection, {}).values())
-
-    async def get_position(self, projection: str) -> int | None:
-        """Get last position."""
-        return self._positions.get(projection)
-
-    async def set_position(self, projection: str, position: int) -> None:
-        """Set last position."""
-        self._positions[projection] = position
-
-    def get_records(self, projection: str) -> dict[str, dict]:
-        """Get all records for a projection (testing helper)."""
-        return self._projections.get(projection, {})
-
-
-# ============================================================================
 # Mock Projection Manager
 # ============================================================================
 
@@ -208,9 +167,9 @@ def event_store() -> MockEventStore:
 
 
 @pytest.fixture
-def projection_store() -> MockProjectionStore:
+def projection_store() -> InMemoryProjectionStore:
     """Create mock projection store."""
-    return MockProjectionStore()
+    return InMemoryProjectionStore()
 
 
 @pytest.fixture
@@ -223,7 +182,7 @@ def projection_manager() -> MockProjectionManager:
 def subscription_service(
     event_store: MockEventStore,
     projection_manager: MockProjectionManager,
-    projection_store: MockProjectionStore,
+    projection_store: InMemoryProjectionStore,
 ) -> EventSubscriptionService:
     """Create subscription service with mocks."""
     return EventSubscriptionService(
@@ -250,7 +209,7 @@ class TestLiveUpdatesE2E:
         self,
         event_store: MockEventStore,
         projection_manager: MockProjectionManager,
-        projection_store: MockProjectionStore,
+        projection_store: InMemoryProjectionStore,
         subscription_service: EventSubscriptionService,
     ):
         """Test workflow started event flows through subscription to projection."""
@@ -300,7 +259,7 @@ class TestLiveUpdatesE2E:
         self,
         event_store: MockEventStore,
         projection_manager: MockProjectionManager,
-        projection_store: MockProjectionStore,
+        projection_store: InMemoryProjectionStore,
         subscription_service: EventSubscriptionService,
     ):
         """Test phase completed event includes metrics that update projections."""
@@ -374,7 +333,7 @@ class TestLiveUpdatesE2E:
         self,
         event_store: MockEventStore,
         projection_manager: MockProjectionManager,
-        projection_store: MockProjectionStore,
+        projection_store: InMemoryProjectionStore,
         subscription_service: EventSubscriptionService,
     ):
         """Test multiple events in sequence are all processed."""
@@ -448,7 +407,7 @@ class TestLiveUpdatesE2E:
         self,
         event_store: MockEventStore,
         projection_manager: MockProjectionManager,
-        projection_store: MockProjectionStore,
+        projection_store: InMemoryProjectionStore,
     ):
         """Test that subscription resumes from saved position, skipping already processed events."""
         # 1. Setup events
@@ -571,7 +530,7 @@ class TestLiveUpdatesE2E:
         self,
         event_store: MockEventStore,
         projection_manager: MockProjectionManager,
-        projection_store: MockProjectionStore,
+        projection_store: InMemoryProjectionStore,
         subscription_service: EventSubscriptionService,
     ):
         """Test realistic scenario: aggregate execution metrics across phase completions."""
@@ -698,7 +657,7 @@ class TestLiveUpdatesPerformance:
         self,
         event_store: MockEventStore,
         projection_manager: MockProjectionManager,
-        projection_store: MockProjectionStore,
+        projection_store: InMemoryProjectionStore,
     ):
         """Test handling of high event volume (100+ events)."""
         # 1. Generate 100 events
@@ -739,7 +698,7 @@ class TestLiveUpdatesPerformance:
         self,
         event_store: MockEventStore,
         projection_manager: MockProjectionManager,
-        projection_store: MockProjectionStore,
+        projection_store: InMemoryProjectionStore,
     ):
         """Test that position is saved periodically during catch-up (batch_size events)."""
         # 1. Create 21 events (will test batching with batch_size=10)
