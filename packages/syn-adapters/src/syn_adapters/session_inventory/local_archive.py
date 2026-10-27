@@ -23,8 +23,10 @@ import asyncio
 import fcntl
 import gzip
 import hashlib
+import io
 import os
 import re
+import sys
 import tempfile
 import zlib
 from contextlib import ExitStack, contextmanager
@@ -45,15 +47,23 @@ from syn_domain.contexts.agent_sessions import (
     TranscriptIntegrityError,
 )
 
-from .archive_splice import SpliceReference, envelope_identity, plan_splice, reconstruct
+from .archive_splice import (
+    SpliceReference,
+    assemble,
+    envelope_identity,
+    plan_splice,
+    reconstruct,
+)
+from .archive_stream import CHUNK, BodyWindow, copy_into, inflate_into
 
 _GZIP_MAGIC = b"\x1f\x8b"
+_GZIP_FRAMING = 18
+"""Header plus trailer: no gzip stream is shorter."""
 _OBJECT_NAME = re.compile(r"[0-9a-f]{64}")
-_CHUNK = 1024 * 1024
 # Temporaries are named after their digest so a writer killed before its
 # cleanup ran leaves bytes the next locked operation on that digest reclaims.
-_TEMPORARY_PREFIXES = (".capture-", ".compress-", ".reference-")
 _REFERENCE = ".ref-"
+_TEMPORARY_PREFIXES = (".capture-", ".compress-", f".reference-{_REFERENCE}")
 _PIN = ".pin-"
 # Enough to hold any envelope head; identity is read from it alone.
 _IDENTITY_PREFIX = 64 * 1024
@@ -75,7 +85,7 @@ def _decode(source: BinaryIO, size: int) -> bytes:
     out = bytearray()
     try:
         while not inflater.eof and len(out) <= size:
-            chunk = inflater.unconsumed_tail or source.read(_CHUNK)
+            chunk = inflater.unconsumed_tail or source.read(CHUNK)
             if not chunk:
                 break
             out += inflater.decompress(chunk, size + 1 - len(out))
@@ -118,28 +128,10 @@ def _read_object(source: BinaryIO, reference: ArchivedTranscript) -> bytes:
     return body
 
 
-def _inflate(stored: bytes) -> bytes | None:
-    """The body of one complete gzip stream; ``None`` if it is anything else."""
-    if stored[: len(_GZIP_MAGIC)] != _GZIP_MAGIC:
-        return None
-    inflater = zlib.decompressobj(wbits=31)
-    out = bytearray()
-    pending = stored
-    try:
-        while pending and not inflater.eof:
-            out += inflater.decompress(pending, _CHUNK)
-            pending = inflater.unconsumed_tail
-        out += inflater.flush()
-    except zlib.error:
-        return None
-    if not inflater.eof or inflater.unused_data:
-        return None
-    return bytes(out)
-
-
 def _gzip_digest(stored: bytes) -> str | None:
-    body = _inflate(stored)
-    return None if body is None else hashlib.sha256(body).hexdigest()
+    """sha256 of one complete gzip stream, inflated in bounded chunks; ``None`` if damaged."""
+    window = BodyWindow()
+    return window.hexdigest() if inflate_into(io.BytesIO(stored), window) else None
 
 
 def _sha(body: bytes) -> str:
@@ -180,7 +172,8 @@ class EnvelopeSummary:
 def _head_and_size(source: BinaryIO) -> tuple[bytes, int] | None:
     head = source.read(_IDENTITY_PREFIX)
     size = os.fstat(source.fileno()).st_size
-    if head[: len(_GZIP_MAGIC)] != _GZIP_MAGIC:
+    # Shorter than gzip framing: an uncompressed body that starts with the magic.
+    if head[: len(_GZIP_MAGIC)] != _GZIP_MAGIC or size < _GZIP_FRAMING:
         return head, size
     source.seek(-4, os.SEEK_END)
     size = int.from_bytes(source.read(4), "little")
@@ -448,16 +441,34 @@ class LocalSessionTranscriptArchive:
             if entry.name.startswith(prefix) and _OBJECT_NAME.fullmatch(entry.name[len(prefix) :])
         )
 
-    def _full_locked(self, digest: str) -> bytes | None:
-        """A full object's verified body; ``None`` when there is no full object."""
+    def _window_locked(self, digest: str, start: int = 0, end: int = 0) -> BodyWindow | None:
+        """Bytes ``[start, end)`` of a full object's verified body, in bounded memory.
+
+        ``None`` when there is no full object. The whole body is hashed, so the
+        kept bytes are trusted only because everything else verified too.
+        """
         try:
-            stored = (self._root / digest).read_bytes()
+            source = (self._root / digest).open("rb")
         except FileNotFoundError:
             return None
-        body = stored if _sha(stored) == digest else _inflate(stored)
-        if body is None or _sha(body) != digest:
+        with source:
+            if source.read(len(_GZIP_MAGIC)) == _GZIP_MAGIC:
+                source.seek(0)
+                window = BodyWindow(start, end)
+                if inflate_into(source, window) and window.hexdigest() == digest:
+                    return window
+            # Uncompressed, including a body that happens to start with the magic.
+            source.seek(0)
+            window = BodyWindow(start, end)
+            copy_into(source, window)
+        if window.hexdigest() != digest:
             raise TranscriptIntegrityError("archived transcript failed integrity verification")
-        return body
+        return window
+
+    def _full_locked(self, digest: str) -> bytes | None:
+        """A full object's verified body; ``None`` when there is no full object."""
+        window = self._window_locked(digest, 0, sys.maxsize)
+        return None if window is None else bytes(window.kept)
 
     def _spliced_locked(self, digest: str) -> bytes | None:
         """The verified body a reference names; ``None`` when there is no reference.
@@ -470,8 +481,9 @@ class LocalSessionTranscriptArchive:
         reference = self._reference(digest)
         if reference is None:
             return None
-        base = self._full_locked(reference.base_sha256)
-        body = None if base is None else reconstruct(reference, base)
+        end = reference.offset + reference.length
+        base = self._window_locked(reference.base_sha256, reference.offset, end)
+        body = None if base is None else assemble(reference, base.size, bytes(base.kept))
         if body is None:
             raise TranscriptIntegrityError("archived transcript reference failed verification")
         return body
@@ -487,7 +499,7 @@ class LocalSessionTranscriptArchive:
 
     def _materialize_locked(self, digest: str, base: str) -> None:
         """Store a referrer of ``base`` as a full object again, then drop its reference."""
-        if not self._deleted(digest) and self._full_locked(digest) is None:
+        if not self._deleted(digest) and self._window_locked(digest) is None:
             body = self._spliced_locked(digest)
             if body is not None:
                 self._put_locked(body)

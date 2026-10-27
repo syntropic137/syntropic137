@@ -92,13 +92,19 @@ def plan_splice(older: bytes, base: bytes) -> SpliceReference | None:
 
 def reconstruct(reference: SpliceReference, base: bytes) -> bytes | None:
     """The bytes ``reference`` names, or ``None`` unless they verify exactly."""
-    if len(base) != reference.base_size or reference.offset + reference.length > len(base):
-        return None
-    body = (
-        reference.head
-        + base[reference.offset : reference.offset + reference.length]
-        + reference.tail
+    return assemble(
+        reference, len(base), base[reference.offset : reference.offset + reference.length]
     )
+
+
+def assemble(reference: SpliceReference, base_size: int, middle: bytes) -> bytes | None:
+    """``reference`` around ``middle``, the slice read from a verified base of ``base_size`` bytes.
+
+    ``None`` unless the result verifies exactly; a short slice is a base too short.
+    """
+    if base_size != reference.base_size or len(middle) != reference.length:
+        return None
+    body = reference.head + middle + reference.tail
     if len(body) != reference.size or hashlib.sha256(body).hexdigest() != reference.sha256:
         return None
     return body

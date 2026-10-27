@@ -6,10 +6,12 @@ import gzip
 import hashlib
 import json
 import threading
+import tracemalloc
 from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.session_inventory import archive_stream
 from syn_adapters.session_inventory.archive_splice import (
     SpliceReference,
     envelope_identity,
@@ -335,3 +337,36 @@ async def test_a_reference_larger_than_the_object_is_not_written(tmp_path: Path)
     outcome = archive.splice_onto(older.sha256, newest.sha256, apply=True)
     assert outcome.status is SpliceStatus.NO_SAVING
     assert (tmp_path / older.sha256).exists() and not list(tmp_path.glob(".ref-*"))
+
+
+async def test_reading_a_slice_keeps_only_the_slice_of_its_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    older, newest = await archive.put(_envelope(40)), await archive.put(_envelope(30_000))
+    archive.splice_onto(older.sha256, newest.sha256, apply=True)
+    monkeypatch.setattr(archive_stream, "CHUNK", 64 * 1024)
+    tracemalloc.start()
+    try:
+        assert await archive.get(older) == _envelope(40)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    # Many small revisions read concurrently must not each hold the whole base.
+    assert peak < newest.size // 8
+
+
+async def test_a_killed_reference_writer_leaves_nothing_behind(tmp_path: Path) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    older, newest = await archive.put(_envelope(40)), await archive.put(_envelope(90))
+    archive.splice_onto(older.sha256, newest.sha256, apply=True)
+    (tmp_path / f".reference-.ref-{older.sha256}-killed").write_bytes(b"{")
+    await archive.delete(older)
+    assert not list(tmp_path.glob(".reference-*"))
+
+
+async def test_a_short_body_starting_with_the_gzip_magic_is_summarised(tmp_path: Path) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path, compress=False)
+    for body in (b"\x1f\x8b", b"\x1f\x8b\x08 short"):
+        ref = await archive.put(body)
+        assert archive.envelope_summary(ref.sha256) is None
