@@ -122,10 +122,23 @@ def test_the_syn_key_is_bridged_to_the_sdk_variable() -> None:
     assert environ[SDK_KEY_VARIABLE] == "e2b_test_key_not_real"
 
 
-def test_an_sdk_key_already_set_is_left_alone() -> None:
-    environ = {SDK_KEY_VARIABLE: "sdk_test_key_not_real", SYN_KEY_VARIABLE: "syn_test_not_real"}
+def test_an_sdk_key_alone_is_used_as_it_is() -> None:
+    environ = {SDK_KEY_VARIABLE: "sdk_test_key_not_real"}
     bridge_sdk_key(environ)
-    assert environ[SDK_KEY_VARIABLE] == "sdk_test_key_not_real"
+    assert environ == {SDK_KEY_VARIABLE: "sdk_test_key_not_real"}
+
+
+def test_the_same_key_in_both_variables_is_accepted() -> None:
+    environ = {SDK_KEY_VARIABLE: "e2b_test_key_not_real", SYN_KEY_VARIABLE: "e2b_test_key_not_real"}
+    bridge_sdk_key(environ)
+    assert environ[SDK_KEY_VARIABLE] == "e2b_test_key_not_real"
+
+
+def test_two_different_keys_are_refused_without_printing_either() -> None:
+    environ = {SDK_KEY_VARIABLE: "sdk_test_key_not_real", SYN_KEY_VARIABLE: "syn_test_not_real"}
+    with pytest.raises(TemplateBuildError, match="different keys") as refused:
+        bridge_sdk_key(environ)
+    assert "not_real" not in str(refused.value)
 
 
 def test_no_key_at_all_refuses_before_building() -> None:

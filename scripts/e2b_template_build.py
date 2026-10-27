@@ -117,10 +117,22 @@ class TemplateReceipt(BaseModel):
 
 
 def bridge_sdk_key(environ: MutableMapping[str, str]) -> None:
-    """Make ``SYN_E2B_API_KEY`` visible to the SDK as ``E2B_API_KEY``; refuse neither."""
-    if environ.get(SDK_KEY_VARIABLE):
-        return
+    """Make ``SYN_E2B_API_KEY`` visible to the SDK as ``E2B_API_KEY``.
+
+    ``SYN_E2B_API_KEY`` is the key the API runs with, so it wins. A different
+    ``E2B_API_KEY`` beside it is refused: the template would be built in one
+    account and looked up by the API in another. Neither value is printed.
+    """
     key = environ.get(SYN_KEY_VARIABLE)
+    sdk_key = environ.get(SDK_KEY_VARIABLE)
+    if key and sdk_key and key != sdk_key:
+        msg = (
+            f"{SYN_KEY_VARIABLE} and {SDK_KEY_VARIABLE} hold different keys; unset "
+            f"{SDK_KEY_VARIABLE} so the template is built in the account the API uses"
+        )
+        raise TemplateBuildError(msg)
+    if not key and sdk_key:
+        return
     if not key:
         msg = f"set {SYN_KEY_VARIABLE} (or {SDK_KEY_VARIABLE}) to build an E2B template"
         raise TemplateBuildError(msg)
