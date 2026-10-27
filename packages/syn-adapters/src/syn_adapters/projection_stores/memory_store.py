@@ -73,11 +73,12 @@ class InMemoryProjectionStore:
     # document and keeps its own copy of every write, so an edit that is never
     # saved is lost. Sharing the stored dict with callers would let a handler
     # that forgets to `save` pass here and lose the write in production (#2124),
-    # so every write stores, and every read returns, a detached copy.
+    # so every read returns a detached copy. A write is already detached:
+    # `pg_safe` rebuilds every dict and list it walks.
 
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         """Save or update a projection record."""
-        self._data.setdefault(projection, {})[pg_safe(key)] = pg_safe(copy.deepcopy(data))
+        self._data.setdefault(projection, {})[pg_safe(key)] = pg_safe(data.copy())
         self._update_state(projection)
 
     async def save_if(
