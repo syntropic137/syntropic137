@@ -27,6 +27,10 @@ promote one alone.
 uv run python scripts/eval_suite.py check  [--suite evals/<suite-id>]  # git only: every pin, fix and control re-read
 uv run python scripts/eval_suite.py launch --suite evals/<suite-id>    # dispatches runs; see --help for split/version
 uv run python scripts/eval_suite.py score  --suite evals/<suite-id>    # catch rate over defects, false-block rate over controls
+uv run python scripts/eval_suite.py register --suite evals/<suite-id>  # roster tags on each case eval; idempotent; a conflict writes nothing
+uv run python scripts/eval_suite.py launch --suite evals/<suite-id> --trials 3  # k runs per case, one cohort
+uv run python scripts/eval_suite.py launch --suite evals/<suite-id> --trials 3 --top-up  # only trials_short; refused while any trial is pending
+uv run python scripts/eval_suite.py score  --suite evals/<suite-id> --trials 3  # pass@k / pass^k with bounds from GET /eval-sets/metrics
 # verifier-seed-aw-v1 pins agentic-workspace commits: add --repo lib/agentic-workspace to check and launch, or every pin reports missing
 
 uv run python scripts/eval_implementer.py check  [--suite evals/<suite-id>]  # git only
@@ -64,6 +68,15 @@ Launches cost real quota.
   short or never-launched case is 0 and 1. Decide only when both bounds agree;
   straddling means top up, not judge. An in-run verify verdict is part of the
   treatment, never the eval score.
+- **A trial is scored under its cohort's scorer protocol.** `launch --trials`
+  tags each run `scorer:<protocol>` (the suite version, plus the LLM judge's
+  identity when `--llm-judge`); the server counts a score only when its
+  scorer_version matches, so `score` refuses another protocol. Switching judge
+  means a new cohort, not a re-score.
+- **Eval subjects stay on their pin (#2055).** `check` refuses a workflow
+  whose prompts `git pull` or merge/rebase the default branch, and with
+  `--trials` refuses model aliases (cohort `model:` tags must be explicit ids).
+  `launch --trials` registers the whole roster first, whatever `--split`.
 - **Call a cheaper arm "quality-neutral" only when the paired difference's
   interval excludes the drop you would tolerate** (say -5pp). Inconclusive is
   not neutral.

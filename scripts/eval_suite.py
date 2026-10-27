@@ -19,9 +19,10 @@ every version and every verifier adds runs to the same eval - the eval's run
 list is the case's history. What differs between runs goes on the RUN as tags:
 ``suite-version:<n>`` and ``verifier:<workflow id>``.
 
-    uv run python scripts/eval_suite.py check  [--suite DIR]   # offline dry run
-    uv run python scripts/eval_suite.py launch [--suite DIR] [--workflow ID] [--split S] [--api-url URL]
-    uv run python scripts/eval_suite.py score  [--suite DIR] [--workflow ID] [--version N] [--split S] [--api-url URL]
+    uv run python scripts/eval_suite.py check    [--suite DIR] [--trials]  # offline dry run
+    uv run python scripts/eval_suite.py register [--suite DIR] [--api-url URL]
+    uv run python scripts/eval_suite.py launch   [--suite DIR] [--workflow ID] [--split S] [--trials [K]] [--top-up] [--api-url URL]
+    uv run python scripts/eval_suite.py score    [--suite DIR] [--workflow ID] [--version N] [--split S] [--trials [K]] [--api-url URL]
 
 SAME CASES, DIFFERENT VERIFIER. A suite lists one or more workflows; each
 differs from the others only in who verifies. ``--workflow`` picks one (the
@@ -79,6 +80,21 @@ that the eval pins the case's commit, and that the run used the suite's
 workflow. An eval's run list cannot tell a run launched into it from one
 attached afterwards - attach never copies the baseline - so a run found only
 by tag is reported and never scored.
+
+K TRIALS PER CASE (#2108). ``register`` writes the roster onto each case's
+eval (``suite-version:<n>``, ``split:<s>``, ``polarity:<p>``; idempotent, and
+a split or polarity conflict anywhere writes nothing). ``launch --trials K``
+registers the whole roster, then starts K runs per case as one cohort: every run carries the declared
+``model:`` tags, ``scorer:<protocol>`` and ``trial:<batch>/<i>``, and the
+ledger line records batch, trial and scorer. ``--top-up`` launches only the
+server's ``trials_short`` per case, and is refused while any trial is
+pending or for a cohort never launched. ``score --trials K`` scores each
+trial under its launch's scorer protocol (another protocol is refused) and
+prints the server's pass@k / pass^k with roster-wide bounds
+(``GET /eval-sets/metrics``). ``check`` always refuses a workflow prompt that
+moves a run off its pinned baseline (``git pull``, merging the default
+branch); with ``--trials`` it also refuses model aliases, because a cohort's
+``model:`` tags are matched against observed explicit ids.
 
 Exit status: 0 on success (for ``score``: every case scored pass), 1 otherwise.
 """
