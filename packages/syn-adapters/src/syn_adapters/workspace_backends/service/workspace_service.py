@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 
     from syn_adapters.platform_access import PlatformTokenService
     from syn_adapters.workspace_backends.service.memory_ledger import (
-        MemoryReservation,
+        LedgerReservation,
         WorkspaceMemoryLedger,
     )
     from syn_adapters.workspace_backends.tokens.token_injection_adapter import (
@@ -598,7 +598,7 @@ class WorkspaceService:
 
         return aggregate, isolation_config
 
-    async def _reserve_memory(self, memory_mb: int, workspace_id: str) -> MemoryReservation | None:
+    async def _reserve_memory(self, memory_mb: int, workspace_id: str) -> LedgerReservation | None:
         """Hold ``memory_mb`` of this process's workspace memory, waiting if it is taken."""
         if self._memory_ledger is None:
             return None

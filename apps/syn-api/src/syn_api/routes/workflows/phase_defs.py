@@ -144,8 +144,6 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
         PhaseExecutionType,
         deployment_memory_ceiling_mb,
         require_memory_within_cap,
-    )
-    from syn_domain.contexts.orchestration._shared.workspace_resources import (
         stored_resource_request,
     )
 

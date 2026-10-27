@@ -98,6 +98,7 @@ from syn_domain.contexts.orchestration._shared.workspace_resources import (
     WorkspaceMemoryOverCapError,
     WorkspaceResourceRequest,
     require_memory_within_cap,
+    stored_resource_request,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
@@ -649,6 +650,7 @@ __all__ = [
     "require_supported_execution_type",
     "roster_of",
     "salvage_stranded_phase",
+    "stored_resource_request",
     "summarize_case",
     "summarize_eval_set",
     "utc_day",

@@ -45,7 +45,7 @@ class _Waiter:
     granted: asyncio.Future[None] = field(repr=False)
 
 
-class MemoryReservation:
+class LedgerReservation:
     """One workspace's share of the ledger. ``release`` is idempotent."""
 
     def __init__(self, ledger: WorkspaceMemoryLedger, memory_mb: int) -> None:
@@ -86,7 +86,7 @@ class WorkspaceMemoryLedger:
         """Workspaces queued for memory."""
         return len(self._waiting)
 
-    async def reserve(self, memory_mb: int, *, workspace_id: str) -> MemoryReservation:
+    async def reserve(self, memory_mb: int, *, workspace_id: str) -> LedgerReservation:
         """Wait for ``memory_mb`` to be free, then hold it until the reservation is released.
 
         Cancellation while waiting gives the place back; cancellation after the
@@ -113,7 +113,7 @@ class WorkspaceMemoryLedger:
             elif waiter.granted.done() and not waiter.granted.cancelled():
                 self._give_back(memory_mb)
             raise
-        return MemoryReservation(self, memory_mb)
+        return LedgerReservation(self, memory_mb)
 
     def _fits(self, memory_mb: int) -> bool:
         return self._holders == 0 or self._reserved_mb + memory_mb <= self._capacity_mb
