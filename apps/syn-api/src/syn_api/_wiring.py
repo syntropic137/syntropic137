@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import asyncpg
-    from agentic_isolation.providers.e2b_client import E2BSandboxClient
 
     from syn_adapters.control import ExecutionController
     from syn_adapters.control.commands import ControlSignal
@@ -331,43 +330,19 @@ def build_workspace_service(
     No credential policy is passed, deliberately: the executor this wiring
     serves runs real agents, which need the host's credentials. E2B only when SYN_E2B_ENABLED (#1915).
     """
+    from syn_api._wiring_e2b import e2b_client_with_breaker
+
     e2b = shared_settings.get_settings().e2b
     backend = WorkspaceBackend.selected(e2b)
     return WorkspaceService.create(
         backend=backend,
         e2b=e2b,
-        e2b_client=_e2b_client_with_breaker() if backend is WorkspaceBackend.E2B else None,
+        e2b_client=e2b_client_with_breaker() if backend is WorkspaceBackend.E2B else None,
         config=ws_config,
         environment=_build_workspace_env(),
         capture_source_instance_id=capture_source_instance_id,
         platform_tokens=get_platform_token_service(),
     )
-
-
-def _e2b_client_with_breaker() -> E2BSandboxClient | None:
-    """The E2B executor's sandbox client, its creates feeding the Outage Breaker (#1917).
-
-    None (the provider's own SDK client) with the Run Queue off: there is no
-    budget row to disable claims on.
-    """
-    settings = shared_settings.get_settings()
-    if not settings.execution.run_queue_enabled or settings.e2b.api_key is None:
-        return None
-    from datetime import timedelta
-
-    from agentic_isolation.providers.e2b_client import SdkE2BClient
-
-    from syn_adapters.execution_host.outage_breaker import OutageBreaker
-    from syn_adapters.workspace_backends.e2b.breaker_client import BreakerE2BClient
-    from syn_adapters.workspace_backends.host_labels import LABEL_HOST_ID, host_labels
-
-    breaker = OutageBreaker(
-        get_execution_run_queue,
-        host_labels()[LABEL_HOST_ID],  # the host id the ExecutionHost registers (D5)
-        threshold=settings.e2b.breaker_failures,
-        cooldown=timedelta(seconds=settings.e2b.breaker_cooldown_s),
-    )
-    return BreakerE2BClient(SdkE2BClient(api_key=settings.e2b.api_key.get_secret_value()), breaker)
 
 
 def get_workflow_repo():
