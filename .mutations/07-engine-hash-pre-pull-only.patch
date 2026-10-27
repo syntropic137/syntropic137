@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
+index 0268f64e4..65323eb63 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/template_ref.py
+@@ -54,7 +54,7 @@ def pinned_docker_engine() -> DockerEngine:
+ 
+ def engine_hash(engine: DockerEngine) -> str:
+     """The first 8 hex of sha256 over every field of ``engine``, canonically serialised."""
+-    canonical = json.dumps(dataclasses.asdict(engine), sort_keys=True, separators=(",", ":"))
++    canonical = json.dumps([dataclasses.asdict(p) for p in engine.pre_pull], sort_keys=True, separators=(",", ":"))
+     return hashlib.sha256(canonical.encode()).hexdigest()[:8]
+ 
+ 

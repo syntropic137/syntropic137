@@ -13,53 +13,21 @@ from datetime import UTC, datetime
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions import AgentLaunch
 from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
     SessionListProjection,
 )
 
 
-class MockProjectionStore:
-    """Mock projection store for testing."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, dict[str, dict]] = {}
-
-    async def save(self, projection_name: str, key: str, data: dict) -> None:
-        if projection_name not in self._data:
-            self._data[projection_name] = {}
-        self._data[projection_name][key] = data
-
-    async def get(self, projection_name: str, key: str) -> dict | None:
-        return self._data.get(projection_name, {}).get(key)
-
-    async def get_all(self, projection_name: str) -> list[dict]:
-        return list(self._data.get(projection_name, {}).values())
-
-    async def query(
-        self,
-        projection_name: str,
-        filters: dict | None = None,
-        order_by: str | None = None,
-        limit: int | None = 100,
-        offset: int = 0,
-    ) -> list[dict]:
-        items = list(self._data.get(projection_name, {}).values())
-        if filters:
-            items = [item for item in items if all(item.get(k) == v for k, v in filters.items())]
-        if limit is None:
-            return items[offset:]
-        return items[offset : offset + limit]
-
-
 @pytest.fixture
-def mock_store() -> MockProjectionStore:
+def mock_store() -> InMemoryProjectionStore:
     """Create a mock projection store."""
-    return MockProjectionStore()
+    return InMemoryProjectionStore()
 
 
 @pytest.fixture
-def projection(mock_store: MockProjectionStore) -> SessionListProjection:
+def projection(mock_store: InMemoryProjectionStore) -> SessionListProjection:
     """Create a SessionListProjection with mock store."""
     return SessionListProjection(mock_store)
 
@@ -70,7 +38,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_session_started_with_datetime_object(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """Test handling SessionStarted with datetime object (direct call)."""
         event_data = {
@@ -92,7 +60,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_session_started_with_iso_string(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """Test handling SessionStarted with ISO string (from event store).
 
@@ -117,7 +85,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_session_started_with_none_datetime(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """Test handling SessionStarted with None datetime."""
         event_data = {
@@ -135,7 +103,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_session_completed_with_iso_string(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """Test handling SessionCompleted with ISO string datetime."""
         # First create a session
@@ -167,7 +135,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_session_completed_extracts_token_breakdown(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """Test that session completed extracts input/output token breakdown."""
         # Create session
@@ -201,7 +169,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_session_completed_calculates_duration(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """Test that session completed calculates duration from timestamps."""
         # Create session
@@ -231,7 +199,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_session_started_stores_phase_id(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """Test that session started stores phase_id from event."""
         await projection.on_session_started(
@@ -250,7 +218,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_session_started_claims_nothing_about_the_agent(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """A freshly started session knows nothing yet, and must say so.
 
@@ -274,7 +242,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_agent_launched_survives_from_dict(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """on_agent_launched must persist through to the SessionSummary the
         read path actually returns, not just the raw store row - this is the
@@ -300,7 +268,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_completion_carries_the_launch_fact_onto_the_row(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """A rebuilt projection gets the answer from SessionCompleted alone.
 
@@ -334,7 +302,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_a_completion_from_before_the_field_overwrites_nothing(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """Replaying the archive must leave rows saying "unknown", not "no".
 
@@ -369,7 +337,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_agent_launched_is_noop_for_unknown_session(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """on_agent_launched must not create a row for a session it hasn't
         seen SessionStarted for yet - mirrors the guard already used by
@@ -382,7 +350,7 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_on_operation_recorded_accumulates_tokens(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """Test that operation events correctly accumulate token counts."""
         # Create session
@@ -419,7 +387,7 @@ class TestSessionListProjection:
     async def test_query_filters_by_started_after(
         self,
         projection: SessionListProjection,
-        mock_store: MockProjectionStore,
+        mock_store: InMemoryProjectionStore,
     ) -> None:
         """started_after returns only sessions whose started_at >= bound."""
         await projection.on_session_started(
@@ -447,7 +415,7 @@ class TestSessionListProjection:
     async def test_query_filters_by_started_before(
         self,
         projection: SessionListProjection,
-        mock_store: MockProjectionStore,
+        mock_store: InMemoryProjectionStore,
     ) -> None:
         """started_before returns only sessions whose started_at <= bound."""
         await projection.on_session_started(
@@ -475,7 +443,7 @@ class TestSessionListProjection:
     async def test_query_filters_by_time_window_intersection(
         self,
         projection: SessionListProjection,
-        mock_store: MockProjectionStore,
+        mock_store: InMemoryProjectionStore,
     ) -> None:
         """started_after + started_before together yield the intersection."""
         for sid, started in [
@@ -502,7 +470,7 @@ class TestSessionListProjection:
     async def test_query_multi_status_or(
         self,
         projection: SessionListProjection,
-        mock_store: MockProjectionStore,
+        mock_store: InMemoryProjectionStore,
     ) -> None:
         """statuses=[a,b] returns sessions in either state (OR'd)."""
         for sid, status in [("a", "running"), ("b", "completed"), ("c", "failed")]:
@@ -526,7 +494,7 @@ class TestSessionListProjection:
     async def test_query_sessions_by_workflow(
         self,
         projection: SessionListProjection,
-        mock_store: MockProjectionStore,
+        mock_store: InMemoryProjectionStore,
     ) -> None:
         """Test querying sessions filtered by workflow."""
         # Create sessions for different workflows
@@ -981,7 +949,7 @@ class TestASessionThatDidNotSayHowItEnded:
 
     @pytest.mark.asyncio
     async def test_a_completion_carrying_no_status_is_not_listed_as_completed(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         await projection.on_session_started(
             {
@@ -1002,7 +970,7 @@ class TestASessionThatDidNotSayHowItEnded:
 
     @pytest.mark.asyncio
     async def test_a_reported_status_is_still_the_one_recorded(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore
+        self, projection: SessionListProjection, mock_store: InMemoryProjectionStore
     ) -> None:
         """The regression guard: healthy sessions must be unaffected."""
         await projection.on_session_started(

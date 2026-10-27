@@ -20,6 +20,7 @@ them, which is precisely how the create-path drop survived.
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING
 
 import pytest
@@ -63,7 +64,7 @@ class _Store:
         self.rows[key] = data
 
     async def get(self, _name: str, key: str) -> Mapping[str, object] | None:
-        return self.rows.get(key)
+        return copy.deepcopy(self.rows.get(key))
 
 
 def _created_event() -> Mapping[str, object]:

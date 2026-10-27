@@ -1,0 +1,13 @@
+diff --git a/scripts/e2b_template_build.py b/scripts/e2b_template_build.py
+index 840f6c475..4837b327b 100644
+--- a/scripts/e2b_template_build.py
++++ b/scripts/e2b_template_build.py
+@@ -125,7 +125,7 @@ def bridge_sdk_key(environ: MutableMapping[str, str]) -> None:
+     """
+     key = environ.get(SYN_KEY_VARIABLE)
+     sdk_key = environ.get(SDK_KEY_VARIABLE)
+-    if key and sdk_key and key != sdk_key:
++    if False:
+         msg = (
+             f"{SYN_KEY_VARIABLE} and {SDK_KEY_VARIABLE} hold different keys; unset "
+             f"{SDK_KEY_VARIABLE} so the template is built in the account the API uses"

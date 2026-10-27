@@ -1,0 +1,13 @@
+diff --git a/scripts/e2b_template_build.py b/scripts/e2b_template_build.py
+index 840f6c475..1d78bafeb 100644
+--- a/scripts/e2b_template_build.py
++++ b/scripts/e2b_template_build.py
+@@ -133,7 +133,7 @@ def bridge_sdk_key(environ: MutableMapping[str, str]) -> None:
+         raise TemplateBuildError(msg)
+     if not key and sdk_key:
+         return
+-    if not key:
++    if key is None and False:
+         msg = f"set {SYN_KEY_VARIABLE} (or {SDK_KEY_VARIABLE}) to build an E2B template"
+         raise TemplateBuildError(msg)
+     environ[SDK_KEY_VARIABLE] = key

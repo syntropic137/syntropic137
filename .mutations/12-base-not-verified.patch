@@ -1,0 +1,12 @@
+diff --git a/scripts/e2b_template_build.py b/scripts/e2b_template_build.py
+index 840f6c475..482df3f1e 100644
+--- a/scripts/e2b_template_build.py
++++ b/scripts/e2b_template_build.py
+@@ -149,7 +149,6 @@ async def build(
+ ) -> TemplateReceipt:
+     """Verify the base, build the template, write and return its receipt."""
+     image = workspace_image_ref(E2B_DOCKER_TEMPLATE_PROVIDER)
+-    reader.verify(image)
+     spec = pinned_template_spec(
+         expected_manifest_hash=reader.manifest_hash(image),
+         cpu_count=cpu_count,

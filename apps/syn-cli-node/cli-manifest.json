@@ -483,6 +483,37 @@
           ]
         },
         {
+          "name": "set",
+          "args": [],
+          "options": [
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "k",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "split",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "suite",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "suite-version",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        },
+        {
           "name": "show",
           "args": [
             "eval-id"

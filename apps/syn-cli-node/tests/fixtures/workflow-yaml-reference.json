@@ -131,28 +131,6 @@
       ],
       "document_sha256": "2e94d88e9c5706c5737fba40dd0e525c322d30b06c74dd4e14817e5b74b14f09"
     },
-    "workflows/evals/implement-score/workflow.yaml": {
-      "phases": [
-        {
-          "id": "score",
-          "order": 1,
-          "model": null,
-          "prompt_file": "phases/score.md"
-        }
-      ],
-      "document_sha256": "26e86cce05cd3990e1cff5ff08e9642f663c06075d477d938c178b7bc1a8e22e"
-    },
-    "workflows/evals/implement-score-v2/workflow.yaml": {
-      "phases": [
-        {
-          "id": "score",
-          "order": 1,
-          "model": null,
-          "prompt_file": "phases/score.md"
-        }
-      ],
-      "document_sha256": "9369c0b7a7f0ed853d762c1740e5e97d3ec52f38347bf1f92dd7d8ab04cc9400"
-    },
     "workflows/evals/verify-pinned/workflow.yaml": {
       "phases": [
         {

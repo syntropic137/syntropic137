@@ -383,6 +383,13 @@ class WorkspaceService:
         if not e2b.enabled or e2b.api_key is None:
             msg = "The E2B backend was selected but SYN_E2B_ENABLED/SYN_E2B_API_KEY are unset"
             raise ValueError(msg)
+        if e2b.nested_docker:
+            # A Docker template built from older pins is refused, not run stale (AW#91).
+            from syn_adapters.workspace_backends.e2b.template_ref import (
+                require_current_template,
+            )
+
+            require_current_template(e2b.template)
         kit = BackendKit.e2b(e2b.template, cpu_count=e2b.cpu_count, memory_mb=e2b.memory_mb)
         sandboxes = client or SdkE2BClient(api_key=e2b.api_key.get_secret_value())
         base = config or WorkspaceServiceConfig()
@@ -400,6 +407,8 @@ class WorkspaceService:
                 client=sandboxes,
                 lifetime_seconds=e2b.timeout_seconds,
                 credentials=credentials,
+                nested_docker=e2b.nested_docker,
+                docker_ready_seconds=e2b.docker_ready_seconds,
             ),
         )
         sidecar = SharedEnvoyAdapter(proxy_url=os.environ.get("SYN_PROXY_URL", ""))

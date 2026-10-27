@@ -12,6 +12,14 @@ name: Mutation Evidence
 # patch must be killed. The runner is scripts/mutation_evidence.py; read its
 # docstring for exactly what KILLED and SURVIVED do and do not prove.
 #
+# Budget: the named tests run once per patch plus a baseline, about 2.5
+# minutes each with docker (PR #2126: 27 tests, 151s per run). The evidence
+# job stops at 120 minutes, so split more than 20 patches across dispatches:
+# one subdirectory per half, each passed as `mutations_dir`. A run cut off by
+# the timeout reads `cancelled` with no verdict for the patches it never
+# reached. Every dispatch on a PR updates the same marker comment, so a split
+# leaves only the last half there: cite each half's run URL.
+#
 # Delete the mutations dir before merge: ci.yml's `mutations-not-merged` job
 # fails any PR into main that still carries `.mutations/`. The PR comment this
 # workflow writes is the record.
@@ -154,7 +162,7 @@ jobs:
     name: Baseline and mutations
     needs: resolve
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     permissions:
       contents: read
     services:

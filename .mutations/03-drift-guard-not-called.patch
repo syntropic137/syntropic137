@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+index 841360b54..f033cbd16 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+@@ -389,7 +389,7 @@ class WorkspaceService:
+                 require_current_template,
+             )
+ 
+-            require_current_template(e2b.template)
++            pass
+         kit = BackendKit.e2b(e2b.template, cpu_count=e2b.cpu_count, memory_mb=e2b.memory_mb)
+         sandboxes = client or SdkE2BClient(api_key=e2b.api_key.get_secret_value())
+         base = config or WorkspaceServiceConfig()

@@ -33,6 +33,8 @@ store). `.env.example` lists them under "E2B REMOTE WORKSPACES".
 | `SYN_E2B_CPU_COUNT` | vCPUs the template was built with. A workspace asking for more is refused. | `2` |
 | `SYN_E2B_MEMORY_MB` | Memory (MB) the template was built with. A workspace asking for more is refused, and a workspace asks for `SYN_WORKSPACE_MEMORY_LIMIT_MB` (4096 by default): with both defaults every workspace is refused, so build the template that large or lower the workspace limit. | `2048` |
 | `SYN_E2B_TIMEOUT_SECONDS` | Sandbox lifetime; E2B kills a sandbox this long after it was created. | `3600` |
+| `SYN_E2B_NESTED_DOCKER` | The template runs Docker (built by `just e2b-template-build`). Needs `SYN_E2B_CPU_COUNT>=2` and `SYN_E2B_MEMORY_MB>=4096`, and `SYN_E2B_TEMPLATE` must be the name derived from the current pins. | `false` |
+| `SYN_E2B_DOCKER_READY_SECONDS` | With nested Docker: how long a new sandbox may take for `docker info` to answer. | `30.0` |
 
 With `SYN_E2B_ENABLED=true` and no key or no template, settings refuse to
 load and the API does not start. It never falls back to Docker: a process that
@@ -41,6 +43,35 @@ was asked for E2B and ran on Docker would be lying about where your code ran.
 The key is a `SecretStr`. Syntropic137 passes it to the E2B client explicitly
 (the SDK's own `E2B_API_KEY` variable is not read), and never logs it or
 writes it into an event.
+
+## A template with Docker (nested Docker)
+
+For workspaces that run Docker themselves (integration tests with compose),
+build the template from the current pins in your own E2B account:
+
+```bash
+export SYN_E2B_API_KEY=...      # from your environment or keychain; never commit it
+just e2b-template-build         # needs docker and cosign; local only, never CI
+```
+
+It cosign-verifies the base image (the `PINNED_DIGESTS` entry for the default
+workspace provider), reads its version manifest, builds with agentic-workspace's
+`DockerEngine` and the pinned pre-pulls (`postgres:16` and the event store, each
+by digest), prints the template name and writes a receipt under
+`.e2b-templates/`. Then set:
+
+```bash
+SYN_E2B_TEMPLATE=<the printed name>
+SYN_E2B_NESTED_DOCKER=true
+SYN_E2B_CPU_COUNT=2
+SYN_E2B_MEMORY_MB=4096
+```
+
+The name is derived from the pinned inputs
+(`syn137-<image>-<digest12>-docker-<engine-hash8>`;
+`just e2b-template-build --name-only` prints it). After a pin bump the derived
+name changes and the API refuses to start on the old template until you build
+the new one: a stale template is never run silently.
 
 ## Running the real-E2B suite
 
