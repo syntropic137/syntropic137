@@ -245,7 +245,7 @@ async def test_an_older_revision_never_expires_even_when_it_was_uploaded(
         )
     assert await worker.step()
     assert await archive.get(older.archive) == b"prefix"
-    assert await _hold(db_pool, source) == ExpiryHold.NOT_NEWEST_UPLOADED.value
+    assert await _hold(db_pool, source) == ExpiryHold.OLDER_REVISION.value
 
 
 async def test_a_splice_base_is_held_so_its_references_are_not_inflated(
@@ -366,3 +366,41 @@ async def test_one_drain_asks_the_archive_a_bounded_number_of_times(
     assert len(sink.asked) == 4
     assert await worker.drain() == 2
     assert len(sink.asked) == 6
+
+
+async def test_holds_report_bodies_and_bytes_by_reason(db_pool, tmp_path: Path) -> None:
+    """What /health shows: every kept body once, under its latest reason."""
+    from syn_adapters.session_inventory.expiry_holds import PostgresExpiryHolds
+
+    source = str(uuid4())
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    older = await _capture(db_pool, archive, source, "older", b"prefix", native="t")
+    newest = await _capture(db_pool, archive, source, "newest", b"prefix+more", native="t")
+    local = await _capture(db_pool, archive, source, "local", b"local-only", native="l")
+    base = await _capture(db_pool, archive, source, "base", b"spliced-base", native="b")
+    await _age(db_pool, source)
+    for capture in (older, newest, base):
+        await _upload(db_pool, source, capture)
+    archive.is_splice_base = AsyncMock(  # type: ignore[method-assign]
+        side_effect=lambda ref: ref.sha256 == base.archive.sha256
+    )
+    worker, _ = _retention(db_pool, archive, source, _Sink(RevisionAbsent()))
+    await worker.drain()
+    summary = await PostgresExpiryHolds(db_pool, source).summary()
+    assert [(c.hold, c.bodies, c.bytes) for c in summary] == [
+        (ExpiryHold.OLDER_REVISION, 1, len(b"prefix")),
+        (ExpiryHold.NOT_UPLOADED, 1, len(b"local-only")),
+        (ExpiryHold.SPLICE_BASE, 1, len(b"spliced-base")),
+        (ExpiryHold.ABSENT, 1, len(b"prefix+more")),
+    ]
+    for capture in (older, newest, local, base):
+        assert await archive.get(capture.archive) is not None
+    # A held body the owner then deletes is no longer reported as held.
+    owner = PostgresTranscriptDeletions(
+        db_pool, source, _DEST, archive=archive, fence=DeletionFence(db_pool, source)
+    )
+    await owner.request(local, "deletion")
+    assert await worker.step()
+    assert ExpiryHold.NOT_UPLOADED not in [
+        c.hold for c in await PostgresExpiryHolds(db_pool, source).summary()
+    ]

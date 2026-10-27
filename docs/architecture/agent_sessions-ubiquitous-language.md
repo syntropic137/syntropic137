@@ -170,9 +170,12 @@ only when the archive holds the same revision (#2107).
 - **Off-site backup attestation:** the operator's statement that the archive
   is itself backed up off-site. Required for confirmed expiry, because a
   confirmation proves a durable commit, not a backup.
-- **Expiry hold:** the record that a confirmed expiry kept the bytes, with the
-  reason. The automatic tombstone is withdrawn and the body is not
-  reconsidered until the hold lapses.
+- **Expiry hold:** the record that the gate kept a body automatic expiry would
+  have removed, with the reason and its logical size: *older revision* (kept
+  for good), *not uploaded*, *splice base*, *backup not attested*, or the
+  archive's confirmation outcome. A withdrawn tombstone is not reconsidered
+  until the hold lapses. `/health` reports holds by reason under
+  `session_store.expiry_holds`.
 
 **Unclear:** the confirmation route and spec version are a draft until the
 owner rules on APSS PR #154 (tracked in #2107).

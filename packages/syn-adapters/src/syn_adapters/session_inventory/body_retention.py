@@ -25,16 +25,39 @@ AUTOMATIC_REASONS = ("retention_age", "retention_quota")
 # delivery was acknowledged remotely, with the content hash persisted before
 # upload. Older revisions are never eligible (#2107 R1). The gate still
 # confirms with the archive right before deleting.
-_ELIGIBLE = """(COALESCE(j.queued AND j.receipt_recorded AND NOT j.cancelled
-    AND j.content_hash IS NOT NULL AND u.payload->>'native_id' IS NOT NULL, FALSE)
-    AND NOT EXISTS(SELECT 1 FROM session_capture_catalog n
+_UPLOADED = """COALESCE(j.queued AND j.receipt_recorded AND NOT j.cancelled
+    AND j.content_hash IS NOT NULL AND u.payload->>'native_id' IS NOT NULL, FALSE)"""
+_NEWEST = """NOT EXISTS(SELECT 1 FROM session_capture_catalog n
         WHERE n.source_instance_id=u.source_instance_id
         AND n.payload->'run'->>'execution_id'=u.payload->'run'->>'execution_id'
         AND n.payload->>'harness'=u.payload->>'harness'
         AND n.payload->>'native_id'=u.payload->>'native_id'
         AND n.payload->>'content_format'='envelope'
         AND ((n.payload->'archive'->>'size')::bigint,n.created_at,n.producer_id,n.capture_id)
-            > ((u.payload->'archive'->>'size')::bigint,u.created_at,u.producer_id,u.capture_id)))"""
+            > ((u.payload->'archive'->>'size')::bigint,u.created_at,u.producer_id,u.capture_id))"""
+_ELIGIBLE = f"({_UPLOADED} AND {_NEWEST})"
+_DUE = """FROM session_capture_catalog c
+    WHERE c.source_instance_id=$1
+    AND NOT EXISTS(SELECT 1 FROM session_body_deletions d
+        WHERE d.source_instance_id=c.source_instance_id
+        AND d.archive_sha256=c.payload->'archive'->>'sha256')
+    GROUP BY 1"""
+_OBJECTS = """SELECT c.payload->'archive'->>'sha256' AS sha,
+    min((c.payload->'archive')::text) AS archive,
+    max((c.payload->'archive'->>'size')::bigint) AS size,
+    max(c.created_at) AS last_seen"""
+# Age: an object expires only when its NEWEST referencing capture has aged out,
+# since one content-addressed object can back captures acquired far apart.
+_AGE_CANDIDATES = f"""WITH candidates AS ({_OBJECTS} {_DUE}
+    HAVING max(c.created_at)<=now()-$2::double precision*interval '1 second')"""
+# Quota: keep the most recently referenced objects within the byte quota; each
+# exact object counts once, and tombstoned objects no longer count.
+_QUOTA_CANDIDATES = f"""WITH objects AS ({_OBJECTS} {_DUE}),
+    ranked AS (SELECT sha,archive,size,last_seen,
+        sum(size) OVER (ORDER BY last_seen DESC,sha DESC) AS newer_total FROM objects),
+    candidates AS (SELECT sha,archive,size,last_seen FROM ranked WHERE newer_total>$2)"""
+_NOT_HELD = """NOT EXISTS(SELECT 1 FROM session_body_retention_holds h
+    WHERE h.source_instance_id=$1 AND h.archive_sha256=sha AND h.held_until>now())"""
 _BACKING = """FROM session_capture_catalog u
     LEFT JOIN session_capture_delivery_jobs j ON j.destination_id=$DEST
     AND j.source_instance_id=u.source_instance_id AND j.producer_id=u.producer_id
@@ -100,100 +123,71 @@ class LocalBodyRetention:
         self._gate, self._destination, self._hold = gate, destination_id, hold_seconds
         self._max_confirms = self._confirms_left = max_confirms
 
-    def _gated(self) -> str:
-        """Discovery filter under the gate; the destination is bound as ``$4``."""
-        if self._gate is None:
-            return ""
-        backing = _BACKING.replace("$DEST", "$4").replace("$SHA", "sha")
-        return f"""AND NOT EXISTS(SELECT 1 FROM session_body_retention_holds h
-                WHERE h.source_instance_id=$1 AND h.archive_sha256=sha AND h.held_until>now())
-            AND NOT EXISTS(SELECT 1 {backing} AND NOT {_ELIGIBLE})"""
-
-    def _gated_args(self) -> tuple[str, ...]:
-        return () if self._gate is None or self._destination is None else (self._destination,)
-
     async def discover(self, limit: int = 100) -> None:
         if not 1 <= limit <= 500:
             raise ValueError("retention discovery limit must be 1..500")
         if self._age is not None:
-            await self._discover_age(limit)
+            await self._discover(_AGE_CANDIDATES, "retention_age", self._age, limit)
         if self._max_bytes is not None:
-            await self._discover_quota(limit)
+            await self._discover(_QUOTA_CANDIDATES, "retention_quota", self._max_bytes, limit)
 
-    async def _discover_age(self, limit: int) -> None:
-        """Tombstone objects whose every referencing capture is past the age.
+    async def _discover(self, candidates: str, reason: str, bound: int, limit: int) -> None:
+        """Tombstone due objects; under the gate, record why ineligible ones stay.
 
-        Bodies are content-addressed, so one object can back captures acquired
-        at very different times. Judging it by its oldest capture would erase
-        bytes a recent capture still references; an object expires only when
-        its newest referencing capture has aged out.
+        ``candidates`` is a CTE named ``candidates`` of due objects (age: every
+        referencing capture past the age; quota: the oldest-referenced objects
+        beyond the byte quota). Ungated, every candidate is tombstoned as before.
+        Gated, only eligible candidates are tombstoned and the rest are held:
+        an older revision for good, a newest one not yet uploaded until
+        ``hold_seconds`` pass. Holds are what the session store health reports.
         """
         async with self._pool.acquire() as conn, conn.transaction():
             await lock_tombstones_xact(conn, self._source)
-            await conn.execute(
-                """WITH objects AS (
-                    SELECT c.payload->'archive'->>'sha256' AS sha,
-                    min((c.payload->'archive')::text) AS archive,
-                    max(c.created_at) AS last_seen
-                    FROM session_capture_catalog c
-                    WHERE c.source_instance_id=$1
-                    AND NOT EXISTS(SELECT 1 FROM session_body_deletions d
-                        WHERE d.source_instance_id=c.source_instance_id
-                        AND d.archive_sha256=c.payload->'archive'->>'sha256')
-                    GROUP BY 1
-                    HAVING max(c.created_at)<=now()-$2::double precision*interval '1 second'
+            if self._gate is None or self._destination is None:
+                await conn.execute(
+                    f"""{candidates}
+                    INSERT INTO session_body_deletions(source_instance_id,archive_sha256,archive,reason)
+                    SELECT $1,sha,archive::jsonb,'{reason}' FROM candidates
+                    ORDER BY last_seen,sha LIMIT $3 ON CONFLICT DO NOTHING""",
+                    self._source,
+                    bound,
+                    limit,
                 )
+                return
+            backing = _BACKING.replace("$DEST", "$4").replace("$SHA", "sha")
+            await conn.execute(
+                f"""{candidates}
                 INSERT INTO session_body_deletions(source_instance_id,archive_sha256,archive,reason)
-                SELECT $1,sha,archive::jsonb,'retention_age' FROM objects
-                WHERE TRUE """
-                + self._gated()
-                + """
-                ORDER BY last_seen,sha LIMIT $3
-                ON CONFLICT DO NOTHING""",
+                SELECT $1,sha,archive::jsonb,'{reason}' FROM candidates
+                WHERE {_NOT_HELD} AND NOT EXISTS(SELECT 1 {backing} AND NOT {_ELIGIBLE})
+                ORDER BY last_seen,sha LIMIT $3 ON CONFLICT DO NOTHING""",
                 self._source,
-                self._age,
+                bound,
                 limit,
-                *self._gated_args(),
+                self._destination,
             )
-
-    async def _discover_quota(self, limit: int) -> None:
-        """Keep the most recently referenced objects within the byte quota.
-
-        Size counts each exact object once however many captures share it, and
-        an object is as recent as its newest referencing capture: the objects
-        whose newest reference is oldest are evicted first. Objects already
-        tombstoned no longer count against the quota.
-        """
-        async with self._pool.acquire() as conn, conn.transaction():
-            await lock_tombstones_xact(conn, self._source)
             await conn.execute(
-                """WITH objects AS (
-                    SELECT c.payload->'archive'->>'sha256' AS sha,
-                    min((c.payload->'archive')::text) AS archive,
-                    max((c.payload->'archive'->>'size')::bigint) AS size,
-                    max(c.created_at) AS last_seen
-                    FROM session_capture_catalog c
-                    WHERE c.source_instance_id=$1
-                    AND NOT EXISTS(SELECT 1 FROM session_body_deletions d
-                        WHERE d.source_instance_id=c.source_instance_id
-                        AND d.archive_sha256=c.payload->'archive'->>'sha256')
-                    GROUP BY 1
-                ), ranked AS (
-                    SELECT sha,archive,last_seen,
-                    sum(size) OVER (ORDER BY last_seen DESC,sha DESC) AS newer_total
-                    FROM objects
+                f"""{candidates}, judged AS (
+                    SELECT sha,size,last_seen,
+                    EXISTS(SELECT 1 {backing} AND NOT {_NEWEST}) AS older
+                    FROM candidates
+                    WHERE {_NOT_HELD} AND EXISTS(SELECT 1 {backing} AND NOT {_ELIGIBLE})
                 )
-                INSERT INTO session_body_deletions(source_instance_id,archive_sha256,archive,reason)
-                SELECT $1,sha,archive::jsonb,'retention_quota' FROM ranked
-                WHERE newer_total>$2 """
-                + self._gated()
-                + """
-                ORDER BY last_seen,sha LIMIT $3
-                ON CONFLICT DO NOTHING""",
+                INSERT INTO session_body_retention_holds
+                (source_instance_id,archive_sha256,held_until,hold,size)
+                SELECT $1,sha,
+                CASE WHEN older THEN 'infinity'::timestamptz
+                    ELSE now()+$5::double precision*interval '1 second' END,
+                CASE WHEN older THEN '{ExpiryHold.OLDER_REVISION.value}'
+                    ELSE '{ExpiryHold.NOT_UPLOADED.value}' END,
+                size FROM judged ORDER BY last_seen,sha LIMIT $3
+                ON CONFLICT(source_instance_id,archive_sha256) DO UPDATE
+                SET held_until=EXCLUDED.held_until,hold=EXCLUDED.hold,size=EXCLUDED.size""",
                 self._source,
-                self._max_bytes,
+                bound,
                 limit,
-                *self._gated_args(),
+                self._destination,
+                self._hold,
             )
 
     async def drain(self, max_steps: int = 20) -> int:
@@ -298,6 +292,13 @@ class LocalBodyRetention:
                 self._source,
                 archive.sha256,
             )
+            # A deleted body is no longer held, whatever an earlier pass decided.
+            await conn.execute(
+                """DELETE FROM session_body_retention_holds
+                WHERE source_instance_id=$1 AND archive_sha256=$2""",
+                self._source,
+                archive.sha256,
+            )
         return True
 
     async def _legacy_hash(self, archive: ArchivedTranscript) -> str | None:
@@ -322,14 +323,16 @@ class LocalBodyRetention:
             rows = await conn.fetch(
                 f"""SELECT u.payload->>'harness' AS harness,
                 u.payload->>'native_id' AS native_id, j.content_hash,
-                ({_ELIGIBLE})::text AS eligible {backing}""",
+                ({_UPLOADED})::text AS uploaded, ({_NEWEST})::text AS newest {backing}""",
                 self._source,
                 archive.sha256,
                 self._destination,
             )
         ineligible = None
-        if not rows or any(row["eligible"] != "true" for row in rows):
-            ineligible = ExpiryHold.NOT_NEWEST_UPLOADED
+        if any(row["newest"] != "true" for row in rows):
+            ineligible = ExpiryHold.OLDER_REVISION
+        elif not rows or any(row["uploaded"] != "true" for row in rows):
+            ineligible = ExpiryHold.NOT_UPLOADED
         elif await self._archive.is_splice_base(archive):
             ineligible = ExpiryHold.SPLICE_BASE
         # One revision per qualified identity and hash: several runs can hold
@@ -374,15 +377,19 @@ class LocalBodyRetention:
             )
             if withdrawn is None:
                 return False
+            # An older revision never becomes the newest again: held for good.
             await conn.execute(
                 """INSERT INTO session_body_retention_holds
-                (source_instance_id,archive_sha256,held_until,hold)
-                VALUES($1,$2,now()+$3::double precision*interval '1 second',$4)
-                ON CONFLICT(source_instance_id,archive_sha256)
-                DO UPDATE SET held_until=EXCLUDED.held_until,hold=EXCLUDED.hold""",
+                (source_instance_id,archive_sha256,held_until,hold,size)
+                VALUES($1,$2,CASE WHEN $4=$6 THEN 'infinity'::timestamptz
+                    ELSE now()+$3::double precision*interval '1 second' END,$4,$5)
+                ON CONFLICT(source_instance_id,archive_sha256) DO UPDATE
+                SET held_until=EXCLUDED.held_until,hold=EXCLUDED.hold,size=EXCLUDED.size""",
                 self._source,
                 archive.sha256,
                 self._hold,
                 hold.value,
+                archive.size,
+                ExpiryHold.OLDER_REVISION.value,
             )
         return True

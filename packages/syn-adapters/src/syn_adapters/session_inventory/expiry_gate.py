@@ -52,7 +52,8 @@ class ExpiryHold(StrEnum):
     """Why an automatic expiry kept the bytes. Stored with the hold row."""
 
     NO_BACKUP_ATTESTATION = "no_backup_attestation"
-    NOT_NEWEST_UPLOADED = "not_newest_uploaded"
+    OLDER_REVISION = "older_revision"
+    NOT_UPLOADED = "not_uploaded"
     SPLICE_BASE = "splice_base"
     ABSENT = "absent"
     UNAUTHORIZED = "unauthorized"
@@ -103,7 +104,7 @@ class ConfirmedExpiryGate:
         """Decide one body's automatic expiry. Call immediately before deleting.
 
         ``ineligible`` is the caller's reason the body may not expire at all
-        (not the newest uploaded revision, or a splice base); the archive is
+        (an older revision, a newest one not yet uploaded, or a splice base); the archive is
         then not asked.
         """
         decision = await self._decide(revisions, ineligible)
@@ -122,7 +123,7 @@ class ConfirmedExpiryGate:
         if ineligible is not None:
             return ExpiryDecision(ineligible)
         if not revisions:
-            return ExpiryDecision(ExpiryHold.NOT_NEWEST_UPLOADED)
+            return ExpiryDecision(ExpiryHold.NOT_UPLOADED)
         for revision in revisions:
             hold = _hold_for(await self._sink.confirm(revision))
             if hold is not None:

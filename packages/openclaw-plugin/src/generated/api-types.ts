@@ -8279,6 +8279,54 @@ export interface components {
             completed_at?: string | null;
         };
         /**
+         * SessionExpiryHoldCount
+         * @description Bodies the confirmed-expiry gate keeps for one reason.
+         */
+        SessionExpiryHoldCount: {
+            /**
+             * Hold
+             * @description older_revision and splice_base are kept by design (splice dedupe); not_uploaded waits for delivery; no_backup_attestation means SYN_SESSION_INVENTORY_ARCHIVE_OFFSITE_BACKUP_ATTESTED is false; the rest are the archive's confirmation outcome (absent, unauthorized, integrity_failure, unavailable, not_advertised, unexpected).
+             * @enum {string}
+             */
+            hold: "no_backup_attestation" | "older_revision" | "not_uploaded" | "splice_base" | "absent" | "unauthorized" | "integrity_failure" | "unavailable" | "not_advertised" | "unexpected";
+            /**
+             * Bodies
+             * @description Distinct held transcript bodies.
+             */
+            bodies: number;
+            /**
+             * Bytes
+             * @description Their logical (uncompressed) size, not bytes on disk.
+             */
+            bytes: number;
+        };
+        /**
+         * SessionExpiryHoldsHealth
+         * @description What automatic expiry would remove but the confirmed-expiry gate keeps (#2107).
+         */
+        SessionExpiryHoldsHealth: {
+            /**
+             * Held Bodies
+             * @description Total held bodies across every reason.
+             */
+            held_bodies: number;
+            /**
+             * Held Bytes
+             * @description Their total logical (uncompressed) size.
+             */
+            held_bytes: number;
+            /**
+             * By Hold
+             * @description One entry per reason with at least one held body.
+             */
+            by_hold: components["schemas"]["SessionExpiryHoldCount"][];
+            /**
+             * Detail
+             * @description One line for an operator: what is held and why.
+             */
+            detail: string;
+        };
+        /**
          * SessionHistoryBackfillSummary
          * @description Receipts are reused across retries, so a resumed backfill reports the same total.
          */
@@ -8738,6 +8786,8 @@ export interface components {
              * @description One line for an operator: size, growth and runway.
              */
             detail: string;
+            /** @description Bodies the confirmed-expiry gate keeps, by reason. Null when SYN_SESSION_INVENTORY_ARCHIVE_CONFIRM_ENABLED is off or the holds could not be read. */
+            expiry_holds?: components["schemas"]["SessionExpiryHoldsHealth"] | null;
         };
         /**
          * SessionSummaryResponse

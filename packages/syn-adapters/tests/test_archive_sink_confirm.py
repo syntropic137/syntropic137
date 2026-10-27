@@ -208,12 +208,14 @@ async def test_without_backup_attestation_nothing_is_permitted_or_asked() -> Non
     assert sink.asked == []
 
 
-@pytest.mark.parametrize("hold", [ExpiryHold.NOT_NEWEST_UPLOADED, ExpiryHold.SPLICE_BASE])
+@pytest.mark.parametrize(
+    "hold", [ExpiryHold.OLDER_REVISION, ExpiryHold.NOT_UPLOADED, ExpiryHold.SPLICE_BASE]
+)
 async def test_an_ineligible_body_is_held_without_asking(hold: ExpiryHold) -> None:
     sink = _ScriptedSink({_revision(1).content_hash: _CONFIRMED})
     gate = ConfirmedExpiryGate(sink, offsite_backup_attested=True)
     assert (await gate.decide([_revision(1)], ineligible=hold)).hold is hold
-    assert (await gate.decide([])).hold is ExpiryHold.NOT_NEWEST_UPLOADED
+    assert (await gate.decide([])).hold is ExpiryHold.NOT_UPLOADED
     assert sink.asked == []
 
 

@@ -3414,6 +3414,50 @@ class DiskSpaceHealth(BaseModel):
     )
 
 
+SessionExpiryHoldReason = Literal[
+    "no_backup_attestation",
+    "older_revision",
+    "not_uploaded",
+    "splice_base",
+    "absent",
+    "unauthorized",
+    "integrity_failure",
+    "unavailable",
+    "not_advertised",
+    "unexpected",
+]
+"""Why the confirmed-expiry gate keeps a body (#2107); mirrors ``ExpiryHold``."""
+
+
+class SessionExpiryHoldCount(BaseModel):
+    """Bodies the confirmed-expiry gate keeps for one reason."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    hold: SessionExpiryHoldReason = Field(
+        description="older_revision and splice_base are kept by design (splice dedupe); "
+        "not_uploaded waits for delivery; no_backup_attestation means "
+        "SYN_SESSION_INVENTORY_ARCHIVE_OFFSITE_BACKUP_ATTESTED is false; the rest are "
+        "the archive's confirmation outcome (absent, unauthorized, integrity_failure, "
+        "unavailable, not_advertised, unexpected)."
+    )
+    bodies: int = Field(description="Distinct held transcript bodies.")
+    bytes: int = Field(description="Their logical (uncompressed) size, not bytes on disk.")
+
+
+class SessionExpiryHoldsHealth(BaseModel):
+    """What automatic expiry would remove but the confirmed-expiry gate keeps (#2107)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    held_bodies: int = Field(description="Total held bodies across every reason.")
+    held_bytes: int = Field(description="Their total logical (uncompressed) size.")
+    by_hold: list[SessionExpiryHoldCount] = Field(
+        description="One entry per reason with at least one held body."
+    )
+    detail: str = Field(description="One line for an operator: what is held and why.")
+
+
 class SessionStoreHealth(BaseModel):
     """Size and growth of the host session archive, as /health reports it (#2107).
 
@@ -3446,6 +3490,11 @@ class SessionStoreHealth(BaseModel):
         "added in the last 7 days."
     )
     detail: str = Field(description="One line for an operator: size, growth and runway.")
+    expiry_holds: SessionExpiryHoldsHealth | None = Field(
+        default=None,
+        description="Bodies the confirmed-expiry gate keeps, by reason. Null when "
+        "SYN_SESSION_INVENTORY_ARCHIVE_CONFIRM_ENABLED is off or the holds could not be read.",
+    )
 
 
 class DbPoolHealth(BaseModel):

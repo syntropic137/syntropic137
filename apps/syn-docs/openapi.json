@@ -20885,6 +20885,83 @@
         "title": "SessionCostResponse",
         "description": "Cost for a single session."
       },
+      "SessionExpiryHoldCount": {
+        "properties": {
+          "hold": {
+            "type": "string",
+            "enum": [
+              "no_backup_attestation",
+              "older_revision",
+              "not_uploaded",
+              "splice_base",
+              "absent",
+              "unauthorized",
+              "integrity_failure",
+              "unavailable",
+              "not_advertised",
+              "unexpected"
+            ],
+            "title": "Hold",
+            "description": "older_revision and splice_base are kept by design (splice dedupe); not_uploaded waits for delivery; no_backup_attestation means SYN_SESSION_INVENTORY_ARCHIVE_OFFSITE_BACKUP_ATTESTED is false; the rest are the archive's confirmation outcome (absent, unauthorized, integrity_failure, unavailable, not_advertised, unexpected)."
+          },
+          "bodies": {
+            "type": "integer",
+            "title": "Bodies",
+            "description": "Distinct held transcript bodies."
+          },
+          "bytes": {
+            "type": "integer",
+            "title": "Bytes",
+            "description": "Their logical (uncompressed) size, not bytes on disk."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "hold",
+          "bodies",
+          "bytes"
+        ],
+        "title": "SessionExpiryHoldCount",
+        "description": "Bodies the confirmed-expiry gate keeps for one reason."
+      },
+      "SessionExpiryHoldsHealth": {
+        "properties": {
+          "held_bodies": {
+            "type": "integer",
+            "title": "Held Bodies",
+            "description": "Total held bodies across every reason."
+          },
+          "held_bytes": {
+            "type": "integer",
+            "title": "Held Bytes",
+            "description": "Their total logical (uncompressed) size."
+          },
+          "by_hold": {
+            "items": {
+              "$ref": "#/components/schemas/SessionExpiryHoldCount"
+            },
+            "type": "array",
+            "title": "By Hold",
+            "description": "One entry per reason with at least one held body."
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "One line for an operator: what is held and why."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "held_bodies",
+          "held_bytes",
+          "by_hold",
+          "detail"
+        ],
+        "title": "SessionExpiryHoldsHealth",
+        "description": "What automatic expiry would remove but the confirmed-expiry gate keeps (#2107)."
+      },
       "SessionHistoryBackfillSummary": {
         "properties": {
           "receipts": {
@@ -21973,6 +22050,17 @@
             "type": "string",
             "title": "Detail",
             "description": "One line for an operator: size, growth and runway."
+          },
+          "expiry_holds": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionExpiryHoldsHealth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bodies the confirmed-expiry gate keeps, by reason. Null when SYN_SESSION_INVENTORY_ARCHIVE_CONFIRM_ENABLED is off or the holds could not be read."
           }
         },
         "additionalProperties": false,

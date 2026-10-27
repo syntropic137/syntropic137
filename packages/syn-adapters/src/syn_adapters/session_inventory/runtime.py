@@ -35,6 +35,7 @@ from .clock import InventoryRecoveryClock
 from .deletion_fence import DeletionFence
 from .docker_recovery import DockerSpoolRecovery
 from .evidence_reader import PostgresSessionEvidence
+from .expiry_holds import PostgresExpiryHolds
 from .history_receipts import PostgresBackfillReceipts, PostgresHistoryBackfillQueue
 from .history_source import PostgresHistoricalEvidenceSource
 from .installation_identity import installation_identity
@@ -104,6 +105,8 @@ class InventoryRuntime:
     """None when no observability reader is wired; explicit backfill is then unavailable."""
     retention_lane: RetentionLane | None = None
     """Background gated retention, stopped with the runtime."""
+    expiry_holds: PostgresExpiryHolds | None = None
+    """What the confirmed-expiry gate keeps; None when the gate is off."""
 
 
 @dataclass(frozen=True)
@@ -272,6 +275,7 @@ async def create_inventory_runtime(
     return InventoryRuntime(
         source_instance_id=source_id,
         retention_lane=retention_lane,
+        expiry_holds=None if gate is None else PostgresExpiryHolds(pool, source_id),
         replication=create_replication_manager(
             pool, inventory, source_id, settings, archive=archive
         ),
