@@ -8,6 +8,7 @@ between the two reads.
 
 from __future__ import annotations
 
+import copy
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
@@ -57,10 +58,12 @@ class _ScanningStore:
         order_by: str | None = None,
     ) -> list[tuple[str, Mapping[str, JsonValue]]]:
         self.scanned_fields = list(fields)
-        return [(str(d["id"]), {f: d.get(f) for f in fields}) for d in self._docs]
+        return copy.deepcopy([(str(d["id"]), {f: d.get(f) for f in fields}) for d in self._docs])
 
     async def get_many(self, projection: str, keys: Sequence[str]) -> dict[str, ProjectionRecord]:
-        return {str(d["id"]): d for d in self._docs if d["id"] in keys and d["id"] != self._lose}
+        return copy.deepcopy(
+            {str(d["id"]): d for d in self._docs if d["id"] in keys and d["id"] != self._lose}
+        )
 
 
 async def _page(store: object, fields: tuple[str, ...], offset: int = 0) -> Page[str]:
