@@ -30,10 +30,14 @@ from eval_suite import ROOT
 
 from syn_shared.settings.workspace_images import WorkspaceImageProvider, workspace_image_ref
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(shutil.which("docker") is None, reason="requires Docker"),
-]
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+def docker_present() -> None:
+    """Fail, never skip, without Docker: a skip here would report nothing (#1984)."""
+    assert shutil.which("docker"), "the container referee tests need Docker on PATH"
+
 
 IMAGE = os.environ.get(
     "SYN_EVAL_REFEREE_TEST_IMAGE", workspace_image_ref(WorkspaceImageProvider.CLAUDE_CLI)
@@ -115,6 +119,7 @@ def test_the_network_patch_passes_where_the_network_is_on(
     assert run.outcome == "PASS", run.detail
 
 
+@pytest.mark.usefixtures("docker_present")
 def test_the_controls_hold_and_a_patch_that_needs_the_network_fails(
     subject: tuple[ImplementerCase, Path],
 ) -> None:
@@ -128,6 +133,7 @@ def test_the_controls_hold_and_a_patch_that_needs_the_network_fails(
     assert "URLError" in network.run.detail or "urlopen" in network.run.detail
 
 
+@pytest.mark.usefixtures("docker_present")
 def test_a_sync_attempt_offline_is_error(subject: tuple[ImplementerCase, Path]) -> None:
     """The prepared environment disappears once the network is cut: score must not rebuild it."""
     case, repo = subject

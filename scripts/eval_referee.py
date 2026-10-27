@@ -253,12 +253,13 @@ def unbundle(bundle: str, target: str) -> list[str]:
     return ["git", "-C", target, "fetch", "--quiet", bundle, refs]
 
 
+#: Lists the container's interfaces through the stdlib, so it names no Linux-only path.
+INTERFACE_PROBE = "import socket; print(' '.join(sorted(n for _, n in socket.if_nameindex())))"
+
+
 def _assert_offline(docker: Docker, name: str) -> None:
     """The container must have no interface but loopback before any agent code runs."""
-    listed = docker(
-        ["exec", name, "python3", "-c", "import os; print(' '.join(sorted(os.listdir('/sys/class/net'))))"],
-        STEP_TIMEOUT_SECONDS,
-    )  # fmt: skip
+    listed = docker(["exec", name, "python3", "-c", INTERFACE_PROBE], STEP_TIMEOUT_SECONDS)
     interfaces = listed.stdout.split()
     if listed.returncode != 0 or interfaces != ["lo"]:
         raise _RefereeError(

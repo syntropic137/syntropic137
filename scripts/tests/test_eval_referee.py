@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import eval_referee
 from eval_implementer import ImplementerCase
 from eval_referee import (
+    INTERFACE_PROBE,
     _RefereeError,
     fetch_patch,
     referee_score,
@@ -134,7 +135,7 @@ def _kind(args: list[str]) -> str:
         return "prepare"
     if args[:1] == ["exec"] and "score" in args:
         return "score"
-    if args[:1] == ["exec"] and "/sys/class/net" in " ".join(args):
+    if args[:1] == ["exec"] and INTERFACE_PROBE in args:
         return "offline-check"
     if args[:1] == ["exec"] and "fetch" in args:
         return "unbundle"
