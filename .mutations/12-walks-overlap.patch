@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/health_probes.py b/apps/syn-api/src/syn_api/services/health_probes.py
+index a0f63fd50..ba337e192 100644
+--- a/apps/syn-api/src/syn_api/services/health_probes.py
++++ b/apps/syn-api/src/syn_api/services/health_probes.py
+@@ -149,7 +149,7 @@ async def describe_session_store() -> SessionStoreHealth | None:
+         cache.refreshed_at is None
+         or time.monotonic() - cache.refreshed_at >= SESSION_STORE_CACHE_SECONDS
+     )
+-    if stale and (cache.refresh is None or cache.refresh.done()):
++    if stale:
+         cache.refresh = asyncio.create_task(_refresh_session_store(cache))
+     return cache.value
+ 

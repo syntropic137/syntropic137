@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+index ae32f4826..f68450110 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/local_archive.py
+@@ -294,7 +294,6 @@ class LocalSessionTranscriptArchive:
+                 output.flush()
+                 os.fsync(output.fileno())
+             # Materializing a referrer, or re-putting a spliced body.
+-            _keep_archived_time(temporary, self._root / f"{_REFERENCE}{ref.sha256}")
+             try:
+                 os.link(temporary, target)
+             except FileExistsError:
