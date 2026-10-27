@@ -2611,6 +2611,16 @@ changelog-check *args:
 vps-reclaim *flags:
     uv run python infra/scripts/vps_reclaim.py "$@"
 
+# Dry run by default: reports objects, bytes before/after and integrity failures.
+# --apply re-encodes each object gzip under the live workers' lock (verify, then
+# atomic replace); safe beside running workers; re-run to continue.
+#   just session-archive-compress
+#   just session-archive-compress --apply --budget-minutes 60
+# Compress existing session archive objects on the selfhost VPS (#2107)
+[positional-arguments]
+session-archive-compress *flags:
+    uv run python infra/scripts/session_archive_compress.py "$@"
+
 # Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
 # Codifies docs/deployment/test-deploy.md (direct path). Not a release.
 #   just pit-stop 0.29.1-beta.5                 # everything, waiting for the drain

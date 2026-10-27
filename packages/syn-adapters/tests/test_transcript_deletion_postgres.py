@@ -8,6 +8,7 @@ the session discoverable.
 
 from __future__ import annotations
 
+import gzip
 import json
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -200,7 +201,7 @@ async def test_owner_deletion_is_whole_object_idempotent_and_cannot_be_resurrect
 
     # Withheld immediately for every sharing run: the archive marker denies
     # reads and puts although erasure has not run yet.
-    assert (tmp_path / "archive" / first.archive.sha256).read_bytes() == body
+    assert gzip.decompress((tmp_path / "archive" / first.archive.sha256).read_bytes()) == body
     assert await archive.get(first.archive) is None
     for capture in (first, shared):
         assert await access.tombstone(capture) == "deleted"

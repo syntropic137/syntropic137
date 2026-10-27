@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import shlex
@@ -122,7 +123,9 @@ async def test_killed_workspace_recovers_native_bytes_without_remote_store(
         assert await worker.step()
         assert await journal.watermark(run) == 1
         bodies = [
-            path.read_bytes() for path in (tmp_path / "archive").iterdir() if path.stat().st_size
+            gzip.decompress(path.read_bytes())
+            for path in (tmp_path / "archive").iterdir()
+            if path.stat().st_size
         ]
         assert len(bodies) == 1
         assert json.loads(bodies[0])["raw"] == raw
