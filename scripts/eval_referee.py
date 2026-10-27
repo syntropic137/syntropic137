@@ -56,7 +56,7 @@ from typing import Protocol
 import httpx
 from eval_implementer import DEFAULT_SUITE, ImplementerCase, fix_patch, load_suite
 from eval_suite import ROOT, DefinitionError, _basic_auth, _detail
-from implementer_scorer import EXIT_CODES, Pin, TestRun
+from implementer_scorer import EXIT_CODES, PATCH_ERRORS, Pin, TestRun
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from syn_shared.settings.dev_tooling import get_dev_api_url
@@ -161,7 +161,7 @@ def write_inputs(pin: Pin, patch: str, scorer_commit: str, repo: Path, into: Pat
         raise _RefereeError(f"{SCORER_PATH} at {scorer_commit}: {scorer.stderr.strip()}")
     (into / "implementer_scorer.py").write_text(scorer.stdout)
     (into / "pin.json").write_text(pin.to_json())
-    (into / "implement.patch").write_text(patch)
+    (into / "implement.patch").write_text(patch, encoding="utf-8", errors=PATCH_ERRORS)
     # The workspace image runs as an unprivileged user that owns none of this.
     into.chmod(0o755)
     for path in into.iterdir():
@@ -191,42 +191,75 @@ def referee_score(
             submodules = write_inputs(pin, patch, scorer_commit, repo, inputs)
         except _RefereeError as exc:
             return TestRun(outcome="ERROR", detail=f"referee inputs: {exc}")
-        network_made = False
         try:
-            _step(docker, ["network", "create", name], "create the container's network")
-            network_made = True
-            _step(
-                docker,
-                [
-                    "run", "--detach", "--name", name, "--network", name,
-                    "--volume", f"{inputs}:{_IN}:ro",
-                    "--entrypoint", "sleep", image, "infinity",
-                ],
-                "start the container",
-            )  # fmt: skip
-            for argv, what in _setup(submodules):
-                _step(docker, ["exec", name, *argv], what, timeout=STEP_TIMEOUT_SECONDS)
-            prepared = docker(
-                ["exec", name, *_scorer("prepare", "--pin", f"{_IN}/pin.json",
-                                        "--repo", f"{_WORK}/repo", "--out", f"{_WORK}/prepared")],
-                PREPARE_TIMEOUT_SECONDS,
-            )  # fmt: skip
-            if prepared.returncode != 0:
-                return TestRun(outcome="ERROR", detail=f"prepare: {_tail(prepared)}")
-            _step(docker, ["network", "disconnect", name, name], "cut the network")
-            _assert_offline(docker, name)
-            scored = docker(
-                ["exec", name, *_scorer("score", "--prepared", f"{_WORK}/prepared",
-                                        "--patch", f"{_IN}/implement.patch")],
-                SCORE_TIMEOUT_SECONDS,
-            )  # fmt: skip
-            return verdict_of(scored)
-        except _RefereeError as exc:
-            return TestRun(outcome="ERROR", detail=str(exc))
+            run = _contained(docker, name, inputs, submodules, image)
         finally:
-            docker(["rm", "--force", name], STEP_TIMEOUT_SECONDS)
-            if network_made:
-                docker(["network", "rm", name], STEP_TIMEOUT_SECONDS)
+            left = [
+                why
+                for why in (
+                    _remove(docker, ["rm", "--force", name]),
+                    _remove(docker, ["network", "rm", name]),
+                )
+                if why
+            ]
+        if left:
+            listed = "\n".join(left)
+            return TestRun(
+                outcome="ERROR",
+                detail=f"cleanup incomplete, verdict {run.outcome} withheld:\n{listed}\n{run.detail}",
+            )
+        return run
+
+
+_GONE = ("no such container", "not found")
+"""How docker says a removal had nothing to remove: the outcome cleanup wants."""
+
+
+def _remove(docker: Docker, args: list[str], attempts: int = 3) -> str | None:
+    """Remove a container or network, retried. None once it is gone, else why it is not."""
+    why = ""
+    for _ in range(attempts):
+        ran = docker(args, STEP_TIMEOUT_SECONDS)
+        if ran.returncode == 0 or any(gone in ran.stderr.lower() for gone in _GONE):
+            return None
+        why = _tail(ran)
+    return f"docker {' '.join(args)} failed {attempts} times: {why}"
+
+
+def _contained(
+    docker: Docker, name: str, inputs: Path, submodules: list[str], image: str
+) -> TestRun:
+    """Everything between creating the container's network and the scorer's verdict."""
+    try:
+        _step(docker, ["network", "create", name], "create the container's network")
+        _step(
+            docker,
+            [
+                "run", "--detach", "--name", name, "--network", name,
+                "--volume", f"{inputs}:{_IN}:ro",
+                "--entrypoint", "sleep", image, "infinity",
+            ],
+            "start the container",
+        )  # fmt: skip
+        for argv, what in _setup(submodules):
+            _step(docker, ["exec", name, *argv], what, timeout=STEP_TIMEOUT_SECONDS)
+        prepared = docker(
+            ["exec", name, *_scorer("prepare", "--pin", f"{_IN}/pin.json",
+                                    "--repo", f"{_WORK}/repo", "--out", f"{_WORK}/prepared")],
+            PREPARE_TIMEOUT_SECONDS,
+        )  # fmt: skip
+        if prepared.returncode != 0:
+            return TestRun(outcome="ERROR", detail=f"prepare: {_tail(prepared)}")
+        _step(docker, ["network", "disconnect", name, name], "cut the network")
+        _assert_offline(docker, name)
+        scored = docker(
+            ["exec", name, *_scorer("score", "--prepared", f"{_WORK}/prepared",
+                                    "--patch", f"{_IN}/implement.patch")],
+            SCORE_TIMEOUT_SECONDS,
+        )  # fmt: skip
+        return verdict_of(scored)
+    except _RefereeError as exc:
+        return TestRun(outcome="ERROR", detail=str(exc))
 
 
 def _scorer(*args: str) -> list[str]:
@@ -372,21 +405,49 @@ class _Artifact(_Frozen):
 
 class _ArtifactList(_Frozen):
     artifacts: list[_Artifact]
+    total: int
+
+
+_PAGE_SIZE = 200
+"""The API's largest page. Any page size is correct: every page is read."""
+
+
+def _implement_artifacts(client: httpx.Client, execution_id: str) -> list[_Artifact]:
+    """Every artifact of the run's implement phase, across every page of the listing."""
+    found: list[_Artifact] = []
+    page = 1
+    while True:
+        listed = client.get(
+            "/artifacts",
+            params={
+                "execution_id": execution_id,
+                "phase_id": "implement",
+                "page": page,
+                "page_size": _PAGE_SIZE,
+            },
+        )
+        if listed.is_error:
+            raise _RefereeError(
+                f"listing {execution_id}'s artifacts: {listed.status_code} {_detail(listed)}"
+            )
+        try:
+            listing = _ArtifactList.model_validate(listed.json())
+        except (ValueError, ValidationError) as exc:
+            raise _RefereeError(f"listing {execution_id}'s artifacts: {exc}") from exc
+        found += listing.artifacts
+        if len(found) >= listing.total:
+            return found
+        if not listing.artifacts:
+            raise _RefereeError(
+                f"listing {execution_id}'s artifacts: page {page} is empty with"
+                f" {len(found)} of {listing.total} read"
+            )
+        page += 1
 
 
 def fetch_patch(client: httpx.Client, execution_id: str) -> str:
     """The implement phase's `implement.patch`, byte for byte. Refuses rather than guesses."""
-    listed = client.get(
-        "/artifacts", params={"execution_id": execution_id, "phase_id": "implement"}
-    )
-    if listed.is_error:
-        raise _RefereeError(
-            f"listing {execution_id}'s artifacts: {listed.status_code} {_detail(listed)}"
-        )
-    try:
-        artifacts = _ArtifactList.model_validate(listed.json()).artifacts
-    except (ValueError, ValidationError) as exc:
-        raise _RefereeError(f"listing {execution_id}'s artifacts: {exc}") from exc
+    artifacts = _implement_artifacts(client, execution_id)
     patches = [a for a in artifacts if (a.title or "").endswith("implement.patch")]
     if len(patches) != 1:
         raise _RefereeError(
@@ -396,7 +457,7 @@ def fetch_patch(client: httpx.Client, execution_id: str) -> str:
     raw = client.get(f"/artifacts/{patches[0].id}/raw")
     if raw.is_error:
         raise _RefereeError(f"artifact {patches[0].id}: {raw.status_code} {_detail(raw)}")
-    return raw.content.decode()
+    return raw.content.decode("utf-8", errors=PATCH_ERRORS)
 
 
 def record(

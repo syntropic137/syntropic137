@@ -190,6 +190,37 @@ def test_no_patch_is_scored_unless_everything_before_it_held(
     assert docker.kinds()[-2:] == ["rm --force", "network rm"]
 
 
+@pytest.mark.parametrize(
+    "answers",
+    [
+        {"rm --force": _done(code=1, stderr="Error response from daemon: device busy")},
+        {"network rm": _done(code=124, stderr="timed out after 300s")},
+    ],
+    ids=["container-stays", "network-stays"],
+)
+def test_a_pass_is_withheld_when_cleanup_does_not_hold(
+    tmp_path: Path, answers: dict[str, subprocess.CompletedProcess[str]]
+) -> None:
+    case, repo = _subject(tmp_path)
+    docker = FakeDocker(answers=answers)
+    run = _score(case, repo, docker)
+    assert run.outcome == "ERROR", run.detail
+    assert "verdict PASS withheld" in run.detail
+    (kind,) = answers
+    assert docker.kinds().count(kind) == 3
+
+
+def test_cleanup_of_what_was_never_made_is_not_an_error(tmp_path: Path) -> None:
+    case, repo = _subject(tmp_path)
+    docker = FakeDocker(
+        answers={
+            "rm --force": _done(code=1, stderr="Error response from daemon: No such container: x"),
+            "network rm": _done(code=1, stderr="Error response from daemon: network x not found"),
+        }
+    )
+    assert _score(case, repo, docker).outcome == "PASS"
+
+
 def test_the_scorer_is_read_from_its_recorded_commit_not_the_working_tree(tmp_path: Path) -> None:
     case, repo = _subject(tmp_path)
     into = tmp_path / "in"
@@ -305,12 +336,19 @@ def test_a_scorer_with_uncommitted_changes_is_refused(tmp_path: Path) -> None:
         scorer_commit_of(repo)
 
 
-def _api(artifacts: list[dict[str, str]], raw: bytes = b"diff --git a/x b/x\n") -> httpx.Client:
+def _api(
+    artifacts: list[dict[str, str]], raw: bytes = b"diff --git a/x b/x\n", cap: int = 200
+) -> httpx.Client:
+    """The listing pages as the API does, `page_size` capped at `cap` (the API's is 200)."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/artifacts":
             assert request.url.params["execution_id"] == "exec-1"
             assert request.url.params["phase_id"] == "implement"
-            return httpx.Response(200, json={"artifacts": artifacts, "total": len(artifacts)})
+            size = min(int(request.url.params.get("page_size", "50")), cap)
+            start = (int(request.url.params.get("page", "1")) - 1) * size
+            page = artifacts[start : start + size]
+            return httpx.Response(200, json={"artifacts": page, "total": len(artifacts)})
         return httpx.Response(200, content=raw)
 
     return httpx.Client(base_url="http://api", transport=httpx.MockTransport(handler))
@@ -322,6 +360,26 @@ def test_the_patch_is_the_implement_phase_s_one_implement_patch_byte_for_byte() 
         [{"id": "a1", "title": "implement.patch"}, {"id": "a2", "title": "notes.md"}], raw
     )
     assert fetch_patch(client, "exec-1") == raw.decode()
+
+
+def test_every_page_is_read_before_the_patch_is_chosen() -> None:
+    notes = [{"id": f"n{i}", "title": f"notes-{i}.md"} for i in range(3)]
+    patch = {"id": "p1", "title": "Implement: implement.patch"}
+    assert fetch_patch(_api([*notes, patch], cap=2), "exec-1") == "diff --git a/x b/x\n"
+    with pytest.raises(_RefereeError, match=r"has 2 implement\.patch"):
+        fetch_patch(
+            _api([patch, *notes, {"id": "p2", "title": "implement.patch"}], cap=2), "exec-1"
+        )
+
+
+def test_a_patch_that_is_not_utf_8_reaches_the_container_byte_for_byte(tmp_path: Path) -> None:
+    raw = b"diff --git a/x b/x\n+caf\xe9 latin-1\n"
+    patch = fetch_patch(_api([{"id": "p1", "title": "implement.patch"}], raw), "exec-1")
+    case, repo = _subject(tmp_path)
+    into = tmp_path / "in"
+    into.mkdir()
+    write_inputs(case.pin(), patch, SCORER_COMMIT, repo, into)
+    assert (into / "implement.patch").read_bytes() == raw
 
 
 @pytest.mark.parametrize(

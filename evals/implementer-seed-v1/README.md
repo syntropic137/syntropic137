@@ -101,8 +101,9 @@ in the PR that added the suite.
    - runs `docker network disconnect`, then checks the container has no
      interface but loopback. Either failing is ERROR and the patch is not run;
    - runs `implementer_scorer.py score --prepared`: apply the patch, write each
-     hidden test (and every `conftest.py` the patch touches) at its
-     `fix_commit` content, run pytest on the hidden files only. It never
+     hidden test (and every pytest configuration file the patch touches:
+     `conftest.py`, `pytest.ini`, `pyproject.toml`, `tox.ini`, `setup.cfg`)
+     at its `fix_commit` content, run pytest on the hidden files only. It never
      syncs: a prepared tree without its environment is ERROR. A prepared tree
      scores one patch;
    - takes the verdict from the scorer's exit code and its last line,

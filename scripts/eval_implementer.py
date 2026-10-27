@@ -43,7 +43,7 @@ from pathlib import Path
 
 import yaml
 from eval_suite import ROOT, DefinitionError, Suite, _read_yaml, _workflow_problems
-from implementer_scorer import Pin, prepare, report, score_patch, score_prepared
+from implementer_scorer import PATCH_ERRORS, Pin, prepare, report, score_patch, score_prepared
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 DEFAULT_SUITE = ROOT / "evals" / "implementer-seed-v1"
@@ -127,7 +127,11 @@ def load_suite(directory: Path, root: Path = ROOT) -> ImplementerSuite:
 
 def _git(repo: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, input=stdin
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        encoding="utf-8",
+        errors=PATCH_ERRORS,
+        input=stdin,
     )
 
 

@@ -21,9 +21,15 @@ xfailed or deselected, so an agent's conftest that skips the hidden tests would
 earn it. The intended hidden tests are the node ids pytest collects from the
 hidden files at ``fix_commit``, before any agent code exists; a recording
 plugin outside the tree reports how each one ended on the change, and every one
-of them must have run and passed. Every ``conftest.py`` the patch touches is
-also put back as it stands at ``fix_commit``: like the hidden tests, the test
-fixtures are the judge's.
+of them must have run and passed. Every file pytest reads its configuration
+or plugins from (``conftest.py``, ``pytest.ini``, ``pyproject.toml`` ...) that
+the patch touches is also put back as it stands at ``fix_commit``, or removed
+if the fix has none: like the hidden tests, how they are run is the judge's. A
+patch adding ``-p hooks`` to ``addopts`` would otherwise load a plugin that
+rewrites every report to passed before the recorder sees it.
+
+Not closed: the hidden tests import the change, so code it adds runs inside
+the pytest process and can forge anything that process reports (#2136).
 
     PASS   every intended hidden test ran and passed on the agent's change
     FAIL   the patch does not apply, a hidden test failed, or one was skipped,
@@ -66,6 +72,13 @@ PYTEST = ("uv", "run", "--frozen", "--no-sync", "pytest")
 """How the environment is built and pytest run in a tree. Module-level so a test can point
 them at a tiny repository's interpreter and still go through the real worktree and pytest."""
 ENVIRONMENT = ".venv"
+PATCH_ERRORS = "surrogateescape"
+"""How a patch is carried as str: `git diff --binary` promises no encoding for a text
+hunk, and surrogateescape maps every byte to a str and back unchanged."""
+JUDGE_CONFIG = frozenset(
+    {"conftest.py", "pytest.ini", ".pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg"}
+)
+"""File names pytest reads configuration or plugins from, in any directory: judged at the fix."""
 """What SYNC builds inside a tree. `score --prepared` refuses a tree without it."""
 
 PREPARED = "prepared.json"
@@ -152,7 +165,11 @@ class _EnvironmentFailure(Exception):
 
 def _git(repo: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, input=stdin
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        encoding="utf-8",
+        errors=PATCH_ERRORS,
+        input=stdin,
     )
 
 
@@ -298,7 +315,7 @@ def _judge(pin: Pin, patch: str, repo: Path, tree: Path, expected: tuple[str, ..
         applied = _git(tree, "apply", "--whitespace=nowarn", "-", stdin=patch)
         if applied.returncode != 0:
             return TestRun(outcome="FAIL", detail=f"patch does not apply: {applied.stderr.strip()}")
-    judged = {p for p in _patched_paths(tree, patch) if Path(p).name == "conftest.py"}
+    judged = {p for p in _patched_paths(tree, patch) if Path(p).name in JUDGE_CONFIG}
     for path in sorted(judged | set(pin.hidden_tests)):
         _restore_from_fix(repo, tree, pin.fix_commit, path)
     return _run_hidden_tests(tree, pin.hidden_tests, expected)
@@ -343,7 +360,7 @@ def _restore_from_fix(repo: Path, tree: Path, fix_commit: str, path: str) -> Non
     """Make `path` in `tree` what it is at `fix_commit`, absent if the fix has no such file."""
     target = tree / path
     if _git(repo, "cat-file", "-e", f"{fix_commit}:{path}").returncode != 0:
-        if path.endswith("conftest.py"):
+        if Path(path).name in JUDGE_CONFIG:
             target.unlink(missing_ok=True)
             return
         raise _EnvironmentFailure(f"hidden test {path} is not in {fix_commit}")
@@ -497,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"prepared {pin.id} at {pin.commit} in {args.out}")
         return 0
     try:
-        patch = args.patch.read_text()
+        patch = args.patch.read_text(encoding="utf-8", errors=PATCH_ERRORS)
     except OSError as exc:
         return report(TestRun(outcome="ERROR", detail=f"{args.patch}: {exc}"))
     return report(score_prepared(args.prepared, patch))

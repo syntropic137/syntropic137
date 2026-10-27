@@ -438,6 +438,9 @@ def test_the_bug_left_in_place_fails_and_the_fix_passes(
         _plugin(*_SKIP_ALL),
         _plugin(*_mark_second("skip")),
         _plugin(*_mark_second("xfail")),
+        _plugin(*_REPORT_PASSED),
+        _new_file("pytest.ini", "[pytest]", "pythonpath = .", "addopts = -p hooks")
+        + _new_file("hooks.py", "import pytest", *_REPORT_PASSED),
         _addopts("--deselect tests/test_second.py::test_second"),
         _conftest(*_SKIP_ALL),
         _conftest(*_mark_second("skip")),
@@ -447,6 +450,8 @@ def test_the_bug_left_in_place_fails_and_the_fix_passes(
         "plugin-skip-all",
         "plugin-skip-second",
         "plugin-xfail-second",
+        "plugin-report-passed",
+        "pytest-ini-plugin-report-passed",
         "addopts-deselect-second",
         "conftest-skip-all",
         "conftest-skip-second",
@@ -461,6 +466,25 @@ def test_a_change_that_hides_the_bug_from_pytest_is_not_a_pass(
     run = score_patch(case.pin(), patch, repo)
     assert run.outcome == "FAIL", run.detail
     assert "test_second" in run.detail
+
+
+def test_a_plugin_loaded_by_config_cannot_forge_a_prepared_pass(
+    prepared: tuple[ImplementerCase, Path, Path],
+) -> None:
+    """The referee's path: `score --prepared` restores the configuration as `score` does."""
+    _, _, out = prepared
+    run = implementer_scorer.score_prepared(out, _plugin(*_REPORT_PASSED))
+    assert run.outcome == "FAIL", run.detail
+
+
+def test_a_patch_whose_text_is_not_utf_8_is_applied_not_crashed_on(
+    two_hidden_files: tuple[ImplementerCase, Path],
+) -> None:
+    """`git diff --binary` promises no encoding for a text hunk; Latin-1 here, carried escaped."""
+    case, repo = two_hidden_files
+    latin1 = b"caf\xe9\n".decode("utf-8", errors=implementer_scorer.PATCH_ERRORS).rstrip("\n")
+    run = score_patch(case.pin(), fix_patch(case, repo) + _new_file("menu.txt", latin1), repo)
+    assert run.outcome == "PASS", run.detail
 
 
 def test_a_fix_plus_a_harmless_conftest_still_passes(
