@@ -5,6 +5,7 @@ Called by scripts/pit_stop.sh at `stage`:
     python3 scripts/pit_stop_repoint.py <tag> <deployed-compose> <staged-compose> [--service gateway]
     python3 scripts/pit_stop_repoint.py --on-tag <tag> <compose> <service>
     python3 scripts/pit_stop_repoint.py --drift <published-compose> <deployed-compose>
+    python3 scripts/pit_stop_repoint.py --add-null-keys <published-compose> <deployed-compose> <out>
 
 The second form prints 1 when the compose service <service> (`api` or
 `gateway`) has one image line and it names exactly the ref `ship` loaded, else 0. It is the count
@@ -20,7 +21,18 @@ otherwise be deployed without it and abort on every start. Every image line is
 compared by image NAME: the published file says `${SYN_VERSION:-latest}`, a
 release-installed host a digest, a hotfixed one a tag, and none of that is drift.
 
-It writes the staged compose and prints, on stdout, the name to back the
+The fourth form handles the one drift that needs no owner (#2154): env keys
+the published compose adds as `KEY: null`. A null passthrough forwards only the
+host's .env value, which is unset for a key the host has never had, so the
+setting's default applies, exactly as on a fresh install. It writes <out> as
+the deployed file with exactly those lines inserted where the published file has
+them (every other byte, the host's own pins included, kept), prints each added
+key on stdout and exits 0. It exits 0 printing nothing, and writes nothing, when
+there is no drift. Any other drift (a valued key, a removed or changed line,
+a key outside an `environment:` map) exits 1 with the reason on stderr and
+writes nothing: that still goes to the owner.
+
+The first form writes the staged compose and prints, on stdout, the name to back the
 deployed file up under (empty when every pin is already the shipped ref, so
 there is nothing to stage). `--service gateway` repoints the syn-gateway pin
 alone and leaves syn-api's exactly as deployed (#1310). Anything it cannot
@@ -63,6 +75,9 @@ REGISTRY = "ghcr.io/syntropic137"
 #: line's indent, not the key's, and pick the wrong service or none.
 _IMAGE_LINE = re.compile(r"^(?P<lead>[ \t]*image:[ \t]*[\"']?)(?P<ref>[^\s\"'#]+)", re.MULTILINE)
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+#: An env passthrough with no value. Literally `null`: `""`, `~`, `${X}` or a
+#: trailing comment is not this shape and stays the owner's.
+_NULL_KEY = re.compile(r"(?P<indent>[ \t]+)(?P<key>[A-Z][A-Z0-9_]*):[ \t]*null[ \t]*")
 
 
 class RepointError(Exception):
@@ -167,16 +182,26 @@ def on_tag(compose: str, tag: str, service: str) -> bool:
     return found == {f"{REGISTRY}/{IMAGES[service]}:{tag}"}
 
 
+def _unpinned(m: re.Match[str]) -> str:
+    path, _, name = m["ref"].partition("@")[0].rpartition("/")
+    return m["lead"] + (f"{path}/" if path else "") + name.partition(":")[0]
+
+
+def _significant(lines: list[str]) -> list[tuple[str, int]]:
+    """Each line `drift` compares, pin cut to its repository, with its index in
+    `lines`: blank and comment lines are skipped, since neither pins nor
+    commentary change what a service runs."""
+    return [
+        (_IMAGE_LINE.sub(_unpinned, line), i)
+        for i, line in enumerate(lines)
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
 def _without_pins(compose: str) -> list[str]:
     """`compose` with every image ref cut to its repository, and without blank
-    and comment lines: neither pins nor commentary change what a service runs."""
-
-    def unpinned(m: re.Match[str]) -> str:
-        path, _, name = m["ref"].partition("@")[0].rpartition("/")
-        return m["lead"] + (f"{path}/" if path else "") + name.partition(":")[0]
-
-    lines = _IMAGE_LINE.sub(unpinned, compose).splitlines(keepends=True)
-    return [line for line in lines if line.strip() and not line.lstrip().startswith("#")]
+    and comment lines."""
+    return [line for line, _ in _significant(compose.splitlines(keepends=True))]
 
 
 def drift(published: str, deployed: str) -> str:
@@ -191,11 +216,73 @@ def drift(published: str, deployed: str) -> str:
     )
 
 
+def _parent_key(lines: list[str], at: int) -> str:
+    """The mapping key line `at` sits under: the nearest significant line above
+    it that is indented less."""
+    indent = len(lines[at]) - len(lines[at].lstrip())
+    for line in reversed(lines[:at]):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if len(line) - len(line.lstrip()) < indent:
+            return line.strip()
+    return ""
+
+
+def add_null_keys(published: str, deployed: str) -> tuple[str, tuple[str, ...]]:
+    """`deployed` with the `KEY: null` env lines `published` adds, and those keys.
+
+    Raises RepointError unless every difference, pins aside, is such a line."""
+    pub_lines = published.splitlines(keepends=True)
+    dep_lines = deployed.splitlines(keepends=True)
+    pub, dep = _significant(pub_lines), _significant(dep_lines)
+    matcher = difflib.SequenceMatcher(None, [s for s, _ in dep], [s for s, _ in pub], autojunk=False)
+    after: dict[int, list[str]] = {}
+    keys: list[str] = []
+    for op, i1, _i2, j1, j2 in matcher.get_opcodes():
+        if op == "equal":
+            continue
+        if op != "insert":
+            where = dep[i1][1] + 1 if i1 < len(dep) else len(dep_lines)
+            raise RepointError(f"deployed line {where} differs from the published compose ({op})")
+        if i1 == 0:
+            raise RepointError("the published compose adds lines before any it shares")
+        for _, j in pub[j1:j2]:
+            m = _NULL_KEY.fullmatch(pub_lines[j].rstrip("\r\n"))
+            if not m:
+                raise RepointError(f"not a KEY: null passthrough: {pub_lines[j].strip()}")
+            if _parent_key(pub_lines, j) != "environment:":
+                raise RepointError(f"{m['key']} is not in an environment: map")
+            keys.append(m["key"])
+            after.setdefault(dep[i1 - 1][1], []).append(pub_lines[j])
+    out: list[str] = []
+    for i, line in enumerate(dep_lines):
+        out.append(line)
+        if i in after:
+            if not line.endswith("\n"):
+                out[-1] = line + "\n"
+            out.extend(after[i])
+    text = "".join(out)
+    if drift(published, text):
+        raise RepointError("adding the keys did not clear the drift")
+    return text, tuple(keys)
+
+
 def main(argv: list[str]) -> int:
     if len(argv) == 3 and argv[0] == "--drift":
         diff = drift(Path(argv[1]).read_text(), Path(argv[2]).read_text())
         print(diff, end="")
         return 1 if diff else 0
+    if len(argv) == 4 and argv[0] == "--add-null-keys":
+        _, published, deployed, out = argv
+        try:
+            text, keys = add_null_keys(Path(published).read_text(), Path(deployed).read_text())
+        except RepointError as e:
+            print(f"   cannot add env keys: {e}", file=sys.stderr)
+            return 1
+        if keys:
+            Path(out).write_text(text)
+            print("\n".join(keys))
+        return 0
     if len(argv) == 4 and argv[0] == "--on-tag":
         _, tag, compose, svc = argv
         print(1 if svc in IMAGES and on_tag(Path(compose).read_text(), tag, svc) else 0)
