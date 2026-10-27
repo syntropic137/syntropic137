@@ -1,7 +1,8 @@
-"""Edit an execution's or a workflow's tags after creation (#967).
+"""Edit an execution's, a workflow's or an eval's tags after creation (#967).
 
 ``POST .../tags`` adds the body's tags; ``DELETE .../tags?tag=`` removes the
-named ones. Both are idempotent and neither replaces the set: adding a tag
+named ones (an eval's tags are only added, #2108: an eval-set roster is
+written onto its evals as tags, and tags accumulate). Both are idempotent and neither replaces the set: adding a tag
 already present, or removing one that is absent, succeeds and records nothing.
 The removal names its tags in the query, spelled exactly like the ``?tag=``
 list filter, because a DELETE body has no defined meaning in HTTP.
@@ -20,17 +21,25 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import ValidationError
 
 from syn_adapters.projection_stores.prefix_match import format_ambiguous_error, resolve_by_prefix
 from syn_api._wiring import (
     ensure_connected,
+    get_eval_repo,
     get_projection_mgr,
     get_publisher,
     get_workflow_execution_repository,
     get_workflow_repo,
     sync_published_events_to_projections,
 )
-from syn_api.types import AddTagsRequest, ExecutionTagsResponse, WorkflowTagsResponse
+from syn_api._wiring_evals import get_revision_resolver
+from syn_api.types import (
+    AddTagsRequest,
+    EvalTagsResponse,
+    ExecutionTagsResponse,
+    WorkflowTagsResponse,
+)
 from syn_domain.contexts.orchestration import (
     AddExecutionTagsCommand,
     AddExecutionTagsHandler,
@@ -43,6 +52,8 @@ from syn_domain.contexts.orchestration import (
     RemoveWorkflowTagsHandler,
     TagSet,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import EvalId
+from syn_domain.contexts.orchestration.slices.update_eval import UpdateEvalHandler
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration._shared.tag_edit import TagEditResult
@@ -53,7 +64,7 @@ if TYPE_CHECKING:
 router = APIRouter(tags=["tags"])
 
 _EDIT_RESPONSES: dict[int | str, dict[str, str]] = {
-    404: {"description": "No execution or workflow has this id"},
+    404: {"description": "No execution, workflow or eval has this id"},
     409: {"description": "The id prefix matches more than one record"},
     422: {"description": "A tag is invalid, none was given, or the limit would be exceeded"},
 }
@@ -188,3 +199,39 @@ async def remove_workflow_tags_endpoint(
     )
     tags = await _settled(result, "Workflow", workflow_id)
     return WorkflowTagsResponse(workflow_id=workflow_id, tags=list(tags))
+
+
+# =============================================================================
+# Evals
+# =============================================================================
+
+
+@router.post(
+    "/evals/{eval_id}/tags",
+    response_model=EvalTagsResponse,
+    responses=_EDIT_RESPONSES,
+)
+async def add_eval_tags_endpoint(eval_id: str, body: AddTagsRequest) -> EvalTagsResponse:
+    """Add tags to an eval: how a harness writes an eval-set roster (suite-version, split, polarity).
+
+    Tags already present are a no-op, so a roster is re-registered safely.
+    An archived eval refuses the edit (422).
+    """
+    try:
+        target = EvalId(eval_id)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from exc
+    await ensure_connected()
+    repository = get_eval_repo()
+    handler = UpdateEvalHandler(repository, get_revision_resolver(), get_publisher())
+    result = await handler.handle(eval_id=target, add_tags=body.tags)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Eval not found: {eval_id}")
+    if not result.success:
+        raise HTTPException(status_code=422, detail=result.error)
+    await sync_published_events_to_projections()
+    edited = await repository.get_by_id(eval_id)
+    if edited is None:
+        msg = f"eval {eval_id} was edited but cannot be loaded"
+        raise RuntimeError(msg)
+    return EvalTagsResponse(eval_id=eval_id, tags=list(edited.tags))
