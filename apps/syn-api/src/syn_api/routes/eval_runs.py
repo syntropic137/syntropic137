@@ -278,7 +278,10 @@ async def eval_summaries(
     Every id given gets an entry; an eval with no runs summarizes nothing.
     """
     members = await manager.eval_list.members_of(eval_ids)
-    scores = await manager.eval_list.scores_in(eval_ids)
+    # The members' scores only: the score history also holds detached runs.
+    scores = await manager.eval_list.scores_of(
+        [(e, row.workflow_execution_id) for e, rows in members.items() for row in rows]
+    )
     execution_ids = {row.workflow_execution_id for rows in members.values() for row in rows}
     reads = await RunReads.load(manager, sorted(execution_ids))
     return {

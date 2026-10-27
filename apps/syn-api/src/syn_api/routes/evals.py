@@ -51,7 +51,7 @@ from syn_api.routes.eval_runs import (
     stats_response,
     variant_responses,
 )
-from syn_api.routes.eval_sets import eval_case_cohorts
+from syn_api.routes.eval_sets import eval_case_cohorts, refuse_oversized_eval
 from syn_api.routes.trends import eval_trend
 from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
@@ -398,6 +398,9 @@ async def get_eval_endpoint(
     detail = await manager.eval_list.detail(eval_id, limit=0)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Eval not found: {eval_id}")
+    if k is not None:
+        # Before the summary below loads every run, not after.
+        refuse_oversized_eval(eval_id, detail.runs.total)
     row = _response(
         detail.record,
         detail.runs.total,
@@ -407,7 +410,9 @@ async def get_eval_endpoint(
     return EvalDetailResponse(
         **row.model_dump(),
         read_model_status=await read_model_status(EvalListProjection.PROJECTION_NAME),
-        cohorts=None if k is None else await eval_case_cohorts(manager, eval_id, k),
+        cohorts=None
+        if k is None
+        else await eval_case_cohorts(manager, eval_id, k, detail.runs.total),
     )
 
 

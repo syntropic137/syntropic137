@@ -29,6 +29,8 @@ from syn_domain.contexts.orchestration.domain.read_models.eval_sets import (
 from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
     DeclaredModel,
     TrialExclusion,
+    TrialOutcome,
+    classify_trial,
     cohort_of,
     declared_model_tags,
     declared_models_of,
@@ -70,6 +72,23 @@ def test_declared_model_tags_survive_the_launch_tag_rules_and_read_back() -> Non
     assert declared_models_of(launched) == {m.phase_id: m.model for m in models}
     key = cohort_of(run(tags=tuple(launched)))
     assert key is not None and key.models_digest == models_digest(models)
+
+
+def test_an_uppercase_phase_id_survives_the_lowercasing_launch_tags() -> None:
+    """TagSet lowercases; phase ids may be uppercase. The spelling must come back exact."""
+    models = _declared(Verify=SOL, review_Final=OPUS, plain=OPUS)
+
+    launched = tuple(TagSet(declared_model_tags(models)))
+
+    assert declared_models_of(launched) == {"Verify": SOL, "review_Final": OPUS, "plain": OPUS}
+    tags = (*cohort_tags(), *launched)
+    as_ran = run(tags=tags, own_models=(PhaseModel("Verify", SOL),))
+    assert classify_trial(as_ran, declared_models_of(tags)).result is TrialOutcome.PASS
+
+
+@pytest.mark.parametrize("spelling", ["_", "_1", "x_", "_-a"])
+def test_a_spelling_the_encoder_never_writes_is_not_a_declaration(spelling: str) -> None:
+    assert declared_models_of((f"model:{spelling}:{OPUS}",)) is None
 
 
 def test_the_models_digest_ignores_order_and_sees_every_phase() -> None:

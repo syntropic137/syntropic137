@@ -56,6 +56,8 @@ class EvalTag(StrEnum):
 
     A phase id never holds a colon (``PHASE_ID_PATTERN``), so the first colon
     after the prefix splits phase from model. ``=`` is not a tag character.
+    Both parts are spelled by ``encode_tag_value``, so an uppercase phase id
+    survives TagSet's lowercasing.
     """
     TRIAL = "trial"
 
@@ -90,6 +92,34 @@ def models_digest(models: Iterable[DeclaredModel]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:MODELS_DIGEST_HEX]
 
 
+def encode_tag_value(value: str) -> str:
+    """``value`` spelled so TagSet's lowercasing cannot change it: ``_`` -> ``__``, ``A`` -> ``_a``.
+
+    Phase ids may be uppercase (``PHASE_ID_PATTERN``) and TagSet lowercases
+    every tag, so a raw ``model:Verify:...`` would read back as ``verify`` and
+    never equal the observed ``Verify``. Reversed by ``decode_tag_value``.
+    """
+    return "".join("__" if c == "_" else f"_{c.lower()}" if c.isupper() else c for c in value)
+
+
+def decode_tag_value(value: str) -> str | None:
+    """The value ``encode_tag_value`` spelled; None for a spelling it never writes."""
+    out: list[str] = []
+    chars = iter(value)
+    for c in chars:
+        if c != "_":
+            out.append(c)
+            continue
+        nxt = next(chars, "")
+        if nxt == "_":
+            out.append("_")
+        elif nxt.isascii() and nxt.islower():
+            out.append(nxt.upper())
+        else:
+            return None
+    return "".join(out)
+
+
 def declared_model_tags(models: Iterable[DeclaredModel]) -> list[str]:
     """The launch tags that declare ``models``: ``models:<digest>`` and one ``model:`` per phase.
 
@@ -99,7 +129,10 @@ def declared_model_tags(models: Iterable[DeclaredModel]) -> list[str]:
     ordered = sorted(models)
     return [
         f"{EvalTag.MODELS}:{models_digest(ordered)}",
-        *(f"{EvalTag.MODEL}:{m.phase_id}:{m.model}" for m in ordered),
+        *(
+            f"{EvalTag.MODEL}:{encode_tag_value(m.phase_id)}:{encode_tag_value(m.model)}"
+            for m in ordered
+        ),
     ]
 
 
@@ -113,7 +146,8 @@ def declared_models_of(tags: Iterable[str]) -> dict[str, str] | None:
     """
     by_phase: dict[str, set[str]] = {}
     for value in tag_values(tags, EvalTag.MODEL):
-        phase, sep, model = value.partition(":")
+        raw_phase, sep, raw_model = value.partition(":")
+        phase, model = decode_tag_value(raw_phase), decode_tag_value(raw_model)
         if sep and phase and model:
             by_phase.setdefault(phase, set()).add(model)
     if not by_phase:

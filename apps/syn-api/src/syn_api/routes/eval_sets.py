@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, HTTPException, Query
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
-from syn_api.routes.eval_runs import RunReads, baseline_pins, eval_run_facts, pass_rate_display
+from syn_api.routes.eval_runs import RunReads, baseline_pins, pass_rate_display
 from syn_api.types import (
     EvalBoundsResponse,
     EvalCaseCohortResponse,
@@ -200,6 +200,9 @@ async def eval_set_summary(
     off the event loop: the paired comparison bootstraps.
     """
     tags = [f"{EvalTag.SUITE}:{suite}", f"{EvalTag.SUITE_VERSION}:{version}"]
+    if split is not None:
+        # In the query, so the case limit counts the split's cases, not the suite's.
+        tags.append(f"{EvalTag.SPLIT}:{split}")
     evals = await manager.eval_list.page(tags=tags, limit=MAX_EVAL_SET_CASES)
     if evals.total > MAX_EVAL_SET_CASES:
         raise _too_large(f"eval set {suite} v{version}", evals.total, MAX_EVAL_SET_CASES)
@@ -212,7 +215,11 @@ async def eval_set_summary(
     if (runs := sum(run_counts[e] for e in eval_ids)) > MAX_EVAL_SET_RUNS:
         raise _too_large(f"eval set {suite} v{version}", runs, MAX_EVAL_SET_RUNS)
     members = await manager.eval_list.members_of(eval_ids)
-    scores = await manager.eval_list.scores_in(eval_ids)
+    # The members' scores only: an eval's score history also holds detached
+    # runs, which the run count above does not bound.
+    scores = await manager.eval_list.scores_of(
+        [(e, row.workflow_execution_id) for e, rows in members.items() for row in rows]
+    )
     execution_ids = {row.workflow_execution_id for rows in members.values() for row in rows}
     reads = await RunReads.load(manager, sorted(execution_ids))
     runs_by_eval = {
@@ -229,13 +236,31 @@ async def eval_set_summary(
     return await asyncio.to_thread(summarize_eval_set, roster, runs_by_eval, k)
 
 
+def refuse_oversized_eval(eval_id: str, run_count: int) -> None:
+    """Refuse a per-eval cohort read past ``MAX_EVAL_SET_RUNS``, before anything is loaded."""
+    if run_count > MAX_EVAL_SET_RUNS:
+        raise _too_large(f"eval {eval_id}", run_count, MAX_EVAL_SET_RUNS)
+
+
 async def eval_case_cohorts(
-    manager: ProjectionManager, eval_id: str, k: int
+    manager: ProjectionManager, eval_id: str, k: int, run_count: int
 ) -> list[EvalCaseCohortResponse]:
-    """One eval's figures in every cohort it has trials in; refused past ``MAX_EVAL_SET_RUNS``."""
-    runs, total = await eval_run_facts(manager, eval_id, limit=MAX_EVAL_SET_RUNS)
-    if total > MAX_EVAL_SET_RUNS:
-        raise _too_large(f"eval {eval_id}", total, MAX_EVAL_SET_RUNS)
+    """One eval's figures in every cohort it has trials in.
+
+    ``run_count`` is the eval's member count, read without loading a run
+    (``EvalListProjection.detail(limit=0)``); past ``MAX_EVAL_SET_RUNS`` the
+    read is refused before any member, score or run detail loads.
+    """
+    refuse_oversized_eval(eval_id, run_count)
+    members = await manager.eval_list.members(eval_id, limit=MAX_EVAL_SET_RUNS)
+    ids = [row.workflow_execution_id for row in members.rows]
+    scores = await manager.eval_list.scores_of([(eval_id, i) for i in ids])
+    baseline = baseline_pins(await manager.eval_list.record(eval_id))
+    reads = await RunReads.load(manager, ids)
+    runs = [
+        reads.facts(row, scores.get((eval_id, row.workflow_execution_id)), baseline)
+        for row in members.rows
+    ]
     cohorts = await asyncio.to_thread(summarize_case, eval_id, runs, k)
     return [
         EvalCaseCohortResponse(cohort=_cohort(c.cohort), metrics=case_metrics_response(c.metrics))

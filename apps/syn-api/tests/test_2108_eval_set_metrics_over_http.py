@@ -463,6 +463,7 @@ async def test_one_eval_over_the_run_limit_refuses_its_cohorts(
     from syn_api.routes import eval_sets
 
     monkeypatch.setattr(eval_sets, "MAX_EVAL_SET_RUNS", 1)
+    _refuse_run_loads(monkeypatch)
     await _eval("eval-a", "suite-version:1")
     await _run("eval-a")
     await _run("eval-a")
@@ -471,3 +472,50 @@ async def test_one_eval_over_the_run_limit_refuses_its_cohorts(
 
     assert response.status_code == 422
     assert "eval eval-a has 2, more than the 1" in response.json()["detail"]
+
+
+def _refuse_run_loads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any run-detail load fails the request, so a 422 proves the refusal came first."""
+    from syn_api.routes.eval_runs import RunReads
+
+    async def _refuse(*_: object, **__: object) -> None:
+        raise AssertionError("run details were loaded past the limit")
+
+    monkeypatch.setattr(RunReads, "load", _refuse)
+
+
+async def test_a_set_reads_only_its_members_scores(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An eval's score history also holds detached runs, which no member count bounds."""
+    from syn_api._wiring import get_projection_mgr
+
+    async def _unbounded(*_: object, **__: object) -> None:
+        raise AssertionError("read every score of the evals, not the members' scores")
+
+    eval_list = get_projection_mgr().eval_list
+    monkeypatch.setattr(eval_list, "scores_in", _unbounded)
+    monkeypatch.setattr(eval_list, "scores", _unbounded)
+    await _eval("eval-a", "suite-version:1")
+    await _run("eval-a")
+
+    body = await _metrics(client, k=1)
+    detail = await client.get("/evals/eval-a", params={"k": 1})
+
+    assert body.cohorts[0].cases[0].c == 1
+    assert detail.status_code == 200, detail.text
+
+
+async def test_the_case_limit_counts_the_split_not_the_suite(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from syn_api.routes import eval_sets
+
+    monkeypatch.setattr(eval_sets, "MAX_EVAL_SET_CASES", 2)
+    await _eval("eval-a", "suite-version:1", "split:train")
+    await _eval("eval-b", "suite-version:1", "split:train")
+    await _eval("eval-c", "suite-version:1", "split:holdout")
+
+    body = await _metrics(client, k=1, split="holdout")
+
+    assert [c.eval_id for c in body.roster] == ["eval-c"]
