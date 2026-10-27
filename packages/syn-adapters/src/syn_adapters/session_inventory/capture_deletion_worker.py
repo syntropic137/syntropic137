@@ -14,10 +14,15 @@ could reach the exporter, so propagation never needs local bytes.
 Only owner deletions and retractions propagate (#2107). Automatic local expiry
 (age, byte quota) never deletes the replica: the remote copy is what made local
 expiry safe. Legacy tombstones recorded before reasons existed default to
-``retention_age`` and are therefore never propagated either. An automatic
-delete already in flight (queued before this rule) is cancelled, not drained:
-its outbox is discarded and its checkpoint removed. An owner request on an
-automatically expired object promotes the tombstone, so it then propagates.
+``retention_age`` and are therefore never propagated either. An owner request
+on an automatically expired object promotes the tombstone, so it then propagates.
+
+An older build may have left automatic deletes in the outbox, checkpointed or
+not (it can crash between the exporter enqueue and the checkpoint commit). So
+before its first drain each destination's outbox is purged unsent, once,
+recorded durably: every unacknowledged checkpoint is dropped with it and owner
+deletes are regenerated from the SQL tombstones. A purge that cannot remove the
+outbox raises, records nothing and drains nothing; the next step retries it.
 """
 
 from __future__ import annotations
@@ -55,25 +60,42 @@ class CaptureDeletionWorker:
         async with self._pool.acquire() as conn, conn.transaction():
             if not await try_deletion_lane(conn, self._source, self._destination):
                 return False
+            if await self._purge_pre_2107_outbox(conn):
+                return True
             if await self._settle_in_flight(conn):
                 return True
             return await self._queue_next(conn)
 
-    async def _settle_in_flight(self, conn: Connection) -> bool:
-        rows = await conn.fetch(
-            """SELECT k.producer_id,k.capture_id,k.acknowledgements::text AS acknowledgements,
-            COALESCE(bool_or(d.reason=ANY($3::text[])),FALSE)::text AS owner
-            FROM session_capture_deletion_checkpoints k
-            LEFT JOIN session_capture_catalog c ON c.source_instance_id=k.source_instance_id
-            AND c.producer_id=k.producer_id AND c.capture_id=k.capture_id
-            LEFT JOIN session_body_deletions d ON d.source_instance_id=c.source_instance_id
-            AND d.archive_sha256=c.payload->'archive'->>'sha256'
-            WHERE k.source_instance_id=$1 AND k.destination_id=$2 AND NOT k.acknowledged
-            GROUP BY k.producer_id,k.capture_id,k.acknowledgements
-            ORDER BY k.producer_id,k.capture_id LIMIT 1""",
+    async def _purge_pre_2107_outbox(self, conn: Connection) -> bool:
+        """Once per destination, under the lane lock, before any drain (#2107)."""
+        recorded = await conn.fetchval(
+            """INSERT INTO session_capture_deletion_outbox_purges
+            (source_instance_id,destination_id) VALUES($1,$2)
+            ON CONFLICT DO NOTHING RETURNING destination_id""",
             self._source,
             self._destination,
-            list(PROPAGATED_REASONS),
+        )
+        if recorded is None:
+            return False
+        # Raises on a failed removal: the transaction rolls back, so the purge
+        # is not recorded and no checkpoint is dropped or drained.
+        await self._transport.discard()
+        await conn.execute(
+            """DELETE FROM session_capture_deletion_checkpoints
+            WHERE source_instance_id=$1 AND destination_id=$2 AND NOT acknowledged""",
+            self._source,
+            self._destination,
+        )
+        return True
+
+    async def _settle_in_flight(self, conn: Connection) -> bool:
+        rows = await conn.fetch(
+            """SELECT producer_id,capture_id,acknowledgements::text AS acknowledgements
+            FROM session_capture_deletion_checkpoints
+            WHERE source_instance_id=$1 AND destination_id=$2 AND NOT acknowledged
+            ORDER BY producer_id,capture_id LIMIT 1""",
+            self._source,
+            self._destination,
         )
         if not rows:
             return False
@@ -81,12 +103,6 @@ class CaptureDeletionWorker:
         args = (self._source, self._destination, row["producer_id"], row["capture_id"])
         where = """WHERE source_instance_id=$1 AND destination_id=$2
             AND producer_id=$3 AND capture_id=$4"""
-        if row["owner"] != "true":
-            # Automatic expiry queued before #2107: cancel, never drain. The lane
-            # holds one delete per destination, so the outbox holds only this one.
-            await self._transport.discard()
-            await conn.execute(f"DELETE FROM session_capture_deletion_checkpoints {where}", *args)
-            return True
         drained = await self._transport.drain(limit=1)
         acknowledgements = int(row["acknowledgements"]) + drained.acknowledged
         if drained.remaining > 0:

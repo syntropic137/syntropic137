@@ -45,3 +45,26 @@ async def test_deletion_outbox_discard_withdraws_the_queued_delete(tmp_path: Pat
     await transport.discard()
     assert not outbox.exists()
     await transport.discard()  # idempotent
+
+
+async def test_deletion_outbox_discard_raises_when_an_entry_survives(tmp_path: Path) -> None:
+    """A partial removal must never be reported as success (#2107 review)."""
+    outbox = tmp_path / "capture-deletions"
+    queue = outbox / "queue"
+    queue.mkdir(parents=True)
+    (queue / "entry").write_bytes(b"queued automatic delete")
+    queue.chmod(0o500)  # entries inside cannot be unlinked
+    transport = ExporterDeletionOutbox(
+        ExporterConfig(
+            binary=Path("/fixture/exporter"),
+            outbox_dir=outbox,
+            store_url="http://127.0.0.1:1",
+            token=SecretStr("test-only"),
+        )
+    )
+    try:
+        with pytest.raises(PermissionError):
+            await transport.discard()
+        assert (queue / "entry").exists()
+    finally:
+        queue.chmod(0o700)
