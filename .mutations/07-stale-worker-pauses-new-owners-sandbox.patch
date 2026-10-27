@@ -1,0 +1,14 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+index 060dd55ce..9f4d4657c 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+@@ -158,8 +158,7 @@ class SandboxSpoolRecovery:
+                     # Ownership unknown: this worker was the last confirmed owner,
+                     # and a running sandbox is the costlier failure.
+                     logger.exception("Spool fence failed before pausing sandbox %s", sandbox_id)
+-            if not lost:
+-                await self._sandboxes.pause(sandbox_id)
++            await self._sandboxes.pause(sandbox_id)
+ 
+     async def remove(self, spool: CaptureSpool) -> bool:
+         # Evicting bytes is not permission to end a run: a quota or age limit

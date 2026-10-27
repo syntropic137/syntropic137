@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+index 060dd55ce..4b8024908 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+@@ -133,7 +133,7 @@ class SandboxSpoolRecovery:
+             try:
+                 exclusive = await sandbox.stop_writers()
+             except Exception:
+-                exclusive = False
++                exclusive = True
+             await capture_retained_partition(sandbox.execute, "/spool", location.partition)
+             yield RecoveryReaders(
+                 transcripts=WorkspaceSpoolReader(sandbox.execute, location.envelope_dir),

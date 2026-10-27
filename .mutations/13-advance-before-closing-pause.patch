@@ -1,0 +1,31 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
+index 9493c4769..d62e605cf 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
+@@ -114,17 +114,15 @@ class CaptureRecoveryWorker:
+                 renew=renew,
+             )
+             children = await self._recover_children(lease, readers)
+-        # Advance only once the context has closed: advancing gives the lease
+-        # up, and a sandbox backend's closing pause needs it still ours.
+-        await self._spools.advance(
+-            lease,
+-            after=progress.next_after if progress.next_after is not None else progress.watermark,
+-            watermark=progress.watermark if progress.next_after is not None else None,
+-            retry_seconds=0
+-            if progress.next_after is not None or children == "more"
+-            else self._retry_seconds,
+-            staged_bytes=progress.staged_bytes,
+-        )
++            await self._spools.advance(
++                lease,
++                after=progress.next_after if progress.next_after is not None else progress.watermark,
++                watermark=progress.watermark if progress.next_after is not None else None,
++                retry_seconds=0
++                if progress.next_after is not None or children == "more"
++                else self._retry_seconds,
++                staged_bytes=progress.staged_bytes,
++            )
+         # Release after the helper container is gone: its mount would block removal.
+         # A remote sandbox stays paused until this point; release kills it.
+         if progress.next_after is None and children == "complete":

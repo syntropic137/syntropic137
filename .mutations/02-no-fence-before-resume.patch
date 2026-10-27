@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+index 060dd55ce..1fcc58c13 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
+@@ -123,7 +123,6 @@ class SandboxSpoolRecovery:
+                 lost = True
+                 raise
+ 
+-        await fenced()
+         sandbox = await self._sandboxes.resume(sandbox_id, executor_id=executor_id)
+         try:
+             await fenced()

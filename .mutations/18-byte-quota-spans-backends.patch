@@ -1,0 +1,22 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/spool_release.py b/packages/syn-adapters/src/syn_adapters/session_inventory/spool_release.py
+index bba0173bc..09b7b9d10 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/spool_release.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/spool_release.py
+@@ -189,7 +189,7 @@ class CaptureSpoolRetention:
+                             SELECT COALESCE(sum(staged_bytes),0) AS bytes
+                             FROM session_capture_spools
+                             WHERE source_instance_id=$1 AND release_reason IS NULL
+-                            AND COALESCE(payload->>'backend','docker')=$5
++                            AND $5::text IS NOT NULL
+                         ), candidates AS (
+                             SELECT session_id,registered_at,
+                             sum(staged_bytes) OVER (ORDER BY registered_at,session_id)
+@@ -197,7 +197,7 @@ class CaptureSpoolRetention:
+                             FROM session_capture_spools
+                             WHERE source_instance_id=$1 AND release_reason IS NULL
+                             AND (settled_at IS NOT NULL)=$4
+-                            AND COALESCE(payload->>'backend','docker')=$5
++                            AND $5::text IS NOT NULL
+                         )
+                         UPDATE session_capture_spools s SET release_reason='expired'
+                         WHERE s.source_instance_id=$1 AND s.release_reason IS NULL

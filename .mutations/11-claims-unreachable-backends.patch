@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
+index 9493c4769..59150747f 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/recovery_worker.py
+@@ -80,7 +80,7 @@ class CaptureRecoveryWorker:
+ 
+     async def step(self) -> bool:
+         lease = await self._spools.claim(
+-            lease_seconds=self._lease_seconds, backends=tuple(self._recovery)
++            lease_seconds=self._lease_seconds, backends=("docker", "e2b")
+         )
+         if lease is None:
+             return False

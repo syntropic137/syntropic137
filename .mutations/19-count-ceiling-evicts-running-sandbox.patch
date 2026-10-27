@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/spool_release.py b/packages/syn-adapters/src/syn_adapters/session_inventory/spool_release.py
+index bba0173bc..7d4ad6e42 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/spool_release.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/spool_release.py
+@@ -228,7 +228,7 @@ class CaptureSpoolRetention:
+                     AND s.session_id IN (
+                         SELECT c.session_id FROM session_capture_spools c
+                         WHERE c.source_instance_id=$1 AND c.release_reason IS NULL
+-                        AND c.settled_at IS NOT NULL AND c.leased_until<=now()
++                        AND c.leased_until<=now()
+                         AND COALESCE(c.payload->>'backend','docker')=$4
+                         ORDER BY c.registered_at,c.session_id
+                         LIMIT LEAST($3,GREATEST(0,(SELECT spools FROM retained)-$2))
