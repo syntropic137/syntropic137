@@ -335,10 +335,10 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             and row.writer_epoch <= entry.host.epoch
             and self._can_run(pool, row)
             and not any(self._can_take(x, row) and self._holds_back(x, pool, now) for x in higher)
-            # No Overflow Budget, no Overflow: only what no live higher executor could take.
+            # No Overflow Budget: only what no REGISTERED higher executor could take.
             and (
                 pool.overflow_budget_usd_per_day is not None
-                or not any(self._can_take(x, row) for x in higher)
+                or not any(self._can_take(x, row) for x in self._registered_higher(pool))
             )
         )
 
@@ -349,6 +349,14 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
             for other in self._hosts.values()
             if self._pools[other.host.pool.pool_id].priority < pool.priority
             and self._live(other, now)
+        ]
+
+    def _registered_higher(self, pool: ExecutorPool) -> list[_Host]:
+        """Registered executors in higher-priority pools, live or not: Postgres's ``registered_higher``."""
+        return [
+            other
+            for other in self._hosts.values()
+            if other.registered and self._pools[other.host.pool.pool_id].priority < pool.priority
         ]
 
     def _holds_back(self, other: _Host, pool: ExecutorPool, now: datetime) -> bool:

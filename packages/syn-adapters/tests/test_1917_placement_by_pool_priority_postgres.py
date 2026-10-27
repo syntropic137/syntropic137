@@ -392,15 +392,39 @@ async def test_without_an_overflow_budget_a_lower_pool_never_overflows_even_when
     await _untouched(pools[0], "run-2")
 
 
-async def test_without_an_overflow_budget_a_pool_still_claims_what_no_higher_executor_could_take(
+@pytest.mark.parametrize(
+    "down",
+    [
+        "UPDATE executor_hosts SET draining=TRUE WHERE host_id='local-1'",
+        # Stale and dead: no heartbeat for an hour, and never deregistered.
+        """UPDATE execution_budget SET heartbeat_at=clock_timestamp()-interval '1 hour',
+        claim_checked_at='-infinity' WHERE executor_id='local-1'""",
+    ],
+    ids=["draining", "stale"],
+)
+async def test_without_an_overflow_budget_a_registered_higher_executor_keeps_the_pool_idle(
+    pools: list[asyncpg.Pool],  # noqa: F811
+    down: str,
+) -> None:
+    queue = PostgresExecutionRunQueue(pools[0])
+    await _join(queue, "local-1", LOCAL, capacity=2)
+    await _join(queue, "e2b-1", UNBUDGETED_E2B, capacity=4)
+    await _admit(queue, "run-1")
+    async with pools[0].acquire() as conn:
+        await conn.execute(down)
+
+    assert await queue.claim("e2b-1") is None
+    await _untouched(pools[0], "run-1")
+
+
+async def test_without_an_overflow_budget_a_pool_claims_once_no_higher_executor_is_registered(
     pools: list[asyncpg.Pool],  # noqa: F811
 ) -> None:
     queue = PostgresExecutionRunQueue(pools[0])
     await _join(queue, "local-1", LOCAL, capacity=1)
     await _join(queue, "e2b-1", UNBUDGETED_E2B, capacity=4)
     await _admit(queue, "run-1")
-    assert _placed(await queue.claim("local-1")) == ("run-1", "local", False)
-    await queue.deregister("local-1")  # the higher pool has no live member
-    await _admit(queue, "run-2")
+    assert await queue.claim("e2b-1") is None
+    await queue.deregister("local-1")  # left: no higher executor is registered
 
-    assert _placed(await queue.claim("e2b-1")) == ("run-2", "e2b", False)
+    assert _placed(await queue.claim("e2b-1")) == ("run-1", "e2b", False)

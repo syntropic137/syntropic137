@@ -71,6 +71,13 @@ _CLAIM_SQL = f"""WITH me AS (
     JOIN executor_pools p ON p.pool_id=b.pool_id, me
     WHERE p.priority<me.priority AND NOT h.draining
     AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second'
+), registered_higher AS (
+    -- Every registered higher executor, live or not: an unbudgeted pool waits on
+    -- a draining or dead one rather than spend (ruling on #2143).
+    SELECT h.epoch, p.supplies_credentials
+    FROM execution_budget b JOIN executor_hosts h ON h.host_id=b.executor_id
+    JOIN executor_pools p ON p.pool_id=b.pool_id, me
+    WHERE p.priority<me.priority
 ), candidate AS (
     SELECT r.execution_id, EXISTS (SELECT 1 FROM higher x WHERE {can_take("x")}) AS overflowed
     FROM execution_runs r, me
@@ -78,9 +85,9 @@ _CLAIM_SQL = f"""WITH me AS (
     AND {can_run("me")}
     AND NOT EXISTS (SELECT 1 FROM higher x WHERE {can_take("x")}
         AND (x.claiming_with_room OR x.recently_full))
-    -- No Overflow Budget, no Overflow: only what no live higher executor could take.
+    -- No Overflow Budget: only what no REGISTERED higher executor could take.
     AND (me.overflow_budget_usd_per_day IS NOT NULL
-        OR NOT EXISTS (SELECT 1 FROM higher x WHERE {can_take("x")}))
+        OR NOT EXISTS (SELECT 1 FROM registered_higher x WHERE {can_take("x")}))
     ORDER BY r.admitted_at, r.execution_id FOR UPDATE OF r SKIP LOCKED LIMIT 1
 ) UPDATE execution_runs r SET state='claimed', executor_id=me.executor_id,
     lease_token=r.lease_token+1, reader_epoch=me.epoch, reason=NULL,

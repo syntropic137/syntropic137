@@ -161,3 +161,40 @@ async def test_without_an_overflow_budget_a_lower_pool_never_overflows_even_when
 
     assert await queue.claim("e2b-1") is None
     assert (await queue.in_use()).admitted == 1
+
+
+@pytest.mark.parametrize("down", ["draining", "stale"])
+async def test_without_an_overflow_budget_a_registered_higher_executor_keeps_the_pool_idle(
+    down: str,
+) -> None:
+    clock = _Clock()
+    queue = InMemoryExecutionRunQueue(clock=clock)
+    await _join(queue, "local-1", LOCAL, capacity=2)
+    unbudgeted = E2B.model_copy(update={"overflow_budget_usd_per_day": None})
+    await _join(queue, "e2b-1", unbudgeted, capacity=4)
+    await _admit(queue, "run-1")
+    if down == "draining":
+        # The double has no drain write (the port's drain(host_id) is a later
+        # slice), so set the row as Postgres's UPDATE executor_hosts would.
+        hosts = queue._hosts
+        hosts["local-1"] = hosts["local-1"].model_copy(update={"draining": True})
+    else:
+        clock.now += timedelta(hours=1)
+        await queue.heartbeat("e2b-1")
+
+    assert await queue.claim("e2b-1") is None
+    assert (await queue.in_use()).admitted == 1
+
+
+async def test_without_an_overflow_budget_a_pool_claims_once_no_higher_executor_is_registered() -> (
+    None
+):
+    queue = InMemoryExecutionRunQueue(clock=_Clock())
+    await _join(queue, "local-1", LOCAL, capacity=1)
+    unbudgeted = E2B.model_copy(update={"overflow_budget_usd_per_day": None})
+    await _join(queue, "e2b-1", unbudgeted, capacity=4)
+    await _admit(queue, "run-1")
+    assert await queue.claim("e2b-1") is None
+    await queue.deregister("local-1")
+
+    assert _placed(await queue.claim("e2b-1")) == ("run-1", "e2b", False)

@@ -761,10 +761,17 @@ pool's claims (an outage breaker, an operator) uses the drain state, never
 overflows only when the operator has declared its **Overflow Budget**, a daily
 spend cap in whole USD (`executor_pools.overflow_budget_usd_per_day`,
 `SYN_EXECUTOR_POOL_OVERFLOW_BUDGET_USD_PER_DAY`). The default is none, and
-none fails closed: the pool claims only runs that no live, non-draining
-higher-priority executor could take, which never includes a run it would claim
-by Overflow. So a paid pool (E2B) never takes an overflow run without a
-declared cap, however long the higher pool has been full. The Overflow Delay
+none fails closed: the pool claims only runs that no **registered**
+higher-priority executor could take (an `executor_hosts` row in a
+higher-priority pool, with the epoch and credentials to take the run), live or
+not. A higher executor that is draining (pit stops drain routinely), stale or
+dead does not push work onto an unbudgeted pool; the runs wait. So a paid pool
+(E2B) never takes an overflow run without a declared cap, and without one it
+claims only when it is the top pool for the run. A registered executor stops
+counting only when it leaves (`deregister`, from `leave`) or a restart in its
+container retires it (D5 Restart); nothing else deletes the row, so a crashed
+host whose machine never returns keeps an unbudgeted lower pool idle until an
+operator removes its row. The Overflow Delay
 (default 60 s) applies only once a budget is declared. The budget is part of
 the pool's definition, so the conflict rule keeps members agreeing. It is
 recorded, not yet metered: counting spend against it, and stopping claims at

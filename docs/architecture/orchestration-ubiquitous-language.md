@@ -877,8 +877,13 @@ NoCredentials pool and an `agent` Workload) did not overflow. (ADR-072 D13,
 
 The operator's daily spend cap for an Executor Pool's Overflow, in whole USD
 (`overflow_budget_usd_per_day`, `SYN_EXECUTOR_POOL_OVERFLOW_BUDGET_USD_PER_DAY`).
-Fail-closed: a pool with no Overflow Budget never claims a run by Overflow,
-only runs no live higher-priority Executor could take. Declaring it is what
+Fail-closed: a pool with no Overflow Budget claims only runs that no
+**registered** higher-priority Executor could take, live or not. A higher
+Executor that is draining (a pit stop), stale or dead keeps it idle, and the
+runs wait; only `leave` (deregistration) or a restart in the same container
+removes one. So an unbudgeted pool claims only when it is the top pool for the
+run. A crashed higher host that never returns and never deregisters keeps it
+idle for good. Declaring it is what
 lets a paid pool such as E2B overflow. Recorded with the pool and not yet
 metered; counting spend against it is #2024. Not the Execution Budget, which
 is slots, not money. (ADR-072 D13, #1917.)

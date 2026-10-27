@@ -281,9 +281,9 @@ class ExecutorPoolSettings(BaseSettings):
         ge=1,
         description=(
             "The Overflow Budget: this pool's daily spend cap for overflow, in whole USD. "
-            "Unset (the default): the pool never claims a run by overflow, only runs no "
-            "live higher-priority executor could take. Set it to let a paid pool (E2B) "
-            "overflow. Recorded with the pool; spend is not yet metered against it "
+            "Unset (the default): the pool claims only runs no registered higher-priority "
+            "executor could take, so it stays idle while a higher pool is registered, even "
+            "draining or dead. Set it to let a paid pool (E2B) overflow. Recorded with the pool; spend is not yet metered against it "
             "(#2024)."
         ),
     )
