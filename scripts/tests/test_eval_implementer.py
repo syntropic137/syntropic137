@@ -423,6 +423,27 @@ def test_scoring_in_a_worktree_never_writes_the_shared_submodule_config(
     assert git(repo, "config", "--get-regexp", "submodule") == before
 
 
+_HOOKS = _new_file("hooks.py", "import pytest", *_REPORT_PASSED)
+_CONFIG_PLUGINS = {
+    "pyproject-plugin-report-passed": _plugin(*_REPORT_PASSED),
+    **{
+        f"{name}-plugin-report-passed": _new_file(
+            name, "[pytest]", "pythonpath = .", "addopts = -p hooks"
+        )
+        + _HOOKS
+        for name in ("pytest.ini", ".pytest.ini")
+    },
+    **{
+        f"{name}-plugin-report-passed": _new_file(
+            name, "[pytest]", 'pythonpath = ["."]', 'addopts = ["-p", "hooks"]'
+        )
+        + _HOOKS
+        for name in ("pytest.toml", ".pytest.toml")
+    },
+}
+"""The bug untouched, and a plugin rewriting every report to passed, loaded by each config file."""
+
+
 def test_the_bug_left_in_place_fails_and_the_fix_passes(
     two_hidden_files: tuple[ImplementerCase, Path],
 ) -> None:
@@ -438,9 +459,7 @@ def test_the_bug_left_in_place_fails_and_the_fix_passes(
         _plugin(*_SKIP_ALL),
         _plugin(*_mark_second("skip")),
         _plugin(*_mark_second("xfail")),
-        _plugin(*_REPORT_PASSED),
-        _new_file("pytest.ini", "[pytest]", "pythonpath = .", "addopts = -p hooks")
-        + _new_file("hooks.py", "import pytest", *_REPORT_PASSED),
+        *_CONFIG_PLUGINS.values(),
         _addopts("--deselect tests/test_second.py::test_second"),
         _conftest(*_SKIP_ALL),
         _conftest(*_mark_second("skip")),
@@ -450,8 +469,7 @@ def test_the_bug_left_in_place_fails_and_the_fix_passes(
         "plugin-skip-all",
         "plugin-skip-second",
         "plugin-xfail-second",
-        "plugin-report-passed",
-        "pytest-ini-plugin-report-passed",
+        *_CONFIG_PLUGINS,
         "addopts-deselect-second",
         "conftest-skip-all",
         "conftest-skip-second",
@@ -468,12 +486,13 @@ def test_a_change_that_hides_the_bug_from_pytest_is_not_a_pass(
     assert "test_second" in run.detail
 
 
+@pytest.mark.parametrize("patch", list(_CONFIG_PLUGINS.values()), ids=list(_CONFIG_PLUGINS))
 def test_a_plugin_loaded_by_config_cannot_forge_a_prepared_pass(
-    prepared: tuple[ImplementerCase, Path, Path],
+    prepared: tuple[ImplementerCase, Path, Path], patch: str
 ) -> None:
     """The referee's path: `score --prepared` restores the configuration as `score` does."""
     _, _, out = prepared
-    run = implementer_scorer.score_prepared(out, _plugin(*_REPORT_PASSED))
+    run = implementer_scorer.score_prepared(out, patch)
     assert run.outcome == "FAIL", run.detail
 
 
@@ -485,6 +504,84 @@ def test_a_patch_whose_text_is_not_utf_8_is_applied_not_crashed_on(
     latin1 = b"caf\xe9\n".decode("utf-8", errors=implementer_scorer.PATCH_ERRORS).rstrip("\n")
     run = score_patch(case.pin(), fix_patch(case, repo) + _new_file("menu.txt", latin1), repo)
     assert run.outcome == "PASS", run.detail
+
+
+@pytest.fixture
+def guarded_crlf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[ImplementerCase, Path, Path]:
+    """Prepared: CRLF source, and a conftest at the pin whose autouse fixture is the check."""
+    monkeypatch.setattr(implementer_scorer, "SYNC", ("mkdir", "-p", implementer_scorer.ENVIRONMENT))
+    monkeypatch.setattr(implementer_scorer, "PYTEST", (sys.executable, "-m", "pytest"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), "-c", "core.autocrlf=false", *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    git("init", "--quiet")
+    git("config", "user.name", "eval test")
+    git("config", "user.email", "eval@example.invalid")
+    (repo / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = ["."]\n')
+    (repo / "bug.py").write_bytes(b"# menu\r\nvalue = 0\r\n")
+    (repo / "tests").mkdir()
+    (repo / "tests/conftest.py").write_text(
+        "import pytest\n\n\n@pytest.fixture(autouse=True)\ndef value_is_one():\n"
+        "    from bug import value\n\n    assert value == 1\n"
+    )
+    git("add", ".")
+    git("commit", "--quiet", "-m", "pin")
+    pin = git("rev-parse", "HEAD")
+    (repo / "tests/test_any.py").write_text("def test_any():\n    pass\n")
+    (repo / "bug.py").write_bytes(b"# menu\r\nvalue = 1\r\n")
+    git("add", ".")
+    git("commit", "--quiet", "-m", "fix")
+    case = ImplementerCase(
+        id="guarded-crlf",
+        source_pr=1,
+        commit=pin,
+        fix_commit=git("rev-parse", "HEAD"),
+        task="value must be one",
+        hidden_tests=("tests/test_any.py",),
+    )
+    out = tmp_path / "prepared"
+    assert implementer_scorer.prepare(case.pin(), repo, out) is None
+    return case, repo, out
+
+
+_RENAME_CONFTEST = (
+    "diff --git a/tests/conftest.py b/tests/renamed.py\nsimilarity index 100%\n"
+    "rename from tests/conftest.py\nrename to tests/renamed.py\n"
+)
+
+
+def test_a_judged_file_renamed_away_is_put_back(
+    guarded_crlf: tuple[ImplementerCase, Path, Path],
+) -> None:
+    _, _, out = guarded_crlf
+    run = implementer_scorer.score_prepared(out, _RENAME_CONFTEST)
+    assert run.outcome == "FAIL", run.detail
+
+
+def test_a_crlf_fix_passes_through_the_scorer_cli(
+    guarded_crlf: tuple[ImplementerCase, Path, Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Read, diffed and applied as bytes: CRLF in the patch must survive every hop."""
+    case, repo, out = guarded_crlf
+    reference = fix_patch(case, repo)
+    assert "value = 1\r\n" in reference
+    patch = tmp_path / "fix.patch"
+    patch.write_bytes(reference.encode("utf-8", implementer_scorer.PATCH_ERRORS))
+    code = implementer_scorer.main(["score", "--prepared", str(out), "--patch", str(patch)])
+    assert capsys.readouterr().out.strip().splitlines()[-1] == "RESULT: PASS"
+    assert code == 0
 
 
 def test_a_fix_plus_a_harmless_conftest_still_passes(

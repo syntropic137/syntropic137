@@ -56,7 +56,7 @@ from typing import Protocol
 import httpx
 from eval_implementer import DEFAULT_SUITE, ImplementerCase, fix_patch, load_suite
 from eval_suite import ROOT, DefinitionError, _basic_auth, _detail
-from implementer_scorer import EXIT_CODES, PATCH_ERRORS, Pin, TestRun
+from implementer_scorer import EXIT_CODES, PATCH_ERRORS, Pin, TestRun, read_patch
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from syn_shared.settings.dev_tooling import get_dev_api_url
@@ -506,7 +506,7 @@ def main(argv: list[str] | None = None) -> int:
         with httpx.Client(
             base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
         ) as client:
-            patches = [(str(p), p.read_text()) for p in args.patch]
+            patches = [(str(p), read_patch(p)) for p in args.patch]
             patches += [(e, fetch_patch(client, e)) for e in args.execution]
             controls, scored = score_case(
                 case, patches, repo=args.repo, scorer_commit=commit, image=args.image

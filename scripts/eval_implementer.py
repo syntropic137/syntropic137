@@ -37,13 +37,12 @@ from __future__ import annotations
 import argparse
 import ast
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 import yaml
 from eval_suite import ROOT, DefinitionError, Suite, _read_yaml, _workflow_problems
-from implementer_scorer import PATCH_ERRORS, Pin, prepare, report, score_patch, score_prepared
+from implementer_scorer import Pin, git, prepare, read_patch, report, score_patch, score_prepared
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 DEFAULT_SUITE = ROOT / "evals" / "implementer-seed-v1"
@@ -125,14 +124,7 @@ def load_suite(directory: Path, root: Path = ROOT) -> ImplementerSuite:
     return ImplementerSuite(suite=suite, cases=cases)
 
 
-def _git(repo: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        capture_output=True,
-        encoding="utf-8",
-        errors=PATCH_ERRORS,
-        input=stdin,
-    )
+_git = git
 
 
 def check_commits(loaded: ImplementerSuite, repo: Path) -> list[str]:
@@ -458,14 +450,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "score" and args.prepared is not None:
         if args.patch is None:
             parser.error("score --prepared needs --patch")
-        return report(score_prepared(args.prepared, args.patch.read_text()))
+        return report(score_prepared(args.prepared, read_patch(args.patch)))
     try:
         loaded = load_suite(args.suite)
         if args.command == "score":
             if args.case is None or args.patch is None:
                 parser.error("score needs --case and --patch, or --prepared and --patch")
             pin = loaded.case(args.case).pin()
-            return report(score_patch(pin, args.patch.read_text(), args.repo))
+            return report(score_patch(pin, read_patch(args.patch), args.repo))
         if args.command == "prepare":
             if args.case is None or args.out is None:
                 parser.error("prepare needs --case and --out")

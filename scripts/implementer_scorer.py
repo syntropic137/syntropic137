@@ -76,7 +76,16 @@ PATCH_ERRORS = "surrogateescape"
 """How a patch is carried as str: `git diff --binary` promises no encoding for a text
 hunk, and surrogateescape maps every byte to a str and back unchanged."""
 JUDGE_CONFIG = frozenset(
-    {"conftest.py", "pytest.ini", ".pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg"}
+    {
+        "conftest.py",
+        "pytest.toml",
+        ".pytest.toml",
+        "pytest.ini",
+        ".pytest.ini",
+        "pyproject.toml",
+        "tox.ini",
+        "setup.cfg",
+    }
 )
 """File names pytest reads configuration or plugins from, in any directory: judged at the fix."""
 """What SYNC builds inside a tree. `score --prepared` refuses a tree without it."""
@@ -163,14 +172,27 @@ class _EnvironmentFailure(Exception):
     """Something other than the agent's change stopped the run: always ERROR."""
 
 
-def _git(repo: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+def git(repo: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    """git in `repo`, every byte in and out kept: no newline translation, no decode error."""
+    ran = subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
-        encoding="utf-8",
-        errors=PATCH_ERRORS,
-        input=stdin,
+        input=None if stdin is None else stdin.encode("utf-8", PATCH_ERRORS),
     )
+    return subprocess.CompletedProcess(
+        ran.args,
+        ran.returncode,
+        ran.stdout.decode("utf-8", PATCH_ERRORS),
+        ran.stderr.decode("utf-8", PATCH_ERRORS),
+    )
+
+
+_git = git
+
+
+def read_patch(path: Path) -> str:
+    """A patch file as the scorer carries it: every byte, CRLF and non-UTF-8 included."""
+    return path.read_bytes().decode("utf-8", PATCH_ERRORS)
 
 
 @contextmanager
@@ -315,7 +337,8 @@ def _judge(pin: Pin, patch: str, repo: Path, tree: Path, expected: tuple[str, ..
         applied = _git(tree, "apply", "--whitespace=nowarn", "-", stdin=patch)
         if applied.returncode != 0:
             return TestRun(outcome="FAIL", detail=f"patch does not apply: {applied.stderr.strip()}")
-    judged = {p for p in _patched_paths(tree, patch) if Path(p).name in JUDGE_CONFIG}
+    touched = {*_patched_paths(tree, patch), *_changed_tracked_paths(tree)}
+    judged = {p for p in touched if Path(p).name in JUDGE_CONFIG}
     for path in sorted(judged | set(pin.hidden_tests)):
         _restore_from_fix(repo, tree, pin.fix_commit, path)
     return _run_hidden_tests(tree, pin.hidden_tests, expected)
@@ -335,6 +358,18 @@ def _intended_hidden_tests(pin: Pin, repo: Path) -> tuple[str, ...]:
             f"collecting the hidden tests at the fix: exit {ran.returncode}\n{tail}"
         )
     return recorded.collected
+
+
+def _changed_tracked_paths(tree: Path) -> list[str]:
+    """Every tracked path the applied patch changed, a rename's source and a delete included.
+
+    `git apply --numstat` names only a rename's destination, so a patch moving
+    `conftest.py` away would take the judge's fixtures with it unseen.
+    """
+    listed = _git(tree, "diff", "--name-only", "--no-renames", "-z", "HEAD")
+    if listed.returncode != 0:
+        raise _EnvironmentFailure(f"listing what the patch changed: {listed.stderr.strip()}")
+    return [p for p in listed.stdout.split("\0") if p]
 
 
 def _patched_paths(tree: Path, patch: str) -> list[str]:
@@ -514,7 +549,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"prepared {pin.id} at {pin.commit} in {args.out}")
         return 0
     try:
-        patch = args.patch.read_text(encoding="utf-8", errors=PATCH_ERRORS)
+        patch = read_patch(args.patch)
     except OSError as exc:
         return report(TestRun(outcome="ERROR", detail=f"{args.patch}: {exc}"))
     return report(score_prepared(args.prepared, patch))
