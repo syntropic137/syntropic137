@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 7b9e237ed..ff9f63e67 100644
+index 167c2b3a9..4defa30af 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -2217,7 +2217,7 @@ def top_up_counts(cohort: _CohortMetrics | None, evals: dict[str, str]) -> dict[
+@@ -2297,7 +2297,7 @@ def top_up_counts(cohort: _CohortMetrics | None, evals: dict[str, str]) -> dict[
              "top up after they finish and are scored, nothing launched"
          )
      short = {c.eval_id: c.trials_short for c in cohort.cases}

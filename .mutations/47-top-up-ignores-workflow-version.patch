@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 167c2b3a9..e3c2acf72 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -2266,7 +2266,7 @@ def own_cohort(loaded: LoadedSuite, metrics: _SetMetrics, protocol: str) -> _Coh
+         )
+         == want
+     ]
+-    mine = [c for c in same if c.cohort.workflow_version == version]
++    mine = same
+     if same and not mine:
+         others = sorted(c.cohort.workflow_version for c in same)
+         raise RuntimeError(

@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 167c2b3a9..53f445f3b 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1326,7 +1326,7 @@ def start_trial(client: httpx.Client, workflow_id: str, body: TrialStart, trial_
+         lost = f"{type(exc).__name__}: {exc}"
+     found = _get(client, _ExecutionList, "/executions", tag=trial_tag)
+     runs = [r.workflow_execution_id for r in found.executions]
+-    if len(runs) == 1:
++    if len(runs) == 1 and False:
+         return runs[0]
+     raise RuntimeError(
+         f"execute for {trial_tag} failed ({lost}) and {len(runs)} runs carry that tag "

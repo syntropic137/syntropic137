@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 7b9e237ed..73383a14f 100644
+index 167c2b3a9..8f340d6e8 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -1971,7 +1971,6 @@ def roster_tags(loaded: LoadedSuite, case: Case) -> list[str]:
+@@ -2041,7 +2041,6 @@ def roster_tags(loaded: LoadedSuite, case: Case) -> list[str]:
      """
      return [
          f"{EvalTag.SUITE_VERSION}:{loaded.version}",

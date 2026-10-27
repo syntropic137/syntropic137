@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 7b9e237ed..f527e8a1f 100644
+index 167c2b3a9..e5e983255 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -2082,7 +2082,6 @@ def cohort_tags(loaded: LoadedSuite, protocol: str) -> list[str]:
+@@ -2152,7 +2152,6 @@ def cohort_tags(loaded: LoadedSuite, protocol: str) -> list[str]:
      """The launch tags every trial of the cohort carries (plan 5.2); the trial tag is per run."""
      return [
          *loaded.run_tags,

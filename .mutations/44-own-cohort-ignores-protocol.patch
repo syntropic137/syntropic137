@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 7b9e237ed..227bb1859 100644
+index 167c2b3a9..8348a8407 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -2189,7 +2189,7 @@ def own_cohort(loaded: LoadedSuite, metrics: _SetMetrics, protocol: str) -> _Coh
+@@ -2262,7 +2262,7 @@ def own_cohort(loaded: LoadedSuite, metrics: _SetMetrics, protocol: str) -> _Coh
              c.cohort.suite_version,
              c.cohort.workflow_id,
              c.cohort.models_digest,

@@ -18,6 +18,10 @@ Each patch re-introduces one bug; the named tests must kill it.
 | 43 | LLM scorer protocol not tag-safe | test_the_llm_scoring_protocol_is_a_tag_the_server_can_compare |
 | 44 | top-up continues a cohort of another scorer protocol | test_top_up_never_continues_a_cohort_scored_under_another_protocol |
 | 46 | tagging an unknown eval returns 200 | apps/syn-api/tests/test_2108_eval_tags_over_http.py::test_an_unknown_eval_is_404 |
+| 47 | top-up reads another workflow version's cohort | test_top_up_never_continues_a_cohort_of_another_workflow_version |
+| 48 | ledger lock is shared, two launchers both run | test_a_second_launcher_on_the_same_ledger_is_refused |
+| 49 | lost execute answer not reconciled | test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered |
+| 50 | a 5xx read as an answer | test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered |
 
 Retired as equivalent: 45 (route skips `sync_published_events_to_projections`).
 The eval read model is not fed by that in-memory dispatch (the tag-filter test

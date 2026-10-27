@@ -1,0 +1,13 @@
+diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
+index 167c2b3a9..4021402d5 100644
+--- a/scripts/eval_suite.py
++++ b/scripts/eval_suite.py
+@@ -1378,7 +1378,7 @@ def ledger_lock(ledger: Path) -> Iterator[None]:
+     lock = ledger.with_name(ledger.name + ".lock")
+     with lock.open("w") as fh:
+         try:
+-            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
++            fcntl.flock(fh, fcntl.LOCK_SH | fcntl.LOCK_NB)
+         except BlockingIOError as exc:
+             raise RuntimeError(
+                 f"another launch holds {lock}: one launcher per suite at a time, nothing launched"

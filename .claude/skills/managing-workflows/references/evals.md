@@ -77,6 +77,12 @@ Launches cost real quota.
   whose prompts `git pull` or merge/rebase the default branch, and with
   `--trials` refuses model aliases (cohort `model:` tags must be explicit ids).
   `launch --trials` registers the whole roster first, whatever `--split`.
+- **One launcher per suite.** `launch --trials` holds `<ledger>.lock` for the
+  whole launch and refuses a second one: two top-ups would each launch the same
+  `trials_short`. The lock is per host; the server reserves nothing. A top-up
+  continues only the cohort of the workflow version this launch installs.
+  An execute call whose answer is lost (timeout, 5xx) is looked up by its
+  unique `trial:<batch>/<i>` tag and ledgered; if no run carries it, launch stops.
 - **Call a cheaper arm "quality-neutral" only when the paired difference's
   interval excludes the drop you would tolerate** (say -5pp). Inconclusive is
   not neutral.

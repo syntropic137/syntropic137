@@ -1,8 +1,8 @@
 diff --git a/scripts/eval_suite.py b/scripts/eval_suite.py
-index 7b9e237ed..8e6728373 100644
+index 167c2b3a9..3c650b447 100644
 --- a/scripts/eval_suite.py
 +++ b/scripts/eval_suite.py
-@@ -2035,7 +2035,7 @@ def default_branch_integrations(prompt: str) -> list[str]:
+@@ -2105,7 +2105,7 @@ def default_branch_integrations(prompt: str) -> list[str]:
      hits: list[str] = []
      for match in _GIT_INTEGRATE.finditer(prompt):
          verb, rest = match.group(1), match.group(2)
