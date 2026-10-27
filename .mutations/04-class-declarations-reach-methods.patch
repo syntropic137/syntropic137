@@ -1,0 +1,16 @@
+diff --git a/scripts/check_version_literals.py b/scripts/check_version_literals.py
+index eac480b3b..9e1648411 100644
+--- a/scripts/check_version_literals.py
++++ b/scripts/check_version_literals.py
+@@ -187,9 +187,9 @@ def _owner(scope: _Scope, name: str) -> _Scope | None:
+     current: _Scope | None = scope
+     first = True
+     while current is not None:
++        if name in current.declared_global:
++            return current.module()
+         if first or not current.is_class:
+-            if name in current.declared_global:
+-                return current.module()
+             # A ``nonlocal`` name is not local here, so the walk goes on to
+             # the nearest function that binds it: its target, in any program
+             # Python compiles.
