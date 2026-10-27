@@ -1,11 +1,11 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
-index 82877d31c..635898da9 100644
+index 485e9aad8..08d96ee1c 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_set_comparison.py
-@@ -144,7 +144,7 @@ def compare_cohorts(
-     """
-     require_k(k)
-     for side in (a, b):
+@@ -130,7 +130,7 @@ def paired_bootstrap(
+ 
+ def _require_roster_version(roster: Roster, *cohorts: CohortKey) -> None:
+     for side in cohorts:
 -        if side.suite_version != roster.version:
 +        if False:
              msg = (
