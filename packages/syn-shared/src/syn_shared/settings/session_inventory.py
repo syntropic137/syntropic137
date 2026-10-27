@@ -20,6 +20,10 @@ class SessionInventorySettings(BaseSettings):
         default_factory=lambda: Path.home() / ".syntropic137" / "session-inventory",
         description="Absolute host-owned durable directory for native transcript bytes and installation identity. Mount a persistent volume in containers.",
     )
+    archive_compression: bool = Field(
+        default=True,
+        description="Store new archive objects gzip-compressed. Reads are verified against the uncompressed hash either way, and objects written uncompressed stay readable; `just session-archive-compress` re-encodes them.",
+    )
     source_instance_id: str = Field(
         default="",
         max_length=128,
