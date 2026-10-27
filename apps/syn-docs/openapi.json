@@ -1078,7 +1078,7 @@
           "execution"
         ],
         "summary": "Execute Workflow Endpoint",
-        "description": "Start workflow execution in background.\n\nReturns 409 while maintenance mode is active; no execution is started.",
+        "description": "Start workflow execution in background.\n\nReturns 409 while maintenance mode is active; no execution is started.\nWith `idempotency_key`, a start already accepted is answered again, not\nrepeated (#2129).",
         "operationId": "execute_workflow_endpoint_workflows__workflow_id__execute_post",
         "parameters": [
           {
@@ -13208,6 +13208,21 @@
             "description": "Launch an ordinary run: join no eval, even if the workflow has a default eval (#967). Cannot be combined with `eval_id` (422).",
             "default": false
           },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^\\x00]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key",
+            "description": "Makes the start idempotent (#2129): the execution id is derived from the workflow and this key, so every start with the same key, concurrent ones included, answers with the one execution and `replayed: true` after the first. A start that differs from the one that made it is refused with 409."
+          },
           "provider": {
             "type": "string",
             "title": "Provider",
@@ -13253,6 +13268,11 @@
             "type": "string",
             "title": "Message",
             "default": "Workflow execution started"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed",
+            "default": false
           }
         },
         "type": "object",

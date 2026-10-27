@@ -791,6 +791,19 @@ by type and id, so a request at the execution's id would BE the execution's
 stream, and the start's NoStream write would refuse the run as a duplicate.
 That shipped once and stopped every direct start (v0.33.2-beta.8, beta.9).
 
+## Idempotency Key
+
+What a caller names a direct start by so a retry starts nothing new (#2129).
+With `idempotency_key`, the execution id is derived from the workflow and the
+key (`execution_id_for_key`), so every start with that key writes the same
+Execution Request stream and its NoStream guard admits exactly one. A later
+start with the key is a **replay**: it answers with the recorded execution
+(`replayed: true`) and admits nothing, even while maintenance holds the gate.
+A start whose request differs from the recorded one (`same_request`: workflow,
+inputs, task, repos, tags, and the eval as chosen, not as resolved) reused the
+key and is refused with 409. Scoped per workflow: one key on two workflows is
+two starts. The eval trial launcher's key is its trial tag.
+
 ## Withdraw
 
 What cancelling a Queued Start does to its Execution Request (#1650):

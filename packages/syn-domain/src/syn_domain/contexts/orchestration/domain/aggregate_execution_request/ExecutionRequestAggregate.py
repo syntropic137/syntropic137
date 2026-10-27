@@ -133,6 +133,41 @@ class ExecutionRequestAggregate(AggregateRoot["ExecutionRequestedEvent"]):
         """What the launch asked for. Read only when ``launch_eval`` is None."""
         return self._eval_choice
 
+    def same_request(
+        self,
+        *,
+        workflow_id: str,
+        inputs: dict[str, str],
+        task: str | None,
+        repos: list[RepositoryRef],
+        tags: TagSet,
+        choice: EvalChoice,
+    ) -> bool:
+        """Whether a keyed retry asks for what this request recorded (#2129).
+
+        A retry that differs is not a retry: its key was reused for another
+        start. The eval is compared as the caller chose it, never as it was
+        resolved: a launch that named none took the workflow default at the
+        time, and a later retry naming none still asks for the same thing.
+        """
+        return (
+            self._workflow_id == workflow_id
+            and self._inputs == inputs
+            and self._task == task
+            and [r.slug for r in self._repos] == [r.slug for r in repos]
+            and list(self._tags) == list(tags)
+            and self._recorded_choice() == choice
+        )
+
+    def _recorded_choice(self) -> EvalChoice:
+        """The eval choice the recorded launch made, before any default was applied."""
+        launch = self._launch_eval
+        if launch is None:
+            return self._eval_choice
+        if launch.selection is EvalSelection.EXPLICIT:
+            return EvalChoice(eval_id=launch.eval_id)
+        return EvalChoice(ordinary=launch.selection is EvalSelection.ORDINARY)
+
     @command_handler("RequestExecutionCommand")
     def request(self, command: RequestExecutionCommand) -> None:
         from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
