@@ -296,6 +296,7 @@ async def test_envelope_summary_reads_identity_and_size(tmp_path: Path) -> None:
 
 async def test_a_reference_larger_than_the_object_is_not_written(tmp_path: Path) -> None:
     archive = LocalSessionTranscriptArchive(tmp_path)
+
     def small(raw: str) -> bytes:
         return json.dumps({"agent": "ClaudeCode", "raw": raw}, separators=(",", ":")).encode()
 
