@@ -2,9 +2,9 @@
 
 - **Status**: Accepted (decision recorded; implementation lands in #1310 Phase 1, items 1.2-1.7, and Phase 2). D2, D4 and D10 revised in place 2026-10-15 for #1944.
 - **Date**: 2026-10-05 (first drafted in parked PR #1597; resumed 2026-10-08 against #1574 and #1651 as merged)
-- **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511, #1734 (implementation of multi-host placement, heartbeat and fencing, moved out of #1310 on 2026-10-07). #1734 also carries pools, priority and overflow (D13, amended 2026-10-14), #1944, #1917 (placement by priority and the credential clause, D13)
+- **Issue**: #1310 (umbrella; the full plan is the "Full plan" comment there), #1552, #1557, #1381, #1555, #1511, #1734 (implementation of multi-host placement, heartbeat and fencing, moved out of #1310 on 2026-10-07). #1734 also carries pools, priority and overflow (D13, amended 2026-10-14), #1944, #1917 (placement by priority and the credential clause, D13; the Outage Breaker, the Recovery Kit and the C8 fence guard, D5 and D13, amended 2026-10-27)
 - **Related**: ADR-014 (section 7, resume; section 9, who runs an execution), ADR-025, ADR-055, ADR-057, ADR-060 (section 8, dispatch concurrency), ADR-070 (D4/D5, drain-aware rotation)
-- **Vocabulary**: `docs/architecture/orchestration-ubiquitous-language.md` (Executor, Run Queue, Claim, Lease, Heartbeat, Fencing, Drain (of an executor), Event Epoch, Queued, Execution Budget, Executor Pool, Pool Priority, Overflow, Overflow Delay, Claim Check, Capability, Isolation Level, Run Requirements, Unplaceable, Placement, Reap Scope; reserved: Adopt / Reattach, Router)
+- **Vocabulary**: `docs/architecture/orchestration-ubiquitous-language.md` (Executor, Run Queue, Claim, Lease, Heartbeat, Fencing, Drain (of an executor), Event Epoch, Queued, Execution Budget, Executor Pool, Pool Priority, Overflow, Overflow Delay, Claim Check, Capability, Isolation Level, Run Requirements, Unplaceable, Placement, Reap Scope, Outage Breaker, Recovery Kit; reserved: Adopt / Reattach, Router)
 
 No earlier ADR covers how the platform itself is deployed. ADR-052 is the docs
 site's Vercel deployment and ADR-057 is service registration inside one
@@ -218,7 +218,7 @@ charges whichever executor takes it, from step 3 above.
 
 A claimer closes a run only once its backend shows the run's resources gone
 (D13). Otherwise it leaves the run charged for reconciliation: its Lease
-expires and a reconciler in the same reap scope fences it, and releases it only
+expires and a reconciler that reaches its reap scope fences it (D5, C8), and releases it only
 once its own reap succeeds (D5). A reap that raises counts as not shown gone. This holds
 however the drain ended, so an error the processor turned into a failed workflow
 cannot free a slot over resources that may still exist.
@@ -334,9 +334,9 @@ only that host takes turns on it:
 
 | Step | Action | Guard |
 |---|---|---|
-| `claimed` → `fencing` | `lease_token + 1`, `reconciler = <host>`, `reader_epoch = LEAST(reader_epoch, <its epoch>)`, one UPDATE | `leased_until < now()` and `writer_epoch <= <its epoch>` (D9), and the claimer's `reap_scope` equals the reconciler's (D13) |
-| takeover, in `fencing` or `reaped` | `lease_token + 1`, `reconciler = <host>`, `reader_epoch` recomputed (D9), one UPDATE | the current `reconciler` has **left**: it has no `executor_hosts` row (below), and `writer_epoch <= <its epoch>`, and the claimer's `reap_scope` equals the reconciler's (D13) |
-| `fencing` → `reaped` | remove containers labelled `syn.host_id=<dead host>`, `syn.execution_id=<id>` | the reap reports complete (the existing `fully_reaped` rule in `reconciliation.py`); otherwise stay `fencing` and retry |
+| `claimed` → `fencing` | `lease_token + 1`, `reconciler = <host>`, `reader_epoch = LEAST(reader_epoch, <its epoch>)`, one UPDATE | `leased_until < now()` and `writer_epoch <= <its epoch>` (D9), and the claimer's `reap_scope` is the reconciler's own or one it holds a **Recovery Kit** for (D13, C8) |
+| takeover, in `fencing` or `reaped` | `lease_token + 1`, `reconciler = <host>`, `reader_epoch` recomputed (D9), one UPDATE | the current `reconciler` has **left**: it has no `executor_hosts` row (below), and `writer_epoch <= <its epoch>`, and the claimer's `reap_scope` is in the reconciler's reach, as for fencing (D13, C8) |
+| `fencing` → `reaped` | remove containers (or sandboxes) labelled `syn.host_id=<dead host>`, `syn.execution_id=<id>`, with the reaper for the claimer's scope | the reap reports complete (the existing `fully_reaped` rule in `reconciliation.py`; for a kit, a fresh listing shows none left); otherwise stay `fencing` and retry |
 | `reaped` → `interrupted` | two ordered steps, below | |
 
 The last step crosses two stores, the event store and `execution_runs`, and
@@ -462,6 +462,23 @@ equals nothing, so until then no reconciler fences the row; it stays charged and
 raises this alert, and the runbook step is an operator-verified manual
 `UPDATE`. On Docker the scope is the `docker info` engine ID, read once at
 startup; an executor that cannot read one does not start.
+
+**Recovery access (C8, amended 2026-10-27, #1917).** A reconciler's reach is
+its own scope plus every scope it holds a **Recovery Kit** for. A kit is the
+narrow capability to clean up after a dead executor on one backend and
+account: list the resources an owner left for one run, attach to each with
+the ownership check, and kill it. It creates and runs nothing, so a local
+Docker executor can hold an E2B kit without running E2B workspaces. The kits an
+executor holds are recorded on its budget row (`execution_budget.recovery_scopes`,
+each derived from the kit, never configured), and the fence and takeover guards
+above read them. A fenced run is reaped by the reaper for the claimer's scope,
+never by the reconciler's own backend. So an executor without the kit never
+fences a remote run, and a run is never stranded in `fencing` under a
+reconciler that cannot reap it. A failed list or kill leaves the run `fencing`
+with its charge held (D3), and the next turn retries. An E2B scope is a digest
+of the account's API key (`e2b-key-<sha256 prefix>`): a kit must hold the key
+the E2B executor uses, and a kit holding another key strands the run safely
+under the alert above rather than fence what it may be unable to list.
 
 Visibility-timeout redelivery (Sidekiq, Celery, SQS) is deliberately not
 adopted: redelivering an hour-long agent phase is exactly the duplicate-effects
@@ -754,8 +771,22 @@ full. With priorities 0 and 1 both full, a priority 2 executor claims the
 oldest admitted run; with priority 1 free, it claims nothing. Nothing is
 preempted and nothing migrates back when a higher slot frees. The owner's
 word for priority was "tier"; the vocabulary keeps Pool Priority. Disabling a
-pool's claims (an outage breaker, an operator) uses the drain state, never
-`capacity = 0`, which the `CHECK` refuses while a run is charged.
+pool's claims never sets `capacity = 0`, which the `CHECK` refuses while a run
+is charged.
+
+**Outage Breaker** (amended 2026-10-27, #1917, research decision 2). After K
+consecutive failed workspace creates (`SYN_E2B_BREAKER_FAILURES`, default 3),
+an executor's claims are disabled for a cooldown
+(`SYN_E2B_BREAKER_COOLDOWN_S`, default 300 s), recorded on its own budget row
+(`create_failures`, `claims_disabled_until`). A disabled executor's claim takes
+nothing and stamps no Claim Check, and it never counts as a higher executor
+holding a run back, so other pools never wait on it. Capacity and the charged
+runs are untouched: they finish or are fenced normally, and the `CHECK` holds.
+After the cooldown one claim is tried; a failed create disables claims again at
+once, a successful one clears the count. The breaker does not use the D10
+drain state: a drain is one-way (the executor deregisters and exits), and a
+breaker must re-open by itself. Any exception from the backend's create counts
+(an outage, a refused quota, a bad template): each would fail every run claimed.
 
 **No Overflow Budget, no Overflow** (orchestrator ruling on #2143). A pool
 overflows only when the operator has declared its **Overflow Budget**, a daily
@@ -808,11 +839,15 @@ so an older image's writes keep it right), priority and overflow, the
 `placed_pool`/`overflowed`/`claimed_at` columns and the credential clause, in
 both adapters. Still to come: the published drain (`drain(host_id)`, which
 is also the claim-disable path), Run Requirements (#2060) and the placement
-read, as the plan sets out. No production Executor declares
-`supplies_credentials = false` yet: until the E2B Executor is wired (its
-reaper and its pool from its BackendKit), an executor refuses to start with
-both `SYN_E2B_ENABLED` and the Run Queue on, rather than register a Docker
-reaper and host credentials for E2B workspaces.
+read, as the plan sets out. The E2B Executor is wired (#1917): with
+`SYN_E2B_ENABLED` and the Run Queue on, the executor's reaper is an E2B
+Recovery Kit on its own account, its pool declares `provider = e2b`,
+`isolation = microvm` and, from `BackendKit.e2b`, `supplies_credentials =
+false`, and its sandbox creates feed the Outage Breaker. It never falls back to
+Docker. A local executor holds an E2B kit only when `SYN_E2B_RECOVERY_API_KEY`
+is set. Still to come for remote runs: the unpushed-work guard run inside a
+remote orphan through the kit before its kill (research decision 8; scripted
+runs push nothing), and the e2b SDK in the image (#1918).
 
 **Applying the schema (#1965).** The api and every executor apply the Run Queue
 schema as they start, so they apply it concurrently. `ensure_ready` therefore
