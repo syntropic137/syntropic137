@@ -163,6 +163,18 @@ async def test_an_e2b_executor_declares_its_own_reaper_and_a_no_credentials_pool
     assert built.call_args.kwargs["recovery"] == ()
 
 
+@pytest.mark.parametrize("environment", ["development", "production"])
+async def test_the_e2b_executor_is_refused_outside_test_until_reaps_are_verified(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    # Q6 ruling on #2153: the label-listing reap limit is accepted only behind
+    # this guard, which is the ADR-060 check, not the e2b SDK's ImportError.
+    _e2b_env(monkeypatch)
+    monkeypatch.setenv("APP_ENVIRONMENT", environment)
+    with pytest.raises(runner.UnverifiedE2BReap, match="1916"):
+        await _start(monkeypatch)
+
+
 async def test_a_local_executor_holding_the_kit_declares_the_e2b_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

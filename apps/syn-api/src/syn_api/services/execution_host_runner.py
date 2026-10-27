@@ -137,9 +137,34 @@ def _e2b_reaper(api_key: SecretStr | None) -> RunReaper:
     process reaps sandboxes, never Docker containers, and never falls back to
     Docker (decision 9). ``E2BSettings`` refuses to load enabled without a key.
     """
+    _refuse_unverified_e2b_reap()
     if api_key is None:
         raise RuntimeError("SYN_E2B_ENABLED without SYN_E2B_API_KEY")
     return E2BRunReaper(E2BRecoveryKit.for_key(api_key))
+
+
+class UnverifiedE2BReap(RuntimeError):
+    """The E2B executor would free slots on an unconfirmed E2B listing (#1916)."""
+
+
+def _refuse_unverified_e2b_reap() -> None:
+    """Refuse the E2B executor outside test/offline until its reap is verifiable.
+
+    Its reap trusts E2B's label listing, which can omit a live sandbox, so an
+    empty listing could free a slot over a sandbox still running (codex review
+    of #2153, accepted as a limit by ruling). Production waits for each sandbox
+    to be confirmed gone by a durably recorded id. The check is the ADR-060
+    one, ``uses_in_memory_stores`` (test or offline), never the e2b SDK's
+    ImportError, which goes away when the SDK is installed.
+    """
+    # TODO(#1916): drop this guard once remote reaps confirm sandboxes by recorded id.
+    if not get_settings().uses_in_memory_stores:
+        raise UnverifiedE2BReap(
+            "SYN_E2B_ENABLED with SYN_EXECUTION_RUN_QUEUE_ENABLED: the E2B executor's reap "
+            "trusts E2B's sandbox listing, which can omit a live sandbox, so it is refused "
+            "outside test/offline until reaps confirm sandboxes by recorded id "
+            "(https://github.com/syntropic137/syntropic137/issues/1916)."
+        )
 
 
 def _recovery_kits(reaper: RunReaper) -> tuple[RunReaper, ...]:

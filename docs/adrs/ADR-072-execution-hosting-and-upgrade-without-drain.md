@@ -478,11 +478,17 @@ reconciler that cannot reap it. A failed list or kill leaves the run `fencing`
 with its charge held (D3), and the next turn retries. An E2B scope is a digest
 of the account's API key (`e2b-key-<sha256 prefix>`): a kit must hold the key
 the E2B executor uses, and a kit holding another key strands the run safely
-under the alert above rather than fence what it may be unable to list. A kit
+under the alert above rather than fence what it may be unable to list.
+Rotating the E2B key therefore changes the scope: a run claimed under the old
+key is reachable only by a kit holding the old key. Rotate only with no live
+E2B runs, and change every Recovery Kit's key in the same step. A kit
 trusts the provider's listing by label (the D13 contract: resources are found
 by label, never by a create handle). E2B's list can lag a sandbox created
 moments before; confirming each sandbox by a durably recorded id, with the
 remote spool's routing (#1916), is the follow-up that removes that trust.
+Until then the E2B executor refuses to start outside test and offline mode
+(`uses_in_memory_stores`, the ADR-060 check), so no production slot is freed
+on an unconfirmed listing.
 
 Visibility-timeout redelivery (Sidekiq, Celery, SQS) is deliberately not
 adopted: redelivering an hour-long agent phase is exactly the duplicate-effects

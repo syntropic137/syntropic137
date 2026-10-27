@@ -35,7 +35,12 @@ class E2BSettings(BaseSettings):
     )
     api_key: SecretStr | None = Field(
         default=None,
-        description=("E2B API key. From the operator's environment or keychain; never commit it."),
+        description=(
+            "E2B API key. From the operator's environment or keychain; never commit it. "
+            "Rotating it changes the E2B executor's reap scope (a digest of the key): rotate "
+            "only with no live E2B runs, and set the same new key as SYN_E2B_RECOVERY_API_KEY "
+            "on every executor holding a Recovery Kit in the same step."
+        ),
     )
     template: str = Field(
         default="",
@@ -96,7 +101,8 @@ class E2BSettings(BaseSettings):
             "a dead E2B executor (list, attach with ownership check, kill), never to create. "
             "Set it on a local executor to let it reconcile E2B runs. It must be the key the "
             "E2B executor uses: the reap scope is derived from the key. Unset: this executor "
-            "never fences an E2B run."
+            "never fences an E2B run. When SYN_E2B_API_KEY is rotated, change this in the "
+            "same step, with no live E2B runs."
         ),
     )
 
