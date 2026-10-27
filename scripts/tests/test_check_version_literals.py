@@ -127,6 +127,18 @@ FASTAPI_PLANTED: dict[str, str] = {
     "class rebinds the outer name to itself": (
         'from fastapi import FastAPI as API\nclass C:\n    API = API\n    app = API(version="1")\n'
     ),
+    # #2106: a class-body read of a name the class binds skips enclosing functions.
+    "class rebinds a module name an enclosing function shadows": (
+        "from fastapi import FastAPI as API\ndef outer():\n    API = object\n"
+        '    class C:\n        API = API\n        app = API(version="1")\n'
+    ),
+    # #2106: a nonlocal READ resolves past a class that declares the name global.
+    "nonlocal read under a class that declares global": (
+        "def outer():\n    API = None\n    class C:\n        global API\n"
+        "        def setup(self):\n            nonlocal API\n"
+        "            from fastapi import FastAPI as API\n"
+        '            return API(version="1")\n'
+    ),
     # #2105 review: nonlocal skips the class and lands on the enclosing function.
     "nonlocal in a method targets the enclosing function": (
         "def outer():\n    API = None\n"
@@ -198,6 +210,11 @@ CLEAN: dict[str, str] = {
     ),
     "attribute past the class is not a constructor": (
         'import fastapi\napp = fastapi.FastAPI.FastAPI(version="1")\n'
+    ),
+    # #2106: the reverse of the planted case; the class reads the module's object.
+    "class rebinds a module name over an enclosing function's import": (
+        "API = object\ndef outer():\n    from fastapi import FastAPI as API\n"
+        '    class C:\n        API = API\n        app = API(version="1")\n'
     ),
     "relative import named fastapi": ('from .fastapi import FastAPI\napp = FastAPI(version="1")\n'),
 }

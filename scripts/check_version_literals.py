@@ -164,15 +164,17 @@ class _Scope:
 def _owner(scope: _Scope, name: str) -> _Scope | None:
     """The scope a read of ``name`` in ``scope`` resolves to.
 
-    The innermost scope that binds it, honoring ``global``. A class body is
-    visible only to itself, never to the functions, lambdas and
-    comprehensions nested in it. ``None`` is a builtin or an unbound name.
+    The innermost scope that binds it, honoring ``global`` and ``nonlocal``.
+    A class body is visible only to itself, never to the functions, lambdas
+    and comprehensions nested in it. ``None`` is a builtin or an unbound name.
     """
     current: _Scope | None = scope
     first = True
     while current is not None:
         if name in current.declared_global:
             return current.module()
+        if name in current.declared_nonlocal:
+            return _nonlocal_owner(current.parent, name)
         if current.is_local(name) and (first or not current.is_class):
             return current
         first = False
@@ -184,28 +186,18 @@ def _owners(scope: _Scope, name: str) -> tuple[_Scope, ...]:
     """Every scope a read of ``name`` in ``scope`` may resolve to.
 
     ``_owner``, plus one case: a read IN a class body that binds the name may
-    still see the enclosing binding (``API = API`` reads the outer one before
-    the class stores its own), so that body falls through as well, skipping
-    any enclosing class bodies. Empty is a builtin or an unbound name.
+    still see a binding outside it (``API = API`` reads before the class
+    stores its own), so that body falls through as well. Python compiles that
+    read as ``LOAD_NAME``, which tries the class, then the MODULE: every
+    enclosing function is skipped (#2106). Empty is a builtin or an unbound name.
     """
     owner = _owner(scope, name)
     if owner is None:
         return ()
     if owner is scope and scope.is_class and scope.parent is not None:
-        return (owner, *_owners_outside_class(scope.parent, name))
+        module = scope.module()
+        return (owner, module) if module.is_local(name) else (owner,)
     return (owner,)
-
-
-def _owners_outside_class(scope: _Scope, name: str) -> tuple[_Scope, ...]:
-    """Lookup from the scope enclosing a class body, which skips class bodies."""
-    current: _Scope | None = scope
-    while current is not None:
-        if name in current.declared_global:
-            return (current.module(),)
-        if current.is_local(name) and not current.is_class:
-            return (current,)
-        current = current.parent
-    return ()
 
 
 def _nonlocal_owner(scope: _Scope | None, name: str) -> _Scope | None:
