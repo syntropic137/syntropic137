@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py b/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py
+index 8adce164c..ec9cce523 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/memory.py
+@@ -179,7 +179,7 @@ class InMemoryExecutionRunQueue(InMemoryAdapter):
+         async with self._lock:
+             now = self._now()
+             entry = self._hosts.get(host_id)
+-            if entry is None or not self._live(entry, now) or not self._claims_enabled(entry, now):
++            if entry is None or not self._live(entry, now):
+                 return None
+             entry = self._budget(host_id, entry, claim_checked_at=now)
+             if entry.in_use >= entry.capacity:

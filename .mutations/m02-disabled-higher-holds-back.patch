@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 434ac4ec8..b6d6709fb 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -91,7 +91,7 @@ _CLAIM_SQL = f"""WITH me AS (
+             AS recently_full
+     FROM execution_budget b JOIN executor_hosts h ON h.host_id=b.executor_id
+     JOIN executor_pools p ON p.pool_id=b.pool_id, me
+-    WHERE p.priority<me.priority AND NOT h.draining AND {claims_enabled("b")}
++    WHERE p.priority<me.priority AND NOT h.draining
+     AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second'
+ ), registered_higher AS (
+     -- Every registered higher executor, live or not: an unbudgeted pool waits on

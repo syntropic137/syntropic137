@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/recovery_kit.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/recovery_kit.py
+index a9c5ab744..8d9dc5cec 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/recovery_kit.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/recovery_kit.py
+@@ -125,7 +125,7 @@ class E2BRunReaper:
+         """
+         labels = {LABEL_HOST_ID: executor_id, LABEL_EXECUTION_ID: execution_id}
+         for sandbox_id in await self._kit.owned(labels):
+-            await self._kit.kill(sandbox_id, labels)
++            pass
+         left = await self._kit.owned(labels)
+         if left:
+             logger.warning(

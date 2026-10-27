@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 434ac4ec8..69974a76c 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -280,7 +280,7 @@ class PostgresExecutionRunQueue:
+             has_room = await conn.fetchval(
+                 f"""UPDATE execution_budget b SET claim_checked_at=clock_timestamp()
+                 FROM executor_hosts h WHERE b.executor_id=$1 AND h.host_id=b.executor_id
+-                AND NOT h.draining AND {claims_enabled("b")}
++                AND NOT h.draining
+                 AND b.heartbeat_at>clock_timestamp()-$2::double precision*interval '1 second'
+                 RETURNING (b.in_use<b.capacity)::text""",
+                 host_id,

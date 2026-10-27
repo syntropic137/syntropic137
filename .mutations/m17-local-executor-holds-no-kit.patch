@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/execution_host_runner.py b/apps/syn-api/src/syn_api/services/execution_host_runner.py
+index ca4536c68..18dba54cd 100644
+--- a/apps/syn-api/src/syn_api/services/execution_host_runner.py
++++ b/apps/syn-api/src/syn_api/services/execution_host_runner.py
+@@ -152,7 +152,7 @@ def _recovery_kits(reaper: RunReaper) -> tuple[RunReaper, ...]:
+     if key is None:
+         return ()
+     kit = E2BRunReaper(E2BRecoveryKit.for_key(key))
+-    return () if kit.scope() == reaper.scope() else (kit,)
++    return ()
+ 
+ 
+ def _supplies_credentials() -> bool:

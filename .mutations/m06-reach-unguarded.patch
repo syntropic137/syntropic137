@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 434ac4ec8..f708c8ec0 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -60,7 +60,7 @@ def in_reach(claimer: str, reconciler: str) -> str:
+     Its own reap scope, or one it holds a Recovery Kit for (D5, D13, C8). A
+     claimer with no scope is NULL, which equals nothing, so no one fences it.
+     """
+-    return f"""(SELECT reap_scope FROM execution_budget WHERE executor_id={claimer})
++    return f"""TRUE OR (SELECT reap_scope FROM execution_budget WHERE executor_id={claimer})
+         IN (SELECT unnest(array_prepend(reap_scope,recovery_scopes)) FROM execution_budget
+             WHERE executor_id={reconciler})"""
+ 

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/host.py b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+index 15f46dc2c..2a8361f0a 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/host.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+@@ -102,7 +102,7 @@ class ExecutionHost:
+         recovery: Sequence[RunReaper] = (),
+     ) -> None:
+         held = frozenset(kit.scope() for kit in recovery)
+-        if held != host.recovery_scopes:
++        if False:
+             # The row would advertise a reach the reconciler cannot reap (C8).
+             raise ValueError(
+                 f"host {host.host_id!r} declares recovery scopes {sorted(host.recovery_scopes)} "

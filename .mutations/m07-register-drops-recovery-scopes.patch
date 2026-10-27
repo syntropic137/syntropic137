@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 434ac4ec8..89d4582d8 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -583,7 +583,7 @@ class PostgresExecutionRunQueue:
+             int(free or 0) if held else capacity,
+             host.pool.pool_id,
+             host.reap_scope,
+-            sorted(host.recovery_scopes),
++            [],
+         )
+         # Rows from before the scope column (D13): one container runs on one
+         # daemon, so a successor in the same container proves the same scope.

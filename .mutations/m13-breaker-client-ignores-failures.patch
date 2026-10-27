@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/breaker_client.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/breaker_client.py
+index 2e3d8ae4e..d687dad29 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/breaker_client.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/breaker_client.py
+@@ -40,7 +40,6 @@ class BreakerE2BClient:
+                 template=template, metadata=metadata, lifetime_seconds=lifetime_seconds
+             )
+         except Exception:
+-            await self._breaker.failed()
+             raise
+         await self._breaker.succeeded()
+         return sandbox_id

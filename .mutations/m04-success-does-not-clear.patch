@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+index 434ac4ec8..6a9009e9c 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_runs/postgres.py
+@@ -322,7 +322,7 @@ class PostgresExecutionRunQueue:
+     async def record_create_success(self, host_id: str) -> None:
+         async with self._pool.acquire() as conn:
+             await conn.execute(
+-                """UPDATE execution_budget SET create_failures=0,claims_disabled_until=NULL
++                """UPDATE execution_budget SET create_failures=0
+                 WHERE executor_id=$1 AND (create_failures<>0 OR claims_disabled_until IS NOT NULL)""",
+                 host_id,
+             )
