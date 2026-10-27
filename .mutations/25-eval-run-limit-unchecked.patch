@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/eval_sets.py b/apps/syn-api/src/syn_api/routes/eval_sets.py
+index 25d05cec8..89fbcb1ca 100644
+--- a/apps/syn-api/src/syn_api/routes/eval_sets.py
++++ b/apps/syn-api/src/syn_api/routes/eval_sets.py
+@@ -234,7 +234,7 @@ async def eval_case_cohorts(
+ ) -> list[EvalCaseCohortResponse]:
+     """One eval's figures in every cohort it has trials in; refused past ``MAX_EVAL_SET_RUNS``."""
+     runs, total = await eval_run_facts(manager, eval_id, limit=MAX_EVAL_SET_RUNS)
+-    if total > MAX_EVAL_SET_RUNS:
++    if False:
+         raise _too_large(f"eval {eval_id}", total, MAX_EVAL_SET_RUNS)
+     cohorts = await asyncio.to_thread(summarize_case, eval_id, runs, k)
+     return [

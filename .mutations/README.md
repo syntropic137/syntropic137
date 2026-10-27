@@ -21,3 +21,9 @@
 | 17-route-ignores-split.patch | `apps/syn-api/src/syn_api/routes/eval_sets.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
 | 18-detail-never-reports-cohorts.patch | `apps/syn-api/src/syn_api/routes/evals.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
 | 19-run-row-no-trial-result.patch | `apps/syn-api/src/syn_api/routes/eval_runs.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
+| 20-model-tag-split-on-equals.patch | `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py` | `packages/syn-domain/tests/contexts/orchestration/test_2108_declared_models_and_images.py` | killed |
+| 21-models-digest-full-length.patch | `packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py` | `packages/syn-domain/tests/contexts/orchestration/test_2108_declared_models_and_images.py` | killed |
+| 22-read-scope-omits-eval-sets.patch | `packages/syn-adapters/src/syn_adapters/platform_access/__init__.py` | `apps/syn-api/tests/test_1744_workspace_platform_eval_scope.py` | killed |
+| 23-set-case-limit-unchecked.patch | `apps/syn-api/src/syn_api/routes/eval_sets.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
+| 24-set-run-limit-unchecked.patch | `apps/syn-api/src/syn_api/routes/eval_sets.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
+| 25-eval-run-limit-unchecked.patch | `apps/syn-api/src/syn_api/routes/eval_sets.py` | `apps/syn-api/tests/test_2108_eval_set_metrics_over_http.py` | killed |
