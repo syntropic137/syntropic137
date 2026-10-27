@@ -4328,7 +4328,14 @@ def test_both_arms_of_a_comparison_score_under_one_panel_protocol() -> None:
     b = eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_SONNET_WF), panel)
 
     assert a == b
-    assert eval_suite.JUDGE_MODEL in a and eval_suite.CODEX_JUDGE_MODEL in a
+    assert panel.identity == (
+        f"panel:{eval_suite.JUDGE_MODEL}+{eval_suite.CODEX_JUDGE_MODEL}"
+        f"@prompt-v{eval_suite.JUDGE_PROMPT_VERSION}"
+    )
+    assert a.endswith(
+        f"panel-{eval_suite.JUDGE_MODEL}-{eval_suite.CODEX_JUDGE_MODEL}"
+        f"-prompt-v{eval_suite.JUDGE_PROMPT_VERSION}"
+    )
     assert list(TagSet([f"scorer:{a}"])) == [f"scorer:{a}"]
     single = eval_suite.LlmJudge(_FakeModel(_reply("no_match")))
     assert a != eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_CODEX_WF), single)
@@ -4351,6 +4358,15 @@ def test_a_panel_that_disagrees_is_unclear_and_not_caught(
     score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
     assert score.llm is not None and score.llm.verdict == "unclear"
     assert score.llm.reason.startswith("panel split")
+    assert score.llm.quote == "", "a split quotes no member, so no one family's finding stands"
+    assert not score.caught
+
+
+@pytest.mark.unit
+def test_a_panel_that_agrees_on_no_match_says_no_match() -> None:
+    panel, _, _ = _panel(_reply("no_match"), _reply("no_match"))
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
+    assert score.llm is not None and score.llm.verdict == "no_match"
     assert not score.caught
 
 
