@@ -1,8 +1,8 @@
 diff --git a/scripts/e2b_template_build.py b/scripts/e2b_template_build.py
-index 52b903363..6c829f9f0 100644
+index 840f6c475..f32d70967 100644
 --- a/scripts/e2b_template_build.py
 +++ b/scripts/e2b_template_build.py
-@@ -164,7 +164,6 @@ async def build(
+@@ -176,7 +176,6 @@ async def build(
          built_at=datetime.now(UTC).isoformat(),
      )
      receipt_dir.mkdir(parents=True, exist_ok=True)
