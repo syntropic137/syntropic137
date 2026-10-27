@@ -2,7 +2,7 @@
 
 ## Overview
 
-Syntropic137 uses **trunk-based development** with a dedicated `release` branch for production deployments. Development happens on `main`, and releases are cut by merging `main` into `release`.
+Syntropic137 uses **trunk-based development** with a dedicated `release` branch for production deployments. Development happens on `main`, and releases are cut by merging `main` into `release`. A security or urgent bug fix can instead ship as a [hotfix](#hotfix-release): a `hotfix/vX.Y.Z` branch off the last release tag, merged into `release` and then forward into `main`.
 
 ## Branch Strategy
 
@@ -11,6 +11,7 @@ Syntropic137 uses **trunk-based development** with a dedicated `release` branch 
 | `main` | Development trunk, all PRs target here | Nothing (CI only) |
 | `release` | Production deployments | Docker images, CLI, docs |
 | `feat/*` | Feature branches (short-lived) | Nothing (CI runs on the PR, not the branch push) |
+| `hotfix/vX.Y.Z` | One fix off the last release tag ([Hotfix Release](#hotfix-release)) | Through its PR into `release` |
 
 ## First-Time Setup
 
@@ -94,7 +95,7 @@ Two environments are needed across the two repos:
    gh api repos/syntropic137/syntropic137/git/refs --method POST \
      -f ref=refs/heads/release -f sha=$(git rev-parse main)
    ```
-2. Branch ruleset: PR required, merge commits only (no squash, no rebase), Release Gate + CI Success checks, admin bypass.
+2. Branch ruleset: PR required, merge commits only (no squash, no rebase), required checks `Release Gate`, `CI Success`, `Compose Stack Smoke Test` and `Release Source`, admin bypass.
 3. Vercel: set production branch to `release` in project settings.
 
 ### Docker / Container Setup
@@ -715,15 +716,83 @@ process: do not trigger it.
 
 ## Hotfix Release
 
-Same as production release, but bump the patch version:
+A hotfix ships one already-merged fix on top of the last release, without the
+beta. Design and rationale: [ADR-077](adrs/ADR-077-hotfix-release-path.md).
+`release-source.yml` enforces the shape below with `main`'s copy of the
+checker (`pull_request_target`), so a hotfix PR cannot rewrite it.
 
-```bash
-# Fix the bug on main first
-just bump-version 0.19.1
-# Then follow the standard release PR flow
-```
+### Hotfix or beta-gated release?
 
-The bump files the fix under `## [0.19.1]` in `CHANGELOG.md` like any release.
+| | Hotfix | Beta-gated release |
+|---|---|---|
+| Security: a CVE, advisory or compromise affecting a shipped image, dependency or pin | yes | |
+| Production outage or data-loss bug in the released version, with a small, already-merged fix | yes | |
+| A quick bug patch: small, already merged to `main`, cherry-picks cleanly onto the release tag | yes | |
+| Anything touching an event schema, a projection `VERSION`, a migration or the event store | | yes |
+| Features, refactors, dependency upgrades with no advisory | | yes |
+| A fix that does not cherry-pick cleanly onto the release tag | | yes |
+| Several unrelated fixes | | yes |
+
+When in doubt, it is a beta-gated release.
+
+### What a hotfix skips and keeps
+
+Skips: the beta (pit stop, live run) and the upgrade rehearsal. Keeps: every
+required check on the PR into `release` (`CI Success`, `Release Gate`,
+`Compose Stack Smoke Test`, `Release Source`), and the owner's `release-publish` approval.
+
+### Steps (example: v1.0.5 off v1.0.4)
+
+1. **Land the fix on `main` first**, through a normal PR. Note its commit SHA
+   (the fix commit, not the PR's merge commit).
+2. **Cut the hotfix branch from the release tag** and push it:
+   ```bash
+   git fetch origin --tags
+   git worktree add -b hotfix/v1.0.5 ../syntropic137_worktrees/hotfix-v1.0.5 v1.0.4
+   cd ../syntropic137_worktrees/hotfix-v1.0.5 && git push -u origin hotfix/v1.0.5
+   ```
+3. **Bring each fix in through its own PR into the hotfix branch**, as an
+   unmodified `git cherry-pick -x` (the `-x` trailer is how the gate finds the
+   `main` commit; an edited pick fails its patch-id check):
+   ```bash
+   git switch -c hotfix/v1.0.5-cloudflared v1.0.4
+   git cherry-pick -x <fix sha>
+   git push -u origin hotfix/v1.0.5-cloudflared
+   gh pr create --base hotfix/v1.0.5 --title "<the main PR's title>" --body "Cherry-pick of #N for v1.0.5."
+   gh pr merge <pr> --merge
+   ```
+   The merge commit is what puts the fix in `CHANGELOG.md`; the PR title is
+   its wording and its conventional-commit type its section (`security` ->
+   Security). A pick that conflicts is not a hotfix: use the beta.
+4. **Bump on the hotfix branch** and push:
+   ```bash
+   git switch hotfix/v1.0.5 && git pull
+   just bump-version 1.0.5
+   git add <each file git status lists>
+   git commit -m "chore: bump version to v1.0.5"
+   git push
+   ```
+   The commit subject is exact; the gate looks for it.
+5. **Write the notes, then open the PR into `release`** (the body is the
+   GitHub Release text and is read from the frozen event payload):
+   ```bash
+   gh pr create --base release --head hotfix/v1.0.5 --title "Release v1.0.5 (hotfix)" --body-file notes.md
+   ```
+   Lead with a `## Security` (or `## Fixed`) section: what, the advisory link,
+   and the one-line upgrade for self-hosters.
+6. **Merge on green** with a merge commit; the owner approves `release-publish`.
+   Verify the release exactly as in [Post-Release Verification](#6-post-release-verification),
+   and publish the npx setup package (step 7 above).
+7. **Forward-merge into `main`** with a merge commit:
+   ```bash
+   gh pr create --base main --head hotfix/v1.0.5 --title "Forward-merge hotfix v1.0.5 into main"
+   ```
+   Resolve conflicts in favour of `main` except the version files, which take
+   the hotfix's version; regenerate `uv.lock` (`uv lock`) and `CHANGELOG.md`
+   (`just changelog`) rather than hand-merging them. Until this lands, the
+   next `main -> release` PR fails `release-source`.
+
+A beta in flight renumbers to the next patch (1.0.5-beta.2 becomes 1.0.6-beta.1).
 
 ## Failure Recovery
 
@@ -767,8 +836,10 @@ the `--check` that follows the bump.
 ## Workflow Architecture
 
 ```
-PR: main → release
+PR: main → release, or hotfix/vX.Y.Z → release
   ├── ci.yml (full CI suite)
+  ├── release-source.yml (pull_request_target: main's copy judges the head
+  │                       as git objects; hotfix secret scan; ADR-077)
   └── release-gate.yml  (thin orchestrator - 4 reusable checks + 3 inline security scans)
         ├── checks/version-check.yml       - every version file consistent, version > release
         ├── checks/changelog-check.yml     - PR body >= 20 chars
@@ -805,6 +876,7 @@ Merge to release
 |------|---------|
 | `.github/workflows/release-gate.yml` | Thin orchestrator - calls checks + inline security scans |
 | `.github/workflows/release-create.yml` | Release pipeline - create tag/release, publish containers + CLI |
+| `.github/workflows/release-source.yml` | `pull_request_target`, main's trusted copy: the head is `main` (on `origin/main`) or a hotfix cut from the last release tag, same repository; gitleaks on hotfix commits (ADR-077) |
 | `.github/workflows/_check-version.yml` | Version consistency: every version file matches, bumped vs release |
 | `.github/workflows/_check-changelog.yml` | PR body length validation (takes `pr_body` input) |
 | `.github/workflows/_check-codegen-sync.yml` | Runs `just codegen`, checks for drift (CLI types, API docs, CLI docs) |
@@ -812,12 +884,14 @@ Merge to release
 | `.github/workflows/release-containers.yaml` | Multi-arch build, cosign sign, push to GHCR, release assets |
 | `.github/workflows/release-cli.yaml` | Build + publish `@syntropic137/cli` to npm (OIDC, provenance) |
 | `scripts/workflows/bump_version.py` | Version bump script; `--check` (consistency) and `--check-release` (semver vs release branch) |
+| `scripts/workflows/check_release_source.py` | Release-source rules; called by `release-source.yml` |
 | `scripts/workflows/check_drift.py` | Drift detection; called by `codegen-sync.yml` to check git diff + untracked files for generated paths |
 
 ## Branch Protection (release)
 
 - Require PR (no direct push)
-- Required status checks: `Release Gate` + `CI Success`
+- Required status checks: `Release Gate`, `CI Success`, `Compose Stack Smoke Test`, `Release Source` (all GitHub Actions, integration 15368). `Release Source` is required since 2026-10-27 (ADR-077).
+- The checks are matched by job name. Renaming any of these jobs must update the ruleset in the same change, or every PR into `release` blocks on a check that never reports.
 - Merge commits only (no squash, no rebase — squashing rewrites history and forces rebasing main on every release)
 - No force pushes, no deletions
 - Admin bypass for emergencies

@@ -1368,7 +1368,7 @@ wheels = [
 
 [[package]]
 name = "syn-adapters"
-version = "1.0.4"
+version = "1.0.5"
 source = { editable = "packages/syn-adapters" }
 dependencies = [
     { name = "agentic-events" },
@@ -1422,7 +1422,7 @@ provides-extras = ["postgres", "minio", "all"]
 
 [[package]]
 name = "syn-api"
-version = "1.0.4"
+version = "1.0.5"
 source = { editable = "apps/syn-api" }
 dependencies = [
     { name = "agentic-logging" },
@@ -1460,7 +1460,7 @@ provides-extras = ["feedback"]
 
 [[package]]
 name = "syn-collector"
-version = "1.0.4"
+version = "1.0.5"
 source = { editable = "packages/syn-collector" }
 dependencies = [
     { name = "click" },
@@ -1500,10 +1500,11 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-domain"
-version = "1.0.4"
+version = "1.0.5"
 source = { editable = "packages/syn-domain" }
 dependencies = [
     { name = "agentic-events" },
+    { name = "agentic-isolation" },
     { name = "cryptography" },
     { name = "event-sourcing-python" },
     { name = "pydantic" },
@@ -1514,6 +1515,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agentic-events", editable = "lib/agentic-workspace/lib/python/agentic_events" },
+    { name = "agentic-isolation", editable = "lib/agentic-workspace/lib/python/agentic_isolation" },
     { name = "cryptography", specifier = ">=46.0.5" },
     { name = "event-sourcing-python", editable = "lib/event-sourcing-platform/event-sourcing/python" },
     { name = "pydantic", specifier = ">=2.12.5" },
@@ -1523,7 +1525,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-perf"
-version = "1.0.4"
+version = "1.0.5"
 source = { editable = "packages/syn-perf" }
 dependencies = [
     { name = "pydantic" },
@@ -1555,7 +1557,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-shared"
-version = "1.0.4"
+version = "1.0.5"
 source = { editable = "packages/syn-shared" }
 dependencies = [
     { name = "certifi" },
@@ -1576,7 +1578,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-tokens"
-version = "1.0.4"
+version = "1.0.5"
 source = { editable = "packages/syn-tokens" }
 dependencies = [
     { name = "pydantic" },
@@ -1593,7 +1595,7 @@ requires-dist = [
 
 [[package]]
 name = "syntropic137"
-version = "1.0.4"
+version = "1.0.5"
 source = { editable = "." }
 dependencies = [
     { name = "event-sourcing-python" },

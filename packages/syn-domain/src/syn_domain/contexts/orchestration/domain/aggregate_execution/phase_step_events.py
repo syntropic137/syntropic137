@@ -44,6 +44,7 @@ def workspace_provisioned_event(
         session_id=command.session_id,
         provisioned_at=datetime.now(UTC),
         checked_out_commits=list(command.checked_out_commits) or None,
+        image_manifest=command.image_manifest,
     )
 
 
@@ -91,4 +92,5 @@ def artifacts_collected_event(
         session_id=command.session_id,
         deliverable_recovered=command.deliverable_recovered,
         observed_heads=list(command.observed_heads),
+        refused_files=list(command.refused_files),
     )

@@ -6,12 +6,12 @@ import re
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
-import yaml
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.list_query import MAX_PAGE_SIZE
+from syn_api.routes.workflows.yaml_scalars import _yaml_flow_list, _yaml_quote
 from syn_api.types import (
     DeclaredSkillResponse,
     Err,
@@ -21,6 +21,7 @@ from syn_api.types import (
     PhaseDefinitionResponse,
     PhaseProgressInfo,
     PhaseRefResponse,
+    PhaseResourcesResponse,
     Result,
     WorkflowDetail,
     WorkflowError,
@@ -236,6 +237,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         delivers_repo_changes=p.delivers_repo_changes,
         platform_access=p.platform_access,
         requires_verdict=p.requires_verdict,
+        resources=PhaseResourcesResponse(memory_mb=p.resources.memory_mb),
         sandbox=p.sandbox,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],
         skills=[_ref_response(r) for r in p.skills],
@@ -383,9 +385,6 @@ async def export_workflow(
 
 _SAFE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
-# Characters that require quoting in YAML scalar values.
-_YAML_SPECIAL_RE = re.compile(r"[:{}\[\],&*?|>!%#@`\"\'\n]")
-
 
 def _sanitize_slug(name: str) -> str:
     """Convert a workflow name to a safe slug for file paths."""
@@ -403,53 +402,6 @@ def _validate_phase_id(phase_id: str) -> str:
         msg = f"Phase ID contains unsafe characters: {phase_id!r}"
         raise ValueError(msg)
     return phase_id
-
-
-def _yaml_flow_list(values: list[str]) -> str:
-    """A flow list the emitter builds, not string concatenation.
-
-    Quoting each item and joining with ", " is not enough: a value that is a
-    perfectly safe standalone scalar can still restructure a FLOW LIST. `a,b`
-    reads back as `a,b` on its own and splits into two entries inside
-    `[a,b]`, so per-item quoting decided correctly and the surrounding
-    context still broke it. The emitter knows both.
-    """
-    return yaml.safe_dump(values, default_flow_style=True, width=10**9).strip().rstrip("\n")
-
-
-def _yaml_quote(value: str) -> str:
-    """Quote a YAML string unless the bare form reads back as itself.
-
-    Special CHARACTERS are not the whole risk. A value made entirely of
-    ordinary characters can still change type: bare `null` parses as None and
-    erases the field, `123` becomes an int a string field then rejects, and
-    `true`/`no`/`on` become booleans. Those look nothing like injection while
-    reading the emitted file, which is why the character test missed them.
-
-    So the check is behavioural rather than syntactic: emit the bare form,
-    parse it, and quote unless it survives as the same string. That covers
-    every YAML scalar resolution rule without this function having to know
-    them.
-    """
-    if _YAML_SPECIAL_RE.search(value) or not _reads_back_as_itself(value):
-        # Delegate to the YAML emitter rather than hand-rolling the escape.
-        # A hand-written double-quoted scalar keeps PHYSICAL newlines, and
-        # YAML folds those to a single space -- so "A\nB" reinstalled as
-        # "A B". A NUL produced a document PyYAML refuses outright. The
-        # emitter knows every escape; this function only decides WHETHER.
-        #
-        # Emitted inside a one-item flow list and unwrapped, so there is no
-        # document-end marker to trim off a bare scalar dump.
-        return _yaml_flow_list([value])[1:-1]
-    return value
-
-
-def _reads_back_as_itself(value: str) -> bool:
-    """Whether the bare scalar parses back to the identical string."""
-    try:
-        return yaml.safe_load(value) == value
-    except yaml.YAMLError:
-        return False
 
 
 # -- Export file builders -----------------------------------------------------
@@ -675,6 +627,10 @@ def _yaml_declaration_lines(phase: PhaseDefinitionResponse) -> list[str]:
         lines.append(f"    platform_access: {phase.platform_access.value}")
     if phase.requires_verdict:
         lines.append("    requires_verdict: true")
+    # okrs-51p.30: dropped, a reinstalled build phase would run in the default
+    # workspace and be OOM-killed.
+    if phase.resources.memory_mb is not None:
+        lines.append(f"    resources: {{memory_mb: {phase.resources.memory_mb}}}")
     return lines
 
 

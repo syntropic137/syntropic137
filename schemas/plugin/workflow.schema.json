@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://syntropic137.dev/schemas/plugin/v1.0.4/workflow.schema.json",
+  "$id": "https://syntropic137.dev/schemas/plugin/v1.0.5/workflow.schema.json",
   "$defs": {
     "AgentYamlDefinition": {
       "additionalProperties": false,
@@ -347,6 +347,9 @@
           "title": "Requires Verdict",
           "type": "boolean"
         },
+        "resources": {
+          "$ref": "#/$defs/WorkspaceResourceRequest"
+        },
         "argument_hint": {
           "anyOf": [
             {
@@ -516,6 +519,27 @@
       ],
       "title": "WorkflowClassification",
       "type": "string"
+    },
+    "WorkspaceResourceRequest": {
+      "additionalProperties": false,
+      "description": "What one phase's workspace asks for beyond the deployment default.\n\nEvery field is optional and None means \"the deployment default\". It is\na REQUEST: the deployment decides whether it fits (``require_memory_within_cap``).",
+      "properties": {
+        "memory_mb": {
+          "anyOf": [
+            {
+              "minimum": 256,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Mb"
+        }
+      },
+      "title": "WorkspaceResourceRequest",
+      "type": "object"
     }
   },
   "additionalProperties": false,

@@ -26,6 +26,18 @@ from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects impor
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
+        AssociationKind,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+        ImageManifestReading,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        EvalBaselinePin,
+        FailureClassification,
+        SourceCommit,
+    )
+
 
 class EvalRunScore(BaseModel):
     """A run's current score: the latest ``EvalRunScored`` for (eval, execution).
@@ -79,6 +91,20 @@ class EvalRunFacts:
     total_tokens: int = 0
     final_phase_model: str | None = None
     """The model the last phase that reported one ran: the verifier model of a verify run."""
+    own_models: tuple[PhaseModel, ...] = ()
+    """Each phase's OWN observed model, delegates ignored: what a declared model is checked against."""
+    failure_classification: FailureClassification | None = None
+    """Why a failed run ended; None when it did not fail or was never classified."""
+    association_kind: AssociationKind | None = None
+    """``launched`` into the eval, or ``attached`` afterwards. Only a launched run is a trial."""
+    inherited_tags: tuple[str, ...] = ()
+    """The run's launch tags, never edited: the only tags a trial's identity is read from (#2108)."""
+    starting_checkout: tuple[SourceCommit, ...] = ()
+    """What the run actually checked out; empty until provisioning recorded it."""
+    baseline: tuple[EvalBaselinePin, ...] = ()
+    """The eval's frozen baseline the run was launched against."""
+    image_manifests: tuple[ImageManifestReading, ...] = ()
+    """Each phase's latest workspace image reading, where provisioning recorded one."""
 
     @property
     def complete_cost_usd(self) -> Decimal | None:

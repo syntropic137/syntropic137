@@ -49,6 +49,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     SavedWork,
     describe_observed_branches,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_capture import (
+    record_phase_capability,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     capture_and_import_phase,
     close_phase_workspaces,
@@ -443,6 +446,27 @@ class PhaseRuntime:
             started_at=self._started_at.get(phase_id, datetime.now(UTC)),
             session_manager=self._session_managers.get(phase_id),
             fallback=self._fallbacks.get(phase_id),
+        )
+
+    async def record_launch(self, phase_id: str) -> None:
+        """Record what is known about this phase's workspace as its agent launches.
+
+        Both rows are Lane 2 and both need the session id `launch` just set.
+        """
+        await self.record_runtime(phase_id)
+        await self.record_capability(phase_id)
+
+    async def record_capability(self, phase_id: str) -> None:
+        """Record the session-store capability's start-up verdict (Lane 2, #1516).
+
+        Call after `launch`, like `record_runtime` and for its reason: the
+        session id is known, and a phase that fails afterwards keeps the row.
+        """
+        await record_phase_capability(
+            self._capture_port,
+            self._workspaces.get(phase_id),
+            session_id=self._session_ids.get(phase_id, ""),
+            phase_id=phase_id,
         )
 
     async def record_runtime(self, phase_id: str) -> None:

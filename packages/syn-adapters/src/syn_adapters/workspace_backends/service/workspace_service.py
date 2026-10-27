@@ -27,14 +27,18 @@ from typing import TYPE_CHECKING
 
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_adapters.workspace_backends.service.workspace_lifecycle import (
+    ProvisionTrack,
     build_isolation_config,
     cleanup_workspace,
     create_workspace_aggregate,
+    finish_abandoned_create,
     provision_workspace,
 )
 from syn_domain.contexts.orchestration import (
     HOST_CREDENTIALS,
     WorkspaceCredentialPolicy,
+    WorkspaceResourceRequest,
+    require_memory_within_cap,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     CapabilityType,
@@ -57,6 +61,11 @@ if TYPE_CHECKING:
     from agentic_isolation.providers.e2b_client import E2BSandboxClient
 
     from syn_adapters.platform_access import PlatformTokenService
+    from syn_adapters.workspace_backends.service.memory_ledger import (
+        LedgerReservation,
+        WorkspaceMemoryLedger,
+    )
+    from syn_adapters.workspace_backends.service.workspace_lifecycle import IsolationTeardown
     from syn_adapters.workspace_backends.tokens.token_injection_adapter import (
         SidecarTokenInjectionAdapter,
     )
@@ -111,7 +120,8 @@ class WorkspaceServiceConfig:
     Attributes:
         backend: Isolation backend type (docker, gvisor, etc.)
         image: Container image for workspace
-        memory_limit_mb: Memory limit in MB
+        memory_limit_mb: Memory limit in MB for a phase that requests none
+        memory_max_mb: The most memory a phase may request (okrs-51p.30)
         cpu_limit_cores: CPU limit in cores
         timeout_seconds: Default command timeout
         allowed_hosts: Allowed egress hosts for sidecar
@@ -121,6 +131,7 @@ class WorkspaceServiceConfig:
     backend: IsolationBackendType = IsolationBackendType.DOCKER_HARDENED
     image: str = DEFAULT_WORKSPACE_IMAGE
     memory_limit_mb: int = DEFAULT_WORKSPACE_MEMORY_LIMIT_MB
+    memory_max_mb: int = DEFAULT_WORKSPACE_MEMORY_LIMIT_MB
     cpu_limit_cores: float = DEFAULT_WORKSPACE_CPU_LIMIT
     timeout_seconds: int = 3600  # 1 hour
     allowed_hosts: tuple[str, ...] = (
@@ -140,9 +151,44 @@ class WorkspaceServiceConfig:
         return cls(
             image=settings.docker_image,
             memory_limit_mb=settings.memory_limit_mb,
+            # Unset is "no phase may ask for more than the default".
+            memory_max_mb=(
+                settings.memory_limit_mb
+                if settings.memory_max_mb is None
+                else settings.memory_max_mb
+            ),
             cpu_limit_cores=settings.cpu_limit,
             runtime=settings.runtime,
         )
+
+
+def _not_shown_gone(
+    track: ProvisionTrack,
+    isolation_handle: IsolationHandle | None,
+    teardown: IsolationTeardown | None,
+) -> str | None:
+    """Why this workspace's container cannot be shown gone, or None when it can.
+
+    Only a clean teardown of a NAMED container is proof. A create that never
+    started made nothing. A create that raised or was abandoned names nothing,
+    yet the backend may have made a container and failed to remove it, so the
+    memory reconciler decides from a listing (Codex on #2148).
+    """
+    if isolation_handle is None:
+        if track.create_task is None:
+            return None
+        if track.still_creating():
+            return "create was abandoned while running"
+        return "create named no container"
+    if teardown is None:
+        return "teardown was interrupted"
+    if teardown.failure is not None:
+        return f"teardown failed: {teardown.failure.kind}: {teardown.failure.message}"
+    return None
+
+
+def _nothing() -> None:
+    pass
 
 
 def _refuse_credentials_under(
@@ -198,6 +244,10 @@ class WorkspaceService:
         #: Mints each workspace's read-only API token (ADR-072). None, or a
         #: disabled service, means workspaces get no token at all.
         self._platform_tokens: PlatformTokenService | None = None
+        #: Where every workspace of this PROCESS reserves its memory, so a
+        #: large one counts as more than one run (okrs-51p.30). None: no
+        #: accounting, which only tests and the memory backend use.
+        self._memory_ledger: WorkspaceMemoryLedger | None = None
 
     @property
     def credential_policy(self) -> WorkspaceCredentialPolicy:
@@ -216,6 +266,7 @@ class WorkspaceService:
         credential_policy: WorkspaceCredentialPolicy = HOST_CREDENTIALS,
         e2b: E2BSettings | None = None,
         e2b_client: E2BSandboxClient | None = None,
+        memory_ledger: WorkspaceMemoryLedger | None = None,
     ) -> WorkspaceService:
         """Create WorkspaceService with explicit backend selection.
 
@@ -235,6 +286,9 @@ class WorkspaceService:
                 E2B is always NoCredentials, whatever ``credential_policy`` says.
             e2b_client: The E2B sandbox client; the e2b SDK adapter, keyed
                 from ``e2b.api_key``, when omitted. Tests pass a double.
+            memory_ledger: The process-wide workspace memory ledger
+                (okrs-51p.30). Shared across every service in the process,
+                so production passes the one singleton.
 
         Returns:
             Configured WorkspaceService
@@ -269,6 +323,7 @@ class WorkspaceService:
                 credential_policy=credential_policy,
             )
         service._platform_tokens = platform_tokens
+        service._memory_ledger = memory_ledger
         return service
 
     @classmethod
@@ -384,18 +439,24 @@ class WorkspaceService:
             msg = "The E2B backend was selected but SYN_E2B_ENABLED/SYN_E2B_API_KEY are unset"
             raise ValueError(msg)
         kit = BackendKit.e2b(e2b.template, cpu_count=e2b.cpu_count, memory_mb=e2b.memory_mb)
-        provider = E2BWorkspaceProvider(
-            e2b.template,
-            client=client or SdkE2BClient(api_key=e2b.api_key.get_secret_value()),
-            lifetime_seconds=e2b.timeout_seconds,
-        )
+        sandboxes = client or SdkE2BClient(api_key=e2b.api_key.get_secret_value())
         base = config or WorkspaceServiceConfig()
         cfg = dataclasses.replace(
             base,
             image=kit.default_image,
             environment={**base.environment, **(environment or {})},
         )
-        isolation = AgenticIsolationAdapter(kit=kit, provider=provider)
+        # The provider resolves launch credentials through the adapter's
+        # resolver, as Docker's does; without one it refuses them all (#1912).
+        isolation = AgenticIsolationAdapter(
+            kit=kit,
+            provider=lambda credentials: E2BWorkspaceProvider(
+                e2b.template,
+                client=sandboxes,
+                lifetime_seconds=e2b.timeout_seconds,
+                credentials=credentials,
+            ),
+        )
         sidecar = SharedEnvoyAdapter(proxy_url=os.environ.get("SYN_PROXY_URL", ""))
         vending = TokenVendingServiceAdapter(get_token_vending_service())  # type: ignore[arg-type]
         return cls(
@@ -529,6 +590,7 @@ class WorkspaceService:
         phase_id: str | None,
         extra_environment: dict[str, str] | None,
         capture_session_id: str | None = None,
+        memory_mb: int | None = None,
     ) -> tuple[WorkspaceAggregate, IsolationConfig]:
         """Create aggregate and isolation config for a new workspace.
 
@@ -538,20 +600,11 @@ class WorkspaceService:
             workflow_id: Optional workflow ID
             phase_id: Optional phase ID
             extra_environment: Additional environment variables
+            memory_mb: This workspace's memory; None is the configured default.
 
         Returns:
             Tuple of (WorkspaceAggregate, IsolationConfig).
         """
-        aggregate = create_workspace_aggregate(
-            workspace_id=workspace_id,
-            execution_id=execution_id,
-            workflow_id=workflow_id,
-            phase_id=phase_id,
-            backend=self._config.backend,
-            capabilities=self._config.capabilities,
-            image=self._config.image,
-        )
-
         isolation_config = build_isolation_config(
             config=self._config,
             workspace_id=workspace_id,
@@ -560,9 +613,43 @@ class WorkspaceService:
             phase_id=phase_id,
             extra_environment=extra_environment,
             capture_session_id=capture_session_id,
+            memory_limit_mb=memory_mb,
+        )
+        aggregate = create_workspace_aggregate(
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            phase_id=phase_id,
+            backend=self._config.backend,
+            capabilities=self._config.capabilities,
+            image=self._config.image,
+            # The limits the container is actually given, recorded on
+            # WorkspaceCreated rather than the SecurityPolicy defaults.
+            security_policy=isolation_config.security_policy,
         )
 
         return aggregate, isolation_config
+
+    @staticmethod
+    def _settle_reservation(
+        reservation: LedgerReservation,
+        execution_id: str,
+        track: ProvisionTrack,
+        isolation_handle: IsolationHandle | None,
+        teardown: IsolationTeardown | None,
+    ) -> None:
+        """Release only when the container is shown gone; otherwise leave it charged."""
+        reason = _not_shown_gone(track, isolation_handle, teardown)
+        if reason is None:
+            reservation.release()
+        else:
+            reservation.leak(execution_id, reason=reason)
+
+    async def _reserve_memory(self, memory_mb: int, workspace_id: str) -> LedgerReservation | None:
+        """Hold ``memory_mb`` of this process's workspace memory, waiting if it is taken."""
+        if self._memory_ledger is None:
+            return None
+        return await self._memory_ledger.reserve(memory_mb, workspace_id=workspace_id)
 
     async def _revoke_platform_grant(self, workspace: ManagedWorkspace) -> None:
         """The phase is over, so its API token is too (ADR-072). Never raises."""
@@ -592,6 +679,7 @@ class WorkspaceService:
         capture_session_id: str | None = None,
         platform_access: PlatformScope = PlatformScope.READ,
         eval_id: str | None = None,
+        resources: WorkspaceResourceRequest | None = None,
     ) -> AsyncIterator[ManagedWorkspace]:
         """Create a managed workspace with full lifecycle.
 
@@ -610,6 +698,10 @@ class WorkspaceService:
                 phase declared it (ADR-072, #1744). READ unless declared.
             eval_id: The eval the execution belongs to; the only eval an EVAL
                 token can launch into or score (#1744).
+            resources: What the phase asked its workspace to be (okrs-51p.30).
+                None or empty: the configured default. A request above
+                ``memory_max_mb`` raises ``WorkspaceMemoryOverCapError``
+                before any container or token exists.
 
         Yields:
             ManagedWorkspace for command execution
@@ -617,6 +709,11 @@ class WorkspaceService:
         import uuid
 
         _refuse_credentials_under(self._credential_policy, with_sidecar, inject_tokens)
+        wanted = resources or WorkspaceResourceRequest()
+        # The last of three places this is checked (install, start, here), and
+        # the one that holds whatever the other two missed: never clamp.
+        require_memory_within_cap(wanted, self._config.memory_max_mb, phase_id=phase_id)
+        memory_mb = wanted.memory_mb_or(self._config.memory_limit_mb)
 
         workspace_id = str(uuid.uuid4())
 
@@ -627,19 +724,27 @@ class WorkspaceService:
             phase_id,
             extra_environment,
             capture_session_id,
+            memory_mb=memory_mb,
         )
+        reservation = await self._reserve_memory(memory_mb, workspace_id)
 
         isolation_handle: IsolationHandle | None = None
         sidecar_handle: SidecarHandle | None = None
         workspace: ManagedWorkspace | None = None
+        track = ProvisionTrack()
+        if reservation is not None:
+            # Until the create and whatever removes its container are over,
+            # no listing can show this workspace gone.
+            reservation.create_started()
 
         try:
-            isolation_handle, sidecar_handle = await provision_workspace(
+            isolation_handle, sidecar_handle, image_manifest = await provision_workspace(
                 self,
                 isolation_config,
                 aggregate,
                 workspace_id,
                 with_sidecar=with_sidecar,
+                track=track,
             )
 
             workspace = ManagedWorkspace(
@@ -648,6 +753,7 @@ class WorkspaceService:
                 aggregate=aggregate,
                 isolation_handle=isolation_handle,
                 sidecar_handle=sidecar_handle,
+                image_manifest=image_manifest,
                 _service=self,
             )
 
@@ -671,21 +777,45 @@ class WorkspaceService:
         finally:
             # After the caller's block, and so after the unpushed-work guard's
             # quarantine push: nothing left in the container needs a token (#725).
-            if workspace is not None:
-                await workspace.revoke_issued_credentials()
-                await self._revoke_platform_grant(workspace)
-            teardown = await cleanup_workspace(
-                self,
-                aggregate,
-                workspace_id,
-                execution_id,
-                isolation_handle=isolation_handle,
-                sidecar_handle=sidecar_handle,
-                inject_tokens=inject_tokens,
-                phase_id=phase_id,
-            )
+            # The handle as soon as the container existed, not only once
+            # provisioning returned: a sidecar that failed to start used to
+            # leave the container undestroyed (okrs-51p.30, Codex on #2148).
+            isolation_handle = isolation_handle or track.created()
+            if track.create_task is not None and track.still_creating():
+                # Cancelled mid-create: the `docker run` carries on. See it
+                # through and destroy what it makes, off this frame.
+                finish_abandoned_create(
+                    self,
+                    track.create_task,
+                    execution_id=execution_id,
+                    on_end=reservation.create_ended if reservation is not None else _nothing,
+                )
+            elif reservation is not None:
+                reservation.create_ended()
+            teardown: IsolationTeardown | None = None
+            try:
+                if workspace is not None:
+                    await workspace.revoke_issued_credentials()
+                    await self._revoke_platform_grant(workspace)
+                teardown = await cleanup_workspace(
+                    self,
+                    aggregate,
+                    workspace_id,
+                    execution_id,
+                    isolation_handle=isolation_handle,
+                    sidecar_handle=sidecar_handle,
+                    inject_tokens=inject_tokens,
+                    phase_id=phase_id,
+                )
+            finally:
+                # The memory is the container's until it is SHOWN gone.
+                if reservation is not None:
+                    self._settle_reservation(
+                        reservation, execution_id, track, isolation_handle, teardown
+                    )
             # Handed back on the object every caller still holds after
             # `__aexit__`, so the frame that knows the session can record it.
-            if workspace is not None:
+            # (teardown is None only when cleanup raised, which never gets here.)
+            if workspace is not None and teardown is not None:
                 workspace.teardown_usage = teardown.usage
                 workspace.teardown_failure = teardown.failure

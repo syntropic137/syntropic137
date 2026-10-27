@@ -35,7 +35,7 @@ one that touches the running host.
 hard gate at each one, and aborts loudly on the first that fails:
 
 ```bash
-just pit-stop 0.29.1-beta.5 --stage-only   # bump, build, verify, ship, repoint: safe while runs are in flight
+just pit-stop 0.29.1-beta.5 --stage-only   # bump, build, verify, ship, stage the pins: safe while runs are in flight
 just pit-stop 0.29.1-beta.5 --swap-only    # wait for the drain, recreate api + gateway, verify
 just pit-stop 0.29.1-beta.5                # both, in one go
 just pit-stop 0.29.1-beta.5 --dry-run      # echo every mutating command; still run the read-only checks
@@ -125,10 +125,31 @@ old file is kept beside it as `docker-compose.syntropic137.yaml.bak-<pin>`,
 where `<pin>` is the old `syn-api` tag (`bak-v0.33.1`) or the first 12 hex of
 its digest (`bak-sha256-bf783882d031`). Anything else - a variable pin, no pin,
 two `syn-api` lines - aborts `stage` before the host is touched. The new file
-is written beside the deployed one and checked against the staged sha256
-before anything else happens. Only then is the backup taken and the new file
-renamed into place, so a transfer cut short leaves the deployed compose as it
-was.
+is written beside the deployed one and checked against the staged sha256, so a
+transfer cut short stages nothing.
+
+**`stage` never touches the live compose (#1511).** The repointed file is
+`docker-compose.syntropic137.yaml.pit-stop-staged`; the swap moves it over
+`docker-compose.syntropic137.yaml` after the gate and the drain, taking the
+`.bak-<pin>` backup then. So between `--stage-only` and `--swap-only` a routine
+`docker compose up -d api` (to load a rotated credential, say) still starts the
+build that was running. Before #1511 it started the staged one, undrained and
+unverified, and beta.6 aborted on every start that way. If the live compose is
+edited after the stage, the swap refuses rather than move the older staged file
+over the edit: stage again.
+
+**`stage` refuses a compose that has drifted from the ref's (#1511).** Before
+anything is built, the deployed compose is compared with
+`docker/docker-compose.syntropic137.yaml` at `--ref`, every `image:` line cut
+to its image name (pins are not drift) and comments and blank lines ignored.
+Any other difference aborts the pit stop and prints the diff: a pit stop only
+moves pins, so a new image whose startup needs a new volume, env var or socket
+proxy policy would be deployed without it. Bring the deployed compose up to
+date by hand (keep its pins), then run the pit stop again. The same check runs
+again on the file `stage` actually repoints, so an edit made on the host during
+the build cannot slip past it. There is no flag to stage the published compose
+wholesale, and no way to compare against any file but `--ref`'s: the release
+asset the host was installed from lacks exactly the config a newer image needs.
 
 The sections below remain the reference for what each stage does and why.
 

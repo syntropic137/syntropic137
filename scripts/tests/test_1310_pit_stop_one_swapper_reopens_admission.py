@@ -226,10 +226,11 @@ def test_the_lock_is_taken_before_anything_ships_in_every_mode() -> None:
     claim = lines.index(_CLAIM)
     for later in (
         'step "ship: docker save | docker load on $HOST"',
-        'step "stage: back up the deployed compose and repoint $REPOINTS"',
+        'step "stage: repoint $REPOINTS into $STAGED (the live compose is untouched until the swap)"',
         'if [ "$MODE" = "stage" ]; then',
         'if [ "$MODE" = "swap" ] && [ "$DRY" = 0 ]; then',
         'if [ "$SERVICE" = gateway ]; then',
+        "apply_staged() {",
     ):
         at = next(i for i, line in enumerate(lines) if line.strip() == later)
         assert claim < at, f"the lock is claimed after: {later}"

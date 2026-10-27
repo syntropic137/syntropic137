@@ -675,22 +675,24 @@ class TestTheInterruptPathKeepsSalvagingAfterAnEmptyFile:
         repo = _Repo()
         collector = ArtifactCollector(repo, None, None)
 
-        ids = await collector.collect_from_unfinished_phase(
-            workspace=_Workspace(  # type: ignore[arg-type]
-                collected_files=[
-                    ("artifacts/output/empty.md", b""),
-                    ("artifacts/output/kept.md", b"salvageable work"),
-                ]
-            ),
-            workflow_id="w1",
-            phase_id="verify",
-            execution_id="e1",
-            session_id="s1",
-            phase_name="Verify",
-            output_artifact_types=("markdown",),
-            agent=UNREPORTED_AGENT,
-            outcome=UnfinishedPhase.INTERRUPTED,
-        )
+        ids = (
+            await collector.collect_from_unfinished_phase(
+                workspace=_Workspace(  # type: ignore[arg-type]
+                    collected_files=[
+                        ("artifacts/output/empty.md", b""),
+                        ("artifacts/output/kept.md", b"salvageable work"),
+                    ]
+                ),
+                workflow_id="w1",
+                phase_id="verify",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Verify",
+                output_artifact_types=("markdown",),
+                agent=UNREPORTED_AGENT,
+                outcome=UnfinishedPhase.INTERRUPTED,
+            )
+        ).artifact_ids
 
         assert len(ids) == 1, "the file after the empty one must still be salvaged"
         assert [c for _, c in _stored(repo)] == ["salvageable work"]

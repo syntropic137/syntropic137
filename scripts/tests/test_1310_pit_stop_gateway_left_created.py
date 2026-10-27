@@ -130,10 +130,17 @@ def _pit_stop(
     bin_dir.mkdir()
     (tmp / "state").write_text("running")
     (tmp / "compose_fails").write_text(str(compose_fails))
-    (host / "docker-compose.syntropic137.yaml").write_text(
+    compose = (
         f"services:\n  api:\n    image: ghcr.io/syntropic137/syn-api:v{_VERSION}\n"
         f"  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v{_VERSION}{digest}\n"
     )
+    # --swap-only counts the staged file (#1511); live and staged agree, as a
+    # replayed stage leaves them.
+    for name in (
+        "docker-compose.syntropic137.yaml",
+        "docker-compose.syntropic137.yaml.pit-stop-staged",
+    ):
+        (host / name).write_text(compose)
     for name, body in (("docker", _DOCKER), ("ssh", _SSH), ("curl", _CURL)):
         stub = bin_dir / name
         stub.write_text(body)

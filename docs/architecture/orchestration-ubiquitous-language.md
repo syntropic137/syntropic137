@@ -87,6 +87,50 @@ of it. An `eval` Phase whose Execution is in no eval can write nothing. A Phase 
 `read`. The declaration is per Phase, not per Workflow, so the one Phase that
 scores does not lend that power to the others.
 
+## Workspace Resource Request
+
+What a Phase asks its workspace to be beyond the deployment default, declared
+per Phase as `resources` (`WorkspaceResourceRequest`, okrs-51p.30). Today it
+holds one field, `memory_mb`. A Phase that declares nothing gets the
+deployment default (`SYN_WORKSPACE_MEMORY_LIMIT_MB`). Per Phase, not per
+Workflow, because a workspace is per Phase: a build that needs 12 GB does not
+hold 12 GB through the review Phases after it. It is a **request**, not a
+limit the Phase sets: the deployment decides whether it fits the
+[Workspace Memory Ceiling](#workspace-memory-ceiling). Pinned with the Phase
+in `WorkflowExecutionStarted.pinned_phases`, so a resume runs under the same
+request, and the memory the container was actually given is recorded on
+`WorkspaceCreated.security_settings`.
+
+## Workspace Memory Ceiling
+
+The most memory one Phase may request on this deployment
+(`SYN_WORKSPACE_MEMORY_MAX_MB`; unset means the default, so nothing above it).
+A request above it is **refused, never clamped**, at install (every install and
+update path, in `CreateWorkflowTemplateHandler`), at start (a 422 before any
+Phase is paid for), at resume (a 422 before the parent's one resume is spent,
+for the Phases the resume would run) and at provisioning: a workspace given less
+memory than it declared is OOM-killed mid-run, and that reads as a code bug.
+
+## Workspace Memory Ledger
+
+How much workspace memory one Executor has handed out (`WorkspaceMemoryLedger`,
+okrs-51p.30). The [Execution Budget](#execution-budget) counts Executions, which
+was exact while every workspace had the same limit; once a Phase can request
+more, one Execution is no longer one unit of host. Every workspace reserves its
+memory here before its container exists and gives it back only once teardown
+**shows the container gone**. A teardown that failed or was interrupted
+**leaks** the reservation: it stays charged, logged at ERROR, until a reap that
+already exists proves the container gone (the host's labelled reap with the Run
+Queue on; the startup reap, before an empty ledger, with it off).
+Capacity is `SYN_EXECUTION_MAX_CONCURRENT x SYN_WORKSPACE_MEMORY_LIMIT_MB`, so
+with no requests it never makes anyone wait that the budget would not, and a
+16 GB Phase on a 4 GB default waits for four shares. First come, first served:
+a small workspace never passes a large one that is waiting. A request larger
+than the whole capacity runs alone rather than never. Reserves the
+**request** (a ceiling), unlike [Run Demand](#run-demand), which is measured:
+a request is the author saying the profile understates this Phase. Per
+process and not durable, like the budget.
+
 ## Phase Profile
 
 What a Phase of one type usually uses, read over every Phase of a Workflow in a
@@ -158,12 +202,17 @@ ten days is one repo touched. Its delta is a plain count ("+3").
 
 An upstream failure of kind `quota` (PC-83): the provider's usage allowance for
 our account is spent until a reset it names ("try again at Oct 9th, 2026 9:10
-PM"). Distinct from capacity, which returns in seconds: a quota returns on a
-calendar date, so it is never retried, and the Phase fails with
-`<provider> quota exhausted until <time>`. Recognised from codex's own fault
-line only. **Unclear:** claude quota text is not recognised here and reads as
-`unknown`; recognising it is harness knowledge and belongs in agentic-workspace
-(#1605).
+PM", or claude's "You've hit your weekly limit · resets Oct 15, 8am (UTC)").
+Distinct from capacity, which returns in seconds: a quota returns on a calendar
+date, so it is never retried. It hands the Phase to its
+[Fallback Agent](#fallback-agent) when it has one; otherwise the Phase fails
+with `<provider> quota exhausted until <resets_at>`. **resets_at** is when the
+provider says the allowance returns, always UTC. It is unstated when the
+provider named no time, or named one that could not be placed. Claude names
+its reset without a year, so it is placed at the first matching time after the
+reason was read. Recognising either provider's quota is harness knowledge:
+agentic-workspace's harness classifiers own it, and this context only maps
+their answer to its own kind (#1605).
 
 ## Upstream Retry
 
@@ -185,11 +234,29 @@ not the agent's answer and says nothing about the change: the same request is
 routinely served by another provider's model. Resending it to the same filter
 gets the same verdict, so it is never retried; it hands the Phase to its
 [Fallback Agent](#fallback-agent), under the same rule as a capacity or quota
-failure. Recognised from codex's own fault line only. **Unclear:** no real
+failure. Recognised by agentic-workspace's harness classifiers (#1605); codex's
+only inside its own fault line. **Unclear:** no real
 claude refusal output exists in this repo or its submodules, so a claude
 refusal is not yet recognised and reads as `unknown`. A refusal that arrives
 after the agent only read, searched or spoke still falls back: that is not
 [Attempt Work](#attempt-work) (#1825).
+
+## Capture Degraded
+
+A Phase whose workspace started with session capture switched off: the
+session-store capability's start-up checks failed (e.g. `store_reachable`), so
+agentic-workspace degraded it rather than failing the workspace (AW #27). The
+Phase runs and completes normally; its transcripts never reach the store. The
+cause is the capability's own `capability_status` verdict (`ready`,
+`degraded`, `failed`), read from the workspace's audit row as the agent
+launches and recorded then as its own `capability_status` observation, so the
+Phase reads as degraded while it runs and keeps that explanation if it never
+reaches teardown. The teardown capture verdict reads it again, and its state
+then reads `degraded` instead of an unexplained `failed`, `incomplete` or
+`unknown`. It still needs a backfill:
+degraded is explained, not settled. A verdict that cannot be read is unknown,
+never degraded, and never fails the Phase. Not `capture failed`, which means
+capture was on and the export broke (#1516).
 
 ## Provision Step Timeout
 
@@ -265,6 +332,55 @@ The pre-built E2B image every E2B workspace starts from (`SYN_E2B_TEMPLATE`,
 sandbox by its template, not per request, so the template's CPU and memory are
 a ceiling, not a request. Not an OCI image reference: nothing is
 cosign-verified when a workspace starts from it.
+
+## Image Manifest
+
+What a workspace image says about itself: `/opt/agentic/version.json`, read
+off the running workspace through the provider's file transfer on every
+backend (#1913), and recorded per phase on `WorkspaceProvisionedForPhase` as
+an **image manifest reading** (`ImageManifestReading`). A reading is exactly
+one of three states, never collapsed:
+
+- **read** - the file was there and was a manifest; every field is required,
+  none is defaulted;
+- **absent** - the workspace has no manifest file. Not an error: no image
+  ships one yet (AgentParadise/agentic-workspace#93);
+- **unreadable** - the transfer failed, or the file was not a manifest. The
+  reason is recorded with it; when the provider refused the file, the
+  **file refusal** itself is recorded too (`refusal`).
+
+Provenance, so Lane 1: it is needed after a restart. The `WorkspaceAggregate`
+also sees it but is never saved, so it is not provenance. Its
+`manifest_digest` is the hash of the build's `manifest.yaml`, not an OCI image
+digest, and is never compared with `PINNED_DIGESTS`.
+
+**Unclear:** the expected manifest hash a reading should be compared with
+does not exist yet, for Docker or E2B (#1913, blocked on
+AgentParadise/agentic-workspace#93), so a reading is recorded, not checked.
+
+## File Refusal
+
+When a workspace's files are read, the provider refuses some entries instead
+of returning them. It refuses links, special files, and anything past a read
+limit. A **file refusal** (`FileRefusal`) names the path and a typed
+reason. A refused file is never recorded as an absent file or an empty one.
+Every backend reads through the provider, Docker included (#1913).
+
+The **refusal policy** for a phase's output:
+
+- **a refused file** is recorded on `ArtifactsCollectedForPhase.refused_files`
+  (`WorkflowExecutionAggregate.refused_files_for`), and the rest of the output
+  is collected;
+- **an incomplete walk** (`entry_limit_exceeded`, `depth_exceeded`) fails the
+  collection (`OutputCollectionIncompleteError`). The walk stopped, so nobody
+  knows which files it missed.
+
+The output kept from a phase that will not complete (failed, cancelled,
+interrupted) is best effort, but its refusals are not: they are recorded on
+`OutputFilesRefusedForPhase` before the phase's outcome, and read back through
+the same `refused_files_for`. A walk that stopped keeps nothing as if it were
+whole, and records what stopped it. A refused image manifest records every
+refusal the read returned on its UNREADABLE reading (`ImageManifestReading.refusals`).
 
 ## Fallback Agent
 
@@ -782,17 +898,39 @@ short word is left to it. (ADR-072 D13.)
 
 ## Pool Priority
 
-The order Executor Pools are tried in: an integer, 0 first. A lower-priority
-pool takes a run only by Overflow. Never "tier". (ADR-072 D13.)
+The order Executor Pools are tried in: an integer an operator sets per pool
+(`SYN_EXECUTOR_POOL_PRIORITY`), 0 first. Local Docker is 0; a second host and
+a remote backend such as E2B take higher numbers. A lower-priority pool takes a
+run only by Overflow, and a run every pool is too full for stays Queued. Never
+"tier", though the owner's direction of 2026-10-14 used that word for it.
+(ADR-072 D13, #1917.)
 
 ## Overflow
 
 An Executor in a lower-priority Executor Pool claiming a run because every
 higher-priority Executor that could take it is full for longer than the
-Overflow Delay, draining, stale, or not claiming. A run that overflowed is
+Overflow Delay, draining, stale, or not claiming, and only when the claiming
+pool has an Overflow Budget. A run that overflowed is
 recorded as such on its row (`overflowed`), as telemetry, never as an event.
-Placement is decided in the claim itself, never by a separate process.
-(ADR-072 D13; lands after the pool model.)
+Placement is decided in the claim itself, never by a separate process. A run
+that a higher Executor could not take anyway (another Event Epoch, or a
+NoCredentials pool and an `agent` Workload) did not overflow. (ADR-072 D13,
+#1917.)
+
+## Overflow Budget
+
+The operator's daily spend cap for an Executor Pool's Overflow, in whole USD
+(`overflow_budget_usd_per_day`, `SYN_EXECUTOR_POOL_OVERFLOW_BUDGET_USD_PER_DAY`).
+Fail-closed: a pool with no Overflow Budget claims only runs that no
+**registered** higher-priority Executor could take, live or not. A higher
+Executor that is draining (a pit stop), stale or dead keeps it idle, and the
+runs wait; only `leave` (deregistration) or a restart in the same container
+removes one. So an unbudgeted pool claims only when it is the top pool for the
+run. A crashed higher host that never returns and never deregisters keeps it
+idle for good. Declaring it is what
+lets a paid pool such as E2B overflow. Recorded with the pool and not yet
+metered; counting spend against it is #2024. Not the Execution Budget, which
+is slots, not money. (ADR-072 D13, #1917.)
 
 ## Overflow Delay
 
@@ -800,8 +938,7 @@ How long a higher-priority Executor must have been **full** before a lower
 pool may overflow past it: saturation duration, measured from that
 Executor's `full_since`, not the run's age. Defined per Executor Pool
 (`overflow_delay_s`, `SYN_EXECUTOR_POOL_OVERFLOW_DELAY_S`, default 60 s).
-Recorded with the pool now; the claim reads it once Overflow lands.
-(ADR-072 D13.)
+The claim reads the **claiming** pool's delay. (ADR-072 D13.)
 
 ## Claim Check
 
@@ -809,8 +946,8 @@ The claim statement's stamp on the claiming Executor's own row,
 `claim_checked_at`, written each time the claim decides, with or without a
 run. A Heartbeat says the loop turned; a Claim Check says the claim ran.
 Placement trusts only the Claim Check to advertise room, so an Executor whose
-claim keeps failing stops holding work back from lower pools. (ADR-072 D4,
-D13; lands after the pool model.)
+claim keeps failing stops holding work back from lower pools. Stamped only
+while the Executor is live and not draining. (ADR-072 D4, D13.)
 
 ## Capability
 
@@ -849,14 +986,70 @@ by Overflow, decided inside the claim transaction. Recorded on the run row
 (`placed_pool`, `overflowed`, `claimed_at`) as infrastructure telemetry.
 (ADR-072 D13.)
 
+## Workload
+
+What a run needs its workspace to hold, as the claim reads it
+(`RunWorkload`, `execution_runs.workload`): `agent`, a real agent that needs
+the host's credentials, or `scripted`, a Scripted Agent that needs none.
+Written at `reserve`; every run is `agent` until a start names a Scripted
+Agent profile (#1918). Infrastructure state on the run row, not an event.
+(#1917, research decision 5.)
+
+## Credential Clause
+
+The part of the claim that keeps credential-free backends away from work that
+needs credentials. An Executor Pool records whether its backend's
+[Workspace Credential Policy](#workspace-credential-policy) supplies
+credentials (`supplies_credentials`, from the Backend Kit, never a setting). A
+pool that supplies none claims only `scripted` Workloads, and is never counted
+as able to take an `agent` run, so it never holds one back. The research
+doc's "Credential policy" is this plus the Workspace Credential Policy itself.
+(ADR-072 D13, #1917.)
+
+## Executor Backend
+
+The workspace backend one Executor drives: Docker today, E2B behind
+`SYN_E2B_ENABLED`. One Executor drives exactly one, so no code path branches on
+backend per run; its value on the Run Queue is the Executor Pool's `provider`.
+A remote backend is an Executor in its own, higher-priority pool, never a
+router in front of the local one. (Research decision 1, #1917.)
+
+## Recovery Kit
+
+The narrow capability to clean up after a dead Executor on one backend and
+account: list the resources an owner left for one run, attach to each with the
+ownership check, and kill it. It creates and runs nothing, so a local Docker
+Executor can hold an E2B kit without provisioning E2B workspaces
+(`SYN_E2B_RECOVERY_API_KEY`). The scopes an Executor holds kits for are its
+**recovery scopes**, recorded on its budget row: it fences and takes over runs
+claimed in its own Reap Scope or in one of those, and reaps each with the kit
+for the claimer's scope, never with its own backend. An Executor without the
+kit never fences the run. A failed list or kill keeps the run `fencing`, its
+slot charged. The E2B Executor's own reaper is a kit on its own account.
+(ADR-072 D5 as amended by C8, research decision 8, #1917.)
+
+## Outage Breaker
+
+Disables an Executor's Claims after K consecutive failed workspace creates
+(an E2B outage, a refused quota, a bad template), for a cooldown, then lets
+exactly one Claim through (the probe), holding the rest until its create
+reports: a failed create disables Claims again at once, a successful one
+clears the count. Recorded on the Executor's own budget row
+(`create_failures`, `claims_disabled_until`), never by lowering capacity, so
+the budget `CHECK` holds while runs are charged and they finish or are fenced
+normally. A disabled Executor stamps no Claim Check and holds no lower pool
+back. Not a Drain: a Drain is one-way and the Executor exits. (ADR-072 D13,
+research decision 2, #1917.)
+
 ## Reap Scope
 
 What an Executor's reconciler can actually reap: one Docker daemon, one
 provider account. Recorded on its budget row (`reap_scope`), derived from the
 backend and never configured. A reconciler fences, takes over and reaps only
-runs claimed in its own Reap Scope, so a reconciler on another machine can
-never free a slot whose workspace may still be running. On Docker it is the
-daemon's engine ID. A budget row with no Reap Scope (written before the column
+runs claimed in its own Reap Scope or one it holds a Recovery Kit for, so a
+reconciler that cannot see a workspace can never free its slot. On Docker it is the
+daemon's engine ID; on E2B a digest of the account's API key (`e2b-key-...`),
+never the key. A budget row with no Reap Scope (written before the column
 existed) is reaped by no one until a successor in its own container gives it
 that successor's. The same backend's reap gates every release: a claimer closes
 its own run only once the reap shows the run's resources gone. (ADR-072 D3, D5,
@@ -1094,6 +1287,14 @@ The model that produced a Score, when a model did (`judge_model` on
 Not the Scorer: the scorer is the program and its version, the judge model is
 the model that program asked.
 
+## Judge Panel
+
+One Claude and one codex model, pinned ids, judging as one (`PanelJudge` in
+`scripts/eval_suite.py`, #2108 S5). Its identity names both models and the
+prompt version and is the Cohort's scoring protocol, so every arm of a
+comparison is judged by the same ruler. The members must agree for a verdict;
+a split is `unclear`, which is never a catch.
+
 ## Verifier Model
 
 On a trend point, the model the Run's last reporting phase OBSERVED running:
@@ -1154,6 +1355,91 @@ A tag on Evals, not a record: `suite:<name>` plus `case:<case id>` names one
 case's Eval, and that Eval is reused by every version of the suite and every
 verifier (`scripts/eval_suite.py`). What differs between Runs goes on the Run
 as tags: `suite-version:<n>` and `verifier:<workflow id>`.
+
+## Trial
+
+One Run LAUNCHED into an Eval (`association_kind = launched`). An attached
+Run is a member of the Eval, not a Trial. A Trial's identity (its Cohort and
+`trial:<batch>/<i>`) is read from its launch tags (`inherited_tags`), never
+from its editable tags, so a retag cannot move it (#2108).
+
+## Eval Set
+
+The Evals that carry one Suite tag (`suite:<name>`). Not a record: it is read
+from tags, like a Suite.
+
+## Roster
+
+The cases of one Eval Set version, written onto the Evals as tags
+(`suite-version:<n>`, `split:<s>`, `polarity:<defect|clean>`) before anything
+is launched. Coverage, bounds and pairing are computed against it, so a case
+never launched counts as n = 0, never as absent (`read_models/eval_sets.py`).
+
+## Cohort
+
+The Trials of one Roster that share a declared treatment and scoring
+protocol: suite version, workflow id and version, the digest of the declared
+models (`models:<sha256>`) and the scoring protocol (`scorer:<id>`). Declared,
+not observed, so a Trial that failed before any model ran still belongs to
+its Cohort. Trials never pool across Cohorts.
+
+## Declared Models
+
+The explicit model id each phase of a Trial was launched to run, as
+`model:<phase>:<id>` launch tags, one `DeclaredModel` each, written with the
+`models:<digest>` cohort tag by `declared_model_tags` and read by
+`declared_models_of`. The treatment check
+compares each phase's own observed model against them; a Trial launched with
+none is not checked, and a phase declared twice with different ids can never
+match.
+
+## Image Provenance
+
+Which workspace images a Cohort's Trials ran: every distinct Image Manifest a
+phase of a counted Trial read, and how many Trials read none (absent,
+unreadable, or never provisioned). Reported beside the figures, never a part of
+the Cohort key: one Cohort may span several images.
+
+## Trial Outcome
+
+`pass`, `fail`, `infra_error` or `pending`, derived at read time by one
+ordered rule (`classify_trial`) from status, Failure Classification, the
+Starting Checkout against the baseline, and the Score. Distinct from Verdict,
+the scorer's word. A Run that is not a Trial, ran off the baseline, or ran a
+model other than the one declared is an exclusion (`not_a_trial`,
+`base_mismatch`, `treatment_mismatch`), counted and never scored.
+
+## Infra Error
+
+A Trial whose result says nothing about the agent: cancelled, interrupted, a
+`platform` or `unclassified` failure, completed on an unverified base, or
+scored ERROR. Out of n in the conditional figures; a fail in the lower bound
+and a pass in the upper. Never scored as 0.
+
+## Referee
+
+The scorer of a Run that the Run's agent cannot see, reach or influence, and
+whose verdict no agent carries. For implementer suites it is
+`scripts/eval_referee.py`: the scorer at a recorded commit, in a throwaway
+container from the pinned workspace image, with the network cut before the
+agent's patch runs; the verdict is the scorer's exit code. An in-run verify
+phase is never a Referee: it is part of the treatment.
+
+## Control
+
+A patch whose Verdict is known before scoring: the case's reference fix (must
+PASS) and the empty patch (must FAIL). Both run through the Referee's exact
+path before any agent patch of the case is scored; if either does not hold, no
+agent patch of that case is scored.
+
+## pass@k / pass^k / Flaky Case
+
+Per case and Cohort with n judged Trials and c passes: pass@k = 1 - C(n-c, k)
+/ C(n, k), pass^k = C(c, k) / C(n, k). A case is Flaky when pass@k > 0 and
+pass^k < 1. With n < k there is no figure: the case is short, and
+`trials_short` says how many more Trials it needs. Set figures are reported
+conditional (over complete cases, labelled partial) and as Roster-wide bounds;
+decisions read the bounds.
 
 ## Goal
 
@@ -1573,6 +1859,10 @@ a person-started Resume is a new decision. Code:
   transaction; there is no routing process, and a central one was rejected
   (ADR-072 D13).
 
+- **Attempt, Sweep** (for a Trial). "Attempt" already means trigger limits and
+  "sweep" the admission opening sweep. A launched Run of an Eval is a Trial.
+- **Variant** (for a Cohort). Variant keeps its meaning: Runs grouped by
+  OBSERVED models. A Cohort is grouped by DECLARED models and scoring protocol.
 - **Suite** (as a record or an aggregate). A suite is a tag on Evals. There is
   no Suite stream, and a second aggregate for it was rejected (evals v2).
 
@@ -1602,12 +1892,12 @@ a person-started Resume is a new decision. Code:
 - **`can_open_pr`.** Retired after #1477. It was a Phase field that, from
   #1197, decided whether a Phase's token could open a pull request. #1477
   removed the token downgrade it controlled, so it decided nothing, and it was
-  then dropped from the Phase and from Pins. Workflow YAML that still carries
-  it loads, and validate and install report a warning naming the Phase; any
-  other unknown key is still refused. Stored events that carry it replay
-  unchanged, permanently. The retired keys are listed in
-  `_shared/retired_phase_fields.py`; rejecting them at authoring time is
-  #1502. There is no replacement: every Phase may open and comment on a PR.
+  then dropped from the Phase and from Pins. After a deprecation window in
+  which it loaded with a warning, Workflow YAML that still carries it is
+  refused at validate and install with a message naming the Phase and the key
+  (#1502). Stored events that carry it replay unchanged, permanently. The
+  retired keys are listed in `_shared/retired_phase_fields.py`. There is no
+  replacement: every Phase may open and comment on a PR.
 - **Adopt / Reattach.** Reserved for #1310 Phase 3, no meaning assigned: a new
   process taking over a phase that is still running after the process that
   started it died. Not built, and deferred until an experiment shows it can be

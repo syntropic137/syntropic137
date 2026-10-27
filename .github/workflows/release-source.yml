@@ -1,0 +1,100 @@
+# =============================================================================
+# Release Source — may this PR's head release at all? (ADR-077)
+# =============================================================================
+#
+#   main            the normal, beta-gated release. The head SHA must be on
+#                   origin/main, and `release` must carry no hotfix commit
+#                   main lacks (forward-merge first).
+#   hotfix/vX.Y.Z   a hotfix: cut from the latest release tag, only
+#                   `git cherry-pick -x` copies of main commits plus one
+#                   version bump, exactly one patch above the release.
+#
+# Any other head, and any head from another repository, is refused.
+#
+# TRUST: this is `pull_request_target`, so GitHub runs the copy of this file
+# on the DEFAULT branch (main), whatever the PR's base, and the checkout below
+# is that same commit (github.workflow_sha). The candidate is fetched as git
+# objects and never checked out, imported or executed: a PR that edits this
+# file or scripts/workflows/check_release_source.py is still judged by main's
+# copies. Nothing here uses a secret, and the token is read-only.
+#
+# The required status check is this job's name, `Release Source`, on the
+# `release` ruleset (required since 2026-10-27). Renaming the job must update
+# the ruleset in the same change, or every PR into `release` blocks.
+# =============================================================================
+
+name: Release Source
+
+on:
+  pull_request_target:
+    branches: [release]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-source-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  release-source:
+    name: Release Source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # The trusted checker: main's commit that this workflow file came
+          # from. NOT the PR base: `release` can predate the checker (v1.0.4
+          # did), and the base's copy is not what GitHub runs here anyway.
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0  # tags, origin/main and origin/release
+          persist-credentials: false
+
+      # Objects only: refs/pull/N/head is the PR's head, from this repository
+      # or a fork, and the working tree stays on main's commit.
+      - name: Fetch the head as git objects
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags origin "+refs/pull/${PR}/head:refs/remotes/pr/head"
+          test "$(git rev-parse refs/remotes/pr/head)" = "$HEAD_SHA" \
+            || { echo "::error::the PR head moved since this event; the next run checks it"; exit 1; }
+
+      # uv picks the interpreter from main's .python-version.
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Check the head may release
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          uv run --no-project python scripts/workflows/check_release_source.py \
+            --head-ref "$HEAD_REF" --head-repo "$HEAD_REPO" --base-repo "$BASE_REPO" \
+            --head-sha "$HEAD_SHA" --base-sha "$BASE_SHA"
+
+      # Only the commits a hotfix adds: a main -> release PR carries weeks of
+      # history whose fixtures were never scanned, and this gate must not start
+      # failing ordinary releases on them. safe.directory: the container's git
+      # refuses a checkout owned by another uid, logs it, scans 0 commits and
+      # exits 0; the grep turns that silent pass into a failure.
+      - name: Secret scan the hotfix commits
+        if: startsWith(github.event.pull_request.head.ref, 'hotfix/')
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -o pipefail
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+            -v "$PWD:/repo" -w /repo \
+            zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --redact --no-banner --no-color --log-opts="$BASE_SHA..$HEAD_SHA" /repo 2>&1 \
+            | tee "$RUNNER_TEMP/gitleaks.log"
+          if grep -q ' 0 commits scanned' "$RUNNER_TEMP/gitleaks.log"; then
+            echo "::error::gitleaks scanned no commits"; exit 1
+          fi

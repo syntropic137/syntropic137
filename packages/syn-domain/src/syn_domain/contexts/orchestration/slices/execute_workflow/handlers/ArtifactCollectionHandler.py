@@ -130,6 +130,7 @@ class ArtifactCollectionHandler:
             else None,
             session_id=session_id,
             deliverable_recovered=collected.deliverable_recovered,
+            refused_files=collected.refused,
         )
 
         return ArtifactCollectionResult(

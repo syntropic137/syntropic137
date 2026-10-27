@@ -28,6 +28,9 @@ from pydantic import ValidationError
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+    ImageManifestReading,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -75,6 +78,8 @@ ON_BRANCH = f"refs/heads/{BRANCH}"
 DETACHED = "HEAD"
 
 PINS = [SourceCommit(repository=APP, sha=APP_PIN), SourceCommit(repository=LIB, sha=LIB_PIN)]
+#: What the workspace's image said about itself when it was provisioned (#1913).
+IMAGE_MANIFEST = ImageManifestReading.unreadable("RuntimeError: sandbox 967 stopped answering")
 
 
 def _phase() -> ExecutablePhase:
@@ -119,6 +124,7 @@ def _workspace_at(
     workspace = AsyncMock()
     workspace.proxy_url = "http://envoy:10000"
     workspace.workspace_id = "ws-967"
+    workspace.image_manifest = IMAGE_MANIFEST
     workspace.run_setup_phase = AsyncMock(
         return_value=ExecutionResult(exit_code=0, success=True, duration_ms=1.0)
     )
@@ -223,6 +229,15 @@ async def test_the_pinned_checkout_is_recorded_and_survives_replay() -> None:
     replayed = _replayed(_started_and_provisioned(result))
 
     assert replayed.starting_checkout == [SourceCommit(repository=APP, sha=APP_PIN)]
+
+
+async def test_the_image_manifest_travels_from_the_workspace_to_the_replayed_execution() -> None:
+    """The handler is the hop from the workspace to the persisted event (#1913)."""
+    result = await _provision({"/workspace/repos/eval-app": APP_PIN}, [APP_URL])
+
+    replayed = _replayed(_started_and_provisioned(result))
+
+    assert replayed.image_manifest_for(PHASE) == IMAGE_MANIFEST
 
 
 async def test_every_repository_of_a_two_repo_baseline_is_verified_and_recorded() -> None:

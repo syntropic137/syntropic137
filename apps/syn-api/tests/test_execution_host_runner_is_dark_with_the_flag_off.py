@@ -109,3 +109,22 @@ async def test_the_production_startup_and_shutdown_drive_the_host_only_with_the_
     finally:
         await runner.stop_execution_host()
         reset_settings()
+
+
+async def test_flag_off_still_starts_the_workspace_memory_reconciler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """okrs-51p.30: the one path that settles leaked memory runs with the queue off too."""
+    from syn_api.services import workspace_memory_reconcile
+
+    monkeypatch.setattr(runner, "get_execution_run_queue", AsyncMock(return_value=None))
+    monkeypatch.setattr(runner, "get_execution_processor", AsyncMock())
+    monkeypatch.setattr(
+        "syn_api._wiring_workspace_memory.ledger_applies", lambda: True, raising=True
+    )
+    await runner.start_execution_host()
+    task = workspace_memory_reconcile._reconcile_task
+    assert task is not None and not task.done()
+    await runner.stop_execution_host()
+    assert workspace_memory_reconcile._reconcile_task is None
+    assert task.cancelled()

@@ -681,6 +681,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/evals/{eval_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Eval Tags Endpoint
+         * @description Add tags to an eval: how a harness writes an eval-set roster (suite-version, split, polarity).
+         *
+         *     Tags already present are a no-op, so a roster is re-registered safely.
+         *     An archived eval refuses the edit (422).
+         */
+        post: operations["add_eval_tags_endpoint_evals__eval_id__tags_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/executions/{execution_id}/eval": {
         parameters: {
             query?: never;
@@ -763,6 +786,9 @@ export interface paths {
         /**
          * Get Eval Endpoint
          * @description One eval with its Baseline and run tally. Its runs are `GET /evals/{eval_id}/runs`.
+         *
+         *     With ``k``, ``cohorts`` carries the eval's trial figures in every cohort
+         *     it has trials in (#2108); without it, ``cohorts`` is null.
          */
         get: operations["get_eval_endpoint_evals__eval_id__get"];
         put?: never;
@@ -855,6 +881,32 @@ export interface paths {
          * @description Archive an eval: it stays readable with its runs, and admits no new ones. Idempotent.
          */
         post: operations["archive_eval_endpoint_evals__eval_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/eval-sets/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eval Set Metrics Endpoint
+         * @description pass@k, pass^k and flakiness of every cohort over one eval-set roster (#2108).
+         *
+         *     One block per cohort (suite version, workflow and version, declared
+         *     models, scoring protocol), each with per-case rows, coverage, roster-wide
+         *     bounds with infra errors and missing trials counted both ways, and the
+         *     images its trials ran. When exactly two cohorts launched into the roster,
+         *     a paired comparison is added. An unknown suite is an empty roster.
+         */
+        get: operations["get_eval_set_metrics_endpoint_eval_sets_metrics_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2641,7 +2693,7 @@ export interface components {
         };
         /**
          * AddTagsRequest
-         * @description Tags to add to an execution or a workflow. Adds only: never replaces the set.
+         * @description Tags to add to an execution, a workflow or an eval. Adds only: never replaces the set.
          */
         AddTagsRequest: {
             /**
@@ -2945,6 +2997,38 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /**
+         * CapabilityStatusEntry
+         * @description One workspace's session-store capability verdict, recorded at agent launch.
+         *
+         *     Recorded at START (#1516), so a degraded workspace is visible while its
+         *     phase runs and stays visible if the phase never reaches teardown. Only
+         *     returned for an execution-filtered read.
+         */
+        CapabilityStatusEntry: {
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Phase Id */
+            phase_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
+            /** Capability */
+            capability: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "degraded" | "failed";
+            /** Failed Checks */
+            failed_checks?: string[];
+            /**
+             * Doctor Exit
+             * @default 0
+             */
+            doctor_exit: number;
+            /** Capability Status Display */
+            capability_status_display: string;
+        };
         /** CaptureReceipt */
         CaptureReceipt: {
             node: components["schemas"]["InventoryNodeRef"];
@@ -3018,6 +3102,14 @@ export interface components {
             origin_deployment?: string | null;
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
+            /** Capability Status */
+            capability_status?: ("ready" | "degraded" | "failed") | null;
+            /** Failed Checks */
+            failed_checks?: string[];
+            /** Doctor Exit */
+            doctor_exit?: number | null;
+            /** Capture Status Display */
+            capture_status_display: string;
         };
         /**
          * CaptureStatusResponse
@@ -3051,6 +3143,8 @@ export interface components {
             truncated: boolean;
             /** Entries */
             entries?: components["schemas"]["CaptureStatusEntry"][];
+            /** Capabilities */
+            capabilities?: components["schemas"]["CapabilityStatusEntry"][];
         };
         /**
          * ClaudePluginFileEntry
@@ -3776,6 +3870,86 @@ export interface components {
             commit_sha: string;
         };
         /**
+         * EvalBoundsResponse
+         * @description A figure with every infra error a fail (lower) and every one a pass (upper).
+         */
+        EvalBoundsResponse: {
+            /** Lower */
+            lower: number;
+            /** Upper */
+            upper: number;
+            /** Display */
+            display: string;
+        };
+        /**
+         * EvalCaseCohortResponse
+         * @description One eval's figures in one cohort.
+         */
+        EvalCaseCohortResponse: {
+            cohort: components["schemas"]["EvalCohortKeyResponse"];
+            metrics: components["schemas"]["EvalCaseMetricsResponse"];
+        };
+        /**
+         * EvalCaseMetricsResponse
+         * @description One case's pass@k, pass^k and flakiness in one cohort (#2108).
+         *
+         *     Computed by the domain; a client never recomputes them.
+         */
+        EvalCaseMetricsResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** K */
+            k: number;
+            /** N */
+            n: number;
+            /** C */
+            c: number;
+            /** Pending */
+            pending: number;
+            /** Infra Error Count */
+            infra_error_count: number;
+            /** Base Mismatch Count */
+            base_mismatch_count: number;
+            /** Treatment Mismatch Count */
+            treatment_mismatch_count: number;
+            /** Trials Short */
+            trials_short: number;
+            /** Exhausted */
+            exhausted: boolean;
+            /** Complete */
+            complete: boolean;
+            /** Never Launched */
+            never_launched: boolean;
+            /** Pass At K */
+            pass_at_k: number | null;
+            /** Pass At K Display */
+            pass_at_k_display: string;
+            /** Pass Hat K */
+            pass_hat_k: number | null;
+            /** Pass Hat K Display */
+            pass_hat_k_display: string;
+            /** Flaky */
+            flaky: boolean | null;
+            pass_at_k_bounds: components["schemas"]["EvalBoundsResponse"];
+            pass_hat_k_bounds: components["schemas"]["EvalBoundsResponse"];
+        };
+        /**
+         * EvalCohortKeyResponse
+         * @description The trials of one roster that share a declared treatment and scoring protocol.
+         */
+        EvalCohortKeyResponse: {
+            /** Suite Version */
+            suite_version: string;
+            /** Workflow Id */
+            workflow_id: string;
+            /** Workflow Version */
+            workflow_version: string;
+            /** Models Digest */
+            models_digest: string;
+            /** Scorer Protocol */
+            scorer_protocol: string;
+        };
+        /**
          * EvalCreatedResponse
          * @description The receipt for a create, read from the Eval aggregate, never a projection (#967).
          *
@@ -3851,12 +4025,46 @@ export interface components {
             variants?: components["schemas"]["EvalVariantResponse"][];
             stats: components["schemas"]["EvalRunStatsResponse"];
             read_model_status?: components["schemas"]["ReadModelStatus"] | null;
+            /** Cohorts */
+            cohorts?: components["schemas"]["EvalCaseCohortResponse"][] | null;
         };
         /**
          * EvalId
          * @description The identity of one eval, and the id of its stream.
          */
         EvalId: string;
+        /**
+         * EvalImageManifestResponse
+         * @description A workspace image's ``version.json`` as a trial's phase read it (#1913).
+         */
+        EvalImageManifestResponse: {
+            /** Provider */
+            provider: string;
+            /** Provider Version */
+            provider_version: string;
+            /** Components */
+            components: {
+                [key: string]: string;
+            };
+            /** Build Commit */
+            build_commit: string;
+            /** Built At */
+            built_at: string;
+            /** Manifest Digest */
+            manifest_digest: string;
+        };
+        /**
+         * EvalIntervalResponse
+         * @description A 95% paired bootstrap percentile interval on a difference in means.
+         */
+        EvalIntervalResponse: {
+            /** Estimate */
+            estimate: number;
+            /** Low */
+            low: number;
+            /** High */
+            high: number;
+        };
         /**
          * EvalListResponse
          * @description One page of evals, newest first (#967).
@@ -3926,6 +4134,15 @@ export interface components {
             variants?: components["schemas"]["EvalVariantResponse"][];
             stats: components["schemas"]["EvalRunStatsResponse"];
         };
+        /** EvalRosterCaseResponse */
+        EvalRosterCaseResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Split */
+            split: string | null;
+            /** Polarity */
+            polarity: string | null;
+        };
         /**
          * EvalRunListResponse
          * @description One page of an eval's current runs, newest first (Evals v2).
@@ -3990,6 +4207,8 @@ export interface components {
             scored_at: string | null;
             /** Judge Model */
             judge_model?: string | null;
+            /** Trial Result */
+            trial_result?: components["schemas"]["TrialOutcome"] | components["schemas"]["TrialExclusion"] | null;
         };
         /**
          * EvalRunScoreRequest
@@ -4057,6 +4276,134 @@ export interface components {
             cost_per_pass_usd: string | null;
             /** Cost Per Pass Display */
             cost_per_pass_display: string;
+        };
+        /**
+         * EvalSetCohortResponse
+         * @description One cohort's figures over one roster (#2108, plan section 7).
+         *
+         *     The means cover complete cases only and are descriptive; decisions read
+         *     the roster-wide bounds, where a short or never-launched case is 0 in the
+         *     lower bound and 1 in the upper.
+         */
+        EvalSetCohortResponse: {
+            cohort: components["schemas"]["EvalCohortKeyResponse"];
+            /** K */
+            k: number;
+            /** Cases */
+            cases: components["schemas"]["EvalCaseMetricsResponse"][];
+            coverage: components["schemas"]["EvalSetCoverageResponse"];
+            /** Mean Pass At K */
+            mean_pass_at_k: number | null;
+            /** Mean Pass At K Display */
+            mean_pass_at_k_display: string;
+            /** Mean Pass Hat K */
+            mean_pass_hat_k: number | null;
+            /** Mean Pass Hat K Display */
+            mean_pass_hat_k_display: string;
+            /** Flakiness */
+            flakiness: number | null;
+            /** Partial */
+            partial: boolean;
+            /** Flaky Cases */
+            flaky_cases: string[];
+            pass_at_k_bounds: components["schemas"]["EvalBoundsResponse"];
+            pass_hat_k_bounds: components["schemas"]["EvalBoundsResponse"];
+            /** Infra Error Count */
+            infra_error_count: number;
+            /** Infra Share */
+            infra_share: number | null;
+            /** Base Mismatch Count */
+            base_mismatch_count: number;
+            /** Treatment Mismatch Count */
+            treatment_mismatch_count: number;
+            /** Image Manifests */
+            image_manifests: components["schemas"]["EvalImageManifestResponse"][];
+            /** Trials Without Image Manifest */
+            trials_without_image_manifest: number;
+        };
+        /**
+         * EvalSetComparisonResponse
+         * @description A paired A/B of the roster's two cohorts (#2108, plan section 11).
+         *
+         *     The estimand is each case's pass^k from its first k judged trials.
+         */
+        EvalSetComparisonResponse: {
+            a: components["schemas"]["EvalCohortKeyResponse"];
+            b: components["schemas"]["EvalCohortKeyResponse"];
+            /** K */
+            k: number;
+            /** Paired Cases */
+            paired_cases: string[];
+            /** Short Cases */
+            short_cases: string[];
+            /** Coverage Complete */
+            coverage_complete: boolean;
+            /** A Only */
+            a_only: number;
+            /** B Only */
+            b_only: number;
+            /** Both */
+            both: number;
+            /** Neither */
+            neither: number;
+            /** Mcnemar P */
+            mcnemar_p: number;
+            difference: components["schemas"]["EvalIntervalResponse"] | null;
+            a_lower_minus_b_upper: components["schemas"]["EvalIntervalResponse"] | null;
+            a_upper_minus_b_lower: components["schemas"]["EvalIntervalResponse"] | null;
+        };
+        /**
+         * EvalSetCoverageResponse
+         * @description How much of the roster a cohort has judged.
+         */
+        EvalSetCoverageResponse: {
+            /** Roster Size */
+            roster_size: number;
+            /** Complete */
+            complete: number;
+            /** Short */
+            short: number;
+            /** Never Launched */
+            never_launched: number;
+        };
+        /**
+         * EvalSetMetricsResponse
+         * @description An eval set's roster and what each cohort scored over it (#2108).
+         *
+         *     Every figure comes from the domain read model at query time.
+         */
+        EvalSetMetricsResponse: {
+            /** Suite */
+            suite: string;
+            /** Version */
+            version: string;
+            /** Split */
+            split: string | null;
+            /** K */
+            k: number;
+            /** Roster */
+            roster: components["schemas"]["EvalRosterCaseResponse"][];
+            /** Cohorts */
+            cohorts: components["schemas"]["EvalSetCohortResponse"][];
+            comparison: components["schemas"]["EvalSetComparisonResponse"] | null;
+            /** Not A Trial Count */
+            not_a_trial_count: number;
+            /**
+             * Isolation
+             * @default unproven
+             * @constant
+             */
+            isolation: "unproven";
+        };
+        /**
+         * EvalTagsResponse
+         * @description An eval's tags after an edit, read from the aggregate, not a projection (#2108).
+         */
+        EvalTagsResponse: {
+            /** Eval Id */
+            eval_id: string;
+            /** Tags */
+            tags: string[];
         };
         /**
          * EvalTrendPointResponse
@@ -5698,6 +6045,8 @@ export interface components {
             cpu_throttling?: components["schemas"]["CpuThrottling"] | null;
             /** @description The execution budget sized from host capacity and measured per-run demand, the term that bound it, and the starts admitted, running and queued in this process or the Run Queue (#1715). Omitted before startup has sized it, and when the Run Queue cannot be read. */
             execution_budget?: components["schemas"]["ExecutionBudgetHealth"] | null;
+            /** @description Size and growth of the session archive (#2107). Omitted when the archive directory does not exist or could not be measured, and until the first background measurement completes. */
+            session_store?: components["schemas"]["SessionStoreHealth"] | null;
         };
         /**
          * HeatmapDayBucketResponse
@@ -6478,6 +6827,7 @@ export interface components {
              * @default false
              */
             requires_verdict: boolean;
+            resources?: components["schemas"]["PhaseResourcesResponse"];
             /**
              * Sandbox
              * @default full-access
@@ -6763,6 +7113,14 @@ export interface components {
             /** Oom Killed Phases */
             oom_killed_phases: components["schemas"]["OomKilledPhaseResponse"][];
             coverage: components["schemas"]["ResourceCoverageResponse"];
+        };
+        /**
+         * PhaseResourcesResponse
+         * @description What a phase's workspace asks for beyond the deployment default (okrs-51p.30).
+         */
+        PhaseResourcesResponse: {
+            /** Memory Mb */
+            memory_mb?: number | null;
         };
         /**
          * PhaseSkillUseInfo
@@ -8392,6 +8750,66 @@ export interface components {
             readonly agent_model_display: string;
         };
         /**
+         * SessionStoreHealth
+         * @description Size and growth of the host session archive, as /health reports it (#2107).
+         *
+         *     Measured by walking the archive directory at most once per cache window,
+         *     off the event loop. Informational: it never degrades /health.
+         */
+        SessionStoreHealth: {
+            /**
+             * Path
+             * @description The archive directory, SYN_SESSION_INVENTORY_ARCHIVE_DIR.
+             */
+            path: string;
+            /**
+             * Measured At
+             * Format: date-time
+             * @description When the directory was walked (UTC).
+             */
+            measured_at: string;
+            /**
+             * Stored Bytes
+             * @description Allocated bytes (st_blocks) of every file in the archive directory, as the disk sees them: compressed objects, splice references, markers and temporaries.
+             */
+            stored_bytes: number;
+            /**
+             * Object Count
+             * @description Full transcript objects, compressed or not.
+             */
+            object_count: number;
+            /**
+             * Reference Count
+             * @description Older revisions stored as splice references to a newer object.
+             */
+            reference_count: number;
+            /**
+             * Added Bytes 24H
+             * @description Current allocated bytes of objects and references first archived in the last 24 hours, by file mtime. Bytes since deleted are not counted.
+             */
+            added_bytes_24h: number;
+            /**
+             * Added Bytes Per Day 7D
+             * @description The same over the last 7 days, divided by 7: the daily growth rate.
+             */
+            added_bytes_per_day_7d: number;
+            /**
+             * Filesystem Free Bytes
+             * @description Bytes available on the archive's filesystem.
+             */
+            filesystem_free_bytes: number;
+            /**
+             * Days Until Full
+             * @description filesystem_free_bytes / added_bytes_per_day_7d; null when nothing was added in the last 7 days.
+             */
+            days_until_full: number | null;
+            /**
+             * Detail
+             * @description One line for an operator: size, growth and runway.
+             */
+            detail: string;
+        };
+        /**
          * SessionSummaryResponse
          * @description Summary of an agent session.
          *
@@ -9607,6 +10025,18 @@ export interface components {
             /** Created */
             created: boolean;
         };
+        /**
+         * TrialExclusion
+         * @description Why a member run is not counted as a trial. Exclusions are counted, never dropped.
+         * @enum {string}
+         */
+        TrialExclusion: "not_a_trial" | "base_mismatch" | "treatment_mismatch";
+        /**
+         * TrialOutcome
+         * @description What a trial says about the agent. Distinct from the scorer's Verdict.
+         * @enum {string}
+         */
+        TrialOutcome: "pass" | "fail" | "infra_error" | "pending";
         /**
          * TriggerActionResponse
          * @description Response for trigger create/update/delete actions.
@@ -11573,7 +12003,7 @@ export interface operations {
                     "application/json": components["schemas"]["ExecutionTagsResponse"];
                 };
             };
-            /** @description No execution or workflow has this id */
+            /** @description No execution, workflow or eval has this id */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -11619,7 +12049,7 @@ export interface operations {
                     "application/json": components["schemas"]["ExecutionTagsResponse"];
                 };
             };
-            /** @description No execution or workflow has this id */
+            /** @description No execution, workflow or eval has this id */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -11666,7 +12096,7 @@ export interface operations {
                     "application/json": components["schemas"]["WorkflowTagsResponse"];
                 };
             };
-            /** @description No execution or workflow has this id */
+            /** @description No execution, workflow or eval has this id */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -11712,7 +12142,54 @@ export interface operations {
                     "application/json": components["schemas"]["WorkflowTagsResponse"];
                 };
             };
-            /** @description No execution or workflow has this id */
+            /** @description No execution, workflow or eval has this id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The id prefix matches more than one record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A tag is invalid, none was given, or the limit would be exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_eval_tags_endpoint_evals__eval_id__tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalTagsResponse"];
+                };
+            };
+            /** @description No execution, workflow or eval has this id */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -11946,7 +12423,10 @@ export interface operations {
     };
     get_eval_endpoint_evals__eval_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Add this eval's pass@k / pass^k in every cohort, over k trials */
+                k?: number | null;
+            };
             header?: never;
             path: {
                 eval_id: string;
@@ -12141,6 +12621,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_eval_set_metrics_endpoint_eval_sets_metrics_get: {
+        parameters: {
+            query: {
+                /** @description The eval set: evals tagged suite:<suite> */
+                suite: string;
+                /** @description The roster version: evals tagged suite-version:<version> */
+                version: string;
+                /** @description Trials per case the figures are computed over */
+                k: number;
+                /** @description Keep only cases of this split, e.g. holdout */
+                split?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvalSetMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -12980,6 +13498,8 @@ export interface operations {
                 limit?: number;
                 /** @description Return only sessions whose transcripts did not reach the store. */
                 needs_backfill?: boolean;
+                /** @description Return only verdicts recorded for this execution. */
+                execution_id?: string | null;
             };
             header?: never;
             path?: never;

@@ -40,6 +40,7 @@ from agentic_isolation import ExecuteResult
 from syn_adapters.workspace_backends import exec_status_lost
 from syn_adapters.workspace_backends.agentic import adapter_copy
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
+from syn_adapters.workspace_backends.backend_kit import BackendKit
 from syn_adapters.workspace_backends.service import setup_phase
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 from syn_adapters.workspace_backends.service.setup_phase import run_setup_phase
@@ -104,6 +105,7 @@ def _workspace(docker: _Docker) -> ManagedWorkspace:
     adapter = object.__new__(AgenticIsolationAdapter)
     adapter._provider = docker  # type: ignore[attr-defined]  # the one double
     adapter._workspaces = {_ISOLATION_ID: object()}  # type: ignore[attr-defined]
+    adapter._kit = BackendKit()  # type: ignore[attr-defined]
     return ManagedWorkspace(
         workspace_id="307ff22a",
         execution_id="exec-27fed66a653d",

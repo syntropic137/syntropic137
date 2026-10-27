@@ -38,6 +38,9 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    RecordRefusedOutputCommand,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     SourceCommit,
 )
@@ -68,6 +71,7 @@ if TYPE_CHECKING:
         ArtifactQueryServiceProtocol,
     )
     from syn_domain.contexts.artifacts.ports import ArtifactContentStoragePort
+    from syn_domain.contexts.orchestration._shared.FileRefusalValueObjects import FileRefusal
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
@@ -272,9 +276,9 @@ class PhaseWorkspace:
         phase: ExecutablePhase,
         *,
         workspace: ManagedWorkspace,
-        workflow_id: str,
         last_agent_message: str | None,
         outcome: UnfinishedPhase,
+        aggregate: WorkflowExecutionAggregate,
     ) -> list[str]:
         """Store what a phase wrote before the run that produced it is torn down.
 
@@ -287,11 +291,15 @@ class PhaseWorkspace:
         `last_agent_message` comes from the run's own stream result, not the
         aggregate: a failed run is never told `agent_execution_completed`, so
         the aggregate holds no message for it.
+
+        What the provider refused of that output is recorded on ``aggregate``
+        (the processor's own instance) before its outcome is told, so it is on
+        the execution whichever way the phase ends (#1913).
         """
         assert todo.phase_id is not None
-        kept = await self._collector().collect_from_unfinished_phase(
+        output = await self._collector().collect_from_unfinished_phase(
             workspace=workspace,
-            workflow_id=workflow_id,
+            workflow_id=aggregate.workflow_id or "",
             phase_id=todo.phase_id,
             execution_id=todo.execution_id,
             session_id=todo.session_id or "",
@@ -301,6 +309,9 @@ class PhaseWorkspace:
             outcome=outcome,
             last_agent_message=last_agent_message,
         )
+        kept = output.artifact_ids
+        if output.refused:
+            await self._record_refused(aggregate, todo.phase_id, output.refused)
         if kept:
             logger.warning(
                 "Phase %s (%s) did not complete (%s); kept %d artifact(s) rather "
@@ -311,6 +322,27 @@ class PhaseWorkspace:
                 len(kept),
             )
         return kept
+
+    async def _record_refused(
+        self,
+        aggregate: WorkflowExecutionAggregate,
+        phase_id: str,
+        refused: tuple[FileRefusal, ...],
+    ) -> None:
+        """Record the refusals; a failure to is logged loudly, never raised (the outcome stands)."""
+        try:
+            aggregate.record_refused_output(
+                RecordRefusedOutputCommand(
+                    execution_id=aggregate.id or "", phase_id=phase_id, refused_files=refused
+                )
+            )
+            await self._journal.append(aggregate)
+        except Exception:
+            logger.exception(
+                "Could not record the refused output of phase %s: %s",
+                phase_id,
+                ", ".join(r.describe() for r in refused),
+            )
 
     async def keep_dropped_workflows(
         self,

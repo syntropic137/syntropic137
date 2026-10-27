@@ -162,12 +162,16 @@ async def create_inventory_runtime(
     jobs = PostgresSessionInventoryJobs(pool)
     # One schema bootstrap initializes the shared durable tables.
     await evidence.ensure_ready()
-    archive = LocalSessionTranscriptArchive(settings.archive_dir)
+    archive = LocalSessionTranscriptArchive(
+        settings.archive_dir, compress=settings.archive_compression
+    )
     await archive.ensure_ready()
     source_id = await asyncio.to_thread(
         installation_identity, settings.archive_dir, settings.source_instance_id
     )
-    spools = PostgresCaptureSpools(pool, source_id)
+    spools = PostgresCaptureSpools(
+        pool, source_id, live_resweep_seconds=settings.live_resweep_seconds
+    )
     receipts = PostgresBackfillReceipts(pool)
     await receipts.ensure_ready()
     history_queue = PostgresHistoryBackfillQueue(pool, source_id)

@@ -19,9 +19,14 @@ if TYPE_CHECKING:
 
 
 class PostgresCaptureSpools:
-    def __init__(self, pool: Pool, source_instance_id: str) -> None:
+    def __init__(
+        self, pool: Pool, source_instance_id: str, *, live_resweep_seconds: int = 900
+    ) -> None:
+        if live_resweep_seconds < 1:
+            raise ValueError("Live re-sweep interval must be positive")
         self._pool = pool
         self._source = source_instance_id
+        self._live_resweep_seconds = live_resweep_seconds
 
     async def project(self, spool: CaptureSpool) -> None:
         if spool.run.source_instance_id != self._source:
@@ -45,6 +50,11 @@ class PostgresCaptureSpools:
     async def claim(
         self, *, lease_seconds: int, backends: Collection[SpoolBackend]
     ) -> CaptureSpoolLease | None:
+        """A live session's spool is re-swept at most once per live re-sweep
+        interval after its last complete traversal (#2107): every sweep of a
+        changed transcript archives a full new revision. Settlement, a spool
+        never fully traversed, and a failed or abandoned traversal (which never
+        stamps ``drained_at``) are claimed as soon as they are due."""
         if lease_seconds < 1:
             raise ValueError("Lease duration must be positive")
         if not backends:
@@ -55,8 +65,10 @@ class PostgresCaptureSpools:
                     SELECT source_instance_id,session_id FROM session_capture_spools
                     WHERE leased_until<=now() AND retry_at<=now() AND source_instance_id=$2
                     AND release_reason IS NULL
+                    AND (settled_at IS NOT NULL OR drained_at IS NULL
+                        OR drained_at<=now()-$3::double precision*interval '1 second')
                     -- Rows written before remote backends carry no key: they are Docker.
-                    AND COALESCE(payload->>'backend','docker')=ANY($3::text[])
+                    AND COALESCE(payload->>'backend','docker')=ANY($4::text[])
                     -- Recovering a sandbox stops its agent: only a settled one.
                     AND (COALESCE(payload->>'backend','docker')='docker' OR settled_at IS NOT NULL)
                     ORDER BY retry_at,source_instance_id,session_id FOR UPDATE SKIP LOCKED LIMIT 1
@@ -68,6 +80,7 @@ class PostgresCaptureSpools:
                     s.settled_at IS NOT NULL AS settled""",
                 lease_seconds,
                 self._source,
+                self._live_resweep_seconds,
                 sorted(backends),
             )
         if not rows:

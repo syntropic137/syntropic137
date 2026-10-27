@@ -11,6 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration import FilesRefusedError
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     TokenType,
     WorkspaceStatus,
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
     )
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
     from syn_domain.contexts.agent_sessions import RolloutDocument
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+        ImageManifestReading,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationHandle,
@@ -84,6 +88,10 @@ class ManagedWorkspace:
     isolation_handle: IsolationHandle
     sidecar_handle: SidecarHandle | None
     _service: WorkspaceService = field(repr=False)
+    #: The image manifest read when the workspace was provisioned (#1913),
+    #: carried onto the phase's persisted provisioning event. None only for a
+    #: workspace built without provisioning one, as tests do.
+    image_manifest: ImageManifestReading | None = None
     _tokens_injected: bool = False
     #: How this workspace's git credential was minted, recorded by the setup
     #: phase so it can be minted AGAIN later (#1393). None until the setup
@@ -281,16 +289,25 @@ class ManagedWorkspace:
 
         Returns:
             List of (relative_path, content) tuples
+
+        Raises:
+            FilesRefusedError: entries were refused; it carries the files read
+                and each refusal, for the caller's policy to decide.
         """
         pats = patterns or ["artifacts/**/*"]
-        collected = await self._service._isolation.copy_from(
-            self.isolation_handle,
-            pats,
-            base_path=base_path,
-        )
         # A file the agent wrote can hold whatever it printed, so it leaves the
-        # workspace through the same scrubber as the stream (#1927).
+        # workspace through the same scrubber as the stream (#1927), the files
+        # a refusal carries included.
         scrubber = CredentialScrubber(self._withheld_values())
+        try:
+            collected = await self._service._isolation.copy_from(
+                self.isolation_handle,
+                pats,
+                base_path=base_path,
+            )
+        except FilesRefusedError as e:
+            files = tuple((path, scrub_bytes(scrubber, content)) for path, content in e.files)
+            raise FilesRefusedError(files, e.refused) from e
         return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
 
     async def run_setup_phase(

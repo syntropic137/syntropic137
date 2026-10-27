@@ -32,6 +32,9 @@ on:
       - main
       - release
       - 'release/**'
+      # A hotfix -> release PR needs the required Compose Stack Smoke Test on
+      # its head, and this workflow has no PR trigger (ADR-077).
+      - 'hotfix/**'
     # No paths filter — every push to main/release gets a smoke test result.
     # Required for release branch protection (smoke test must pass before
     # main → release PR can merge).
@@ -75,6 +78,10 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           submodules: true
+
+      # uv picks the interpreter from .python-version, not the runner's
+      # python3 (#1242).
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -169,7 +176,7 @@ jobs:
           # Extract the actual network name from compose config — the network
           # has an explicit name (syntropic137_${APP_ENVIRONMENT}_agent-net)
           # that differs from the compose project prefix.
-          AGENT_NET=$(docker compose $COMPOSE_FILES config --format json | python3 -c "
+          AGENT_NET=$(docker compose $COMPOSE_FILES config --format json | uv run --no-project python -c "
           import sys, json
           config = json.load(sys.stdin)
           print(config.get('networks', {}).get('agent-net', {}).get('name', ''))

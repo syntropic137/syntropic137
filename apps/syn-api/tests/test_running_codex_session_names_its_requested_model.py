@@ -38,9 +38,6 @@ from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
     SessionCostProjection,
 )
-from syn_domain.contexts.agent_sessions.slices.session_cost.test_projection import (
-    MockProjectionStore,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     CodexStreamProcessor,
 )
@@ -171,7 +168,7 @@ async def test_a_running_codex_session_shows_its_request_then_what_ran(
 
     store = InMemoryProjectionStore()
     session_list = SessionListProjection(store)
-    cost_projection = SessionCostProjection(MockProjectionStore())
+    cost_projection = SessionCostProjection(InMemoryProjectionStore())
 
     async def _connected() -> None:
         return None

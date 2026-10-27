@@ -35,6 +35,9 @@ from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
 from syn_domain.contexts.orchestration._shared.resolved_skill import (
     ResolvedSkill,  # noqa: TC001 - needed at runtime for dataclass field default
 )
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    WorkspaceResourceRequest,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
     classify_resumed_payload,
 )
@@ -986,8 +989,8 @@ def payload_with_origin_owners_restored(data: object) -> object:
 #: whole start event would replay as a generic one (ADR-023), losing its pins.
 #:
 #: Entries are NEVER removed: stored history replays forever. Independent of
-#: `RETIRED_PHASE_FIELDS`, which is what authors may still write and changes on
-#: its own schedule.
+#: `RETIRED_PHASE_FIELDS`, which is what authors are refused at authoring time
+#: (#1502) and changes on its own schedule.
 REMOVED_EXECUTABLE_PHASE_KEYS: Final[frozenset[str]] = frozenset(
     {
         # Retired by #1477; every start event written since #1454 carries it.
@@ -1130,6 +1133,13 @@ class ExecutablePhase:
     # phase that says nothing about what it found would otherwise advance by
     # order exactly as if it had found something, so the run fails instead.
     requires_verdict: bool = False
+
+    # What this phase's workspace asks for, e.g. memory (okrs-51p.30). Rides
+    # here, beside clone_repos, because it decides what the WORKSPACE is, and
+    # it is pinned with the phase in `WorkflowExecutionStarted.pinned_phases`,
+    # so the start event records what each workspace was asked to be and a
+    # resume runs under the same request. Empty: the deployment default.
+    resources: WorkspaceResourceRequest = field(default_factory=WorkspaceResourceRequest)
 
     # Resolved plugins for the workspace materializer (issue #726). PR1 leaves
     # this empty; PR2's resolution service populates it from the workflow- and

@@ -1,6 +1,6 @@
 [project]
 name = "syn-domain"
-version = "1.0.4"
+version = "1.0.5"
 description = "Core domain model for Syntropic137"
 requires-python = ">=3.12"
 
@@ -11,6 +11,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "cryptography>=46.0.5",  # ADR-076: Ed25519 signed-lane verification (D2)
     "agentic-events",  # ADR-029: JSONL parsing utilities
+    "agentic-isolation",  # #1605: harness upstream-failure classifiers
 ]
 
 [build-system]

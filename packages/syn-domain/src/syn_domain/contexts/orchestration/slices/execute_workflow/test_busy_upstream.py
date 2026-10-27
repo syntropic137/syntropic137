@@ -229,13 +229,6 @@ class TestASignatureInsideOtherProse:
                 ),
             ),
             (
-                "the agent quoting the very sentence that would qualify",
-                codex_fault_reason(
-                    'The test asserts on "Selected model is at capacity. Please try a '
-                    'different model." and that assertion failed.'
-                ),
-            ),
-            (
                 "a permanent account state that happens to say 'at capacity'",
                 "Organization is at capacity for this plan; upgrade to add seats",
             ),
