@@ -54,6 +54,7 @@ def create_workspace_aggregate(
     backend: IsolationBackendType,
     capabilities: tuple[CapabilityType, ...],
     image: str,
+    security_policy: SecurityPolicy | None = None,
 ) -> WorkspaceAggregate:
     """Create a WorkspaceAggregate and emit the creation event.
 
@@ -65,6 +66,8 @@ def create_workspace_aggregate(
         backend: Isolation backend type
         capabilities: Required capabilities
         image: Container image
+        security_policy: The limits the container is given, recorded on
+            WorkspaceCreated; the SecurityPolicy defaults when None
 
     Returns:
         Initialized WorkspaceAggregate
@@ -78,6 +81,7 @@ def create_workspace_aggregate(
         isolation_backend=backend,
         capabilities=capabilities,
         image=image,
+        security_policy=security_policy or SecurityPolicy(),
     )
     aggregate.create_workspace(create_cmd)
     return aggregate
@@ -99,6 +103,7 @@ def build_isolation_config(
     phase_id: str | None,
     extra_environment: dict[str, str] | None,
     capture_session_id: str | None = None,
+    memory_limit_mb: int | None = None,
 ) -> IsolationConfig:
     """Build IsolationConfig with merged environment variables.
 
@@ -109,6 +114,8 @@ def build_isolation_config(
         workflow_id: Optional workflow ID
         phase_id: Optional phase ID
         extra_environment: Additional environment variables
+        memory_limit_mb: This workspace's memory, as its phase requested
+            (okrs-51p.30); ``config.memory_limit_mb`` when None
 
     Returns:
         IsolationConfig for container creation
@@ -140,7 +147,9 @@ def build_isolation_config(
         capabilities=config.capabilities,
         image=config.image,
         security_policy=SecurityPolicy(
-            memory_limit_mb=config.memory_limit_mb,
+            memory_limit_mb=(
+                config.memory_limit_mb if memory_limit_mb is None else memory_limit_mb
+            ),
             cpu_limit_cores=config.cpu_limit_cores,
         ),
         environment=merged_environment,

@@ -35,6 +35,8 @@ from syn_adapters.workspace_backends.service.workspace_lifecycle import (
 from syn_domain.contexts.orchestration import (
     HOST_CREDENTIALS,
     WorkspaceCredentialPolicy,
+    WorkspaceResourceRequest,
+    require_memory_within_cap,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     CapabilityType,
@@ -57,6 +59,10 @@ if TYPE_CHECKING:
     from agentic_isolation.providers.e2b_client import E2BSandboxClient
 
     from syn_adapters.platform_access import PlatformTokenService
+    from syn_adapters.workspace_backends.service.memory_ledger import (
+        MemoryReservation,
+        WorkspaceMemoryLedger,
+    )
     from syn_adapters.workspace_backends.tokens.token_injection_adapter import (
         SidecarTokenInjectionAdapter,
     )
@@ -111,7 +117,8 @@ class WorkspaceServiceConfig:
     Attributes:
         backend: Isolation backend type (docker, gvisor, etc.)
         image: Container image for workspace
-        memory_limit_mb: Memory limit in MB
+        memory_limit_mb: Memory limit in MB for a phase that requests none
+        memory_max_mb: The most memory a phase may request (okrs-51p.30)
         cpu_limit_cores: CPU limit in cores
         timeout_seconds: Default command timeout
         allowed_hosts: Allowed egress hosts for sidecar
@@ -121,6 +128,7 @@ class WorkspaceServiceConfig:
     backend: IsolationBackendType = IsolationBackendType.DOCKER_HARDENED
     image: str = DEFAULT_WORKSPACE_IMAGE
     memory_limit_mb: int = DEFAULT_WORKSPACE_MEMORY_LIMIT_MB
+    memory_max_mb: int = DEFAULT_WORKSPACE_MEMORY_LIMIT_MB
     cpu_limit_cores: float = DEFAULT_WORKSPACE_CPU_LIMIT
     timeout_seconds: int = 3600  # 1 hour
     allowed_hosts: tuple[str, ...] = (
@@ -140,6 +148,12 @@ class WorkspaceServiceConfig:
         return cls(
             image=settings.docker_image,
             memory_limit_mb=settings.memory_limit_mb,
+            # Unset is "no phase may ask for more than the default".
+            memory_max_mb=(
+                settings.memory_limit_mb
+                if settings.memory_max_mb is None
+                else settings.memory_max_mb
+            ),
             cpu_limit_cores=settings.cpu_limit,
             runtime=settings.runtime,
         )
@@ -198,6 +212,10 @@ class WorkspaceService:
         #: Mints each workspace's read-only API token (ADR-072). None, or a
         #: disabled service, means workspaces get no token at all.
         self._platform_tokens: PlatformTokenService | None = None
+        #: Where every workspace of this PROCESS reserves its memory, so a
+        #: large one counts as more than one run (okrs-51p.30). None: no
+        #: accounting, which only tests and the memory backend use.
+        self._memory_ledger: WorkspaceMemoryLedger | None = None
 
     @property
     def credential_policy(self) -> WorkspaceCredentialPolicy:
@@ -216,6 +234,7 @@ class WorkspaceService:
         credential_policy: WorkspaceCredentialPolicy = HOST_CREDENTIALS,
         e2b: E2BSettings | None = None,
         e2b_client: E2BSandboxClient | None = None,
+        memory_ledger: WorkspaceMemoryLedger | None = None,
     ) -> WorkspaceService:
         """Create WorkspaceService with explicit backend selection.
 
@@ -235,6 +254,9 @@ class WorkspaceService:
                 E2B is always NoCredentials, whatever ``credential_policy`` says.
             e2b_client: The E2B sandbox client; the e2b SDK adapter, keyed
                 from ``e2b.api_key``, when omitted. Tests pass a double.
+            memory_ledger: The process-wide workspace memory ledger
+                (okrs-51p.30). Shared across every service in the process,
+                so production passes the one singleton.
 
         Returns:
             Configured WorkspaceService
@@ -269,6 +291,7 @@ class WorkspaceService:
                 credential_policy=credential_policy,
             )
         service._platform_tokens = platform_tokens
+        service._memory_ledger = memory_ledger
         return service
 
     @classmethod
@@ -535,6 +558,7 @@ class WorkspaceService:
         phase_id: str | None,
         extra_environment: dict[str, str] | None,
         capture_session_id: str | None = None,
+        memory_mb: int | None = None,
     ) -> tuple[WorkspaceAggregate, IsolationConfig]:
         """Create aggregate and isolation config for a new workspace.
 
@@ -544,20 +568,11 @@ class WorkspaceService:
             workflow_id: Optional workflow ID
             phase_id: Optional phase ID
             extra_environment: Additional environment variables
+            memory_mb: This workspace's memory; None is the configured default.
 
         Returns:
             Tuple of (WorkspaceAggregate, IsolationConfig).
         """
-        aggregate = create_workspace_aggregate(
-            workspace_id=workspace_id,
-            execution_id=execution_id,
-            workflow_id=workflow_id,
-            phase_id=phase_id,
-            backend=self._config.backend,
-            capabilities=self._config.capabilities,
-            image=self._config.image,
-        )
-
         isolation_config = build_isolation_config(
             config=self._config,
             workspace_id=workspace_id,
@@ -566,9 +581,28 @@ class WorkspaceService:
             phase_id=phase_id,
             extra_environment=extra_environment,
             capture_session_id=capture_session_id,
+            memory_limit_mb=memory_mb,
+        )
+        aggregate = create_workspace_aggregate(
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            phase_id=phase_id,
+            backend=self._config.backend,
+            capabilities=self._config.capabilities,
+            image=self._config.image,
+            # The limits the container is actually given, recorded on
+            # WorkspaceCreated rather than the SecurityPolicy defaults.
+            security_policy=isolation_config.security_policy,
         )
 
         return aggregate, isolation_config
+
+    async def _reserve_memory(self, memory_mb: int, workspace_id: str) -> MemoryReservation | None:
+        """Hold ``memory_mb`` of this process's workspace memory, waiting if it is taken."""
+        if self._memory_ledger is None:
+            return None
+        return await self._memory_ledger.reserve(memory_mb, workspace_id=workspace_id)
 
     async def _revoke_platform_grant(self, workspace: ManagedWorkspace) -> None:
         """The phase is over, so its API token is too (ADR-072). Never raises."""
@@ -598,6 +632,7 @@ class WorkspaceService:
         capture_session_id: str | None = None,
         platform_access: PlatformScope = PlatformScope.READ,
         eval_id: str | None = None,
+        resources: WorkspaceResourceRequest | None = None,
     ) -> AsyncIterator[ManagedWorkspace]:
         """Create a managed workspace with full lifecycle.
 
@@ -616,6 +651,10 @@ class WorkspaceService:
                 phase declared it (ADR-072, #1744). READ unless declared.
             eval_id: The eval the execution belongs to; the only eval an EVAL
                 token can launch into or score (#1744).
+            resources: What the phase asked its workspace to be (okrs-51p.30).
+                None or empty: the configured default. A request above
+                ``memory_max_mb`` raises ``WorkspaceMemoryOverCapError``
+                before any container or token exists.
 
         Yields:
             ManagedWorkspace for command execution
@@ -623,6 +662,11 @@ class WorkspaceService:
         import uuid
 
         _refuse_credentials_under(self._credential_policy, with_sidecar, inject_tokens)
+        wanted = resources or WorkspaceResourceRequest()
+        # The last of three places this is checked (install, start, here), and
+        # the one that holds whatever the other two missed: never clamp.
+        require_memory_within_cap(wanted, self._config.memory_max_mb, phase_id=phase_id)
+        memory_mb = wanted.memory_mb_or(self._config.memory_limit_mb)
 
         workspace_id = str(uuid.uuid4())
 
@@ -633,7 +677,9 @@ class WorkspaceService:
             phase_id,
             extra_environment,
             capture_session_id,
+            memory_mb=memory_mb,
         )
+        reservation = await self._reserve_memory(memory_mb, workspace_id)
 
         isolation_handle: IsolationHandle | None = None
         sidecar_handle: SidecarHandle | None = None
@@ -678,19 +724,24 @@ class WorkspaceService:
         finally:
             # After the caller's block, and so after the unpushed-work guard's
             # quarantine push: nothing left in the container needs a token (#725).
-            if workspace is not None:
-                await workspace.revoke_issued_credentials()
-                await self._revoke_platform_grant(workspace)
-            teardown = await cleanup_workspace(
-                self,
-                aggregate,
-                workspace_id,
-                execution_id,
-                isolation_handle=isolation_handle,
-                sidecar_handle=sidecar_handle,
-                inject_tokens=inject_tokens,
-                phase_id=phase_id,
-            )
+            try:
+                if workspace is not None:
+                    await workspace.revoke_issued_credentials()
+                    await self._revoke_platform_grant(workspace)
+                teardown = await cleanup_workspace(
+                    self,
+                    aggregate,
+                    workspace_id,
+                    execution_id,
+                    isolation_handle=isolation_handle,
+                    sidecar_handle=sidecar_handle,
+                    inject_tokens=inject_tokens,
+                    phase_id=phase_id,
+                )
+            finally:
+                # After teardown: the memory is the container's until it is gone.
+                if reservation is not None:
+                    reservation.release()
             # Handed back on the object every caller still holds after
             # `__aexit__`, so the frame that knows the session can record it.
             if workspace is not None:

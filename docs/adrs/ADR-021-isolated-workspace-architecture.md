@@ -3,6 +3,7 @@
 **Status:** Accepted (Implemented, Enforcement in ADR-023)
 **Date:** 2025-12-11
 **Updated:** 2026-02-18 — Hook event transport: `stderr=STDOUT` required in stream() (see Hook Event Transport section)
+**Updated:** 2026-10-27 — Per-phase workspace memory request, ceiling and ledger (see the 2026-10-27 addendum)
 **Deciders:** @neural
 **Tags:** security, isolation, workspaces, scale, firecracker, docker, observability, hooks
 
@@ -835,3 +836,45 @@ purpose-built socket allow-list scoped to network operations only, and the API
 would lose the ability to enumerate, inspect, or delete arbitrary networks.
 
 Tracked as #714 (Phase-2 follow-on to v0.25.2).
+
+## 2026-10-27 Addendum - Per-phase workspace memory (okrs-51p.30)
+
+### Problem
+
+Workspace memory was one deployment-wide number (`SYN_WORKSPACE_MEMORY_LIMIT_MB`,
+default 4096). A build that needs 8-16 GB could only get it by raising every
+workspace, which spends the host on runs that never use it and divides how many
+run at once by the same factor (docs/north-star.md).
+
+### Decision
+
+1. **A phase requests, the deployment decides.** A phase declares
+   `resources: {memory_mb: N}` in its workflow YAML (`WorkspaceResourceRequest`).
+   Per phase, because a workspace is per phase. Absent means the default, so every
+   existing workflow and every stored template behaves exactly as before.
+2. **A ceiling, refused not clamped.** `SYN_WORKSPACE_MEMORY_MAX_MB` bounds a
+   request; unset means the default, so nothing above it is allowed until an
+   operator opts in. A request above it is refused at install, at start (422,
+   before any phase is paid for) and at provisioning. Clamping would hand a build
+   less than it declared and turn a deployment limit into an OOM kill that reads
+   as a code bug.
+3. **A larger workspace counts as more capacity.** The execution budget counts
+   runs. Every workspace also reserves its memory from a per-process
+   `WorkspaceMemoryLedger` of `SYN_EXECUTION_MAX_CONCURRENT x
+   SYN_WORKSPACE_MEMORY_LIMIT_MB` before its container is created, and returns it
+   after teardown. Default workspaces never wait on it; a 16 GB phase waits for
+   four default shares. FIFO, no barging; a request larger than the whole ledger
+   runs alone.
+4. **Recorded in the domain.** The request is part of what an execution IS, so it
+   lives here, not in agentic-workspace: on the template event, pinned on
+   `WorkflowExecutionStarted.pinned_phases`, and the effective limit on
+   `WorkspaceCreated.security_settings` (which previously recorded the
+   `SecurityPolicy` default regardless of the setting).
+
+### Not done
+
+- CPU requests. Same shape (`resources.cpu_cores`) when a phase needs it.
+- E2B: its `BackendKit` already refuses a workspace larger than the template's
+  sandbox size (`require_fits`), so a request above it fails at provisioning.
+- The run-queue (ADR-072) budget counts runs per Executor; the ledger is per
+  process and sits beside it, so it applies under both topologies.

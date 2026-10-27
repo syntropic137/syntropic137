@@ -94,6 +94,11 @@ from syn_domain.contexts.orchestration._shared.workspace_credential_policy impor
     NoCredentials,
     WorkspaceCredentialPolicy,
 )
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    WorkspaceMemoryOverCapError,
+    WorkspaceResourceRequest,
+    require_memory_within_cap,
+)
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
 )
@@ -280,6 +285,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
+    deployment_memory_ceiling_mb,
     validate_phase_declarations,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
@@ -610,6 +616,8 @@ __all__ = [
     "WorkspaceCredentialPolicy",
     "WorkspaceDeleteFallback",
     "WorkspaceDirRemover",
+    "WorkspaceMemoryOverCapError",
+    "WorkspaceResourceRequest",
     "WorkspaceUsage",
     "announce_as",
     "build_command_from_definition",
@@ -618,6 +626,7 @@ __all__ = [
     "created_pull_requests",
     "declared_model_tags",
     "declared_models_of",
+    "deployment_memory_ceiling_mb",
     "execution_request_id",
     "guard_orphaned_workspace",
     "guard_stale_workspace_dir",
@@ -636,6 +645,7 @@ __all__ = [
     "render_workspace_prompt",
     "replays_generic",
     "repository_key",
+    "require_memory_within_cap",
     "require_supported_execution_type",
     "roster_of",
     "salvage_stranded_phase",

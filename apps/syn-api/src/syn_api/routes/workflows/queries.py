@@ -21,6 +21,7 @@ from syn_api.types import (
     PhaseDefinitionResponse,
     PhaseProgressInfo,
     PhaseRefResponse,
+    PhaseResourcesResponse,
     Result,
     WorkflowDetail,
     WorkflowError,
@@ -236,6 +237,7 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         delivers_repo_changes=p.delivers_repo_changes,
         platform_access=p.platform_access,
         requires_verdict=p.requires_verdict,
+        resources=PhaseResourcesResponse(memory_mb=p.resources.memory_mb),
         sandbox=p.sandbox,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],
         skills=[_ref_response(r) for r in p.skills],
@@ -675,6 +677,10 @@ def _yaml_declaration_lines(phase: PhaseDefinitionResponse) -> list[str]:
         lines.append(f"    platform_access: {phase.platform_access.value}")
     if phase.requires_verdict:
         lines.append("    requires_verdict: true")
+    # okrs-51p.30: dropped, a reinstalled build phase would run in the default
+    # workspace and be OOM-killed.
+    if phase.resources.memory_mb is not None:
+        lines.append(f"    resources: {{memory_mb: {phase.resources.memory_mb}}}")
     return lines
 
 

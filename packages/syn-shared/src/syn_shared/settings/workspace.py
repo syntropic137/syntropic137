@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Re-export from sub-modules for backwards compatibility
@@ -109,8 +109,43 @@ class WorkspaceSettings(BaseSettings):
     memory_limit_mb: int = Field(
         default=DEFAULT_WORKSPACE_MEMORY_LIMIT_MB,
         ge=256,
-        description="Memory limit applied to each workspace container, in MB.",
+        description=(
+            "Memory limit applied to each workspace container, in MB, unless its "
+            "phase requests otherwise with resources.memory_mb."
+        ),
     )
+
+    memory_max_mb: int | None = Field(
+        default=None,
+        ge=256,
+        description=(
+            "The most memory, in MB, one phase may request for its workspace with "
+            "resources.memory_mb (okrs-51p.30). Unset means no phase may ask for "
+            "more than SYN_WORKSPACE_MEMORY_LIMIT_MB. A request above it is refused "
+            "at install and at start, never clamped. A larger workspace counts as "
+            "more than one run against the host: each process admits workspaces up "
+            "to SYN_EXECUTION_MAX_CONCURRENT x SYN_WORKSPACE_MEMORY_LIMIT_MB in total, "
+            "so a 16384 MB phase waits for four default-sized ones. Must be at least "
+            "SYN_WORKSPACE_MEMORY_LIMIT_MB."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _ceiling_covers_the_default(self) -> WorkspaceSettings:
+        """A ceiling below the default would refuse a phase that asked for nothing."""
+        if self.memory_max_mb is not None and self.memory_max_mb < self.memory_limit_mb:
+            msg = (
+                f"SYN_WORKSPACE_MEMORY_MAX_MB ({self.memory_max_mb}) is below "
+                f"SYN_WORKSPACE_MEMORY_LIMIT_MB ({self.memory_limit_mb}). The ceiling "
+                "bounds what a phase may request, so it must cover the default."
+            )
+            raise ValueError(msg)
+        return self
+
+    @property
+    def memory_ceiling_mb(self) -> int:
+        """The most memory a phase may request: the ceiling, or the default when unset."""
+        return self.memory_limit_mb if self.memory_max_mb is None else self.memory_max_mb
 
     cpu_limit: float = Field(
         default=DEFAULT_WORKSPACE_CPU_LIMIT,

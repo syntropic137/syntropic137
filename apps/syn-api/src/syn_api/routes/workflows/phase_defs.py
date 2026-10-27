@@ -139,7 +139,15 @@ def _fallback_agent(declared: object) -> FallbackAgent | None:
 
 
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
-    from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
+    from syn_domain.contexts.orchestration import (
+        PhaseDefinition,
+        PhaseExecutionType,
+        deployment_memory_ceiling_mb,
+        require_memory_within_cap,
+    )
+    from syn_domain.contexts.orchestration._shared.workspace_resources import (
+        stored_resource_request,
+    )
 
     if phases:
         defs = [
@@ -200,9 +208,17 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 fallback_agent=_fallback_agent(p.get("fallback_agent")),
                 claude_plugins=tuple(p.get("claude_plugins") or ()),
                 skills=_expand_skills(p.get("skills")),
+                # Held to the YAML's model, so the API cannot store a request
+                # the YAML would refuse (okrs-51p.30).
+                resources=stored_resource_request(p.get("resources")),
             )
             for i, p in enumerate(phases)
         ]
+        # Refused at install as well as at start: a workflow this deployment
+        # can never run should not install with a 201 (okrs-51p.30).
+        ceiling = deployment_memory_ceiling_mb()
+        for d in defs:
+            require_memory_within_cap(d.resources, ceiling, phase_id=d.phase_id)
         # The YAML refuses this too; a phase created here never passes it (#1376).
         for d in defs:
             require_enforceable_cost_limit(d.provider, d.max_cost_usd, phase_id=d.phase_id)

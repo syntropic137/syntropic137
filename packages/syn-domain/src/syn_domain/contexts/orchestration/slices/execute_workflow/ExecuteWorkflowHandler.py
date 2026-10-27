@@ -17,6 +17,10 @@ from event_sourcing import StreamAlreadyExistsError
 from syn_domain.contexts._shared.maintenance import refuse_if_paused
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    WorkspaceResourceRequest,
+    require_memory_within_cap,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -185,8 +189,30 @@ def _resolve_repos_from_template(
     return []
 
 
-def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
+def deployment_memory_ceiling_mb() -> int:
+    """The most workspace memory a phase may request on this deployment (okrs-51p.30)."""
+    from syn_shared.settings import get_settings
+
+    return get_settings().workspace.memory_ceiling_mb
+
+
+def _phase_resources(phase: object) -> WorkspaceResourceRequest:
+    """A stored phase's resource request; the default for one that predates it."""
+    resources = getattr(phase, "resources", None)
+    return (
+        resources if isinstance(resources, WorkspaceResourceRequest) else WorkspaceResourceRequest()
+    )
+
+
+def validate_phase_declarations(
+    workflow: WorkflowTemplateAggregate, *, memory_ceiling_mb: int | None = None
+) -> None:
     """Raise if any stored phase declares something the platform cannot honour.
+
+    ``memory_ceiling_mb`` is this deployment's workspace memory ceiling; None
+    reads it from settings (``SYN_WORKSPACE_MEMORY_MAX_MB``). A phase whose
+    ``resources.memory_mb`` exceeds it is refused here, before any phase of
+    the run is paid for, rather than at its own workspace (okrs-51p.30).
 
     THE single definition of that check (#1039). Three entry points need it and
     each one previously would have grown its own copy:
@@ -202,8 +228,10 @@ def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
     historical ``WorkflowTemplateCreated`` event and never sees the YAML
     validator, so authoring-time refusal reaches none of them.
     """
+    ceiling = deployment_memory_ceiling_mb() if memory_ceiling_mb is None else memory_ceiling_mb
     for phase in workflow.phases:
         phase_id = getattr(phase, "phase_id", None)
+        require_memory_within_cap(_phase_resources(phase), ceiling, phase_id=phase_id)
         require_supported_execution_type(
             getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
             phase_id=phase_id,
@@ -638,6 +666,7 @@ class ExecuteWorkflowHandler:
         # Resolution unions global + workflow + phase scopes per phase.
         workflow_refs = workflow.claude_plugins
         workflow_skill_refs = workflow.skills
+        memory_ceiling = deployment_memory_ceiling_mb()
         executable_phases: list[ExecutablePhase] = []
         for phase in workflow.phases:
             # EXECUTION-BOUNDARY re-check, not a duplicate of the YAML rule.
@@ -655,6 +684,11 @@ class ExecuteWorkflowHandler:
             # phase cannot finish under (#1434).
             require_runnable_sandbox(
                 getattr(phase, "sandbox", None), phase_id=getattr(phase, "phase_id", None)
+            )
+            # And the memory ceiling (okrs-51p.30): refused before phase 1 is
+            # paid for, not when the phase that asked reaches its workspace.
+            require_memory_within_cap(
+                _phase_resources(phase), memory_ceiling, phase_id=getattr(phase, "phase_id", None)
             )
             agent_config = _build_agent_config_from_phase(phase)
             resolved = await self._resolve_phase_plugins(
@@ -695,6 +729,9 @@ class ExecuteWorkflowHandler:
                     delivers_repo_changes=phase.delivers_repo_changes,
                     platform_access=phase.platform_access,
                     requires_verdict=phase.requires_verdict,
+                    # Dropped, a build phase that declared 12 GB would run in
+                    # the default and be OOM-killed mid-build (okrs-51p.30).
+                    resources=_phase_resources(phase),
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )

@@ -12,6 +12,9 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    WorkspaceResourceRequest,
+)
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX
 from syn_shared.platform_access import PlatformScope
 
@@ -212,6 +215,14 @@ class PhaseDefinition(BaseModel):
     Sourced from the workflow YAML ``requires_verdict`` field. When True, a
     run that reports none fails instead of advancing by order. See
     ``PhaseYamlDefinition.requires_verdict``."""
+
+    resources: WorkspaceResourceRequest = Field(default_factory=WorkspaceResourceRequest)
+    """What this phase's workspace asks for, e.g. ``memory_mb`` (okrs-51p.30).
+
+    Sourced from the workflow YAML ``resources`` block. Empty means the
+    deployment default, which is also what every template stored before the
+    field existed replays as. Checked against the deployment ceiling at
+    install, at start and at provisioning; see ``workspace_resources``."""
 
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
