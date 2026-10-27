@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py
+index 37355e0fc..fc4073d28 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py
+@@ -485,7 +485,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
+         existing = await self._store.get(self.PROJECTION_NAME, event.execution_id)
+         if not existing:
+             return
+-        if existing.get("starting_checkout") is None:
++        if True:
+             existing["starting_checkout"] = [
+                 c.model_dump(mode="json") for c in event.checked_out_commits or ()
+             ]

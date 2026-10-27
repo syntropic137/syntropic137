@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/eval_sets.py b/apps/syn-api/src/syn_api/routes/eval_sets.py
+index 9b9837837..515e39939 100644
+--- a/apps/syn-api/src/syn_api/routes/eval_sets.py
++++ b/apps/syn-api/src/syn_api/routes/eval_sets.py
+@@ -184,7 +184,7 @@ async def eval_set_summary(
+     evals = await manager.eval_list.page(tags=tags)
+     records = {row.record.eval_id: row.record for row in evals.rows}
+     roster = roster_of(
+-        (TaggedEval(r.eval_id, r.tags) for r in records.values()), suite, version, split
++        (TaggedEval(r.eval_id, r.tags) for r in records.values()), suite, version, None
+     )
+     eval_ids = [c.eval_id for c in roster.cases]
+     members = await manager.eval_list.members_of(eval_ids)

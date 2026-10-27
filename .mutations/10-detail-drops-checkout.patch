@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/workflow_execution_detail.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/workflow_execution_detail.py
+index c2374a7fb..93857e1d9 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/workflow_execution_detail.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/workflow_execution_detail.py
+@@ -538,7 +538,7 @@ class WorkflowExecutionDetail:
+             inputs={str(k): str(v) for k, v in (data.get("inputs") or {}).items()},
+             tags=tuple(data.get("tags") or ()),
+             inherited_tags=tuple(data.get("inherited_tags") or ()),
+-            starting_checkout=tuple(read_source_commits(data.get("starting_checkout"))),
++            starting_checkout=(),
+         )
+ 
+     @staticmethod

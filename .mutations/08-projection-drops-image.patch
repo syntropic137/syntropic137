@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py
+index 37355e0fc..f72eb6cbf 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py
+@@ -497,7 +497,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
+         _, phase = found
+         phase["provisioned_at"] = event.provisioned_at.isoformat()
+         if event.image_manifest is not None:
+-            phase["image_manifest"] = event.image_manifest.model_dump(mode="json")
++            pass
+         await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
+ 
+     @staticmethod

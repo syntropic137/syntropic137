@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_sets.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_sets.py
+index 3d6c690f8..b99ca65d8 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_sets.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_sets.py
+@@ -184,8 +184,6 @@ def image_provenance(trials: Iterable[ClassifiedTrial]) -> ImageProvenance:
+     distinct: dict[str, ImageManifestContent] = {}
+     without = 0
+     for trial in trials:
+-        if not isinstance(trial.result, TrialOutcome):
+-            continue
+         read = [
+             m.manifest
+             for m in trial.run.image_manifests
