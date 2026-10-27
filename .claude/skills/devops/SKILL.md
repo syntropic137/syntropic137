@@ -109,7 +109,7 @@ hand-rolled list missed gates CI then failed on.
 | `smoke-test.yml` | push to `main`/`release`/`hotfix/**` only (PR trigger disabled) | full selfhost compose stack comes up healthy; a red smoke on `main` is found after merge |
 | `e2e-container.yml` | PRs and `main` pushes touching workspace code, the AW gitlink or image pins; `workflow_dispatch` | automatic runs build and probe the workspace image from source; a real agent run (live API calls) happens only on manual dispatch with `run_full_e2e=true` |
 | `docs-drift.yml` | push to `main`/`release` | generated docs match source |
-| `release-source.yml` | PRs into `release` (`pull_request_target`: the release branch's copy runs) | the head is `main` (on `origin/main`) or a hotfix of the last tag, same repository; only cherry-picks + exact version substitutions; gitleaks on hotfix commits (ADR-077) |
+| `release-source.yml` | PRs into `release` (`pull_request_target`: main's copy runs, checked out at `github.workflow_sha`) | the head is `main` (on `origin/main`) or a hotfix of the last tag, same repository; only cherry-picks + exact version substitutions; gitleaks on hotfix commits (ADR-077) |
 | `release-gate.yml` | PRs into `release` | `_check-version`, `_check-changelog` (PR body >= 20 chars, read from the frozen event payload), `_check-codegen-sync`, `_check-docker-dry-run`, OSV, pip-audit, dependency review |
 | `release-create.yml` | push to `release` | `create-release` (waits on `release-publish` approval) -> tag + Release -> codegen re-check -> `release-containers.yaml` + `release-cli.yaml` |
 | `release-beta.yaml` | a published GitHub prerelease | beta images + CLI on `next`; exists, but the owner does not want GitHub prereleases (see `agent_release.md`) |

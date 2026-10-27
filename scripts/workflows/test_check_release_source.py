@@ -321,7 +321,7 @@ def test_the_bump_allowlist_covers_what_bump_version_rewrote_for_v1_0_5() -> Non
 
 
 class TestWorkflowTrust:
-    """release-source.yml must judge a PR with the release branch's code.
+    """release-source.yml must judge a PR with main's code, never the PR's.
 
     A `pull_request` workflow runs the PR's own copy, so a hotfix could replace
     the checker with `exit 0`. These pin the properties that stop that.
@@ -339,14 +339,16 @@ class TestWorkflowTrust:
         assert set(triggers) == {"pull_request_target"}
         assert workflow["permissions"] == {"contents": "read"}
 
-    def test_it_checks_out_the_base_and_never_the_head(self, workflow: dict[str, object]) -> None:
+    def test_it_checks_out_its_own_commit_and_never_the_head(
+        self, workflow: dict[str, object]
+    ) -> None:
         jobs = workflow["jobs"]
         assert isinstance(jobs, dict)
         steps = jobs["release-source"]["steps"]
         checkouts = [s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@")]
-        assert [c["with"]["ref"] for c in checkouts] == [
-            "${{ github.event.pull_request.base.sha }}"
-        ]
+        # The workflow's own (default-branch) commit: never the PR head, and
+        # not the base either, which can predate the checker.
+        assert [c["with"]["ref"] for c in checkouts] == ["${{ github.workflow_sha }}"]
         assert checkouts[0]["with"]["persist-credentials"] is False
         scripts = "\n".join(str(s.get("run", "")) for s in steps)
         for forbidden in ("git checkout", "git switch", "git worktree", "git reset"):

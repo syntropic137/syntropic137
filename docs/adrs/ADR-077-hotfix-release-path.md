@@ -73,18 +73,24 @@ unless every one of these holds:
 ### The checker runs trusted code only
 
 `release-source.yml` triggers on `pull_request_target`, so GitHub runs the
-copy of the workflow on `release`, and it checks out the base commit. The head
-is fetched as git objects (`refs/pull/N/head`) and is only read: never checked
-out, imported or executed. A PR that rewrites the checker or the workflow is
-still judged by the release branch's copies. A `pull_request` workflow (as
-`release-gate.yml` is) runs the PR's own copy, which is why the source rule
-does not live there. The job uses no secret and a read-only token.
+copy of the workflow on the default branch (`main`), whatever the PR's base, and
+the job checks out that same commit (`github.workflow_sha`). The head is fetched
+as git objects (`refs/pull/N/head`) and is only read: never checked out,
+imported or executed. A PR that rewrites the checker or the workflow is still
+judged by `main`'s copies, which only change through reviewed PRs into `main`.
+A `pull_request` workflow (as `release-gate.yml` is) runs the PR's own copy,
+which is why the source rule does not live there. The job uses no secret and a
+read-only token.
 
-Bootstrapping: a `pull_request_target` workflow exists for a PR only once it is
-on the base branch. The release that first carries this file (v1.0.5) is
-checked by `release-gate.yml` alone; the owner then adds `Release Source` to
-the `release` ruleset's required status checks, and from then on every PR into
-`release` needs it.
+It does not check out the PR base: `release` can predate the checker. The first
+version of this workflow did, and on v1.0.5's release PR (base v1.0.4, which has
+no checker) it failed with "No such file". The workflow itself had run anyway,
+because GitHub took it from `main`.
+
+The rule binds only once `Release Source` is a required status check on the
+`release` ruleset, which is an owner setting. Until then a red `Release Source`
+can be merged over, and the release PR carries a manual run of `main`'s checker
+as evidence instead.
 
 The rule's first half: a fix lands on `main` first, always, through the normal
 PR and review. A hotfix never carries code `main` has not merged.
