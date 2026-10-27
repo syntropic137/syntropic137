@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/archive_usage.py b/packages/syn-adapters/src/syn_adapters/session_inventory/archive_usage.py
+index df295906d..905e100c3 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/archive_usage.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/archive_usage.py
+@@ -60,7 +60,6 @@ def measure_archive_usage(root: Path, now: float) -> ArchiveUsage | None:
+         is_object = _OBJECT_NAME.fullmatch(name) is not None
+         is_reference = _REFERENCE.fullmatch(name) is not None
+         objects += is_object
+-        references += is_reference
+         age = now - stat.st_mtime
+         if (is_object or is_reference) and age < _WEEK_DAYS * _DAY:
+             week += stat.st_size

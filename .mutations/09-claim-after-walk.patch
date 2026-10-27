@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/services/health_probes.py b/apps/syn-api/src/syn_api/services/health_probes.py
+index cc6b1d799..6d70bbab0 100644
+--- a/apps/syn-api/src/syn_api/services/health_probes.py
++++ b/apps/syn-api/src/syn_api/services/health_probes.py
+@@ -141,7 +141,6 @@ async def describe_session_store() -> SessionStoreHealth | None:
+         return _session_store_cache.value
+     # Claim the window before the walk: concurrent /health calls answer from
+     # the previous value instead of each starting their own walk.
+-    _session_store_cache.expires_at = now + SESSION_STORE_CACHE_SECONDS
+     try:
+         from syn_shared.settings import get_settings
+ 

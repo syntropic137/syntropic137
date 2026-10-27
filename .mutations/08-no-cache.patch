@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/health_probes.py b/apps/syn-api/src/syn_api/services/health_probes.py
+index cc6b1d799..dd65dacdf 100644
+--- a/apps/syn-api/src/syn_api/services/health_probes.py
++++ b/apps/syn-api/src/syn_api/services/health_probes.py
+@@ -137,8 +137,6 @@ _session_store_cache = _SessionStoreCache()
+ async def describe_session_store() -> SessionStoreHealth | None:
+     """Session archive size and growth (#2107), cached. Never raises."""
+     now = time.time()
+-    if now < _session_store_cache.expires_at:
+-        return _session_store_cache.value
+     # Claim the window before the walk: concurrent /health calls answer from
+     # the previous value instead of each starting their own walk.
+     _session_store_cache.expires_at = now + SESSION_STORE_CACHE_SECONDS

@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/services/lifecycle.py b/apps/syn-api/src/syn_api/services/lifecycle.py
+index 8fc9d7a32..6b6f1b1a0 100644
+--- a/apps/syn-api/src/syn_api/services/lifecycle.py
++++ b/apps/syn-api/src/syn_api/services/lifecycle.py
+@@ -383,7 +383,6 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
+             db_pools=db_pools,
+             cpu_throttling=cpu_throttling.read_cpu_throttling(),
+             execution_budget=await execution_capacity.describe_execution_budget(),
+-            session_store=await describe_session_store(),
+         )
+     )
+ 
