@@ -142,8 +142,6 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
     from syn_domain.contexts.orchestration import (
         PhaseDefinition,
         PhaseExecutionType,
-        deployment_memory_ceiling_mb,
-        require_memory_within_cap,
         stored_resource_request,
     )
 
@@ -212,11 +210,6 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
             )
             for i, p in enumerate(phases)
         ]
-        # Refused at install as well as at start: a workflow this deployment
-        # can never run should not install with a 201 (okrs-51p.30).
-        ceiling = deployment_memory_ceiling_mb()
-        for d in defs:
-            require_memory_within_cap(d.resources, ceiling, phase_id=d.phase_id)
         # The YAML refuses this too; a phase created here never passes it (#1376).
         for d in defs:
             require_enforceable_cost_limit(d.provider, d.max_cost_usd, phase_id=d.phase_id)

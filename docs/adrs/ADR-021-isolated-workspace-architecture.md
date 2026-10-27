@@ -854,8 +854,11 @@ run at once by the same factor (docs/north-star.md).
    existing workflow and every stored template behaves exactly as before.
 2. **A ceiling, refused not clamped.** `SYN_WORKSPACE_MEMORY_MAX_MB` bounds a
    request; unset means the default, so nothing above it is allowed until an
-   operator opts in. A request above it is refused at install, at start (422,
-   before any phase is paid for) and at provisioning. Clamping would hand a build
+   operator opts in. A request above it is refused at install (in
+   `CreateWorkflowTemplateHandler`, which every install and update path goes
+   through), at start (422, before any phase is paid for), at resume (422, for
+   the phases the resume runs, before the parent's one resume is spent) and at
+   provisioning. Clamping would hand a build
    less than it declared and turn a deployment limit into an OOM kill that reads
    as a code bug.
 3. **A larger workspace counts as more capacity.** The execution budget counts
@@ -864,7 +867,13 @@ run at once by the same factor (docs/north-star.md).
    SYN_WORKSPACE_MEMORY_LIMIT_MB` before its container is created, and returns it
    after teardown. Default workspaces never wait on it; a 16 GB phase waits for
    four default shares. FIFO, no barging; a request larger than the whole ledger
-   runs alone.
+   runs alone. Memory is returned only when teardown shows the container gone.
+   A failed or interrupted teardown (or a cancel mid-`create`) leaks the
+   reservation: it stays charged and is logged at ERROR until an existing reap
+   proves the container gone - `RunReaper.reap` for this host and execution with
+   the Run Queue on (`LedgerSettlingReaper`), the startup reap before a fresh
+   ledger with it off. Holding memory for a dead container costs capacity;
+   freeing it for a live one over-commits the host.
 4. **Recorded in the domain.** The request is part of what an execution IS, so it
    lives here, not in agentic-workspace: on the template event, pinned on
    `WorkflowExecutionStarted.pinned_phases`, and the effective limit on

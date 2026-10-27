@@ -105,8 +105,10 @@ request, and the memory the container was actually given is recorded on
 
 The most memory one Phase may request on this deployment
 (`SYN_WORKSPACE_MEMORY_MAX_MB`; unset means the default, so nothing above it).
-A request above it is **refused, never clamped**, at install, at start (a 422
-before any Phase is paid for) and at provisioning: a workspace given less
+A request above it is **refused, never clamped**, at install (every install and
+update path, in `CreateWorkflowTemplateHandler`), at start (a 422 before any
+Phase is paid for), at resume (a 422 before the parent's one resume is spent,
+for the Phases the resume would run) and at provisioning: a workspace given less
 memory than it declared is OOM-killed mid-run, and that reads as a code bug.
 
 ## Workspace Memory Ledger
@@ -115,7 +117,11 @@ How much workspace memory one Executor has handed out (`WorkspaceMemoryLedger`,
 okrs-51p.30). The [Execution Budget](#execution-budget) counts Executions, which
 was exact while every workspace had the same limit; once a Phase can request
 more, one Execution is no longer one unit of host. Every workspace reserves its
-memory here before its container exists and gives it back after teardown.
+memory here before its container exists and gives it back only once teardown
+**shows the container gone**. A teardown that failed or was interrupted
+**leaks** the reservation: it stays charged, logged at ERROR, until a reap that
+already exists proves the container gone (the host's labelled reap with the Run
+Queue on; the startup reap, before an empty ledger, with it off).
 Capacity is `SYN_EXECUTION_MAX_CONCURRENT x SYN_WORKSPACE_MEMORY_LIMIT_MB`, so
 with no requests it never makes anyone wait that the budget would not, and a
 16 GB Phase on a 4 GB default waits for four shares. First come, first served:

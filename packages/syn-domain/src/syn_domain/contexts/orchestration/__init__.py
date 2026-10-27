@@ -97,7 +97,9 @@ from syn_domain.contexts.orchestration._shared.workspace_credential_policy impor
 from syn_domain.contexts.orchestration._shared.workspace_resources import (
     WorkspaceMemoryOverCapError,
     WorkspaceResourceRequest,
+    deployment_memory_ceiling_mb,
     require_memory_within_cap,
+    require_phases_within_cap,
     stored_resource_request,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -134,6 +136,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_s
     replays_generic,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
+    phases_the_resume_runs,
     refuse_resume_start,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -286,7 +289,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProces
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
-    deployment_memory_ceiling_mb,
     validate_phase_declarations,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
@@ -639,6 +641,7 @@ __all__ = [
     "mint_wrapper_name",
     "models_digest",
     "open_eval",
+    "phases_the_resume_runs",
     "read_record",
     "read_start_record",
     "refuse_resume_start",
@@ -647,6 +650,7 @@ __all__ = [
     "replays_generic",
     "repository_key",
     "require_memory_within_cap",
+    "require_phases_within_cap",
     "require_supported_execution_type",
     "roster_of",
     "salvage_stranded_phase",

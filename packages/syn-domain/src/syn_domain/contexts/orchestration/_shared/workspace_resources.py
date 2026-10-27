@@ -25,7 +25,12 @@ not hold 12 GB through its review phases.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 #: The smallest memory a workspace may be given, in MB. The same floor
 #: ``SYN_WORKSPACE_MEMORY_LIMIT_MB`` has: below it an agent CLI cannot start.
@@ -77,6 +82,31 @@ def require_memory_within_cap(
         raise WorkspaceMemoryOverCapError(
             requested_mb=request.memory_mb, cap_mb=cap_mb, phase_id=phase_id
         )
+
+
+def deployment_memory_ceiling_mb() -> int:
+    """The most workspace memory a phase may request on this deployment.
+
+    ``SYN_WORKSPACE_MEMORY_MAX_MB``, or the default limit when it is unset.
+    Read by every check above provisioning: install, start and resume.
+    """
+    from syn_shared.settings import get_settings
+
+    return get_settings().workspace.memory_ceiling_mb
+
+
+def require_phases_within_cap(phases: Iterable[object], cap_mb: int | None = None) -> None:
+    """Refuse the first phase whose request exceeds ``cap_mb`` (the deployment's when None).
+
+    Takes anything with ``phase_id`` and ``resources``: a template's
+    ``PhaseDefinition`` or a run's pinned ``ExecutablePhase``. A phase with no
+    ``resources`` (stored before the field existed) requests nothing.
+    """
+    ceiling = deployment_memory_ceiling_mb() if cap_mb is None else cap_mb
+    for phase in phases:
+        resources = getattr(phase, "resources", None)
+        if isinstance(resources, WorkspaceResourceRequest):
+            require_memory_within_cap(resources, ceiling, phase_id=getattr(phase, "phase_id", None))
 
 
 def stored_resource_request(stored: object) -> WorkspaceResourceRequest:

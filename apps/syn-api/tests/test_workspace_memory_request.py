@@ -16,7 +16,7 @@ from syn_adapters.workspace_backends.service.workspace_service import WorkspaceS
 from syn_api._wiring import build_workspace_service
 from syn_api._wiring_workspace_memory import get_workspace_memory_ledger
 from syn_api.routes.workflows.phase_defs import _build_phase_defs
-from syn_domain.contexts.orchestration import WorkspaceMemoryOverCapError, WorkspaceResourceRequest
+from syn_domain.contexts.orchestration import WorkspaceResourceRequest
 from syn_shared.settings import get_settings
 from syn_shared.settings.workspace import WorkspaceSettings
 
@@ -39,12 +39,63 @@ def test_the_production_workspace_service_reserves_from_the_process_ledger() -> 
     )
 
 
-def test_install_refuses_a_request_above_the_deployment_ceiling() -> None:
-    """Unset SYN_WORKSPACE_MEMORY_MAX_MB: nothing above the 4096 default installs."""
-    with pytest.raises(WorkspaceMemoryOverCapError, match="build"):
-        _build_phase_defs(
-            [{"phase_id": "build", "name": "Build", "order": 1, "resources": {"memory_mb": 12288}}]
-        )
+@pytest.fixture
+def _storage():
+    """In-memory adapters, as the other service-level workflow tests use."""
+    from syn_adapters.projections.manager import reset_projection_manager
+    from syn_adapters.storage import reset_storage
+
+    reset_storage()
+    reset_projection_manager()
+    yield
+    reset_storage()
+    reset_projection_manager()
+
+
+_BIG_YAML = """
+id: big-build-api
+name: Big build
+phases:
+  - id: build
+    name: Build
+    order: 1
+    prompt_template: build it
+    resources: {memory_mb: 12288}
+"""
+
+
+@pytest.mark.usefixtures("_storage")
+async def test_api_create_refuses_a_request_above_the_ceiling_and_stores_nothing() -> None:
+    """`POST /workflows` with phase dicts (the package install path the CLI uses)."""
+    from syn_api.routes.workflows import create_workflow
+    from syn_api.routes.workflows.queries import get_workflow
+    from syn_api.types import Err
+
+    result = await create_workflow(
+        name="Big build",
+        workflow_id="big-build-dicts",
+        phases=[
+            {"phase_id": "build", "name": "Build", "order": 1, "resources": {"memory_mb": 12288}}
+        ],
+    )
+
+    assert isinstance(result, Err)
+    assert "SYN_WORKSPACE_MEMORY_MAX_MB" in str(result.message)
+    assert isinstance(await get_workflow("big-build-dicts"), Err)
+
+
+@pytest.mark.usefixtures("_storage")
+async def test_yaml_install_refuses_a_request_above_the_ceiling_and_stores_nothing() -> None:
+    """Codex's reproduction: this path built its command without `_build_phase_defs`."""
+    from syn_api.routes.workflows.commands import create_workflow_from_yaml
+    from syn_api.routes.workflows.queries import get_workflow
+    from syn_api.types import Err
+
+    result = await create_workflow_from_yaml(_BIG_YAML)
+
+    assert isinstance(result, Err)
+    assert "SYN_WORKSPACE_MEMORY_MAX_MB" in str(result.message)
+    assert isinstance(await get_workflow("big-build-api"), Err)
 
 
 def test_install_refuses_a_malformed_request_rather_than_dropping_it() -> None:

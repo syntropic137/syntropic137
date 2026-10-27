@@ -19,6 +19,7 @@ from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
 from syn_domain.contexts.orchestration._shared.workspace_resources import (
     WorkspaceResourceRequest,
+    deployment_memory_ceiling_mb,
     require_memory_within_cap,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -187,13 +188,6 @@ def _resolve_repos_from_template(
     if repo_url:
         return [RepositoryRef.parse(repo_url)]
     return []
-
-
-def deployment_memory_ceiling_mb() -> int:
-    """The most workspace memory a phase may request on this deployment (okrs-51p.30)."""
-    from syn_shared.settings import get_settings
-
-    return get_settings().workspace.memory_ceiling_mb
 
 
 def _phase_resources(phase: object) -> WorkspaceResourceRequest:

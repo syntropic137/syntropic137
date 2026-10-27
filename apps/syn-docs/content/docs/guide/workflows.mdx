@@ -416,7 +416,8 @@ phases:
   do not hold the build's memory.
 - The deployment's ceiling is `SYN_WORKSPACE_MEMORY_MAX_MB`. Unset, nothing above
   the default is allowed. A request above the ceiling is **refused**, never
-  clamped: at install, and at start with a 422 before any phase runs.
+  clamped: at install, at start with a 422 before any phase runs, and at resume
+  with a 422 before the resume is admitted (if the ceiling was lowered since).
   `syn workflow validate` does not know the deployment's ceiling and does not
   check it.
 - A larger workspace counts as more than one run. Each process hands out at
