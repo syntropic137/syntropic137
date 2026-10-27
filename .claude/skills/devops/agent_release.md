@@ -17,6 +17,9 @@ checklist plus the lessons that doc does not carry.
 | How | `just pit-stop <version>` per `docs/deployment/test-deploy.md` | `main -> release` PR, below |
 | GitHub Release | none | yes |
 
+A security fix or quick bug patch that cannot wait for the next beta is a
+hotfix release instead: `agent_hotfix_release.md` (ADR-077).
+
 The owner does not want GitHub prereleases: they are public release-list noise.
 `docs/release-process.md` still documents a "Published beta" via `gh release
 create --prerelease` (which `release-beta.yaml` serves); use it only if the
@@ -48,7 +51,7 @@ so it never exercises signing. When to deploy a beta is `orchestrating`'s call.
    ```
    Sections: What's Changed (user-facing), Upgrade Notes (rebuild windows, config changes, rollback limits).
 5. Wait for `release-gate.yml` and `ci.yml` green. Triage with `agent_ci_triage.md`.
-6. The owner merges or asks you to, with a merge commit. The merge is the trigger: `release-create.yml` starts and `create-release` waits on the `release-publish` environment. Tell the owner it is waiting; do not approve it yourself.
+6. The owner merges or asks you to, with a merge commit. The merge is the trigger: `release-create.yml` starts and `create-release` waits on the `release-publish` environment. Page the owner that it is waiting (`agent_hotfix_release.md` "Paging the operator"); do not approve it yourself.
 7. After approval: tag + Release, codegen re-check, `release-containers.yaml` (multi-arch build, cosign, GHCR, compose + SHA256SUMS assets) and `release-cli.yaml` (npm, provenance). About 6 minutes.
 8. Verify the artifact, not the pipeline:
    ```
