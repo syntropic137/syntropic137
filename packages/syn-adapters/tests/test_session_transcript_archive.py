@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import hashlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from syn_adapters.session_inventory.local_archive import LocalSessionTranscriptArchive
+from syn_adapters.session_inventory.local_archive import (
+    CompressionStatus,
+    LocalSessionTranscriptArchive,
+)
 from syn_domain.contexts.agent_sessions import ArchivedTranscript, TranscriptIntegrityError
 
 pytestmark = pytest.mark.unit
@@ -133,3 +138,105 @@ async def test_concurrent_puts_cannot_restore_deleted_body(tmp_path: Path) -> No
     )
     assert not (tmp_path / ref.sha256).exists()
     assert await archive.get(ref) is None
+
+
+_ENVELOPE = b'{"scs_version":"1.0","raw":"' + b'{\\"type\\":\\"assistant\\"}\\n' * 4000 + b'"}'
+
+
+async def test_objects_are_stored_compressed_and_read_back_exact(tmp_path: Path) -> None:
+    """#2107: compression is physical only; key, size and reads are the raw bytes."""
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    ref = await archive.put(_ENVELOPE)
+    assert ref.sha256 == hashlib.sha256(_ENVELOPE).hexdigest() and ref.size == len(_ENVELOPE)
+    stored = (tmp_path / ref.sha256).read_bytes()
+    assert stored[:2] == b"\x1f\x8b" and len(stored) * 10 < len(_ENVELOPE)
+    assert await LocalSessionTranscriptArchive(tmp_path).get(ref) == _ENVELOPE
+    # A duplicate capture verifies the compressed object instead of failing.
+    assert await archive.put(_ENVELOPE) == ref
+
+
+async def test_uncompressed_objects_stay_readable_and_writable(tmp_path: Path) -> None:
+    plain = LocalSessionTranscriptArchive(tmp_path, compress=False)
+    ref = await plain.put(_ENVELOPE)
+    assert (tmp_path / ref.sha256).read_bytes() == _ENVELOPE
+    assert await LocalSessionTranscriptArchive(tmp_path).get(ref) == _ENVELOPE
+    # An uncompressed body that happens to start with the gzip magic is itself.
+    magic = b"\x1f\x8b not gzip"
+    magic_ref = await plain.put(magic)
+    assert await LocalSessionTranscriptArchive(tmp_path).get(magic_ref) == magic
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        pytest.param(lambda b: b[:-9], id="truncated"),
+        pytest.param(lambda b: b + b"\x00", id="trailing"),
+        pytest.param(lambda b: b[:20] + bytes([b[20] ^ 0xFF]) + b[21:], id="flipped"),
+        pytest.param(
+            lambda _: gzip.compress(_ENVELOPE.replace(b"assistant", b"assistanT"), mtime=0),
+            id="other-body",
+        ),
+        pytest.param(lambda _: gzip.compress(_ENVELOPE + b"x", mtime=0), id="longer-body"),
+    ],
+)
+async def test_damaged_compressed_objects_never_read_as_the_body(
+    tmp_path: Path, damage: Callable[[bytes], bytes]
+) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    ref = await archive.put(_ENVELOPE)
+    target = tmp_path / ref.sha256
+    target.write_bytes(damage(target.read_bytes()))
+    with pytest.raises(TranscriptIntegrityError):
+        await archive.get(ref)
+
+
+async def test_oversized_compressed_object_is_rejected_before_inflating(tmp_path: Path) -> None:
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    ref = await archive.put(b"original")
+    with (tmp_path / ref.sha256).open("r+b") as corrupted:
+        corrupted.truncate(8 * 1024 * 1024 * 1024)
+    with pytest.raises(TranscriptIntegrityError):
+        await archive.get(ref)
+
+
+async def test_compress_in_place_measures_then_rewrites_without_changing_reads(
+    tmp_path: Path,
+) -> None:
+    plain = LocalSessionTranscriptArchive(tmp_path, compress=False)
+    ref = await plain.put(_ENVELOPE)
+    tiny = await plain.put(b"x")
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    assert sorted(archive.object_keys()) == sorted([ref.sha256, tiny.sha256])
+    dry = archive.compress_in_place(ref.sha256, apply=False)
+    assert dry is not None and dry.status is CompressionStatus.COMPRESSED
+    assert dry.before == len(_ENVELOPE) and dry.after < dry.before // 10
+    assert (tmp_path / ref.sha256).read_bytes() == _ENVELOPE  # dry run wrote nothing
+    applied = archive.compress_in_place(ref.sha256, apply=True)
+    assert applied == dry
+    assert (tmp_path / ref.sha256).stat().st_size == dry.after
+    assert await archive.get(ref) == _ENVELOPE
+    again = archive.compress_in_place(ref.sha256, apply=True)
+    assert again is not None and again.status is CompressionStatus.ALREADY_COMPRESSED
+    small = archive.compress_in_place(tiny.sha256, apply=True)
+    assert small is not None and small.status is CompressionStatus.INCOMPRESSIBLE
+    assert (tmp_path / tiny.sha256).read_bytes() == b"x"
+    assert not list(tmp_path.glob(".compress-*"))
+
+
+async def test_compress_in_place_never_rewrites_a_corrupt_or_deleted_object(
+    tmp_path: Path,
+) -> None:
+    plain = LocalSessionTranscriptArchive(tmp_path, compress=False)
+    ref = await plain.put(_ENVELOPE)
+    gone = await plain.put(_ENVELOPE + b" ")
+    corrupt = _ENVELOPE.replace(b"assistant", b"assistanT")
+    (tmp_path / ref.sha256).write_bytes(corrupt)
+    archive = LocalSessionTranscriptArchive(tmp_path)
+    with pytest.raises(TranscriptIntegrityError):
+        archive.compress_in_place(ref.sha256, apply=True)
+    assert (tmp_path / ref.sha256).read_bytes() == corrupt
+    await archive.mark_deleted(gone)
+    assert archive.compress_in_place(gone.sha256, apply=True) is None
+    assert archive.compress_in_place("0" * 64, apply=True) is None
+    with pytest.raises(ValueError, match="key"):
+        archive.compress_in_place("../escape", apply=True)
