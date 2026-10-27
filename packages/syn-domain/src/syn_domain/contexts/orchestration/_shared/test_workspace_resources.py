@@ -72,7 +72,7 @@ def test_the_yaml_request_reaches_the_domain_phase_and_an_undeclared_phase_gets_
     [{"memory_mb": 128}, {"memory_mb": 4096, "cpu": 4}, {"memory": 4096}],
     ids=["below-the-floor", "unknown-key-beside", "misspelled-key"],
 )
-def test_a_malformed_request_is_refused_at_authoring(resources: dict[str, object]) -> None:
+def test_a_malformed_request_is_refused_at_authoring(resources: dict[str, int]) -> None:
     """A misspelled key must not install as "no request" and run in the default."""
     flow = "{" + ", ".join(f"{k}: {v}" for k, v in resources.items()) + "}"
     yaml = _YAML.replace("resources:\n      memory_mb: 12288", f"resources: {flow}")
