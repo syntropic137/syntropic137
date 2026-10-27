@@ -12,15 +12,14 @@
 # Any other head, and any head from another repository, is refused.
 #
 # TRUST: this is `pull_request_target`, so GitHub runs the copy of this file
-# on `release`, and the checkout below is the base commit. The candidate is
-# fetched as git objects and never checked out, imported or executed: a PR
-# that edits this file or scripts/workflows/check_release_source.py is still
-# judged by the release branch's copies. Nothing here uses a secret, and the
-# token is read-only.
+# on the DEFAULT branch (main), whatever the PR's base, and the checkout below
+# is that same commit (github.workflow_sha). The candidate is fetched as git
+# objects and never checked out, imported or executed: a PR that edits this
+# file or scripts/workflows/check_release_source.py is still judged by main's
+# copies. Nothing here uses a secret, and the token is read-only.
 #
 # The required status check is this job's name, `Release Source`, on the
-# `release` ruleset. It only exists once this file is on `release`: the first
-# release that carries it is checked by release-gate.yml alone.
+# `release` ruleset.
 # =============================================================================
 
 name: Release Source
@@ -44,12 +43,15 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          fetch-depth: 0  # tags, origin/main and the release history
+          # The trusted checker: main's commit that this workflow file came
+          # from. NOT the PR base: `release` can predate the checker (v1.0.4
+          # did), and the base's copy is not what GitHub runs here anyway.
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0  # tags, origin/main and origin/release
           persist-credentials: false
 
       # Objects only: refs/pull/N/head is the PR's head, from this repository
-      # or a fork, and the working tree stays on the base commit.
+      # or a fork, and the working tree stays on main's commit.
       - name: Fetch the head as git objects
         env:
           PR: ${{ github.event.pull_request.number }}
@@ -59,7 +61,7 @@ jobs:
           test "$(git rev-parse refs/remotes/pr/head)" = "$HEAD_SHA" \
             || { echo "::error::the PR head moved since this event; the next run checks it"; exit 1; }
 
-      # uv picks the interpreter from the base commit's .python-version.
+      # uv picks the interpreter from main's .python-version.
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Check the head may release
