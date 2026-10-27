@@ -131,7 +131,7 @@ class CaptureRecoveryWorker:
             await self._spools.mark_drained(lease)
             release = self._release.get(lease.spool.backend)
             if release is not None:
-                await release.after_drain(lease, exclusive=readers.exclusive)
+                await release.after_drain(lease, exclusive=_exclusive_traversal(lease, readers))
 
     async def _recover_children(
         self, lease: CaptureSpoolLease, readers: RecoveryReaders
@@ -164,3 +164,15 @@ class CaptureRecoveryWorker:
             # cursor for retry while allowing durable transcript work to advance.
             logger.exception("Child journal recovery failed; child cursor remains retryable")
             return "failed"
+
+
+def _exclusive_traversal(lease: CaptureSpoolLease, readers: RecoveryReaders) -> bool:
+    """Exclusive for the whole traversal, not just its last page.
+
+    A watermark carried in on the lease was frozen by an earlier claim, which
+    may have read while a writer still ran. Bytes written after that freeze
+    and before this claim's stop lie beyond it, so finishing that traversal
+    archived none of them: releasing now would delete them. Only a traversal
+    whose watermarks this exclusive claim froze itself may release; the next
+    claim starts a fresh one."""
+    return readers.exclusive and lease.watermark is None and lease.child_watermark is None

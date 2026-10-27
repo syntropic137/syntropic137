@@ -70,7 +70,13 @@ class RecoverySandboxes(Protocol):
     """The recovery kit for one backend and account (decision 8)."""
 
     async def resume(self, sandbox_id: str, *, executor_id: str) -> RecoverySandbox:
-        """Resume ``sandbox_id`` after an ownership check against ``executor_id``."""
+        """Resume ``sandbox_id`` after an ownership check against ``executor_id``.
+
+        Raising means the sandbox is paused, as it was: a resume that may have
+        applied (its response lost) is paused again before raising. The caller
+        cannot pause after a failed resume, because a failed ownership check
+        must never touch the sandbox; only the adapter knows which it was.
+        """
         ...
 
     async def pause(self, sandbox_id: str) -> None:

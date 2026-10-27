@@ -193,3 +193,29 @@ async def test_incomplete_traversal_never_marks_drained_or_releases(case: str) -
     assert await worker.step()
     spools.mark_drained.assert_not_awaited()
     release.after_drain.assert_not_awaited()
+
+
+@pytest.mark.parametrize("carried", ["watermark", "child_watermark"])
+async def test_traversal_frozen_by_an_earlier_claim_never_releases(carried: str) -> None:
+    """Codex review of #2078: page one read while a writer ran and froze the
+    watermark; this claim's stop was confirmed, but bytes written between the
+    two lie beyond that watermark and were never archived. Finishing the old
+    traversal marks it drained but must not release: the next, fresh
+    traversal, frozen under exclusivity, does."""
+    lease = _lease().model_copy(update={carried: 4})
+    spools, drain, release = AsyncMock(), AsyncMock(), AsyncMock()
+    spools.claim.return_value = lease
+    drain.page.return_value = SpoolDrainProgress(
+        watermark=4, next_after=None, captured=4, staged_bytes=900
+    )
+    worker = CaptureRecoveryWorker(
+        spools,
+        {"docker": ExclusiveRecovery(True)},
+        drain,
+        lease_seconds=120,
+        retry_seconds=10,
+        release={"docker": release},
+    )
+    assert await worker.step()
+    spools.mark_drained.assert_awaited_once_with(lease)
+    release.after_drain.assert_awaited_once_with(lease, exclusive=False)
