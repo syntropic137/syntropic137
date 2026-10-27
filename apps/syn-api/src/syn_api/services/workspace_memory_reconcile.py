@@ -20,7 +20,7 @@ from syn_adapters.workspace_backends.service.memory_reconciler import (
 _reconcile_task: asyncio.Task[None] | None = None
 
 
-def start_workspace_memory_reconciler() -> None:
+def start() -> None:
     """Start the reconciler, once; nothing when workspaces are not local Docker."""
     global _reconcile_task
     if _reconcile_task is not None and not _reconcile_task.done():
@@ -36,7 +36,7 @@ def start_workspace_memory_reconciler() -> None:
     )
 
 
-async def stop_workspace_memory_reconciler() -> None:
+async def stop() -> None:
     """Stop the reconciler; a no-op if never started."""
     global _reconcile_task
     task, _reconcile_task = _reconcile_task, None
