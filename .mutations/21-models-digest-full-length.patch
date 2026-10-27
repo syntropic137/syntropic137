@@ -1,13 +1,13 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
-index 43c79ad73..d386f4663 100644
+index 7bacc46f8..95f054060 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/eval_trials.py
-@@ -79,7 +79,7 @@ MODELS_DIGEST_HEX = 32
- def models_digest(models: Mapping[str, str]) -> str:
+@@ -87,7 +87,7 @@ class DeclaredModel:
+ def models_digest(models: Iterable[DeclaredModel]) -> str:
      """The cohort's declared-models identity: sha256 of ``phase=model`` lines in phase order."""
-     canonical = "".join(f"{phase}={models[phase]}\n" for phase in sorted(models))
+     canonical = "".join(f"{m.phase_id}={m.model}\n" for m in sorted(models))
 -    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:MODELS_DIGEST_HEX]
 +    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
  
  
- def declared_model_tags(models: Mapping[str, str]) -> list[str]:
+ def declared_model_tags(models: Iterable[DeclaredModel]) -> list[str]:
