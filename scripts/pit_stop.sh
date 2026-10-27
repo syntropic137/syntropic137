@@ -517,7 +517,9 @@ refuse_drift() {
 # applies, as on a fresh install. Any other drift is left for refuse_drift,
 # which still stops the pit stop for the owner. The write is compare-and-swap
 # against the file read (checked before the backup and again just before the
-# rename), backed up first, checked by sha256, and read back.
+# rename), backed up first, checked by sha256, and read back. Not atomic
+# against a hand edit landing between that last check and the rename; the
+# swap lock covers every other pit stop, and the backup keeps what was read.
 apply_null_keys() {
     local keys sum was bak
     keys="$(python3 "$REPOINT_PY" --add-null-keys "$TMP/compose.published" "$TMP/compose.deployed" "$TMP/compose.keyed")" \

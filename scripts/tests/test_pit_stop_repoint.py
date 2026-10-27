@@ -569,8 +569,36 @@ class TestAddNullKeys:
         deployed = _DEPLOYED.replace("    environment:\n", "    environment:\n" + merge, 1)
         published = _PUBLISHED.replace("    environment:\n", "    environment:\n" + merge, 1)
         rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
-        assert rc == 1 and "merge key" in stderr
+        assert rc == 1 and "not bare" in stderr
         assert not out.exists()
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            "'SYN_WORKSPACE_MEMORY_MAX_MB': secret",
+            '"SYN_WORKSPACE_MEMORY_MAX_MB": secret',
+            "!!merge '<<': *base",
+            "? SYN_WORKSPACE_MEMORY_MAX_MB",
+        ],
+    )
+    def test_a_null_beside_a_key_that_is_not_bare_is_refused(
+        self, tmp_path: Path, entry: str
+    ) -> None:
+        """Codex pass 2 on #2156: a quoted or tagged spelling of the same key, or
+        of a merge, overrides or duplicates just as the bare one would."""
+        deployed = _DEPLOYED.replace("    environment:\n", f"    environment:\n      {entry}\n", 1)
+        published = _PUBLISHED.replace(
+            "    environment:\n", f"    environment:\n      {entry}\n", 1
+        )
+        rc, _, stderr, out = _add_keys(tmp_path, published, deployed)
+        assert rc == 1 and "not bare" in stderr
+        assert not out.exists()
+
+    def test_services_with_trailing_spaces_is_still_the_root(self, tmp_path: Path) -> None:
+        published = _PUBLISHED.replace("services:\n", "services:  \n", 1)
+        deployed = _DEPLOYED.replace("services:\n", "services:  \n", 1)
+        rc, stdout, _, _ = _add_keys(tmp_path, published, deployed)
+        assert rc == 0 and stdout.split() == ["SYN_WORKSPACE_MEMORY_MAX_MB"] * 2
 
     def test_a_crlf_file_is_refused_not_rewritten(self, tmp_path: Path) -> None:
         rc, _, stderr, out = _add_keys(tmp_path, _PUBLISHED, _DEPLOYED.replace("\n", "\r\n"))

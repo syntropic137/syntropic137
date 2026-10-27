@@ -80,6 +80,10 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 _NULL_KEY = re.compile(r"(?P<indent>[ \t]+)(?P<key>[A-Z][A-Z0-9_]*):[ \t]*null[ \t]*")
 #: A mapping key that opens a nested block: no value, anchor, alias or block scalar.
 _PLAIN_PARENT = re.compile(r"[A-Za-z0-9._-]+:")
+#: An env map entry this will sit beside: a bare key. A quoted (`'FOO':`),
+#: tagged (`!!merge`), merge (`<<`), anchored or aliased key is refused, since
+#: the plain spelling of a duplicate or an override could not be told from it.
+_BARE_ENTRY = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*:(?:[ \t].*)?")
 
 
 class RepointError(Exception):
@@ -248,7 +252,8 @@ def _check_env_line(lines: list[str], at: int, key: str) -> None:
         len(chain) != 3
         or chain[0].strip() != "environment:"
         or not _PLAIN_PARENT.fullmatch(chain[1].strip())
-        or chain[2].rstrip("\n") != "services:"
+        or _indent(chain[2]) != 0
+        or chain[2].strip() != "services:"
         or _parent(lines, root) != -1
     ):
         raise RepointError(f"{key} is not in a services.<name>.environment: map")
@@ -259,9 +264,12 @@ def _check_env_line(lines: list[str], at: int, key: str) -> None:
         if _indent(line) <= _indent(lines[env]):
             break
         if _indent(line) == _indent(lines[at]):
+            if not _BARE_ENTRY.fullmatch(line.strip()):
+                raise RepointError(
+                    f"{key}'s environment: map has a key that is not bare ({line.strip()}); "
+                    "a null could duplicate or override it"
+                )
             siblings.append(line.strip().partition(":")[0])
-    if any(s.startswith("<<") for s in siblings):
-        raise RepointError(f"{key}'s environment: map has a merge key; a null could override it")
     if siblings.count(key) != 1:
         raise RepointError(f"{key} would be set more than once in its environment: map")
 
