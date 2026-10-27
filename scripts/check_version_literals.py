@@ -145,6 +145,8 @@ class _Scope:
     parent: _Scope | None
     is_class: bool = False
     is_comprehension: bool = False
+    # A list, set or dict comprehension: inlined into its scope (PEP 709).
+    inlined: bool = False
     bound: set[str] = field(default_factory=set[str])
     declared_global: set[str] = field(default_factory=set[str])
     declared_nonlocal: set[str] = field(default_factory=set[str])
@@ -181,11 +183,13 @@ def _owner(scope: _Scope, name: str) -> _Scope | None:
     The innermost scope that binds it, honoring ``global`` and ``nonlocal``.
     A class body, its bindings and its ``global`` and ``nonlocal`` declarations
     alike, is visible only to itself, never to the functions, lambdas and
-    comprehensions nested in it; those see only its implicit ``__class__``
-    cell. ``None`` is a builtin or an unbound name.
+    comprehensions nested in it. Those see only its implicit ``__class__``
+    cell, and only through a real function: an inlined comprehension in the
+    body reads the module. ``None`` is a builtin or an unbound name.
     """
     current: _Scope | None = scope
     first = True
+    closure = False
     while current is not None:
         if first or not current.is_class:
             if name in current.declared_global:
@@ -195,8 +199,9 @@ def _owner(scope: _Scope, name: str) -> _Scope | None:
             # Python compiles.
             if current.is_local(name):
                 return current
-        elif name == _CLASS_CELL and current.cell is not None:
+        elif name == _CLASS_CELL and current.cell is not None and closure:
             return current.cell
+        closure = closure or not (current.is_class or current.inlined)
         first = False
         current = current.parent
     return None
@@ -221,9 +226,14 @@ def _owners(scope: _Scope, name: str) -> tuple[_Scope, ...]:
 
 
 def _nonlocal_owner(scope: _Scope | None, name: str) -> _Scope | None:
-    """The nearest enclosing FUNCTION that binds ``name``: never a class, never the module."""
+    """The nearest enclosing FUNCTION that binds ``name``: never a class, never the module.
+
+    Or the ``__class__`` cell of a class it passes.
+    """
     current = scope
     while current is not None and current.parent is not None:
+        if current.is_class and name == _CLASS_CELL and current.cell is not None:
+            return current.cell
         if current.is_local(name) and not current.is_class:
             return current
         current = current.parent
@@ -316,7 +326,12 @@ class _ScopeBuilder:
         self._bind(_Binding(_CLASS_CELL, cell, bases=bases, read_scope=scope))
 
     def _visit_comprehension(self, node: _Comprehension, scope: _Scope) -> None:
-        inner = _Scope(parent=scope, is_comprehension=True, private=scope.private)
+        inner = _Scope(
+            parent=scope,
+            is_comprehension=True,
+            inlined=not isinstance(node, ast.GeneratorExp),
+            private=scope.private,
+        )
         for index, gen in enumerate(node.generators):
             # The first iterable is evaluated in the enclosing scope.
             self.visit(gen.iter, scope if index == 0 else inner)

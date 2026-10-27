@@ -157,6 +157,21 @@ FASTAPI_PLANTED: dict[str, str] = {
         "from fastapi import FastAPI\nclass C(FastAPI):\n"
         '    def make(self):\n        return __class__(version="1")\n'
     ),
+    # #2106 review pass 2: a `nonlocal __class__` store writes the cell.
+    "nonlocal __class__ rebinds the cell": (
+        "class C:\n    def make(self):\n        nonlocal __class__\n"
+        "        from fastapi import FastAPI as __class__\n"
+        '        return __class__(version="1")\n'
+    ),
+    # #2106 review pass 2: an inlined class-body comprehension reads the module (PEP 709).
+    "class-body list comprehension reads the module __class__": (
+        "from fastapi import FastAPI as __class__\nclass C:\n"
+        '    apps = [__class__(version="1") for _ in [0]]\n'
+    ),
+    "lambda in a class-body generator reads the cell": (
+        "from fastapi import FastAPI\nclass C(FastAPI):\n"
+        '    makers = list(lambda: __class__(version="1") for _ in [0])\n'
+    ),
     # #2106 review: `__API` in class C is `_C__API`.
     "mangled private name in a class body": (
         'from fastapi import FastAPI as _C__API\nclass C:\n    app = __API(version="1")\n'
@@ -245,6 +260,10 @@ CLEAN: dict[str, str] = {
     ),
     "class body reads the module, not its own cell": (
         'from fastapi import FastAPI\nclass C(FastAPI):\n    app = __class__(version="1")\n'
+    ),
+    "class-body list comprehension does not read the cell": (
+        "from fastapi import FastAPI\nclass C(FastAPI):\n"
+        '    apps = [__class__(version="1") for _ in [0]]\n'
     ),
     "mangled name is not the unmangled import": (
         'from fastapi import FastAPI as __API\nclass C:\n    app = __API(version="1")\n'
