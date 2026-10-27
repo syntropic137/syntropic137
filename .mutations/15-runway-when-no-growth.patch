@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/health_probes.py b/apps/syn-api/src/syn_api/services/health_probes.py
+index a0f63fd50..da105a556 100644
+--- a/apps/syn-api/src/syn_api/services/health_probes.py
++++ b/apps/syn-api/src/syn_api/services/health_probes.py
+@@ -174,7 +174,7 @@ def _measure_session_store(root: Path, now: float) -> SessionStoreHealth | None:
+     if usage is None:
+         return None
+     per_day = usage.added_bytes_7d // 7
+-    runway = None if per_day == 0 else round(usage.filesystem_free_bytes / per_day, 1)
++    runway = round(usage.filesystem_free_bytes / max(per_day, 1), 1)
+     detail = (
+         f"{format_bytes(usage.stored_bytes)} in {usage.object_count} objects and "
+         f"{usage.reference_count} references; +{format_bytes(usage.added_bytes_24h)} in 24h, "
