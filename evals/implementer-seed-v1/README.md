@@ -78,51 +78,66 @@ in the PR that added the suite.
    Opus, `delivers_repo_changes: false`) on an eval whose Baseline pins the
    case's `commit`, with the case's `task` as the `task` input. The phase
    writes `artifacts/output/implement.patch` and pushes nothing.
-2. **Score**, in a workspace and never on the API host, because it runs the
-   agent's code:
+2. **Score** with the container referee (#2108 S4), on a host with Docker:
 
    ```
-   uv run python scripts/eval_implementer.py score --case <id> --patch implement.patch
+   uv run python scripts/eval_referee.py --case <id> --eval <eval-id> --execution <exec-id>
    ```
 
-   It creates a throwaway worktree at the pin and checks out the submodules
-   from the local clones, never from the network. It runs `uv sync` before the
-   patch is applied, so a sync failure can only be the environment's. Then it
-   applies the patch, writes each hidden test file at its `fix_commit` content
-   (over whatever the patch did to that path) and runs pytest on those files
-   and nothing else.
+   No agent carries the verdict. Per patch, the referee:
+
+   - fetches the implement phase's one `implement.patch` artifact through the
+     API (none, or more than one, is refused, never guessed);
+   - bundles this repository holding the pin and the fix, and each submodule
+     holding every gitlink the pin and the fix record, and mounts them
+     read-only into a throwaway container from the pinned workspace image.
+     Nothing is cloned from GitHub;
+   - copies in `scripts/implementer_scorer.py` at a recorded commit (HEAD,
+     refused if the file has uncommitted changes); that commit is part of
+     `scorer_version` (`<suite version>-<commit[:12]>`);
+   - runs `implementer_scorer.py prepare` with the network on: the intended
+     hidden node ids collected at `fix_commit`, then a worktree at the pin
+     with its `uv sync`. No agent code runs;
+   - runs `docker network disconnect`, then checks the container has no
+     interface but loopback. Either failing is ERROR and the patch is not run;
+   - runs `implementer_scorer.py score --prepared`: apply the patch, write each
+     hidden test (and every `conftest.py` the patch touches) at its
+     `fix_commit` content, run pytest on the hidden files only. It never
+     syncs: a prepared tree without its environment is ERROR. A prepared tree
+     scores one patch;
+   - takes the verdict from the scorer's exit code and its last line,
+     `RESULT: <outcome>`, which must agree (a crash is ERROR, not FAIL), and
+     records it as `EvalRunScored`, scorer `eval_implementer.py`.
+
+   Before any agent patch of a case, the reference fix (must PASS) and the
+   empty patch (must FAIL) run through this same path in the same invocation.
+   If either does not hold, no agent patch is scored.
 
    | Result | Exit | When |
    |---|---|---|
    | PASS | 0 | every intended hidden test ran and passed |
-   | FAIL | 1 | the patch does not apply, a hidden test failed, a hidden test could not be collected (the change does not provide what it imports), or one was skipped, xfailed, deselected or never reported |
+   | FAIL | 1 | the patch does not apply, a hidden test failed, a hidden test could not be collected (the change does not provide what it imports, or needs the network), or one was skipped, xfailed, deselected or never reported |
+   | ERROR | 2 | the environment or the referee: the pin, a submodule commit or a hidden file is missing, `uv sync` failed, the network could not be cut, the prepared environment is gone, pytest erred internally or collected nothing, or the run timed out |
 
    pytest's exit 0 alone is not a PASS: it also covers skipped, xfailed and
    deselected tests, so a patch that adds a skip hook would earn it. The
    intended set is the node ids pytest collects from the hidden files at
    `fix_commit`, where no agent code exists. A recording plugin loaded from
    outside the tree reports how each one ended, and each must have a passing
-   `call`. Every `conftest.py` the patch touches is reset to its `fix_commit`
-   content (or removed), as the hidden tests are. What this does not stop:
-   code the tests import runs in the same process as pytest and can tamper
-   with it. The scorer defends the hidden set against configuration, not
-   against an adversarial patch, which is one more reason `score` belongs in
-   a workspace.
-   | ERROR | 2 | the environment: the pin, a submodule commit or a hidden file is missing, `uv sync` failed, pytest erred internally or collected nothing, or the run timed out |
+   `call`. What this does not stop: code the tests import runs in the same
+   process as pytest and can tamper with it. The container bounds what that
+   code can reach; it does not make the in-process judge tamper-proof.
+
+   `eval_implementer.py score --case <id> --patch <diff>` runs the same scorer
+   on a host, with the network on. It is for debugging a case, never for a
+   recorded score. `eval-implement-score-v1` and `-v2` (an agent ran the
+   scorer and reported its result) are retired; archive them on any deployment
+   that still has them.
 
 `launch` and the score ledger are not wired into `scripts/eval_suite.py` for
 this kind yet. That script's `Case`, scoring and `_report_of` all assume a
-verifier report. Today the run is launched like any eval run, and `score` is
-run by hand inside a workspace with the patch copied into it. What is missing
-for this to be automatic:
-
-- **Patch handoff between executions.** No mechanism gives one execution's
-  output artifact to a different execution's workspace as an input artifact.
-  So the scorer cannot yet be a workflow of its own that consumes the
-  implement run's patch.
-- **`patch` is a name, not a type.** `output_artifacts` is a free list of
-  strings. The platform collects whatever is under `artifacts/output/`, and
-  nothing checks that `implement.patch` is there or that it is a diff.
+verifier report. Today the implement run is launched like any eval run, and
+the referee is run by hand per case.
 
 ## Leakage: NOT prevented today
 

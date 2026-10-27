@@ -35,8 +35,20 @@ uv run python scripts/eval_suite.py score  --suite evals/<suite-id> --trials 3  
 
 uv run python scripts/eval_implementer.py check  [--suite evals/<suite-id>]  # git only
 uv run python scripts/eval_implementer.py admit [--case <id>]  # runs hidden tests: empty patch must FAIL, real fix must PASS
-uv run python scripts/eval_implementer.py score --case <id> --patch <diff>
+uv run python scripts/eval_referee.py --case <id> --eval <eval-id> --execution <exec-id>  # the referee: scores AND records
+uv run python scripts/eval_referee.py --case <id> --patch <diff>  # same path, nothing recorded
 ```
+
+An agent's patch is scored only by `eval_referee.py` (#2108 S4): a throwaway
+container from the pinned workspace image, the repo and each submodule as git
+bundles, `prepare` with the network on, then `docker network disconnect`, a
+check that only loopback is left, and `score --prepared` with no network and no
+sync. The reference fix must PASS and the empty patch FAIL through that same
+path in the same invocation, or no agent patch of the case is scored. The
+verdict is the scorer's exit code and its last `RESULT:` line, which must agree;
+`scorer_version` is the suite version plus the scorer's commit. It needs Docker
+on the host it runs on. `eval_implementer.py score` on a host is for debugging
+a case, never for a recorded score; `eval-implement-score*` is retired.
 
 `--suite` takes the suite's directory. Without it, `eval_suite.py` uses
 `evals/verifier-seed-v1` and `eval_implementer.py` uses
@@ -91,7 +103,7 @@ Launches cost real quota.
   interval excludes the drop you would tolerate** (say -5pp). Inconclusive is
   not neutral.
 - **Report cost and wall-clock beside the score** (`eval_suite.py score` prints
-  both; it does not print tokens, and `eval_implementer.py score` prints outcome
+  both; it does not print tokens, and `eval_referee.py` prints outcome
   only), so one run answers the quality and the cost question. Add tokens to
   any new score output.
 - **Hidden tests can certify wrong fixes.** On SWE-bench, UTBoost

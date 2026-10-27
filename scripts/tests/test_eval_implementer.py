@@ -469,3 +469,76 @@ def test_a_fix_plus_a_harmless_conftest_still_passes(
     case, repo = two_hidden_files
     run = score_patch(case.pin(), fix_patch(case, repo) + _conftest("FIXTURE = 1"), repo)
     assert run.outcome == "PASS", run.detail
+
+
+@pytest.fixture
+def prepared(
+    two_hidden_files: tuple[ImplementerCase, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[ImplementerCase, Path, Path]:
+    """`prepare` on the two-file repository, with SYNC building the environment it checks for."""
+    case, repo = two_hidden_files
+    monkeypatch.setattr(implementer_scorer, "SYNC", ("mkdir", "-p", implementer_scorer.ENVIRONMENT))
+    out = tmp_path / "prepared"
+    assert implementer_scorer.prepare(case.pin(), repo, out) is None
+    return case, repo, out
+
+
+def test_a_prepared_tree_scores_the_fix_pass_and_the_bug_fail(
+    prepared: tuple[ImplementerCase, Path, Path], tmp_path: Path
+) -> None:
+    case, repo, out = prepared
+    fixed = implementer_scorer.score_prepared(out, fix_patch(case, repo))
+    assert fixed.outcome == "PASS", fixed.detail
+    again = tmp_path / "again"
+    assert implementer_scorer.prepare(case.pin(), repo, again) is None
+    assert implementer_scorer.score_prepared(again, "").outcome == "FAIL"
+
+
+def test_a_prepared_tree_without_its_environment_is_error_never_a_sync(
+    prepared: tuple[ImplementerCase, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case, repo, out = prepared
+    (out / "tree" / implementer_scorer.ENVIRONMENT).rmdir()
+    synced: list[str] = []
+    monkeypatch.setattr(implementer_scorer, "_run", lambda *a: synced.append(a[2]))
+    run = implementer_scorer.score_prepared(out, fix_patch(case, repo))
+    assert run.outcome == "ERROR"
+    assert "never syncs" in run.detail
+    assert synced == []
+
+
+def test_a_prepared_tree_scores_one_patch_only(
+    prepared: tuple[ImplementerCase, Path, Path],
+) -> None:
+    case, repo, out = prepared
+    assert implementer_scorer.score_prepared(out, "").outcome == "FAIL"
+    second = implementer_scorer.score_prepared(out, fix_patch(case, repo))
+    assert second.outcome == "ERROR"
+    assert "already scored" in second.detail
+
+
+def test_prepare_refuses_a_directory_that_is_not_empty(
+    two_hidden_files: tuple[ImplementerCase, Path], tmp_path: Path
+) -> None:
+    case, repo = two_hidden_files
+    out = tmp_path / "used"
+    out.mkdir()
+    (out / "left-over").write_text("")
+    failed = implementer_scorer.prepare(case.pin(), repo, out)
+    assert failed is not None
+    assert failed.outcome == "ERROR"
+
+
+def test_the_scorer_cli_ends_with_a_result_line_matching_its_exit(
+    prepared: tuple[ImplementerCase, Path, Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    case, repo, out = prepared
+    patch = tmp_path / "fix.patch"
+    patch.write_text(fix_patch(case, repo))
+    code = implementer_scorer.main(["score", "--prepared", str(out), "--patch", str(patch)])
+    assert code == 0
+    assert capsys.readouterr().out.strip().splitlines()[-1] == "RESULT: PASS"

@@ -1287,6 +1287,22 @@ A Trial whose result says nothing about the agent: cancelled, interrupted, a
 scored ERROR. Out of n in the conditional figures; a fail in the lower bound
 and a pass in the upper. Never scored as 0.
 
+## Referee
+
+The scorer of a Run that the Run's agent cannot see, reach or influence, and
+whose verdict no agent carries. For implementer suites it is
+`scripts/eval_referee.py`: the scorer at a recorded commit, in a throwaway
+container from the pinned workspace image, with the network cut before the
+agent's patch runs; the verdict is the scorer's exit code. An in-run verify
+phase is never a Referee: it is part of the treatment.
+
+## Control
+
+A patch whose Verdict is known before scoring: the case's reference fix (must
+PASS) and the empty patch (must FAIL). Both run through the Referee's exact
+path before any agent patch of the case is scored; if either does not hold, no
+agent patch of that case is scored.
+
 ## pass@k / pass^k / Flaky Case
 
 Per case and Cohort with n judged Trials and c passes: pass@k = 1 - C(n-c, k)
