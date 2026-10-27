@@ -2621,6 +2621,17 @@ vps-reclaim *flags:
 session-archive-compress *flags:
     uv run python infra/scripts/session_archive_compress.py "$@"
 
+# Dry run by default: groups revisions per session, reports how many older ones
+# splice onto the newest, bytes saved, non-prefix count. Run it first.
+# --apply stores each as a verified reference under the live workers' locks
+# (verify, pin, publish, re-verify, then unlink); re-run to continue.
+#   just session-archive-dedupe
+#   just session-archive-dedupe --apply --budget-minutes 60
+# Store older session revisions as splice references on the selfhost VPS (#2107)
+[positional-arguments]
+session-archive-dedupe *flags:
+    uv run python -m infra.scripts.session_archive_dedupe "$@"
+
 # Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
 # Codifies docs/deployment/test-deploy.md (direct path). Not a release.
 #   just pit-stop 0.29.1-beta.5                 # everything, waiting for the drain
