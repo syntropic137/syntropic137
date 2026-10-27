@@ -2,7 +2,8 @@
 # Release Create — Orchestrates the full release pipeline
 # =============================================================================
 #
-# Trigger: Push to the `release` branch (via merged PR from main).
+# Trigger: Push to the `release` branch (via a merged PR from main or a
+# hotfix/vX.Y.Z branch, ADR-077).
 #
 # Pipeline:
 #   1. Read version from pyproject.toml, create git tag + GitHub Release

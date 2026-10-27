@@ -15,7 +15,7 @@ services:
   # Provides secure, zero-trust access without port forwarding.
   # See: infra/cloudflare/README.md for setup instructions.
   cloudflared:
-    image: cloudflare/cloudflared:2026.2.0
+    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
     container_name: syn137-cloudflared
     command: tunnel run
     environment:

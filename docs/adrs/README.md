@@ -2,7 +2,7 @@
 
 ## How to use
 
-- Next available number: **ADR-077**
+- Next available number: **ADR-078**
 - Template: Status, Date, Context, Decision, Consequences (Nygard format)
 - ADR-025 was never created (numbering gap)
 - ADR-027 has two files: `ADR-027-sdk-wrapper-architecture.md` (superseded) and `ADR-027-unified-workflow-executor.md` (accepted)
@@ -67,6 +67,7 @@
 | [ADR-067](ADR-067-model-registry-and-cost-attribution.md) | Model Registry and Rate-at-Write Cost Attribution | Proposed |
 | [ADR-070](ADR-070-credential-rotation.md) | Credential Rotation Without a Restart | Proposed |
 | [ADR-075](ADR-075-request-latency-telemetry.md) | Durable Request Latency Telemetry | Accepted |
+| [ADR-077](ADR-077-hotfix-release-path.md) | Hotfix Release Path | Accepted |
 
 ### Testing & Quality
 
