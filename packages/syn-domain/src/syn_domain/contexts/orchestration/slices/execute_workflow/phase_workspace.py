@@ -221,18 +221,8 @@ class PhaseWorkspace:
             delivers_repo_changes=phase.delivers_repo_changes,
         )
         if sandbox_backend is not None:
-            # After the sandbox exists and before any agent launches in it:
-            # the durable route a recovery worker reaches its spool by. Raising
-            # here fails the phase through the workspace now attached.
-            handle = result.workspace.isolation_handle
-            if handle.executor_id is None:
-                msg = f"sandbox {handle.isolation_id} carries no executor label; its spool is unroutable"
-                raise ValueError(msg)
-            await session_mgr.record_sandbox_spool(
-                backend=sandbox_backend,
-                executor_id=handle.executor_id,
-                sandbox_id=handle.isolation_id,
-            )
+            # After the sandbox exists and before any agent launches in it.
+            await self._record_sandbox_spool(session_mgr, sandbox_backend, result)
         await self._runtime.record_starting_point(todo.phase_id)
         # BEFORE the agent is launched and AFTER the workspace exists, which is
         # the only window in which the quarantine push's credential can be
@@ -243,6 +233,27 @@ class PhaseWorkspace:
         )
         aggregate.provision_workspace_completed(result.command)
         await self._journal.append(aggregate)
+
+    @staticmethod
+    async def _record_sandbox_spool(
+        session_mgr: SessionLifecycleManager,
+        backend: RemoteSpoolBackend,
+        result: ProvisionResult,
+    ) -> None:
+        """The durable route a recovery worker reaches this sandbox's spool by (#2161).
+
+        Raising fails the phase through the workspace already attached, before
+        any agent launches: a transcript nothing could recover is not run.
+        """
+        handle = result.workspace.isolation_handle
+        if handle.executor_id is None:
+            msg = (
+                f"sandbox {handle.isolation_id} carries no executor label; its spool is unroutable"
+            )
+            raise ValueError(msg)
+        await session_mgr.record_sandbox_spool(
+            backend=backend, executor_id=handle.executor_id, sandbox_id=handle.isolation_id
+        )
 
     def _sandbox_spool_backend(self) -> RemoteSpoolBackend | None:
         """The remote backend holding this phase's spool, or None for a host volume."""
