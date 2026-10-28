@@ -170,6 +170,11 @@ class SandboxSpoolRecovery:
     async def remove(self, spool: CaptureSpool) -> bool:
         # Evicting bytes is not permission to end a run: a quota or age limit
         # reaching a sandbox whose agent still runs keeps it until that stops.
+        # FIXME(#1916): a paused writer never stops on its own, and an expired
+        # row is no longer claimable by recovery, so a settled sandbox expired
+        # with a live writer stays paused until an operator acts. The fix needs
+        # writer confirmation (see ``stop_writers``) to stop it under a lease
+        # before the kill; until then this fails closed (paused, never killed).
         sandbox_id, executor_id = _route(spool)
         if not await self._sandboxes.writers_stopped(sandbox_id, executor_id=executor_id):
             return False
