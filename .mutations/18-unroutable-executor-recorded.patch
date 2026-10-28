@@ -1,12 +1,12 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
-index 2d77754ad..d2722dce5 100644
+index edaebc27f..aef39b95e 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
-@@ -39,6 +39,6 @@ class SandboxSpoolRecordedEvent(DomainEvent):
+@@ -49,6 +49,6 @@ class SandboxSpoolRecordedEvent(DomainEvent):
      backend: RemoteSpoolBackend
      #: Validated as the spool row validates them, so a recorded route can
      #: always be projected: a fact the projector refuses would stall it.
--    executor_id: RoutingIdentifier
+-    executor_id: SandboxRouteIdentifier
 +    executor_id: str
-     sandbox_id: RoutingIdentifier
+     sandbox_id: SandboxRouteIdentifier
      recorded_at: datetime

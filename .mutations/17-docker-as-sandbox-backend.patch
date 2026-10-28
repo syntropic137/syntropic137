@@ -1,10 +1,10 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
-index 2d77754ad..9baa53fb4 100644
+index edaebc27f..29d4dde56 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
-@@ -11,7 +11,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
-     RoutingIdentifier,  # noqa: TC001 - pydantic resolves the annotation at runtime
- )
+@@ -8,7 +8,7 @@ from typing import Annotated, Literal
+ from event_sourcing import DomainEvent, event
+ from pydantic import AfterValidator, Field
  
 -RemoteSpoolBackend = Literal["e2b"]
 +RemoteSpoolBackend = Literal["e2b", "docker"]
