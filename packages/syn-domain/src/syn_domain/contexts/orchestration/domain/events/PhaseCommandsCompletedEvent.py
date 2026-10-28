@@ -6,7 +6,7 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 
 from event_sourcing import DomainEvent, event
 
-from syn_domain.contexts.orchestration._shared.command_phase import (
+from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import (
     CommandStepResult,  # noqa: TC001 - needed at runtime for Pydantic
 )
 

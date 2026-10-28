@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
-    from syn_domain.contexts.orchestration._shared.command_phase import CommandStepResult
+    from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import CommandStepResult
     from syn_domain.contexts.orchestration._shared.evidence_contract import StepOutcome, StepRef
     from syn_domain.contexts.orchestration._shared.file_transfer import FileRefusal
     from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (

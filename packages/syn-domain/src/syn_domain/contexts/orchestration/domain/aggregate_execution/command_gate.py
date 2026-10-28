@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration._shared.command_phase import (
+from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import (
     CommandStepOutcome,
     CommandStepResult,
 )

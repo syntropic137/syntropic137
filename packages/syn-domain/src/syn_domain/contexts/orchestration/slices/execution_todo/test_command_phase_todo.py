@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
-from syn_domain.contexts.orchestration._shared.command_phase import (
+from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import (
     CommandStepOutcome,
     CommandStepResult,
 )

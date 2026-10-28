@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from event_sourcing import DomainEvent, EventEnvelope
 
-from syn_domain.contexts.orchestration._shared.command_phase import (
+from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import (
     CommandStepOutcome,
     CommandStepResult,
 )
