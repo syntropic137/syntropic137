@@ -395,7 +395,9 @@ class AgenticIsolationAdapter:
         )
 
         self._kit.require_fits(
-            config.security_policy.cpu_limit_cores, config.security_policy.memory_limit_mb
+            config.security_policy.cpu_limit_cores,
+            config.security_policy.memory_limit_mb,
+            config.security_policy.pids_limit,
         )
         environment = self._build_environment(config)
         capture_mounts = self._kit.capture_mounts(config, environment)
