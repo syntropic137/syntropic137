@@ -1,10 +1,10 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-index f6295b387..6a8e59eb2 100644
+index 2be798c22..84701e423 100644
 --- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
 +++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-@@ -171,7 +171,7 @@ class SandboxSpoolRecovery:
-         # Evicting bytes is not permission to end a run: a quota or age limit
-         # reaching a sandbox whose agent still runs keeps it until that stops.
+@@ -176,7 +176,7 @@ class SandboxSpoolRecovery:
+         # writer confirmation (see ``stop_writers``) to stop it under a lease
+         # before the kill; until then this fails closed (paused, never killed).
          sandbox_id, executor_id = _route(spool)
 -        if not await self._sandboxes.writers_stopped(sandbox_id, executor_id=executor_id):
 +        if False:

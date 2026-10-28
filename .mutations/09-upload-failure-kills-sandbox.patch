@@ -1,5 +1,5 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
-index f6295b387..c56101df1 100644
+index 2be798c22..6c17eee2d 100644
 --- a/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
 +++ b/packages/syn-adapters/src/syn_adapters/session_inventory/sandbox_recovery.py
 @@ -152,6 +152,9 @@ class SandboxSpoolRecovery:
