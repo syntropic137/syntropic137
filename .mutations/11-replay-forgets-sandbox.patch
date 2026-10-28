@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py
+index 75b5e174b..adb0849f3 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py
+@@ -466,7 +466,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
+     @event_sourcing_handler("SandboxSpoolRecorded")
+     def on_sandbox_spool_recorded(self, event: SandboxSpoolRecordedEvent) -> None:
+         """Apply SandboxSpoolRecordedEvent."""
+-        self._sandbox_spool = event
++        del event
+ 
+     @event_sourcing_handler("AgentLaunched")
+     def on_agent_launched(self, event: AgentLaunchedEvent) -> None:  # noqa: ARG002

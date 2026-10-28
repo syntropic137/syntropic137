@@ -1,0 +1,14 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py
+index 75b5e174b..a008768fb 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py
+@@ -393,8 +393,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
+             route = (command.backend, command.executor_id, command.sandbox_id)
+             if route == (recorded.backend, recorded.executor_id, recorded.sandbox_id):
+                 return
+-            msg = "Cannot record a sandbox spool: the session's spool is in another sandbox"
+-            raise ValueError(msg)
++            return
+         self._apply(
+             SandboxSpoolRecordedEvent(
+                 session_id=str(self.id),

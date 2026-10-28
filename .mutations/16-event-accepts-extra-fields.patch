@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
+index 831fa6715..32fe0576e 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
+@@ -30,6 +30,7 @@ class SandboxSpoolRecordedEvent(DomainEvent):
+     event existed, and every Docker session, have none.
+     """
+ 
++    model_config = {"frozen": True, "extra": "allow"}  # type: ignore[assignment]
+     session_id: str
+     execution_id: str
+     phase_id: str

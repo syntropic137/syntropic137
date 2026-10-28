@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/HostSessionEvidenceProjector.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/HostSessionEvidenceProjector.py
+index 29ee80452..28958545e 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/HostSessionEvidenceProjector.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/HostSessionEvidenceProjector.py
+@@ -176,7 +176,7 @@ class HostSessionEvidenceProjector:
+         if not event.execution_id:
+             return  # Old unscoped sessions cannot be assigned to a run by guesswork.
+         run = RunIdentity(source_instance_id=self._source, execution_id=event.execution_id)
+-        if self._spools is not None and event.capture_profile == "local-spool/1":
++        if self._spools is not None and event.capture_profile in ("local-spool/1", "sandbox-spool/1"):
+             await self._spools.project(
+                 CaptureSpool(run=run, session_id=event.session_id, phase_id=event.phase_id)
+             )

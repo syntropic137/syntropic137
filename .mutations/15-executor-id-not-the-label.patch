@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+index ee15a2439..f449be159 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py
+@@ -476,7 +476,7 @@ class AgenticIsolationAdapter:
+             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
+             runtime=isolation_runtime_from_metadata(workspace_obj.metadata),
+             # The owner a recovery worker checks before touching it (#2161).
+-            executor_id=labels[LABEL_HOST_ID],
++            executor_id=config.workspace_id,
+         )
+ 
+     async def _ensure_tmpdir(

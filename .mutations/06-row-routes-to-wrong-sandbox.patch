@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/HostSessionEvidenceProjector.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/HostSessionEvidenceProjector.py
+index 29ee80452..8a46f4215 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/HostSessionEvidenceProjector.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/HostSessionEvidenceProjector.py
+@@ -167,7 +167,7 @@ class HostSessionEvidenceProjector:
+                 profile=capture_profile_for(recorded.backend),
+                 backend=recorded.backend,
+                 executor_id=recorded.executor_id,
+-                sandbox_id=recorded.sandbox_id,
++                sandbox_id=recorded.executor_id,
+             )
+         )
+ 

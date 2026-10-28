@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
+index 831fa6715..2ae840cb4 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
+@@ -8,7 +8,7 @@ from typing import Literal
+ from event_sourcing import DomainEvent, event
+ from pydantic import Field
+ 
+-RemoteSpoolBackend = Literal["e2b"]
++RemoteSpoolBackend = Literal["e2b", "docker"]
+ """A spool backend whose bytes live on a sandbox's own disk, never on this host."""
+ 
+ 

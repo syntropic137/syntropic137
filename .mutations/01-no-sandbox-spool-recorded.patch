@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py
+index af2cc98d9..132a45b43 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py
+@@ -222,7 +222,7 @@ class PhaseWorkspace:
+         )
+         if sandbox_backend is not None:
+             # After the sandbox exists and before any agent launches in it.
+-            await self._record_sandbox_spool(session_mgr, sandbox_backend, result)
++            pass
+         await self._runtime.record_starting_point(todo.phase_id)
+         # BEFORE the agent is launched and AFTER the workspace exists, which is
+         # the only window in which the quarantine push's credential can be

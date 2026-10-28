@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py
+index bf30a760a..5d50c47c7 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py
+@@ -136,7 +136,7 @@ class BackendKit:
+             apply_workspace_capture,
+         )
+ 
+-        if self.spool_backend != "docker":
++        if False:
+             # Mountless: the sandbox's own /spool holds the spool (#2161).
+             apply_capture_environment(config, self.capture_source_instance_id, environment)
+             return []

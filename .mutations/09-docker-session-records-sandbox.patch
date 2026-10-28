@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py
+index 75b5e174b..aad5c302f 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py
+@@ -385,7 +385,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
+         if self.id is None or self._status != SessionStatus.RUNNING:
+             msg = "Cannot record a sandbox spool: the session is not running"
+             raise ValueError(msg)
+-        if self._capture_profile != "sandbox-spool/1" or self._execution_id is None:
++        if self._execution_id is None:
+             msg = "Cannot record a sandbox spool: the session was not planned with sandbox-spool/1"
+             raise ValueError(msg)
+         recorded = self._sandbox_spool

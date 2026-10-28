@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+index e498475cf..530d3458c 100644
+--- a/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
++++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
+@@ -490,7 +490,6 @@ class WorkspaceService:
+             event_stream=AgenticEventStreamAdapter(isolation),
+             config=cfg,
+             credential_policy=kit.credential_policy,
+-            spool_backend=kit.spool_backend,
+         )
+ 
+     @classmethod

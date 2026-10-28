@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py
+index af2cc98d9..ff78892d0 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/phase_workspace.py
+@@ -189,7 +189,7 @@ class PhaseWorkspace:
+             agent_model=phase.agent_config.model,
+             repos=[r.slug for r in repos] if repos else [],
+             observability=self._observability_writer,
+-            capture_profile=capture_profile_for(sandbox_backend or "docker"),
++            capture_profile="local-spool/1",
+         )
+         await session_mgr.start()
+         self._runtime.begin(
