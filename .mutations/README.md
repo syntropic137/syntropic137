@@ -1,6 +1,6 @@
 # Mutation evidence for #2161 (PR #2167)
 
-Seventeen patches, one per meaningful check in non-test source. Each was
+Eighteen patches, one per meaningful check in non-test source. Each was
 applied, asserted applied (non-empty `git diff`), killed locally by its named
 tests, and reversed; every named test passes on clean HEAD. `killers.tsv` maps
 patch to killing node ids. All killers are `unit` tests (E2B is the
@@ -31,3 +31,4 @@ where `ids.txt` is the space-separated union of `killers.tsv`'s second column.
 | 15-executor-id-not-the-label | the handle's executor id is not the label the sandbox carries |
 | 16-event-accepts-extra-fields | the event accepts an undeclared field such as a reattach token |
 | 17-docker-as-sandbox-backend | docker is accepted as a sandbox spool backend |
+| 18-unroutable-executor-recorded | an executor id the spool row refuses is recorded, stalling the projector |

@@ -15,3 +15,4 @@
 15-executor-id-not-the-label	packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/test_2161_e2b_writes_its_capture_spool_row.py::test_an_e2b_run_writes_one_sandbox_spool_row
 16-event-accepts-extra-fields	packages/syn-domain/tests/contexts/agent_sessions/test_2161_sandbox_spool_recorded.py::test_the_event_is_frozen_and_refuses_a_reattach_token
 17-docker-as-sandbox-backend	packages/syn-domain/tests/contexts/agent_sessions/test_2161_sandbox_spool_recorded.py::test_docker_is_not_a_sandbox_backend
+18-unroutable-executor-recorded	packages/syn-domain/tests/contexts/agent_sessions/test_2161_sandbox_spool_recorded.py::test_a_route_the_spool_row_would_refuse_is_never_recorded

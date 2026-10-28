@@ -1,8 +1,8 @@
 diff --git a/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py b/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py
-index bf30a760a..5d50c47c7 100644
+index 401330400..2d09b09fc 100644
 --- a/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py
 +++ b/packages/syn-adapters/src/syn_adapters/workspace_backends/backend_kit.py
-@@ -136,7 +136,7 @@ class BackendKit:
+@@ -138,7 +138,7 @@ class BackendKit:
              apply_workspace_capture,
          )
  

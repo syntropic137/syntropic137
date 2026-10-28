@@ -1,8 +1,8 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
-index 831fa6715..32fe0576e 100644
+index 2d77754ad..61d2c46c9 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/events/SandboxSpoolRecordedEvent.py
-@@ -30,6 +30,7 @@ class SandboxSpoolRecordedEvent(DomainEvent):
+@@ -33,6 +33,7 @@ class SandboxSpoolRecordedEvent(DomainEvent):
      event existed, and every Docker session, have none.
      """
  
