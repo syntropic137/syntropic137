@@ -32,6 +32,12 @@ class CommandStepReport(CommandStepResult):
     tail: str = ""
     dropped_bytes: int = Field(default=0, ge=0)
 
+    def recorded(self) -> CommandStepResult:
+        """The step as the event records it: its result, never its output (D5)."""
+        return CommandStepResult.model_validate(
+            self.model_dump(include=set(CommandStepResult.model_fields))
+        )
+
 
 class CommandsReport(BaseModel):
     """The whole of `commands.json`."""
@@ -60,7 +66,10 @@ class CommandsReport(BaseModel):
             success=success,
             timed_out=timed_out,
             tails_lost=True,
-            steps=tuple(CommandStepReport(**step.model_dump()) for step in steps),
+            steps=tuple(
+                CommandStepReport(**step.model_dump(include=set(CommandStepResult.model_fields)))
+                for step in steps
+            ),
         )
 
     def files(self) -> list[tuple[str, bytes]]:

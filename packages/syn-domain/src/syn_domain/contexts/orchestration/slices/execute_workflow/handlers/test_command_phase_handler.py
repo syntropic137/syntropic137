@@ -16,7 +16,10 @@ from syn_domain.contexts.orchestration._shared.command_phase import (
     CommandTerminal,
     PhaseKind,
 )
-from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import CommandStepOutcome
+from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import (
+    CommandStepOutcome,
+    CommandStepResult,
+)
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -170,6 +173,8 @@ class TestCommandPhaseHandler:
         (command,) = aggregate.recorded
         assert command.success and command.workspace_id == "ws-1"
         assert [s.name for s in command.steps] == ["build", "test"]
+        # The event records results, never output: no tail rides on it (D5).
+        assert {type(s) for s in command.steps} == {CommandStepResult}
         save.assert_awaited_once()
 
     @pytest.mark.asyncio

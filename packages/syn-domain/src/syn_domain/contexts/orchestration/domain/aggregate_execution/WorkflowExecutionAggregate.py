@@ -507,6 +507,11 @@ class WorkflowExecutionAggregate(
         return self._reported_failure_reason
 
     @property
+    def error_message(self) -> str | None:
+        """Why the run failed, as `WorkflowFailed` recorded it, or None."""
+        return self._error
+
+    @property
     def cancel_reason(self) -> str | None:
         """Get the cancellation reason, if the execution was cancelled."""
         return self._cancel_reason

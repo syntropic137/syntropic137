@@ -42,6 +42,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_re
     CancelledWorkLedger,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.command_phase_run import (
+    gate_failed_result,
     record_cancel,
     run_command_phase,
 )
@@ -584,6 +585,8 @@ class WorkflowExecutionProcessor:
                     cancel_reason=aggregate.cancel_reason,
                     phase_id=dispatch_ctx.current_phase_id,
                 )
+            if aggregate.status == ExecutionStatus.FAILED:  # a command gate (ADR-078 D5)
+                return gate_failed_result(aggregate, phase_results, all_artifact_ids, started_at)
             return await self._complete_execution(
                 aggregate,
                 execution_id,

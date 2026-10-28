@@ -19,7 +19,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Final, Protocol
+from typing import TYPE_CHECKING, Final
 
 from syn_domain.contexts.orchestration._shared.command_phase import CommandTerminal
 from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import CommandStepOutcome
@@ -51,6 +51,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
+    from syn_domain.contexts.orchestration.ports.CommandWorkspacePort import (
+        CommandWorkspacePort,
+    )
 
 #: Steps run where the workspace's repositories are checked out under.
 _STEP_DIRECTORY: Final = str(WORKSPACE_ROOT)
@@ -60,26 +63,6 @@ _ENDED: Final = {
     CommandTerminal.INTERRUPTED: CommandStepOutcome.INTERRUPTED,
     CommandTerminal.FAILED_TO_START: CommandStepOutcome.FAILED_TO_START,
 }
-
-
-class CommandWorkspace(Protocol):
-    """What a command Phase needs of its Workspace."""
-
-    @property
-    def workspace_id(self) -> str: ...
-
-    async def run_bounded(
-        self,
-        command: list[str],
-        *,
-        timeout_seconds: int,
-        working_directory: str | None = None,
-        phase_deadline: datetime | None = None,
-    ) -> BoundedCommandResult: ...
-
-    async def inject_files(self, files: list[tuple[str, bytes]]) -> None: ...
-
-    async def interrupt(self) -> bool: ...
 
 
 def step_outcome(result: BoundedCommandResult) -> CommandStepOutcome:
@@ -110,7 +93,7 @@ class CommandPhaseHandler:
         self,
         todo: TodoItem,
         phase: ExecutablePhase,
-        workspace: CommandWorkspace,
+        workspace: CommandWorkspacePort,
         aggregate: WorkflowExecutionAggregate,
         save: Callable[[WorkflowExecutionAggregate], Awaitable[None]],
     ) -> CommandPhaseRun:
@@ -134,7 +117,7 @@ class CommandPhaseHandler:
                     workspace_id=workspace.workspace_id,
                     success=report.success,
                     timed_out=report.timed_out,
-                    steps=report.steps,
+                    steps=[step.recorded() for step in report.steps],
                 )
             )
             await save(aggregate)
@@ -146,7 +129,7 @@ class _Steps:
     """One Phase's worth of steps: the deadline, what ran, and whether to go on."""
 
     h: CommandPhaseHandler
-    workspace: CommandWorkspace
+    workspace: CommandWorkspacePort
     poller: CancelSignalPoller
     budget: int
     results: list[CommandStepReport] = field(default_factory=list)
