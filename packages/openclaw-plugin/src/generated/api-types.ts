@@ -5379,7 +5379,7 @@ export interface components {
          *     written by an agent that had no key to omit.
          * @enum {string}
          */
-        FailureClassification: "platform" | "task" | "correct_refusal" | "unclassified";
+        FailureClassification: "platform" | "task" | "correct_refusal" | "gate" | "unclassified";
         /**
          * FailurePatternResponse
          * @description A recurring failure pattern within a system.
