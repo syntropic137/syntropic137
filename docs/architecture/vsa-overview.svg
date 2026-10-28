@@ -129,7 +129,7 @@
   <text x="750" y="915" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• TicketReportDetached</text>
   <text x="750" y="933" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• TicketReprioritised</text>
   <text x="750" y="951" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• TicketResolved</text>
-  <rect x="40" y="984" width="330" height="783" fill="#d6c9ff" stroke="#a0a0a0" stroke-width="1.5" rx="8" opacity="1" filter="url(#shadow)"/>
+  <rect x="40" y="984" width="330" height="837" fill="#d6c9ff" stroke="#a0a0a0" stroke-width="1.5" rx="8" opacity="1" filter="url(#shadow)"/>
   <text x="55" y="1009" font-size="14" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">agent_sessions</text>
   <text x="55" y="1034" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Aggregates:</text>
   <text x="60" y="1054" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• InventoryClock</text>
@@ -144,33 +144,36 @@
   <text x="60" y="1223" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• mark_agent_launched</text>
   <text x="60" y="1241" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• read_local_transcript</text>
   <text x="60" y="1259" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• record_operation</text>
-  <text x="60" y="1277" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• session_cost</text>
-  <text x="60" y="1295" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• start_session</text>
-  <text x="60" y="1313" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• token_metrics</text>
-  <text x="60" y="1331" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• tool_timeline</text>
-  <text x="60" y="1349" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• replicate_session_inventory</text>
-  <text x="60" y="1367" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• canonical_totals</text>
-  <text x="55" y="1385" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">⚡ Commands</text>
-  <text x="60" y="1405" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• AdvanceInventoryReconciliation</text>
-  <text x="60" y="1423" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• CompleteSession</text>
-  <text x="60" y="1441" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• MarkAgentLaunched</text>
-  <text x="60" y="1459" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ObserveInventoryClock</text>
-  <text x="60" y="1477" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• RecordOperation</text>
-  <text x="60" y="1495" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• RecordSessionInvocation</text>
-  <text x="60" y="1513" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• RequestInventoryReconciliation</text>
-  <text x="60" y="1531" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• StartSession</text>
-  <text x="55" y="1549" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">📨 Events</text>
-  <text x="60" y="1569" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• AgentLaunched</text>
-  <text x="60" y="1587" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• DelegationBound</text>
-  <text x="60" y="1605" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• DelegationFinished</text>
-  <text x="60" y="1623" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• DelegationStarted</text>
-  <text x="60" y="1641" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• InventoryReconciliationChanged</text>
-  <text x="60" y="1659" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• InventoryReconciliationSweep</text>
-  <text x="60" y="1677" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• OperationRecorded</text>
-  <text x="60" y="1695" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• SessionCompleted</text>
-  <text x="60" y="1713" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• SessionInvocationBindingConflicted</text>
-  <text x="60" y="1731" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• SessionInvocationRecorded</text>
-  <text x="60" y="1749" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• SessionStarted</text>
+  <text x="60" y="1277" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• record_sandbox_spool</text>
+  <text x="60" y="1295" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• session_cost</text>
+  <text x="60" y="1313" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• start_session</text>
+  <text x="60" y="1331" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• token_metrics</text>
+  <text x="60" y="1349" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• tool_timeline</text>
+  <text x="60" y="1367" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• replicate_session_inventory</text>
+  <text x="60" y="1385" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• canonical_totals</text>
+  <text x="55" y="1403" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">⚡ Commands</text>
+  <text x="60" y="1423" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• AdvanceInventoryReconciliation</text>
+  <text x="60" y="1441" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• CompleteSession</text>
+  <text x="60" y="1459" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• MarkAgentLaunched</text>
+  <text x="60" y="1477" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• ObserveInventoryClock</text>
+  <text x="60" y="1495" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• RecordOperation</text>
+  <text x="60" y="1513" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• RecordSandboxSpool</text>
+  <text x="60" y="1531" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• RecordSessionInvocation</text>
+  <text x="60" y="1549" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• RequestInventoryReconciliation</text>
+  <text x="60" y="1567" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• StartSession</text>
+  <text x="55" y="1585" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">📨 Events</text>
+  <text x="60" y="1605" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• AgentLaunched</text>
+  <text x="60" y="1623" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• DelegationBound</text>
+  <text x="60" y="1641" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• DelegationFinished</text>
+  <text x="60" y="1659" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• DelegationStarted</text>
+  <text x="60" y="1677" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• InventoryReconciliationChanged</text>
+  <text x="60" y="1695" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• InventoryReconciliationSweep</text>
+  <text x="60" y="1713" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• OperationRecorded</text>
+  <text x="60" y="1731" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• SandboxSpoolRecorded</text>
+  <text x="60" y="1749" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• SessionCompleted</text>
+  <text x="60" y="1767" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• SessionInvocationBindingConflicted</text>
+  <text x="60" y="1785" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• SessionInvocationRecorded</text>
+  <text x="60" y="1803" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• SessionStarted</text>
   <rect x="385" y="984" width="330" height="1107" fill="#c9d9ff" stroke="#a0a0a0" stroke-width="1.5" rx="8" opacity="1" filter="url(#shadow)"/>
   <text x="400" y="1009" font-size="14" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">organization</text>
   <text x="400" y="1034" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Aggregates:</text>
@@ -374,10 +377,10 @@
   <text x="40" y="3616" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">CQRS Pattern</text>
   <rect x="40" y="3646" width="333.3333333333333" height="120" fill="#e3f2fd" stroke="#1976d2" stroke-width="2" rx="8" opacity="1"/>
   <text x="60" y="3681" font-size="18" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">Commands</text>
-  <text x="60" y="3711" font-size="14" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">80 total</text>
+  <text x="60" y="3711" font-size="14" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">81 total</text>
   <rect x="393.3333333333333" y="3646" width="333.3333333333333" height="120" fill="#fff3e0" stroke="#f57c00" stroke-width="2" rx="8" opacity="1"/>
   <text x="413.3333333333333" y="3681" font-size="18" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">Events</text>
-  <text x="413.3333333333333" y="3711" font-size="14" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">115 total</text>
+  <text x="413.3333333333333" y="3711" font-size="14" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">116 total</text>
   <rect x="746.6666666666666" y="3646" width="333.3333333333333" height="120" fill="#e8f5e9" stroke="#388e3c" stroke-width="2" rx="8" opacity="1"/>
   <text x="766.6666666666666" y="3681" font-size="18" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">Projections</text>
   <text x="766.6666666666666" y="3711" font-size="14" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">32 total</text>
