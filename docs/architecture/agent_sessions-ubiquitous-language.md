@@ -153,6 +153,19 @@ worker find them after any crash (#1398, #1916).
 - **Sandbox spool:** profile `sandbox-spool/1`. Its row names the sandbox and
   the executor that launched it, so a fresh worker routes from the row and
   never from memory.
+- **Capture profile:** the capture contract a session is planned with, fixed
+  on `SessionStarted` before its workspace exists: `local-spool/1` for a Docker
+  volume, `sandbox-spool/1` for a remote sandbox. Absent on historical sessions.
+- **Sandbox spool recorded** (`SandboxSpoolRecorded`, #2161): the Lane 1 fact
+  that the sandbox holding a session's sandbox spool exists. Recorded once,
+  after the sandbox is created and before any agent launches in it, naming the
+  backend, the sandbox and the executor that created it. A Docker spool row is
+  projected from `SessionStarted`; a sandbox spool row only from this fact.
+  It carries ids only: an operation reattach token is a credential and is never
+  on it, on the row, or in a log line (#1919 decides where it is stored).
+- **Mountless capture:** the sandbox spool's capture strategy. The
+  session-store capability writes to the sandbox's own `/spool` with the same
+  partition a Docker volume would use; nothing is mounted.
 - **Exclusive drain:** a traversal during which nothing else could write. For
   Docker, no other container referenced the volume. For a sandbox, the provider
   confirmed every agent process stopped after resume. A run in `fencing`, a

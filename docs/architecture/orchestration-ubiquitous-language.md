@@ -319,7 +319,8 @@ approved for credential-free runs. Two kits exist:
 - **Docker kit**: the default. No credential-free image is pinned yet, so a
   NoCredentials Docker kit cannot start.
 - **E2B kit** (#1915, experimental, off unless `SYN_E2B_ENABLED`): always
-  NoCredentials, never captures, and its one approved image is its
+  NoCredentials, captures without a mount into the sandbox's own `/spool`
+  (a sandbox spool, #2161; see the agent_sessions vocabulary), and its one approved image is its
   [E2B Template](#e2b-template). It also carries the template's CPU and memory,
   refusing a workspace that asks for more, and reads files back through the
   provider because the workspace disk is not on this host.

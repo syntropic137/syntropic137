@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.agent_sessions.domain.events.InventoryReconciliationSweepEvent import (
     InventoryReconciliationSweepEvent,
 )
+from syn_domain.contexts.agent_sessions.domain.events.SandboxSpoolRecordedEvent import (
+    SandboxSpoolRecordedEvent,
+)
 from syn_domain.contexts.agent_sessions.domain.events.SessionCompletedEvent import (
     SessionCompletedEvent,
 )
@@ -32,7 +35,10 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     InventoryNodeRef,
     RunIdentity,
 )
-from syn_domain.contexts.agent_sessions.ports.SessionCaptureSpoolPort import CaptureSpool
+from syn_domain.contexts.agent_sessions.ports.SessionCaptureSpoolPort import (
+    CaptureSpool,
+    capture_profile_for,
+)
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import EvidenceBatch
 from syn_domain.contexts.agent_sessions.ports.SessionSettlementPort import SettlementDeadline
 
@@ -83,6 +89,11 @@ class HostSessionEvidenceProjector:
     session of it can resume, even one killed before reporting completion.
     Settling never reads or removes bytes; release still needs a later
     complete traversal.
+
+    A Docker spool row comes from ``SessionStarted`` (``local-spool/1``): its
+    volume is named from the session alone. A sandbox spool row comes from
+    ``SandboxSpoolRecorded`` (#2161), because the sandbox it names is created
+    after the session starts. A ``sandbox-spool/1`` start writes no row.
     """
 
     def __init__(
@@ -111,6 +122,7 @@ class HostSessionEvidenceProjector:
         }
         if self._spools is not None:
             types.add(SessionCompletedEvent.event_type)
+            types.add(SandboxSpoolRecordedEvent.event_type)
         if self._settlements is not None:
             types.add(InventoryReconciliationSweepEvent.event_type)
         return types
@@ -126,6 +138,7 @@ class HostSessionEvidenceProjector:
             SessionInvocationBindingConflictedEvent.event_type: self._project_binding_conflict,
             InventoryReconciliationSweepEvent.event_type: self._record_clock,
             SessionCompletedEvent.event_type: self._settle_session_spool,
+            SandboxSpoolRecordedEvent.event_type: self._project_sandbox_spool,
         }.get(event_type or "")
         if project is not None:
             await project(envelope)
@@ -137,6 +150,26 @@ class HostSessionEvidenceProjector:
             return
         completed = SessionCompletedEvent.model_validate_json(envelope.event.model_dump_json())
         await self._spools.settle(completed.session_id)
+
+    async def _project_sandbox_spool(self, envelope: EventEnvelope[DomainEvent]) -> None:
+        # Idempotent: keyed by session, first write wins, and a different
+        # route for the same session is refused by the port.
+        if self._spools is None:
+            return
+        recorded = SandboxSpoolRecordedEvent.model_validate_json(envelope.event.model_dump_json())
+        await self._spools.project(
+            CaptureSpool(
+                run=RunIdentity(
+                    source_instance_id=self._source, execution_id=recorded.execution_id
+                ),
+                session_id=recorded.session_id,
+                phase_id=recorded.phase_id,
+                profile=capture_profile_for(recorded.backend),
+                backend=recorded.backend,
+                executor_id=recorded.executor_id,
+                sandbox_id=recorded.sandbox_id,
+            )
+        )
 
     async def _project_session(self, envelope: EventEnvelope[DomainEvent]) -> None:
         event = SessionStartedEvent.model_validate_json(envelope.event.model_dump_json())

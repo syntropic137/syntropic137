@@ -38,6 +38,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from syn_domain.contexts.agent_sessions import capture_profile_for
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     RecordRefusedOutputCommand,
 )
@@ -67,6 +68,7 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts._shared.repository_ref import RepositoryRef
+    from syn_domain.contexts.agent_sessions import RemoteSpoolBackend
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
@@ -174,6 +176,9 @@ class PhaseWorkspace:
         )
         aggregate.start_phase(start_cmd)
 
+        # Planned before the workspace exists: the backend fixes where the
+        # spool will live, and SessionStarted carries that plan (#2161).
+        sandbox_backend = self._sandbox_spool_backend()
         session_mgr = SessionLifecycleManager(
             repository=self._session_repo,
             session_id=session_id,
@@ -184,6 +189,7 @@ class PhaseWorkspace:
             agent_model=phase.agent_config.model,
             repos=[r.slug for r in repos] if repos else [],
             observability=self._observability_writer,
+            capture_profile=capture_profile_for(sandbox_backend or "docker"),
         )
         await session_mgr.start()
         self._runtime.begin(
@@ -214,6 +220,19 @@ class PhaseWorkspace:
             # and have no definition to ask (#1231).
             delivers_repo_changes=phase.delivers_repo_changes,
         )
+        if sandbox_backend is not None:
+            # After the sandbox exists and before any agent launches in it:
+            # the durable route a recovery worker reaches its spool by. Raising
+            # here fails the phase through the workspace now attached.
+            handle = result.workspace.isolation_handle
+            if handle.executor_id is None:
+                msg = f"sandbox {handle.isolation_id} carries no executor label; its spool is unroutable"
+                raise ValueError(msg)
+            await session_mgr.record_sandbox_spool(
+                backend=sandbox_backend,
+                executor_id=handle.executor_id,
+                sandbox_id=handle.isolation_id,
+            )
         await self._runtime.record_starting_point(todo.phase_id)
         # BEFORE the agent is launched and AFTER the workspace exists, which is
         # the only window in which the quarantine push's credential can be
@@ -224,6 +243,11 @@ class PhaseWorkspace:
         )
         aggregate.provision_workspace_completed(result.command)
         await self._journal.append(aggregate)
+
+    def _sandbox_spool_backend(self) -> RemoteSpoolBackend | None:
+        """The remote backend holding this phase's spool, or None for a host volume."""
+        backend = self._workspace_service.spool_backend
+        return "e2b" if backend == "e2b" else None
 
     async def provision(
         self,

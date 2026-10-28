@@ -221,6 +221,14 @@ from syn_domain.contexts.agent_sessions.slices.record_operation import (
 from syn_domain.contexts.agent_sessions.slices.record_operation.RecordOperationHandler import (
     RecordOperationHandler,
 )
+from syn_domain.contexts.agent_sessions.slices.record_sandbox_spool import (
+    RecordSandboxSpoolCommand,
+    RemoteSpoolBackend,
+    SandboxSpoolRecordedEvent,
+)
+from syn_domain.contexts.agent_sessions.slices.record_sandbox_spool.RecordSandboxSpoolHandler import (
+    RecordSandboxSpoolHandler,
+)
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import (
     CostCalculator,
 )
@@ -279,6 +287,7 @@ __all__ = [
     "CanonicalUsageQueryService",
     "CaptureEvidence",
     "CaptureLocalTranscriptHandler",
+    "CaptureProfile",
     "CaptureReceipt",
     "CaptureSpool",
     "CaptureSpoolLease",
@@ -362,12 +371,16 @@ __all__ = [
     "ReconciliationStage",
     "RecordOperationCommand",
     "RecordOperationHandler",
+    "RecordSandboxSpoolCommand",
+    "RecordSandboxSpoolHandler",
     "RecordSessionInvocationCommand",
     "RefreshSessionInventoryHandler",
+    "RemoteSpoolBackend",
     "ResolvedInventory",
     "RolloutDocument",
     "RolloutRecord",
     "RunIdentity",
+    "SandboxSpoolRecordedEvent",
     "SchedulePendingInventoryHandler",
     "SessionCaptureCatalogPort",
     "SessionCaptureSpoolPort",
@@ -405,6 +418,7 @@ __all__ = [
     "TranscriptIntegrityError",
     "TranscriptMessage",
     "UnsupportedEvidenceIssue",
+    "capture_profile_for",
     "import_phase_delegates",
     "inventory_counts",
     "model_from_rollout",
@@ -461,11 +475,13 @@ from .ports.NativeSessionEvidencePort import (
 from .ports.QualifiedSessionStorePort import QualifiedSessionIdentity
 from .ports.SessionCaptureCatalogPort import CataloguedCapture, SessionCaptureCatalogPort
 from .ports.SessionCaptureSpoolPort import (
+    CaptureProfile,
     CaptureSpool,
     CaptureSpoolLease,
     CaptureSpoolLeaseLost,
     SessionCaptureSpoolPort,
     SpoolBackend,
+    capture_profile_for,
 )
 from .ports.SessionSettlementPort import (
     SessionSettlementPort,

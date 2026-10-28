@@ -272,6 +272,9 @@ class IsolationHandle:
     #: The OCI runtime the provider resolved for this container. None when the
     #: backend has no OCI runtime (memory, local) or the provider recorded none.
     runtime: IsolationRuntime | None = None
+    #: The executor (``syn.host_id``) this isolation was labelled with at
+    #: create. None for a backend that labels nothing (memory, local).
+    executor_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -60,8 +60,10 @@ class RecoverySandbox(Protocol):
         executor's operation is ``unknown_operation``, and the provider has no
         public pause. AW#103 added ``SupportsOperationReattach`` and
         ``SupportsWorkspaceSuspend`` (release 896449c5, pinned by #2149). The
+        row itself is now written (``SandboxSpoolRecorded``, #2161). The
         adapter then also needs the executor to persist the writer's
-        ``OperationRef`` and reattach token, a credential, on this row.
+        ``OperationRef`` and reattach token. The token is a credential: never
+        on this row, an event or a log line; its store is #1919.
         """
         ...
 

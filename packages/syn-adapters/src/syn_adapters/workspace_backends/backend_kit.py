@@ -11,6 +11,7 @@ adapter had before the kit: capture only when a capture source instance is
 configured, cosign verification of every image, and ``isolation_type="docker"``.
 
 The E2B kit (#1915, :meth:`BackendKit.e2b`) is the second, and is shipped dark.
+It captures into the sandbox's own ``/spool`` without a mount (#2161).
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 if TYPE_CHECKING:
     from agentic_isolation import MountConfig
 
+    from syn_domain.contexts.agent_sessions import SpoolBackend
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationConfig,
     )
@@ -69,16 +71,29 @@ class BackendKit:
     #: signal death can be explained from this host's ring buffer. A remote
     #: sandbox has its own kernel: this host's records say nothing about it.
     shares_host_kernel: bool = True
+    #: Where a captured session's spool lives: a host volume (``docker``) or
+    #: the sandbox's own ``/spool`` (a remote backend, mounted from nothing).
+    spool_backend: SpoolBackend = "docker"
 
     def __post_init__(self) -> None:
         self._require_permitted(self.default_image)
 
     @classmethod
-    def e2b(cls, template: str, *, cpu_count: int, memory_mb: int) -> BackendKit:
-        """The E2B kit: one template, no host credentials, no capture (#1915).
+    def e2b(
+        cls,
+        template: str,
+        *,
+        cpu_count: int,
+        memory_mb: int,
+        capture_source_instance_id: str | None = None,
+    ) -> BackendKit:
+        """The E2B kit: one template, no host credentials, mountless capture (#1915, #2161).
 
         The E2B provider refuses credential bindings and host mounts, so this
-        kit is ``NoCredentials`` and never captures. Its one approved
+        kit is ``NoCredentials`` and captures without a mount: the spool is
+        the sandbox's own ``/spool``, kept by pausing the sandbox
+        (``sandbox-spool/1``). As for Docker, it captures only when a capture
+        source instance is configured. Its one approved
         "image" is the template, which is the credential-free allowlist the
         Docker kit leaves empty; a per-run image is therefore refused rather
         than silently ignored. A template is not an OCI reference, so there is
@@ -98,6 +113,8 @@ class BackendKit:
             max_cpu_cores=float(cpu_count),
             max_memory_mb=memory_mb,
             shares_host_kernel=False,
+            capture_source_instance_id=capture_source_instance_id,
+            spool_backend="e2b",
         )
 
     @property
@@ -114,8 +131,15 @@ class BackendKit:
         """
         if self.capture_source_instance_id is None:
             return []
-        from syn_adapters.session_inventory.workspace_capture import apply_workspace_capture
+        from syn_adapters.session_inventory.workspace_capture import (
+            apply_capture_environment,
+            apply_workspace_capture,
+        )
 
+        if self.spool_backend != "docker":
+            # Mountless: the sandbox's own /spool holds the spool (#2161).
+            apply_capture_environment(config, self.capture_source_instance_id, environment)
+            return []
         return apply_workspace_capture(config, self.capture_source_instance_id, environment)
 
     async def resolve_image(self, requested: str | None) -> str:

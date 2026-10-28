@@ -70,7 +70,7 @@ from syn_adapters.workspace_backends.exec_status_lost import (
     status_was_lost,
     workspace_container_name,
 )
-from syn_adapters.workspace_backends.host_labels import host_labels
+from syn_adapters.workspace_backends.host_labels import LABEL_HOST_ID, host_labels
 from syn_adapters.workspace_backends.host_security import host_security_failure
 from syn_domain.contexts.orchestration import (
     FileRefusal,
@@ -420,6 +420,7 @@ class AgenticIsolationAdapter:
         # local image ID, so Docker cannot pull or retag something else in
         # between. See image_verification for the full policy.
         image = await self._kit.resolve_image(config.image)
+        labels = _container_labels(config)
 
         ws_config = WorkspaceConfig(
             provider=self._kit.isolation_type,
@@ -428,7 +429,7 @@ class AgenticIsolationAdapter:
             environment=environment,
             credentials=session_store_credential_bindings(self._session_store),
             mounts=capture_mounts,
-            labels=_container_labels(config),
+            labels=labels,
             security=self._security,
             limits=ResourceLimits(
                 cpu=f"{config.security_policy.cpu_limit_cores:g}",
@@ -474,6 +475,8 @@ class AgenticIsolationAdapter:
             workspace_path="/workspace",
             host_workspace_path=workspace_obj.metadata.get("workspace_dir", ""),
             runtime=isolation_runtime_from_metadata(workspace_obj.metadata),
+            # The owner a recovery worker checks before touching it (#2161).
+            executor_id=labels[LABEL_HOST_ID],
         )
 
     async def _ensure_tmpdir(

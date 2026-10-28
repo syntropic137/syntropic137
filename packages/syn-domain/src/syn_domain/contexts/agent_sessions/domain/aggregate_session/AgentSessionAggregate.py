@@ -38,6 +38,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
         RecordOperationCommand,
     )
+    from syn_domain.contexts.agent_sessions.domain.commands.RecordSandboxSpoolCommand import (
+        RecordSandboxSpoolCommand,
+    )
     from syn_domain.contexts.agent_sessions.domain.commands.RecordSessionInvocationCommand import (
         RecordSessionInvocationCommand,
     )
@@ -49,6 +52,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.agent_sessions.domain.events.OperationRecordedEvent import (
         OperationRecordedEvent,
+    )
+    from syn_domain.contexts.agent_sessions.domain.events.SandboxSpoolRecordedEvent import (
+        SandboxSpoolRecordedEvent,
     )
     from syn_domain.contexts.agent_sessions.domain.events.SessionCompletedEvent import (
         SessionCompletedEvent,
@@ -91,6 +97,10 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         self._invocations: dict[str, SessionInvocationState] = {}
         #: Contradicting native claims already recorded, per invocation.
         self._binding_conflicts: dict[str, set[str]] = {}
+        #: The capture contract planned at start; None on historical sessions.
+        self._capture_profile: str | None = None
+        #: The sandbox holding this session's sandbox spool, once recorded (#2161).
+        self._sandbox_spool: SandboxSpoolRecordedEvent | None = None
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -358,6 +368,45 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         )
         self._apply(event)
 
+    @command_handler("RecordSandboxSpoolCommand")
+    def record_sandbox_spool(self, command: RecordSandboxSpoolCommand) -> None:
+        """Record the sandbox that holds this session's sandbox spool (#2161).
+
+        Only a running session planned with ``sandbox-spool/1`` has one: a
+        Docker session's spool is a volume named from the session itself.
+        Idempotent for the same sandbox, so a re-dispatch changes nothing. A
+        different sandbox is refused: one session is one workspace, and a
+        second row would route recovery to a sandbox the first never wrote.
+        """
+        from syn_domain.contexts.agent_sessions.domain.events.SandboxSpoolRecordedEvent import (
+            SandboxSpoolRecordedEvent,
+        )
+
+        if self.id is None or self._status != SessionStatus.RUNNING:
+            msg = "Cannot record a sandbox spool: the session is not running"
+            raise ValueError(msg)
+        if self._capture_profile != "sandbox-spool/1" or self._execution_id is None:
+            msg = "Cannot record a sandbox spool: the session was not planned with sandbox-spool/1"
+            raise ValueError(msg)
+        recorded = self._sandbox_spool
+        if recorded is not None:
+            route = (command.backend, command.executor_id, command.sandbox_id)
+            if route == (recorded.backend, recorded.executor_id, recorded.sandbox_id):
+                return
+            msg = "Cannot record a sandbox spool: the session's spool is in another sandbox"
+            raise ValueError(msg)
+        self._apply(
+            SandboxSpoolRecordedEvent(
+                session_id=str(self.id),
+                execution_id=self._execution_id,
+                phase_id=self._phase_id or "",
+                backend=command.backend,
+                executor_id=command.executor_id,
+                sandbox_id=command.sandbox_id,
+                recorded_at=datetime.now(UTC),
+            )
+        )
+
     @command_handler("CompleteSessionCommand")
     def complete_session(self, command: CompleteSessionCommand) -> None:
         """Handle CompleteSessionCommand.
@@ -412,6 +461,12 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         self._status = SessionStatus.RUNNING
         self._started_at = event.started_at
         self._metadata = dict(event.metadata)
+        self._capture_profile = event.capture_profile
+
+    @event_sourcing_handler("SandboxSpoolRecorded")
+    def on_sandbox_spool_recorded(self, event: SandboxSpoolRecordedEvent) -> None:
+        """Apply SandboxSpoolRecordedEvent."""
+        self._sandbox_spool = event
 
     @event_sourcing_handler("AgentLaunched")
     def on_agent_launched(self, event: AgentLaunchedEvent) -> None:  # noqa: ARG002

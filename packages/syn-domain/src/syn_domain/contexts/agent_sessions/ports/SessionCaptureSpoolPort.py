@@ -14,6 +14,14 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
 SpoolBackend = Literal["docker", "e2b"]
 """Where the staged bytes live, so a worker can route recovery from the row alone."""
 
+CaptureProfile = Literal["local-spool/1", "sandbox-spool/1"]
+"""The capture contract a session is planned with, fixed when it starts."""
+
+
+def capture_profile_for(backend: SpoolBackend) -> CaptureProfile:
+    """A Docker spool is a host volume; every remote one is on its sandbox's disk."""
+    return "local-spool/1" if backend == "docker" else "sandbox-spool/1"
+
 
 class CaptureSpool(InventoryModel):
     """A durable claim on staged capture bytes.
@@ -27,7 +35,7 @@ class CaptureSpool(InventoryModel):
     run: RunIdentity
     session_id: RoutingIdentifier
     phase_id: RoutingIdentifier
-    profile: Literal["local-spool/1", "sandbox-spool/1"] = "local-spool/1"
+    profile: CaptureProfile = "local-spool/1"
     backend: SpoolBackend = "docker"
     executor_id: RoutingIdentifier | None = None
     sandbox_id: RoutingIdentifier | None = None

@@ -20,6 +20,7 @@ from syn_domain.contexts.agent_sessions import (
     OperationType,
     RecordOperationCommand,
     RecordOperationHandler,
+    RecordSandboxSpoolCommand,
     RecordSessionInvocationCommand,
     SessionInvocationState,
     SessionStatus,
@@ -35,6 +36,7 @@ from syn_shared.observed_model import OBSERVED_MODEL_KEY, REQUESTED_MODEL_KEY
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from syn_domain.contexts.agent_sessions import CaptureProfile, RemoteSpoolBackend
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
     )
@@ -84,8 +86,11 @@ class SessionLifecycleManager:
         agent_model: str | None,
         repos: list[str] | None = None,
         observability: ObservabilityRecorder | None = None,
+        capture_profile: CaptureProfile = "local-spool/1",
     ) -> None:
         self._repo = repository
+        #: Planned before provisioning, from the backend that will hold the spool.
+        self._capture_profile: CaptureProfile = capture_profile
         self._observability = observability
         self._session_id = session_id
         self._session: AgentSessionAggregate | None = None
@@ -190,7 +195,7 @@ class SessionLifecycleManager:
             aggregate_id=self._session_id,
             workflow_id=self._workflow_id,
             execution_id=self._execution_id,
-            capture_profile="local-spool/1",
+            capture_profile=self._capture_profile,
             phase_id=self._phase_id,
             agent_provider=self._agent_provider,
             agent_model=self._agent_model,
@@ -199,6 +204,36 @@ class SessionLifecycleManager:
         self._session.start_session(cmd)
         await self._repo.save(self._session)
         logger.debug("Session started: %s (phase: %s)", self._session_id, self._phase_id)
+
+    async def record_sandbox_spool(
+        self, *, backend: RemoteSpoolBackend, executor_id: str, sandbox_id: str
+    ) -> None:
+        """Record the sandbox holding this session's spool, once it exists (#2161).
+
+        Called after the sandbox is created and before any agent launches in
+        it. Failure propagates: without this fact nothing can recover the
+        spool, so the phase must not launch an agent whose transcript would be
+        unrecoverable. Ids only; never an operation reattach token (#1919).
+        """
+        if self._repo is None:
+            return
+        if self._session is None:
+            raise ValueError("session must be started before recording its sandbox spool")
+        command = RecordSandboxSpoolCommand(
+            aggregate_id=self._session_id,
+            backend=backend,
+            executor_id=executor_id,
+            sandbox_id=sandbox_id,
+        )
+        self._issue(lambda session: session.record_sandbox_spool(command))
+        await self._save()
+        logger.info(
+            "Sandbox spool recorded: session %s in %s sandbox %s (executor %s)",
+            self._session_id,
+            backend,
+            sandbox_id,
+            executor_id,
+        )
 
     async def prepare_invocation(self, harness: str) -> SessionInvocationState | None:
         """Persist intent before every launch, including capacity retries."""

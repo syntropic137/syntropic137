@@ -69,6 +69,7 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.tokens.token_injection_adapter import (
         SidecarTokenInjectionAdapter,
     )
+    from syn_domain.contexts.agent_sessions import SpoolBackend
     from syn_domain.contexts.orchestration._shared.ports import (
         EventStreamPort,
         IsolationBackendPort,
@@ -223,6 +224,7 @@ class WorkspaceService:
         event_stream: EventStreamPort,
         config: WorkspaceServiceConfig | None = None,
         credential_policy: WorkspaceCredentialPolicy = HOST_CREDENTIALS,
+        spool_backend: SpoolBackend = "docker",
     ) -> None:
         """Initialize WorkspaceService with adapters.
 
@@ -234,9 +236,12 @@ class WorkspaceService:
             config: Service configuration
             credential_policy: Whether host credentials reach its workspaces
                 (#1914). The Docker factory takes it from the BackendKit.
+            spool_backend: Where its workspaces' capture spools live, from the
+                BackendKit (#2161).
         """
         self._isolation = isolation
         self._credential_policy = credential_policy
+        self._spool_backend: SpoolBackend = spool_backend
         self._sidecar = sidecar
         self._token_injection = token_injection
         self._event_stream = event_stream
@@ -253,6 +258,15 @@ class WorkspaceService:
     def credential_policy(self) -> WorkspaceCredentialPolicy:
         """Whether host credentials reach this service's workspaces (#1914)."""
         return self._credential_policy
+
+    @property
+    def spool_backend(self) -> SpoolBackend:
+        """Where a captured session's spool lives on this service's workspaces (#2161).
+
+        Fixed per service, so a phase plans its session's capture profile
+        before the workspace exists.
+        """
+        return self._spool_backend
 
     @classmethod
     def create(
@@ -312,7 +326,11 @@ class WorkspaceService:
                 msg = "WorkspaceBackend.E2B needs its E2BSettings"
                 raise ValueError(msg)
             service = cls._create_e2b_impl(
-                e2b=e2b, client=e2b_client, config=config, environment=environment
+                e2b=e2b,
+                client=e2b_client,
+                config=config,
+                environment=environment,
+                capture_source_instance_id=capture_source_instance_id,
             )
         else:
             service = cls._create_docker_impl(
@@ -413,6 +431,7 @@ class WorkspaceService:
         client: E2BSandboxClient | None,
         config: WorkspaceServiceConfig | None,
         environment: dict[str, str] | None,
+        capture_source_instance_id: str | None = None,
     ) -> WorkspaceService:
         """Internal: the E2B backend (#1915), through the same adapters as Docker.
 
@@ -438,7 +457,12 @@ class WorkspaceService:
         if not e2b.enabled or e2b.api_key is None:
             msg = "The E2B backend was selected but SYN_E2B_ENABLED/SYN_E2B_API_KEY are unset"
             raise ValueError(msg)
-        kit = BackendKit.e2b(e2b.template, cpu_count=e2b.cpu_count, memory_mb=e2b.memory_mb)
+        kit = BackendKit.e2b(
+            e2b.template,
+            cpu_count=e2b.cpu_count,
+            memory_mb=e2b.memory_mb,
+            capture_source_instance_id=capture_source_instance_id,
+        )
         sandboxes = client or SdkE2BClient(api_key=e2b.api_key.get_secret_value())
         base = config or WorkspaceServiceConfig()
         cfg = dataclasses.replace(
@@ -466,6 +490,7 @@ class WorkspaceService:
             event_stream=AgenticEventStreamAdapter(isolation),
             config=cfg,
             credential_policy=kit.credential_policy,
+            spool_backend=kit.spool_backend,
         )
 
     @classmethod
