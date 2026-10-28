@@ -334,6 +334,10 @@ Quotas (all disabled by default, ADR-004 settings forwarded through compose):
   session or terminal execution) past this age expires.
 - `SYN_SESSION_INVENTORY_SPOOL_MAX_BYTES`: settled spools are evicted oldest
   first; a non-terminal spool only when settled ones cannot satisfy the quota.
+- `SYN_SESSION_INVENTORY_SPOOL_MAX_COUNT`: a per-backend ceiling on retained
+  spools, for remote sandboxes where an empty spool is still a paused sandbox.
+  Settled spools are evicted oldest first; a non-terminal spool never is, and a
+  sandbox is killed only once the provider confirms no agent process remains.
 
 Every expiry journals a `capture_spool_expired` gap before the volume is removed.
 
