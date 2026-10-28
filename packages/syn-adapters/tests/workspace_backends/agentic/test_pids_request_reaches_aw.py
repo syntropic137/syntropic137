@@ -97,6 +97,9 @@ async def _docker_run_argv(pids_limit: int | None, tmp_path: Path) -> list[str]:
         patch.object(provider, "_inspect_image", AsyncMock(return_value=("sha256:img", {}))),
         patch.object(provider, "_ensure_network", AsyncMock()),
         patch.object(SecurityConfig, "_docker_info", staticmethod(_docker_info)),
+        # The host's kernel is not asked either: a Linux runner with securityfs
+        # would report the pinned profile as not loaded and refuse the run.
+        patch("agentic_isolation.config.apparmor_profile_loaded", return_value=True),
         patch(
             "agentic_isolation.providers.docker.asyncio.create_subprocess_exec",
             side_effect=_run,
