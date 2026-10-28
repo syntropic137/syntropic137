@@ -3826,6 +3826,8 @@ class _TrialServer(_Server):
         self.refuse: set[int] = set()
         """Start attempts (from 1) that answer 503 and start nothing."""
         self.attempts = 0
+        self.keyed: dict[str, str] = {}
+        """The run each idempotency key started; a later start with the key replays it."""
         self.lagging_lookups = 0
         """How many tag lookups still answer empty, as a lagging list read does."""
 
@@ -3852,9 +3854,15 @@ class _TrialServer(_Server):
             self.attempts += 1
             if self.attempts in self.refuse:
                 return httpx.Response(503, json={"detail": "unavailable"})
-            self.started += 1
-            run_id = f"exec-{self.started}"
-            self.run_tags[run_id] = json.loads(request.content)["tags"]
+            body = json.loads(request.content)
+            key = body.get("idempotency_key")
+            run_id = self.keyed.get(key) if key else None
+            if run_id is None:
+                self.started += 1
+                run_id = f"exec-{self.started}"
+                self.run_tags[run_id] = body["tags"]
+                if key:
+                    self.keyed[key] = run_id
             if self.attempts in self.lose_answer:
                 return httpx.Response(504, json={"detail": "gateway timeout"})
             return httpx.Response(200, json={"execution_id": run_id, "workflow_id": self.installed})
@@ -4215,8 +4223,11 @@ def test_a_second_launcher_on_the_same_ledger_is_refused(tmp_path: Path) -> None
 
 
 @pytest.mark.unit
-def test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered(tmp_path: Path) -> None:
+def test_a_trial_whose_answer_was_lost_is_replayed_by_its_key_and_ledgered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A 504 after the run started must not leave an unledgered trial (codex #2126 P2)."""
+    monkeypatch.setattr(eval_suite, "START_PAUSE_S", 0)
     loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
     server = _TrialServer(loaded)
     server.lose_answer = {2}
@@ -4226,7 +4237,46 @@ def test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered(tmp_path
 
     lines = read_launches(ledger)
     assert [x.run_id for x in lines] == [f"exec-{i}" for i in range(1, server.started + 1)]
-    assert len(lines) == 3 * len(loaded.cases)
+    assert len(lines) == server.started == 3 * len(loaded.cases)
+
+
+@pytest.mark.unit
+def test_every_start_of_a_trial_is_keyed_by_its_trial_tag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The retry names the run the lost start made, so the server replays it (#2129)."""
+    monkeypatch.setattr(eval_suite, "START_PAUSE_S", 0)
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.lose_answer = {1, 2}
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 1)
+
+    bodies = [json.loads(r.content) for r in server.posts("/execute")]
+    first = [b for b in bodies if b["idempotency_key"] == bodies[0]["idempotency_key"]]
+    assert len(first) == 3  # two lost answers, then the replay
+    for body in bodies:
+        assert body["idempotency_key"] in body["tags"]
+        assert body["idempotency_key"].startswith("trial:")
+    assert server.started == len(loaded.cases)
+
+
+@pytest.mark.unit
+def test_a_refused_start_is_sent_again_and_starts_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(eval_suite, "START_PAUSE_S", 0)
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.refuse = {2}
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 1)
+
+    assert [x.run_id for x in read_launches(ledger)] == [
+        f"exec-{i}" for i in range(1, len(loaded.cases) + 1)
+    ]
 
 
 @pytest.mark.unit
@@ -4235,9 +4285,10 @@ def test_a_trial_that_never_started_stops_the_launch_and_ledgers_nothing_for_it(
 ) -> None:
     loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
     server = _TrialServer(loaded)
-    server.refuse = {2}
+    server.refuse = set(range(2, 2 + eval_suite.START_ATTEMPTS))  # every retry of trial 2
     ledger = tmp_path / "launches.jsonl"
     monkeypatch.setattr(eval_suite, "RECONCILE_PAUSE_S", 0)
+    monkeypatch.setattr(eval_suite, "START_PAUSE_S", 0)
 
     with pytest.raises(RuntimeError, match="0 runs carry that tag"):
         eval_suite.launch_trials(loaded, server.client(), ledger, 3)
@@ -4268,10 +4319,11 @@ def test_an_unresolved_intent_blocks_every_later_launch_until_its_run_is_visible
 ) -> None:
     """The intent is written before the POST; a lagging list never makes a duplicate (pass 2)."""
     monkeypatch.setattr(eval_suite, "RECONCILE_PAUSE_S", 0)
+    monkeypatch.setattr(eval_suite, "START_PAUSE_S", 0)
     loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
     server = _TrialServer(loaded)
     ledger = tmp_path / "launches.jsonl"
-    server.lose_answer = {2}
+    server.lose_answer = set(range(2, 2 + eval_suite.START_ATTEMPTS))  # every retry of trial 2
     server.lagging_lookups = eval_suite.RECONCILE_ATTEMPTS
 
     with pytest.raises(RuntimeError, match="intent stays pending"):
