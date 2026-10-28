@@ -83,7 +83,8 @@ _EVERY_FIELD: Mapping[str, object] = {
     "requires_verdict": True,
     # NOT the default (empty). Below the default 4096 ceiling, so the create
     # path's ceiling check passes and only the mapping is measured (okrs-51p.30).
-    "resources": {"memory_mb": 2048},
+    # pids_limit 128: below the 256 default ceiling, and not the default.
+    "resources": {"memory_mb": 2048, "pids_limit": 128},
     "argument_hint": "[task]",
     "model": "claude-opus-5-5",
     # NOT the default (None). Claude, not codex: a codex phase cannot carry
@@ -167,6 +168,7 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     assert phase.requires_verdict is True
     # 2048 cannot come from any fallback: every hop defaults to None.
     assert phase.resources.memory_mb == 2048
+    assert phase.resources.pids_limit == 128
     assert phase.argument_hint == "[task]"
     assert phase.model == "claude-opus-5-5"
     assert phase.provider == "claude"

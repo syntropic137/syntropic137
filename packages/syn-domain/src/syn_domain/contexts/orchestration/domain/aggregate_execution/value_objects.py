@@ -1134,7 +1134,7 @@ class ExecutablePhase:
     # order exactly as if it had found something, so the run fails instead.
     requires_verdict: bool = False
 
-    # What this phase's workspace asks for, e.g. memory (okrs-51p.30). Rides
+    # What this phase's workspace asks for: memory, pids (okrs-51p.30). Rides
     # here, beside clone_repos, because it decides what the WORKSPACE is, and
     # it is pinned with the phase in `WorkflowExecutionStarted.pinned_phases`,
     # so the start event records what each workspace was asked to be and a

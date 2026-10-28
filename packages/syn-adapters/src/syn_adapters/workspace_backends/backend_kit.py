@@ -25,6 +25,7 @@ from syn_domain.contexts.orchestration import (
     NO_CREDENTIALS,
     WorkspaceCredentialPolicy,
 )
+from syn_shared.settings.workspace import DEFAULT_WORKSPACE_PIDS_LIMIT
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
@@ -65,6 +66,9 @@ class BackendKit:
     #: workspaces itself rather than per request. None: no ceiling.
     max_cpu_cores: float | None = None
     max_memory_mb: int | None = None
+    #: The highest pids limit this backend can honour, when it cannot set one
+    #: per workspace. None: it applies whatever is asked (okrs-51p.30).
+    max_pids_limit: int | None = None
     #: Whether the workspace's processes run on this host's kernel, so that a
     #: signal death can be explained from this host's ring buffer. A remote
     #: sandbox has its own kernel: this host's records say nothing about it.
@@ -87,7 +91,10 @@ class BackendKit:
         verified digest). E2B sizes a sandbox by its template, so a workspace
         asking for more than the template has is refused. The sandbox's disk
         is not on this host; files come back through the provider, as on every
-        backend (#1913).
+        backend (#1913). The E2B provider sets no per-sandbox process limit,
+        so a phase that raises ``resources.pids_limit`` above the default is
+        refused here rather than admitted and silently not applied
+        (okrs-51p.30); the default itself passes, as it always has.
         """
         return cls(
             default_image=template,
@@ -97,6 +104,7 @@ class BackendKit:
             verifies_images=False,
             max_cpu_cores=float(cpu_count),
             max_memory_mb=memory_mb,
+            max_pids_limit=DEFAULT_WORKSPACE_PIDS_LIMIT,
             shares_host_kernel=False,
         )
 
@@ -129,13 +137,14 @@ class BackendKit:
         self._require_permitted(image)
         return await verify_image_async(image) if self.verifies_images else image
 
-    def require_fits(self, cpu_cores: float, memory_mb: int) -> None:
+    def require_fits(self, cpu_cores: float, memory_mb: int, pids_limit: int) -> None:
         """Refuse a workspace this backend could only run smaller than asked."""
         too_much = [
             f"{asked} {unit} (at most {ceiling})"
             for asked, ceiling, unit in (
                 (cpu_cores, self.max_cpu_cores, "CPU cores"),
                 (memory_mb, self.max_memory_mb, "MB of memory"),
+                (pids_limit, self.max_pids_limit, "as its pids limit"),
             )
             if ceiling is not None and asked > ceiling
         ]

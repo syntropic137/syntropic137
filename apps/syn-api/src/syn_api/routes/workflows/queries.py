@@ -237,7 +237,9 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         delivers_repo_changes=p.delivers_repo_changes,
         platform_access=p.platform_access,
         requires_verdict=p.requires_verdict,
-        resources=PhaseResourcesResponse(memory_mb=p.resources.memory_mb),
+        resources=PhaseResourcesResponse(
+            memory_mb=p.resources.memory_mb, pids_limit=p.resources.pids_limit
+        ),
         sandbox=p.sandbox,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],
         skills=[_ref_response(r) for r in p.skills],
@@ -628,9 +630,17 @@ def _yaml_declaration_lines(phase: PhaseDefinitionResponse) -> list[str]:
     if phase.requires_verdict:
         lines.append("    requires_verdict: true")
     # okrs-51p.30: dropped, a reinstalled build phase would run in the default
-    # workspace and be OOM-killed.
-    if phase.resources.memory_mb is not None:
-        lines.append(f"    resources: {{memory_mb: {phase.resources.memory_mb}}}")
+    # workspace and be OOM-killed, or hit EAGAIN at the default pids limit.
+    requested = [
+        f"{key}: {value}"
+        for key, value in (
+            ("memory_mb", phase.resources.memory_mb),
+            ("pids_limit", phase.resources.pids_limit),
+        )
+        if value is not None
+    ]
+    if requested:
+        lines.append(f"    resources: {{{', '.join(requested)}}}")
     return lines
 
 

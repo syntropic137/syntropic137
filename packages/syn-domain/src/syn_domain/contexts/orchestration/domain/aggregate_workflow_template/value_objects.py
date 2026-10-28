@@ -217,7 +217,7 @@ class PhaseDefinition(BaseModel):
     ``PhaseYamlDefinition.requires_verdict``."""
 
     resources: WorkspaceResourceRequest = Field(default_factory=WorkspaceResourceRequest)
-    """What this phase's workspace asks for, e.g. ``memory_mb`` (okrs-51p.30).
+    """What this phase's workspace asks for: ``memory_mb``, ``pids_limit`` (okrs-51p.30).
 
     Sourced from the workflow YAML ``resources`` block. Empty means the
     deployment default, which is also what every template stored before the

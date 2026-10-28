@@ -36,6 +36,16 @@ DEFAULT_WORKSPACE_MEMORY_LIMIT_MB = 4096
 DEFAULT_WORKSPACE_CPU_LIMIT = 2.0
 """CPU ceiling for one workspace container, in cores."""
 
+DEFAULT_WORKSPACE_PIDS_LIMIT = 256
+"""Processes and threads one workspace container may hold (``--pids-limit``).
+
+The value agentic-workspace's ``SecurityConfig`` defaults to; syn137 owns it
+now and passes it explicitly, so a workspace's limit does not move when the
+submodule's default does."""
+
+MIN_WORKSPACE_PIDS_LIMIT = 64
+"""Below this an agent CLI and its shell tools cannot start."""
+
 
 #: What `WorkspaceSettings.runtime` reads (env_prefix + field name). Named so
 #: the doctor reports the same variable the settings parse.
@@ -146,6 +156,45 @@ class WorkspaceSettings(BaseSettings):
     def memory_ceiling_mb(self) -> int:
         """The most memory a phase may request: the ceiling, or the default when unset."""
         return self.memory_limit_mb if self.memory_max_mb is None else self.memory_max_mb
+
+    pids_limit: int = Field(
+        default=DEFAULT_WORKSPACE_PIDS_LIMIT,
+        ge=MIN_WORKSPACE_PIDS_LIMIT,
+        description=(
+            "Processes and threads each workspace container may hold (--pids-limit), "
+            "unless its phase requests otherwise with resources.pids_limit. Threads "
+            "count: a parallel test suite can exceed the default."
+        ),
+    )
+
+    pids_max: int | None = Field(
+        default=None,
+        ge=MIN_WORKSPACE_PIDS_LIMIT,
+        description=(
+            "The highest pids limit one phase may request for its workspace with "
+            "resources.pids_limit (okrs-51p.30). Unset means no phase may ask for "
+            "more than SYN_WORKSPACE_PIDS_LIMIT. A request above it is refused at "
+            "install and at start, never clamped. Must be at least "
+            "SYN_WORKSPACE_PIDS_LIMIT."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _pids_ceiling_covers_the_default(self) -> WorkspaceSettings:
+        """A pids ceiling below the default would refuse a phase that asked for nothing."""
+        if self.pids_max is not None and self.pids_max < self.pids_limit:
+            msg = (
+                f"SYN_WORKSPACE_PIDS_MAX ({self.pids_max}) is below "
+                f"SYN_WORKSPACE_PIDS_LIMIT ({self.pids_limit}). The ceiling bounds "
+                "what a phase may request, so it must cover the default."
+            )
+            raise ValueError(msg)
+        return self
+
+    @property
+    def pids_ceiling(self) -> int:
+        """The highest pids limit a phase may request: the ceiling, or the default when unset."""
+        return self.pids_limit if self.pids_max is None else self.pids_max
 
     cpu_limit: float = Field(
         default=DEFAULT_WORKSPACE_CPU_LIMIT,

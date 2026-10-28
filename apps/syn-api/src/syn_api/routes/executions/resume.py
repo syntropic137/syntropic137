@@ -89,7 +89,7 @@ async def _free_child_id(executions: WorkflowExecutionRepositoryPort, attempts: 
 
 
 def _refuse_over_todays_ceiling(command: StartResumeCommand) -> None:
-    """422 when a phase the resume runs asks for more memory than today's ceiling (okrs-51p.30).
+    """422 when a phase the resume runs asks above today's memory or pids ceiling (okrs-51p.30).
 
     The parent's pinned requests were admitted under the ceiling of its own
     start. An operator may have lowered it since; admitting anyway would spend
@@ -98,13 +98,14 @@ def _refuse_over_todays_ceiling(command: StartResumeCommand) -> None:
     """
     from syn_domain.contexts.orchestration import (
         WorkspaceMemoryOverCapError,
+        WorkspacePidsOverCapError,
         phases_the_resume_runs,
         require_phases_within_cap,
     )
 
     try:
         require_phases_within_cap(phases_the_resume_runs(command))
-    except WorkspaceMemoryOverCapError as exc:
+    except (WorkspaceMemoryOverCapError, WorkspacePidsOverCapError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

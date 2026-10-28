@@ -571,6 +571,9 @@ class PhaseResourcesResponse(BaseModel):
     memory_mb: int | None = None
     """Workspace memory in MB; None means SYN_WORKSPACE_MEMORY_LIMIT_MB."""
 
+    pids_limit: int | None = None
+    """Workspace process and thread limit; None means SYN_WORKSPACE_PIDS_LIMIT."""
+
 
 class PhaseDefinitionResponse(BaseModel):
     """Phase definition within a workflow template."""

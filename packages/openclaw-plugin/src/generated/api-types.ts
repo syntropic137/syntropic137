@@ -7105,6 +7105,8 @@ export interface components {
         PhaseResourcesResponse: {
             /** Memory Mb */
             memory_mb?: number | null;
+            /** Pids Limit */
+            pids_limit?: number | null;
         };
         /**
          * PhaseSkillUseInfo
