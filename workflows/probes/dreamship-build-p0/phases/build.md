@@ -10,10 +10,14 @@ result being measured. Run each block as ONE Bash call.
 
 ```
 cd /workspace/repos/* && pwd && git rev-parse HEAD
-mkdir -p /workspace/tmp /workspace/probe
+echo "TMPDIR as received: ${TMPDIR:-<unset>}"
+mkdir -p /workspace/probe
 cat > /workspace/probe/run.sh <<'SH'
 set -u
-export TMPDIR=/workspace/tmp
+# The platform sets TMPDIR=/workspace/.tmp (exec-capable; /tmp is noexec).
+# The fallback only matters on a deployment that predates that (#1100).
+export TMPDIR="${TMPDIR:-/workspace/.tmp}"
+mkdir -p "$TMPDIR"
 cd /workspace/repos/*
 date -u +%s > /workspace/probe/start
 {
