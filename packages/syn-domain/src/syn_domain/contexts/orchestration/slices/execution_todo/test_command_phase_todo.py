@@ -40,7 +40,7 @@ STARTED = {
 }
 
 
-def _commands_completed(*, success: bool) -> dict[str, object]:
+def _commands_completed(*, success: bool) -> PhaseCommandsCompletedEvent:
     outcome = CommandStepOutcome.PASSED if success else CommandStepOutcome.FAILED
     event = PhaseCommandsCompletedEvent(
         workflow_id="wf-1",
@@ -53,8 +53,7 @@ def _commands_completed(*, success: bool) -> dict[str, object]:
             CommandStepResult(name="cargo-build", outcome=outcome, exit_code=0 if success else 101)
         ],
     )
-    # What the subscription delivers: the stored payload, not the model.
-    return event.model_dump(mode="json")
+    return event
 
 
 async def _ran_build(proj: ExecutionTodoProjection) -> None:
@@ -72,7 +71,7 @@ async def test_commands_completed_queues_collection_whatever_the_gate_said(
     proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
     await _ran_build(proj)
 
-    await proj.on_phase_commands_completed(_commands_completed(success=success))  # type: ignore[arg-type]  # the coordinator delivers the stored dict
+    await proj.on_phase_commands_completed(_commands_completed(success=success))
 
     [todo] = await proj.get_pending("exec-1")
     assert todo.action == TodoAction.COLLECT_ARTIFACTS
@@ -84,7 +83,7 @@ async def test_commands_completed_queues_collection_whatever_the_gate_said(
 async def test_the_gate_failure_clears_the_list_so_nothing_after_it_runs() -> None:
     proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
     await _ran_build(proj)
-    await proj.on_phase_commands_completed(_commands_completed(success=False))  # type: ignore[arg-type]  # the coordinator delivers the stored dict
+    await proj.on_phase_commands_completed(_commands_completed(success=False))
 
     # The aggregate's one save at collection: collected, then failed.
     await proj.on_artifacts_collected_for_phase({"execution_id": "exec-1", "phase_id": "build"})

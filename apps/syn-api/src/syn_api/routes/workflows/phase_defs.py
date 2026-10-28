@@ -139,10 +139,11 @@ def _fallback_agent(declared: object) -> FallbackAgent | None:
     return FallbackAgentYamlDefinition.model_validate(declared).to_domain()
 
 
-def _phase_kind(p: dict[str, Any]) -> PhaseKind:
+def _phase_kind(declared: object) -> PhaseKind:
+    """A phase's kind; ``agent`` when it declares none (ADR-078 D1)."""
     from syn_domain.contexts.orchestration import PhaseKind
 
-    return PhaseKind(p.get("kind", PhaseKind.AGENT))
+    return PhaseKind.AGENT if declared is None else PhaseKind(str(declared))
 
 
 def _command_steps(declared: object) -> tuple[CommandStep, ...]:
@@ -176,7 +177,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 execution_type=p.get("execution_type", PhaseExecutionType.SEQUENTIAL),
                 # Dropped, a command phase would install as an agent phase with
                 # no prompt and run a model on nothing (ADR-078).
-                kind=_phase_kind(p),
+                kind=_phase_kind(p.get("kind")),
                 commands=_command_steps(p.get("commands")),
                 input_artifact_types=p.get("input_artifact_types", []),
                 output_artifact_types=p.get("output_artifact_types", []),
@@ -198,7 +199,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # A command phase defaults to False: what it gates is a
                 # revision, not a change it delivers (ADR-078 D2).
                 delivers_repo_changes=_as_bool(
-                    p.get("delivers_repo_changes", _phase_kind(p) is PhaseKind.AGENT),
+                    p.get("delivers_repo_changes", _phase_kind(p.get("kind")) is PhaseKind.AGENT),
                     "delivers_repo_changes",
                 ),
                 # Dropping this downgrades a declared `eval` phase to `read`:
