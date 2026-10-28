@@ -17,6 +17,7 @@ import logging
 import math
 import posixpath
 import signal
+import time
 import uuid
 from typing import TYPE_CHECKING, Protocol
 
@@ -29,8 +30,15 @@ from agentic_isolation.contract import (
 )
 
 from syn_adapters.diagnostics import capture_signal_death
+from syn_adapters.workspace_backends.agentic.bounded_output import BoundedOutput
 from syn_adapters.workspace_backends.agentic.credential_scrubber import CredentialScrubber
-from syn_domain.contexts.orchestration import announce_as, mint_wrapper_name
+from syn_domain.contexts.orchestration import (
+    COMMAND_TAIL_BYTES,
+    BoundedCommandResult,
+    CommandTerminal,
+    announce_as,
+    mint_wrapper_name,
+)
 from syn_shared.diagnostics import SignalDeath, name_exit_status
 
 if TYPE_CHECKING:
@@ -127,6 +135,36 @@ def _timeout_seconds(timeout_seconds: float | None) -> int:
 def _refreshed(scrubber: CredentialScrubber, current: tuple[str, ...]) -> CredentialScrubber:
     """``scrubber``, or a new one when the secret set it matches has changed."""
     return scrubber if scrubber.covers(current) else CredentialScrubber(current)
+
+
+def _elapsed_ms(started: float) -> int:
+    return max(0, round((time.monotonic() - started) * 1000))
+
+
+def _bounded_result(
+    status: OperationStatus, output: BoundedOutput, *, duration_ms: int
+) -> BoundedCommandResult:
+    """How a bounded command ended, as a typed terminal and never as an exit code alone.
+
+    ``lost`` and a ``failed`` with no exit status are the platform failing to
+    run the command, not the command saying no (ADR-078 D5).
+    """
+    exit_code = _exit_code_of(status)
+    if status.state == "timed_out":
+        terminal = CommandTerminal.TIMED_OUT
+    elif status.state == "cancelled":
+        terminal = CommandTerminal.INTERRUPTED
+    elif status.state in ("succeeded", "failed") and exit_code is not None:
+        terminal = CommandTerminal.EXITED
+    else:
+        terminal = CommandTerminal.FAILED_TO_START
+    return BoundedCommandResult(
+        terminal=terminal,
+        exit_code=exit_code if terminal is CommandTerminal.EXITED else None,
+        duration_ms=duration_ms,
+        tail=output.tail,
+        dropped_bytes=output.dropped_bytes,
+    )
 
 
 class LineDecoder:
@@ -257,6 +295,54 @@ class AgenticEventStreamAdapter:
         arrives EMBEDDED inside stream-json tool_result content, which
         WorkflowExecutionEngine scans; it is never a separate channel.
         """
+        provider, ref, spec, secrets = await self._start(
+            handle,
+            command,
+            timeout_seconds=timeout_seconds,
+            working_directory=working_directory,
+            environment=environment,
+            wrapper_name=wrapper_name,
+            withheld=withheld,
+        )
+        self._running[handle.isolation_id] = (provider, ref)
+        try:
+            async for line in self._observe(provider, ref, secrets, spec.launch_marker.line):
+                yield line
+            status = await provider.status(ref)
+        except BaseException:
+            # The reader stopped early, was cancelled, or observation failed:
+            # the operation must not outlive the stream nobody is reading. The
+            # primary failure stays primary - a cancel or settle that also
+            # fails is logged with its cause, never raised in its place.
+            try:
+                await self._settle(
+                    await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS),
+                    spec,
+                    CredentialScrubber(secrets()),
+                )
+            except Exception:
+                logger.exception(
+                    "Cancelling stream operation %s after it stopped also failed",
+                    ref.operation_id,
+                )
+            raise
+        finally:
+            if self._running.get(handle.isolation_id) == (provider, ref):
+                del self._running[handle.isolation_id]
+        await self._settle(status, spec, CredentialScrubber(secrets()))
+
+    async def _start(
+        self,
+        handle: IsolationHandle,
+        command: list[str],
+        *,
+        timeout_seconds: int | None,
+        working_directory: str | None,
+        environment: dict[str, str] | None,
+        wrapper_name: str | None,
+        withheld: Callable[[], Iterable[str]] | None,
+    ) -> tuple[SupportsOperations, OperationRef, OperationSpec, Callable[[], tuple[str, ...]]]:
+        """Start ``command`` as an operation; return it and the secret set to withhold."""
         workspace = self._host.workspace(handle.isolation_id)
         if workspace is None:
             raise RuntimeError(f"Workspace not found: {handle.isolation_id}")
@@ -299,32 +385,80 @@ class AgenticEventStreamAdapter:
             CredentialScrubber(secrets()).scrub(str(command)),
         )
 
+        return provider, ref, spec, secrets
+
+    async def run_bounded(
+        self,
+        handle: IsolationHandle,
+        command: list[str],
+        *,
+        timeout_seconds: int,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+        tail_bytes: int = COMMAND_TAIL_BYTES,
+        withheld: Callable[[], Iterable[str]] | None = None,
+    ) -> BoundedCommandResult:
+        """Run ``command`` to its end, keeping a scrubbed tail of its output (ADR-078 D3).
+
+        Unlike ``stream`` it never yields: the output is consumed as raw pages
+        into a ``BoundedOutput``, so memory stays bounded whatever the command
+        prints, and the terminal state is returned beside the exit code rather
+        than folded into it. ``cancel_running`` stops it like a stream, and it
+        then ends ``interrupted``.
+        """
+        started = time.monotonic()
+        try:
+            provider, ref, spec, secrets = await self._start(
+                handle,
+                command,
+                timeout_seconds=timeout_seconds,
+                working_directory=working_directory,
+                environment=environment,
+                wrapper_name=None,
+                withheld=withheld,
+            )
+        except Exception:
+            logger.exception("Bounded command did not start in workspace %s", handle.isolation_id)
+            return BoundedCommandResult(
+                terminal=CommandTerminal.FAILED_TO_START, duration_ms=_elapsed_ms(started)
+            )
+        output = BoundedOutput(tail_bytes, launch_line=spec.launch_marker.line)
         self._running[handle.isolation_id] = (provider, ref)
         try:
-            async for line in self._observe(provider, ref, secrets, spec.launch_marker.line):
-                yield line
-            status = await provider.status(ref)
+            status = await self._observe_bounded(provider, ref, secrets, output)
         except BaseException:
-            # The reader stopped early, was cancelled, or observation failed:
-            # the operation must not outlive the stream nobody is reading. The
-            # primary failure stays primary - a cancel or settle that also
-            # fails is logged with its cause, never raised in its place.
             try:
-                await self._settle(
-                    await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS),
-                    spec,
-                    CredentialScrubber(secrets()),
-                )
+                await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS)
             except Exception:
-                logger.exception(
-                    "Cancelling stream operation %s after it stopped also failed",
-                    ref.operation_id,
-                )
+                logger.exception("Cancelling bounded operation %s also failed", ref.operation_id)
             raise
         finally:
             if self._running.get(handle.isolation_id) == (provider, ref):
                 del self._running[handle.isolation_id]
-        await self._settle(status, spec, CredentialScrubber(secrets()))
+        return _bounded_result(status, output, duration_ms=_elapsed_ms(started))
+
+    async def _observe_bounded(
+        self,
+        provider: SupportsOperations,
+        ref: OperationRef,
+        secrets: Callable[[], Iterable[str]],
+        output: BoundedOutput,
+    ) -> OperationStatus:
+        """Feed every page into ``output`` until the operation ends; return how it ended."""
+        scrubber = CredentialScrubber()
+        cursor: str | None = None
+        while True:
+            page = await provider.observe(
+                ref, cursor=cursor, max_bytes=_PAGE_BYTES, wait_seconds=_OBSERVE_WAIT_SECONDS
+            )
+            scrubber = _refreshed(scrubber, tuple(secrets()))
+            if isinstance(page.gap, ObservationGap):
+                output.gap(page.gap.lost_bytes)
+            output.feed(base64.b64decode(page.data_b64), scrubber)
+            if page.complete:
+                output.finish(scrubber)
+                return await provider.status(ref)
+            cursor = page.next_cursor
 
     async def cancel_running(self, handle: IsolationHandle) -> bool:
         """Stop the operation streaming in ``handle``'s workspace; True once it is over.

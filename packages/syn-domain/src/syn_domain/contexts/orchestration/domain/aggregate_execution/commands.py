@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
+    from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import CommandStepResult
     from syn_domain.contexts.orchestration._shared.evidence_contract import StepOutcome, StepRef
     from syn_domain.contexts.orchestration._shared.file_transfer import FileRefusal
     from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
@@ -481,6 +482,31 @@ class AgentExecutionCompletedCommand:
         """
         self.agent_provider = provider
         self.agent_model = model
+
+
+class RecordPhaseCommandsCommand:
+    """Command reported by CommandPhaseHandler after a command Phase's steps ran.
+
+    The command Phase's counterpart of `AgentExecutionCompletedCommand`: there
+    is no session, provider, model or token count, because nothing that has
+    them ran (ADR-078 D5).
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        workspace_id: str,
+        success: bool,
+        steps: Sequence[CommandStepResult],
+        timed_out: bool = False,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.workspace_id = workspace_id
+        self.success = success
+        self.timed_out = timed_out
+        self.steps = tuple(steps)
 
 
 class ArtifactsCollectedCommand:

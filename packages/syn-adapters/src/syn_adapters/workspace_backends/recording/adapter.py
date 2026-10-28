@@ -18,6 +18,12 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from syn_domain.contexts.orchestration import (
+    COMMAND_TAIL_BYTES,
+    BoundedCommandResult,
+    CommandTerminal,
+)
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable
 
@@ -206,6 +212,24 @@ class RecordingEventStreamAdapter:
             for event in self._player:
                 yield json.dumps(event)
         self._last_exit_code = 0
+
+    async def run_bounded(
+        self,
+        handle: IsolationHandle,  # noqa: ARG002
+        command: list[str],  # noqa: ARG002
+        *,
+        timeout_seconds: int,  # noqa: ARG002
+        working_directory: str | None = None,  # noqa: ARG002
+        environment: dict[str, str] | None = None,  # noqa: ARG002
+        tail_bytes: int = COMMAND_TAIL_BYTES,  # noqa: ARG002
+        withheld: Callable[[], Iterable[str]] | None = None,  # noqa: ARG002
+    ) -> BoundedCommandResult:
+        """A recording replays an agent's output; it has no command to run.
+
+        Reported as a failure to start rather than a clean exit, so a command
+        phase driven through a recording cannot pass a gate it never ran.
+        """
+        return BoundedCommandResult(terminal=CommandTerminal.FAILED_TO_START, duration_ms=0)
 
     async def cancel_running(self, handle: IsolationHandle) -> bool:  # noqa: ARG002
         """Nothing to cancel: replaying a recording creates no process."""

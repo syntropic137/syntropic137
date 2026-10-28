@@ -24,6 +24,14 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,
 )
+from syn_domain.contexts.orchestration._shared.command_phase import (
+    COMMAND_TAIL_BYTES,
+    BoundedCommandResult,
+    CommandStep,
+    CommandTerminal,
+    InconsistentPhaseKindError,
+    PhaseKind,
+)
 from syn_domain.contexts.orchestration._shared.eval_admission import (
     EvalUnavailableError,
     launch_eval_for,
@@ -176,6 +184,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.requir
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
+    require_consistent_phase_kind,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
@@ -414,6 +423,7 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
+    "COMMAND_TAIL_BYTES",
     "HOST_CREDENTIALS",
     "IMAGE_MANIFEST_FILE",
     "IMAGE_MANIFEST_ROOT",
@@ -449,6 +459,7 @@ __all__ = [
     # The clock a phase's retry budget is measured on (#1303)
     "AttemptClock",
     "BaselineRequest",
+    "BoundedCommandResult",
     # Claude plugin types + errors (issue #726)
     "CancelledWorkLedger",
     "ClaudePluginError",
@@ -460,6 +471,8 @@ __all__ = [
     "ClaudePluginNotRegistered",
     "ClaudePluginRef",
     "ClaudePluginVersionHashMismatch",
+    "CommandStep",
+    "CommandTerminal",
     "CommitShipped",
     "CreateEvalHandler",
     "CreateWorkflowTemplateCommand",
@@ -522,6 +535,7 @@ __all__ = [
     "ImageManifestContent",
     "ImageManifestReading",
     "ImageManifestState",
+    "InconsistentPhaseKindError",
     "InheritanceUnavailableError",
     "InjectTokensCommand",
     # Value objects - workflow template
@@ -537,6 +551,7 @@ __all__ = [
     "Percentiles",
     "PhaseDefinition",
     "PhaseExecutionType",
+    "PhaseKind",
     "PhaseProfileQueryService",
     "PhaseProfiles",
     "PhaseProgress",
@@ -656,6 +671,7 @@ __all__ = [
     "render_workspace_prompt",
     "replays_generic",
     "repository_key",
+    "require_consistent_phase_kind",
     "require_memory_within_cap",
     "require_phases_within_cap",
     "require_pids_within_cap",

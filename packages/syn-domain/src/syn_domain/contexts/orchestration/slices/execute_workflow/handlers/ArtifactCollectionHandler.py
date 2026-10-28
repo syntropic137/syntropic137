@@ -75,6 +75,7 @@ class ArtifactCollectionHandler:
         agent: AgentIdentity,
         last_agent_message: str | None = None,
         describe_work: DescribeWork | None = None,
+        primary_path: str | None = None,
     ) -> ArtifactCollectionResult:
         """Collect artifacts from workspace after agent execution.
 
@@ -102,6 +103,8 @@ class ArtifactCollectionHandler:
                 fail, so it never reaches the failure path that normally
                 reports this (#1200), and the artifact becomes the only place
                 the surviving branch is named.
+            primary_path: The file the phase names as its primary deliverable,
+                rather than whichever was collected first (ADR-078 D7).
 
         Returns:
             ArtifactCollectionResult with artifact IDs and aggregate command
@@ -119,6 +122,7 @@ class ArtifactCollectionHandler:
             agent=agent,
             last_agent_message=last_agent_message,
             describe_work=describe_work,
+            primary_path=primary_path,
         )
 
         command = ArtifactsCollectedCommand(

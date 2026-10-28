@@ -21,6 +21,10 @@ from pydantic import (
 
 # Runtime import: a pydantic field type of DelegationAttempt.
 from syn_domain.contexts.agent_sessions import DelegationOutcome  # noqa: TC001
+from syn_domain.contexts.orchestration._shared.command_phase import (
+    CommandStep,
+    PhaseKind,
+)
 from syn_domain.contexts.orchestration._shared.evidence_contract import (
     EvidenceRequest,  # noqa: TC001 - needed at runtime for Pydantic
     EvidenceStepKind,  # noqa: TC001 - needed at runtime for Pydantic
@@ -153,6 +157,18 @@ class FailureClassification(StrEnum):
 
     This is the system WORKING, and it carries that label so nobody optimises
     it away or counts it as a defect.
+    """
+
+    GATE = "gate"
+    """A command Phase's own step said no (ADR-078 D5).
+
+    A step the workflow author wrote exited non-zero, hit its own timeout, or
+    the Phase ran out of the deadline the author gave it. The platform ran it
+    correctly and it answered: that is a positive claim, made from the exit
+    code the step itself produced, never from a report. It is kept out of
+    `PLATFORM` for the reason this enum exists: a red build gate counted as a
+    platform failure inflates the platform failure rate with the system
+    working as designed. A step the platform could not start is `PLATFORM`.
     """
 
     UNCLASSIFIED = "unclassified"
@@ -1088,6 +1104,12 @@ class ExecutablePhase:
 
     # Prompt template (REQUIRED - actual template, not ID)
     prompt_template: str = ""  # Must be set by workflow definition
+
+    # What runs this phase (ADR-078). A command phase runs `commands` and no
+    # agent: its agent_config is the inert default and its prompt is empty.
+    # Pinned with the phase, so a resume runs the steps it started with.
+    kind: PhaseKind = PhaseKind.AGENT
+    commands: tuple[CommandStep, ...] = ()
 
     # Input configuration
     inputs: list[PhaseInput] = field(default_factory=list)

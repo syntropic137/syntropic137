@@ -575,6 +575,17 @@ class PhaseResourcesResponse(BaseModel):
     """Workspace process and thread limit; None means SYN_WORKSPACE_PIDS_LIMIT."""
 
 
+class CommandStepResponse(BaseModel):
+    """One fixed shell step of a command phase (ADR-078)."""
+
+    name: str
+    run: str
+    """Executed as ``sh -c <run>`` in ``/workspace``; never templated."""
+    timeout_seconds: int | None = None
+    """None: whatever remains of the phase's budget."""
+    allow_failure: bool = False
+
+
 class PhaseDefinitionResponse(BaseModel):
     """Phase definition within a workflow template."""
 
@@ -624,6 +635,10 @@ class PhaseDefinitionResponse(BaseModel):
     can launch runs into a named eval and score them."""
     # PC-116: the phase fails when it reports no review_verdict.
     requires_verdict: bool = False
+    kind: Literal["agent", "command"] = "agent"
+    """What runs this phase (ADR-078): an agent, or ``commands`` at 0 tokens."""
+    commands: list[CommandStepResponse] = Field(default_factory=list)
+    """A command phase's ordered steps; empty on an agent phase."""
     resources: PhaseResourcesResponse = Field(default_factory=PhaseResourcesResponse)
     """What this phase's workspace asks for (okrs-51p.30). Empty: the default."""
     sandbox: str = DEFAULT_PHASE_SANDBOX
