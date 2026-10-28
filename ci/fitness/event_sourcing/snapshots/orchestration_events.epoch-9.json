@@ -2396,105 +2396,6 @@
     "schema_version": 1,
     "version": "v1"
   },
-  "PhaseCommandsCompletedEvent": {
-    "event_type": "PhaseCommandsCompleted",
-    "schema": {
-      "$defs": {
-        "CommandStepOutcome": {
-          "enum": [
-            "passed",
-            "failed",
-            "timed_out",
-            "skipped",
-            "interrupted",
-            "failed_to_start"
-          ],
-          "type": "string"
-        },
-        "CommandStepResult": {
-          "additionalProperties": false,
-          "properties": {
-            "allow_failure": {
-              "default": false,
-              "type": "boolean"
-            },
-            "duration_ms": {
-              "default": 0,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "exit_code": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "name": {
-              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-              "type": "string"
-            },
-            "outcome": {
-              "$ref": "#/$defs/CommandStepOutcome"
-            }
-          },
-          "required": [
-            "name",
-            "outcome"
-          ],
-          "type": "object"
-        }
-      },
-      "additionalProperties": false,
-      "properties": {
-        "completed_at": {
-          "format": "date-time",
-          "type": "string"
-        },
-        "execution_id": {
-          "type": "string"
-        },
-        "phase_id": {
-          "type": "string"
-        },
-        "steps": {
-          "items": {
-            "$ref": "#/$defs/CommandStepResult"
-          },
-          "type": "array"
-        },
-        "success": {
-          "type": "boolean"
-        },
-        "timed_out": {
-          "default": false,
-          "type": "boolean"
-        },
-        "workflow_id": {
-          "type": "string"
-        },
-        "workspace_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "workflow_id",
-        "execution_id",
-        "phase_id",
-        "workspace_id",
-        "completed_at",
-        "success",
-        "steps"
-      ],
-      "type": "object"
-    },
-    "schema_version": 1,
-    "version": "v1"
-  },
   "PhaseCommitPushedEvent": {
     "event_type": "PhaseCommitPushed",
     "schema": {
@@ -3024,40 +2925,6 @@
           },
           "type": "object"
         },
-        "CommandStep": {
-          "additionalProperties": false,
-          "properties": {
-            "allow_failure": {
-              "default": false,
-              "type": "boolean"
-            },
-            "name": {
-              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-              "type": "string"
-            },
-            "run": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "timeout_seconds": {
-              "anyOf": [
-                {
-                  "exclusiveMinimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            }
-          },
-          "required": [
-            "name",
-            "run"
-          ],
-          "type": "object"
-        },
         "ContinuedBranch": {
           "additionalProperties": false,
           "properties": {
@@ -3260,13 +3127,6 @@
               "default": true,
               "type": "boolean"
             },
-            "commands": {
-              "default": [],
-              "items": {
-                "$ref": "#/$defs/CommandStep"
-              },
-              "type": "array"
-            },
             "delivers_repo_changes": {
               "default": true,
               "type": "boolean"
@@ -3298,10 +3158,6 @@
                 "$ref": "#/$defs/PhaseInput"
               },
               "type": "array"
-            },
-            "kind": {
-              "$ref": "#/$defs/PhaseKind",
-              "default": "agent"
             },
             "max_cost_usd": {
               "anyOf": [
@@ -3636,13 +3492,6 @@
           ],
           "type": "object"
         },
-        "PhaseKind": {
-          "enum": [
-            "agent",
-            "command"
-          ],
-          "type": "string"
-        },
         "PlatformScope": {
           "enum": [
             "read",
@@ -3795,6 +3644,18 @@
               "anyOf": [
                 {
                   "minimum": 256,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "pids_limit": {
+              "anyOf": [
+                {
+                  "minimum": 64,
                   "type": "integer"
                 },
                 {
@@ -4184,7 +4045,6 @@
             "platform",
             "task",
             "correct_refusal",
-            "gate",
             "unclassified"
           ],
           "type": "string"
@@ -4706,40 +4566,6 @@
             }
           ]
         },
-        "CommandStep": {
-          "additionalProperties": false,
-          "properties": {
-            "allow_failure": {
-              "default": false,
-              "type": "boolean"
-            },
-            "name": {
-              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-              "type": "string"
-            },
-            "run": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "timeout_seconds": {
-              "anyOf": [
-                {
-                  "exclusiveMinimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            }
-          },
-          "required": [
-            "name",
-            "run"
-          ],
-          "type": "object"
-        },
         "FallbackAgent": {
           "additionalProperties": false,
           "properties": {
@@ -4834,12 +4660,6 @@
               "default": true,
               "type": "boolean"
             },
-            "commands": {
-              "items": {
-                "$ref": "#/$defs/CommandStep"
-              },
-              "type": "array"
-            },
             "delivers_repo_changes": {
               "default": true,
               "type": "boolean"
@@ -4875,10 +4695,6 @@
                 "type": "string"
               },
               "type": "array"
-            },
-            "kind": {
-              "$ref": "#/$defs/PhaseKind",
-              "default": "agent"
             },
             "max_cost_usd": {
               "anyOf": [
@@ -5011,13 +4827,6 @@
           ],
           "type": "string"
         },
-        "PhaseKind": {
-          "enum": [
-            "agent",
-            "command"
-          ],
-          "type": "string"
-        },
         "PlatformScope": {
           "enum": [
             "read",
@@ -5108,6 +4917,18 @@
               "anyOf": [
                 {
                   "minimum": 256,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "pids_limit": {
+              "anyOf": [
+                {
+                  "minimum": 64,
                   "type": "integer"
                 },
                 {
@@ -5339,40 +5160,6 @@
             }
           ]
         },
-        "CommandStep": {
-          "additionalProperties": false,
-          "properties": {
-            "allow_failure": {
-              "default": false,
-              "type": "boolean"
-            },
-            "name": {
-              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-              "type": "string"
-            },
-            "run": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "timeout_seconds": {
-              "anyOf": [
-                {
-                  "exclusiveMinimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            }
-          },
-          "required": [
-            "name",
-            "run"
-          ],
-          "type": "object"
-        },
         "FallbackAgent": {
           "additionalProperties": false,
           "properties": {
@@ -5467,12 +5254,6 @@
               "default": true,
               "type": "boolean"
             },
-            "commands": {
-              "items": {
-                "$ref": "#/$defs/CommandStep"
-              },
-              "type": "array"
-            },
             "delivers_repo_changes": {
               "default": true,
               "type": "boolean"
@@ -5508,10 +5289,6 @@
                 "type": "string"
               },
               "type": "array"
-            },
-            "kind": {
-              "$ref": "#/$defs/PhaseKind",
-              "default": "agent"
             },
             "max_cost_usd": {
               "anyOf": [
@@ -5644,13 +5421,6 @@
           ],
           "type": "string"
         },
-        "PhaseKind": {
-          "enum": [
-            "agent",
-            "command"
-          ],
-          "type": "string"
-        },
         "PlatformScope": {
           "enum": [
             "read",
@@ -5741,6 +5511,18 @@
               "anyOf": [
                 {
                   "minimum": 256,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "pids_limit": {
+              "anyOf": [
+                {
+                  "minimum": 64,
                   "type": "integer"
                 },
                 {

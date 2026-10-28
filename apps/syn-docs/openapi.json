@@ -19064,6 +19064,17 @@
               }
             ],
             "title": "Memory Mb"
+          },
+          "pids_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pids Limit"
           }
         },
         "type": "object",

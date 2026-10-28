@@ -104,10 +104,13 @@ from syn_domain.contexts.orchestration._shared.workspace_credential_policy impor
 )
 from syn_domain.contexts.orchestration._shared.workspace_resources import (
     WorkspaceMemoryOverCapError,
+    WorkspacePidsOverCapError,
     WorkspaceResourceRequest,
     deployment_memory_ceiling_mb,
+    deployment_pids_ceiling,
     require_memory_within_cap,
     require_phases_within_cap,
+    require_pids_within_cap,
     stored_resource_request,
 )
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -636,6 +639,7 @@ __all__ = [
     "WorkspaceDeleteFallback",
     "WorkspaceDirRemover",
     "WorkspaceMemoryOverCapError",
+    "WorkspacePidsOverCapError",
     "WorkspaceResourceRequest",
     "WorkspaceUsage",
     "announce_as",
@@ -646,6 +650,7 @@ __all__ = [
     "declared_model_tags",
     "declared_models_of",
     "deployment_memory_ceiling_mb",
+    "deployment_pids_ceiling",
     "execution_id_for_key",
     "execution_request_id",
     "guard_orphaned_workspace",
@@ -669,6 +674,7 @@ __all__ = [
     "require_consistent_phase_kind",
     "require_memory_within_cap",
     "require_phases_within_cap",
+    "require_pids_within_cap",
     "require_supported_execution_type",
     "roster_of",
     "salvage_stranded_phase",

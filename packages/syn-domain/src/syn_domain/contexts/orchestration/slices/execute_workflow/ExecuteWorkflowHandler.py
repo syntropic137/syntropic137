@@ -20,7 +20,8 @@ from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection,
 from syn_domain.contexts.orchestration._shared.workspace_resources import (
     WorkspaceResourceRequest,
     deployment_memory_ceiling_mb,
-    require_memory_within_cap,
+    deployment_pids_ceiling,
+    require_within_caps,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
@@ -234,7 +235,10 @@ def _command_phase(phase: PhaseDefinition) -> ExecutablePhase:
 
 
 def validate_phase_declarations(
-    workflow: WorkflowTemplateAggregate, *, memory_ceiling_mb: int | None = None
+    workflow: WorkflowTemplateAggregate,
+    *,
+    memory_ceiling_mb: int | None = None,
+    pids_ceiling: int | None = None,
 ) -> None:
     """Raise if any stored phase declares something the platform cannot honour.
 
@@ -242,6 +246,8 @@ def validate_phase_declarations(
     reads it from settings (``SYN_WORKSPACE_MEMORY_MAX_MB``). A phase whose
     ``resources.memory_mb`` exceeds it is refused here, before any phase of
     the run is paid for, rather than at its own workspace (okrs-51p.30).
+    ``pids_ceiling`` does the same for ``resources.pids_limit``
+    (``SYN_WORKSPACE_PIDS_MAX``).
 
     THE single definition of that check (#1039). Three entry points need it and
     each one previously would have grown its own copy:
@@ -258,11 +264,14 @@ def validate_phase_declarations(
     validator, so authoring-time refusal reaches none of them.
     """
     ceiling = deployment_memory_ceiling_mb() if memory_ceiling_mb is None else memory_ceiling_mb
+    pids_cap = deployment_pids_ceiling() if pids_ceiling is None else pids_ceiling
     for phase in workflow.phases:
         phase_id = getattr(phase, "phase_id", None)
         # A stored template never passes the YAML's kind check (ADR-078 D2).
         _require_consistent_kind(phase)
-        require_memory_within_cap(_phase_resources(phase), ceiling, phase_id=phase_id)
+        require_within_caps(
+            _phase_resources(phase), memory_cap_mb=ceiling, pids_cap=pids_cap, phase_id=phase_id
+        )
         require_supported_execution_type(
             getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
             phase_id=phase_id,
@@ -698,6 +707,7 @@ class ExecuteWorkflowHandler:
         workflow_refs = workflow.claude_plugins
         workflow_skill_refs = workflow.skills
         memory_ceiling = deployment_memory_ceiling_mb()
+        pids_ceiling = deployment_pids_ceiling()
         executable_phases: list[ExecutablePhase] = []
         for phase in workflow.phases:
             # EXECUTION-BOUNDARY re-check, not a duplicate of the YAML rule.
@@ -716,10 +726,14 @@ class ExecuteWorkflowHandler:
             require_runnable_sandbox(
                 getattr(phase, "sandbox", None), phase_id=getattr(phase, "phase_id", None)
             )
-            # And the memory ceiling (okrs-51p.30): refused before phase 1 is
-            # paid for, not when the phase that asked reaches its workspace.
-            require_memory_within_cap(
-                _phase_resources(phase), memory_ceiling, phase_id=getattr(phase, "phase_id", None)
+            # And the memory and pids ceilings (okrs-51p.30): refused before
+            # phase 1 is paid for, not when the phase that asked reaches its
+            # workspace.
+            require_within_caps(
+                _phase_resources(phase),
+                memory_cap_mb=memory_ceiling,
+                pids_cap=pids_ceiling,
+                phase_id=getattr(phase, "phase_id", None),
             )
             # And the kind (ADR-078 D2): a command phase reaching here with an
             # agent field, from a stored template or a phase edit, is refused.

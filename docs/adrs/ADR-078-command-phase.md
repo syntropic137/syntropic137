@@ -196,7 +196,7 @@ workspace lost) is `PLATFORM`.
 
 The new event type, and the new fields in `ExecutablePhase` inside existing
 events (`WorkflowExecutionStarted.pinned_phases`, template events), move
-`ORCHESTRATION_EVENT_EPOCH` to 9 with a complete epoch-9 snapshot. The
+`ORCHESTRATION_EVENT_EPOCH` to 10 with a complete epoch-10 snapshot (9 went to #2164). The
 projection manager's event routing (`manager_event_map.py`) registers the new
 event. Replay of existing streams is unchanged: no stream holds the new event
 and the new fields default to `agent`.

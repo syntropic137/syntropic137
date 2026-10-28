@@ -29,6 +29,7 @@ from syn_adapters.workspace_backends.errors import (
     WorkspaceTeardownError,
 )
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
+from syn_domain.contexts.orchestration import SecurityPolicy
 from syn_shared.settings.e2b import E2BSettings
 
 if TYPE_CHECKING:
@@ -288,6 +289,22 @@ async def test_a_workspace_bigger_than_the_template_is_refused() -> None:
     adapter, _ = _adapter(double)
     with pytest.raises(WorkspaceCapacityError, match="MB of memory"):
         await adapter.create(suite.isolation_config(_TEMPLATE, memory_mb=4096))
+    assert double.created_from == []
+
+
+async def test_a_raised_pids_limit_is_refused_not_ignored() -> None:
+    # E2B sets no per-sandbox process limit, so admitting the request would
+    # run the phase without what it declared (okrs-51p.30).
+    double = SandboxDouble()
+    adapter, _ = _adapter(double)
+    config = suite.isolation_config(_TEMPLATE)
+    raised = SecurityPolicy(
+        cpu_limit_cores=config.security_policy.cpu_limit_cores,
+        memory_limit_mb=config.security_policy.memory_limit_mb,
+        pids_limit=2048,
+    )
+    with pytest.raises(WorkspaceCapacityError, match="2048 as its pids limit"):
+        await adapter.create(type(config)(**{**config.__dict__, "security_policy": raised}))
     assert double.created_from == []
 
 

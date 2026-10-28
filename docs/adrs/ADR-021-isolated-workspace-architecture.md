@@ -3,7 +3,7 @@
 **Status:** Accepted (Implemented, Enforcement in ADR-023)
 **Date:** 2025-12-11
 **Updated:** 2026-02-18 — Hook event transport: `stderr=STDOUT` required in stream() (see Hook Event Transport section)
-**Updated:** 2026-10-27 — Per-phase workspace memory request, ceiling and ledger (see the 2026-10-27 addendum)
+**Updated:** 2026-10-27 — Per-phase workspace memory and pids requests, ceilings and memory ledger (see the 2026-10-27 addendum)
 **Deciders:** @neural
 **Tags:** security, isolation, workspaces, scale, firecracker, docker, observability, hooks
 
@@ -837,7 +837,7 @@ would lose the ability to enumerate, inspect, or delete arbitrary networks.
 
 Tracked as #714 (Phase-2 follow-on to v0.25.2).
 
-## 2026-10-27 Addendum - Per-phase workspace memory (okrs-51p.30)
+## 2026-10-27 Addendum - Per-phase workspace memory and pids (okrs-51p.30)
 
 ### Problem
 
@@ -888,6 +888,24 @@ run at once by the same factor (docs/north-star.md).
    `WorkflowExecutionStarted.pinned_phases`, and the effective limit on
    `WorkspaceCreated.security_settings` (which previously recorded the
    `SecurityPolicy` default regardless of the setting).
+
+5. **The process limit is a second request of the same shape.** The workspace's
+   `--pids-limit` was agentic-workspace's `SecurityConfig.pids_limit` default
+   (256), and threads count against it: cargo, libtest, `node --test` and
+   lavapipe suites exceed it and fail with fork/EAGAIN. A phase declares
+   `resources: {pids_limit: N}` (floor 64). syn137 now owns the default
+   (`SYN_WORKSPACE_PIDS_LIMIT`, 256, so nothing changes until someone asks) and
+   the ceiling (`SYN_WORKSPACE_PIDS_MAX`; unset means the default), checked and
+   refused at exactly the points memory is. The effective limit rides
+   `SecurityPolicy.pids_limit` to the adapter, which passes it as
+   `WorkspaceConfig.security = dataclasses.replace(<provider policy>,
+   pids_limit=N)`: the per-workspace override agentic-workspace's Docker
+   provider already prefers, so no submodule change was needed and the
+   image-derived runtime, AppArmor and seccomp settings are kept. No ledger:
+   pids are a per-container cap, not a pooled share of the host. Recorded on
+   `WorkspaceCreated.security_settings` beside memory. Adding the field to the
+   stored phase resources changed three orchestration event schemas, so
+   `ORCHESTRATION_EVENT_EPOCH` moved 8 -> 9.
 
 ### Not done
 

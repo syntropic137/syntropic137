@@ -11,6 +11,10 @@ the adapter does with it is pinned in ``test_workspace_memory_request.py``.
 2048 rather than a large value: below the default ceiling, so the start
 check passes and only the carrying is measured, and not the default, so a
 dropped request cannot satisfy it.
+
+``resources.pids_limit`` rides the same hops in the same object; 128 for the
+same reason (below the 256 default ceiling, and not the default). What the
+adapter does with it is pinned in ``test_pids_request_reaches_aw.py``.
 """
 
 from __future__ import annotations
@@ -62,6 +66,7 @@ phases:
     prompt_template: "build it"
     resources:
       memory_mb: 2048
+      pids_limit: 128
   - id: review
     name: Review
     order: 2
@@ -139,7 +144,7 @@ async def test_a_phase_that_requests_memory_gets_it_on_its_workspace() -> None:
     phases = await _executable_phases()
     assert await _resources_the_workspace_was_created_with(
         phases["build"]
-    ) == WorkspaceResourceRequest(memory_mb=2048)
+    ) == WorkspaceResourceRequest(memory_mb=2048, pids_limit=128)
 
 
 async def test_a_phase_that_requests_nothing_asks_for_the_default() -> None:

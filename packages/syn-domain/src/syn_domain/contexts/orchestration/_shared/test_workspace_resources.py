@@ -1,4 +1,4 @@
-"""A phase's workspace memory request: declared in YAML, carried, and held to the ceiling (okrs-51p.30)."""
+"""A phase's workspace memory and pids requests: declared in YAML, carried, and held to the ceiling (okrs-51p.30)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,11 @@ from syn_domain.contexts.orchestration import (
     PhaseDefinition,
     WorkflowDefinition,
     WorkspaceMemoryOverCapError,
+    WorkspacePidsOverCapError,
     WorkspaceResourceRequest,
     require_memory_within_cap,
+    require_phases_within_cap,
+    require_pids_within_cap,
     validate_phase_declarations,
 )
 from syn_domain.contexts.orchestration._shared.workspace_resources import (
@@ -183,3 +186,123 @@ def test_the_workflow_detail_read_model_stores_and_reloads_the_request() -> None
     (reloaded,) = WorkflowDetail.from_dict(detail.to_dict()).phases
 
     assert reloaded.resources.memory_mb == 12288
+
+
+# -- pids_limit (okrs-51p.30): the same request, for --pids-limit ----------------
+
+
+def _pids_phase(pids_limit: int | None) -> PhaseDefinition:
+    return PhaseDefinition(
+        phase_id="build",
+        name="Build",
+        order=1,
+        resources=WorkspaceResourceRequest(pids_limit=pids_limit),
+    )
+
+
+def test_the_yaml_pids_request_reaches_the_domain_phase_beside_memory() -> None:
+    yaml = _YAML.replace("memory_mb: 12288", "{memory_mb: 12288, pids_limit: 2048}").replace(
+        "resources:\n      {", "resources: {"
+    )
+    assert "pids_limit: 2048" in yaml
+
+    build, review = (p.to_domain() for p in WorkflowDefinition.from_yaml(yaml).phases)
+
+    assert (build.resources.memory_mb, build.resources.pids_limit) == (12288, 2048)
+    assert review.resources.pids_limit is None
+
+
+def test_a_pids_request_below_the_floor_is_refused_at_authoring() -> None:
+    with pytest.raises(ValidationError):
+        WorkspaceResourceRequest(pids_limit=63)
+    assert WorkspaceResourceRequest(pids_limit=64).pids_limit == 64
+
+
+def test_the_effective_pids_limit_is_the_request_or_the_default() -> None:
+    assert WorkspaceResourceRequest(pids_limit=2048).pids_limit_or(256) == 2048
+    assert WorkspaceResourceRequest().pids_limit_or(256) == 256
+    assert WorkspaceResourceRequest(memory_mb=8192).pids_limit_or(256) == 256
+
+
+def test_a_pids_request_at_the_ceiling_passes_and_one_above_is_refused_by_name() -> None:
+    require_pids_within_cap(WorkspaceResourceRequest(pids_limit=4096), 4096, phase_id="build")
+    require_pids_within_cap(WorkspaceResourceRequest(), 256, phase_id="build")
+
+    with pytest.raises(WorkspacePidsOverCapError) as caught:
+        require_pids_within_cap(WorkspaceResourceRequest(pids_limit=4097), 4096, phase_id="build")
+
+    assert (caught.value.requested, caught.value.cap) == (4097, 4096)
+    message = str(caught.value)
+    assert "Phase 'build'" in message
+    assert "SYN_WORKSPACE_PIDS_MAX" in message
+    assert "Resource temporarily unavailable" in message
+
+
+def test_install_and_resume_hold_pids_to_the_ceiling_beside_memory() -> None:
+    """`require_phases_within_cap` is what install and resume call."""
+    phases = [_pids_phase(2048)]
+
+    require_phases_within_cap(phases, 4096, pids_cap=2048)
+    with pytest.raises(WorkspacePidsOverCapError):
+        require_phases_within_cap(phases, 4096, pids_cap=1024)
+
+
+def test_start_refuses_a_stored_pids_request_above_the_ceiling() -> None:
+    stored = _Template(_pids_phase(2048))
+
+    validate_phase_declarations(stored, pids_ceiling=4096)  # type: ignore[arg-type]
+    with pytest.raises(WorkspacePidsOverCapError):
+        validate_phase_declarations(stored, pids_ceiling=1024)  # type: ignore[arg-type]
+
+
+def test_start_reads_the_deployment_pids_ceiling_when_none_is_passed() -> None:
+    """Unset SYN_WORKSPACE_PIDS_MAX is the default limit, 256: 2048 is refused."""
+    with pytest.raises(WorkspacePidsOverCapError):
+        validate_phase_declarations(_Template(_pids_phase(2048)))  # type: ignore[arg-type]
+    validate_phase_declarations(_Template(_pids_phase(256)))  # type: ignore[arg-type]
+
+
+async def test_a_direct_handler_caller_is_refused_above_the_pids_ceiling() -> None:
+    with pytest.raises(WorkspacePidsOverCapError, match="build"):
+        await _bare_handler()._get_executable_phases(
+            _Rehydrated(_pids_phase(2048))  # type: ignore[arg-type]
+        )
+
+
+async def test_the_execution_boundary_pins_the_pids_request() -> None:
+    (pinned,) = await _bare_handler()._get_executable_phases(
+        _Rehydrated(_pids_phase(128))  # type: ignore[arg-type]
+    )
+
+    assert pinned.resources.pids_limit == 128
+
+
+def test_a_stored_request_without_pids_replays_as_no_pids_request() -> None:
+    assert stored_resource_request({"memory_mb": 8192}).pids_limit is None
+    assert stored_resource_request({"pids_limit": 2048}).pids_limit == 2048
+
+
+def test_the_workflow_detail_read_model_stores_and_reloads_the_pids_request() -> None:
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
+        PhaseDefinitionDetail,
+        WorkflowDetail,
+    )
+
+    detail = WorkflowDetail(
+        id="wf",
+        name="wf",
+        workflow_type="custom",
+        classification="standard",
+        description=None,
+        phases=[
+            PhaseDefinitionDetail(
+                id="build",
+                name="Build",
+                resources=WorkspaceResourceRequest(memory_mb=8192, pids_limit=2048),
+            )
+        ],
+    )
+
+    (reloaded,) = WorkflowDetail.from_dict(detail.to_dict()).phases
+
+    assert reloaded.resources == WorkspaceResourceRequest(memory_mb=8192, pids_limit=2048)

@@ -582,7 +582,7 @@
     },
     "WorkspaceResourceRequest": {
       "additionalProperties": false,
-      "description": "What one phase's workspace asks for beyond the deployment default.\n\nEvery field is optional and None means \"the deployment default\". It is\na REQUEST: the deployment decides whether it fits (``require_memory_within_cap``).",
+      "description": "What one phase's workspace asks for beyond the deployment default.\n\nEvery field is optional and None means \"the deployment default\". It is\na REQUEST: the deployment decides whether it fits (``require_memory_within_cap``,\n``require_pids_within_cap``).",
       "properties": {
         "memory_mb": {
           "anyOf": [
@@ -596,6 +596,19 @@
           ],
           "default": null,
           "title": "Memory Mb"
+        },
+        "pids_limit": {
+          "anyOf": [
+            {
+              "minimum": 64,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pids Limit"
         }
       },
       "title": "WorkspaceResourceRequest",
