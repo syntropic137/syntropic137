@@ -45,6 +45,12 @@ from syn_shared.settings.workspace_images import (
     workspace_image_ref,
 )
 
+#: Images agentic-workspace publishes that are deliberately NOT workspace
+#: providers. scripted-agent is the load-test and E2B stub (#1918): a separate
+#: pin (SCRIPTED_AGENT_IMAGE, #1918 PR 3), never a WorkspaceImageProvider
+#: member, so it can never be selected as a production workspace image.
+NOT_WORKSPACE_PROVIDERS: frozenset[str] = frozenset({"scripted-agent"})
+
 #: ``release-images.yml`` in the PUBLISHING repository is what decides the
 #: repository each digest is pushed to. Not the provider manifests: under
 #: agentic-workspace those still carry agentic-primitives names and disagree
@@ -118,7 +124,7 @@ def test_every_published_provider_is_known_here() -> None:
         pytest.skip("lib/agentic-workspace is not checked out")
 
     known = {p.value for p in WorkspaceImageProvider}
-    unmodelled = sorted(set(published) - known)
+    unmodelled = sorted(set(published) - known - NOT_WORKSPACE_PROVIDERS)
     assert not unmodelled, (
         f"agentic-workspace publishes providers this repo does not model: "
         f"{unmodelled}. Add them to WorkspaceImageProvider with a PINNED_DIGESTS "
