@@ -87,6 +87,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.phase_step_eve
     agent_completed_event,
     artifacts_collected_event,
     phase_commands_event,
+    phase_completed_event,
+    phase_started_event,
     workspace_provisioned_event,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
@@ -596,26 +598,13 @@ class WorkflowExecutionAggregate(
     @command_handler("StartPhaseCommand")
     def start_phase(self, command: StartPhaseCommand) -> None:
         """Handle StartPhaseCommand."""
-        from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
-            PhaseStartedEvent,
-        )
-
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot start phase in status {self._status}"
             raise ValueError(msg)
         refuse_unordered(self._phase_order_conflict, "start a phase of")
         refuse_reopening(self._completed_phase_ids, command.phase_id, "start")
 
-        event = PhaseStartedEvent(
-            workflow_id=command.workflow_id,
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            phase_name=command.phase_name,
-            phase_order=command.phase_order,
-            started_at=datetime.now(UTC),
-            session_id=command.session_id,
-        )
-        self._apply(event)
+        self._apply(phase_started_event(command))
 
     @command_handler("RetryPhaseCommand")
     def retry_phase(self, command: RetryPhaseCommand) -> None:
@@ -673,38 +662,18 @@ class WorkflowExecutionAggregate(
     @command_handler("CompletePhaseCommand")
     def complete_phase(self, command: CompletePhaseCommand) -> None:
         """Handle CompletePhaseCommand."""
-        from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
-            PhaseCompletedEvent,
-        )
-
         if self._status != ExecutionStatus.RUNNING:
             msg = f"Cannot complete phase in status {self._status}"
             raise ValueError(msg)
         refuse_reopening(self._completed_phase_ids, command.phase_id, "complete")
 
-        event = PhaseCompletedEvent(
-            workflow_id=command.workflow_id,
-            execution_id=command.aggregate_id,
-            phase_id=command.phase_id,
-            completed_at=datetime.now(UTC),
-            success=True,
-            artifact_id=command.artifact_id,
-            session_id=command.session_id,
-            # Read off replayed state rather than taken from the command: the
-            # salvage is decided at COLLECT_ARTIFACTS and reported here, a
-            # different to-do item and possibly a different process, so the
-            # only honest source is the stream. It also keeps
-            # CompletePhaseCommand - and every caller of it - unchanged.
-            deliverable_recovered=command.phase_id in self._recovered_phases,
-            reported_side_effects=self._reported_side_effects.get(command.phase_id),
-            input_tokens=command.input_tokens,
-            output_tokens=command.output_tokens,
-            cache_creation_tokens=command.cache_creation_tokens,
-            cache_read_tokens=command.cache_read_tokens,
-            total_tokens=command.total_tokens,
-            duration_seconds=command.duration_seconds,
+        self._apply(
+            phase_completed_event(
+                command,
+                deliverable_recovered=command.phase_id in self._recovered_phases,
+                reported_side_effects=self._reported_side_effects.get(command.phase_id),
+            )
         )
-        self._apply(event)
 
     @command_handler("ProvisionWorkspaceCompletedCommand")
     def provision_workspace_completed(self, command: ProvisionWorkspaceCompletedCommand) -> None:
@@ -745,20 +714,11 @@ class WorkflowExecutionAggregate(
         self._apply(artifacts_collected_event(command, self._workflow_id or ""))
 
         # A failed command gate ends the run here, its logs already kept (ADR-078 D5).
-        gate = self._command_gates.failure_of(command.phase_id)
-        if gate is not None:
-            self._apply(
-                failed_event(
-                    gate.command(
-                        execution_id=command.aggregate_id,
-                        phase_id=command.phase_id,
-                        completed_phases=self._completed_phases,
-                        total_phases=len(self._phase_definitions),
-                        artifact_ids=command.artifact_ids,
-                    ),
-                    self._workflow_id or "",
-                )
-            )
+        failed = self._command_gates.failed_event(
+            command, self._completed_phases, len(self._phase_definitions), self._workflow_id or ""
+        )
+        if failed is not None:
+            self._apply(failed)
             return
 
         # The phase's own verdict decides what runs next (PC-63).
@@ -1044,12 +1004,7 @@ class WorkflowExecutionAggregate(
     @event_sourcing_handler("PhaseCommandsCompleted")
     def on_phase_commands_completed(self, event: PhaseCommandsCompletedEvent) -> None:
         """Apply PhaseCommandsCompletedEvent: keep the gate's verdict for collection."""
-        self._command_gates.report(
-            evt(event, "phase_id") or "",
-            success=bool(evt(event, "success")),
-            timed_out=bool(evt(event, "timed_out", False)),
-            steps=evt(event, "steps", []),
-        )
+        self._command_gates.report_event(event)
 
     @event_sourcing_handler("ArtifactsCollectedForPhase")
     def on_artifacts_collected_for_phase(self, event: ArtifactsCollectedForPhaseEvent) -> None:

@@ -19,12 +19,25 @@ from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import (
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     FailExecutionCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
+    failed_event,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        ArtifactsCollectedCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PhaseCommandsCompletedEvent import (
+        PhaseCommandsCompletedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
+        WorkflowFailedEvent,
+    )
 
 #: `error_type` on the `WorkflowFailed` a failed gate writes.
 COMMAND_GATE_ERROR_TYPE = "CommandPhaseFailed"
@@ -124,3 +137,36 @@ class CommandGateRecord:
     def failure_of(self, phase_id: str) -> GateFailure | None:
         """The failure recorded for this phase; None for a pass or an agent Phase."""
         return self._failures.get(phase_id)
+
+    def report_event(self, event: PhaseCommandsCompletedEvent) -> None:
+        """Record a `PhaseCommandsCompleted`, live or replayed."""
+        from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import evt
+
+        self.report(
+            evt(event, "phase_id") or "",
+            success=bool(evt(event, "success")),
+            timed_out=bool(evt(event, "timed_out", False)),
+            steps=evt(event, "steps", []),
+        )
+
+    def failed_event(
+        self,
+        collected: ArtifactsCollectedCommand,
+        completed_phases: int,
+        total_phases: int,
+        workflow_id: str,
+    ) -> WorkflowFailedEvent | None:
+        """The `WorkflowFailed` collection writes for a failed gate; None when it passed."""
+        gate = self.failure_of(collected.phase_id)
+        if gate is None:
+            return None
+        return failed_event(
+            gate.command(
+                execution_id=collected.aggregate_id,
+                phase_id=collected.phase_id,
+                completed_phases=completed_phases,
+                total_phases=total_phases,
+                artifact_ids=collected.artifact_ids,
+            ),
+            workflow_id,
+        )

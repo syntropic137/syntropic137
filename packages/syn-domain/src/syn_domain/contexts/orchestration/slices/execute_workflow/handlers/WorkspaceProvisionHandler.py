@@ -177,6 +177,18 @@ def _codex_auth_staged_for(phase: ExecutablePhase) -> bool:
     return any(_auth_staging_for(a.provider, a.allow_delegation)[0] for a in agents)
 
 
+def _agent_staging(phase: ExecutablePhase) -> tuple[bool, bool]:
+    """Whether to stage codex auth, and whether to inline instruction imports.
+
+    Both False for a command phase: it runs no agent, so nothing agent-shaped
+    is staged, no model credential above all (ADR-078 D3, D7).
+    """
+    if phase.kind is PhaseKind.COMMAND:
+        return False, False
+    inline = not all(agent.expands_at_imports for agent in _agents_that_may_run(phase))
+    return _codex_auth_staged_for(phase), inline
+
+
 def _agents_that_may_run(phase: ExecutablePhase) -> frozenset[AgentProvider]:
     """Every provider whose CLI may run in this phase's workspace.
 
@@ -390,10 +402,7 @@ class WorkspaceProvisionHandler:
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
         workspace = await workspace_cm.__aenter__()
         try:
-            # A command phase runs no agent, so nothing agent-shaped is staged:
-            # no model credential, plugin, skill or hook (ADR-078 D3, D7).
-            runs_agent = phase.kind is PhaseKind.AGENT
-            include_codex_auth = runs_agent and _codex_auth_staged_for(phase)
+            include_codex_auth, inline_instructions = _agent_staging(phase)
             await self._hydrate_workspace(
                 workspace,
                 effective_repos,
@@ -403,8 +412,7 @@ class WorkspaceProvisionHandler:
                 continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
                 credential_policy=policy,
-                inline_instructions=runs_agent
-                and not all(agent.expands_at_imports for agent in _agents_that_may_run(phase)),
+                inline_instructions=inline_instructions,
             )
             # Read back BEFORE anything else is staged and long before the agent
             # is launched: a workspace not at its pins is refused here (#967).
@@ -418,8 +426,7 @@ class WorkspaceProvisionHandler:
                 if phase.clone_repos
                 else ()
             )
-            if runs_agent:
-                await self._prepare_for_agent(workspace, phase)
+            await self._prepare_for_agent(workspace, phase)
             await self._inject_phase_artifacts(
                 workspace, artifacts, completed_phase_ids or [], outputs, todo
             )
@@ -656,7 +663,12 @@ class WorkspaceProvisionHandler:
             )
 
     async def _prepare_for_agent(self, workspace: ManagedWorkspace, phase: ExecutablePhase) -> None:
-        """Stage what only an agent reads: plugins, skills, the sandbox probe, the hook."""
+        """Stage what only an agent reads: plugins, skills, the sandbox probe, the hook.
+
+        Nothing for a command phase, which runs no agent (ADR-078 D3).
+        """
+        if phase.kind is PhaseKind.COMMAND:
+            return
         await self._materialize_claude_plugins(workspace, phase)
         await self._materialize_and_install_skills(workspace, phase)
         await self._install_baked_delegation_skill(workspace, phase)
