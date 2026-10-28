@@ -427,6 +427,36 @@ phases:
 - On E2B the sandbox size is the template's (`SYN_E2B_MEMORY_MB`); a request
   above it fails the phase at provisioning.
 
+### Per-phase workspace process limit (`resources.pids_limit`)
+
+Every workspace caps how many processes and threads it may hold
+(`--pids-limit`). Threads count, so a test suite that starts a worker and its
+threads per core (cargo, libtest, `node --test`, Mesa's lavapipe) can hit the
+default and fail with `fork: Resource temporarily unavailable` (EAGAIN). A
+phase may ask for more:
+
+```yaml title="workflow.yaml"
+phases:
+  - id: test
+    name: Test
+    order: 1
+    prompt_file: phases/test.md
+    resources:
+      memory_mb: 8192
+      pids_limit: 4096
+```
+
+- Unset means the deployment default, `SYN_WORKSPACE_PIDS_LIMIT` (256). The
+  minimum is 64.
+- Per phase, like memory: only this phase's workspace gets it.
+- The deployment's ceiling is `SYN_WORKSPACE_PIDS_MAX`. Unset, nothing above the
+  default is allowed. A request above the ceiling is **refused**, never clamped,
+  at the same points as memory: install, start (422), resume (422) and
+  provisioning. A build given fewer pids than it needs fails late with EAGAIN,
+  which reads like a bug in the code under test.
+- Unlike memory, a higher pids limit does not count as more than one run: it
+  is a per-container cap, not a share of the host.
+
 ### What each harness gives you
 
 | | `claude` | `codex` |

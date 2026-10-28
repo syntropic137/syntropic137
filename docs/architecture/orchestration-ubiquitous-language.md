@@ -91,15 +91,17 @@ scores does not lend that power to the others.
 
 What a Phase asks its workspace to be beyond the deployment default, declared
 per Phase as `resources` (`WorkspaceResourceRequest`, okrs-51p.30). Today it
-holds one field, `memory_mb`. A Phase that declares nothing gets the
-deployment default (`SYN_WORKSPACE_MEMORY_LIMIT_MB`). Per Phase, not per
+holds two fields, `memory_mb` and `pids_limit`. A Phase that declares nothing
+gets the deployment defaults (`SYN_WORKSPACE_MEMORY_LIMIT_MB`,
+`SYN_WORKSPACE_PIDS_LIMIT`). Per Phase, not per
 Workflow, because a workspace is per Phase: a build that needs 12 GB does not
 hold 12 GB through the review Phases after it. It is a **request**, not a
 limit the Phase sets: the deployment decides whether it fits the
-[Workspace Memory Ceiling](#workspace-memory-ceiling). Pinned with the Phase
+[Workspace Memory Ceiling](#workspace-memory-ceiling) and the
+[Workspace Pids Ceiling](#workspace-pids-ceiling). Pinned with the Phase
 in `WorkflowExecutionStarted.pinned_phases`, so a resume runs under the same
-request, and the memory the container was actually given is recorded on
-`WorkspaceCreated.security_settings`.
+request, and the memory and pids limit the container was actually given are
+recorded on `WorkspaceCreated.security_settings`.
 
 ## Workspace Memory Ceiling
 
@@ -110,6 +112,26 @@ update path, in `CreateWorkflowTemplateHandler`), at start (a 422 before any
 Phase is paid for), at resume (a 422 before the parent's one resume is spent,
 for the Phases the resume would run) and at provisioning: a workspace given less
 memory than it declared is OOM-killed mid-run, and that reads as a code bug.
+
+## Workspace Pids Limit
+
+How many processes and threads one workspace container may hold
+(`--pids-limit`; `SecurityPolicy.pids_limit`). The deployment default is
+`SYN_WORKSPACE_PIDS_LIMIT` (256, the value agentic-workspace used to apply on
+its own); a Phase may request more with `resources.pids_limit` (floor 64).
+Threads count, which is why parallel test suites hit it. Not a share of the
+host: unlike memory, a higher limit does not reserve anything from the
+[Workspace Memory Ledger](#workspace-memory-ledger) or count as more than one
+Execution.
+
+## Workspace Pids Ceiling
+
+The highest [Workspace Pids Limit](#workspace-pids-limit) one Phase may request
+on this deployment (`SYN_WORKSPACE_PIDS_MAX`; unset means the default, so
+nothing above it). Refused, never clamped, at the same four points as the
+[Workspace Memory Ceiling](#workspace-memory-ceiling): a build given fewer pids
+than it declared fails late with fork/EAGAIN ("Resource temporarily
+unavailable"), which reads as a code bug.
 
 ## Workspace Memory Ledger
 
