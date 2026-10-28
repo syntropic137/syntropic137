@@ -39,6 +39,7 @@ from syn_domain.contexts.orchestration import (
     WorkspaceCredentialPolicy,
     WorkspaceResourceRequest,
     require_memory_within_cap,
+    require_pids_within_cap,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     CapabilityType,
@@ -49,6 +50,7 @@ from syn_shared.platform_access import PlatformScope
 from syn_shared.settings.workspace import (
     DEFAULT_WORKSPACE_CPU_LIMIT,
     DEFAULT_WORKSPACE_MEMORY_LIMIT_MB,
+    DEFAULT_WORKSPACE_PIDS_LIMIT,
     WorkspaceRuntime,
 )
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
@@ -122,6 +124,8 @@ class WorkspaceServiceConfig:
         image: Container image for workspace
         memory_limit_mb: Memory limit in MB for a phase that requests none
         memory_max_mb: The most memory a phase may request (okrs-51p.30)
+        pids_limit: Processes and threads for a phase that requests none
+        pids_max: The highest pids limit a phase may request (okrs-51p.30)
         cpu_limit_cores: CPU limit in cores
         timeout_seconds: Default command timeout
         allowed_hosts: Allowed egress hosts for sidecar
@@ -132,6 +136,8 @@ class WorkspaceServiceConfig:
     image: str = DEFAULT_WORKSPACE_IMAGE
     memory_limit_mb: int = DEFAULT_WORKSPACE_MEMORY_LIMIT_MB
     memory_max_mb: int = DEFAULT_WORKSPACE_MEMORY_LIMIT_MB
+    pids_limit: int = DEFAULT_WORKSPACE_PIDS_LIMIT
+    pids_max: int = DEFAULT_WORKSPACE_PIDS_LIMIT
     cpu_limit_cores: float = DEFAULT_WORKSPACE_CPU_LIMIT
     timeout_seconds: int = 3600  # 1 hour
     allowed_hosts: tuple[str, ...] = (
@@ -157,6 +163,9 @@ class WorkspaceServiceConfig:
                 if settings.memory_max_mb is None
                 else settings.memory_max_mb
             ),
+            pids_limit=settings.pids_limit,
+            # Unset is "no phase may ask for more than the default".
+            pids_max=(settings.pids_limit if settings.pids_max is None else settings.pids_max),
             cpu_limit_cores=settings.cpu_limit,
             runtime=settings.runtime,
         )
@@ -591,6 +600,7 @@ class WorkspaceService:
         extra_environment: dict[str, str] | None,
         capture_session_id: str | None = None,
         memory_mb: int | None = None,
+        pids_limit: int | None = None,
     ) -> tuple[WorkspaceAggregate, IsolationConfig]:
         """Create aggregate and isolation config for a new workspace.
 
@@ -601,6 +611,7 @@ class WorkspaceService:
             phase_id: Optional phase ID
             extra_environment: Additional environment variables
             memory_mb: This workspace's memory; None is the configured default.
+            pids_limit: This workspace's pids limit; None is the configured default.
 
         Returns:
             Tuple of (WorkspaceAggregate, IsolationConfig).
@@ -614,6 +625,7 @@ class WorkspaceService:
             extra_environment=extra_environment,
             capture_session_id=capture_session_id,
             memory_limit_mb=memory_mb,
+            pids_limit=pids_limit,
         )
         aggregate = create_workspace_aggregate(
             workspace_id=workspace_id,
@@ -700,7 +712,8 @@ class WorkspaceService:
                 token can launch into or score (#1744).
             resources: What the phase asked its workspace to be (okrs-51p.30).
                 None or empty: the configured default. A request above
-                ``memory_max_mb`` raises ``WorkspaceMemoryOverCapError``
+                ``memory_max_mb`` raises ``WorkspaceMemoryOverCapError``, and
+                one above ``pids_max`` raises ``WorkspacePidsOverCapError``,
                 before any container or token exists.
 
         Yields:
@@ -713,6 +726,7 @@ class WorkspaceService:
         # The last of three places this is checked (install, start, here), and
         # the one that holds whatever the other two missed: never clamp.
         require_memory_within_cap(wanted, self._config.memory_max_mb, phase_id=phase_id)
+        require_pids_within_cap(wanted, self._config.pids_max, phase_id=phase_id)
         memory_mb = wanted.memory_mb_or(self._config.memory_limit_mb)
 
         workspace_id = str(uuid.uuid4())
@@ -725,6 +739,7 @@ class WorkspaceService:
             extra_environment,
             capture_session_id,
             memory_mb=memory_mb,
+            pids_limit=wanted.pids_limit_or(self._config.pids_limit),
         )
         reservation = await self._reserve_memory(memory_mb, workspace_id)
 

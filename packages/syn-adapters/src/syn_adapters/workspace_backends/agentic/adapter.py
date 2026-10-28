@@ -10,6 +10,7 @@ See ADR-021: Isolated Workspace Architecture
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import os
 import shlex
@@ -429,7 +430,12 @@ class AgenticIsolationAdapter:
             credentials=session_store_credential_bindings(self._session_store),
             mounts=capture_mounts,
             labels=_container_labels(config),
-            security=self._security,
+            # The provider-level policy (image-derived runtime, AppArmor,
+            # seccomp) with only this phase's pids limit replaced
+            # (okrs-51p.30). syn137 owns the default, so it is always passed.
+            security=dataclasses.replace(
+                self._security, pids_limit=config.security_policy.pids_limit
+            ),
             limits=ResourceLimits(
                 cpu=f"{config.security_policy.cpu_limit_cores:g}",
                 memory=f"{config.security_policy.memory_limit_mb}m",

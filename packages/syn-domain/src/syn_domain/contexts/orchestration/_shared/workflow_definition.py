@@ -467,7 +467,11 @@ class PhaseYamlDefinition(BaseModel):
     hold it through the review phases after it. Omitted means the deployment
     default (``SYN_WORKSPACE_MEMORY_LIMIT_MB``). A request above the
     deployment ceiling (``SYN_WORKSPACE_MEMORY_MAX_MB``) is refused at
-    install and at start, never clamped."""
+    install and at start, never clamped.
+
+    ``resources: {pids_limit: 2048}`` raises the workspace's process and
+    thread limit the same way: default ``SYN_WORKSPACE_PIDS_LIMIT``, ceiling
+    ``SYN_WORKSPACE_PIDS_MAX``, refused above it."""
 
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None

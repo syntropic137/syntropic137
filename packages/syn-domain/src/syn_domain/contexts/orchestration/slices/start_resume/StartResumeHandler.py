@@ -140,7 +140,8 @@ class StartResumeHandler:
             raise ValueError(refusal)
         # okrs-51p.30: refused before dispatch, not at the over-ceiling
         # phase's workspace after the phases before it have run and been paid
-        # for. Raises WorkspaceMemoryOverCapError, a ValueError.
+        # for. Raises WorkspaceMemoryOverCapError or WorkspacePidsOverCapError,
+        # both ValueErrors.
         require_phases_within_cap(phases_the_resume_runs(command))
         # The inheritance is resolved HERE, synchronously, for the reason in the
         # docstring above. `inherited_outputs` also runs inside the background

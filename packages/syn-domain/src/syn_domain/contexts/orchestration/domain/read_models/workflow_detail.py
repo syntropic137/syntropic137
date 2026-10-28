@@ -184,7 +184,7 @@ class PhaseDefinitionDetail:
     """Whether this phase fails when it reports no ``review_verdict`` (PC-116)."""
 
     resources: WorkspaceResourceRequest = field(default_factory=WorkspaceResourceRequest)
-    """What this phase's workspace asks for, e.g. ``memory_mb`` (okrs-51p.30).
+    """What this phase's workspace asks for: ``memory_mb``, ``pids_limit`` (okrs-51p.30).
     Readable because it decides how much of the host one run of it holds."""
 
     sandbox: str = DEFAULT_PHASE_SANDBOX

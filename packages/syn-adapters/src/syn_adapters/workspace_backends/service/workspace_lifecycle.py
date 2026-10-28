@@ -107,6 +107,7 @@ def build_isolation_config(
     extra_environment: dict[str, str] | None,
     capture_session_id: str | None = None,
     memory_limit_mb: int | None = None,
+    pids_limit: int | None = None,
 ) -> IsolationConfig:
     """Build IsolationConfig with merged environment variables.
 
@@ -119,6 +120,8 @@ def build_isolation_config(
         extra_environment: Additional environment variables
         memory_limit_mb: This workspace's memory, as its phase requested
             (okrs-51p.30); ``config.memory_limit_mb`` when None
+        pids_limit: This workspace's process and thread limit, as its phase
+            requested (okrs-51p.30); ``config.pids_limit`` when None
 
     Returns:
         IsolationConfig for container creation
@@ -154,6 +157,7 @@ def build_isolation_config(
                 config.memory_limit_mb if memory_limit_mb is None else memory_limit_mb
             ),
             cpu_limit_cores=config.cpu_limit_cores,
+            pids_limit=config.pids_limit if pids_limit is None else pids_limit,
         ),
         environment=merged_environment,
     )

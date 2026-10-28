@@ -13,6 +13,7 @@ import pytest
 
 from syn_domain.contexts.orchestration import (
     WorkspaceMemoryOverCapError,
+    WorkspacePidsOverCapError,
     build_command_from_definition,
 )
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
@@ -80,5 +81,34 @@ async def test_a_request_within_the_ceiling_installs() -> None:
     repository = InMemoryWorkflowRepository()
 
     await _handler(repository, 16384).handle(build_command_from_definition(_yaml(12288)))
+
+    assert repository.streams
+
+
+def _pids_yaml(pids_limit: int) -> WorkflowDefinition:
+    resources = f"    resources: {{pids_limit: {pids_limit}}}\n"
+    return WorkflowDefinition.from_yaml(_YAML.format(resources=resources))
+
+
+async def test_yaml_install_refuses_a_pids_request_above_the_ceiling() -> None:
+    """2048 under the unset SYN_WORKSPACE_PIDS_MAX (= the 256 default)."""
+    repository = InMemoryWorkflowRepository()
+
+    with pytest.raises(WorkspacePidsOverCapError, match="build"):
+        await _handler(repository).handle(build_command_from_definition(_pids_yaml(2048)))
+
+    assert repository.streams == {}
+
+
+async def test_a_pids_request_within_an_injected_ceiling_installs() -> None:
+    repository = InMemoryWorkflowRepository()
+    handler = CreateWorkflowTemplateHandler(
+        repository,
+        InMemoryEventPublisher(),
+        model_defaults=PhaseModelDefaults(),
+        pids_ceiling=4096,
+    )
+
+    await handler.handle(build_command_from_definition(_pids_yaml(2048)))
 
     assert repository.streams

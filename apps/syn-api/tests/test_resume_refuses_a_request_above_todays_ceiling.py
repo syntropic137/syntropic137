@@ -12,6 +12,7 @@ asked for more is not held to it: the child does not run it.
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import pytest
@@ -24,7 +25,11 @@ from test_resume_endpoint import (  # pyright: ignore[reportMissingImports]
 )
 
 from syn_api.routes.executions.resume import ResumeRequest, resume
-from syn_domain.contexts.orchestration import WorkspaceMemoryOverCapError, WorkspaceResourceRequest
+from syn_domain.contexts.orchestration import (
+    WorkspaceMemoryOverCapError,
+    WorkspacePidsOverCapError,
+    WorkspaceResourceRequest,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     CompletePhaseCommand,
     FailExecutionCommand,
@@ -50,7 +55,9 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.unit
 
 
-def _parent(requests: Mapping[str, int]) -> WorkflowExecutionAggregate:
+def _parent(
+    requests: Mapping[str, int], pids: Mapping[str, int] = MappingProxyType({})
+) -> WorkflowExecutionAggregate:
     """Completed `research`, failed before `plan`: a resume runs `plan` and `implement`."""
     aggregate = WorkflowExecutionAggregate()
     aggregate.start_execution(
@@ -71,7 +78,9 @@ def _parent(requests: Mapping[str, int]) -> WorkflowExecutionAggregate:
                     order=i + 1,
                     agent_config=AgentConfiguration(),
                     prompt_template=f"{p} as pinned",
-                    resources=WorkspaceResourceRequest(memory_mb=requests.get(p)),
+                    resources=WorkspaceResourceRequest(
+                        memory_mb=requests.get(p), pids_limit=pids.get(p)
+                    ),
                 )
                 for i, p in enumerate(PHASES)
             ],
@@ -161,4 +170,41 @@ async def test_the_dispatcher_refuses_before_it_spawns_the_start(
             await handler.validate(PARENT)
     finally:
         monkeypatch.delenv("SYN_WORKSPACE_MEMORY_LIMIT_MB")
+        reset_settings()
+
+
+async def test_a_remaining_phase_above_todays_pids_ceiling_is_a_422_and_spends_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pids ceiling (unset: the 256 default) is held at the same point as memory."""
+    executions = _Executions(_parent({}, pids={"implement": 2048}))
+    _point_wiring_at(executions, monkeypatch)
+
+    with pytest.raises(HTTPException) as caught:
+        await resume(PARENT, ResumeRequest())
+
+    assert caught.value.status_code == 422
+    assert "implement" in str(caught.value.detail)
+    assert "SYN_WORKSPACE_PIDS_MAX" in str(caught.value.detail)
+    assert executions.saved == [], "the parent's one resume must not be spent"
+
+
+async def test_the_dispatcher_refuses_a_pids_request_before_it_spawns_the_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executions = _Executions(_parent({}, pids={"plan": 256}))
+    _point_wiring_at(executions, monkeypatch)
+    await resume(PARENT, ResumeRequest())  # admitted under today's ceiling
+
+    handler = StartResumeHandler.__new__(StartResumeHandler)
+    handler._executions = executions  # type: ignore[assignment]
+    monkeypatch.setenv("SYN_WORKSPACE_PIDS_LIMIT", "128")
+    from syn_shared.settings import reset_settings
+
+    reset_settings()
+    try:
+        with pytest.raises(WorkspacePidsOverCapError, match="plan"):
+            await handler.validate(PARENT)
+    finally:
+        monkeypatch.delenv("SYN_WORKSPACE_PIDS_LIMIT")
         reset_settings()

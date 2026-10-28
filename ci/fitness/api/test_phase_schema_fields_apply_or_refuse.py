@@ -79,7 +79,8 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # that reports no verdict.
     "requires_verdict": ("ExecutablePhase", "requires_verdict"),
     # Carried to `create_workspace`, where `memory_mb` is the container's
-    # memory limit and its share of the workspace memory ledger (okrs-51p.30).
+    # memory limit and its share of the workspace memory ledger, and
+    # `pids_limit` is its --pids-limit (okrs-51p.30).
     "resources": ("ExecutablePhase", "resources"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),

@@ -57,6 +57,7 @@ from syn_domain.contexts.orchestration import (
     UnsupportedExecutionTypeError,
     UnsupportedToolPolicyForProviderError,
     WorkspaceMemoryOverCapError,
+    WorkspacePidsOverCapError,
     launch_eval_for,
     validate_phase_declarations,
 )
@@ -569,9 +570,10 @@ def _check_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
         UnsupportedToolNameError,
         UnsupportedToolPolicyForProviderError,
         UnrunnablePhaseSandboxError,
-        # okrs-51p.30: a phase asking for more workspace memory than this
+        # okrs-51p.30: a phase asking for more workspace memory or pids than this
         # deployment allows is refused before the run exists.
         WorkspaceMemoryOverCapError,
+        WorkspacePidsOverCapError,
     ) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
