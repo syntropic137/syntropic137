@@ -27,7 +27,7 @@ workspace runs under ``SYN_WORKSPACE_PIDS_LIMIT`` processes and threads (256
 by default), and a test suite that spawns workers and threads per core
 (cargo, libtest, ``node --test``, lavapipe) exceeds it. A phase may ask for
 more, bounded by ``SYN_WORKSPACE_PIDS_MAX``, and is refused above it: a build
-given fewer pids than it needs fails late with fork/EAGAIN ("Resource
+given fewer pids than it needs fails late with EAGAIN ("Resource
 temporarily unavailable"), which reads like a code bug. Unlike memory, pids
 are not a pooled host budget, so a larger request is not counted against
 concurrent admission.
@@ -107,7 +107,7 @@ class WorkspacePidsOverCapError(ValueError):
             f"deployment's workspace pids ceiling of {cap} "
             "(SYN_WORKSPACE_PIDS_MAX). Lower the request, or have the operator "
             "raise the ceiling. Refused rather than clamped: a workspace given "
-            "fewer pids than it declared fails late with fork/EAGAIN "
+            "fewer pids than it declared fails late with EAGAIN "
             "('Resource temporarily unavailable'), which reads like a code bug."
         )
         self.requested = requested

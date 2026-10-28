@@ -130,7 +130,7 @@ The highest [Workspace Pids Limit](#workspace-pids-limit) one Phase may request
 on this deployment (`SYN_WORKSPACE_PIDS_MAX`; unset means the default, so
 nothing above it). Refused, never clamped, at the same four points as the
 [Workspace Memory Ceiling](#workspace-memory-ceiling): a build given fewer pids
-than it declared fails late with fork/EAGAIN ("Resource temporarily
+than it declared fails late with EAGAIN ("Resource temporarily
 unavailable"), which reads as a code bug.
 
 ## Workspace Memory Ledger

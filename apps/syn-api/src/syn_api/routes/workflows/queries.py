@@ -630,7 +630,7 @@ def _yaml_declaration_lines(phase: PhaseDefinitionResponse) -> list[str]:
     if phase.requires_verdict:
         lines.append("    requires_verdict: true")
     # okrs-51p.30: dropped, a reinstalled build phase would run in the default
-    # workspace and be OOM-killed, or fork-fail at the default pids limit.
+    # workspace and be OOM-killed, or hit EAGAIN at the default pids limit.
     requested = [
         f"{key}: {value}"
         for key, value in (
