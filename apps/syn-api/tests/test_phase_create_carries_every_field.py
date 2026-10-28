@@ -27,7 +27,12 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_api.routes.workflows.commands import _build_phase_defs
-from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
+from syn_domain.contexts.orchestration import (
+    InconsistentPhaseKindError,
+    PhaseDefinition,
+    PhaseExecutionType,
+    PhaseKind,
+)
 from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
@@ -104,6 +109,22 @@ _EVERY_FIELD: Mapping[str, object] = {
 }
 
 
+#: The fields only a command phase sets (ADR-078). They cannot sit in
+#: `_EVERY_FIELD`, which is an agent phase and would be refused for them, so
+#: they get their own phase and their own round trip below.
+_COMMAND_PHASE: Mapping[str, object] = {
+    "phase_id": "build",
+    "name": "Build",
+    "order": 1,
+    # NOT the default ("agent"): a dropped mapping reads agent.
+    "kind": "command",
+    "commands": [
+        {"name": "cargo-build", "run": "cargo build", "timeout_seconds": 900},
+        {"name": "size", "run": "./size.sh", "allow_failure": True},
+    ],
+}
+
+
 def test_the_fixture_covers_every_field_on_the_model() -> None:
     """A new field on `PhaseDefinition` fails here first.
 
@@ -112,7 +133,28 @@ def test_the_fixture_covers_every_field_on_the_model() -> None:
     level up.
     """
     assert not set(_EVERY_FIELD) & set(_NOT_CALLER_SETTABLE)
-    assert set(_EVERY_FIELD) | set(_NOT_CALLER_SETTABLE) == set(PhaseDefinition.model_fields)
+    assert set(_EVERY_FIELD) | set(_NOT_CALLER_SETTABLE) | {"kind", "commands"} == set(
+        PhaseDefinition.model_fields
+    )
+
+
+def test_a_command_phase_reaches_the_domain_with_its_steps() -> None:
+    """kind and commands survive, and the undeclared delivers default is False (ADR-078)."""
+    (phase,) = _build_phase_defs([dict(_COMMAND_PHASE)])
+
+    assert phase.kind is PhaseKind.COMMAND
+    assert [(c.name, c.run, c.timeout_seconds, c.allow_failure) for c in phase.commands] == [
+        ("cargo-build", "cargo build", 900, False),
+        ("size", "./size.sh", None, True),
+    ]
+    assert phase.delivers_repo_changes is False
+    assert phase.prompt_template is None
+
+
+def test_a_command_phase_with_an_agent_field_is_refused_at_create() -> None:
+    """The API holds a command phase to the YAML's kind rule (ADR-078 D2)."""
+    with pytest.raises(InconsistentPhaseKindError, match="prompt_template"):
+        _build_phase_defs([{**_COMMAND_PHASE, "prompt_template": "do it"}])
 
 
 def test_a_caller_cannot_set_what_is_not_caller_settable() -> None:

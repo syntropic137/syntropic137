@@ -16,12 +16,16 @@ if TYPE_CHECKING:
         AgentExecutionCompletedCommand,
         ArtifactsCollectedCommand,
         ProvisionWorkspaceCompletedCommand,
+        RecordPhaseCommandsCommand,
     )
     from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
         AgentExecutionCompletedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
         ArtifactsCollectedForPhaseEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PhaseCommandsCompletedEvent import (
+        PhaseCommandsCompletedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
         WorkspaceProvisionedForPhaseEvent,
@@ -71,6 +75,26 @@ def agent_completed_event(
         reported_evidence=list(command.reported_evidence),
         agent_provider=command.agent_provider,
         agent_model=command.agent_model,
+    )
+
+
+def phase_commands_event(
+    command: RecordPhaseCommandsCommand, workflow_id: str
+) -> PhaseCommandsCompletedEvent:
+    """The `PhaseCommandsCompleted` a command Phase's finished steps record."""
+    from syn_domain.contexts.orchestration.domain.events.PhaseCommandsCompletedEvent import (
+        PhaseCommandsCompletedEvent,
+    )
+
+    return PhaseCommandsCompletedEvent(
+        workflow_id=workflow_id,
+        execution_id=command.aggregate_id,
+        phase_id=command.phase_id,
+        workspace_id=command.workspace_id,
+        completed_at=datetime.now(UTC),
+        success=command.success,
+        timed_out=command.timed_out,
+        steps=list(command.steps),
     )
 
 

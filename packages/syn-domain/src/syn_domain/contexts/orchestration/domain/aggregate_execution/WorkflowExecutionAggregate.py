@@ -24,6 +24,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continu
     LeftBranches,
     PushedCommit,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.command_gate import (
+    CommandGateRecord,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (  # noqa: TC001 - re-exported + used at runtime by @command_handler
     AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,
@@ -34,6 +37,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     InterruptExecutionCommand,
     ProvisionWorkspaceCompletedCommand,
     RecordCancelledWorkCommand,
+    RecordPhaseCommandsCommand,
     RecordPhasePushCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
@@ -82,6 +86,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.own_pushes imp
 from syn_domain.contexts.orchestration.domain.aggregate_execution.phase_step_events import (
     agent_completed_event,
     artifacts_collected_event,
+    phase_commands_event,
     workspace_provisioned_event,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import (
@@ -175,6 +180,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
         NextPhaseReadyEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PhaseCommandsCompletedEvent import (
+        PhaseCommandsCompletedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
         PhaseCommitPushedEvent,
@@ -302,6 +310,8 @@ class WorkflowExecutionAggregate(
         self._reported_side_effects: dict[str, SideEffectStatus | None] = {}
         #: Review verdicts, which choose the next phase (PC-63).
         self._reviews = ReviewRecord()
+        #: What each command Phase's steps said; read at its collection (ADR-078 D5).
+        self._command_gates = CommandGateRecord()
         #: What each phase declared it needs proven and what the forge showed
         #: at its collection (plan §A.2). Recorded only: nothing decides on it.
         self._evidence = EvidenceRecord()
@@ -714,6 +724,16 @@ class WorkflowExecutionAggregate(
 
         self._apply(agent_completed_event(command, self._workflow_id or ""))
 
+    @command_handler("RecordPhaseCommandsCommand")
+    def record_phase_commands(self, command: RecordPhaseCommandsCommand) -> None:
+        """Handle a command Phase's steps having run (ADR-078 D5)."""
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot record phase commands in status {self._status}"
+            raise ValueError(msg)
+        refuse_reopening(self._completed_phase_ids, command.phase_id, "record commands for")
+
+        self._apply(phase_commands_event(command, self._workflow_id or ""))
+
     @command_handler("ArtifactsCollectedCommand")
     def artifacts_collected(self, command: ArtifactsCollectedCommand) -> None:
         """Handle artifacts collected — aggregate decides if more phases exist."""
@@ -723,6 +743,23 @@ class WorkflowExecutionAggregate(
         refuse_reopening(self._completed_phase_ids, command.phase_id, "collect artifacts for")
 
         self._apply(artifacts_collected_event(command, self._workflow_id or ""))
+
+        # A failed command gate ends the run here, its logs already kept (ADR-078 D5).
+        gate = self._command_gates.failure_of(command.phase_id)
+        if gate is not None:
+            self._apply(
+                failed_event(
+                    gate.command(
+                        execution_id=command.aggregate_id,
+                        phase_id=command.phase_id,
+                        completed_phases=self._completed_phases,
+                        total_phases=len(self._phase_definitions),
+                        artifact_ids=command.artifact_ids,
+                    ),
+                    self._workflow_id or "",
+                )
+            )
+            return
 
         # The phase's own verdict decides what runs next (PC-63).
         decided = next_phase(
@@ -1002,6 +1039,16 @@ class WorkflowExecutionAggregate(
             phase_name=self._phase_names.get(phase_id, phase_id),
             session_id=evt(event, "session_id") or "",
             last_agent_message=said,
+        )
+
+    @event_sourcing_handler("PhaseCommandsCompleted")
+    def on_phase_commands_completed(self, event: PhaseCommandsCompletedEvent) -> None:
+        """Apply PhaseCommandsCompletedEvent: keep the gate's verdict for collection."""
+        self._command_gates.report(
+            evt(event, "phase_id") or "",
+            success=bool(evt(event, "success")),
+            timed_out=bool(evt(event, "timed_out", False)),
+            steps=evt(event, "steps", []),
         )
 
     @event_sourcing_handler("ArtifactsCollectedForPhase")

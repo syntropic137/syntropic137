@@ -55,6 +55,9 @@ _APPLIED: dict[str, tuple[str, str]] = {
     "order": ("ExecutablePhase", "order"),
     "description": ("ExecutablePhase", "description"),
     "prompt_template": ("ExecutablePhase", "prompt_template"),
+    # ADR-078: what runs the phase, and a command phase's steps.
+    "kind": ("ExecutablePhase", "kind"),
+    "commands": ("ExecutablePhase", "commands"),
     # `prompt_file` is resolved into `prompt_template` at load time, so it
     # rides the same keyword; it has no separate execution identity.
     "prompt_file": ("ExecutablePhase", "prompt_template"),

@@ -3222,6 +3222,23 @@ export interface components {
             detail: string;
         };
         /**
+         * CommandStepResponse
+         * @description One fixed shell step of a command phase (ADR-078).
+         */
+        CommandStepResponse: {
+            /** Name */
+            name: string;
+            /** Run */
+            run: string;
+            /** Timeout Seconds */
+            timeout_seconds?: number | null;
+            /**
+             * Allow Failure
+             * @default false
+             */
+            allow_failure: boolean;
+        };
+        /**
          * ConditionRequest
          * @description A single trigger condition (field operator value).
          */
@@ -6811,6 +6828,14 @@ export interface components {
              * @default false
              */
             requires_verdict: boolean;
+            /**
+             * Kind
+             * @default agent
+             * @enum {string}
+             */
+            kind: "agent" | "command";
+            /** Commands */
+            commands?: components["schemas"]["CommandStepResponse"][];
             resources?: components["schemas"]["PhaseResourcesResponse"];
             /**
              * Sandbox

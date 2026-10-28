@@ -9662,6 +9662,41 @@
         "title": "CodexAuthStatus",
         "description": "A non-secret description of the configured codex credential."
       },
+      "CommandStepResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "run": {
+            "type": "string",
+            "title": "Run"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          },
+          "allow_failure": {
+            "type": "boolean",
+            "title": "Allow Failure",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "run"
+        ],
+        "title": "CommandStepResponse",
+        "description": "One fixed shell step of a command phase (ADR-078)."
+      },
       "ConditionRequest": {
         "properties": {
           "field": {
@@ -18254,6 +18289,22 @@
             "type": "boolean",
             "title": "Requires Verdict",
             "default": false
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "command"
+            ],
+            "title": "Kind",
+            "default": "agent"
+          },
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/CommandStepResponse"
+            },
+            "type": "array",
+            "title": "Commands"
           },
           "resources": {
             "$ref": "#/components/schemas/PhaseResourcesResponse"

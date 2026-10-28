@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
 from syn_domain.contexts.orchestration._shared.workspace_resources import (
     require_phases_within_cap,
 )
@@ -189,6 +190,10 @@ def _with_default_models(
     """
     normalised: list[PhaseDefinition] = []
     for phase in phases:
+        if phase.kind is PhaseKind.COMMAND:
+            # No agent runs it, so no model is defaulted onto it (ADR-078 D2).
+            normalised.append(phase.model_copy(update={"model_defaulted": False}))
+            continue
         if phase.fallback_agent is not None:
             normalize_phase_model(
                 phase.fallback_agent.provider, phase.fallback_agent.model, defaults
@@ -219,6 +224,9 @@ def _as_stored(
     stored_by_id = {phase.phase_id: phase for phase in stored}
     result: list[PhaseDefinition] = []
     for phase in phases:
+        if phase.kind is PhaseKind.COMMAND:
+            result.append(phase.model_copy(update={"model_defaulted": False}))
+            continue
         _, needs_default = normalize_phase_model(phase.provider, phase.model, defaults)
         previous = stored_by_id.get(phase.phase_id)
         if needs_default and previous is not None and previous.model_defaulted:

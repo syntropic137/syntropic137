@@ -78,6 +78,9 @@ from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import 
 from syn_domain.contexts.orchestration.domain.events.OutputFilesRefusedForPhaseEvent import (
     OutputFilesRefusedForPhaseEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseCommandsCompletedEvent import (
+    PhaseCommandsCompletedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
     PhaseCommitPushedEvent,
 )
@@ -170,6 +173,7 @@ __all__ = [
     "MutationPatchesRemovedEvent",
     "NextPhaseReadyEvent",
     "OutputFilesRefusedForPhaseEvent",
+    "PhaseCommandsCompletedEvent",
     "PhaseCommitPushedEvent",
     "PhaseCompletedEvent",
     "PhaseRetryScheduledEvent",
