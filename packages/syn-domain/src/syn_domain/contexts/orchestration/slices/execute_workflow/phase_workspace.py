@@ -38,6 +38,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     RecordRefusedOutputCommand,
 )
@@ -163,7 +164,8 @@ class PhaseWorkspace:
     ) -> None:
         """Dispatch PROVISION_WORKSPACE."""
         assert todo.phase_id is not None
-        session_id = str(uuid4())
+        # A command phase runs no agent, so it opens no session (ADR-078 D3).
+        session_id = str(uuid4()) if phase.kind is PhaseKind.AGENT else None
         start_cmd = StartPhaseCommand(
             execution_id=todo.execution_id,
             workflow_id=aggregate.workflow_id or "",
@@ -174,18 +176,20 @@ class PhaseWorkspace:
         )
         aggregate.start_phase(start_cmd)
 
-        session_mgr = SessionLifecycleManager(
-            repository=self._session_repo,
-            session_id=session_id,
-            workflow_id=aggregate.workflow_id or "",
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            agent_provider=phase.agent_config.provider,
-            agent_model=phase.agent_config.model,
-            repos=[r.slug for r in repos] if repos else [],
-            observability=self._observability_writer,
-        )
-        await session_mgr.start()
+        session_mgr = None
+        if session_id is not None:
+            session_mgr = SessionLifecycleManager(
+                repository=self._session_repo,
+                session_id=session_id,
+                workflow_id=aggregate.workflow_id or "",
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+                agent_provider=phase.agent_config.provider,
+                agent_model=phase.agent_config.model,
+                repos=[r.slug for r in repos] if repos else [],
+                observability=self._observability_writer,
+            )
+            await session_mgr.start()
         self._runtime.begin(
             todo.phase_id, session_manager=session_mgr, started_at=datetime.now(UTC)
         )
@@ -231,7 +235,7 @@ class PhaseWorkspace:
         todo: TodoItem,
         phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
-        session_id: str,
+        session_id: str | None,
         repo_urls: list[str],
         completed_phase_ids: list[str],
         phase_outputs: PhaseOutputCache,

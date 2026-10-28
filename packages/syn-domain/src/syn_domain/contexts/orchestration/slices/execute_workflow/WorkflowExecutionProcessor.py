@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
 from syn_domain.contexts.orchestration._shared.shipped_ledger import ShippedLedgerProvider
 from syn_domain.contexts.orchestration._shared.shipped_recorder import shipped_recorder
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
@@ -41,6 +42,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown i
 from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
     CancelledWorkLedger,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.command_phase_run import (
+    run_command_phase,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.evidence_heads import (
     EvidenceHeadObserver,
 )
@@ -53,6 +57,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.failed_execution 
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
     AgentExecutionResult,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.CommandPhaseHandler import (
+    CommandPhaseHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_completion import (
     complete_phase,
@@ -698,6 +705,18 @@ class WorkflowExecutionProcessor:
                 repos,
                 completed_phase_ids,
                 phase_outputs,
+            )
+        elif todo.action == TodoAction.RUN_AGENT and phase.kind is PhaseKind.COMMAND:
+            # The same action, a different runner (ADR-078 D3).
+            await run_command_phase(
+                CommandPhaseHandler(controller=self._controller),
+                todo,
+                phase,
+                aggregate,
+                runtime=self._runtimes.of(todo.execution_id),
+                workspaces=self._workspaces_for(todo.execution_id, dispatch_ctx.inputs, journal),
+                journal=journal,
+                kept=dispatch_ctx,
             )
         elif todo.action == TodoAction.RUN_AGENT:
             await self._handle_run_agent(todo, phase, aggregate, dispatch_ctx)

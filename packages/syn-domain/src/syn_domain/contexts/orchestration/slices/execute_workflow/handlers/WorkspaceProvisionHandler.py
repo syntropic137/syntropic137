@@ -345,7 +345,7 @@ class WorkspaceProvisionHandler:
         todo: TodoItem,
         phase: ExecutablePhase,
         workflow_id: str,
-        session_id: str,
+        session_id: str | None,
         repos: list[str] | None = None,
         artifacts: ArtifactCollector | None = None,
         completed_phase_ids: list[str] | None = None,
@@ -361,7 +361,8 @@ class WorkspaceProvisionHandler:
             todo: The to-do item being dispatched.
             phase: The executable phase definition.
             workflow_id: Workflow aggregate ID.
-            session_id: Agent session ID for this phase.
+            session_id: Agent session ID for this phase; None for a command
+                phase, which has no agent session (ADR-078 D3).
             repos: Full GitHub URLs to clone and hydrate context from.
             artifacts: Artifact collector for previous-phase injection.
             completed_phase_ids: Phase IDs completed before this one.
@@ -682,7 +683,7 @@ class WorkspaceProvisionHandler:
         todo: TodoItem,
         phase: ExecutablePhase,
         workflow_id: str,
-        session_id: str,
+        session_id: str | None,
         effective_repos: list[str],
         outputs: dict[str, str],
         inputs: dict[str, object] | None,
@@ -698,7 +699,8 @@ class WorkspaceProvisionHandler:
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             workspace_id=workspace.workspace_id,
-            session_id=session_id,
+            # The event's own "no session" spelling: a command phase has none.
+            session_id=session_id or "",
             checked_out_commits=checked_out,
             image_manifest=workspace.image_manifest,
         )
@@ -710,6 +712,7 @@ class WorkspaceProvisionHandler:
                 claude_cmd=[],
                 command=command,
             )
+        assert session_id is not None, "an agent phase runs under a session"
         # repo_url for {{repo_url}} prompt substitution (backward compat — uses first repo)
         repo_url_for_prompt = effective_repos[0] if effective_repos else None
         prompt = await self._prompt_builder(
