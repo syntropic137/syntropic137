@@ -103,17 +103,41 @@ not by emptying one helper:
 | `phase_workspace` session start, `phase_runtime` finalise | `SessionLifecycleManager` | skipped: a command Phase has no agent session |
 | `agent_attempts` | retries, fallback agent, cost limit, invocation registration | bypassed entirely |
 
-`CommandPhaseHandler` runs each step with
-`workspace.stream(["sh", "-c", run], timeout_seconds=..., working_directory="/workspace")`,
-not `execute`, for two reasons. `execute` buffers both channels whole on the
-executor (`docker_operations.py` bytearrays), so a noisy build costs executor
-memory in proportion to its output; streaming lets the handler keep only a
-bounded ring of the last 8 KiB per channel. And `stream` is the path the
-`ExecutionController` interrupts, so a cancel stops the running step's process
-the same way it stops an agent, the remaining steps are recorded `skipped`, and
-the processor routes it through `ExecutionCancelledEvent` as today. `stream`
-also applies the Phase's `platform_access` grant and the credential withholding
-(#1927), which `execute` does not.
+`CommandPhaseHandler` runs each step through a new transport method,
+`ManagedWorkspace.run_bounded(argv, *, timeout_seconds, working_directory,
+tail_bytes, cancel)`, on the same event-stream transport `stream()` uses, and
+returning a typed `BoundedCommandResult`:
+
+```
+terminal: exited | timed_out | interrupted | failed_to_start
+exit_code: int | None        # set only when terminal == exited
+duration_ms: int
+tail: str                    # last tail_bytes of COMBINED stdout+stderr, scrubbed
+dropped_bytes: int           # output not retained
+```
+
+Neither existing method fits. `execute` buffers both channels whole on the
+executor (`docker_operations.py`). `stream` yields decoded lines, so
+`LineDecoder` (`stream_adapter.py`) holds an unterminated line whole and a build
+that prints without newlines grows executor memory; it also folds a provider
+timeout into the exit code (`stream_adapter.py`), so `exit 124` and a timeout
+look the same. `run_bounded` consumes raw chunks into a ring of `tail_bytes`
+(8 KiB), keeps the terminal state separate from the exit code, and applies
+the credential withholding `stream` applies (#1927) to each chunk with a
+carry-over window as long as the longest withheld value, so a secret split
+across chunks is still withheld before anything is retained. It also injects
+the Phase's `platform_access` grant, as `stream` does.
+
+Output is combined, not per channel: the transport already merges stdout and
+stderr in arrival order, and an interleaved tail is what a person reads to see
+why a build failed.
+
+Cancellation is explicit, not inherited: the handler runs the existing
+`CancelSignalPoller` pattern beside the step, so a cancel arrives during quiet
+and noisy output alike. On cancel it calls `workspace.interrupt()`, the step
+ends `interrupted`, partial results and the tail are kept, later steps are
+`skipped`, and the handler returns a cancellation outcome that the processor
+routes through `ExecutionCancelledEvent` as for an agent.
 
 ### D4. Execution semantics
 
@@ -142,7 +166,7 @@ emits a new Lane 1 event, `PhaseCommandsCompleted` v1:
 ```
 execution_id, phase_id, workspace_id,
 success: bool, timed_out: bool,
-steps: list[CommandStepResult]   # name, outcome (passed|failed|timed_out|skipped|cancelled),
+steps: list[CommandStepResult]   # name, outcome (passed|failed|timed_out|skipped|interrupted|failed_to_start),
                                  # exit_code | None, duration_ms, allow_failure
 ```
 
@@ -155,11 +179,13 @@ agent.
 The to-do projection maps `PhaseCommandsCompleted` to `COLLECT_ARTIFACTS`
 whatever `success` says, so the logs of a failed gate are kept. The aggregate
 decides what that means: `artifacts_collected` for a Phase whose recorded
-command outcome is a failure does NOT select the next Phase; it fails the Phase
-and the Execution with the same events the agent failure path writes
-(`PhaseCompleted(success=false)`, then the execution failure), carrying
-`error_message` naming the step and exit code. So `COMPLETE_PHASE` is never
-queued for a failed command Phase and no later Phase runs.
+command outcome is a failure does NOT select the next Phase; it fails the
+Execution with `WorkflowFailed`, the event `fail_execution()` writes on the
+agent failure path today (`failure_teardown.py`), carrying `error_message`
+naming the step and exit code and `failure_classification: gate`. That is new
+aggregate behaviour (collection deciding failure), not a reuse of an existing
+branch. `COMPLETE_PHASE` is never queued for a failed command Phase and no
+later Phase runs.
 
 `FailureClassification` gains `GATE = "gate"`: a step the author declared
 exited non-zero or hit its own timeout. The platform ran it correctly and it
@@ -191,15 +217,15 @@ for command Phases, the agent-only stranded salvage that reads
 ### D7. Output, credentials and cost
 
 Before reporting, the handler writes into the Workspace's artifact output
-directory `commands.json` (the step results plus each step's last 8 KiB of
-stdout and stderr) and, for a step with output, `commands/<name>.log`. A step
+directory `commands.json` (the step results plus each step's combined tail,
+at most 8 KiB, and `dropped_bytes`) and, for a step with output, `commands/<name>.log`. A step
 with no output gets no log file, because the collector treats an empty file as
 a failed artifact (`ArtifactCollector.py`); `commands.json` is never empty. The
 collector is told to mark `commands.json` primary explicitly rather than
 relying on collection order.
 
-Tails pass the same credential scrubbing collection applies, before they are
-truncated, written or logged.
+Tails are scrubbed inside `run_bounded` (D3) before they are retained, and
+collection's own scrubbing applies again to the written files.
 
 **Credentials, stated plainly.** No Claude or Codex credential is staged. The
 GitHub authority is the existing policy's and is NOT cleared: ADR-024 keeps
