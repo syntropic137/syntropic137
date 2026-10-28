@@ -52,6 +52,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_workspace i
     PhaseWorkspace,
 )
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
+from syn_shared.env_constants import (
+    ENV_AGENTIC_SESSION_STORE_PARTITION,
+    ENV_AGENTIC_SESSION_STORE_PROVIDER,
+    ENV_AGENTIC_SESSION_STORE_SPOOL,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping
@@ -282,8 +287,8 @@ async def test_an_e2b_run_writes_one_sandbox_spool_row(
     # at /spool and the partition recovery derives from the row.
     partition = workspace_capture_location(row.run, row.session_id).partition
     assert any(
-        env.get("AGENTIC_SESSION_STORE_SPOOL") == "/spool"
-        and env.get("AGENTIC_SESSION_STORE_PARTITION") == partition
+        env.get(ENV_AGENTIC_SESSION_STORE_SPOOL) == "/spool"
+        and env.get(ENV_AGENTIC_SESSION_STORE_PARTITION) == partition
         for env in sandbox.environments
     )
 
@@ -367,8 +372,8 @@ def test_the_e2b_kit_captures_without_a_mount() -> None:
     environment: dict[str, str] = {}
     assert kit.capture_mounts(_isolation_config(), environment) == []
     assert kit.spool_backend == "e2b"
-    assert environment["AGENTIC_SESSION_STORE_SPOOL"] == "/spool"
-    assert environment["AGENTIC_SESSION_STORE_PROVIDER"] == "local"
+    assert environment[ENV_AGENTIC_SESSION_STORE_SPOOL] == "/spool"
+    assert environment[ENV_AGENTIC_SESSION_STORE_PROVIDER] == "local"
     assert "session-store" in environment["AGENTIC_CAPABILITIES"].split()
 
 
@@ -391,4 +396,4 @@ def test_the_docker_kit_still_mounts_its_volume() -> None:
         "/spool",
         "volume",
     )
-    assert environment["AGENTIC_SESSION_STORE_PARTITION"] == location.partition
+    assert environment[ENV_AGENTIC_SESSION_STORE_PARTITION] == location.partition

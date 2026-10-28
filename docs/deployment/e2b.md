@@ -14,7 +14,7 @@ port as Docker, so the rest of the system does not know which backend ran.
 |---|---|
 | Creating and destroying a workspace, with confirmed cleanup | **An agent launch on real E2B.** Syntropic137 launches, streams, settles and cancels an agent through the E2B provider's operation contract (#1912), with launch credentials delivered by the provider into the environment, never argv. That is tested against a scripted provider only; `test_an_agent_launches_on_real_e2b` has not run yet. |
 | Running commands (stdout and stderr merged in write order) | Any workspace that needs host credentials. The E2B kit is always `NoCredentials`, so a phase with repositories is refused (see the ubiquitous language). |
-| Writing and reading files, binary-safe | Session capture. E2B cannot mount the host's capture directory. |
+| Writing and reading files, binary-safe | Keeping a captured session. The agent writes its spool to the sandbox's own `/spool` (no mount) and the platform records which sandbox holds it (#2161), but teardown still kills the sandbox and remote recovery is not wired, so the transcript is not yet archived (#1916). |
 | Listing and re-attaching to this run's sandboxes | Choosing E2B per run. Placement is #1917; today the flag switches every workspace. |
 
 None of this has been run against real E2B yet. See [Running the real-E2B

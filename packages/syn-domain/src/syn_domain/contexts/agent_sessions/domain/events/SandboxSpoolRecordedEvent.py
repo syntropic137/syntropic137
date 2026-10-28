@@ -6,7 +6,10 @@ from datetime import datetime  # noqa: TC003
 from typing import Literal
 
 from event_sourcing import DomainEvent, event
-from pydantic import Field
+
+from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
+    RoutingIdentifier,  # noqa: TC001 - pydantic resolves the annotation at runtime
+)
 
 RemoteSpoolBackend = Literal["e2b"]
 """A spool backend whose bytes live on a sandbox's own disk, never on this host."""
@@ -34,6 +37,8 @@ class SandboxSpoolRecordedEvent(DomainEvent):
     execution_id: str
     phase_id: str
     backend: RemoteSpoolBackend
-    executor_id: str = Field(min_length=1)
-    sandbox_id: str = Field(min_length=1)
+    #: Validated as the spool row validates them, so a recorded route can
+    #: always be projected: a fact the projector refuses would stall it.
+    executor_id: RoutingIdentifier
+    sandbox_id: RoutingIdentifier
     recorded_at: datetime

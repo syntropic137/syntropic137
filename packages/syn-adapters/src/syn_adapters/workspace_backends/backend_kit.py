@@ -91,9 +91,11 @@ class BackendKit:
 
         The E2B provider refuses credential bindings and host mounts, so this
         kit is ``NoCredentials`` and captures without a mount: the spool is
-        the sandbox's own ``/spool``, kept by pausing the sandbox
-        (``sandbox-spool/1``). As for Docker, it captures only when a capture
-        source instance is configured. Its one approved
+        the sandbox's own ``/spool`` (``sandbox-spool/1``), and its durable
+        row is written from ``SandboxSpoolRecorded``. As for Docker, it
+        captures only when a capture source instance is configured. The bytes
+        are not yet retained: teardown still kills the sandbox (see
+        ``AgenticIsolationAdapter.destroy``, TODO(#1916)). Its one approved
         "image" is the template, which is the credential-free allowlist the
         Docker kit leaves empty; a per-run image is therefore refused rather
         than silently ignored. A template is not an OCI reference, so there is

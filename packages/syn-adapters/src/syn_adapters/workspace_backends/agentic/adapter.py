@@ -583,6 +583,10 @@ class AgenticIsolationAdapter:
             return None
 
         logger.info("Destroying workspace (id=%s)", handle.isolation_id)
+        # TODO(#1916): a sandbox spool (#2161) dies with this teardown. It
+        # needs pause-until-drained: pause instead of kill until recovery
+        # marks the spool drained. Until then its row outlives its bytes;
+        # remote recovery is unwired, so nothing acts on that row.
         try:
             report = await self._provider.teardown(target=workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
         except Exception as e:

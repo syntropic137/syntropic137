@@ -154,3 +154,26 @@ def test_the_event_is_subscribed_only_with_a_spool_port() -> None:
     assert SandboxSpoolRecordedEvent.event_type in (
         HostSessionEvidenceProjector(AsyncMock(), "i", AsyncMock()).get_subscribed_event_types()
     )
+
+
+@pytest.mark.parametrize("bad", [" ", "a\x00b", "x" * 129])
+def test_a_route_the_spool_row_would_refuse_is_never_recorded(bad: str) -> None:
+    """A fact the projector cannot turn into a row would stall it on every replay."""
+    with pytest.raises(ValidationError):
+        RecordSandboxSpoolCommand(
+            aggregate_id="s", backend="e2b", executor_id=bad, sandbox_id="sbx"
+        )
+    with pytest.raises(ValidationError):
+        RecordSandboxSpoolCommand(
+            aggregate_id="s", backend="e2b", executor_id="host", sandbox_id=bad
+        )
+    with pytest.raises(ValidationError):
+        SandboxSpoolRecordedEvent(
+            session_id="s",
+            execution_id="e",
+            phase_id="p",
+            backend="e2b",
+            executor_id=bad,
+            sandbox_id="sbx",
+            recorded_at=datetime.now(UTC),
+        )

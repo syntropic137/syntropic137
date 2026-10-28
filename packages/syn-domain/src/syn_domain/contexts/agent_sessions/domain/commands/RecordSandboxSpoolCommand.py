@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts.agent_sessions.domain.events.SandboxSpoolRecordedEvent import (
     RemoteSpoolBackend,  # noqa: TC001 - pydantic resolves the annotation at runtime
 )
+from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
+    RoutingIdentifier,  # noqa: TC001 - pydantic resolves the annotation at runtime
+)
 
 
 @command(
@@ -21,5 +24,5 @@ class RecordSandboxSpoolCommand(BaseModel):
 
     aggregate_id: str = Field(..., description="Session whose spool the sandbox holds")
     backend: RemoteSpoolBackend
-    executor_id: str = Field(..., min_length=1, description="syn.host_id of the creator")
-    sandbox_id: str = Field(..., min_length=1, description="The provider's sandbox id")
+    executor_id: RoutingIdentifier = Field(..., description="syn.host_id of the creator")
+    sandbox_id: RoutingIdentifier = Field(..., description="The provider's sandbox id")

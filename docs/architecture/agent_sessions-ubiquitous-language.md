@@ -165,7 +165,8 @@ worker find them after any crash (#1398, #1916).
   on it, on the row, or in a log line (#1919 decides where it is stored).
 - **Mountless capture:** the sandbox spool's capture strategy. The
   session-store capability writes to the sandbox's own `/spool` with the same
-  partition a Docker volume would use; nothing is mounted.
+  partition a Docker volume would use; nothing is mounted. Teardown does not
+  yet pause the sandbox until drained, so the bytes are not yet kept (#1916).
 - **Exclusive drain:** a traversal during which nothing else could write. For
   Docker, no other container referenced the volume. For a sandbox, the provider
   confirmed every agent process stopped after resume. A run in `fencing`, a
