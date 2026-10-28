@@ -89,11 +89,11 @@ backend can run agent work". Brokered splits them: no host credential enters, bu
   presenters, `github_presentation`) are new branches on `delivery`, never on the old bool.
 - `admit()` refuses a phase whose credential classes have no broker route or presenter yet (for
   example Codex before #1735 S1 passes for it), before `create_workspace`.
-- **The pool column.** `executor_pools.supplies_credentials` keeps its name for now but is
-  written from `runs_agent_work`; `can_run` becomes `(pool.runs_agent_work OR
-  r.workload='scripted')` via a new column `runs_agent_work` (`ADD COLUMN IF NOT EXISTS`,
-  backfilled from the old one) so the SQL does not lie. The old column is dropped in a later PR
-  (D2).
+- **The pool column.** A new column `executor_pools.runs_agent_work` (`ADD COLUMN IF NOT
+  EXISTS`, backfilled from `supplies_credentials`), and `can_run` becomes `(pool.runs_agent_work
+  OR r.workload='scripted')`. `supplies_credentials` keeps its true meaning: a brokered pool is
+  `supplies_credentials=false, runs_agent_work=true`. That row makes the negative control
+  falsifying: the old predicate refuses it (D2).
 - `BackendKit.e2b(template, *, policy=...)`. `SYN_E2B_CREDENTIAL_POLICY = none | brokered`,
   default `none`. Under `brokered`, the D5 stub-only rule of #1918 does not apply: the kit runs
   the agent template (#2150's nested-Docker template, per #1918 D5).
@@ -121,13 +121,31 @@ E2B sandbox --HTTPS + capability--> public broker hostname (TLS listener, #1735 
   decision 6). There is no owned box on E2B, so #1735's H4 recommendation (a secret-free box
   Envoy holding a per-box mTLS cert) **does not apply**: §3.2 of the owner-decisions doc scopes
   it to owned boxes. E2B is a new case for H4 (D4).
+- **A distinct listener and principal (amends #1735 PR 8).** The owned-box listener requires a
+  box client certificate and matches it to the grant's `box_id`. E2B gets its **own** listener
+  (`e2b` principal, no client certificate) on its own hostname. Grants issued for E2B carry
+  `principal = e2b:<sandbox_id>`. The injector denies an E2B grant on the box listener and a box
+  grant on the E2B listener, and takes the principal from the listener (Envoy dynamic metadata,
+  #1735 D7), never from a request header. Tests: cross-listener denial both ways; a forged
+  principal header is ignored. P4 depends on this PR 8 amendment, not on PR 8 as written.
 - **Sandbox to broker authentication.** The per-workspace, per-class capability (#1735 D2:
   32 bytes of host entropy, broker stores only `sha256(wire)`, grant bound to `execution_id`,
   `workspace_id`, `token_type`, `expires_at`). It is delivered:
   - to the agent process through AW operation `credential_bindings` (envs only, redacted);
   - to git and gh as capability-bearing files written by `github_presentation` through
-    `write_bytes`. These files hold capabilities only, which the Tripwire allows and an upstream
-    value would trip.
+    `write_bytes`. These files hold capabilities only.
+- **The Tripwire and capabilities.** The #1918 Tripwire matches issuer prefixes (`sk-ant-`,
+  `ghs_`, ...) and a presenter may shape a capability like `sk-ant-...` (#1735 D6). So the
+  Tripwire gets an exact exemption set: the wire values issued for this workspace
+  (`BrokerGrantSet`), matched by equality, never by prefix. Configured upstream values are still
+  refused, prefix-shaped or not. Test: the real presenter's wire form passes; a configured
+  upstream value with the same prefix is refused.
+- **Capabilities are redacted from what comes out.** AW redacts operation bindings only. Every
+  issued wire value (env and file) is registered with `ManagedWorkspace`'s stream and artifact
+  scrubber (`service/managed_workspace.py`: ledger tokens plus withheld values) **before**
+  delivery, so an agent that prints `hosts.yml` exports `[REDACTED]`. Archived native
+  transcripts pass the same scrubber before upload. Test: print and copy each capability file,
+  raw and base64; no stream, artifact or archive holds the wire value.
 - **Binding the capability to the sandbox (D3).** A bearer exfiltrated through an allowed host
   is replayable from anywhere until its deadline. Three options:
   - (a) capability only, plus a tight TTL. Meets #1919's acceptance. Default for the first slice.
@@ -169,9 +187,14 @@ E2B sandbox --HTTPS + capability--> public broker hostname (TLS listener, #1735 
 - **Default contents.** The broker hostname(s) only. Package registries and direct `github.com`
   are owner choices (O4). Dropping `github.com` follows #1735 D5, which records it as a
   deliberate change from research decision 6.
-- **Fail closed.** A provider that cannot apply `deny_all` (an open-source `e2b-dev/runtime`
-  deployment, a plan without the feature) refuses `create`. It never creates an open sandbox.
-  `BrokeredCredentials` refuses a kit whose `EgressPolicy.deny_all` is false (D5).
+- **Fail closed.** If E2B rejects the network config, `create` fails; it never creates an open
+  sandbox. **Unclear:** which deployments or tiers cannot apply deny-all (the SDK's explicit OSS
+  exclusion is for `egress_proxy` only). `BrokeredCredentials` refuses a kit whose
+  `EgressPolicy.deny_all` is false (D5).
+- **No public ingress.** E2B defaults `allow_public_traffic` to true, so an agent could serve a
+  capability on a sandbox port to an outside requester despite outbound deny-all. `EgressPolicy`
+  gains `public_ingress: bool = False`, and AW sends `allow_public_traffic=False`. Test (live):
+  an agent-started server is unreachable from outside without E2B auth.
 - **Relationship to #1794.** #1794 is local Docker `agent-net` (`agent-net: null` in
   `docker/docker-compose.syntropic137.yaml`). This plan does not change it. Remote egress is
   stricter than local until #1794 is decided; that asymmetry is stated in `docs/deployment/e2b.md`
@@ -229,9 +252,9 @@ needs its own store, written by infrastructure, not by a projector.
    killed (today's fail-closed path). It alerts with the sandbox id. Option C closes this window.
 3. **Read.** The production `RecoverySandboxes` adapter (below) reads the row for the spool's
    `(sandbox_id, session_id)` and checks `executor_id` against the spool row.
-4. **Delete.** After the spool is `mark_drained` and the kill is confirmed (release), or when the
-   starting executor settles the operation and its spool drains normally. A sweeper deletes rows
-   whose sandbox `lookup` is confirmed gone (by recorded id, not by listing).
+4. **Delete.** One condition only: the sandbox is confirmed gone by its recorded id (`lookup`,
+   never the listing). Drain and settle do not delete it, because a failed kill after a drain
+   still needs the token to stop a writer. A sweeper retries the lookup, then deletes.
 5. **Rotation.** Prepend a new key, run `just rotate-remote-secrets` (a tested Python script;
    it re-encrypts every row under the current key), then remove the old key. This is independent
    of E2B key rotation (`docs/deployment/e2b.md` "Rotating the E2B key"): recovery needs **both**
@@ -239,13 +262,39 @@ needs its own store, written by infrastructure, not by a projector.
 
 ### 4.4 How recovery uses it (closes the `FIXME(#1916)` gap)
 
-`E2BRecoverySandboxes` satisfies `RecoverySandboxes` (`session_inventory/sandbox_recovery.py`):
+`E2BRecoverySandboxes` satisfies `RecoverySandboxes` (`session_inventory/sandbox_recovery.py`).
+The token is necessary but **not sufficient**: AW reattach as it stands has three gaps (AW
+`providers/e2b_operations.py` at `origin/main`):
+
+- **G1. Marker-based liveness misses some writers.** A descendant that clears its environment
+  and is orphaned is invisible to a fresh instance (module docstring: "A fresh instance cannot
+  follow ..."). So `status` after `cancel` cannot prove that no writer remains.
+- **G2. Cancel may kill the sandbox.** Unconfirmed termination escalates to a sandbox kill
+  (`cancel_escalation`). During recovery that destroys the undrained spool.
+- **G3. Probing resumes.** `reattach` and `status` run sandbox commands, which connect, and
+  connecting resumes a paused sandbox. `writers_stopped` must never resume (its docstring), and
+  `remove` calls it on a paused sandbox.
+
+So the adapter needs an AW slice, **AW-2**, before it may claim exclusivity:
+
+- a sandbox-wide quiescence check that trusts no workload-written marker: no process owned by
+  the agent user remains (`/proc` by uid, run as a privileged control user); reattach is used
+  only to signal the group first;
+- a recovery cancel mode that never escalates to a sandbox kill: unconfirmed termination raises
+  and the sandbox stays paused;
+- a **durable quiescence receipt**: under its lease, recovery writes `writers_stopped_at` on the
+  token row after a confirmed check, and `writers_stopped` reads that receipt with **no** E2B call.
+
+Then:
 
 - `resume`: `E2BRecoveryKit` attach with the ownership check, then AW `SupportsWorkspaceSuspend.resume`.
-- `stop_writers` / `writers_stopped`: `get` the token, AW `SupportsOperationReattach.reattach(ref,
-  token)`, then `cancel` and `status`. A missing row, `unknown_operation` or
-  `provider_unavailable` means False.
+- `stop_writers`: `get` the token, `reattach`, recovery-mode `cancel`, then the quiescence check;
+  True only when it confirms, and only then is the receipt written. Any failure is False.
+- `writers_stopped`: reads the receipt only. Never connects.
 - `pause` and `kill`: AW suspend, Recovery Kit kill.
+- Tests: a detached, environment-cleared writer that outlives its parent makes `stop_writers`
+  False; a termination failure leaves the sandbox paused with its spool readable;
+  `writers_stopped` on a paused sandbox makes zero client calls.
 - Wired as `remote_recovery={"e2b": SandboxSpoolRecovery(E2BRecoverySandboxes(...))}`
   (`session_inventory/runtime.py`), only on executors holding the E2B Recovery Kit
   (`SYN_E2B_RECOVERY_API_KEY`) **and** the key ring.
@@ -259,6 +308,8 @@ needs its own store, written by infrastructure, not by a projector.
 | Threat | Control | Residual |
 |---|---|---|
 | Prompt-injected agent sends an upstream credential off-box | None is in the sandbox: Tripwire refuses the call, #1735 D12 `SendGuard`, canary scan | Scan limits (#1735 D13) |
+| Agent serves a capability on a public sandbox port | `allow_public_traffic=False` (§3.3) | none known |
+| Agent prints a capability into its stream, an artifact or a transcript | Wire values registered with the scrubber before delivery (§3.2) | Encodings the scrubber does not match |
 | Agent exfiltrates a capability through an allowed host | Deny-all egress; per-class capability; TTL = deadline; revoke on teardown and reap | Replay until revoke unless D3 (b) or (c) binds it to the sandbox |
 | Agent uses the broker as an open proxy | Injector routes only the `UPSTREAM_ROUTES` table (#1735 PR 4) | none |
 | Exfiltration through registries or direct github.com | Not on the default allowlist (O4) | Present if the owner allows them |
@@ -298,9 +349,10 @@ Each PR carries a test that fails when its change is reverted and a negative con
 | **AW-1** | AW | `EgressPolicy` on `WorkspaceConfig`; E2B `create` passes `network`; refuses when `deny_all` cannot apply; `limits.network=False` maps to deny-all; no `update_network`. Python only: a submodule bump, no image release | none |
 | **P1** | syn137 | `CredentialDelivery`, `runs_agent_work`, `BrokeredCredentials` (refuses every phase until P4 wires it), `runs_agent_work` pool column, `can_run` | none |
 | **P2** | syn137 | `RemoteOperationSecretStore` (Postgres + AES-GCM, in-memory double), key ring setting, rotation script, executor `put` after launch, docs | #2149 (for `reattach_token` on the pinned provider) |
-| **P3** | syn137 (#1916) | `E2BRecoverySandboxes`, wired in `runtime.py` | P2, #2149, #2161 |
+| **AW-2** | AW | Privileged sandbox-wide quiescence check, recovery cancel without sandbox kill (§4.4), and a privileged inspection port for the canary scan (#1735 D13 scans as root; AW commands run as `agent`). Python only | AW#104 |
+| **P3** | syn137 (#1916) | `E2BRecoverySandboxes` with the quiescence receipt, wired in `runtime.py` | P2, AW-2, #2149, #2161 |
 | **P4** | syn137 | E2B brokered wiring: kit policy, `EgressPolicy` from settings, capability delivery, reap-time revoke, execution index | #1735 PRs 2-5 and 8, AW-1, P1 |
-| **P5** | syn137 (owner run) | `just e2b-brokered-run`: acceptance 1-3 live; flip nothing by default | P4, H (#1918) |
+| **P5** | syn137 (owner run) | `just e2b-brokered-run`: acceptance 1-3 live; flip nothing by default | P4, AW-2 (privileged scan), H (#1918) |
 
 ### Exit tests and negative controls
 
@@ -308,7 +360,9 @@ Each PR carries a test that fails when its change is reverted and a negative con
   records the create body). Negative control: dropping `deny_out` from the translation fails it.
   `test_create_refuses_when_deny_all_cannot_apply`. Live (`test_e2b_live.py`): off-list `curl`
   fails, on-list succeeds.
-- **P1.** `test_a_brokered_pool_claims_an_agent_row` (Postgres) and its memory twin;
+- **P1.** `test_a_brokered_pool_claims_an_agent_row` (Postgres; a pool row with
+  `supplies_credentials=false, runs_agent_work=true`, through the claim, priority and overflow
+  paths) and its memory twin;
   `test_a_no_credentials_pool_still_claims_only_scripted_rows`. Negative control: `can_run`
   reverted to `supplies_credentials` makes the brokered claim test fail.
   `test_brokered_keeps_every_supplies_credentials_reader_closed`: no session-store token, no
@@ -328,11 +382,14 @@ Each PR carries a test that fails when its change is reverted and a negative con
   `test_reap_revokes_every_grant_of_the_execution_before_kill`. Negative control: removing the
   reap-time revoke leaves a grant that `authorize` accepts, and the test fails.
   `test_a_brokered_kit_without_deny_all_refuses_to_construct`.
-- **P5 (owner run).** A real Claude phase on E2B, brokered, with #1735 D13 scans `clean` at every
-  boundary; an off-list `curl` from inside fails; `--negative-control` builds the sandbox with
-  `deny_all=false` and the script must report the off-list request **succeeded**, exiting
-  non-zero. The negative-control switch is refused unless `APP_ENVIRONMENT=development` (as #1918
-  D7).
+- **P5 (owner run).** A real Claude phase on E2B, brokered, with #1735 D13 scans `clean` (not
+  `incomplete`) at every boundary through AW-2's privileged inspection. The scan's own positive
+  control plants a canary in another user's process and in a root-owned writable path, and must
+  find both. An off-list request from inside fails. `--negative-control` keeps the kit valid
+  (`deny_all=true`) and swaps AW's translation, beneath the kit, for one that omits `deny_out`,
+  so creation succeeds. The script must see the sandbox created **and** the off-list request
+  succeed, then exit non-zero. A construction or create failure does not count as the control
+  passing. The switch is refused unless `APP_ENVIRONMENT=development` (as #1918 D7).
 
 ### What lands where
 
@@ -390,6 +447,16 @@ deletion, any new external service.
 - **Unclear:** whether H4 (owned-box mTLS) has been approved; it does not cover E2B either way
   (D4). Needs a ruling on #1735.
 - **Unclear:** E2B egress IP ranges, if the broker ingress wants a source allowlist.
+
+- **Unclear:** which E2B deployments or tiers cannot apply deny-all at all.
+
+## Review disposition (codex, pass 1)
+
+All 11 findings (no P0; 7 P1, 4 P2) accepted and fixed in place: reattach cannot prove
+quiescence, cancel can kill the spool, probing resumes (§4.4, AW-2); public sandbox ingress
+(§3.3); capability redaction and the Tripwire exemption (§3.2); a distinct E2B listener and
+principal amending #1735 PR 8 (§3.2); the privileged scan transport (AW-2, P5); one token
+deletion condition (§4.3); a creatable negative control (P5); a falsifying pool control (§3.1, P1).
 
 ## 10. Out of scope
 
