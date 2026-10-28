@@ -72,10 +72,14 @@ names the step's log artifact.
 | `delivers_repo_changes` | default `true` | default `false`; `true` refused in v1 |
 | `timeout_seconds`, `clone_repos`, `resources`, `input_artifacts`, `platform_access` | as today | applied, same meaning (a referee step may score an eval run under `eval`) |
 
-Refusal happens at parse (`WorkflowDefinition.from_yaml`), naming the Phase and
-field, so a workflow is rejected at registration, not mid-run. The two existing
-fitness checks (`test_phase_definition_roundtrip`,
-`test_phase_schema_fields_apply_or_refuse`) cover the new fields.
+Refusal happens twice, as for `execution_type` and the sandbox level: at parse
+(`WorkflowDefinition.from_yaml`), naming the Phase and field, so a workflow is
+rejected at registration; and again in `ExecuteWorkflowHandler` through one
+`require_consistent_phase_kind(phase)` rule, because a stored template never
+passes the YAML validator. Workflow-level `claude_plugins` and `skills` are not
+merged into a command Phase. The existing fitness checks use fixed tables, so
+they get explicit rows and kind-conditional cases, not an assumption that they
+cover new fields.
 
 ### D3. Same to-do list, same Workspace, a different runner
 
@@ -85,84 +89,148 @@ No new `TodoAction`. The flow stays
 
 and the processor's `RUN_AGENT` branch routes by `phase.kind`: an agent Phase
 goes to `AgentExecutionHandler` as today, a command Phase to a new
-`CommandPhaseHandler` (<200 LOC) that runs each step with
-`workspace.execute(["sh", "-c", run], timeout_seconds=..., working_directory="/workspace")`.
+`CommandPhaseHandler` (<200 LOC). Keeping the action avoids a to-do projection
+`VERSION` bump for a routing decision. The cost is that `RUN_AGENT` now means
+"run the Phase's runner"; the glossary says so (D9).
 
-Keeping the action avoids a to-do projection `VERSION` bump and a read-path
-rebuild for a routing decision. The cost is that `RUN_AGENT` now means "run the
-Phase's runner"; the glossary says so (D7). Renaming the stored action value is
-a separate, projection-versioned change and is not worth it here.
+Agent machinery is branched off by kind at every place that builds it today,
+not by emptying one helper:
 
-Provisioning is the same Workspace, image, limits, repo clone and ADR-024 setup
-phase. One difference: `_agents_that_may_run(phase)` is empty for a command
-Phase, so no Claude or Codex credential is staged and no agent argv is built.
-GitHub repo credentials follow the existing policy and are cleared before the
-commands run, exactly as before an agent.
+| where | agent Phase | command Phase |
+|---|---|---|
+| `ExecuteWorkflowHandler` (`ExecutablePhase` build) | agent config, plugins, skills, fallback | none; `kind` and `commands` carried |
+| `WorkspaceProvisionHandler` (`_codex_auth_staged_for`, `_build_provision_result`, `_launch_for`) | prompt, argv, agent env, Claude/Codex auth | skipped: no prompt, no argv, no model credential |
+| `phase_workspace` session start, `phase_runtime` finalise | `SessionLifecycleManager` | skipped: a command Phase has no agent session |
+| `agent_attempts` | retries, fallback agent, cost limit, invocation registration | bypassed entirely |
+
+`CommandPhaseHandler` runs each step with
+`workspace.stream(["sh", "-c", run], timeout_seconds=..., working_directory="/workspace")`,
+not `execute`, for two reasons. `execute` buffers both channels whole on the
+executor (`docker_operations.py` bytearrays), so a noisy build costs executor
+memory in proportion to its output; streaming lets the handler keep only a
+bounded ring of the last 8 KiB per channel. And `stream` is the path the
+`ExecutionController` interrupts, so a cancel stops the running step's process
+the same way it stops an agent, the remaining steps are recorded `skipped`, and
+the processor routes it through `ExecutionCancelledEvent` as today. `stream`
+also applies the Phase's `platform_access` grant and the credential withholding
+(#1927), which `execute` does not.
 
 ### D4. Execution semantics
 
+- Every `timeout_seconds` (Phase and step) is a positive integer; zero,
+  negative and non-integers are refused at parse. Zero would otherwise reach
+  Docker as "no timeout" and fall back to the workspace default
+  (`adapter.py`).
+- One monotonic deadline per Phase, set when the first step starts. A step gets
+  `min(step.timeout_seconds, deadline - now)`; when that is not positive the
+  step is not started, it and every later step are recorded `skipped`, and the
+  Phase fails as timed out.
 - Steps run in order. The first step that exits non-zero or times out, and is
-  not `allow_failure`, stops the Phase; every later step is recorded `skipped`.
-- A step's timeout is `min(step.timeout_seconds, phase budget remaining)`. A
-  timeout is a failure with `timed_out: true`.
-- The Phase succeeds iff no non-`allow_failure` step failed. A failed command
-  Phase fails the Execution the same way a failed agent Phase does, with
-  `error_message` naming the step and its exit code.
-- Handlers stay idempotent (CLAUDE.md "Handler Idempotency Rule"): a re-run
-  after a crash re-runs every step in a fresh Workspace. Authors of steps with
-  external side effects own their idempotency, as agent prompts do today.
+  not `allow_failure`, stops the Phase; later steps are recorded `skipped`.
+- The Phase succeeds iff no non-`allow_failure` step failed AND the Phase
+  deadline was not exhausted. `allow_failure` excuses a step's exit code and
+  its own step timeout, never the Phase's.
+- A re-run after a crash re-runs every step in a fresh Workspace (D6). Authors
+  of steps with external side effects own their idempotency, as agent prompts
+  do today.
 
-### D5. Events: a new `PhaseCommandsCompleted`, not a borrowed agent event
+### D5. Events and failure
 
-The command runner reports to the aggregate with a new command,
-`CompletePhaseCommandsCommand`, which emits a new Lane 1 event
-`PhaseCommandsCompleted` v1:
+The handler reports to the aggregate with `RecordPhaseCommandsCommand`, which
+emits a new Lane 1 event, `PhaseCommandsCompleted` v1:
 
 ```
-execution_id, phase_id, workspace_id, session_id,
-success: bool,
-steps: list[CommandStepResult]   # name, exit_code | None, duration_ms,
-                                 # timed_out, skipped, allow_failure
+execution_id, phase_id, workspace_id,
+success: bool, timed_out: bool,
+steps: list[CommandStepResult]   # name, outcome (passed|failed|timed_out|skipped|cancelled),
+                                 # exit_code | None, duration_ms, allow_failure
 ```
 
-It is not `AgentExecutionCompleted` with zero tokens. That event's name, its
-`agent_provider`/`agent_model` fields and its verdict fields would all be lies
-for a Phase with no agent, and every consumer reading "an agent ran" would
-believe them.
+No `session_id`, no agent provider or model: a command Phase has no agent
+session, and the event says so by not carrying one. It is not
+`AgentExecutionCompleted` with zero tokens, because that event's name, its
+agent provenance and its verdict fields would all be false for a Phase with no
+agent.
 
-The to-do projection maps `PhaseCommandsCompleted` to `COLLECT_ARTIFACTS`, as
-it maps `AgentExecutionCompleted`. That adds a handler for an event type no
-stream holds yet, so replay of existing streams is byte-identical and the
-projection `VERSION` does not change. `ORCHESTRATION_EVENT_EPOCH` goes to 9 for
-the new event type, and its schema snapshot is added.
+The to-do projection maps `PhaseCommandsCompleted` to `COLLECT_ARTIFACTS`
+whatever `success` says, so the logs of a failed gate are kept. The aggregate
+decides what that means: `artifacts_collected` for a Phase whose recorded
+command outcome is a failure does NOT select the next Phase; it fails the Phase
+and the Execution with the same events the agent failure path writes
+(`PhaseCompleted(success=false)`, then the execution failure), carrying
+`error_message` naming the step and exit code. So `COMPLETE_PHASE` is never
+queued for a failed command Phase and no later Phase runs.
 
-Exit codes and timing are domain facts (did the gate pass, how long did it
-take), so they are in the event. Output text is not.
+`FailureClassification` gains `GATE = "gate"`: a step the author declared
+exited non-zero or hit its own timeout. The platform ran it correctly and it
+said no. It is kept out of `PLATFORM` for the reason #1357 exists: a red build
+gate reported as a platform failure inflates the platform failure rate with
+the system working as designed. A step that could not be started (exec error,
+workspace lost) is `PLATFORM`.
 
-### D6. Output tails are artifacts; cost is zero by construction
+The new event type, and the new fields in `ExecutablePhase` inside existing
+events (`WorkflowExecutionStarted.pinned_phases`, template events), move
+`ORCHESTRATION_EVENT_EPOCH` to 9 with a complete epoch-9 snapshot. The
+projection manager's event routing (`manager_event_map.py`) registers the new
+event. Replay of existing streams is unchanged: no stream holds the new event
+and the new fields default to `agent`.
 
-Before reporting, the runner writes into the Workspace's artifact output
-directory:
+### D6. Restart recovery
 
-- `commands.json`: the same step results as the event plus, per step, the last
-  8 KiB of stdout and of stderr;
-- `commands/<name>.log`: each step's combined tail.
+| crash point | durable state | recovery |
+|---|---|---|
+| before `PhaseCommandsCompleted` | to-do is `RUN_AGENT` | re-provision, re-run every step |
+| after `PhaseCommandsCompleted`, before collection | to-do is `COLLECT_ARTIFACTS`, workspace gone | collect from the event: write `commands.json` from the recorded step results, with `tails_lost: true` and no tails, then continue as normal (succeed or fail per D5) |
+| after `ArtifactsCollectedForPhase` | artifacts in object storage | unchanged from agent Phases |
 
-The existing `ArtifactCollectionHandler` then collects them exactly as it
-collects an agent's output, so they land in object storage, appear in
-`syn artifacts`, and `commands.json` is the Phase output the next Phase's
-`input_artifacts` receives. Full output stays out of the event store (Lane 1)
-because nothing needs it after a restart to decide what happens next.
+The exit codes and timing are the gate's result and are in the event, so a
+lost workspace loses only the output tails, never the verdict. This replaces,
+for command Phases, the agent-only stranded salvage that reads
+`last_agent_message`.
 
-A command Phase writes no Lane 2 `session_summary` row, and cost is priced from
-those rows, so its token count and cost are 0 by construction, not by a special
-case. `PhaseCompleted` carries zero tokens and the real `duration_seconds`.
+### D7. Output, credentials and cost
 
-### D7. Vocabulary
+Before reporting, the handler writes into the Workspace's artifact output
+directory `commands.json` (the step results plus each step's last 8 KiB of
+stdout and stderr) and, for a step with output, `commands/<name>.log`. A step
+with no output gets no log file, because the collector treats an empty file as
+a failed artifact (`ArtifactCollector.py`); `commands.json` is never empty. The
+collector is told to mark `commands.json` primary explicitly rather than
+relying on collection order.
+
+Tails pass the same credential scrubbing collection applies, before they are
+truncated, written or logged.
+
+**Credentials, stated plainly.** No Claude or Codex credential is staged. The
+GitHub authority is the existing policy's and is NOT cleared: ADR-024 keeps
+`~/.git-credentials` and the `gh` credential for the Phase's repositories, so a
+command step has the same GitHub reach as an agent in that workspace, including
+the ability to push. `delivers_repo_changes: false` is a statement about what
+the gate judges, not a permission. A command Phase is author-written code
+running with the Phase's repository credentials; it adds no authority the
+agent did not already have, and removes the model credentials.
+
+**Cost.** A command Phase writes no Lane 2 `session_summary` and no
+`token_usage` rows, the two sources cost is priced from, so its tokens and
+cost are 0. `PhaseCompleted` carries zero tokens and the real
+`duration_seconds`. Tests prove 0 through the API read (execution detail and
+cost) for success, failure and resume, rather than inferring it.
+
+### D8. Which repository state a command Phase sees
+
+The Phase's workspace is checked out at the Execution's start pins
+(`start_pins.py`), exactly like any fresh Phase. It does NOT see commits an
+earlier agent Phase pushed. A command Phase therefore gates the start revision
+(the DreamShip probe, an eval referee on a pinned case), not "the change the
+previous Phase just made". Gating a previous Phase's branch needs a typed,
+recorded head handoff and is not in v1.
+
+### D9. Vocabulary
 
 `docs/architecture/orchestration-ubiquitous-language.md` gains **Phase Kind**,
-**Command Phase**, **Command Step** and the event, and the **Phase** entry
-stops saying every Phase has an agent and a model. A Command Phase is not a
+**Command Phase**, **Command Step**, `PhaseCommandsCompleted` and the `gate`
+failure class, and **Phase** stops saying every Phase has an agent and a model.
+`RUN_AGENT` is defined as "run the Phase's runner". A Command Phase is not a
 Scripted Agent: the Scripted Agent pretends to be an agent for load tests; a
 Command Phase is honestly not one.
 
@@ -170,21 +238,19 @@ Command Phase is honestly not one.
 
 - Execution inputs in commands: neither `{{input}}` templating into `run` nor
   environment variables (e.g. `SYN_INPUT_<NAME>`, which a shell never parses as
-  code and is the likely first step). Revisit with the first workflow that needs it.
-- A verdict from a command Phase (`requires_verdict`), and pushing commits
-  (`delivers_repo_changes`). An eval referee can exit non-zero today; a typed
-  verdict is a follow-up.
+  code and is the likely first step).
+- Gating a previous Phase's pushed head (D8).
+- A typed verdict from a command Phase (`requires_verdict`), and pushing as a
+  deliverable (`delivers_repo_changes: true`).
 - A no-credential run pool for command-only workflows (cf.
   `RunWorkload.SCRIPTED`). v1 runs in the normal pool.
-- Parallel steps, retries per step, streaming output to Lane 2.
+- Parallel steps, per-step retries, streaming step output to Lane 2.
 
 ## Consequences
 
-- Probes, build gates and referees cost 0 tokens and are deterministic.
-- Command Phases and agent Phases compose in one workflow: an agent implements,
-  a command Phase gates, at no model cost.
-- Event epoch 8 -> 9. A server on epoch 8 cannot load `PhaseCommandsCompleted`;
-  the existing `writer_epoch` claim check keeps old Executors off those runs.
-- One more runner behind `RUN_AGENT`: anything that assumed `RUN_AGENT` implies
-  an agent session (Lane 2 joins, session tools) sees a Phase with no session
-  rows, which is the truth.
+- Probes and gates on a pinned revision cost 0 tokens and are deterministic.
+- A failed gate is `gate`, not `platform`, in every failure rate.
+- Event epoch 8 -> 9. The `writer_epoch` claim check
+  (`execution_runs/postgres.py`) keeps an epoch-8 Executor off runs written at 9.
+- Anything that assumed every Phase has an agent session sees a Phase with
+  none, which is the truth; dashboard session links must handle it.
