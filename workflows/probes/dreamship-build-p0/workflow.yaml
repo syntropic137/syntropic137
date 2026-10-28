@@ -1,0 +1,36 @@
+id: dreamship-build-p0-probe-v1
+name: "Probe: DreamShip compiles in a syn137 workspace (okrs-51p.30 P0)"
+description: >
+  One phase that runs DreamShip's smallest build proof (engine cargo check +
+  wasm32 build) inside a workspace and records wall time, peak container
+  memory and target/ size. The agent only runs fixed commands; the build is
+  the measurement.
+type: custom
+classification: simple
+requires_repos: true
+
+# WHY THIS EXISTS. KR okrs-51p.30 Track A: DreamShip (AweHelm/dream-ship-os)
+# must build and test green inside a syn137 workspace on the VPS Docker
+# backend. This is P0, the smallest proof: no GPU, no Docker, no tests.
+# It needs the deployment's workspace memory at 8 GB or more (16 GB for a
+# full build); with the 4096 MB default the expected result is an OOM kill,
+# which is itself the evidence the per-run override exists for.
+#
+# The prompt runs the build detached and polls it, because the agent's
+# shell tool caps one call at 10 minutes and a cold build on 2 cores takes
+# far longer. Do not "simplify" it into one blocking call.
+
+phases:
+  - id: build
+    name: Cold-build DreamShip engine and wasm, record resources
+    order: 1
+    execution_type: sequential
+    timeout_seconds: 3600
+    delivers_repo_changes: false
+    allowed_tools:
+      - Bash
+      - Write
+    agent:
+      provider: claude
+      model: sonnet
+    prompt_file: phases/build.md
