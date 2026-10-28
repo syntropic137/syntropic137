@@ -155,13 +155,17 @@ class _Steps:
     stopped: bool = False
     _deadline: float | None = None
 
-    async def run(self, step: CommandStep) -> None:
+    def _allowance(self, step: CommandStep) -> tuple[int, int]:
+        """(this step's bound, what remains of the Phase); the deadline starts with step one."""
         if self._deadline is None:
             self._deadline = self.h.clock() + self.budget
         remaining = math.floor(self._deadline - self.h.clock())
-        allowed = (
-            remaining if step.timeout_seconds is None else min(step.timeout_seconds, remaining)
-        )
+        if step.timeout_seconds is None:
+            return remaining, remaining
+        return min(step.timeout_seconds, remaining), remaining
+
+    async def run(self, step: CommandStep) -> None:
+        allowed, remaining = self._allowance(step)
         if not self.stopped and allowed <= 0:
             self.timed_out = self.stopped = True
         if not self.stopped:

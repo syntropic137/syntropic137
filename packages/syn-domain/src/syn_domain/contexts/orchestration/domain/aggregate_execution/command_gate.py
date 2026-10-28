@@ -112,6 +112,15 @@ def judge_commands(
     )
 
 
+@dataclass(frozen=True)
+class RecordedCommands:
+    """What a `PhaseCommandsCompleted` said, kept so a lost workspace loses only its tails (D6)."""
+
+    success: bool
+    timed_out: bool
+    steps: tuple[CommandStepResult, ...]
+
+
 @dataclass
 class CommandGateRecord:
     """Each command Phase's latest recorded verdict, replayed from the stream.
@@ -121,15 +130,17 @@ class CommandGateRecord:
     """
 
     _failures: dict[str, GateFailure | None] = field(default_factory=dict)
+    _recorded: dict[str, RecordedCommands] = field(default_factory=dict)
 
     def report(
         self, phase_id: str, *, success: bool, timed_out: bool, steps: Sequence[object]
     ) -> None:
         """Record what a `PhaseCommandsCompleted` said; steps may be replayed dicts."""
-        results = [
+        results = tuple(
             step if isinstance(step, CommandStepResult) else CommandStepResult.model_validate(step)
             for step in steps
-        ]
+        )
+        self._recorded[phase_id] = RecordedCommands(success, timed_out, results)
         self._failures[phase_id] = judge_commands(
             phase_id, success=success, timed_out=timed_out, steps=results
         )
@@ -137,6 +148,10 @@ class CommandGateRecord:
     def failure_of(self, phase_id: str) -> GateFailure | None:
         """The failure recorded for this phase; None for a pass or an agent Phase."""
         return self._failures.get(phase_id)
+
+    def recorded(self, phase_id: str) -> RecordedCommands | None:
+        """The steps this phase last recorded; None for an agent Phase or one not yet run."""
+        return self._recorded.get(phase_id)
 
     def report_event(self, event: PhaseCommandsCompletedEvent) -> None:
         """Record a `PhaseCommandsCompleted`, live or replayed."""

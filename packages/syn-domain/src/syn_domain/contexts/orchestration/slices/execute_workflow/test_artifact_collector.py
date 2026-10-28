@@ -485,6 +485,38 @@ class TestExactlyOnePrimaryDeliverable:
         assert result.first_content == "# Plan"
 
     @pytest.mark.asyncio
+    async def test_a_named_primary_is_primary_whatever_order_it_was_collected_in(self) -> None:
+        """A command phase names `commands.json`, never left to order (ADR-078 D7)."""
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(
+            collected_files=[
+                ("artifacts/output/commands/build.log", b"error: nope"),
+                ("artifacts/output/commands.json", b'{"success": false}'),
+                ("artifacts/output/commands/test.log", b"ok"),
+            ]
+        )
+
+        result = await collector.collect_from_workspace(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Build",
+            output_artifact_types=(),
+            agent=UNREPORTED_AGENT,
+            primary_path="artifacts/output/commands.json",
+        )
+
+        assert [(a.source_path, a.is_primary_deliverable) for a in repo.saved] == [
+            ("artifacts/output/commands.json", True),
+            ("artifacts/output/commands/build.log", False),
+            ("artifacts/output/commands/test.log", False),
+        ]
+        assert result.first_content == '{"success": false}'
+
+    @pytest.mark.asyncio
     async def test_a_single_file_is_still_primary(self) -> None:
         repo = MockArtifactRepo()
         collector = ArtifactCollector(repo, None, None)

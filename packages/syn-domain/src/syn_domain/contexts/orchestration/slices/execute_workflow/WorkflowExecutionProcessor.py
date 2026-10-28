@@ -22,7 +22,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseResult,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-    CancelExecutionCommand,
     StartExecutionCommand,
     StartResumeCommand,
     WorkflowExecutionAggregate,
@@ -43,6 +42,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_re
     CancelledWorkLedger,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.command_phase_run import (
+    record_cancel,
     run_command_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.evidence_heads import (
@@ -56,10 +56,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.failed_execution 
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
-    AgentExecutionResult,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.CommandPhaseHandler import (
-    CommandPhaseHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_completion import (
     complete_phase,
@@ -709,7 +705,7 @@ class WorkflowExecutionProcessor:
         elif todo.action == TodoAction.RUN_AGENT and phase.kind is PhaseKind.COMMAND:
             # The same action, a different runner (ADR-078 D3).
             await run_command_phase(
-                CommandPhaseHandler(controller=self._controller),
+                self._controller,
                 todo,
                 phase,
                 aggregate,
@@ -888,7 +884,7 @@ class WorkflowExecutionProcessor:
                     said,
                     UnfinishedPhase.INTERRUPTED,
                 )
-                await self._handle_cancel_signal(todo, result, aggregate, journal)
+                await record_cancel(todo, result.stream_result.interrupt_reason, aggregate, journal)
                 return
 
             command = result.command
@@ -950,23 +946,6 @@ class WorkflowExecutionProcessor:
             outcome=outcome,
             aggregate=aggregate,
         )
-
-    async def _handle_cancel_signal(
-        self,
-        todo: TodoItem,
-        result: AgentExecutionResult,
-        aggregate: WorkflowExecutionAggregate,
-        journal: ExecutionJournal,
-    ) -> None:
-        """Dispatch CancelExecutionCommand when the agent stream was interrupted by a cancel signal."""
-        assert todo.phase_id is not None, "phase_id must be set for a running agent todo"
-        cancel_cmd = CancelExecutionCommand(
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            reason=result.stream_result.interrupt_reason or "Cancelled by user",
-        )
-        aggregate.cancel_execution(cancel_cmd)
-        await journal.append(aggregate)
 
     async def _handle_complete_phase(
         self,

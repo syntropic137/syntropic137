@@ -26,6 +26,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continu
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.command_gate import (
     CommandGateRecord,
+    RecordedCommands,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (  # noqa: TC001 - re-exported + used at runtime by @command_handler
     AgentExecutionCompletedCommand,
@@ -413,6 +414,10 @@ class WorkflowExecutionAggregate(
     def attempts_for(self, phase_id: str) -> int:
         """How many times this phase has been attempted, 0 if never started."""
         return self._phase_attempts.get(phase_id, 0)
+
+    def recorded_commands_for(self, phase_id: str) -> RecordedCommands | None:
+        """What this command phase's steps recorded, from the event stream (ADR-078 D6)."""
+        return self._command_gates.recorded(phase_id)
 
     def last_agent_message_for(self, phase_id: str) -> str | None:
         """What this phase's agent said as it finished, or None.

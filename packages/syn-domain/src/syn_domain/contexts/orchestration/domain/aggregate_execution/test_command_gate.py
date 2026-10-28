@@ -167,6 +167,17 @@ class TestTheAggregateDecidesAtCollection:
         assert recorded.workspace_id == "ws-1"
         assert "session_id" not in PhaseCommandsCompletedEvent.model_fields
 
+    def test_the_recorded_steps_survive_a_restart_for_a_lost_workspace(self) -> None:
+        """D6: the verdict is in the event, so collection can rebuild it."""
+        store = _collect_after([PASSED, FAILED, SKIPPED], success=False)
+
+        recorded = store.load().recorded_commands_for("build")
+
+        assert recorded is not None
+        assert recorded.steps == (PASSED, FAILED, SKIPPED)
+        assert (recorded.success, recorded.timed_out) == (False, False)
+        assert store.load().recorded_commands_for("review") is None
+
     def test_a_step_that_could_not_start_is_the_platforms_failure(self) -> None:
         lost = _step("cargo-build", CommandStepOutcome.FAILED_TO_START)
         store = _collect_after([lost, SKIPPED], success=False)

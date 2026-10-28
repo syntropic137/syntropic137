@@ -38,8 +38,10 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from syn_domain.contexts.artifacts import ContentType, PhaseOutputFile
 from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    ArtifactsCollectedCommand,
     RecordRefusedOutputCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -51,6 +53,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
     UnfinishedPhase,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.command_report import (
+    COMMANDS_REPORT_PATH,
+    CommandsReport,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import RESCUE_PATCH_NAME
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
@@ -74,6 +80,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.ports import ArtifactContentStoragePort
     from syn_domain.contexts.orchestration._shared.FileRefusalValueObjects import FileRefusal
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.command_gate import (
+        RecordedCommands,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
     )
@@ -416,6 +425,18 @@ class PhaseWorkspace:
         """Dispatch COLLECT_ARTIFACTS."""
         assert todo.phase_id is not None
         workspace = self._runtime.workspace_for(todo.phase_id)
+        recorded = aggregate.recorded_commands_for(todo.phase_id)
+        if (
+            workspace is None
+            and recorded is not None
+            and aggregate.running_phase_id == todo.phase_id
+        ):
+            # A restart after `PhaseCommandsCompleted` lost the workspace and
+            # only the output with it: the verdict is in the event (ADR-078 D6).
+            await self._collect_recorded_commands(
+                todo, phase, aggregate, recorded, all_artifact_ids, phase_outputs
+            )
+            return
         if workspace is None:
             # Defense in depth: in-process this branch is unreachable
             # (the runtime gives up a phase's workspace only after
@@ -454,6 +475,8 @@ class PhaseWorkspace:
             # costs a git inspection, and it has to happen HERE rather than on
             # the failure path because a salvaged phase does not fail (#1300).
             describe_work=partial(self._runtime.describe_work, todo.phase_id),
+            # Named, not left to collection order (ADR-078 D7).
+            primary_path=COMMANDS_REPORT_PATH if phase.kind is PhaseKind.COMMAND else None,
         )
         all_artifact_ids.extend(result.artifact_ids)
         self._runtime.record_artifacts(todo.phase_id, result.artifact_ids)
@@ -463,4 +486,53 @@ class PhaseWorkspace:
             # the event it records rather than I/O inside it (plan §A.2).
             result.command.observed(await self._evidence_heads.observe(aggregate, todo.phase_id))
         aggregate.artifacts_collected(result.command)
+        await self._journal.append(aggregate)
+
+    async def _collect_recorded_commands(
+        self,
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        aggregate: WorkflowExecutionAggregate,
+        recorded: RecordedCommands,
+        all_artifact_ids: list[str],
+        phase_outputs: PhaseOutputCache,
+    ) -> None:
+        """Store `commands.json` rebuilt from the event, tails lost, then collect as normal."""
+        assert todo.phase_id is not None
+        report = CommandsReport.from_record(
+            todo.phase_id,
+            success=recorded.success,
+            timed_out=recorded.timed_out,
+            steps=recorded.steps,
+        )
+        ((path, body),) = report.files()
+        content = body.decode()
+        artifact_id = str(uuid4())
+        await self._collector().create_artifact(
+            artifact_id=artifact_id,
+            workflow_id=aggregate.workflow_id or "",
+            phase_id=todo.phase_id,
+            execution_id=todo.execution_id,
+            session_id=todo.session_id or "",
+            artifact_type="json",
+            content=content,
+            title=f"{phase.name}: {path}",
+            agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
+            source_path=path,
+            content_type=ContentType.APPLICATION_JSON,
+        )
+        all_artifact_ids.append(artifact_id)
+        self._runtime.record_artifacts(todo.phase_id, [artifact_id])
+        phase_outputs.record(
+            todo.phase_id, content, [PhaseOutputFile(source_path=path, content=content)]
+        )
+        aggregate.artifacts_collected(
+            ArtifactsCollectedCommand(
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+                artifact_ids=[artifact_id],
+                first_content_preview=content[:500],
+                session_id=todo.session_id,
+            )
+        )
         await self._journal.append(aggregate)

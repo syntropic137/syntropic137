@@ -16,8 +16,12 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     UnfinishedPhase,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.CommandPhaseHandler import (
+    CommandPhaseHandler,
+)
 
 if TYPE_CHECKING:
+    from syn_adapters.control import ExecutionController
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
@@ -27,9 +31,6 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
         ExecutionJournal,
-    )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.CommandPhaseHandler import (
-        CommandPhaseHandler,
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.phase_runtime import (
         PhaseRuntime,
@@ -45,8 +46,26 @@ class KeptArtifacts(Protocol):
     kept_artifact_ids: list[str]
 
 
+async def record_cancel(
+    todo: TodoItem,
+    reason: str | None,
+    aggregate: WorkflowExecutionAggregate,
+    journal: ExecutionJournal,
+) -> None:
+    """End the Execution as cancelled: a stopped agent or a stopped command step alike."""
+    assert todo.phase_id is not None, "phase_id must be set for a running phase todo"
+    aggregate.cancel_execution(
+        CancelExecutionCommand(
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            reason=reason or "Cancelled by user",
+        )
+    )
+    await journal.append(aggregate)
+
+
 async def run_command_phase(
-    handler: CommandPhaseHandler,
+    controller: ExecutionController | None,
     todo: TodoItem,
     phase: ExecutablePhase,
     aggregate: WorkflowExecutionAggregate,
@@ -73,16 +92,13 @@ async def run_command_phase(
         )
 
     try:
-        run = await handler.run(todo, phase, workspace, aggregate, journal.append)
+        run = await CommandPhaseHandler(controller=controller).run(
+            todo, phase, workspace, aggregate, journal.append
+        )
     except Exception:
         await keep(UnfinishedPhase.FAILED)
         raise
     if run.cancelled is None:
         return
     await keep(UnfinishedPhase.INTERRUPTED)
-    aggregate.cancel_execution(
-        CancelExecutionCommand(
-            execution_id=todo.execution_id, phase_id=todo.phase_id, reason=run.cancelled
-        )
-    )
-    await journal.append(aggregate)
+    await record_cancel(todo, run.cancelled, aggregate, journal)

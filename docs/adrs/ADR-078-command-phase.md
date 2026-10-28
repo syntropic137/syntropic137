@@ -105,7 +105,7 @@ not by emptying one helper:
 
 `CommandPhaseHandler` runs each step through a new transport method,
 `ManagedWorkspace.run_bounded(argv, *, timeout_seconds, working_directory,
-tail_bytes, cancel)`, on the same event-stream transport `stream()` uses, and
+tail_bytes, phase_deadline)`, on the same event-stream transport `stream()` uses, and
 returning a typed `BoundedCommandResult`:
 
 ```
