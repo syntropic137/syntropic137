@@ -16,7 +16,6 @@ image-derived hardening (runtime, AppArmor, seccomp) must survive it.
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
@@ -26,9 +25,13 @@ from agentic_isolation import SecurityConfig
 from agentic_isolation.config import WorkspaceRuntime
 from agentic_isolation.providers.docker import WorkspaceDockerProvider
 
-from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
+from syn_adapters.workspace_backends.agentic.adapter import (
+    AgenticIsolationAdapter,
+    WorkspaceProvisionError,
+)
 from syn_adapters.workspace_backends.service.workspace_lifecycle import build_isolation_config
 from syn_adapters.workspace_backends.service.workspace_service import WorkspaceServiceConfig
+from syn_shared.settings.session_store import SessionStoreSettings
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,7 +75,12 @@ async def _docker_run_argv(pids_limit: int | None, tmp_path: Path) -> list[str]:
     )
     # The provider's own policy says 256, so only config.security can say 2048.
     provider = WorkspaceDockerProvider(security=_PINNED, workspace_base_dir=tmp_path)
-    adapter = AgenticIsolationAdapter(security=_PINNED)
+    # Pinned off: left to get_settings(), a store configured by the
+    # environment or another test adds a credential binding this provider
+    # (built with no resolver) refuses before docker run.
+    adapter = AgenticIsolationAdapter(
+        security=_PINNED, session_store=SessionStoreSettings(url=None, _env_file=None)
+    )
     captured: list[str] = []
 
     async def _passthrough(image_ref: str) -> str:
@@ -97,10 +105,12 @@ async def _docker_run_argv(pids_limit: int | None, tmp_path: Path) -> list[str]:
             "syn_adapters.workspace_backends.backend_kit.verify_image_async",
             side_effect=_passthrough,
         ),
-        contextlib.suppress(Exception),
+        pytest.raises(WorkspaceProvisionError) as refused,
     ):
         await adapter.create(isolation_config)
 
+    # Anything but the stubbed docker run is the real reason, so say it.
+    assert isinstance(refused.value.__cause__, _ArgvCaptured), refused.value
     assert captured, "docker run was never reached"
     return captured
 
