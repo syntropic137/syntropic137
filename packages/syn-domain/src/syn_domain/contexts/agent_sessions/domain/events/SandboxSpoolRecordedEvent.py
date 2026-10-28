@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003
-from typing import Literal
+from typing import Annotated, Literal
 
 from event_sourcing import DomainEvent, event
-
-from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import (
-    RoutingIdentifier,  # noqa: TC001 - pydantic resolves the annotation at runtime
-)
+from pydantic import AfterValidator, Field
 
 RemoteSpoolBackend = Literal["e2b"]
 """A spool backend whose bytes live on a sandbox's own disk, never on this host."""
+
+
+def _route_identifier(value: str) -> str:
+    # The spool row's RoutingIdentifier rule, restated: events carry no
+    # dependencies (VSA), and a route the row refuses would stall projection.
+    if not value.strip() or "\x00" in value:
+        raise ValueError("identifier must be non-blank and contain no NUL")
+    value.encode("utf-8")
+    return value
+
+
+SandboxRouteIdentifier = Annotated[str, Field(max_length=128), AfterValidator(_route_identifier)]
+"""An executor or sandbox id, bounded exactly as ``CaptureSpool`` bounds it."""
 
 
 @event("SandboxSpoolRecorded", "v1")
@@ -39,6 +49,6 @@ class SandboxSpoolRecordedEvent(DomainEvent):
     backend: RemoteSpoolBackend
     #: Validated as the spool row validates them, so a recorded route can
     #: always be projected: a fact the projector refuses would stall it.
-    executor_id: RoutingIdentifier
-    sandbox_id: RoutingIdentifier
+    executor_id: SandboxRouteIdentifier
+    sandbox_id: SandboxRouteIdentifier
     recorded_at: datetime
