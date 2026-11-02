@@ -239,8 +239,12 @@ agent did not already have, and removes the model credentials.
 **Cost.** A command Phase writes no Lane 2 `session_summary` and no
 `token_usage` rows, the two sources cost is priced from, so its tokens and
 cost are 0. `PhaseCompleted` carries zero tokens and the real
-`duration_seconds`. Tests prove 0 through the API read (execution detail and
-cost) for success, failure and resume, rather than inferring it.
+`duration_seconds`. `apps/syn-api/tests/test_2141_a_command_phase_costs_zero_to_a_client.py`
+proves 0 through the API read rather than inferring it: a real run's events,
+through the detail projection and the response mapping, for a completed run
+and a gate-failed one. Resume is proven at the events
+(`test_2141_a_command_phase_runs_through_the_processor.py`, D6), not through
+the API.
 
 ### D8. Which repository state a command Phase sees
 
