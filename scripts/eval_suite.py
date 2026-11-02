@@ -1367,6 +1367,8 @@ class TrialStart(_Frozen):
     repos: list[str]
     eval_id: str
     tags: list[str]
+    idempotency_key: str
+    """The trial tag (#2129): every retry of this start names the one run it made."""
 
 
 class _ExecutionRow(_Read):
@@ -1379,6 +1381,8 @@ class _ExecutionList(_Read):
 
 RECONCILE_ATTEMPTS = 3
 RECONCILE_PAUSE_S = 2.0
+START_ATTEMPTS = 3
+START_PAUSE_S = 2.0
 
 
 def find_trial_run(client: httpx.Client, trial_tag: str, workflow_id: str) -> list[str]:
@@ -1405,18 +1409,25 @@ def start_trial(client: httpx.Client, workflow_id: str, body: TrialStart, trial_
     """POST one trial and return its run id, even when the answer is lost.
 
     A timeout, a dropped connection or a 5xx says nothing about whether the
-    run started. The trial tag is unique (`new_batch`), so the run is looked
-    up by it: one match is the run. Otherwise the launch stops and the trial's
-    intent stays pending, so no later launch replaces it until it is resolved.
+    run started, so the POST is sent again, up to START_ATTEMPTS times. The
+    body carries the trial tag as its `idempotency_key` (#2129), so a retry
+    of a start that landed answers with that run and starts nothing. If every
+    answer is lost, the run is looked up by its tag: one match is the run.
+    Otherwise the launch stops and the trial's intent stays pending, so no
+    later launch replaces it until it is resolved.
     """
-    try:
-        response = client.post(f"/workflows/{workflow_id}/execute", json=body.model_dump())
-        if response.status_code < 500:
-            response.raise_for_status()
-            return _Started.model_validate(response.json()).execution_id
-        lost = f"{response.status_code} {_detail(response)}"
-    except httpx.TransportError as exc:
-        lost = f"{type(exc).__name__}: {exc}"
+    lost = ""
+    for attempt in range(START_ATTEMPTS):
+        if attempt:
+            time.sleep(START_PAUSE_S)
+        try:
+            response = client.post(f"/workflows/{workflow_id}/execute", json=body.model_dump())
+            if response.status_code < 500:
+                response.raise_for_status()
+                return _Started.model_validate(response.json()).execution_id
+            lost = f"{response.status_code} {_detail(response)}"
+        except httpx.TransportError as exc:
+            lost = f"{type(exc).__name__}: {exc}"
     runs = find_trial_run(client, trial_tag, workflow_id)
     if len(runs) == 1:
         return runs[0]
@@ -2521,6 +2532,7 @@ def launch_trials(
                         repos=[s.repository],
                         eval_id=evals[case.id],
                         tags=[*tags, trial_tag],
+                        idempotency_key=trial_tag,
                     ),
                     trial_tag,
                 )
