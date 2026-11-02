@@ -107,6 +107,17 @@ class _Clock:
 
 
 @dataclass
+class _TickingClock(_Clock):
+    """A real clock's one property that matters here: two reads are never equal."""
+
+    tick: float = 0.001
+
+    def __call__(self) -> float:
+        self.now += self.tick
+        return self.now
+
+
+@dataclass
 class _Aggregate:
     recorded: list[RecordPhaseCommandsCommand] = field(default_factory=list)
 
@@ -228,6 +239,31 @@ class TestCommandPhaseHandler:
         await _run(workspace, phase, clock=clock)
 
         assert [c.timeout_seconds for c in workspace.calls] == [100, 50]
+
+    @pytest.mark.asyncio
+    async def test_a_one_second_phase_runs_its_step(self) -> None:
+        """Time passes between setting the deadline and reading it; the bound is
+        rounded up, not down to zero (codex #2162 pass 1)."""
+        workspace = _Workspace([_exited(0)])
+        phase = _phase(CommandStep(name="a", run="true"), timeout=1)
+
+        _, _, report, _ = await _run(workspace, phase, clock=_TickingClock())
+
+        assert [c.timeout_seconds for c in workspace.calls] == [1]
+        assert report.success and not report.timed_out
+
+    @pytest.mark.asyncio
+    async def test_a_step_that_exits_zero_after_the_deadline_times_the_phase_out(self) -> None:
+        """The transport's whole-second bound may let a step end past the exact
+        deadline; a zero exit then still fails the Phase (D4)."""
+        clock = _Clock()
+        workspace = _Workspace([_exited(0)], clock=clock, spends=101)
+        phase = _phase(CommandStep(name="a", run="a"), timeout=100)
+
+        _, _, report, _ = await _run(workspace, phase, clock=clock)
+
+        assert _outcomes(report) == [CommandStepOutcome.PASSED]
+        assert report.timed_out and not report.success
 
     @pytest.mark.asyncio
     async def test_the_phase_deadline_is_never_excused_by_allow_failure(self) -> None:

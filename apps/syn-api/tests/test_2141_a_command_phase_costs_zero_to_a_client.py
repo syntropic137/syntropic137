@@ -22,6 +22,7 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.workspace_backends.memory import MemoryEventStreamAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api.routes.executions.phase_mapping import _map_phase_detail, _map_phase_to_response
+from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.orchestration._shared.command_phase import (
     BoundedCommandResult,
     CommandStep,
@@ -110,6 +111,24 @@ class _Stream:
         return None
 
 
+class _Lane2:
+    """The observability writer: every row a run sends to Lane 2, where cost is priced."""
+
+    def __init__(self) -> None:
+        self.types: list[str] = []
+
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: object,
+        data: object,
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        self.types.append(str(getattr(observation_type, "value", observation_type)))
+
+
 class _NoTimeline:
     async def get_session_tools(self, _session_id: str) -> None:
         return None
@@ -130,7 +149,7 @@ def _phases() -> list[ExecutablePhase]:
     ]
 
 
-async def _run(exit_codes: dict[str, int]) -> _Stream:
+async def _run(exit_codes: dict[str, int], lane2: _Lane2 | None = None) -> _Stream:
     stream = _Stream()
     workspace_service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
     workspace_service._event_stream = _Steps(exit_codes)  # pyright: ignore[reportPrivateUsage]
@@ -142,7 +161,7 @@ async def _run(exit_codes: dict[str, int]) -> _Stream:
         artifact_content_storage=None,
         artifact_query=None,
         conversation_storage=None,
-        observability_writer=None,
+        observability_writer=lane2,
         controller=None,
         prompt_builder=AsyncMock(return_value=""),
         command_builder=MagicMock(return_value=[]),
@@ -222,3 +241,15 @@ def _assert_no_tokens(detail: WorkflowExecutionDetail) -> None:
         detail.total_cache_read_tokens,
     )
     assert totals == (0, 0, 0, 0)
+
+
+@pytest.mark.parametrize("exit_codes", [{}, {"make build": 2}], ids=["completed", "gate-failed"])
+async def test_a_command_run_sends_nothing_cost_is_priced_from(exit_codes: dict[str, int]) -> None:
+    """The client's 0 is only true if Lane 2 got no usage to price (ADR-078 D7):
+    the API merges cost from there, so this is the half the mapping cannot see."""
+    lane2 = _Lane2()
+
+    await _run(exit_codes, lane2)
+
+    priced_from = {ObservationType.TOKEN_USAGE.value, ObservationType.COMPLETED.value}
+    assert priced_from.isdisjoint(lane2.types), lane2.types

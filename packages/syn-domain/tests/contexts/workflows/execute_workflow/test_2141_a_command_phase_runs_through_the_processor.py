@@ -295,7 +295,7 @@ async def test_a_cancel_mid_step_cancels_the_run_and_keeps_the_report() -> None:
 
 
 @pytest.mark.anyio
-async def test_a_restart_that_lost_the_workspace_collects_the_recorded_verdict(
+async def test_a_workspace_lost_before_collection_collects_the_recorded_verdict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """D6: after `PhaseCommandsCompleted`, collection finds no workspace."""

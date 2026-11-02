@@ -154,7 +154,7 @@ routes through `ExecutionCancelledEvent` as for an agent.
 - The Phase succeeds iff no non-`allow_failure` step failed AND the Phase
   deadline was not exhausted. `allow_failure` excuses a step's exit code and
   its own step timeout, never the Phase's.
-- A re-run after a crash re-runs every step in a fresh Workspace (D6). Authors
+- A resume after a crash re-runs every step in a fresh Workspace (D6). Authors
   of steps with external side effects own their idempotency, as agent prompts
   do today.
 
@@ -201,18 +201,29 @@ projection manager's event routing (`manager_event_map.py`) registers the new
 event. Replay of existing streams is unchanged: no stream holds the new event
 and the new fields default to `agent`.
 
-### D6. Restart recovery
+### D6. A lost workspace, and a restart
 
-| crash point | durable state | recovery |
+Two different losses, and v1 recovers only the first.
+
+**The workspace is lost while the processor lives** (the container dies, or
+collection finds no workspace):
+
+| point | durable state | recovery |
 |---|---|---|
-| before `PhaseCommandsCompleted` | to-do is `RUN_AGENT` | re-provision, re-run every step |
-| after `PhaseCommandsCompleted`, before collection | to-do is `COLLECT_ARTIFACTS`, workspace gone | collect from the event: write `commands.json` from the recorded step results, with `tails_lost: true` and no tails, then continue as normal (succeed or fail per D5) |
+| before `PhaseCommandsCompleted` | to-do is `RUN_AGENT` | the Phase fails, as an agent Phase does |
+| after `PhaseCommandsCompleted`, before collection | to-do is `COLLECT_ARTIFACTS` | collect from the event: write `commands.json` from the recorded step results, with `tails_lost: true` and no tails, then continue as normal (succeed or fail per D5) |
 | after `ArtifactsCollectedForPhase` | artifacts in object storage | unchanged from agent Phases |
 
 The exit codes and timing are the gate's result and are in the event, so a
-lost workspace loses only the output tails, never the verdict. This replaces,
-for command Phases, the agent-only stranded salvage that reads
-`last_agent_message`.
+lost workspace loses only the output tails, never the verdict.
+
+**The processor restarts.** Unchanged from agent Phases (ADR-072: mid-phase
+crash survival is not provided). Boot reconciliation fails the RUNNING
+execution as `OrphanedByRestart`, and a resume re-provisions the Phase and
+re-runs every step. Reconciliation's stranded salvage reads a finished agent
+run's `last_agent_message`, so it does not reach a command Phase, and a
+verdict recorded before the restart is kept in the stream but not collected.
+Collecting it at reconciliation is #2169, not v1.
 
 ### D7. Output, credentials and cost
 
@@ -242,9 +253,8 @@ cost are 0. `PhaseCompleted` carries zero tokens and the real
 `duration_seconds`. `apps/syn-api/tests/test_2141_a_command_phase_costs_zero_to_a_client.py`
 proves 0 through the API read rather than inferring it: a real run's events,
 through the detail projection and the response mapping, for a completed run
-and a gate-failed one. Resume is proven at the events
-(`test_2141_a_command_phase_runs_through_the_processor.py`, D6), not through
-the API.
+and a gate-failed one, and that neither run sends Lane 2 a usage row. A resume runs the Phase afresh (D6), so it is one of
+those two cases again; it has no test of its own through the API.
 
 ### D8. Which repository state a command Phase sees
 

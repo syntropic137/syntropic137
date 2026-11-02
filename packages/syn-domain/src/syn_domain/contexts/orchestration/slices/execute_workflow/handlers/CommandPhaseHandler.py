@@ -138,18 +138,35 @@ class _Steps:
     stopped: bool = False
     _deadline: float | None = None
 
-    def _allowance(self, step: CommandStep) -> tuple[int, int]:
-        """(this step's bound, what remains of the Phase); the deadline starts with step one."""
+    def _allowance(self, step: CommandStep) -> tuple[int, float]:
+        """(this step's whole-second bound, the seconds left of the Phase).
+
+        The deadline starts with step one and stays exact: only the transport's
+        bound is rounded, up, and `_over_deadline` holds the Phase to the
+        exact deadline after the step. Rounding the remainder down instead
+        made a one-second Phase skip every step.
+        """
         if self._deadline is None:
             self._deadline = self.h.clock() + self.budget
-        remaining = math.floor(self._deadline - self.h.clock())
+        remaining = self._deadline - self.h.clock()
+        bound = math.ceil(remaining)
         if step.timeout_seconds is None:
-            return remaining, remaining
-        return min(step.timeout_seconds, remaining), remaining
+            return bound, remaining
+        return min(step.timeout_seconds, bound), remaining
+
+    def _phase_ran_out(
+        self, step: CommandStep, outcome: CommandStepOutcome, remaining: float
+    ) -> bool:
+        """Its own timeout is excusable; the Phase's deadline never is (D4),
+        including a step that exited after it, whatever its exit code."""
+        own_bound = step.timeout_seconds is not None and step.timeout_seconds < math.ceil(remaining)
+        if outcome is CommandStepOutcome.TIMED_OUT and not own_bound:
+            return True
+        return self._deadline is not None and self.h.clock() > self._deadline
 
     async def run(self, step: CommandStep) -> None:
         allowed, remaining = self._allowance(step)
-        if not self.stopped and allowed <= 0:
+        if not self.stopped and remaining <= 0:
             self.timed_out = self.stopped = True
         if not self.stopped:
             await self._check_cancel()
@@ -158,9 +175,7 @@ class _Steps:
             return
         result = await self._bounded(step, allowed, remaining)
         outcome = step_outcome(result)
-        # Its own timeout is excusable; the Phase's deadline never is (D4).
-        if outcome is CommandStepOutcome.TIMED_OUT and allowed == remaining:
-            self.timed_out = True
+        self.timed_out = self._phase_ran_out(step, outcome, remaining)
         recorded = self._record(step, outcome, result)
         self.stopped = self.timed_out or self.cancelled is not None or recorded.stops_the_phase
 
@@ -171,7 +186,7 @@ class _Steps:
             self.stopped = True
 
     async def _bounded(
-        self, step: CommandStep, allowed: int, remaining: int
+        self, step: CommandStep, allowed: int, remaining: float
     ) -> BoundedCommandResult:
         task = asyncio.ensure_future(
             self.workspace.run_bounded(

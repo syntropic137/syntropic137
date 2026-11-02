@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
@@ -394,7 +394,9 @@ class PhaseYamlDefinition(BaseModel):
     prompt_template: str | None = None
     prompt_file: str | None = None
     max_tokens: int | None = None
-    timeout_seconds: int | None = None
+    timeout_seconds: StrictInt | None = None
+    """Strict, as a command step's is (ADR-078 D4): ``1.0``, ``"60"`` and ``true``
+    are refused rather than coerced. Positivity is the domain rule's."""
     max_cost_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     """Stop the phase once its agent has spent more than this, in USD (#1376).
 

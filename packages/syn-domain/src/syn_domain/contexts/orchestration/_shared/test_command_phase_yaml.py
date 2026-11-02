@@ -130,6 +130,13 @@ def test_a_step_timeout_is_a_positive_integer(timeout: object) -> None:
         CommandStep.model_validate({"name": "s", "run": "x", "timeout_seconds": timeout})
 
 
+@pytest.mark.parametrize("timeout", [0, -1, 1.0, 1.5, "60", True])
+def test_a_phase_timeout_is_a_positive_integer(timeout: object) -> None:
+    """D4 for the Phase as for its steps: nothing is coerced into a bound."""
+    with pytest.raises(ValidationError):
+        _command_phase(timeout_seconds=timeout)
+
+
 @pytest.mark.parametrize("name", ["Build", "-x", "a/b", "../log", "a" * 64, ""])
 def test_a_step_name_is_a_file_name_safe_slug(name: str) -> None:
     with pytest.raises(ValidationError):
