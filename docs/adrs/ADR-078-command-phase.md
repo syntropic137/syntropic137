@@ -292,7 +292,7 @@ Command Phase is honestly not one.
 
 - Probes and gates on a pinned revision cost 0 tokens and are deterministic.
 - A failed gate is `gate`, not `platform`, in every failure rate.
-- Event epoch 8 -> 9. The `writer_epoch` claim check
-  (`execution_runs/postgres.py`) keeps an epoch-8 Executor off runs written at 9.
+- Event epoch 9 -> 10 (D5). The `writer_epoch` claim check
+  (`execution_runs/postgres.py`) keeps an epoch-9 Executor off runs written at 10.
 - Anything that assumed every Phase has an agent session sees a Phase with
   none, which is the truth; dashboard session links must handle it.
