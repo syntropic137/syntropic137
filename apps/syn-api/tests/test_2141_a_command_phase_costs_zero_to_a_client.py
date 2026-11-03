@@ -22,7 +22,6 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.workspace_backends.memory import MemoryEventStreamAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api.routes.executions.phase_mapping import _map_phase_detail, _map_phase_to_response
-from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.orchestration._shared.command_phase import (
     BoundedCommandResult,
     CommandStep,
@@ -48,6 +47,7 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.projection im
     WorkflowExecutionDetailProjection,
 )
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
+from syn_shared.events import SESSION_SUMMARY, TOKEN_USAGE
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -251,5 +251,21 @@ async def test_a_command_run_sends_nothing_cost_is_priced_from(exit_codes: dict[
 
     await _run(exit_codes, lane2)
 
-    priced_from = {ObservationType.TOKEN_USAGE.value, ObservationType.COMPLETED.value}
-    assert priced_from.isdisjoint(lane2.types), lane2.types
+    _assert_nothing_priced(lane2.types)
+
+
+#: The two Lane 2 rows cost is priced from (ADR-078 D7), by the names the
+#: writers send them under, not the observation enum, which has no summary.
+_PRICED_FROM = frozenset({SESSION_SUMMARY, TOKEN_USAGE})
+
+
+def _assert_nothing_priced(types: list[str]) -> None:
+    sent = _PRICED_FROM.intersection(types)
+    assert not sent, f"a command run sent Lane 2 {sorted(sent)}"
+
+
+@pytest.mark.parametrize("row", sorted(_PRICED_FROM))
+def test_the_lane2_assertion_catches_a_priced_row(row: str) -> None:
+    """Negative control: a run that did send a row cost is priced from fails."""
+    with pytest.raises(AssertionError, match=row):
+        _assert_nothing_priced(["started", row])

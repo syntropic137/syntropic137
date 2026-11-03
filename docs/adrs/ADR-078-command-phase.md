@@ -205,8 +205,10 @@ and the new fields default to `agent`.
 
 Two different losses, and v1 recovers only the first.
 
-**The workspace is lost while the processor lives** (the container dies, or
-collection finds no workspace):
+**The processor holds no workspace for the Phase at collection** (its runtime
+handle is gone while the processor lives). A handle that is still held over a
+workspace whose files have gone is not detected: collection finds nothing and
+the Phase fails, as an agent Phase would.
 
 | point | durable state | recovery |
 |---|---|---|

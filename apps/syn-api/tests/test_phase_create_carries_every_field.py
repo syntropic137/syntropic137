@@ -381,6 +381,19 @@ class TestMultiNameSkillsExpand:
         assert [s.skill_name for s in phase.skills] == ["one-skill"]
 
 
+@pytest.mark.parametrize("sent", [True, "60", 1.0, 1.5])
+def test_a_non_integer_timeout_is_refused_at_create(sent: object) -> None:
+    """ADR-078 D4 on the API path, which never passes the YAML validator."""
+    with pytest.raises(ValueError, match="must be an integer"):
+        _build_phase_defs([{"name": "Build", "timeout_seconds": sent}])
+
+
+def test_an_integer_timeout_is_kept_at_create() -> None:
+    (phase,) = _build_phase_defs([{"name": "Build", "timeout_seconds": 60}])
+
+    assert phase.timeout_seconds == 60
+
+
 def test_a_cost_limit_on_a_codex_phase_is_refused_at_create() -> None:
     """#1376: the API create path never passes the YAML validator, so it refuses too."""
     phase = {"name": "Experiment", "max_cost_usd": 12.5, "agent": {"provider": "codex"}}

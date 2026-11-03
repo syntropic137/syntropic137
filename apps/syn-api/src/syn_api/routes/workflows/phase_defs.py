@@ -77,6 +77,18 @@ def _as_bool(value: object, field: str) -> bool:
     raise ValueError(msg)
 
 
+def _as_timeout(value: object) -> int | None:
+    """Only a real int, or None. The YAML path refuses ``1.0``, ``"60"`` and
+    ``true`` (ADR-078 D4); a template created here never passes it, so this path
+    refuses them too. ``int(True)`` is 1, which is how a typo becomes a bound.
+    Positivity is ``require_consistent_phase_kind``'s for a command phase.
+    """
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    msg = f"phase field 'timeout_seconds' must be an integer, got {type(value).__name__}: {value!r}"
+    raise ValueError(msg)
+
+
 def _expand_skills(entries: Iterable[object] | None) -> tuple[SkillRef, ...]:
     """Expand each entry the way the YAML path does.
 
@@ -183,7 +195,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 output_artifact_types=p.get("output_artifact_types", []),
                 prompt_template=p.get("prompt_template"),
                 max_tokens=p.get("max_tokens"),
-                timeout_seconds=p.get("timeout_seconds"),
+                timeout_seconds=_as_timeout(p.get("timeout_seconds")),
                 max_cost_usd=p.get("max_cost_usd"),
                 allowed_tools=p.get("allowed_tools", []),
                 # Dropping this silently reinstates the clone for a phase

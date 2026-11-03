@@ -431,7 +431,7 @@ class PhaseWorkspace:
             and recorded is not None
             and aggregate.running_phase_id == todo.phase_id
         ):
-            # A restart after `PhaseCommandsCompleted` lost the workspace and
+            # The runtime lost the workspace after `PhaseCommandsCompleted`, and
             # only the output with it: the verdict is in the event (ADR-078 D6).
             await self._collect_recorded_commands(
                 todo, phase, aggregate, recorded, all_artifact_ids, phase_outputs
