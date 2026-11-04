@@ -1,6 +1,6 @@
 ---
 model: opus
-timeout-seconds: 5400
+timeout-seconds: 7200
 ---
 
 # Implement this change, test-first, and open the PR before you finish

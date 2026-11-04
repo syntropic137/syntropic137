@@ -1,6 +1,6 @@
 ---
 model: gpt-sol
-timeout-seconds: 2400
+timeout-seconds: 3000
 ---
 
 # Review the PR the previous phase opened

@@ -7,6 +7,7 @@ description: >
   See README.md for the evidence.
 type: implementation
 classification: standard
+requires_repos: true
 
 phases:
   - id: implement

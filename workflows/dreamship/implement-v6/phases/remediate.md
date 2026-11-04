@@ -1,6 +1,6 @@
 ---
 model: opus
-timeout-seconds: 2400
+timeout-seconds: 3600
 ---
 
 # Address the review
