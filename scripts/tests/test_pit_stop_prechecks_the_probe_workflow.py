@@ -146,6 +146,11 @@ def _run(tmp: Path, api: str, *flags: str, password: str = _PASSWORD) -> _Run:
     refuse = f'#!/bin/sh\necho "$(basename "$0") $*" >> {tmp}/touched\nexit 1\n'
     for tool in ("docker", "ssh", "just"):
         (bin_dir / tool).write_text(refuse)
+    # The one read a host answers: it has no executor. Not recorded as touched.
+    (bin_dir / "ssh").write_text(
+        '#!/bin/sh\ncase "$*" in *"docker ps -aq"*) exit 0 ;; esac\n'
+        + refuse.removeprefix("#!/bin/sh\n")
+    )
     # The repository is a fake one in tmp, so no path can fetch or add a worktree for real.
     (bin_dir / "git").write_text(
         f'#!/bin/sh\ncase "$*" in *--git-common-dir*) echo {tmp}/repo/.git; exit 0 ;; esac\n'

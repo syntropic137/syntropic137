@@ -49,10 +49,9 @@ no other spelling resolves to them.
 
 BY COMPOSE SERVICE, NOT BY IMAGE NAME. The executor runs the syn-api image in
 another role (ADR-072 D1, #1310 1.6), so a compose with it names syn-api twice.
-A pit stop recreates `api` and `gateway` only, so only THEIR lines move: an
+`--service all` moves the executor line only when the host has an executor; an
 executor pin moved under a container that was never recreated would claim a
-build it is not running, which is drift. The executor's line is left exactly
-as deployed until a pit stop that recreates the executor exists.
+build it is not running, which is drift.
 """
 
 from __future__ import annotations
@@ -64,10 +63,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 #: The compose services a pit stop recreates, to the image `ship` loads for each.
-IMAGES = {"api": "syn-api", "gateway": "syn-gateway"}
+IMAGES = {"api": "syn-api", "gateway": "syn-gateway", "executor": "syn-api"}
 #: `--service` as pit_stop.sh spells it, to the compose services it recreates.
-#: Never `executor`: no pit stop recreates it yet, so none may move its pin.
-SHIPPED = {"all": ("api", "gateway"), "gateway": ("gateway",)}
+#: `executor` only with `all-with-executor`, which pit_stop.sh picks when the host
+#: has one: a pin moved under a container not recreated would claim a build it
+#: is not running.
+SHIPPED = {
+    "all": ("api", "gateway"),
+    "all-with-executor": ("api", "gateway", "executor"),
+    "api": ("api",),
+    "gateway": ("gateway",),
+}
 REGISTRY = "ghcr.io/syntropic137"
 
 #: Horizontal whitespace only: `\s` crosses newlines, so a blank line above an
