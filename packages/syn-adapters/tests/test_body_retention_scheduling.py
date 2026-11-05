@@ -20,7 +20,7 @@ async def test_expiry_failure_does_not_block_inventory_work(caplog):
         step=AsyncMock(),
         recovery=recovery,
         retention=retention,
-        spool_release=spool_release,
+        spool_release=(spool_release,),
     )
     await work.schedule()
     recovery.step.assert_awaited_once()

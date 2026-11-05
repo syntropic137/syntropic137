@@ -9,7 +9,8 @@ Staged bytes leave the host only after one of two durable facts:
   qualifies: an unattached workspace may be paused and resume.
 - ``expired``: a settled spool exceeded its retention age, or the byte quota
   forced eviction (settled spools first; a non-terminal spool only when settled
-  ones cannot satisfy the quota). An explicit acquisition gap is journaled
+  ones cannot satisfy the quota), or the per-backend count ceiling did
+  (settled spools only). An explicit acquisition gap is journaled
   before the volume is removed, so the run's inventory keeps the session
   discoverable and says why its body is absent.
 
@@ -35,7 +36,7 @@ from syn_domain.contexts.agent_sessions import (
 )
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.agent_sessions import CaptureSpoolLease
+    from syn_domain.contexts.agent_sessions import CaptureSpoolLease, SpoolBackend
     from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
         SessionEvidenceWritePort,
     )
@@ -48,7 +49,9 @@ _PRODUCER = "capture-spool-retention"
 
 class SpoolVolumePort(Protocol):
     async def remove(self, spool: CaptureSpool) -> bool:
-        """True when removed or already absent; False while a container uses it."""
+        """True when removed or already absent; False while a writer may still use it.
+
+        For a sandbox, removing is killing it; until then it stays paused."""
         ...
 
 
@@ -97,19 +100,31 @@ class CaptureSpoolRetention:
         volumes: SpoolVolumePort,
         journal: SessionEvidenceWritePort,
         *,
+        backend: SpoolBackend = "docker",
         age_seconds: int | None = None,
         max_bytes: int | None = None,
+        max_count: int | None = None,
     ) -> None:
+        """Owns the spools of one ``backend``: its limits and quota count only
+        them, and ``volumes`` is the only thing that can remove their bytes."""
         if age_seconds is not None and age_seconds < 1:
             raise ValueError("spool retention period must be positive")
         if max_bytes is not None and max_bytes < 1:
             raise ValueError("spool byte quota must be positive")
+        if max_count is not None and max_count < 1:
+            raise ValueError("spool count ceiling must be positive")
         self._pool, self._source = pool, source
         self._volumes, self._journal = volumes, journal
         self._age, self._max_bytes = age_seconds, max_bytes
+        self._max_count = max_count
+        self._backend = backend
 
     async def after_drain(self, lease: CaptureSpoolLease, *, exclusive: bool) -> bool:
-        if not exclusive or lease.spool.run.source_instance_id != self._source:
+        if (
+            not exclusive
+            or lease.spool.run.source_instance_id != self._source
+            or lease.spool.backend != self._backend
+        ):
             return False
         async with self._pool.acquire() as conn:
             marked = await conn.fetchval(
@@ -135,9 +150,11 @@ class CaptureSpoolRetention:
             rows = await conn.fetch(
                 """SELECT payload::text,release_reason FROM session_capture_spools
                 WHERE source_instance_id=$1 AND release_reason IS NOT NULL AND released_at IS NULL
-                AND leased_until<=now() ORDER BY registered_at,session_id LIMIT $2""",
+                AND leased_until<=now() AND COALESCE(payload->>'backend','docker')=$3
+                ORDER BY registered_at,session_id LIMIT $2""",
                 self._source,
                 limit,
+                self._backend,
             )
         released = 0
         for row in rows:
@@ -155,10 +172,12 @@ class CaptureSpoolRetention:
                         WHERE source_instance_id=$1 AND release_reason IS NULL
                         AND leased_until<=now() AND settled_at IS NOT NULL
                         AND registered_at<=now()-$2::double precision*interval '1 second'
+                        AND COALESCE(payload->>'backend','docker')=$4
                         ORDER BY registered_at,session_id LIMIT $3 FOR UPDATE SKIP LOCKED)""",
                     self._source,
                     self._age,
                     limit,
+                    self._backend,
                 )
             if self._max_bytes is not None:
                 # Settled spools go first. A non-terminal spool is evicted only
@@ -170,6 +189,7 @@ class CaptureSpoolRetention:
                             SELECT COALESCE(sum(staged_bytes),0) AS bytes
                             FROM session_capture_spools
                             WHERE source_instance_id=$1 AND release_reason IS NULL
+                            AND COALESCE(payload->>'backend','docker')=$5
                         ), candidates AS (
                             SELECT session_id,registered_at,
                             sum(staged_bytes) OVER (ORDER BY registered_at,session_id)
@@ -177,6 +197,7 @@ class CaptureSpoolRetention:
                             FROM session_capture_spools
                             WHERE source_instance_id=$1 AND release_reason IS NULL
                             AND (settled_at IS NOT NULL)=$4
+                            AND COALESCE(payload->>'backend','docker')=$5
                         )
                         UPDATE session_capture_spools s SET release_reason='expired'
                         WHERE s.source_instance_id=$1 AND s.release_reason IS NULL
@@ -188,7 +209,35 @@ class CaptureSpoolRetention:
                         self._max_bytes,
                         limit,
                         settled,
+                        self._backend,
                     )
+
+            if self._max_count is not None:
+                # Every retained spool counts: for a sandbox, each is a paused
+                # sandbox whether or not it staged bytes. Only settled ones are
+                # evicted, oldest first; a running execution is never a casualty
+                # of the ceiling.
+                await conn.execute(
+                    """WITH retained AS (
+                        SELECT count(*) AS spools FROM session_capture_spools
+                        WHERE source_instance_id=$1 AND release_reason IS NULL
+                        AND COALESCE(payload->>'backend','docker')=$4
+                    )
+                    UPDATE session_capture_spools s SET release_reason='expired'
+                    WHERE s.source_instance_id=$1 AND s.release_reason IS NULL
+                    AND s.session_id IN (
+                        SELECT c.session_id FROM session_capture_spools c
+                        WHERE c.source_instance_id=$1 AND c.release_reason IS NULL
+                        AND c.settled_at IS NOT NULL AND c.leased_until<=now()
+                        AND COALESCE(c.payload->>'backend','docker')=$4
+                        ORDER BY c.registered_at,c.session_id
+                        LIMIT LEAST($3,GREATEST(0,(SELECT spools FROM retained)-$2))
+                        FOR UPDATE SKIP LOCKED)""",
+                    self._source,
+                    self._max_count,
+                    limit,
+                    self._backend,
+                )
 
     async def _release(self, spool: CaptureSpool, reason: str) -> bool:
         if reason == "expired":

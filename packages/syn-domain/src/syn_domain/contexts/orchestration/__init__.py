@@ -94,6 +94,17 @@ from syn_domain.contexts.orchestration._shared.workspace_credential_policy impor
     NoCredentials,
     WorkspaceCredentialPolicy,
 )
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    WorkspaceMemoryOverCapError,
+    WorkspacePidsOverCapError,
+    WorkspaceResourceRequest,
+    deployment_memory_ceiling_mb,
+    deployment_pids_ceiling,
+    require_memory_within_cap,
+    require_phases_within_cap,
+    require_pids_within_cap,
+    stored_resource_request,
+)
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
 )
@@ -128,6 +139,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_s
     replays_generic,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
+    phases_the_resume_runs,
     refuse_resume_start,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -150,6 +162,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
     ExecutionAlreadyRequestedError,
     ExecutionRequestAggregate,
+    execution_id_for_key,
     execution_request_id,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
@@ -610,6 +623,9 @@ __all__ = [
     "WorkspaceCredentialPolicy",
     "WorkspaceDeleteFallback",
     "WorkspaceDirRemover",
+    "WorkspaceMemoryOverCapError",
+    "WorkspacePidsOverCapError",
+    "WorkspaceResourceRequest",
     "WorkspaceUsage",
     "announce_as",
     "build_command_from_definition",
@@ -618,6 +634,9 @@ __all__ = [
     "created_pull_requests",
     "declared_model_tags",
     "declared_models_of",
+    "deployment_memory_ceiling_mb",
+    "deployment_pids_ceiling",
+    "execution_id_for_key",
     "execution_request_id",
     "guard_orphaned_workspace",
     "guard_stale_workspace_dir",
@@ -629,6 +648,7 @@ __all__ = [
     "mint_wrapper_name",
     "models_digest",
     "open_eval",
+    "phases_the_resume_runs",
     "read_record",
     "read_start_record",
     "refuse_resume_start",
@@ -636,9 +656,13 @@ __all__ = [
     "render_workspace_prompt",
     "replays_generic",
     "repository_key",
+    "require_memory_within_cap",
+    "require_phases_within_cap",
+    "require_pids_within_cap",
     "require_supported_execution_type",
     "roster_of",
     "salvage_stranded_phase",
+    "stored_resource_request",
     "summarize_case",
     "summarize_eval_set",
     "utc_day",

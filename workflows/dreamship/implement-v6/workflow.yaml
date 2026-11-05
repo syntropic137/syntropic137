@@ -1,0 +1,44 @@
+id: dreamship-implement-v6
+name: dreamship-implement-v6
+description: >
+  v6 of dreamship-implement. Identical to v5 (prompts, models, phase order)
+  except the phase timeouts, sized from the DreamShip runs on record (#2172):
+  implement 5400 -> 7200, review 2400 -> 3000, remediate 2400 -> 3600.
+  See README.md for the evidence.
+type: implementation
+classification: standard
+requires_repos: true
+
+phases:
+  - id: implement
+    name: 'Implement behind a failing test, then open the PR'
+    order: 1
+    execution_type: sequential
+    prompt_file: phases/implement.md
+    output_artifacts: [markdown]
+    timeout_seconds: 7200
+    agent:
+      provider: claude
+      model: opus
+  - id: review
+    name: 'Try to falsify it, and attack it on security'
+    order: 2
+    execution_type: sequential
+    prompt_file: phases/review.md
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 3000
+    agent:
+      provider: codex
+      model: gpt-sol
+  - id: remediate
+    name: Fix what the review blocked on
+    order: 3
+    execution_type: sequential
+    prompt_file: phases/remediate.md
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 3600
+    agent:
+      provider: claude
+      model: opus

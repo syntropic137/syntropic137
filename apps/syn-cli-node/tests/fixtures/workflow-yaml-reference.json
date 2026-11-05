@@ -87,6 +87,29 @@
       ],
       "document_sha256": "99f32a9ed4d9809a13e0ae1fa48bb1369154e8a0eba3e83ef69635a98ae51059"
     },
+    "workflows/dreamship/implement-v6/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "review",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/review.md"
+        },
+        {
+          "id": "remediate",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/remediate.md"
+        }
+      ],
+      "document_sha256": "64f78f6d0b83ad00405b68bf9ae8bc3641c1c0e0d42553872fbbfd451e24fb5f"
+    },
     "workflows/evals/implement-pinned/workflow.yaml": {
       "phases": [
         {

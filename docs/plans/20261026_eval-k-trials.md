@@ -357,7 +357,7 @@ update ride with S1 and S3.
 
 Lesson from the A/B: dry-run one unit end to end before freezing. After S1 to
 S3 land: `verifier-seed-v1`, `--split train`, 2 cases (one defect, one clean),
-k = 3, one cohort, 6 runs. Pass: the roster is registered, 6 ledger lines,
+k = 3, one cohort, 6 runs (`launch --trials 3 --split train --case <defect> --case <clean>`). Pass: the roster is registered, 6 ledger lines,
 every trial's starting checkout equals its eval's baseline, and
 `GET /eval-sets/metrics` matches a hand count, bounds included. Then the full
 set, then an A/B. Results stay `isolation: unproven` until #2056.

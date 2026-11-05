@@ -49,7 +49,7 @@ from syn_adapters.storage.repositories import RepositoryAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.execution_budget import ExecutionBudget, StartClaim, StartPath
-from syn_api.routes.executions import commands, control, queries, resume_start_info
+from syn_api.routes.executions import commands, control, keyed_start, queries, resume_start_info
 from syn_api.routes.executions.commands import ExecuteWorkflowRequest
 from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
@@ -943,13 +943,13 @@ class TestTheProcessManagerAndTheRouteRaceForOneRequest:
         """The coordinator can deliver the durable request and offer it before
         the route claims it: the route must still answer 200, start nothing
         twice, and leave no lease behind."""
-        recorded = commands.record_execution_request
+        recorded = keyed_start.record_execution_request
 
         async def _manager_wins_the_race(*args: object, **kwargs: object) -> None:
             await recorded(*args, **kwargs)  # type: ignore[arg-type]
             assert await world.coordinate() == (0, 1)
 
-        monkeypatch.setattr(commands, "record_execution_request", _manager_wins_the_race)
+        monkeypatch.setattr(keyed_start, "record_execution_request", _manager_wins_the_race)
 
         execution_id = await world.post_execute()
 

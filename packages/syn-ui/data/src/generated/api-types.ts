@@ -316,6 +316,8 @@ export interface paths {
          * @description Start workflow execution in background.
          *
          *     Returns 409 while maintenance mode is active; no execution is started.
+         *     With `idempotency_key`, a start already accepted is answered again, not
+         *     repeated (#2129).
          */
         post: operations["execute_workflow_endpoint_workflows__workflow_id__execute_post"];
         delete?: never;
@@ -4597,6 +4599,11 @@ export interface components {
              */
             no_eval: boolean;
             /**
+             * Idempotency Key
+             * @description Makes the start idempotent (#2129): the execution id is derived from the workflow and this key, so every start with the same key, concurrent ones included, answers with the one execution and `replayed: true` after the first. A start that differs from the one that made it is refused with 409.
+             */
+            idempotency_key?: string | null;
+            /**
              * Provider
              * @deprecated
              * @description Agent provider to use. Currently ignored by execute(); sending this field has no effect.
@@ -4629,6 +4636,11 @@ export interface components {
              * @default Workflow execution started
              */
             message: string;
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
         };
         /**
          * ExecutionBudgetHealth
@@ -6799,6 +6811,7 @@ export interface components {
              * @default false
              */
             requires_verdict: boolean;
+            resources?: components["schemas"]["PhaseResourcesResponse"];
             /**
              * Sandbox
              * @default full-access
@@ -7084,6 +7097,16 @@ export interface components {
             /** Oom Killed Phases */
             oom_killed_phases: components["schemas"]["OomKilledPhaseResponse"][];
             coverage: components["schemas"]["ResourceCoverageResponse"];
+        };
+        /**
+         * PhaseResourcesResponse
+         * @description What a phase's workspace asks for beyond the deployment default (okrs-51p.30).
+         */
+        PhaseResourcesResponse: {
+            /** Memory Mb */
+            memory_mb?: number | null;
+            /** Pids Limit */
+            pids_limit?: number | null;
         };
         /**
          * PhaseSkillUseInfo
