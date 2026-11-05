@@ -111,6 +111,9 @@ class SandboxDouble:
     async def pause(self, sandbox_id: str) -> None:
         return None
 
+    async def resume(self, sandbox_id: str) -> None:
+        return None
+
     async def start(
         self,
         sandbox_id: str,
