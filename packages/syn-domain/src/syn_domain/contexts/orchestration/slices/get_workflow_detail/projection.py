@@ -15,6 +15,10 @@ if TYPE_CHECKING:
 
     from event_sourcing import ProjectionStore
 
+from syn_domain.contexts.orchestration._shared.command_phase import (
+    stored_command_steps,
+    stored_phase_kind,
+)
 from syn_domain.contexts.orchestration._shared.recorded_time import RecordedTimeProjection
 from syn_domain.contexts.orchestration._shared.tags import TagSet, replay_tag_edit
 from syn_domain.contexts.orchestration._shared.workspace_resources import (
@@ -239,6 +243,8 @@ class WorkflowDetailProjection(RecordedTimeProjection):
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
                 platform_access=stored_platform_access(p.get("platform_access")),
                 requires_verdict=bool(p.get("requires_verdict", False)),
+                kind=stored_phase_kind(p.get("kind")),
+                commands=stored_command_steps(p.get("commands")),
                 # okrs-51p.30. The sibling site in read_models/workflow_detail.py
                 # reads it too, through the same function.
                 resources=stored_resource_request(p.get("resources")),

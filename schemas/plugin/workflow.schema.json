@@ -117,6 +117,46 @@
       "description": "A workflow-declared reference to a Claude Code plugin.\n\nCompared and hashed by ``(source_url, version, name)`` to match the lock\nprojection key (issue #726). A workflow author who installs the same\nplugin under two different display names produces two distinct lock\nentries -- the materializer needs both to write the right files.",
       "title": "ClaudePluginRef"
     },
+    "CommandStep": {
+      "additionalProperties": false,
+      "description": "One fixed shell step of a command Phase (ADR-078 D1).\n\n``run`` is executed as ``sh -c <run>`` in ``/workspace``. It is never\ntemplated: substituting execution inputs into a shell line is an\ninjection path, so v1 passes no inputs to a step at all.",
+      "properties": {
+        "name": {
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "run": {
+          "minLength": 1,
+          "title": "Run",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Seconds"
+        },
+        "allow_failure": {
+          "default": false,
+          "title": "Allow Failure",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "run"
+      ],
+      "title": "CommandStep",
+      "type": "object"
+    },
     "EvalId": {
       "description": "The identity of one eval, and the id of its stream.",
       "title": "EvalId",
@@ -208,6 +248,15 @@
       "title": "PhaseExecutionType",
       "type": "string"
     },
+    "PhaseKind": {
+      "description": "What runs a Phase. A Phase that declares nothing is an agent Phase (ADR-069 D4).",
+      "enum": [
+        "agent",
+        "command"
+      ],
+      "title": "PhaseKind",
+      "type": "string"
+    },
     "PhaseYamlDefinition": {
       "additionalProperties": false,
       "description": "Phase definition as parsed from YAML.\n\nConverts YAML snake_case to domain PhaseDefinition.",
@@ -233,6 +282,17 @@
         "execution_type": {
           "$ref": "#/$defs/PhaseExecutionType",
           "default": "sequential"
+        },
+        "kind": {
+          "$ref": "#/$defs/PhaseKind",
+          "default": "agent"
+        },
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/CommandStep"
+          },
+          "title": "Commands",
+          "type": "array"
         },
         "description": {
           "anyOf": [

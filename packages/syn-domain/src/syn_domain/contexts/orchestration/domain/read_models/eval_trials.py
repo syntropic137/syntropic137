@@ -240,7 +240,15 @@ _VERDICT_OUTCOME = {
     Verdict.ERROR: TrialOutcome.INFRA_ERROR,
 }
 
-_AGENT_STOPPED = frozenset({FailureClassification.CORRECT_REFUSAL, FailureClassification.TASK})
+#: The work said no: the agent stopped without the deliverable, or a command
+#: Phase's own step failed its gate (ADR-078 D5). Neither is the platform's.
+_WORK_STOPPED = frozenset(
+    {
+        FailureClassification.CORRECT_REFUSAL,
+        FailureClassification.TASK,
+        FailureClassification.GATE,
+    }
+)
 
 
 def _outcome(run: EvalRunFacts, cohort: CohortKey) -> TrialOutcome:
@@ -251,8 +259,8 @@ def _outcome(run: EvalRunFacts, cohort: CohortKey) -> TrialOutcome:
     if status in (ExecutionStatus.CANCELLED, ExecutionStatus.INTERRUPTED):
         return TrialOutcome.INFRA_ERROR
     if status == ExecutionStatus.FAILED:
-        # The agent stopped without the deliverable, whatever the score says.
-        if run.failure_classification in _AGENT_STOPPED:
+        # The work stopped without the deliverable, whatever the score says.
+        if run.failure_classification in _WORK_STOPPED:
             return TrialOutcome.FAIL
         # platform, unclassified, or never classified: includes failures before
         # provisioning, which record no checkout.

@@ -21,6 +21,7 @@ from syn_shared.platform_access import PlatformScope
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
+    from syn_domain.contexts.orchestration._shared.command_phase import CommandStep, PhaseKind
     from syn_domain.contexts.orchestration._shared.skill_ref import SkillRef
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         FallbackAgent,
@@ -73,6 +74,18 @@ def _as_bool(value: object, field: str) -> bool:
     if isinstance(value, bool):
         return value
     msg = f"phase field {field!r} must be a boolean, got {type(value).__name__}: {value!r}"
+    raise ValueError(msg)
+
+
+def _as_timeout(value: object) -> int | None:
+    """Only a real int, or None. The YAML path refuses ``1.0``, ``"60"`` and
+    ``true`` (ADR-078 D4); a template created here never passes it, so this path
+    refuses them too. ``int(True)`` is 1, which is how a typo becomes a bound.
+    Positivity is ``require_consistent_phase_kind``'s for a command phase.
+    """
+    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    msg = f"phase field 'timeout_seconds' must be an integer, got {type(value).__name__}: {value!r}"
     raise ValueError(msg)
 
 
@@ -138,10 +151,31 @@ def _fallback_agent(declared: object) -> FallbackAgent | None:
     return FallbackAgentYamlDefinition.model_validate(declared).to_domain()
 
 
+def _phase_kind(declared: object) -> PhaseKind:
+    """A phase's kind; ``agent`` when it declares none (ADR-078 D1)."""
+    from syn_domain.contexts.orchestration import PhaseKind
+
+    return PhaseKind.AGENT if declared is None else PhaseKind(str(declared))
+
+
+def _command_steps(declared: object) -> tuple[CommandStep, ...]:
+    """A command phase's steps, held to the YAML's model (ADR-078)."""
+    from syn_domain.contexts.orchestration import CommandStep
+
+    if not declared:
+        return ()
+    if not isinstance(declared, list):
+        msg = "'commands' must be a list of steps"
+        raise ValueError(msg)
+    return tuple(CommandStep.model_validate(step) for step in declared)
+
+
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
     from syn_domain.contexts.orchestration import (
         PhaseDefinition,
         PhaseExecutionType,
+        PhaseKind,
+        require_consistent_phase_kind,
         stored_resource_request,
     )
 
@@ -153,11 +187,15 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 order=p.get("order", i + 1),
                 description=p.get("description"),
                 execution_type=p.get("execution_type", PhaseExecutionType.SEQUENTIAL),
+                # Dropped, a command phase would install as an agent phase with
+                # no prompt and run a model on nothing (ADR-078).
+                kind=_phase_kind(p.get("kind")),
+                commands=_command_steps(p.get("commands")),
                 input_artifact_types=p.get("input_artifact_types", []),
                 output_artifact_types=p.get("output_artifact_types", []),
                 prompt_template=p.get("prompt_template"),
                 max_tokens=p.get("max_tokens"),
-                timeout_seconds=p.get("timeout_seconds"),
+                timeout_seconds=_as_timeout(p.get("timeout_seconds")),
                 max_cost_usd=p.get("max_cost_usd"),
                 allowed_tools=p.get("allowed_tools", []),
                 # Dropping this silently reinstates the clone for a phase
@@ -170,8 +208,11 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 # its job (#1308). True is the field's own default, so
                 # forgetting it judges the phase strictly rather than leaving
                 # it unjudged.
+                # A command phase defaults to False: what it gates is a
+                # revision, not a change it delivers (ADR-078 D2).
                 delivers_repo_changes=_as_bool(
-                    p.get("delivers_repo_changes", True), "delivers_repo_changes"
+                    p.get("delivers_repo_changes", _phase_kind(p.get("kind")) is PhaseKind.AGENT),
+                    "delivers_repo_changes",
                 ),
                 # Dropping this downgrades a declared `eval` phase to `read`:
                 # the safe direction, and still a silent lie (#1744).
@@ -212,6 +253,7 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
         ]
         # The YAML refuses this too; a phase created here never passes it (#1376).
         for d in defs:
+            require_consistent_phase_kind(d)
             require_enforceable_cost_limit(d.provider, d.max_cost_usd, phase_id=d.phase_id)
             if d.fallback_agent is not None:
                 require_enforceable_cost_limit(

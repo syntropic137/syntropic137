@@ -576,6 +576,7 @@ class ArtifactCollector:
         agent: AgentIdentity,
         last_agent_message: str | None = None,
         describe_work: DescribeWork | None = None,
+        primary_path: str | None = None,
     ) -> CollectedArtifacts:
         """Collect a phase's declared output from its workspace, or fail.
 
@@ -634,6 +635,9 @@ class ArtifactCollector:
             last_agent_message=last_agent_message,
             describe_work=describe_work,
         )
+        if primary_path is not None:
+            # The phase names its primary; stable, so the rest keep their order.
+            deliverables.sort(key=lambda d: d.source_path != primary_path)
 
         artifact_ids = await self._store(
             deliverables,

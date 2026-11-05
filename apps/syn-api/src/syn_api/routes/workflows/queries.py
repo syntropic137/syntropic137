@@ -11,8 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.list_query import MAX_PAGE_SIZE
+from syn_api.routes.workflows.command_phase_yaml import command_phase_yaml_lines
 from syn_api.routes.workflows.yaml_scalars import _yaml_flow_list, _yaml_quote
 from syn_api.types import (
+    CommandStepResponse,
     DeclaredSkillResponse,
     Err,
     FallbackAgentResponse,
@@ -237,6 +239,16 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         delivers_repo_changes=p.delivers_repo_changes,
         platform_access=p.platform_access,
         requires_verdict=p.requires_verdict,
+        kind=p.kind.value,
+        commands=[
+            CommandStepResponse(
+                name=c.name,
+                run=c.run,
+                timeout_seconds=c.timeout_seconds,
+                allow_failure=c.allow_failure,
+            )
+            for c in p.commands
+        ],
         resources=PhaseResourcesResponse(
             memory_mb=p.resources.memory_mb, pids_limit=p.resources.pids_limit
         ),
@@ -559,7 +571,10 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     ]
     if phase.description:
         lines.append(f"    description: {_yaml_quote(phase.description)}")
-    lines.append(f"    prompt_file: phases/{pid}.md")
+    if phase.kind == "command":
+        lines.extend(command_phase_yaml_lines(phase.commands))
+    else:
+        lines.append(f"    prompt_file: phases/{pid}.md")
     if phase.input_artifact_types:
         lines.append(f"    input_artifacts: {_yaml_flow_list(list(phase.input_artifact_types))}")
     if phase.output_artifact_types:
@@ -729,7 +744,8 @@ def _build_package_files(
 
     for phase in detail.phases:
         pid = _validate_phase_id(phase.phase_id)
-        files[f"phases/{pid}.md"] = _build_phase_md(phase)
+        if phase.kind == "agent":
+            files[f"phases/{pid}.md"] = _build_phase_md(phase)
 
 
 def _build_plugin_files(
@@ -747,7 +763,8 @@ def _build_plugin_files(
 
     for phase in detail.phases:
         pid = _validate_phase_id(phase.phase_id)
-        files[f"{wf_prefix}/phases/{pid}.md"] = _build_phase_md(phase)
+        if phase.kind == "agent":
+            files[f"{wf_prefix}/phases/{pid}.md"] = _build_phase_md(phase)
 
 
 # -- HTTP Endpoints -----------------------------------------------------------

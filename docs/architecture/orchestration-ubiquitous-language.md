@@ -41,13 +41,60 @@ start's reconciliation fails it as `OrphanedByRestart`.
 
 ## Phase
 
-One step of a Workflow inside an Execution, with its own agent, model, prompt
-and timeout. Phases run in a total order given by `order`, which
-`WorkflowDefinition.from_yaml` guarantees is unique per Workflow.
+One step of a Workflow inside an Execution, with its own timeout and its own
+Workspace. What runs it is its Phase Kind: an agent Phase has an agent, a model
+and a prompt; a Command Phase has none of the three. Phases run in a total
+order given by `order`, which `WorkflowDefinition.from_yaml` guarantees is
+unique per Workflow.
+
+`RUN_AGENT` is the to-do action for "run the Phase's runner": the agent for an
+agent Phase, the steps for a Command Phase (ADR-078 D3). The name predates
+kinds and was kept so routing needs no to-do projection version bump.
 
 A Phase is completed only when the Execution recorded it so. A Phase that
 started and did not complete has no partial credit: there is no mid-phase
 resume.
+
+## Phase Kind
+
+What runs a Phase (`PhaseKind`): `agent`, the default and every Phase that
+declares nothing, or `command`. A field the kind does not apply, such as a
+prompt on a command Phase or `commands` on an agent one, is refused at parse
+and again on a stored template (ADR-078 D2).
+
+## Command Phase
+
+A Phase that runs the author's Command Steps in its Workspace instead of an
+agent, at 0 tokens (ADR-078). It has no agent session, no model credential and
+no Lane 2 cost rows; it keeps the Phase's repository credentials. Its record is
+`PhaseCommandsCompleted`, its primary artifact `commands.json`, and its
+verdict is decided by the aggregate at collection: a failed gate ends the
+Execution with Failure Classification `gate`. Not a Scripted Agent: that one
+pretends to be an agent for load tests, and a Command Phase is honestly not one.
+
+## Command Step
+
+One fixed shell line of a Command Phase (`CommandStep`), run as `sh -c` in
+`/workspace`, never templated. It has a file-name-safe `name` (its log is
+`commands/<name>.log`), an optional own `timeout_seconds`, and `allow_failure`,
+which excuses its exit code and its own timeout but never the Phase Deadline.
+How it ended is a `CommandStepOutcome`: `passed`, `failed`, `timed_out`,
+`skipped`, `interrupted` or `failed_to_start`.
+
+## PhaseCommandsCompleted
+
+The Lane 1 event a Command Phase's steps record (ADR-078 D5): every step's
+outcome, exit code and duration, `success` and `timed_out`, and no session,
+provider or model. The to-do list goes on to collection whatever it says, so a
+failed build's logs are kept; a restart that lost the Workspace rebuilds
+`commands.json` from it with `tails_lost: true` (D6).
+
+## Gate Failure
+
+Failure Classification `gate`: a Command Step the author declared said no, by
+a non-zero exit, its own timeout or the Phase Deadline. The platform worked as
+designed, so it is kept out of `platform`; a step the platform could not start
+is `platform`. Counted as a Trial fail, not an Infra Error.
 
 ## Phase Deadline
 
@@ -58,6 +105,8 @@ NOT the Phase's start plus it. The agent is told the same deadline as
 `SYN_PHASE_DEADLINE`. Upstream-busy retries inside one run share it; a retried
 Phase is provisioned again and gets a new one. It is derived, never recorded as
 its own event: the facts it is made of are already events.
+A Command Phase's deadline is one monotonic clock started as its first Command
+Step starts; each step gets at most what remains (ADR-078 D4).
 
 ## Phase Cost Limit
 

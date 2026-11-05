@@ -7,9 +7,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from syn_domain.contexts.orchestration._shared.command_phase import COMMAND_TAIL_BYTES
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable
 
+    from syn_domain.contexts.orchestration._shared.command_phase import BoundedCommandResult
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         Artifact,
         ArtifactCollectionResult,
@@ -238,6 +241,26 @@ class EventStreamPort(Protocol):
     @property
     def last_exit_code(self) -> int | None:
         """Exit code from the most recent stream() call."""
+        ...
+
+    async def run_bounded(
+        self,
+        handle: IsolationHandle,
+        command: list[str],
+        *,
+        timeout_seconds: int,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+        tail_bytes: int = COMMAND_TAIL_BYTES,
+        withheld: Callable[[], Iterable[str]] | None = None,
+    ) -> BoundedCommandResult:
+        """Run ``command`` to its end and keep only a scrubbed tail of its output (ADR-078 D3).
+
+        Memory is bounded whatever the command prints, credentials are
+        withheld as in ``stream`` before anything is retained, and how it
+        ended is a typed terminal beside the exit code, never folded into it.
+        ``cancel_running`` stops it, and it then ends ``interrupted``.
+        """
         ...
 
     async def cancel_running(self, handle: IsolationHandle) -> bool:

@@ -239,6 +239,9 @@ if TYPE_CHECKING:
         ClaudePluginStoragePort,
     )
     from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutPort
+    from syn_domain.contexts.orchestration.ports.CommandWorkspacePort import (
+        CommandWorkspacePort,
+    )
     from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
         DelegationEvidencePort,
     )
@@ -353,6 +356,7 @@ if TYPE_CHECKING:
         _direct_injection: TokenInjectionPort = direct_injection
         _memory_injection: TokenInjectionPort = memory_injection
         _rollout: CodexRolloutPort = workspace
+        _command_workspace: CommandWorkspacePort = workspace
         _delegations: DelegationEvidencePort = delegations
         _service: WorkspaceServicePort = service
 

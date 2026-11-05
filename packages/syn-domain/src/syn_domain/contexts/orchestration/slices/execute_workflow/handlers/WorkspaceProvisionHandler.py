@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
 from syn_domain.contexts.orchestration._shared.skill_errors import SkillInstallFailed
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -174,6 +175,18 @@ def _codex_auth_staged_for(phase: ExecutablePhase) -> bool:
     """
     agents = (phase.agent_config, *((phase.fallback_agent,) if phase.fallback_agent else ()))
     return any(_auth_staging_for(a.provider, a.allow_delegation)[0] for a in agents)
+
+
+def _agent_staging(phase: ExecutablePhase) -> tuple[bool, bool]:
+    """Whether to stage codex auth, and whether to inline instruction imports.
+
+    Both False for a command phase: it runs no agent, so nothing agent-shaped
+    is staged, no model credential above all (ADR-078 D3, D7).
+    """
+    if phase.kind is PhaseKind.COMMAND:
+        return False, False
+    inline = not all(agent.expands_at_imports for agent in _agents_that_may_run(phase))
+    return _codex_auth_staged_for(phase), inline
 
 
 def _agents_that_may_run(phase: ExecutablePhase) -> frozenset[AgentProvider]:
@@ -332,7 +345,7 @@ class WorkspaceProvisionHandler:
         todo: TodoItem,
         phase: ExecutablePhase,
         workflow_id: str,
-        session_id: str,
+        session_id: str | None,
         repos: list[str] | None = None,
         artifacts: ArtifactCollector | None = None,
         completed_phase_ids: list[str] | None = None,
@@ -348,7 +361,8 @@ class WorkspaceProvisionHandler:
             todo: The to-do item being dispatched.
             phase: The executable phase definition.
             workflow_id: Workflow aggregate ID.
-            session_id: Agent session ID for this phase.
+            session_id: Agent session ID for this phase; None for a command
+                phase, which has no agent session (ADR-078 D3).
             repos: Full GitHub URLs to clone and hydrate context from.
             artifacts: Artifact collector for previous-phase injection.
             completed_phase_ids: Phase IDs completed before this one.
@@ -389,7 +403,7 @@ class WorkspaceProvisionHandler:
         # Enter the async context manager; clean up on any exception (P0: container leak fix)
         workspace = await workspace_cm.__aenter__()
         try:
-            include_codex_auth = _codex_auth_staged_for(phase)
+            include_codex_auth, inline_instructions = _agent_staging(phase)
             await self._hydrate_workspace(
                 workspace,
                 effective_repos,
@@ -399,9 +413,7 @@ class WorkspaceProvisionHandler:
                 continued_branches=continued_branches,
                 include_codex_auth=include_codex_auth,
                 credential_policy=policy,
-                inline_instructions=not all(
-                    agent.expands_at_imports for agent in _agents_that_may_run(phase)
-                ),
+                inline_instructions=inline_instructions,
             )
             # Read back BEFORE anything else is staged and long before the agent
             # is launched: a workspace not at its pins is refused here (#967).
@@ -415,11 +427,7 @@ class WorkspaceProvisionHandler:
                 if phase.clone_repos
                 else ()
             )
-            await self._materialize_claude_plugins(workspace, phase)
-            await self._materialize_and_install_skills(workspace, phase)
-            await self._install_baked_delegation_skill(workspace, phase)
-            await require_codex_sandbox(workspace, phase)
-            await self._install_attribution_hook(workspace)
+            await self._prepare_for_agent(workspace, phase)
             await self._inject_phase_artifacts(
                 workspace, artifacts, completed_phase_ids or [], outputs, todo
             )
@@ -655,6 +663,19 @@ class WorkspaceProvisionHandler:
                 phase_files=outputs.files,
             )
 
+    async def _prepare_for_agent(self, workspace: ManagedWorkspace, phase: ExecutablePhase) -> None:
+        """Stage what only an agent reads: plugins, skills, the sandbox probe, the hook.
+
+        Nothing for a command phase, which runs no agent (ADR-078 D3).
+        """
+        if phase.kind is PhaseKind.COMMAND:
+            return
+        await self._materialize_claude_plugins(workspace, phase)
+        await self._materialize_and_install_skills(workspace, phase)
+        await self._install_baked_delegation_skill(workspace, phase)
+        await require_codex_sandbox(workspace, phase)
+        await self._install_attribution_hook(workspace)
+
     async def _build_provision_result(
         self,
         workspace: ManagedWorkspace,
@@ -662,13 +683,36 @@ class WorkspaceProvisionHandler:
         todo: TodoItem,
         phase: ExecutablePhase,
         workflow_id: str,
-        session_id: str,
+        session_id: str | None,
         effective_repos: list[str],
         outputs: dict[str, str],
         inputs: dict[str, object] | None,
         checked_out: Sequence[SourceCommit] = (),
     ) -> ProvisionResult:
-        """Build prompt, CLI command, and return the ProvisionResult."""
+        """Build prompt, CLI command, and return the ProvisionResult.
+
+        A command phase gets neither: no prompt, no argv and no agent env,
+        so no model credential is ever built for it (ADR-078 D7).
+        """
+        assert todo.phase_id is not None
+        command = ProvisionWorkspaceCompletedCommand(
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            workspace_id=workspace.workspace_id,
+            # The event's own "no session" spelling: a command phase has none.
+            session_id=session_id or "",
+            checked_out_commits=checked_out,
+            image_manifest=workspace.image_manifest,
+        )
+        if phase.kind is PhaseKind.COMMAND:
+            return ProvisionResult(
+                workspace=workspace,
+                workspace_cm=workspace_cm,
+                agent_env={},
+                claude_cmd=[],
+                command=command,
+            )
+        assert session_id is not None, "an agent phase runs under a session"
         # repo_url for {{repo_url}} prompt substitution (backward compat — uses first repo)
         repo_url_for_prompt = effective_repos[0] if effective_repos else None
         prompt = await self._prompt_builder(
@@ -688,15 +732,6 @@ class WorkspaceProvisionHandler:
             fallback = FallbackLaunch(
                 agent=phase.fallback_agent, agent_env=fallback_env, claude_cmd=fallback_cmd
             )
-        assert todo.phase_id is not None
-        command = ProvisionWorkspaceCompletedCommand(
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            workspace_id=workspace.workspace_id,
-            session_id=session_id,
-            checked_out_commits=checked_out,
-            image_manifest=workspace.image_manifest,
-        )
         return ProvisionResult(
             workspace=workspace,
             workspace_cm=workspace_cm,

@@ -9,6 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
+from syn_domain.contexts.orchestration._shared.command_phase import (
+    CommandStep,
+    InconsistentPhaseKindError,
+    PhaseKind,
+    require_unique_step_names,
+)
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
@@ -158,6 +164,11 @@ class PhaseDefinition(BaseModel):
 
     # Execution
     execution_type: PhaseExecutionType = PhaseExecutionType.SEQUENTIAL
+    kind: PhaseKind = PhaseKind.AGENT
+    """What runs this phase (ADR-078 D1). A template stored before kinds
+    existed rehydrates as ``agent``, which is what it always was."""
+    commands: tuple[CommandStep, ...] = Field(default_factory=tuple)
+    """The ordered steps of a command phase; empty on an agent phase."""
 
     # Description
     description: str | None = None
@@ -285,3 +296,68 @@ class PhaseDefinition(BaseModel):
     # follow-up resolution service rewrites them into ResolvedSkill entries
     # on ExecutablePhase.
     skills: tuple[SkillRef, ...] = Field(default_factory=tuple)
+
+
+def require_consistent_phase_kind(phase: PhaseDefinition) -> None:
+    """Refuse a field the phase's kind does not apply (ADR-078 D2, ADR-069 D5).
+
+    TWO CALLERS, as for ``require_supported_execution_type``: the YAML loader
+    at registration, and ``ExecuteWorkflowHandler`` at the execution boundary,
+    because a stored template never passes the loader again.
+
+    Agent-only fields are judged against their defaults rather than "was it
+    written", because a stored template carries every field whether or not
+    its author wrote it. ``model`` is judged undeclared when the platform
+    defaulted it (``model_defaulted``).
+    """
+    if phase.kind is PhaseKind.AGENT:
+        if phase.commands:
+            raise InconsistentPhaseKindError(
+                phase.phase_id, phase.kind, "'commands' applies only to kind: command"
+            )
+        return
+    if not phase.commands:
+        raise InconsistentPhaseKindError(
+            phase.phase_id, phase.kind, "'commands' is required and must not be empty"
+        )
+    require_unique_step_names(phase.phase_id, phase.commands)
+    declared = [name for name, is_set in _agent_only_fields(phase) if is_set]
+    if declared:
+        raise InconsistentPhaseKindError(
+            phase.phase_id,
+            phase.kind,
+            f"{', '.join(declared)} applies only to an agent phase; a command phase runs no agent",
+        )
+    if phase.requires_verdict:
+        raise InconsistentPhaseKindError(
+            phase.phase_id, phase.kind, "requires_verdict is not supported on a command phase"
+        )
+    if phase.delivers_repo_changes:
+        raise InconsistentPhaseKindError(
+            phase.phase_id,
+            phase.kind,
+            "delivers_repo_changes: true is not supported on a command phase",
+        )
+    if phase.timeout_seconds is not None and phase.timeout_seconds <= 0:
+        raise InconsistentPhaseKindError(
+            phase.phase_id, phase.kind, "timeout_seconds must be a positive integer"
+        )
+
+
+def _agent_only_fields(phase: PhaseDefinition) -> tuple[tuple[str, bool], ...]:
+    """Each agent-only field, and whether this phase sets it away from its default."""
+    return (
+        ("prompt_template", phase.prompt_template is not None),
+        ("model", phase.model is not None and not phase.model_defaulted),
+        ("agent.provider", phase.provider is not None),
+        ("agent.sandbox", phase.sandbox != DEFAULT_PHASE_SANDBOX),
+        ("agent.allow_delegation", phase.allow_delegation),
+        ("agent.require_delegation", phase.require_delegation),
+        ("fallback_agent", phase.fallback_agent is not None),
+        ("allowed_tools", bool(phase.allowed_tools)),
+        ("max_cost_usd", phase.max_cost_usd is not None),
+        ("max_tokens", phase.max_tokens is not None),
+        ("argument_hint", phase.argument_hint is not None),
+        ("claude_plugins", bool(phase.claude_plugins)),
+        ("skills", bool(phase.skills)),
+    )

@@ -28,7 +28,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ExecutablePhase,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    PhaseDefinition,
     PhaseExecutionType,
+    PhaseKind,
+    require_consistent_phase_kind,
     require_supported_execution_type,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
@@ -199,6 +202,38 @@ def _phase_resources(phase: object) -> WorkspaceResourceRequest:
     )
 
 
+def _require_consistent_kind(phase: object) -> None:
+    """The kind rule, for a stored phase. Tests drive this boundary with
+    stand-ins that predate kinds, and every one of them is an agent phase."""
+    if isinstance(phase, PhaseDefinition):
+        require_consistent_phase_kind(phase)
+
+
+def _command_phase(phase: PhaseDefinition) -> ExecutablePhase:
+    """The runnable form of a command phase: its steps, and no agent (ADR-078 D3).
+
+    No agent config, prompt, plugins, skills or fallback, and the workflow's
+    own plugins and skills are not merged in: nothing here would read them.
+    The inert default ``agent_config`` is kept only because the field is not
+    optional; its timeout is the fallback ``effective_timeout_seconds`` uses
+    when the phase declares none, exactly as for an agent phase.
+    """
+    return ExecutablePhase(
+        phase_id=phase.phase_id,
+        name=phase.name,
+        order=phase.order,
+        description=phase.description,
+        kind=PhaseKind.COMMAND,
+        commands=phase.commands,
+        output_artifact_types=tuple(phase.output_artifact_types),
+        timeout_seconds=phase.timeout_seconds,
+        clone_repos=phase.clone_repos,
+        delivers_repo_changes=phase.delivers_repo_changes,
+        platform_access=phase.platform_access,
+        resources=_phase_resources(phase),
+    )
+
+
 def validate_phase_declarations(
     workflow: WorkflowTemplateAggregate,
     *,
@@ -232,6 +267,8 @@ def validate_phase_declarations(
     pids_cap = deployment_pids_ceiling() if pids_ceiling is None else pids_ceiling
     for phase in workflow.phases:
         phase_id = getattr(phase, "phase_id", None)
+        # A stored template never passes the YAML's kind check (ADR-078 D2).
+        _require_consistent_kind(phase)
         require_within_caps(
             _phase_resources(phase), memory_cap_mb=ceiling, pids_cap=pids_cap, phase_id=phase_id
         )
@@ -698,6 +735,12 @@ class ExecuteWorkflowHandler:
                 pids_cap=pids_ceiling,
                 phase_id=getattr(phase, "phase_id", None),
             )
+            # And the kind (ADR-078 D2): a command phase reaching here with an
+            # agent field, from a stored template or a phase edit, is refused.
+            _require_consistent_kind(phase)
+            if isinstance(phase, PhaseDefinition) and phase.kind is PhaseKind.COMMAND:
+                executable_phases.append(_command_phase(phase))
+                continue
             agent_config = _build_agent_config_from_phase(phase)
             resolved = await self._resolve_phase_plugins(
                 workflow_refs=workflow_refs,

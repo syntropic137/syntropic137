@@ -21,10 +21,15 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
+)
+from syn_domain.contexts.orchestration._shared.command_phase import (
+    CommandStep,
+    InconsistentPhaseKindError,
+    PhaseKind,
 )
 from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
@@ -48,6 +53,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseDefinition,
     PhaseExecutionType,
     WorkflowClassification,
+    require_consistent_phase_kind,
     require_supported_execution_type,
 )
 from syn_shared.agents import (
@@ -374,6 +380,10 @@ class PhaseYamlDefinition(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     order: int = Field(..., ge=1)
     execution_type: PhaseExecutionType = PhaseExecutionType.SEQUENTIAL
+    kind: PhaseKind = PhaseKind.AGENT
+    """``command`` runs ``commands`` instead of an agent, at 0 tokens (ADR-078)."""
+    commands: list[CommandStep] = Field(default_factory=list)
+    """A command phase's ordered steps. Refused on an agent phase."""
     description: str | None = None
 
     # YAML uses different names than domain model
@@ -384,7 +394,9 @@ class PhaseYamlDefinition(BaseModel):
     prompt_template: str | None = None
     prompt_file: str | None = None
     max_tokens: int | None = None
-    timeout_seconds: int | None = None
+    timeout_seconds: StrictInt | None = None
+    """Strict, as a command step's is (ADR-078 D4): ``1.0``, ``"60"`` and ``true``
+    are refused rather than coerced. Positivity is the domain rule's."""
     max_cost_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     """Stop the phase once its agent has spent more than this, in USD (#1376).
 
@@ -583,6 +595,24 @@ class PhaseYamlDefinition(BaseModel):
         """
         return reject_retired_fields(data)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _command_phase_delivers_nothing_by_default(cls, data: object) -> object:
+        """An undeclared ``delivers_repo_changes`` is False on a command phase (ADR-078 D2).
+
+        A command phase gates a revision; nothing it does is a deliverable, so
+        the agent default (True, the strict answer) would arm the unpushed-work
+        gate against a build tool's side effects. Declaring True is refused by
+        ``require_consistent_phase_kind``.
+        """
+        if (
+            isinstance(data, dict)
+            and data.get("kind") == PhaseKind.COMMAND
+            and "delivers_repo_changes" not in data
+        ):
+            return {**data, "delivers_repo_changes": False}
+        return data
+
     @field_validator("skills", mode="before")
     @classmethod
     def _expand_skills(cls, value: object) -> object:
@@ -666,6 +696,22 @@ class PhaseYamlDefinition(BaseModel):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def validate_phase_kind(self) -> PhaseYamlDefinition:
+        """Refuse a field this phase's kind does not apply, naming it (ADR-078 D2).
+
+        The rule is ``require_consistent_phase_kind``, which execution applies
+        again to stored templates. ``prompt_file`` is checked here because it
+        never reaches the domain: the loader resolves it into the template.
+        """
+        if self.kind is PhaseKind.COMMAND and self.prompt_file is not None:
+            raise InconsistentPhaseKindError(
+                self.id, self.kind, "prompt_file applies only to an agent phase"
+            )
+        if self.kind is PhaseKind.COMMAND or self.commands:
+            require_consistent_phase_kind(self.to_domain())
+        return self
+
     def _fallback_agent_domain(self) -> FallbackAgent | None:
         """The declared fallback_agent as a domain value, or None when absent."""
         return self.fallback_agent.to_domain() if self.fallback_agent else None
@@ -699,6 +745,8 @@ class PhaseYamlDefinition(BaseModel):
             name=self.name,
             order=self.order,
             execution_type=self.execution_type,
+            kind=self.kind,
+            commands=tuple(self.commands),
             description=self.description,
             input_artifact_types=self.input_artifacts,
             output_artifact_types=self.output_artifacts,
