@@ -228,12 +228,9 @@ class TestAProbeNeedsARoom:
 
     def _room(self, tmp: Path, block: str) -> int:
         (tmp / "health.json").write_text('{"execution_budget": ' + block + "}")
-        body = (
-            f'api() {{ cp {tmp}/health.json "$2"; }}\n'
-            + _between("executor_has_room() {", 'PROBE_LINE=""\n')
-            + "executor_has_room"
-        )
-        return _run(tmp, body, "    :").returncode
+        body = _between("executor_has_room() {", 'PROBE_LINE=""\n') + "executor_has_room"
+        remote = f'    case "$*" in *syn137-executor*) cat {tmp}/health.json ;; esac'
+        return _run(tmp, body, remote).returncode
 
     def test_a_free_slot_has_room(self, tmp_path: Path) -> None:
         assert self._room(tmp_path, '{"budget": 10, "running": 3, "queued": 0}') == 0
@@ -245,6 +242,10 @@ class TestAProbeNeedsARoom:
 
     def test_an_unreadable_budget_has_none(self, tmp_path: Path) -> None:
         assert self._room(tmp_path, "null") == 1
+
+    def test_an_executor_that_will_not_answer_has_none(self, tmp_path: Path) -> None:
+        body = _between("executor_has_room() {", 'PROBE_LINE=""\n') + "executor_has_room"
+        assert _run(tmp_path, body, "    return 1").returncode == 1
 
 
 class TestRecoveryWithAnExecutor:

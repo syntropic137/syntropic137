@@ -1111,10 +1111,11 @@ Probe $PROBE_ID is terminal, verified by GET: $PROBE_LAST"
 
 # Whether a probe can start now. --service api does not wait for idle, so every
 # slot may be taken: the probe would queue past its deadline and report a healthy
-# swap as broken. Read from /health, which counts the Run Queue: /executions
-# counts this process, which is nothing beside a full executor. Unknown is no room.
+# swap as broken. Asked of the executor itself: its /health counts the Run Queue
+# against the capacity it claims with, which the new API's own sizing need not
+# match. Unknown is no room.
 executor_has_room() {
-    api "/health" "$TMP/room.json" || return 1
+    remote "docker exec syn137-executor python -c 'import urllib.request as u; print(u.urlopen(\"http://localhost:8000/health\", timeout=10).read().decode())'" > "$TMP/room.json" || return 1
     python3 -c 'import json, sys; b = json.load(open(sys.argv[1]))["execution_budget"]; sys.exit(0 if b and b["running"] + b["queued"] < b["budget"] else 1)' "$TMP/room.json"
 }
 
