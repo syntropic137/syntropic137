@@ -32,7 +32,7 @@ _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "pit_stop.sh"
 _PAUSE = 'maintenance true "pit stop $VERSION"'
 _DRAIN = 'step "drain: waiting for every execution to be terminal'
 # The swap's own definition: the probe's printed rollback names the same command.
-_SWAP = 'swap_up() { run remote "cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d api gateway"'
+_SWAP = 'swap_up() { run remote "cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d ${SWAP_ARGS:-api gateway}"'
 _VERIFY = 'die "projections not healthy after the swap"'
 _RESUME = 'step "gate: resuming execution admission"'
 _STAGE_ONLY_EXIT = 'step "staged $TAG; run with --swap-only once drained"'

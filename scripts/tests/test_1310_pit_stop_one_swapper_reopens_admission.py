@@ -58,7 +58,7 @@ def _ungate() -> str:
     """The script's own ungate after verify: the step, the clear and the disarm."""
     lines = _lines()
     start = lines.index(_UNGATE)
-    return "\n".join(lines[start : lines.index("", start)])
+    return "\n".join(lines[start : lines.index("GATED=0", start) + 1])
 
 
 def _swap_begins() -> str:

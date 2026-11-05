@@ -685,7 +685,7 @@ while it is the only reader that is the row's `reader_epoch`.
 | Change | Procedure | Waits for executions? |
 |---|---|---|
 | gateway | `pit_stop --service gateway`: swap the gateway alone | no |
-| api | `pit_stop --service api`: recreate `api` alone; admission stays open | no |
+| api | `pit_stop --service api`: recreate `api` alone; admission stays open. Refused unless the Run Queue is on, an executor is running and the new image shares its event epoch | no |
 | executor (Phase 1) | drain the one executor on `in_use().claimed == 0`; **admission stays open**, admitted work waits durably | yes, for that executor's runs only |
 | executor (Phase 2) | start generation N+1 in its own compose project with `capacity = 0`, wait for its heartbeat, **drain** generation N naming N+1 as its successor, so N's capacity moves to N+1 as N's runs finish (D3) | no |
 
@@ -700,6 +700,10 @@ receives no new signal; this is a property of the host, not of an execution,
 which avoids repeating the Pause mistake (an event nothing in the execution
 path observed). It is not the pit-stop drain, which closes admission and waits
 for the whole platform to be idle.
+
+`pit_stop --service all` keeps its full drain and, on a host with an executor,
+recreates it and moves its pin too. An event epoch bump goes through it: an API
+ahead of the executor would admit runs nothing can claim.
 
 Out of scope: upgrading the event store, Postgres, Redis, envoy-proxy, the
 token injector or the collector without a drain, and multi-host deployment

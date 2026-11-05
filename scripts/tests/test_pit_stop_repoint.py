@@ -134,7 +134,9 @@ class TestGatewayOnly:
 
         assert (default.stdout, staged.read_text()) == (explicit.stdout, staged_all.read_text())
 
-    @pytest.mark.parametrize("flags", [("--service", "api"), ("--service",), ("--gateway", "x")])
+    @pytest.mark.parametrize(
+        "flags", [("--service", "executor"), ("--service",), ("--gateway", "x")]
+    )
     def test_an_unknown_service_is_a_usage_error(
         self, flags: tuple[str, ...], tmp_path: Path
     ) -> None:
@@ -604,3 +606,36 @@ class TestAddNullKeys:
         rc, _, stderr, out = _add_keys(tmp_path, _PUBLISHED, _DEPLOYED.replace("\n", "\r\n"))
         assert rc == 1 and "CR line endings" in stderr
         assert not out.exists()
+
+
+class TestTheExecutorMovesOnlyWithAllWithExecutor:
+    """`all-with-executor` is what pit_stop.sh picks on a host that has one."""
+
+    _COMPOSE = (
+        "services:\n"
+        "  api:\n    image: ghcr.io/syntropic137/syn-api:v1\n"
+        '  executor:\n    profiles: ["run-queue"]\n'
+        "    image: ghcr.io/syntropic137/syn-api:v1\n"
+        "  gateway:\n    image: ghcr.io/syntropic137/syn-gateway:v1\n"
+    )
+
+    def _moved(self, tmp_path: Path, service: str) -> set[str]:
+        deployed, staged = tmp_path / "deployed.yaml", tmp_path / "staged.yaml"
+        deployed.write_text(self._COMPOSE)
+        subprocess.run(
+            [sys.executable, str(_HELPER), _TAG, str(deployed), str(staged), "--service", service],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        services = yaml.safe_load(staged.read_text())["services"]
+        return {name for name, svc in services.items() if svc["image"].endswith(f":{_TAG}")}
+
+    def test_all_with_executor_moves_all_three(self, tmp_path: Path) -> None:
+        assert self._moved(tmp_path, "all-with-executor") == {"api", "executor", "gateway"}
+
+    def test_all_leaves_it(self, tmp_path: Path) -> None:
+        assert self._moved(tmp_path, "all") == {"api", "gateway"}
+
+    def test_api_moves_only_the_api(self, tmp_path: Path) -> None:
+        assert self._moved(tmp_path, "api") == {"api"}
