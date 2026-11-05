@@ -50,7 +50,12 @@ _DEFINITION_FIELDS: frozenset[tuple[str, str]] = frozenset(
 
 
 def _is_exempt_name(field: str) -> bool:
-    return field == "requested_model" or field.endswith("_display") or "model" not in field
+    # A `*_digest` is a hash of a models map (#2108 `models_digest`), never a model id.
+    return (
+        field == "requested_model"
+        or field.endswith(("_display", "_digest"))
+        or "model" not in field
+    )
 
 
 def _all_models() -> Iterator[type[BaseModel]]:

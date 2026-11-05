@@ -231,7 +231,9 @@ async def test_a_framework_redirect_stays_on_the_platform_route(
 # day it lands: a write route must be refused, and a read route outside the
 # allowlist must be refused, whatever its path.
 
-_READ_SEGMENTS = frozenset({"executions", "sessions", "artifacts", "evals", "insights", "health"})
+_READ_SEGMENTS = frozenset(
+    {"executions", "sessions", "artifacts", "evals", "eval-sets", "insights", "health"}
+)
 _SENSITIVE_WORDS = ("secret", "credential", "token", "env", "setting", "config", "key", "auth")
 
 

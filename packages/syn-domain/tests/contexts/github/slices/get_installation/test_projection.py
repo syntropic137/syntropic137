@@ -7,35 +7,12 @@ from typing import Any
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.github.slices.get_installation.projection import (
     InstallationProjection,
 )
 
 pytestmark = pytest.mark.unit
-
-# ---------------------------------------------------------------------------
-# Fake store (mirrors FakeProjectionStore in organization slices conftest)
-# ---------------------------------------------------------------------------
-
-
-class _FakeStore:
-    """Minimal in-memory projection store for unit tests."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, dict[str, dict[str, Any]]] = {}
-
-    async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
-        self._data.setdefault(projection, {})[key] = data
-
-    async def get(self, projection: str, key: str) -> dict[str, Any] | None:
-        return self._data.get(projection, {}).get(key)
-
-    async def get_all(self, projection: str) -> list[dict[str, Any]]:
-        return list(self._data.get(projection, {}).values())
-
-    async def delete(self, projection: str, key: str) -> None:
-        self._data.get(projection, {}).pop(key, None)
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -78,7 +55,7 @@ def _make_raw_installation(
 @pytest.mark.anyio
 async def test_handle_app_installed_sets_synced_at() -> None:
     """handle_app_installed stamps synced_at with the current time."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     proj = InstallationProjection(store=store)
     before = datetime.now(UTC)
     event = _make_installed_event()
@@ -97,7 +74,7 @@ async def test_handle_app_installed_sets_synced_at() -> None:
 @pytest.mark.anyio
 async def test_update_repositories_stamps_synced_at() -> None:
     """update_repositories updates synced_at so the cache TTL resets."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     proj = InstallationProjection(store=store)
     event = _make_installed_event(repos=("acme-org/repo-a",))
     await proj.handle_app_installed(event)
@@ -118,7 +95,7 @@ async def test_update_repositories_stamps_synced_at() -> None:
 @pytest.mark.anyio
 async def test_upsert_from_github_api_new_record() -> None:
     """upsert_from_github_api creates a new projection record with synced_at set."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     proj = InstallationProjection(store=store)
     before = datetime.now(UTC)
     raw = _make_raw_installation()
@@ -135,7 +112,7 @@ async def test_upsert_from_github_api_new_record() -> None:
 @pytest.mark.anyio
 async def test_upsert_from_github_api_existing_preserves_repos() -> None:
     """upsert_from_github_api does not overwrite existing repos on the record."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     proj = InstallationProjection(store=store)
     event = _make_installed_event(repos=("acme-org/repo-a", "acme-org/repo-b"))
     await proj.handle_app_installed(event)
@@ -150,7 +127,7 @@ async def test_upsert_from_github_api_existing_preserves_repos() -> None:
 @pytest.mark.anyio
 async def test_upsert_from_github_api_preserves_installed_at() -> None:
     """upsert_from_github_api keeps the original installed_at, not now()."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     proj = InstallationProjection(store=store)
     event = _make_installed_event()
     original = await proj.handle_app_installed(event)
@@ -164,7 +141,7 @@ async def test_upsert_from_github_api_preserves_installed_at() -> None:
 @pytest.mark.anyio
 async def test_upsert_from_github_api_updates_synced_at_on_existing() -> None:
     """upsert_from_github_api always refreshes synced_at, even for existing records."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     proj = InstallationProjection(store=store)
     event = _make_installed_event()
     first = await proj.handle_app_installed(event)
@@ -188,7 +165,7 @@ async def test_upsert_from_github_api_updates_synced_at_on_existing() -> None:
 @pytest.mark.anyio
 async def test_get_all_active_returns_installation_without_synced_at() -> None:
     """Older records without synced_at are returned by get_all_active (not filtered out)."""
-    store = _FakeStore()
+    store = InMemoryProjectionStore()
     proj = InstallationProjection(store=store)
     # Write a record directly without synced_at (simulates pre-migration data)
     await store.save(

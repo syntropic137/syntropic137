@@ -29,6 +29,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
         AssociationKind,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+        ImageManifestReading,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         EvalBaselinePin,
         FailureClassification,
@@ -100,6 +103,8 @@ class EvalRunFacts:
     """What the run actually checked out; empty until provisioning recorded it."""
     baseline: tuple[EvalBaselinePin, ...] = ()
     """The eval's frozen baseline the run was launched against."""
+    image_manifests: tuple[ImageManifestReading, ...] = ()
+    """Each phase's latest workspace image reading, where provisioning recorded one."""
 
     @property
     def complete_cost_usd(self) -> Decimal | None:

@@ -30,6 +30,8 @@ class RequestExecutionCommand(BaseModel):
     task: str | None = None
     repos: list[RepositoryRef] = Field(default_factory=list)
     tags: TagSet = Field(default_factory=TagSet)
+    idempotency_key: str | None = None
+    """The key a keyed start was named by (#2129); a replay compares it."""
     launch_eval: LaunchEval
     """The eval the start joins and its frozen baseline (#967), resolved and
     admitted at acceptance (``launch_eval_for``) and never again: a start that

@@ -3,44 +3,17 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.organization.slices.repo_cost.projection import (
     RepoCostProjection,
 )
 
 
-class FakeProjectionStore:
-    """Minimal in-memory store for unit tests."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, dict[str, dict[str, Any]]] = {}
-
-    async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
-        self._data.setdefault(projection, {})[key] = data
-
-    async def get(self, projection: str, key: str) -> dict[str, Any] | None:
-        return self._data.get(projection, {}).get(key)
-
-    async def get_all(self, projection: str) -> list[dict[str, Any]]:
-        return list(self._data.get(projection, {}).values())
-
-    async def query(
-        self, projection: str, filters: dict[str, Any] | None = None
-    ) -> list[dict[str, Any]]:
-        records = list(self._data.get(projection, {}).values())
-        if filters:
-            records = [r for r in records if all(r.get(k) == v for k, v in filters.items())]
-        return records
-
-    async def delete_all(self, projection: str) -> None:
-        self._data.pop(projection, None)
-
-
 async def _seed_correlation(
-    store: FakeProjectionStore, repo: str, exec_id: str, wf_id: str = "wf-1"
+    store: InMemoryProjectionStore, repo: str, exec_id: str, wf_id: str = "wf-1"
 ) -> None:
     key = f"{exec_id}:{repo}"
     await store.save(
@@ -60,7 +33,7 @@ async def _seed_correlation(
 class TestRepoCostProjection:
     @pytest.mark.asyncio
     async def test_completed_records_cost(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCostProjection(store)
         await _seed_correlation(store, "acme/api", "exec-1")
 
@@ -84,7 +57,7 @@ class TestRepoCostProjection:
 
     @pytest.mark.asyncio
     async def test_failed_also_records_cost(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCostProjection(store)
         await _seed_correlation(store, "acme/api", "exec-2")
 
@@ -105,7 +78,7 @@ class TestRepoCostProjection:
 
     @pytest.mark.asyncio
     async def test_cost_accumulates_across_executions(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCostProjection(store)
         await _seed_correlation(store, "acme/api", "exec-1")
         await _seed_correlation(store, "acme/api", "exec-2")
@@ -138,7 +111,7 @@ class TestRepoCostProjection:
 
     @pytest.mark.asyncio
     async def test_cost_by_workflow_breakdown(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCostProjection(store)
         await _seed_correlation(store, "acme/api", "exec-1", "wf-deploy")
         await _seed_correlation(store, "acme/api", "exec-2", "wf-test")
@@ -170,7 +143,7 @@ class TestRepoCostProjection:
 
     @pytest.mark.asyncio
     async def test_uncorrelated_execution_ignored(self) -> None:
-        store = FakeProjectionStore()
+        store = InMemoryProjectionStore()
         proj = RepoCostProjection(store)
 
         await proj.on_workflow_completed(

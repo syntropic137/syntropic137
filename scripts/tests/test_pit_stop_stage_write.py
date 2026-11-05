@@ -115,6 +115,7 @@ die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
 run() {{ "$@"; }}
 {stub}
 {_refuse_drift()}
+{_function("apply_null_keys")}
 {_counters()}
 {_apply_staged()}
 """
@@ -307,3 +308,33 @@ remote() {{
     assert "still PAUSED" in proc.stderr
     assert "up -d api gateway" in proc.stderr
     assert f"cp {_COMPOSE}.bak-sha256-bf783882d031 {_COMPOSE}" in proc.stderr
+
+
+def test_the_stage_adds_null_env_keys_to_the_live_compose_with_a_backup(
+    dirs: tuple[Path, Path],
+) -> None:
+    """#2154: a `KEY: null` passthrough the ref adds is written into the live
+    compose (backed up, mode kept), and the stage then proceeds."""
+    host, tmp = dirs
+    live = (
+        (_FIXTURES / "compose-tag.yaml")
+        .read_text()
+        .replace(
+            "    image: ghcr.io/syntropic137/syn-api:v0.33.1-beta.2\n",
+            "    image: ghcr.io/syntropic137/syn-api:v0.33.1-beta.2\n    environment:\n      SYN_A: null\n",
+        )
+    )
+    published = live.replace("      SYN_A: null\n", "      SYN_A: null\n      SYN_NEW: null\n")
+    (host / _COMPOSE).write_text(live)
+    (host / _COMPOSE).chmod(0o640)
+    (tmp / "compose.published").write_text(published)
+    proc = _run_stage("", host, tmp, _FULL)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "adding 1 KEY: null env passthrough line(s)" in proc.stdout
+    assert (host / _COMPOSE).read_text() == published
+    assert (host / _COMPOSE).stat().st_mode & 0o777 == 0o640
+    backups = list(host.glob(f"{_COMPOSE}.bak-*-pitstop-keys"))
+    assert len(backups) == 1 and backups[0].read_text() == live
+    assert not (host / f"{_COMPOSE}.pit-stop-keys").exists()
+    assert (host / _STAGED).exists()

@@ -94,6 +94,17 @@ from syn_domain.contexts.orchestration._shared.workspace_credential_policy impor
     NoCredentials,
     WorkspaceCredentialPolicy,
 )
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    WorkspaceMemoryOverCapError,
+    WorkspacePidsOverCapError,
+    WorkspaceResourceRequest,
+    deployment_memory_ceiling_mb,
+    deployment_pids_ceiling,
+    require_memory_within_cap,
+    require_phases_within_cap,
+    require_pids_within_cap,
+    stored_resource_request,
+)
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
 )
@@ -114,6 +125,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     InterruptExecutionCommand,
     ResumeExecutionCommand,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
+    AssociationKind,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
     IMAGE_MANIFEST_FILE,
     IMAGE_MANIFEST_ROOT,
@@ -125,12 +139,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_s
     replays_generic,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
+    phases_the_resume_runs,
     refuse_resume_start,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     DelegationAttempt,
     DelegationFailure,
     DelegationFailureReason,
+    EvalBaselinePin,
     ExecutablePhase,
     ExecutionStatus,
     FailureClassification,
@@ -146,6 +162,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
     ExecutionAlreadyRequestedError,
     ExecutionRequestAggregate,
+    execution_id_for_key,
     execution_request_id,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
@@ -208,6 +225,25 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
+)
+from syn_domain.contexts.orchestration.domain.read_models.eval_set_comparison import (
+    compare_pair,
+)
+from syn_domain.contexts.orchestration.domain.read_models.eval_sets import (
+    TaggedEval,
+    roster_of,
+    summarize_case,
+    summarize_eval_set,
+)
+from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
+    DeclaredModel,
+    EvalTag,
+    TrialExclusion,
+    TrialOutcome,
+    classify_trial,
+    declared_model_tags,
+    declared_models_of,
+    models_digest,
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_plan import PlannedPhase
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
@@ -368,6 +404,9 @@ from syn_domain.contexts.orchestration.slices.tag_workflow import (
     AddWorkflowTagsHandler,
     RemoveWorkflowTagsHandler,
 )
+from syn_domain.contexts.orchestration.slices.update_eval.UpdateEvalHandler import (
+    UpdateEvalHandler,
+)
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
@@ -404,6 +443,7 @@ __all__ = [
     "ArchiveWorkflowTemplateCommand",
     # Handlers
     "ArchiveWorkflowTemplateHandler",
+    "AssociationKind",
     "AttachExecutionToEvalCommand",
     "AttachExecutionToEvalHandler",
     # The clock a phase's retry budget is measured on (#1303)
@@ -428,6 +468,7 @@ __all__ = [
     "CreatedPullRequest",
     "CredentialFreePhaseRefusedError",
     "CredentialRenewalFailedError",
+    "DeclaredModel",
     "DefinitionChangeKind",
     "DelegationAttempt",
     "DelegationFailure",
@@ -436,10 +477,12 @@ __all__ = [
     "DetachExecutionFromEvalHandler",
     # Errors
     "DuplicateExecutionError",
+    "EvalBaselinePin",
     "EvalChoice",
     "EvalId",
     "EvalMembershipResult",
     "EvalRunNotMemberError",
+    "EvalTag",
     "EvalUnavailableError",
     # Value objects - execution
     "ExecutablePhase",
@@ -549,11 +592,15 @@ __all__ = [
     "StreamResult",
     "SubagentTracker",
     "TagSet",
+    "TaggedEval",
     "TemplateLaunches",
     "TerminateWorkspaceCommand",
     "TokenAccumulator",
+    "TrialExclusion",
+    "TrialOutcome",
     "UnsupportedExecutionTypeError",
     "UnsupportedToolPolicyForProviderError",
+    "UpdateEvalHandler",
     "UpdatePhasePromptCommand",
     "UpdateWorkflowPhaseHandler",
     "UpdateWorkflowTemplateCommand",
@@ -576,10 +623,20 @@ __all__ = [
     "WorkspaceCredentialPolicy",
     "WorkspaceDeleteFallback",
     "WorkspaceDirRemover",
+    "WorkspaceMemoryOverCapError",
+    "WorkspacePidsOverCapError",
+    "WorkspaceResourceRequest",
     "WorkspaceUsage",
     "announce_as",
     "build_command_from_definition",
+    "classify_trial",
+    "compare_pair",
     "created_pull_requests",
+    "declared_model_tags",
+    "declared_models_of",
+    "deployment_memory_ceiling_mb",
+    "deployment_pids_ceiling",
+    "execution_id_for_key",
     "execution_request_id",
     "guard_orphaned_workspace",
     "guard_stale_workspace_dir",
@@ -589,7 +646,9 @@ __all__ = [
     "judge_owner",
     "launch_eval_for",
     "mint_wrapper_name",
+    "models_digest",
     "open_eval",
+    "phases_the_resume_runs",
     "read_record",
     "read_start_record",
     "refuse_resume_start",
@@ -597,8 +656,15 @@ __all__ = [
     "render_workspace_prompt",
     "replays_generic",
     "repository_key",
+    "require_memory_within_cap",
+    "require_phases_within_cap",
+    "require_pids_within_cap",
     "require_supported_execution_type",
+    "roster_of",
     "salvage_stranded_phase",
+    "stored_resource_request",
+    "summarize_case",
+    "summarize_eval_set",
     "utc_day",
     "validate_phase_declarations",
     "validate_workflow_yaml",

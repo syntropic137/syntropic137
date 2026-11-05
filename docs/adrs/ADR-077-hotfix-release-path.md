@@ -87,10 +87,14 @@ version of this workflow did, and on v1.0.5's release PR (base v1.0.4, which has
 no checker) it failed with "No such file". The workflow itself had run anyway,
 because GitHub took it from `main`.
 
-The rule binds only once `Release Source` is a required status check on the
-`release` ruleset, which is an owner setting. Until then a red `Release Source`
-can be merged over, and the release PR carries a manual run of `main`'s checker
-as evidence instead.
+The rule binds because `Release Source` is a required status check on the
+`release` ruleset (an owner setting, added 2026-10-27, GitHub Actions
+integration 15368). A red or missing `Release Source` blocks the merge; no
+manual run of the checker stands in for it.
+
+The ruleset matches the check by the job's `name:`, so renaming the `Release
+Source` job must update the ruleset in the same change, or every PR into
+`release` blocks on a check that never reports.
 
 The rule's first half: a fix lands on `main` first, always, through the normal
 PR and review. A hotfix never carries code `main` has not merged.
@@ -99,9 +103,9 @@ PR and review. A hotfix never carries code `main` has not merged.
 
 What a hotfix skips: the beta (pit stop, live run) and the release rehearsal.
 What it keeps: the ruleset's required checks (`CI Success`, `Release Gate`,
-`Compose Stack Smoke Test`), so full CI, codegen sync, the six-image docker
-build, OSV, pip-audit, dependency review and the selfhost stack smoke test all
-run on the hotfix head. That is roughly 30 minutes. The fix itself was already
+`Compose Stack Smoke Test`, `Release Source`), so full CI, codegen sync, the
+six-image docker build, OSV, pip-audit, dependency review and the selfhost
+stack smoke test all run on the hotfix head. That is roughly 30 minutes. The fix itself was already
 reviewed and tested on `main`; what is new on the hotfix branch is only its
 combination with the last release, and CI exercises exactly that.
 `smoke-test.yml` fires on pushes to `hotfix/**`, because it has no PR trigger

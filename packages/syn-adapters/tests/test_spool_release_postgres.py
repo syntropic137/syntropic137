@@ -68,7 +68,7 @@ def _spool(source: str, session: str) -> CaptureSpool:
 
 
 async def _traverse(spools: PostgresCaptureSpools, *, staged: int = 0) -> CaptureSpoolLease:
-    lease = await spools.claim(lease_seconds=60)
+    lease = await spools.claim(lease_seconds=60, backends=("docker",))
     assert lease is not None
     await spools.advance(lease, after=0, watermark=None, retry_seconds=0, staged_bytes=staged)
     await spools.mark_drained(lease)
@@ -102,7 +102,7 @@ async def test_archived_release_requires_settlement_later_traversal_and_exclusiv
     assert not await retention.after_drain(later, exclusive=False)
     assert await retention.after_drain(later, exclusive=True)
     assert volumes.removed == ["s"]
-    assert await spools.claim(lease_seconds=60) is None  # never drained again
+    assert await spools.claim(lease_seconds=60, backends=("docker",)) is None  # never drained again
     assert await retention.step() == 0  # nothing pending, nothing repeated
     assert await _gaps(db_pool, source) == 0  # archived releases record no gap
     async with db_pool.acquire() as conn:
@@ -125,7 +125,7 @@ async def test_in_use_volume_reopens_an_archived_release_for_capture(
     lease = await _traverse(spools)
     assert not await retention.after_drain(lease, exclusive=True)
     # A container attached after traversal; its writes are not archived yet.
-    again = await spools.claim(lease_seconds=60)
+    again = await spools.claim(lease_seconds=60, backends=("docker",))
     assert again is not None and again.token > lease.token
 
 
@@ -147,14 +147,14 @@ async def test_paused_non_terminal_spool_survives_age_drain_and_resumes(
     assert volumes.removed == [] and await _gaps(db_pool, source) == 0
     # The workspace resumes; later bytes are still captured from the same volume,
     # once the live re-sweep interval has passed (#2107).
-    assert await spools.claim(lease_seconds=60) is None
+    assert await spools.claim(lease_seconds=60, backends=("docker",)) is None
     async with db_pool.acquire() as conn:
         await conn.execute(
             """UPDATE session_capture_spools SET drained_at=drained_at-interval '1 hour'
             WHERE source_instance_id=$1""",
             source,
         )
-    resumed = await spools.claim(lease_seconds=60)
+    resumed = await spools.claim(lease_seconds=60, backends=("docker",))
     assert resumed is not None and resumed.token > first.token
     await spools.advance(resumed, after=0, watermark=None, retry_seconds=0, staged_bytes=50)
     await spools.settle("paused")
@@ -205,7 +205,9 @@ async def test_expiry_records_gap_before_removal_and_retries_until_removed(
     page = await evidence.read(spool.run, await evidence.watermark(spool.run))
     gap = page.items[-1].batch.evidence.acquisition_gaps[0].gap
     assert gap.reason == SPOOL_EXPIRED_GAP and gap.node_keys
-    assert await spools.claim(lease_seconds=60) is not None  # fresh spool only
+    assert (
+        await spools.claim(lease_seconds=60, backends=("docker",)) is not None
+    )  # fresh spool only
     volumes.in_use.clear()
     async with db_pool.acquire() as conn:
         await conn.execute(
@@ -299,10 +301,80 @@ async def test_terminal_run_settles_its_spools_only(db_pool: asyncpg.Pool) -> No
     assert rows[(other, "killed")] is None
     # The killed session's spool now releases after a later complete traversal.
     for _ in range(6):  # bounded: an unsettled spool stays claimable
-        lease = await spools.claim(lease_seconds=60)
+        lease = await spools.claim(lease_seconds=60, backends=("docker",))
         if lease is None:
             break
         await spools.advance(lease, after=0, watermark=None, retry_seconds=0)
         await spools.mark_drained(lease)
         await retention.after_drain(lease, exclusive=True)
     assert sorted(volumes.removed) == ["completed", "killed"]
+
+
+async def test_byte_quota_counts_and_evicts_only_its_own_backend(db_pool: asyncpg.Pool) -> None:
+    """A full sandbox quota never evicts a Docker volume, nor the reverse (#1916)."""
+    spools, docker, docker_volumes, evidence, source = await _setup(db_pool, max_bytes=1000)
+    sandbox_volumes = Volumes()
+    sandbox = CaptureSpoolRetention(
+        db_pool, source, sandbox_volumes, evidence, backend="e2b", max_bytes=1000
+    )
+    await spools.project(_spool(source, "volume"))
+    await spools.project(
+        CaptureSpool(
+            run=RunIdentity(source_instance_id=source, execution_id="run"),
+            session_id="paused-sandbox",
+            phase_id="phase",
+            profile="sandbox-spool/1",
+            backend="e2b",
+            executor_id="executor",
+            sandbox_id="sbx",
+        )
+    )
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE session_capture_spools SET staged_bytes=CASE session_id
+            WHEN 'volume' THEN 900 ELSE 1500 END WHERE source_instance_id=$1""",
+            source,
+        )
+    # Together the two exceed either quota; each backend alone, only the sandbox.
+    assert await docker.step() == 0
+    assert await sandbox.step() == 1
+    assert docker_volumes.removed == []
+    assert sandbox_volumes.removed == ["paused-sandbox"]
+
+
+def _sandbox_spool(source: str, session: str) -> CaptureSpool:
+    return CaptureSpool(
+        run=RunIdentity(source_instance_id=source, execution_id="run"),
+        session_id=session,
+        phase_id="phase",
+        profile="sandbox-spool/1",
+        backend="e2b",
+        executor_id="executor",
+        sandbox_id=f"sbx-{session}",
+    )
+
+
+async def test_count_ceiling_bounds_empty_paused_sandboxes_but_never_a_running_one(
+    db_pool: asyncpg.Pool,
+) -> None:
+    """Decision 7: byte quotas cannot bound spools that staged nothing (#1916)."""
+    spools, docker, docker_volumes, evidence, source = await _setup(db_pool)
+    sandbox_volumes = Volumes()
+    sandbox = CaptureSpoolRetention(
+        db_pool, source, sandbox_volumes, evidence, backend="e2b", max_count=1
+    )
+    await spools.project(_spool(source, "volume"))
+    for session in ("old", "running", "new"):
+        await spools.project(_sandbox_spool(source, session))
+    await spools.settle("old")
+    # Three paused sandboxes, zero staged bytes, a ceiling of one. Only the
+    # settled one goes; the two non-terminal ones stay though that exceeds it.
+    assert await sandbox.step() == 1
+    assert sandbox_volumes.removed == ["old"]
+    assert await docker.step() == 0
+    assert docker_volumes.removed == []
+    assert await _gaps(db_pool, source) == 1
+    await spools.settle("new")
+    assert await sandbox.step() == 1
+    assert sandbox_volumes.removed == ["old", "new"]
+    assert await sandbox.step() == 0

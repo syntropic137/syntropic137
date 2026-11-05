@@ -8,6 +8,7 @@ filter to the rows also moves the total and the facets, whichever filter it is.
 
 from __future__ import annotations
 
+import copy
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -27,7 +28,7 @@ class _FakeStore:
         self._rows = rows
 
     async def get_all(self, projection: str) -> list[dict]:
-        return list(self._rows)
+        return copy.deepcopy(self._rows)
 
 
 def _rows() -> list[dict]:

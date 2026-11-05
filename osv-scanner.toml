@@ -12,3 +12,15 @@
 #   - the condition for revisiting it
 #   - an `ignoreUntil` date, so the ignore lapses and CI fails again rather
 #     than going stale silently
+
+# GHSA-gcqx-w48m-w2h4 (CVSS 5.3): deepmerge mergeObject() prototype poisoning.
+# No fix: osv.dev marks 4.2.0..4.3.1 affected with last_affected 4.3.1 and no
+# fixed event. Path: @sveltejs/vite-plugin-svelte (devDependency of syn-ui and
+# @syn137/skyline-svelte-v5) -> deepmerge 4.3.1. Even the latest plugin (7.3.1)
+# requires ^4.3.1. Build time only: the plugin merges the developer's own plugin
+# options (src/utils/options.js); no app code imports it and it is not bundled.
+# Revisit when deepmerge or the plugin ships a fix (#2157).
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2026-11-27T00:00:00Z
+reason = "deepmerge has no fixed release; build-time dependency of @sveltejs/vite-plugin-svelte, merges trusted plugin options only (#2157)"

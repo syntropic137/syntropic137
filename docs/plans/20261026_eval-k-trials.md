@@ -91,7 +91,7 @@ or a scorer still belongs to its cohort:
 |---|---|---|
 | roster (eval set + version) | trial tag `suite-version:<n>` | a case changed between versions is another question |
 | workflow id + workflow version | execution summary | an edited workflow is another treatment |
-| declared models | trial tag `models:<sha256 of the suite.yaml models map>` | the model is part of the measurement; declared, not observed, so early failures still join |
+| declared models | trial tag `models:<models_digest>` (first 32 hex of sha256 of the models map, so the tag fits 64 chars) plus `model:<phase>:<id>` per phase, both written by `declared_model_tags` | the model is part of the measurement; declared, not observed, so early failures still join |
 | scoring protocol | trial tag `scorer:<scorer protocol id>` | a different judge is a different ruler |
 
 All cohort and trial identity is read from the execution's
@@ -357,7 +357,7 @@ update ride with S1 and S3.
 
 Lesson from the A/B: dry-run one unit end to end before freezing. After S1 to
 S3 land: `verifier-seed-v1`, `--split train`, 2 cases (one defect, one clean),
-k = 3, one cohort, 6 runs. Pass: the roster is registered, 6 ledger lines,
+k = 3, one cohort, 6 runs (`launch --trials 3 --split train --case <defect> --case <clean>`). Pass: the roster is registered, 6 ledger lines,
 every trial's starting checkout equals its eval's baseline, and
 `GET /eval-sets/metrics` matches a hand count, bounds included. Then the full
 set, then an A/B. Results stay `isolation: unproven` until #2056.

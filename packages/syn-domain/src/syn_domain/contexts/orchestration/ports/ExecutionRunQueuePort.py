@@ -61,6 +61,19 @@ class Capability(StrEnum):
     NESTED_DOCKER = "nested_docker"
 
 
+class RunWorkload(StrEnum):
+    """What a run needs its workspace to hold, as the claim reads it (#1917, decision 5).
+
+    Recorded on the run row at reserve. Every run is ``AGENT`` until a start
+    names a Scripted Agent profile (issue H).
+    """
+
+    AGENT = "agent"
+    """A real agent: it needs the host's credentials."""
+    SCRIPTED = "scripted"
+    """A Scripted Agent: it needs no credential, so a NoCredentials pool may run it."""
+
+
 class IsolationLevel(IntEnum):
     """How strongly a pool isolates one workspace from another; compared as a minimum (D13).
 
@@ -90,6 +103,22 @@ class ExecutorPool(BaseModel):
     capabilities: frozenset[Capability] = frozenset()
     overflow_delay: timedelta = Field(default=timedelta(seconds=60), ge=timedelta(0))
     """How long this pool's executors wait on a full higher-priority pool before overflowing."""
+    overflow_budget_usd_per_day: int | None = Field(default=None, ge=1)
+    """The Overflow Budget: the operator's daily spend cap for this pool's overflow, in USD.
+
+    Fail-closed: ``None`` (the default) means this pool claims only runs that no
+    registered higher-priority executor could take, live or not: a draining or
+    dead higher executor keeps it idle, so it never claims by Overflow. Declaring
+    it is what allows a paid pool (E2B) to overflow. Recorded with the pool;
+    spend is not yet metered against it, which is #2024's.
+    """
+    supplies_credentials: bool = True
+    """Whether the backend's Workspace Credential Policy supplies host credentials.
+
+    False for a NoCredentials backend (E2B): its executors claim only
+    ``SCRIPTED`` runs, and never hold an ``AGENT`` run back from a lower pool
+    (#1917). Taken from the backend kit, never a setting.
+    """
 
     @field_validator("overflow_delay")
     @classmethod
@@ -121,6 +150,14 @@ class ExecutorHost(BaseModel):
     """
     pool: ExecutorPool = DEFAULT_EXECUTOR_POOL
     """The Executor Pool this host joins on ``register`` (D13)."""
+    recovery_scopes: frozenset[ReapScope] = frozenset()
+    """Other reap scopes this host holds a Recovery Kit for (D5, C8 on #1917).
+
+    Each comes from a kit's reaper, never configured. The host fences and
+    takes over runs claimed in its own scope or in one of these, and reaps
+    each with the reaper for the claimer's scope. A host without a kit for a
+    scope never fences a run claimed in it.
+    """
 
 
 class ClaimedRun(BaseModel):
@@ -131,6 +168,10 @@ class ClaimedRun(BaseModel):
     executor_id: str
     token: int = Field(ge=1)
     is_resume: bool
+    pool_id: PoolId
+    """The Executor Pool the run was placed in (D13)."""
+    overflowed: bool = False
+    """A live higher-priority executor could have taken the run, and it spilled past (D13)."""
 
 
 class FencedRun(BaseModel):
@@ -146,6 +187,8 @@ class FencedRun(BaseModel):
     token: int = Field(ge=1)
     reaped: bool = False
     """The row is ``reaped``: the dead host's containers are already gone."""
+    claimer_scope: ReapScope | None = None
+    """The dead claimer's ``reap_scope``: which of the reconciler's reapers reaps it (C8)."""
 
 
 class OpeningSweep(BaseModel):
@@ -204,7 +247,14 @@ class ExecutionRunQueue(Protocol):
         """Whether any executor other than ``host_id`` has a live heartbeat (D6)."""
         ...
 
-    async def reserve(self, execution_id: str, writer_epoch: int, *, is_resume: bool) -> bool:
+    async def reserve(
+        self,
+        execution_id: str,
+        writer_epoch: int,
+        *,
+        is_resume: bool,
+        workload: RunWorkload = RunWorkload.AGENT,
+    ) -> bool:
         """Insert an ``opening`` row. False when the execution already has one."""
         ...
 
@@ -213,7 +263,35 @@ class ExecutionRunQueue(Protocol):
         ...
 
     async def claim(self, host_id: str) -> ClaimedRun | None:
-        """Take the oldest claimable run within this host's own capacity, in one transaction (D3)."""
+        """Take the oldest run this host may take now, within its own capacity (D3, D13).
+
+        One transaction. Stamps the host's Claim Check whenever it is live, not
+        draining and its claims are not disabled by the Outage Breaker, with or
+        without room. A run is taken only when the host's
+        pool can run its workload and no live, non-draining executor in a
+        higher-priority pool that could take it is claiming with room or has
+        been full for less than this pool's Overflow Delay. Otherwise the run
+        stays ``admitted`` (queued); it is never claimed and deferred.
+        """
+        ...
+
+    async def record_create_failure(
+        self, host_id: str, *, threshold: int, cooldown: timedelta
+    ) -> bool:
+        """Count one failed workspace create; disable claims once ``threshold`` are consecutive.
+
+        The Outage Breaker (#1917, research decision 2). Disabled, the host's
+        claim takes nothing and stamps no Claim Check until ``cooldown`` has
+        passed; capacity and charged runs are untouched, so the D3 ``CHECK``
+        holds. After the cooldown exactly one claim is let through, the probe,
+        and claims stay disabled until its create reports (or for another
+        cooldown, if it never does); one more failure disables claims again at
+        once. Returns whether claims are now disabled.
+        """
+        ...
+
+    async def record_create_success(self, host_id: str) -> None:
+        """A workspace create succeeded: clear the count and re-enable claims."""
         ...
 
     async def renew(self, run: ClaimedRun) -> None:
@@ -231,8 +309,9 @@ class ExecutionRunQueue(Protocol):
     async def fence_expired(self, reconciler: str, *, limit: int) -> list[FencedRun]:
         """At most ``limit`` expired ``claimed`` runs this host can read and reap -> ``fencing``.
 
-        Only runs whose claimer has this host's ``reap_scope``; a claimer with no
-        scope, or another, is never fenced here and stays charged (D5, D13).
+        Only runs whose claimer has this host's ``reap_scope`` or one of its
+        ``recovery_scopes``; a claimer with no scope, or another, is never fenced
+        here and stays charged (D5, D13, C8).
 
         Oldest ``leased_until`` first, owned by ``reconciler``. Two fencers never
         take the same row; the rest stay ``claimed`` for a later turn or another
@@ -246,7 +325,7 @@ class ExecutionRunQueue(Protocol):
         Each is taken under a new token, oldest ``leased_until`` first. Leaving
         means its ``executor_hosts`` row is gone: a stale heartbeat alone is not
         leaving, so a stalled reconciler is never taken over while registered.
-        Only rows whose claimer has this host's ``reap_scope`` (D5, D13).
+        Only rows whose claimer is in this host's reach, as for ``fence_expired`` (D5, D13, C8).
         """
         ...
 

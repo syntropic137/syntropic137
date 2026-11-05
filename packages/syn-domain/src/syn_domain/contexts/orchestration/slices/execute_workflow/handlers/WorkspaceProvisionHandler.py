@@ -383,6 +383,7 @@ class WorkspaceProvisionHandler:
             capture_session_id=session_id,
             platform_access=phase.platform_access,
             eval_id=eval_id,
+            resources=phase.resources,
         )
 
         # Enter the async context manager; clean up on any exception (P0: container leak fix)

@@ -139,7 +139,11 @@ def _fallback_agent(declared: object) -> FallbackAgent | None:
 
 
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
-    from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
+    from syn_domain.contexts.orchestration import (
+        PhaseDefinition,
+        PhaseExecutionType,
+        stored_resource_request,
+    )
 
     if phases:
         defs = [
@@ -200,6 +204,9 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 fallback_agent=_fallback_agent(p.get("fallback_agent")),
                 claude_plugins=tuple(p.get("claude_plugins") or ()),
                 skills=_expand_skills(p.get("skills")),
+                # Held to the YAML's model, so the API cannot store a request
+                # the YAML would refuse (okrs-51p.30).
+                resources=stored_resource_request(p.get("resources")),
             )
             for i, p in enumerate(phases)
         ]

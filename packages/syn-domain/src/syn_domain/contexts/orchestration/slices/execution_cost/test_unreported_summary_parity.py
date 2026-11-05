@@ -13,6 +13,7 @@ from decimal import Decimal
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.agent_sessions.slices.session_cost.test_unreported_cost import (
@@ -30,9 +31,6 @@ from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
 )
 from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
     ExecutionCostQueryService,
-)
-from syn_domain.contexts.orchestration.slices.execution_cost.test_projection import (
-    MockProjectionStore,
 )
 from syn_domain.contexts.orchestration.slices.execution_cost.timescale_query import (
     UnreportedSessionCosts,
@@ -58,7 +56,7 @@ def _execution_row(session_id: str, cost: float | None) -> dict[str, _Cell]:
 
 
 async def _replayed(turns: list[tuple[str, int, int]], *, with_reported: bool) -> Decimal:
-    projection = ExecutionCostProjection(store=MockProjectionStore())  # type: ignore[arg-type]
+    projection = ExecutionCostProjection(store=InMemoryProjectionStore())  # type: ignore[arg-type]
     for model, inp, out in turns:
         await projection.on_agent_observation(
             {
