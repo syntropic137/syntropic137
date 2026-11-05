@@ -58,6 +58,7 @@ case "$*" in
     *"ps -eo args"*) echo 0 ;;
     *"docker ps -aq"*) printf '%s\\n' "${PIT_EXECUTOR_ID:-}" ;;
     *"printenv SYN_EXECUTION_RUN_QUEUE_ENABLED"*) printf '%s\\n' "${PIT_RUN_QUEUE:-}" ;;
+    *"printenv SYN_EXECUTION_PROCESS_ROLE"*) echo "${PIT_API_ROLE-api}" ;;
     *"docker inspect syn137-executor"*) echo "${PIT_EXECUTOR_RUNNING:-true}" ;;
 esac
 """

@@ -481,6 +481,9 @@ if [ "$SERVICE" = api ]; then
         true|1|yes|on) : ;;
         *) die "the Run Queue is off on $HOST, so executions run inside the API and --service api would kill them. Use --service all" ;;
     esac
+    # `all` is a role too: it claims queued runs in the API process.
+    role="$(remote "docker exec syn137-api printenv SYN_EXECUTION_PROCESS_ROLE" || true)"
+    [ "$role" = api ] || die "syn137-api has process role '$role', so it may hold runs of its own. Use --service all"
     [ -n "$EXECUTOR_ID" ] || die "no syn137-executor on $HOST, so nothing would hold the runs. Use --service all"
     [ "$(remote "docker inspect syn137-executor --format '{{.State.Running}}'")" = true ] \
         || die "syn137-executor is not running on $HOST. Use --service all"
@@ -904,6 +907,21 @@ if [ "${SERVICE:-all}" = api ] && [ "$DRY" = 0 ]; then
     case "$new_epoch" in ''|*[!0-9]*) die "syn-api:$TAG reported no event epoch (got: $new_epoch)" ;; esac
     [ "$new_epoch" = "$old_epoch" ] \
         || die "event epoch $new_epoch is not the running executor's $old_epoch: use --service all, which moves both. Nothing was recreated"
+
+    # The checks above read the RUNNING container; compose starts the new one
+    # from today's .env. Flag off there, and its startup reconcile would reap the
+    # executor's live workspaces. Parsed from the pipe, printing two values only:
+    # the resolved config carries every secret, so it never reaches a file.
+    step "precheck: the API compose is about to start is still split from the executor"
+    resolved="$(remote "cd $COMPOSE_DIR && docker compose -f $STAGED config --format json" | python3 -c '
+import json, sys
+env = json.load(sys.stdin)["services"]["api"]["environment"]
+print(env.get("SYN_EXECUTION_PROCESS_ROLE"), str(env.get("SYN_EXECUTION_RUN_QUEUE_ENABLED")).lower())
+')" || die "could not resolve the staged compose on $HOST; nothing was recreated"
+    case "$resolved" in
+        "api true"|"api 1"|"api yes"|"api on") echo "   resolved: role and Run Queue as required" ;;
+        *) die "the new API would start as (role, Run Queue): $resolved. It must be api with the queue on, or its startup reaps the executor's runs. Fix .env; nothing was recreated" ;;
+    esac
 fi
 
 # Gated and drained, nothing recreated yet: a refusal before apply_staged writes
@@ -917,7 +935,8 @@ if [ "${SERVICE:-all}" = api ]; then
 else
 step "swap: recreate api + gateway (no pull: the images are only in the host's daemon)"
 RECOVERY="RECOVERY: admission is still PAUSED. Once syn137-api is healthy, finish by hand:
-   ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d gateway'
+   ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d gateway${ALSO_PINNED:+ $ALSO_PINNED}'${ALSO_PINNED:+
+   ssh $HOST \"docker inspect syn137-executor --format '{{.Config.Image}}'\"     # must name $TAG, or new runs may never be claimed}
    curl -fsS -u admin:\$SYN_API_PASSWORD $API/version     # image_tag must be $TAG
    curl -fsS -u admin:\$SYN_API_PASSWORD -X PUT $API/maintenance -H 'Content-Type: application/json' -d '{\"active\": false, \"reason\": \"\", \"actor\": \"manual\"}'"
 fi
@@ -1092,10 +1111,11 @@ Probe $PROBE_ID is terminal, verified by GET: $PROBE_LAST"
 
 # Whether a probe can start now. --service api does not wait for idle, so every
 # slot may be taken: the probe would queue past its deadline and report a healthy
-# swap as broken.
+# swap as broken. Read from /health, which counts the Run Queue: /executions
+# counts this process, which is nothing beside a full executor. Unknown is no room.
 executor_has_room() {
-    api "/executions?page_size=1" "$TMP/room.json" || return 0
-    python3 -c 'import json, sys; b = json.load(open(sys.argv[1]))["budget"]; sys.exit(0 if b["running"] + b["queued"] < b["limit"] else 1)' "$TMP/room.json"
+    api "/health" "$TMP/room.json" || return 1
+    python3 -c 'import json, sys; b = json.load(open(sys.argv[1]))["execution_budget"]; sys.exit(0 if b and b["running"] + b["queued"] < b["budget"] else 1)' "$TMP/room.json"
 }
 
 PROBE_LINE=""
@@ -1105,13 +1125,18 @@ elif [ "$SKIP_PROBE" = 1 ]; then
     printf '\n!!! --skip-probe: NO EXECUTION HAS BEEN SEEN TO START ON %s.\n!!! beta.8 passed every other check with every start dropped (#1641).\n!!! Dispatch one real workflow now and watch a PHASE reach running.\n' "$TAG" >&2
     PROBE_LINE=" PROBE SKIPPED: dispatch one real workflow and watch a PHASE reach running."
 elif [ "${SERVICE:-all}" = api ] && ! executor_has_room; then
-    PROBE_LINE=" PROBE SKIPPED: every execution slot is taken, so no start could be seen. Dispatch one real workflow once a slot frees."
-    printf '\n!!! Every execution slot is taken: NO EXECUTION HAS BEEN SEEN TO START ON %s.\n' "$TAG"
+    PROBE_LINE=" PROBE SKIPPED: no free execution slot could be seen, so no start could be either. Dispatch one real workflow once a slot frees."
+    printf '\n!!! No free execution slot: NO EXECUTION HAS BEEN SEEN TO START ON %s.\n' "$TAG"
 else
     # BAK is set only when this run repointed the pins; under --swap-only the
     # backup is the $COMPOSE.bak-* an earlier stage left on the host: put its PIN in.
     rollback="ssh $HOST 'cd $COMPOSE_DIR && ls $COMPOSE.bak-* && cp $COMPOSE.bak-${BAK:-PIN} $COMPOSE'
    ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d ${SWAP_ARGS:-api gateway}'"
+    # Admission is open by now, so an executor may hold other people's runs, and
+    # a recreate would interrupt them. Only a drained pit stop may move it back.
+    if [ -n "${ALSO_PINNED:-}" ]; then
+        rollback="do NOT recreate syn137-executor by hand: it may hold live runs. Roll back with a pit stop to the previous version, which gates and drains. If that lowers the event epoch, runs admitted since may need a new enough executor."
+    fi
     RECOVERY="$TAG is LIVE and admission is OPEN, deliberately: in-flight work from other users is not held hostage to a failed probe. Nothing was rolled back. To roll back by hand:
    $rollback"
     step "probe: dispatching $PROBE_WORKFLOW; waiting up to ${PROBE_TIMEOUT}s for a PHASE to reach running"
