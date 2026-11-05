@@ -19,10 +19,13 @@ The API is SIGKILLed and a new API process boots through production startup, so
   in the executor sees it, ends the agent and the run ends
   ``ExecutionCancelled``, with its container gone.
 
-Both the API and the executor reach Docker differently on purpose: the API gets
-a DOCKER_HOST that answers nothing, so with the flag on it provably needs no
-daemon, and a regression that re-enables its global reap cannot remove anyone's
-``agentic-ws-`` containers from a developer's machine.
+The API never reaches a real daemon. Its DOCKER_HOST is ``_DockerTrap``, a local
+listener that answers like a daemon holding one workspace and records every
+call. An unreachable host would not do: production's reap tolerates Docker
+failures, so a reap that failed quietly would leave this test green. With the
+trap a reap succeeds, against nothing, and the test fails on the record, and no
+regression can remove anyone's ``agentic-ws-`` containers from a developer's
+machine. A canary proves on every run that the API's environment reaches it.
 
 Admission is the sibling tests' in-process ``processor.run``, not HTTP:
 ``test_1310_every_entrance_admits_into_postgres`` owns that hop. Only the
@@ -35,7 +38,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
+import re
 import shutil
 import socket
 import sys
@@ -88,6 +93,13 @@ _WAIT_S = 120
 #: Printed by `resolve_previous_world`, and only on its Run Queue branch.
 _LEFT_TO_LEASE_EXPIRY = "Run Queue on: session reconcile is left to Lease expiry"
 _TERMINAL = {"WorkflowCompleted", "WorkflowFailed", "WorkflowInterrupted", "ExecutionCancelled"}
+#: What a daemon says first, so the client negotiates a version it can speak.
+_TRAP_API_VERSION = "1.47"
+_TRAPPED_ID = "feedface" * 8
+#: One workspace, so a reap goes on to stop and remove it and those calls are recorded too.
+_TRAP_LISTING = json.dumps(
+    [{"Id": _TRAPPED_ID, "Names": ["/agentic-ws-v6-trap"], "Labels": {}, "State": "running"}]
+)
 _RUN_ROW = "SELECT state, executor_id, lease_token FROM execution_runs WHERE execution_id=$1"
 
 
@@ -125,7 +137,54 @@ class _Stack(NamedTuple):
     database_url: str
     api_port: int
     executor_port: int
+    docker_trap_port: int
     logs: Path
+
+
+class _DockerCall(NamedTuple):
+    method: str
+    path: str
+
+
+class _DockerTrap:
+    """Stands in for the Docker daemon behind the API's DOCKER_HOST, recording every call."""
+
+    def __init__(self) -> None:
+        self.calls: list[_DockerCall] = []
+
+    @property
+    def container_calls(self) -> list[_DockerCall]:
+        """Every touch of a container: list, inspect, stop, kill, remove. The API owes none."""
+        return [call for call in self.calls if call.path.startswith("/containers")]
+
+    async def answer(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            head = await reader.readuntil(b"\r\n\r\n")
+            method, target = head.decode().split(" ", 2)[:2]
+            call = _DockerCall(method, re.sub(r"^/v[0-9.]+", "", target.split("?")[0]))
+            self.calls.append(call)
+            writer.write(_trap_reply(call))
+            await writer.drain()
+        except (asyncio.IncompleteReadError, ConnectionError):
+            pass  # a client that hung up has already been recorded, or asked nothing
+        finally:
+            writer.close()
+
+
+def _trap_reply(call: _DockerCall) -> bytes:
+    if call.path == "/_ping":
+        status, body = "200 OK", "OK"
+    elif call.path == "/containers/json":
+        status, body = "200 OK", _TRAP_LISTING
+    elif call.method in {"POST", "DELETE"}:
+        status, body = "204 No Content", ""
+    else:
+        status, body = "404 Not Found", '{"message": "no such object"}'
+    return (
+        f"HTTP/1.1 {status}\r\nApi-Version: {_TRAP_API_VERSION}\r\nOstype: linux\r\n"
+        f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n"
+        f"Connection: close\r\n\r\n{body}"
+    ).encode()
 
 
 class _RunRow(NamedTuple):
@@ -149,19 +208,37 @@ async def _until_reported(out: Path, event: str, execution_id: str) -> _Report:
             await asyncio.sleep(0.1)
 
 
-async def _docker(*args: str, check: bool = True) -> str:
-    """Run one docker command; with ``check``, a failure raises rather than reading as empty."""
+async def _docker(*args: str, check: bool = True, env: dict[str, str] | None = None) -> str:
+    """Run one docker command; with ``check``, a failure raises rather than reading as empty.
+
+    A command that outlives its wait is killed and reaped before the timeout
+    propagates: left running, a `docker run` could create a container after
+    teardown had already removed everything it knew of.
+    """
     proc = await asyncio.create_subprocess_exec(
-        "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+        "docker", *args, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
     )
-    async with asyncio.timeout(_WAIT_S * 2):  # a first run pulls the image
-        out, _ = await proc.communicate()
+    try:
+        async with asyncio.timeout(_WAIT_S * 2):  # a first run pulls the image
+            out, _ = await proc.communicate()
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
     assert not check or proc.returncode == 0, f"docker {args[0]} exited {proc.returncode}"
     return out.decode().strip()
 
 
-async def _service(prefix: str, port: int, *run: str) -> _Service:
+async def _remove(name: str) -> None:
+    """Best effort, so one stuck removal never spares the containers after it."""
+    with contextlib.suppress(TimeoutError):
+        await _docker("rm", "-f", name, check=False)
+
+
+async def _service(started: list[str], prefix: str, port: int, *run: str) -> _Service:
+    """Start a container, named in ``started`` BEFORE it exists, so any failure removes it."""
     name = f"syn-v6-{prefix}-{uuid4().hex[:8]}"
+    started.append(name)
     await _docker("run", "-d", "--name", name, "-p", f"127.0.0.1::{port}", *run)
     mapped = await _docker("port", name, f"{port}/tcp")
     return _Service(name, int(mapped.splitlines()[0].rsplit(":", 1)[1]))
@@ -218,25 +295,35 @@ async def pool(database: str) -> AsyncIterator[asyncpg.Pool]:
 
 
 @pytest.fixture
-async def stack(database: str, tmp_path: Path) -> AsyncIterator[_Stack]:
-    """Redis and MinIO of its own: CI's integration job has neither, and both are load-bearing."""
-    started: list[_Service] = []
+async def docker_trap() -> AsyncIterator[tuple[_DockerTrap, int]]:
+    trap = _DockerTrap()
+    server = await asyncio.start_server(trap.answer, "127.0.0.1", 0)
     try:
-        redis = await _service("redis", 6379, "redis:7-alpine")
-        started.append(redis)
+        yield trap, server.sockets[0].getsockname()[1]
+    finally:
+        server.close()
+
+
+@pytest.fixture
+async def stack(
+    database: str, tmp_path: Path, docker_trap: tuple[_DockerTrap, int]
+) -> AsyncIterator[_Stack]:
+    """Redis and MinIO of its own: CI's integration job has neither, and both are load-bearing."""
+    started: list[str] = []
+    try:
+        redis = await _service(started, "redis", 6379, "redis:7-alpine")
         minio = await _service(
-            "minio", 9000,
+            started, "minio", 9000,
             "-e", f"MINIO_ROOT_USER={_MINIO_USER}",
             "-e", f"MINIO_ROOT_PASSWORD={_MINIO_SECRET}",
             _MINIO_IMAGE, "server", "/data",
         )  # fmt: skip
-        started.append(minio)
         await _redis_live(redis.name)
         await _minio_live(minio.port)
-        yield _Stack(redis, minio, database, _free_port(), _free_port(), tmp_path)
+        yield _Stack(redis, minio, database, _free_port(), _free_port(), docker_trap[1], tmp_path)
     finally:
-        for service in started:
-            await _docker("rm", "-f", service.name, check=False)
+        for name in started:
+            await _remove(name)
 
 
 def _environment(world: _Infra, stack: _Stack, role: str) -> dict[str, str]:
@@ -266,9 +353,17 @@ def _environment(world: _Infra, stack: _Stack, role: str) -> dict[str, str]:
     }
 
 
-async def _spawn_api(world: _Infra, stack: _Stack, log: Path) -> asyncio.subprocess.Process:
+def _api_environment(world: _Infra, stack: _Stack) -> dict[str, str]:
+    """The API's settings, with the trap as its only Docker daemon (see the module docstring)."""
     env = _environment(world, stack, "api")
-    env["DOCKER_HOST"] = "tcp://127.0.0.1:1"  # see the module docstring
+    for selects_a_daemon in ("DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"):
+        env.pop(selects_a_daemon, None)
+    env["DOCKER_HOST"] = f"tcp://127.0.0.1:{stack.docker_trap_port}"
+    return env
+
+
+async def _spawn_api(world: _Infra, stack: _Stack, log: Path) -> asyncio.subprocess.Process:
+    env = _api_environment(world, stack)
     with log.open("w") as sink:
         return await asyncio.create_subprocess_exec(
             sys.executable, "-m", "uvicorn", "syn_api.main:app",
@@ -383,7 +478,15 @@ async def test_v6_an_api_restart_leaves_a_running_run_alone_and_a_later_cancel_s
     infra: _Infra,  # noqa: F811
     pool: asyncpg.Pool,
     stack: _Stack,
+    docker_trap: tuple[_DockerTrap, int],
 ) -> None:
+    trap, _ = docker_trap
+    # The canary: a docker client in the API's environment reaches the trap and only the trap.
+    listed = await _docker("ps", "-q", env=_api_environment(infra, stack))
+    assert listed == _TRAPPED_ID[:12], listed
+    assert trap.container_calls == [_DockerCall("GET", "/containers/json")]
+    trap.calls.clear()
+
     out = stack.logs / "executor.jsonl"
     first_log, second_log = stack.logs / "api-1.log", stack.logs / "api-2.log"
     children: list[asyncio.subprocess.Process] = []
@@ -415,6 +518,7 @@ async def test_v6_an_api_restart_leaves_a_running_run_alone_and_a_later_cancel_s
             second_api = await _spawn_api(infra, stack, second_log)
             children.append(second_api)
             await _api_serving(client, stack.api_port)
+            assert trap.container_calls == []  # neither startup reaped, or even looked
             assert _LEFT_TO_LEASE_EXPIRY in first_log.read_text()
             assert _LEFT_TO_LEASE_EXPIRY in second_log.read_text()
             assert executor.returncode is None, "the executor died with the API"
@@ -448,9 +552,50 @@ async def test_v6_an_api_restart_leaves_a_running_run_alone_and_a_later_cancel_s
             assert [line.event for line in _lines(out)].count("agent_started") == 2
             assert not [line for line in _lines(out) if line.execution_id == survivor][1:]
             assert executor.returncode is None
+            assert trap.container_calls == []
         finally:
             for child in children:
                 await _stop(child)
             for execution_id in (survivor, cancelled):
                 if execution_id:
-                    await _docker("rm", "-f", container_name(execution_id), check=False)
+                    await _remove(container_name(execution_id))
+
+
+async def test_a_docker_command_that_outlives_its_wait_is_killed_before_the_timeout_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid_file = tmp_path / "pid"
+    shim = tmp_path / "docker"
+    shim.write_text(f"#!/bin/sh\necho $$ > {pid_file}\nexec sleep 600\n")
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path), prepend=os.pathsep)
+    monkeypatch.setattr(sys.modules[__name__], "_WAIT_S", 0.25)
+
+    with pytest.raises(TimeoutError):
+        await _docker("run", "anything")
+
+    with pytest.raises(ProcessLookupError):  # reaped, so its pid is gone
+        os.kill(int(pid_file.read_text()), 0)
+
+
+async def test_a_service_whose_setup_fails_after_creation_is_still_named_for_removal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_docker = _docker
+
+    async def port_refused(*args: str, check: bool = True) -> str:
+        if args[0] == "port":
+            raise AssertionError("docker port exited 1")
+        return await real_docker(*args, check=check)
+
+    monkeypatch.setattr(sys.modules[__name__], "_docker", port_refused)
+    started: list[str] = []
+    try:
+        with pytest.raises(AssertionError, match="docker port"):
+            await _service(started, "half-made", 6379, "alpine:3", "sleep", "600")
+        (name,) = started
+        assert await real_docker("ps", "-aq", "--filter", f"name={name}")  # it does exist
+    finally:
+        for leftover in started:
+            await _remove(leftover)
+    assert not await real_docker("ps", "-aq", "--filter", f"name={name}")
