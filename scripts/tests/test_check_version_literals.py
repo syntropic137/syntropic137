@@ -127,6 +127,18 @@ FASTAPI_PLANTED: dict[str, str] = {
     "class rebinds the outer name to itself": (
         'from fastapi import FastAPI as API\nclass C:\n    API = API\n    app = API(version="1")\n'
     ),
+    # #2106: a class-body read of a name the class binds skips enclosing functions.
+    "class rebinds a module name an enclosing function shadows": (
+        "from fastapi import FastAPI as API\ndef outer():\n    API = object\n"
+        '    class C:\n        API = API\n        app = API(version="1")\n'
+    ),
+    # #2106: a nonlocal READ resolves past a class that declares the name global.
+    "nonlocal read under a class that declares global": (
+        "def outer():\n    API = None\n    class C:\n        global API\n"
+        "        def setup(self):\n            nonlocal API\n"
+        "            from fastapi import FastAPI as API\n"
+        '            return API(version="1")\n'
+    ),
     # #2105 review: nonlocal skips the class and lands on the enclosing function.
     "nonlocal in a method targets the enclosing function": (
         "def outer():\n    API = None\n"
@@ -134,6 +146,39 @@ FASTAPI_PLANTED: dict[str, str] = {
         "        def setup(self):\n            nonlocal API\n"
         "            from fastapi import FastAPI as API\n"
         '    C().setup()\n    return API(version="1")\n'
+    ),
+    # #2106 review: a class's `global` binds its own body, never its methods.
+    "method reads past a class that declares the name global": (
+        "def outer():\n    from fastapi import FastAPI as API\n"
+        '    class C:\n        global API\n        def make(self):\n            return API(version="1")\n'
+    ),
+    # #2106 review: every function in a class body sees its implicit `__class__` cell.
+    "__class__ of a FastAPI subclass": (
+        "from fastapi import FastAPI\nclass C(FastAPI):\n"
+        '    def make(self):\n        return __class__(version="1")\n'
+    ),
+    # #2106 review pass 2: a `nonlocal __class__` store writes the cell.
+    "nonlocal __class__ rebinds the cell": (
+        "class C:\n    def make(self):\n        nonlocal __class__\n"
+        "        from fastapi import FastAPI as __class__\n"
+        '        return __class__(version="1")\n'
+    ),
+    # #2106 review pass 2: an inlined class-body comprehension reads the module (PEP 709).
+    "class-body list comprehension reads the module __class__": (
+        "from fastapi import FastAPI as __class__\nclass C:\n"
+        '    apps = [__class__(version="1") for _ in [0]]\n'
+    ),
+    "lambda in a class-body generator reads the cell": (
+        "from fastapi import FastAPI\nclass C(FastAPI):\n"
+        '    makers = list(lambda: __class__(version="1") for _ in [0])\n'
+    ),
+    # #2106 review: `__API` in class C is `_C__API`.
+    "mangled private name in a class body": (
+        'from fastapi import FastAPI as _C__API\nclass C:\n    app = __API(version="1")\n'
+    ),
+    "mangled private name in a method": (
+        "from fastapi import FastAPI as _C__API\nclass C:\n"
+        '    def m(self):\n        return __API(version="1")\n'
     ),
     # #2105 review: self-referential attribute rebinding must still terminate.
     "module rebound to its own submodule": (
@@ -198,6 +243,30 @@ CLEAN: dict[str, str] = {
     ),
     "attribute past the class is not a constructor": (
         'import fastapi\napp = fastapi.FastAPI.FastAPI(version="1")\n'
+    ),
+    # #2106: the reverse of the planted case; the class reads the module's object.
+    "class rebinds a module name over an enclosing function's import": (
+        "API = object\ndef outer():\n    from fastapi import FastAPI as API\n"
+        '    class C:\n        API = API\n        app = API(version="1")\n'
+    ),
+    # #2106 review: the reverses of the planted cases.
+    "method reads the enclosing function past a class's global": (
+        "from fastapi import FastAPI as API\ndef outer():\n    API = object\n"
+        '    class C:\n        global API\n        def make(self):\n            return API(version="1")\n'
+    ),
+    "module __class__ is not a method's cell": (
+        "from fastapi import FastAPI as __class__\nclass C:\n"
+        '    def make(self):\n        return __class__(version="1")\n'
+    ),
+    "class body reads the module, not its own cell": (
+        'from fastapi import FastAPI\nclass C(FastAPI):\n    app = __class__(version="1")\n'
+    ),
+    "class-body list comprehension does not read the cell": (
+        "from fastapi import FastAPI\nclass C(FastAPI):\n"
+        '    apps = [__class__(version="1") for _ in [0]]\n'
+    ),
+    "mangled name is not the unmangled import": (
+        'from fastapi import FastAPI as __API\nclass C:\n    app = __API(version="1")\n'
     ),
     "relative import named fastapi": ('from .fastapi import FastAPI\napp = FastAPI(version="1")\n'),
 }

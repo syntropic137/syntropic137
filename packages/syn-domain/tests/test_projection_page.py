@@ -14,6 +14,7 @@ import os
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+import copy
 from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -51,7 +52,7 @@ class _PagingStore:
         )
 
     async def get_many(self, projection: str, keys: Sequence[str]) -> dict[str, ProjectionRecord]:
-        return {k: v for k, v in self._docs[projection].items() if k in keys}
+        return copy.deepcopy({k: v for k, v in self._docs[projection].items() if k in keys})
 
     async def count_by(
         self,

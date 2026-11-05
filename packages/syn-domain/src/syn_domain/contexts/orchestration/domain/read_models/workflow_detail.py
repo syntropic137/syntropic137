@@ -8,6 +8,16 @@ For execution details, see WorkflowExecutionDetail.
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from syn_domain.contexts.orchestration._shared.command_phase import (
+    CommandStep,
+    PhaseKind,
+    stored_command_steps,
+    stored_phase_kind,
+)
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    WorkspaceResourceRequest,
+    stored_resource_request,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     FallbackAgent,
     stored_fallback_agent,
@@ -179,6 +189,16 @@ class PhaseDefinitionDetail:
     requires_verdict: bool = False
     """Whether this phase fails when it reports no ``review_verdict`` (PC-116)."""
 
+    kind: PhaseKind = PhaseKind.AGENT
+    """What runs this phase (ADR-078). ``command`` runs ``commands``, no agent."""
+
+    commands: tuple[CommandStep, ...] = ()
+    """A command phase's ordered steps; empty on an agent phase."""
+
+    resources: WorkspaceResourceRequest = field(default_factory=WorkspaceResourceRequest)
+    """What this phase's workspace asks for: ``memory_mb``, ``pids_limit`` (okrs-51p.30).
+    Readable because it decides how much of the host one run of it holds."""
+
     sandbox: str = DEFAULT_PHASE_SANDBOX
     """The agent sandbox level this phase declares (``agent.sandbox``).
 
@@ -313,6 +333,9 @@ class WorkflowDetail:
                 delivers_repo_changes=bool(p.get("delivers_repo_changes", True)),
                 platform_access=stored_platform_access(p.get("platform_access")),
                 requires_verdict=bool(p.get("requires_verdict", False)),
+                kind=stored_phase_kind(p.get("kind")),
+                commands=stored_command_steps(p.get("commands")),
+                resources=stored_resource_request(p.get("resources")),
                 sandbox=str(p.get("sandbox", DEFAULT_PHASE_SANDBOX)),
                 claude_plugins=_stored_refs(p.get("claude_plugins")),
                 skills=_stored_refs(p.get("skills")),
@@ -402,6 +425,13 @@ class WorkflowDetail:
                 "delivers_repo_changes": p.delivers_repo_changes,
                 "platform_access": p.platform_access.value,
                 "requires_verdict": p.requires_verdict,
+                # ADR-078, written because `from_dict` reads it (#1429 seam).
+                "kind": p.kind.value,
+                "commands": [c.model_dump() for c in p.commands],
+                # okrs-51p.30. Written here because `from_dict` reads it: the
+                # #1429 seam, where a field read but never stored reloads as
+                # its default.
+                "resources": p.resources.model_dump(),
                 "sandbox": p.sandbox,
                 "claude_plugins": [r.to_dict() for r in p.claude_plugins],
                 "skills": [r.to_dict() for r in p.skills],

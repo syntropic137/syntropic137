@@ -10,6 +10,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from syn_adapters.in_memory import InMemoryAdapter
+from syn_domain.contexts.orchestration import (
+    COMMAND_TAIL_BYTES,
+    BoundedCommandResult,
+    CommandTerminal,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable
@@ -33,6 +38,10 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
         super().__init__()
         self._streams: dict[str, list[str]] = {}  # isolation_id -> lines
         self._last_exit_code: int | None = None
+        # isolation_id -> the result each `sh -c <run>` returns, by its run line.
+        self._bounded: dict[str, dict[str, BoundedCommandResult]] = {}
+        #: Every bounded command run, in order, as (isolation_id, argv).
+        self.bounded_runs: list[tuple[str, list[str]]] = []
 
     @property
     def last_exit_code(self) -> int | None:
@@ -77,6 +86,32 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
         for line in lines:
             yield line
         self._last_exit_code = 0
+
+    async def run_bounded(
+        self,
+        handle: IsolationHandle,
+        command: list[str],
+        *,
+        timeout_seconds: int,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+        tail_bytes: int = COMMAND_TAIL_BYTES,
+        withheld: Callable[[], Iterable[str]] | None = None,
+    ) -> BoundedCommandResult:
+        """The configured result for this command's run line, else a clean exit 0."""
+        del timeout_seconds, working_directory, environment, tail_bytes, withheld
+        self.bounded_runs.append((handle.isolation_id, list(command)))
+        configured = self._bounded.get(handle.isolation_id, {})
+        return configured.get(
+            command[-1],
+            BoundedCommandResult(terminal=CommandTerminal.EXITED, exit_code=0, duration_ms=0),
+        )
+
+    def set_bounded_result(
+        self, handle: IsolationHandle, run: str, result: BoundedCommandResult
+    ) -> None:
+        """Configure what ``run_bounded`` returns for the step whose ``run`` is ``run``."""
+        self._bounded.setdefault(handle.isolation_id, {})[run] = result
 
     async def cancel_running(self, handle: IsolationHandle) -> bool:
         """Nothing to cancel: no process is created here."""

@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
@@ -72,6 +73,7 @@ from eval_suite import (
 from syn_domain.contexts.orchestration import (
     ArchiveWorkflowTemplateCommand,
     CreateWorkflowTemplateHandler,
+    TagSet,
     WorkflowTemplateAggregate,
     WorkflowTemplateConflictError,
     build_command_from_definition,
@@ -3795,3 +3797,725 @@ def test_calibration_refuses_a_ledger_without_the_runs(
     ledger.write_text(_LAUNCHED.model_dump_json() + "\n")
     assert eval_judge_calibrate.main(["--launches", str(ledger), "--suite-tag", "nope:v6:"]) == 1
     assert "no ledger line has a suite tag starting 'nope:v6:'" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# k trials per case (#2108 S3): register, launch --trials, --top-up, check
+# ---------------------------------------------------------------------------
+
+# An explicit codex slug: a --trials cohort refuses an alias, and opus is one.
+_TRIAL_WF = "eval-verify-pinned-codex-gpt-6-luna-v1"
+
+
+class _TrialServer(_Server):
+    """`_Server` with every case eval already made, eval tag edits, and eval-set figures.
+
+    `roster` holds tags written onto an eval after create; `metrics` is what
+    `GET /eval-sets/metrics` answers. Each started run gets its own id.
+    """
+
+    def __init__(self, loaded: LoadedSuite) -> None:
+        super().__init__(loaded)
+        self.existing = True
+        self.roster: dict[str, list[str]] = {}
+        self.metrics: dict[str, object] = {}
+        self.started = 0
+        self.run_tags: dict[str, list[str]] = {}
+        self.lose_answer: set[int] = set()
+        """Start attempts (from 1) that start the run but answer 504."""
+        self.refuse: set[int] = set()
+        """Start attempts (from 1) that answer 503 and start nothing."""
+        self.attempts = 0
+        self.lagging_lookups = 0
+        """How many tag lookups still answer empty, as a lagging list read does."""
+
+    def _stable(self, case_id: str) -> dict[str, object]:
+        # Keyed by case, as the real stable key is: two cases may share a pin.
+        ev = {**super()._stable(case_id), "eval_id": f"eval-{case_id}"}
+        return {
+            **ev,
+            "tags": [self.tag, f"case:{case_id}", *self.roster.get(f"eval-{case_id}", [])],
+        }  # pyright: ignore[reportGeneralTypeIssues]
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.method == "POST" and path.startswith("/evals/") and path.endswith("/tags"):
+            self.requests.append(request)
+            eval_id = path.split("/")[2]
+            self.roster.setdefault(eval_id, []).extend(json.loads(request.content)["tags"])
+            return httpx.Response(200, json={"eval_id": eval_id, "tags": self.roster[eval_id]})
+        if path == "/eval-sets/metrics":
+            self.requests.append(request)
+            return httpx.Response(200, json=self.metrics)
+        if request.method == "POST" and path.endswith("/execute") and self.installed:
+            self.requests.append(request)
+            self.attempts += 1
+            if self.attempts in self.refuse:
+                return httpx.Response(503, json={"detail": "unavailable"})
+            self.started += 1
+            run_id = f"exec-{self.started}"
+            self.run_tags[run_id] = json.loads(request.content)["tags"]
+            if self.attempts in self.lose_answer:
+                return httpx.Response(504, json={"detail": "gateway timeout"})
+            return httpx.Response(200, json={"execution_id": run_id, "workflow_id": self.installed})
+        if (
+            request.method == "GET"
+            and path.startswith("/executions/")
+            and path[12:] in self.run_tags
+        ):
+            run_id = path[12:]
+            return httpx.Response(
+                200,
+                json={
+                    "workflow_execution_id": run_id,
+                    "workflow_id": self.installed,
+                    "status": "running",
+                },
+            )
+        if request.method == "GET" and path == "/executions":
+            if self.lagging_lookups:
+                self.lagging_lookups -= 1
+                return httpx.Response(200, json={"executions": [], "total": 0})
+            wanted = request.url.params.get_list("tag")
+            rows = [
+                {"workflow_execution_id": run_id}
+                for run_id, tags in self.run_tags.items()
+                if all(t in tags for t in wanted)
+            ]
+            return httpx.Response(200, json={"executions": rows, "total": len(rows)})
+        return super().handle(request)
+
+    def posts(self, suffix: str) -> list[httpx.Request]:
+        return [r for r in self.requests if r.method == "POST" and r.url.path.endswith(suffix)]
+
+
+def _eval_of(loaded: LoadedSuite, case_id: str) -> str:
+    assert any(c.id == case_id for c in loaded.cases)
+    return f"eval-{case_id}"
+
+
+def _case_metrics(
+    eval_id: str, *, short: int, pending: int = 0, exhausted: bool = False
+) -> dict[str, object]:
+    return {
+        "eval_id": eval_id,
+        "n": 3 - short - pending,
+        "c": 0,
+        "pending": pending,
+        "infra_error_count": 3 if exhausted else 0,
+        "trials_short": short,
+        "exhausted": exhausted,
+        "pass_at_k_display": "-",
+        "pass_hat_k_display": "-",
+        "flaky": None,
+    }
+
+
+def _figures(
+    loaded: LoadedSuite,
+    cases: list[dict[str, object]],
+    scorer_protocol: str = "8",
+    workflow_version: str | None = None,
+) -> dict[str, object]:
+    """`GET /eval-sets/metrics` for one cohort: the one `launch --trials` declares, by default.
+
+    The default workflow version is the one launch installs, `<suite>.<revision>.0`.
+    """
+    installs = f"{loaded.suite.version}.{loaded.workflow.revision}.0"
+    digest = eval_suite.declared_model_tags(eval_suite.declared(loaded))[0].split(":", 1)[1]
+    bounds = {"lower": 0.0, "upper": 1.0, "display": "0% to 100%"}
+    return {
+        "suite": "verifier-seed",
+        "version": "8",
+        "split": None,
+        "k": 3,
+        "roster": [],
+        "cohorts": [
+            {
+                "cohort": {
+                    "suite_version": "8",
+                    "workflow_id": loaded.workflow.id,
+                    "workflow_version": workflow_version or installs,
+                    "models_digest": digest,
+                    "scorer_protocol": scorer_protocol,
+                },
+                "k": 3,
+                "cases": cases,
+                "coverage": {
+                    "roster_size": len(cases),
+                    "complete": 0,
+                    "short": len(cases),
+                    "never_launched": 0,
+                },
+                "mean_pass_at_k_display": "-",
+                "mean_pass_hat_k_display": "-",
+                "partial": True,
+                "flaky_cases": [],
+                "pass_at_k_bounds": bounds,
+                "pass_hat_k_bounds": bounds,
+                "infra_error_count": 0,
+                "base_mismatch_count": 0,
+                "treatment_mismatch_count": 0,
+            }
+        ],
+        "comparison": None,
+        "not_a_trial_count": 0,
+    }
+
+
+@pytest.mark.unit
+def test_register_writes_the_roster_onto_every_case_eval_once() -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+
+    eval_suite.register_roster(loaded, server.client())
+
+    edits = {r.url.path.split("/")[2]: json.loads(r.content)["tags"] for r in server.posts("/tags")}
+    assert edits == {
+        _eval_of(loaded, c.id): ["suite-version:8", f"split:{c.split}", f"polarity:{c.polarity}"]
+        for c in loaded.cases
+    }
+    before = len(server.posts("/tags"))
+    eval_suite.register_roster(loaded, server.client())
+    assert len(server.posts("/tags")) == before  # tags present: nothing written
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("conflict", ["split", "polarity"])
+def test_register_refuses_a_split_or_polarity_the_case_file_disagrees_with(conflict: str) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    case = loaded.cases[-1]
+    wrong = {
+        "split": "train" if case.split == "holdout" else "holdout",
+        "polarity": "clean" if case.polarity == "defect" else "defect",
+    }[conflict]
+    server.roster[_eval_of(loaded, case.id)] = [f"{conflict}:{wrong}"]
+
+    with pytest.raises(RuntimeError, match=f"{case.id}: its eval is tagged {conflict}"):
+        eval_suite.register_roster(loaded, server.client())
+    assert server.posts("/tags") == []  # no case is tagged when any conflicts
+
+
+@pytest.mark.unit
+def test_launch_trials_starts_k_tagged_trials_per_case_with_one_ledger_line_each(
+    tmp_path: Path,
+) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+
+    recorded = read_launches(ledger)
+    assert Counter(x.case for x in recorded) == {c.id: 3 for c in loaded.cases}
+    assert {x.scorer for x in recorded} == {"8"}
+    assert len({x.batch for x in recorded}) == 1
+    # numbered across the batch, so no two cases share a trial tag
+    assert sorted(x.trial or 0 for x in recorded) == list(range(1, 3 * len(loaded.cases) + 1))
+    starts = [json.loads(r.content) for r in server.posts("/execute")]
+    batch = recorded[0].batch
+    cohort = {
+        "suite-version:8",
+        f"verifier:{_TRIAL_WF}",
+        "scorer:8",
+        *eval_suite.declared_model_tags(eval_suite.declared(loaded)),
+    }
+    assert "model:verify:gpt-6-luna" in cohort
+    for start, line in zip(starts, recorded, strict=True):
+        assert set(start["tags"]) == cohort | {f"trial:{batch}/{line.trial}"}
+        assert list(TagSet(start["tags"])) == sorted(start["tags"])  # valid, already normalised
+        assert start["eval_id"] == line.eval_id
+
+
+def _dry_run_pair(loaded: LoadedSuite) -> list[str]:
+    """One train defect and one train clean case: the plan sec 13 dry run's shape."""
+    train = [c for c in loaded.cases if c.split == "train"]
+    defect = next(c for c in train if c.polarity == "defect")
+    clean = next(c for c in train if c.polarity == "clean")
+    return [defect.id, clean.id]
+
+
+@pytest.mark.unit
+def test_a_dry_run_launches_k_trials_of_the_named_cases_and_rosters_every_case(
+    tmp_path: Path,
+) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    pair = _dry_run_pair(loaded)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(
+        eval_suite.select_cases(loaded, pair), server.client(), ledger, 3, roster=loaded
+    )
+
+    recorded = read_launches(ledger)
+    assert Counter(x.case for x in recorded) == dict.fromkeys(pair, 3)
+    assert len(server.posts("/execute")) == 6
+    tagged = {r.url.path.split("/")[2] for r in server.posts("/tags")}
+    assert tagged == {_eval_of(loaded, c.id) for c in loaded.cases}  # roster is the whole version
+
+
+@pytest.mark.unit
+def test_the_case_flag_narrows_what_check_and_launch_hand_on(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pair = _dry_run_pair(load_suite(DEFAULT_SUITE))
+    checked: list[LoadedSuite] = []
+    launched: list[tuple[LoadedSuite, LoadedSuite | None]] = []
+
+    def record(loaded: LoadedSuite, repo: Path) -> list[str]:
+        checked.append(loaded)
+        return []
+
+    def launch(
+        loaded: LoadedSuite, *_: object, roster: LoadedSuite | None = None, **__: object
+    ) -> list[str]:
+        launched.append((loaded, roster))
+        return []
+
+    monkeypatch.setattr(eval_suite, "check_commits", record)
+    monkeypatch.setattr(eval_suite, "launch_trials", launch)
+    cases = [a for c in pair for a in ("--case", c)]
+    assert main(["check", "--split", "train", *cases]) == 0
+    assert [c.id for c in checked[0].cases] == pair
+    assert ": 2 case(s)" in capsys.readouterr().out
+
+    args = ["launch", "--trials", "3", "--workflow", _TRIAL_WF, "--split", "train"]
+    args += ["--api-url", "http://x.invalid"]
+    assert main([*args, *cases]) == 0
+    loaded, roster = launched[0]
+    assert [c.id for c in loaded.cases] == pair
+    assert roster is not None and len(roster.cases) == len(load_suite(DEFAULT_SUITE).cases)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        (["check", "--case", "no-such-case"], "not among the loaded cases"),
+        (["check", "--split", "holdout", "--case", "<train>"], "not among the loaded cases"),
+        (["score", "--case", "<train>"], "narrows `check` and `launch` only"),
+        (["register", "--case", "<train>"], "narrows `check` and `launch` only"),
+    ],
+    ids=["unknown", "other-split", "score", "register"],
+)
+def test_the_case_flag_refuses_what_it_cannot_narrow(
+    argv: list[str], error: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Refused, never skipped: a typo must not launch a smaller dry run than was asked."""
+    train = _dry_run_pair(load_suite(DEFAULT_SUITE))[0]
+    assert main([a.replace("<train>", train) for a in argv]) == 1
+    assert error in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_top_up_launches_exactly_the_servers_trials_short(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    first, second, *rest = loaded.cases
+    server.metrics = _figures(
+        loaded,
+        [
+            _case_metrics(_eval_of(loaded, first.id), short=2),
+            _case_metrics(_eval_of(loaded, second.id), short=1),
+            *(_case_metrics(_eval_of(loaded, c.id), short=0) for c in rest),
+        ],
+    )
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 3, top_up=True)
+
+    assert Counter(x.case for x in read_launches(ledger)) == {first.id: 2, second.id: 1}
+
+
+@pytest.mark.unit
+def test_top_up_is_refused_while_the_cohort_has_a_pending_trial(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    first, *rest = loaded.cases
+    server.metrics = _figures(
+        loaded,
+        [
+            _case_metrics(_eval_of(loaded, first.id), short=1, pending=1),
+            *(_case_metrics(_eval_of(loaded, c.id), short=3) for c in rest),
+        ],
+    )
+    ledger = tmp_path / "launches.jsonl"
+
+    with pytest.raises(RuntimeError, match="pending trials"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3, top_up=True)
+    assert server.posts("/execute") == []
+    assert read_launches(ledger) == []
+
+
+@pytest.mark.unit
+def test_top_up_launches_none_for_an_exhausted_case(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    first, *rest = loaded.cases
+    server.metrics = _figures(
+        loaded,
+        [
+            _case_metrics(_eval_of(loaded, first.id), short=0, exhausted=True),
+            *(_case_metrics(_eval_of(loaded, c.id), short=1) for c in rest),
+        ],
+    )
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 3, top_up=True)
+
+    launched = Counter(x.case for x in read_launches(ledger))
+    assert first.id not in launched
+    assert launched == {c.id: 1 for c in rest}
+
+
+@pytest.mark.unit
+def test_top_up_of_a_cohort_that_launched_nothing_is_refused(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.metrics = {**_figures(loaded, []), "cohorts": []}
+
+    with pytest.raises(RuntimeError, match="launched nothing yet"):
+        eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3, top_up=True)
+    assert server.posts("/execute") == []
+
+
+@pytest.mark.unit
+def test_top_up_never_continues_a_cohort_of_another_workflow_version(tmp_path: Path) -> None:
+    """The 8.0.0 cohort's shortfall is not this launch's: it installs 8.1.0 (codex #2126 P1)."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    assert loaded.workflow.revision == 1  # installs 8.1.0
+    server = _TrialServer(loaded)
+    server.metrics = _figures(
+        loaded,
+        [_case_metrics(_eval_of(loaded, c.id), short=2) for c in loaded.cases],
+        workflow_version="8.0.0",
+    )
+
+    with pytest.raises(RuntimeError, match="another treatment"):
+        eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3, top_up=True)
+    assert server.posts("/execute") == []
+
+
+@pytest.mark.unit
+def test_a_second_launcher_on_the_same_ledger_is_refused(tmp_path: Path) -> None:
+    """Two top-ups would each launch the same trials_short (codex #2126 P2)."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    with eval_suite.ledger_lock(ledger), pytest.raises(RuntimeError, match="another launch holds"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert server.posts("/execute") == []
+    assert read_launches(ledger) == []
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 1)  # released: the next one runs
+    assert len(read_launches(ledger)) == len(loaded.cases)
+
+
+@pytest.mark.unit
+def test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered(tmp_path: Path) -> None:
+    """A 504 after the run started must not leave an unledgered trial (codex #2126 P2)."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.lose_answer = {2}
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+
+    lines = read_launches(ledger)
+    assert [x.run_id for x in lines] == [f"exec-{i}" for i in range(1, server.started + 1)]
+    assert len(lines) == 3 * len(loaded.cases)
+
+
+@pytest.mark.unit
+def test_a_trial_that_never_started_stops_the_launch_and_ledgers_nothing_for_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.refuse = {2}
+    ledger = tmp_path / "launches.jsonl"
+    monkeypatch.setattr(eval_suite, "RECONCILE_PAUSE_S", 0)
+
+    with pytest.raises(RuntimeError, match="0 runs carry that tag"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert [x.run_id for x in read_launches(ledger)] == ["exec-1"]
+
+
+@pytest.mark.unit
+def test_no_two_trials_share_a_trial_tag_across_cases_or_launches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lost answer is found again by its trial tag alone (codex #2126 pass 2)."""
+    monkeypatch.setattr(eval_suite.time, "strftime", lambda *_: "20261027t000000z")  # one second
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 2)
+    eval_suite.launch_trials(loaded, server.client(), ledger, 2)  # same second, still a new batch
+
+    trial_tags = [t for tags in server.run_tags.values() for t in tags if t.startswith("trial:")]
+    assert len(trial_tags) == 4 * len(loaded.cases)
+    assert len(set(trial_tags)) == len(trial_tags)
+
+
+@pytest.mark.unit
+def test_an_unresolved_intent_blocks_every_later_launch_until_its_run_is_visible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The intent is written before the POST; a lagging list never makes a duplicate (pass 2)."""
+    monkeypatch.setattr(eval_suite, "RECONCILE_PAUSE_S", 0)
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+    server.lose_answer = {2}
+    server.lagging_lookups = eval_suite.RECONCILE_ATTEMPTS
+
+    with pytest.raises(RuntimeError, match="intent stays pending"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert [x.run_id for x in read_launches(ledger)] == ["exec-1"]
+    [pending] = eval_suite.unresolved_intents(ledger)
+    assert pending.launch.trial == 2
+
+    server.lagging_lookups = eval_suite.RECONCILE_ATTEMPTS  # still not listed
+    with pytest.raises(RuntimeError, match="unresolved trial intents"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert server.started == 2  # nothing replaced it
+
+    eval_suite.launch_trials(
+        loaded, server.client(), ledger, 1
+    )  # now listed: resolved, then launched
+    runs = [x.run_id for x in read_launches(ledger)]
+    assert runs[:2] == ["exec-1", "exec-2"]
+    assert eval_suite.unresolved_intents(ledger) == []
+    assert len(runs) == 2 + len(loaded.cases)
+
+
+@pytest.mark.unit
+def test_top_up_never_continues_a_cohort_scored_under_another_protocol(tmp_path: Path) -> None:
+    """Only an LLM-judged cohort exists; a keyword top-up has nothing of its own to continue."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.metrics = _figures(
+        loaded,
+        [_case_metrics(_eval_of(loaded, c.id), short=2) for c in loaded.cases],
+        scorer_protocol="8-llm-judge",
+    )
+
+    with pytest.raises(RuntimeError, match="launched nothing yet"):
+        eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3, top_up=True)
+    assert server.posts("/execute") == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "git fetch origin && git merge origin/<base>",
+        "run `git merge --no-edit origin/main` first",
+        "git pull",
+        "git pull --ff-only origin feature",
+        "git rebase main",
+        'git rebase "$BASE_BRANCH"',
+        "Before you write anything, merge `origin/main` into your working branch",
+    ],
+)
+def test_a_prompt_that_integrates_the_default_branch_is_refused(prompt: str) -> None:
+    assert eval_suite.default_branch_integrations(prompt)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Do not fetch, pull, check out or merge any other ref",
+        "on a conflict, git merge --abort",
+        "git merge-base HEAD origin/main",
+        "git merge feature-x",
+        "the pull request",
+    ],
+)
+def test_a_prompt_that_stays_on_the_pin_is_not_refused(prompt: str) -> None:
+    assert eval_suite.default_branch_integrations(prompt) == []
+
+
+@pytest.mark.unit
+def test_every_suite_workflow_is_pin_safe_and_implement_v7_is_not() -> None:
+    refs = [r for d in ROOT.glob("evals/*/suite.yaml") for r in _suite_refs(d)]
+    assert refs
+    assert [p for r in refs for p in eval_suite.pin_safety_problems(r)] == []
+    v7 = eval_suite.WorkflowRef(
+        id="sdlc-implement-v7", path="workflows/sdlc/implement-v7/workflow.yaml", models={"x": "y"}
+    )
+    assert any("git merge origin/main" in p for p in eval_suite.pin_safety_problems(v7))
+
+
+def _suite_refs(suite_yaml: Path) -> list[eval_suite.WorkflowRef]:
+    raw = yaml.safe_load(suite_yaml.read_text())
+    return [eval_suite.WorkflowRef.model_validate(w) for w in raw.get("workflows", [])]
+
+
+@pytest.mark.unit
+def test_a_model_alias_is_refused_in_a_trials_suite(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE)  # eval-verify-pinned-v1 declares `opus`
+    server = _TrialServer(loaded)
+
+    assert eval_suite.alias_problems(loaded) == [
+        f"workflow {_WF} phase verify: declares 'opus', not an explicit model id; "
+        "replace it in the workflow and suite.yaml and bump the suite version"
+    ]
+    with pytest.raises(RuntimeError, match="declares 'opus'"):
+        eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3)
+    assert server.requests == []  # refused before anything is registered or installed
+    assert eval_suite.alias_problems(load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)) == []
+
+
+@pytest.mark.unit
+def test_the_llm_scoring_protocol_is_a_tag_the_server_can_compare() -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    judge = eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient())
+
+    protocol = eval_suite.scorer_protocol(loaded, judge)
+
+    assert protocol == f"8-llm-{eval_suite.JUDGE_MODEL}-prompt-v{eval_suite.JUDGE_PROMPT_VERSION}"
+    assert list(TagSet([f"scorer:{protocol}"])) == [f"scorer:{protocol}"]
+    assert eval_suite.scorer_protocol(loaded, None) == eval_suite.scorer_version(loaded, None)
+
+
+_ANY_FAMILY = eval_suite.JUDGE_MODELS | eval_suite.CODEX_JUDGE_MODELS
+
+
+def _panel(
+    claude_reply: str, codex_reply: str
+) -> tuple[eval_suite.PanelJudge, _FakeModel, _FakeModel]:
+    claude, codex = _FakeModel(claude_reply), _FakeModel(codex_reply)
+    panel = eval_suite.PanelJudge(
+        eval_suite.LlmJudge(claude),
+        eval_suite.LlmJudge(
+            codex, model=eval_suite.CODEX_JUDGE_MODEL, allowed=eval_suite.CODEX_JUDGE_MODELS
+        ),
+    )
+    return panel, claude, codex
+
+
+@pytest.mark.unit
+def test_both_arms_of_a_comparison_score_under_one_panel_protocol() -> None:
+    """One ruler: the protocol names the panel, never the arm, and fits a `scorer:` tag."""
+    panel, _, _ = _panel(_reply("no_match"), _reply("no_match"))
+    a = eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_CODEX_WF), panel)
+    b = eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_SONNET_WF), panel)
+
+    assert a == b
+    assert panel.identity == (
+        f"panel:{eval_suite.JUDGE_MODEL}+{eval_suite.CODEX_JUDGE_MODEL}"
+        f"@prompt-v{eval_suite.JUDGE_PROMPT_VERSION}"
+    )
+    assert a.endswith(
+        f"panel-{eval_suite.JUDGE_MODEL}-{eval_suite.CODEX_JUDGE_MODEL}"
+        f"-prompt-v{eval_suite.JUDGE_PROMPT_VERSION}"
+    )
+    assert list(TagSet([f"scorer:{a}"])) == [f"scorer:{a}"]
+    single = eval_suite.LlmJudge(_FakeModel(_reply("no_match")))
+    assert a != eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_CODEX_WF), single)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("claude_says", "codex_says"),
+    [
+        (_reply("match", _PARAPHRASE_QUOTE), _reply("no_match")),
+        (_reply("no_match"), _reply("match", _PARAPHRASE_QUOTE)),
+        (_reply("match", _PARAPHRASE_QUOTE), _reply("unclear")),
+    ],
+    ids=["claude-only", "codex-only", "match-and-unclear"],
+)
+def test_a_panel_that_disagrees_is_unclear_and_not_caught(
+    claude_says: str, codex_says: str
+) -> None:
+    panel, _, _ = _panel(claude_says, codex_says)
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
+    assert score.llm is not None and score.llm.verdict == "unclear"
+    assert score.llm.reason.startswith("panel split")
+    assert score.llm.quote == "", "a split quotes no member, so no one family's finding stands"
+    assert not score.caught
+
+
+@pytest.mark.unit
+def test_a_panel_that_agrees_on_no_match_says_no_match() -> None:
+    panel, _, _ = _panel(_reply("no_match"), _reply("no_match"))
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
+    assert score.llm is not None and score.llm.verdict == "no_match"
+    assert not score.caught
+
+
+@pytest.mark.unit
+def test_a_panel_that_agrees_credits_the_catch_and_asks_each_family_its_own_model() -> None:
+    panel, claude, codex = _panel(
+        _reply("match", _PARAPHRASE_QUOTE), _reply("match", _PARAPHRASE_QUOTE)
+    )
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
+    assert score.llm is not None and (score.llm.verdict, score.llm.quote) == (
+        "match",
+        _PARAPHRASE_QUOTE,
+    )
+    assert score.llm.judge == panel.identity and score.caught
+    assert {c["model"] for c in claude.calls} == {eval_suite.JUDGE_MODEL}
+    assert {c["model"] for c in codex.calls} == {eval_suite.CODEX_JUDGE_MODEL}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("claude_model", "codex_model"),
+    [
+        (eval_suite.JUDGE_MODEL, "claude-opus-5-5"),
+        (eval_suite.CODEX_JUDGE_MODEL, eval_suite.CODEX_JUDGE_MODEL),
+        (eval_suite.CODEX_JUDGE_MODEL, eval_suite.JUDGE_MODEL),
+    ],
+    ids=["two-claude", "two-codex", "swapped"],
+)
+def test_a_panel_is_one_claude_and_one_codex_judge(claude_model: str, codex_model: str) -> None:
+    with pytest.raises(eval_suite.JudgeError, match="one Claude and one codex"):
+        eval_suite.PanelJudge(
+            eval_suite.LlmJudge(_FakeModel(""), model=claude_model, allowed=_ANY_FAMILY),
+            eval_suite.LlmJudge(_FakeModel(""), model=codex_model, allowed=_ANY_FAMILY),
+        )
+
+
+@pytest.mark.unit
+def test_a_codex_judge_is_refused_at_construction_unless_its_client_is_codex() -> None:
+    """Refused before any launch, not at the first finding: an unusable scorer never tags a cohort."""
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient(), model=eval_suite.CODEX_JUDGE_MODEL)
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(
+            _FakeModel(""), model=eval_suite.JUDGE_MODEL, allowed=eval_suite.CODEX_JUDGE_MODELS
+        )
+
+
+@pytest.mark.unit
+def test_the_claude_transport_never_carries_a_codex_model() -> None:
+    transport = _FakeTransport(["ok"])
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.HeadlessJudgeClient(transport=transport).complete(
+            model=eval_suite.CODEX_JUDGE_MODEL, system="s", prompt="p"
+        )
+    assert transport.models == []
+
+
+@pytest.mark.unit
+def test_a_trial_is_scored_under_the_protocol_it_launched_with_and_no_other() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    trial = _LAUNCHED.model_copy(update={"batch": "b", "trial": 1, "scorer": "8"})
+    server = _Server(loaded)
+
+    rows, _ = score_suite(loaded, server.client(), [trial])
+    assert [body["scorer_version"] for _, body in server.scores] == ["8"]
+
+    other = _LAUNCHED.model_copy(update={"batch": "b", "trial": 1, "scorer": "8-llm-x"})
+    server = _Server(loaded)
+    rows, _ = score_suite(loaded, server.client(), [other])
+    assert server.scores == []
+    assert any("launched for scorer 8-llm-x" in r.status for r in rows)

@@ -56,6 +56,10 @@ case "$*" in
             touch "$PIT_LOG/compose-read"; cat "$PIT_COMPOSE"
         fi ;;
     *"ps -eo args"*) echo 0 ;;
+    *"docker ps -aq"*) printf '%s\\n' "${PIT_EXECUTOR_ID:-}" ;;
+    *"printenv SYN_EXECUTION_RUN_QUEUE_ENABLED"*) printf '%s\\n' "${PIT_RUN_QUEUE:-}" ;;
+    *"printenv SYN_EXECUTION_PROCESS_ROLE"*) echo "${PIT_API_ROLE-api}" ;;
+    *"docker inspect syn137-executor"*) echo "${PIT_EXECUTOR_RUNNING:-true}" ;;
 esac
 """
 
@@ -220,7 +224,7 @@ class TestGatewayOnly:
 
     def test_an_unknown_service_is_refused(self, tmp_path: Path) -> None:
         proc = subprocess.run(
-            [str(_SCRIPT), _VERSION, "--dry-run", "--service", "api"],
+            [str(_SCRIPT), _VERSION, "--dry-run", "--service", "executor"],
             env={**os.environ, "SYN_API_PASSWORD": "pw"},
             capture_output=True,
             text=True,

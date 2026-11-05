@@ -352,11 +352,15 @@ class PhaseRuntime:
         self,
         phase_id: str,
         *,
-        session_manager: SessionLifecycleManager,
+        session_manager: SessionLifecycleManager | None,
         started_at: datetime,
     ) -> None:
-        """Take charge of a phase whose session has opened but has no workspace yet."""
-        self._session_managers[phase_id] = session_manager
+        """Take charge of a phase whose session has opened but has no workspace yet.
+
+        None for a command phase: it runs no agent, so it has no session (ADR-078 D3).
+        """
+        if session_manager is not None:
+            self._session_managers[phase_id] = session_manager
         self._started_at[phase_id] = started_at
 
     def attach_workspace(

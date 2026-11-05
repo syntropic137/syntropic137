@@ -81,6 +81,62 @@ _PAIRS: tuple[tuple[str, tuple[str, str], tuple[tuple[str, str], ...]], ...] = (
         (("syn_api.types", "EvalVariantResponse"),),
     ),
     (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_trials",
+            "CohortKey",
+        ),
+        (("syn_api.types", "EvalCohortKeyResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_trial_metrics",
+            "CaseMetrics",
+        ),
+        (("syn_api.types", "EvalCaseMetricsResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_sets",
+            "Coverage",
+        ),
+        (("syn_api.types", "EvalSetCoverageResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_sets",
+            "CohortSummary",
+        ),
+        (("syn_api.types", "EvalSetCohortResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_sets",
+            "RosterCase",
+        ),
+        (("syn_api.types", "EvalRosterCaseResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_set_comparison",
+            "PairedComparison",
+        ),
+        (("syn_api.types", "EvalSetComparisonResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_set_comparison",
+            "Interval",
+        ),
+        (("syn_api.types", "EvalIntervalResponse"),),
+    ),
+    (
         "trends.py",
         (
             "syn_domain.contexts.orchestration.domain.read_models.eval_runs",

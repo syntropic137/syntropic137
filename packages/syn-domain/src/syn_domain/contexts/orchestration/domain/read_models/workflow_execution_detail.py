@@ -11,6 +11,13 @@ from datetime import datetime
 
 from pydantic import ValidationError
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+    ImageManifestReading,
+    read_image_manifest,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+    read_source_commits,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
     DelegationFailure,
@@ -19,6 +26,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ReportedFailureReason,
     ReviewVerdict,
     SideEffectStatus,
+    SourceCommit,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     TASK_INPUT_KEY,
@@ -176,6 +184,11 @@ class PhaseExecutionDetail:
     """What this phase's agent said caused its failure, beside the
     classification and never as it (#1392)."""
 
+    image_manifest: ImageManifestReading | None = None
+    """What this phase's latest workspace image said about itself (#1913), or
+    None when no provisioning recorded a reading. Read, absent and unreadable
+    stay distinct: an eval set reports which images its trials ran (#2108)."""
+
     @staticmethod
     def _to_iso_string(value: datetime | str | None) -> str | None:
         """Convert datetime or string to ISO string."""
@@ -223,6 +236,9 @@ class PhaseExecutionDetail:
             "reported_failure_reason": (
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
+            "image_manifest": (
+                None if self.image_manifest is None else self.image_manifest.model_dump(mode="json")
+            ),
         }
 
     @classmethod
@@ -267,6 +283,7 @@ class PhaseExecutionDetail:
             reported_failure_reason=ReportedFailureReason.from_stored(
                 data.get("reported_failure_reason")
             ),
+            image_manifest=read_image_manifest(data.get("image_manifest")),
         )
 
 
@@ -412,6 +429,12 @@ class WorkflowExecutionDetail:
     """The tags it launched with (#967), never edited: workflow tags united with
     the request's at launch."""
 
+    starting_checkout: tuple[SourceCommit, ...] = ()
+    """Where each pinned repository was verified checked out when the run's
+    FIRST workspace was provisioned (#967), as the aggregate keeps it. Empty
+    until provisioning recorded one: an eval trial's base is judged from it
+    (#2108), and an absent checkout is never a mismatch."""
+
     @property
     def task(self) -> str | None:
         """What this run was asked to do, or ``None`` if it was asked nothing.
@@ -515,6 +538,7 @@ class WorkflowExecutionDetail:
             inputs={str(k): str(v) for k, v in (data.get("inputs") or {}).items()},
             tags=tuple(data.get("tags") or ()),
             inherited_tags=tuple(data.get("inherited_tags") or ()),
+            starting_checkout=tuple(read_source_commits(data.get("starting_checkout"))),
         )
 
     @staticmethod
@@ -568,6 +592,7 @@ class WorkflowExecutionDetail:
             "inputs": dict(self.inputs),
             "tags": list(self.tags),
             "inherited_tags": list(self.inherited_tags),
+            "starting_checkout": [c.model_dump(mode="json") for c in self.starting_checkout],
         }
 
 

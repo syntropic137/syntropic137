@@ -36,11 +36,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
     SessionCostProjection,
-)
-from syn_domain.contexts.agent_sessions.slices.session_cost.test_projection import (
-    MockProjectionStore,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     CodexStreamProcessor,
@@ -168,7 +166,7 @@ class _ObservationsToProjection:
 async def _run_the_recording(
     rollout: _RolloutForTheAnnouncedThread,
 ) -> tuple[SessionCostProjection, _ObservationsToProjection]:
-    projection = SessionCostProjection(MockProjectionStore())
+    projection = SessionCostProjection(InMemoryProjectionStore())
     writer = _ObservationsToProjection(projection)
     collector = ObservabilityCollector(
         writer=writer,

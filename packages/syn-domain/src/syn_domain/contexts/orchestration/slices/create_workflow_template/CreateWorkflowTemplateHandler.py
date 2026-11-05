@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    require_phases_within_cap,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
 )
@@ -88,10 +92,16 @@ class CreateWorkflowTemplateHandler:
         event_publisher: EventPublisher,
         *,
         model_defaults: PhaseModelDefaults,
+        memory_ceiling_mb: int | None = None,
+        pids_ceiling: int | None = None,
     ) -> None:
         self._repository = repository
         self._event_publisher = event_publisher
         self._model_defaults = model_defaults
+        #: The workspace memory and pids ceilings every phase request is held
+        #: to before anything persists (okrs-51p.30). None: the deployment's.
+        self._memory_ceiling_mb = memory_ceiling_mb
+        self._pids_ceiling = pids_ceiling
 
     async def handle(self, command: CreateWorkflowTemplateCommand) -> InstallOutcome:
         """Handle the CreateWorkflowTemplateCommand.
@@ -105,6 +115,13 @@ class CreateWorkflowTemplateHandler:
         Returns:
             The workflow ID and whether anything actually changed.
         """
+        # Before anything is loaded or written, and HERE because every install
+        # and update path goes through this handler (API create, YAML and
+        # package install, seeding): a request above the deployment ceiling
+        # never persists, whichever door it came in by (okrs-51p.30).
+        require_phases_within_cap(
+            command.phases, self._memory_ceiling_mb, pids_cap=self._pids_ceiling
+        )
         aggregate = await self._repository.get_by_id(command.aggregate_id)
         defaulted = command.model_copy(
             update={"phases": _with_default_models(command.phases, self._model_defaults)}
@@ -177,6 +194,10 @@ def _with_default_models(
     """
     normalised: list[PhaseDefinition] = []
     for phase in phases:
+        if phase.kind is PhaseKind.COMMAND:
+            # No agent runs it, so no model is defaulted onto it (ADR-078 D2).
+            normalised.append(phase.model_copy(update={"model_defaulted": False}))
+            continue
         if phase.fallback_agent is not None:
             normalize_phase_model(
                 phase.fallback_agent.provider, phase.fallback_agent.model, defaults
@@ -207,6 +228,9 @@ def _as_stored(
     stored_by_id = {phase.phase_id: phase for phase in stored}
     result: list[PhaseDefinition] = []
     for phase in phases:
+        if phase.kind is PhaseKind.COMMAND:
+            result.append(phase.model_copy(update={"model_defaulted": False}))
+            continue
         _, needs_default = normalize_phase_model(phase.provider, phase.model, defaults)
         previous = stored_by_id.get(phase.phase_id)
         if needs_default and previous is not None and previous.model_defaulted:

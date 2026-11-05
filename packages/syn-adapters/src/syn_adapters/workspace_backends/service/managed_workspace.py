@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.orchestration import FilesRefusedError
+from syn_domain.contexts.orchestration._shared.command_phase import COMMAND_TAIL_BYTES
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     TokenType,
     WorkspaceStatus,
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     )
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
     from syn_domain.contexts.agent_sessions import RolloutDocument
+    from syn_domain.contexts.orchestration._shared.command_phase import BoundedCommandResult
     from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
         ImageManifestReading,
     )
@@ -212,6 +214,36 @@ class ManagedWorkspace:
         )
         async for line in stream:  # type: ignore[attr-defined]
             yield line
+
+    async def run_bounded(
+        self,
+        command: list[str],
+        *,
+        timeout_seconds: int,
+        working_directory: str | None = None,
+        tail_bytes: int = COMMAND_TAIL_BYTES,
+        phase_deadline: datetime | None = None,
+    ) -> BoundedCommandResult:
+        """Run a command phase's step to its end, keeping a bounded scrubbed tail (ADR-078 D3).
+
+        The phase's platform grant rides on it as on ``stream``, so a referee
+        step under ``platform_access: eval`` can score a run, and it dies with
+        the phase. Everything the workload holds is withheld from the tail.
+        """
+        environment: dict[str, str] | None = None
+        if self.platform_grant is not None:
+            await self._bound_platform_grant_to_phase(phase_deadline)
+            environment = dict(self.platform_grant.env)
+            self.withhold(v for k, v in environment.items() if names_a_credential(k))
+        return await self._service._event_stream.run_bounded(
+            self.isolation_handle,
+            command,
+            timeout_seconds=timeout_seconds,
+            working_directory=working_directory,
+            environment=environment,
+            tail_bytes=tail_bytes,
+            withheld=self._withheld_values,
+        )
 
     async def _bound_platform_grant_to_phase(self, deadline: datetime | None) -> None:
         """The API token expires with the phase, not only when teardown revokes it."""

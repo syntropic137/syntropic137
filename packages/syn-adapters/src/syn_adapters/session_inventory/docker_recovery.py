@@ -17,9 +17,9 @@ from .recovery_worker import RecoveryReaders
 from .workspace_location import workspace_capture_location
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
-    from syn_domain.contexts.agent_sessions import CaptureSpool
+    from syn_domain.contexts.agent_sessions import CaptureSpool, CaptureSpoolLease
 
 
 async def _read_limited(stream: asyncio.StreamReader, limit: int) -> bytes:
@@ -77,7 +77,12 @@ class DockerSpoolRecovery:
         self._image = image
 
     @asynccontextmanager
-    async def open(self, spool: CaptureSpool) -> AsyncIterator[RecoveryReaders]:
+    async def open(
+        self, lease: CaptureSpoolLease, *, fence: Callable[[], Awaitable[None]]
+    ) -> AsyncIterator[RecoveryReaders]:
+        # Read-only on a volume nothing else references: no step here needs fencing.
+        del fence
+        spool = lease.spool
         location = workspace_capture_location(spool.run, spool.session_id)
         # Never manufacture an empty replacement for a lost capture volume.
         exists = await _docker(["volume", "inspect", location.volume_name], max_bytes=65536)

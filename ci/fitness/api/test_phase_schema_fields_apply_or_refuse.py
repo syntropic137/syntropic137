@@ -55,6 +55,9 @@ _APPLIED: dict[str, tuple[str, str]] = {
     "order": ("ExecutablePhase", "order"),
     "description": ("ExecutablePhase", "description"),
     "prompt_template": ("ExecutablePhase", "prompt_template"),
+    # ADR-078: what runs the phase, and a command phase's steps.
+    "kind": ("ExecutablePhase", "kind"),
+    "commands": ("ExecutablePhase", "commands"),
     # `prompt_file` is resolved into `prompt_template` at load time, so it
     # rides the same keyword; it has no separate execution identity.
     "prompt_file": ("ExecutablePhase", "prompt_template"),
@@ -78,6 +81,10 @@ _APPLIED: dict[str, tuple[str, str]] = {
     # PC-116: read by `completion_failure`, which fails a declared review phase
     # that reports no verdict.
     "requires_verdict": ("ExecutablePhase", "requires_verdict"),
+    # Carried to `create_workspace`, where `memory_mb` is the container's
+    # memory limit and its share of the workspace memory ledger, and
+    # `pids_limit` is its --pids-limit (okrs-51p.30).
+    "resources": ("ExecutablePhase", "resources"),
     "claude_plugins": ("ExecutablePhase", "claude_plugins"),
     "skills": ("ExecutablePhase", "skills"),
     "allowed_tools": ("AgentConfiguration", "allowed_tools"),

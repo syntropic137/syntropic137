@@ -19,6 +19,7 @@ that hold it:
 
 from __future__ import annotations
 
+import copy
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -53,7 +54,7 @@ class _Store:
         self.rows[key] = data
 
     async def get(self, _name: str, key: str) -> Row | None:
-        return self.rows.get(key)
+        return copy.deepcopy(self.rows.get(key))
 
 
 def _created(**overrides: str) -> Row:

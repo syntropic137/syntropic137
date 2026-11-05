@@ -28,6 +28,8 @@ class ExecutionRequestedEvent(DomainEvent):
     repos: list[str] = Field(default_factory=list)
     """Repository slugs (`owner/name`), as `RepositoryRef.slug` writes them."""
     tags: list[str] = Field(default_factory=list)
+    idempotency_key: str | None = None
+    """The key a keyed start was named by (#2129), or None for an unkeyed start."""
     eval_id: str | None = None
     """The eval the start joins (#967), resolved and admitted when it was accepted.
 

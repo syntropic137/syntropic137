@@ -3,8 +3,9 @@
 **Status:** approved 2026-10-14 with the orchestrator's defaults, which the owner may revise:
 D1 land PR 0-3 now; D2 the §6 ADR-072 amendment, applied in place; D3 the grace period is
 saturation duration (`full_since`). PR 0 (this file, the amendment, the vocabulary) and PR 1
-(the pool model) landed together in one PR (#1931). PR 2 (reach and release) is #2072. PR 3-6 are
-not started. The body below is the
+(the pool model) landed together in one PR (#1931). PR 2 (reach and release) is #2072. PR 3's
+claim signals and PR 4's priority and overflow land together with #1917's credential clause; PR 3's
+published drain, PR 4's real-process test, and PR 5-6 are not started. The body below is the
 plan as reviewed; its `file:line` citations are to `6b5b0abe6` and drift as the PRs land.
 
 **Read on:** `main` as checked out in the workspace (`6b5b0abe6`, the merge of #1894). Every

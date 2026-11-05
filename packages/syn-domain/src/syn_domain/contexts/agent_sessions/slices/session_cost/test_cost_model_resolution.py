@@ -21,13 +21,11 @@ from decimal import Decimal
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
     SessionCostProjection,
-)
-from syn_domain.contexts.agent_sessions.slices.session_cost.test_projection import (
-    MockProjectionStore,
 )
 from syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query import (
     price_session_rows,
@@ -90,7 +88,7 @@ def _token_usage_group(
 )
 @pytest.mark.asyncio
 async def test_projection_prices_token_usage_by_model(model: str, expected: Decimal) -> None:
-    store = MockProjectionStore()
+    store = InMemoryProjectionStore()
     projection = SessionCostProjection(store)
 
     await projection.on_agent_observation(

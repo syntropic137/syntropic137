@@ -110,6 +110,11 @@ class SessionInventorySettings(BaseSettings):
         ge=1,
         description="Optional byte quota for retained staged spool bytes. Disabled by default. When exceeded, the oldest settled spools expire with a recorded gap; a non-terminal spool is evicted only when settled spools cannot satisfy the quota.",
     )
+    spool_max_count: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional ceiling on retained capture spools per backend. Disabled by default. For a remote backend each one is a paused sandbox, which byte quotas do not bound: an empty spool stages no bytes. When exceeded, the oldest settled spools expire with a recorded gap. A non-terminal spool is never evicted by it.",
+    )
 
     replication_enabled: bool = Field(
         default=False,
@@ -133,7 +138,7 @@ class SessionInventorySettings(BaseSettings):
     )
     exporter_binary: Path = Field(
         default=Path("/usr/local/bin/apss-session-exporter"),
-        description="Absolute path to the released standard exporter used for inventory replication.",
+        description="Absolute path to the standard exporter used for inventory replication. Defaults to the pinned, checksum-verified binary shipped in the syn-api image; override only for a non-image deployment.",
     )
 
     @field_validator("exporter_binary")

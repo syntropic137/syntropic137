@@ -6,10 +6,10 @@ phase, and empty/invalid event guards.
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.slices.workflow_phase_metrics.phase_entry import (
     PhaseMetricsEntry,
 )
@@ -18,29 +18,13 @@ from syn_domain.contexts.orchestration.slices.workflow_phase_metrics.projection 
 )
 
 
-class MockProjectionStore:
-    """Minimal projection store for testing (no DB required)."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, dict[str, Any]] = {}
-
-    async def save(self, projection_name: str, key: str, data: dict[str, Any]) -> None:
-        self._data.setdefault(projection_name, {})[key] = data
-
-    async def get(self, projection_name: str, key: str) -> dict[str, Any] | None:
-        return self._data.get(projection_name, {}).get(key)
-
-    async def delete_all(self, projection_name: str) -> None:
-        self._data.pop(projection_name, None)
+@pytest.fixture
+def store() -> InMemoryProjectionStore:
+    return InMemoryProjectionStore()
 
 
 @pytest.fixture
-def store() -> MockProjectionStore:
-    return MockProjectionStore()
-
-
-@pytest.fixture
-def projection(store: MockProjectionStore) -> WorkflowPhaseMetricsProjection:
+def projection(store: InMemoryProjectionStore) -> WorkflowPhaseMetricsProjection:
     return WorkflowPhaseMetricsProjection(store)
 
 
@@ -453,7 +437,7 @@ class TestQueryAndClear:
         assert phases == {}
 
     async def test_clear_all_data_removes_stored_data(
-        self, projection: WorkflowPhaseMetricsProjection, store: MockProjectionStore
+        self, projection: WorkflowPhaseMetricsProjection, store: InMemoryProjectionStore
     ) -> None:
         await projection.on_phase_started(
             {"workflow_id": "wf-1", "phase_id": "p-1", "phase_name": "Build"}

@@ -186,7 +186,8 @@ The window, source and definition of each number above are in
 ### Outcome: every change is proven
 
 - **`scripts/eval_suite.py check|launch|score`** for verifier suites and
-  **`scripts/eval_implementer.py check|admit|score`** for implementer suites.
+  **`scripts/eval_implementer.py check|admit`** plus the container referee
+  **`scripts/eval_referee.py`** (scores and records) for implementer suites.
 - **`docs/experiments/CURRENT-BESTS.md` + `FINDINGS-LEDGER.md`** as the only
   place a default is declared.
 - **Preregister an A/B arm**, as `workflows/sdlc/implement-v4-precheck/EXPERIMENT.md`

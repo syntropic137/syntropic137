@@ -52,7 +52,9 @@ _REDIS_KEY_PREFIX = "syn:platform-token:"
 # routers unprefixed (nginx and Envoy strip ``/api/v1``), so these are the
 # paths the app itself routes. Anything absent here is denied, including
 # routes added later: the allowlist fails closed.
-_READ_RESOURCES = frozenset({"executions", "sessions", "artifacts", "evals", "insights", "health"})
+_READ_RESOURCES = frozenset(
+    {"executions", "sessions", "artifacts", "evals", "eval-sets", "insights", "health"}
+)
 _READ_METHODS = frozenset({"GET", "HEAD"})
 
 # The largest execute body an EVAL token's request is read up to. A real one is

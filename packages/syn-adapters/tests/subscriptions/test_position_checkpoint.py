@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import pytest
@@ -23,7 +24,7 @@ class MockProjectionStore:
         self._positions[key] = position
 
     async def get_all(self, projection_name: str) -> list[dict[str, Any]]:
-        return list(self._data.get(projection_name, {}).values())
+        return copy.deepcopy(list(self._data.get(projection_name, {}).values()))
 
 
 @pytest.fixture

@@ -90,6 +90,7 @@ if TYPE_CHECKING:
     )
     from syn_adapters.session_inventory.replication_worker import InventoryReplicationWorker
     from syn_adapters.session_inventory.runtime import InventoryWork
+    from syn_adapters.session_inventory.sandbox_recovery import SandboxSpoolRecovery
     from syn_adapters.session_inventory.spool_release import (
         CaptureSpoolRetention,
         SpoolVolumePort,
@@ -238,6 +239,9 @@ if TYPE_CHECKING:
         ClaudePluginStoragePort,
     )
     from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutPort
+    from syn_domain.contexts.orchestration.ports.CommandWorkspacePort import (
+        CommandWorkspacePort,
+    )
     from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
         DelegationEvidencePort,
     )
@@ -352,6 +356,7 @@ if TYPE_CHECKING:
         _direct_injection: TokenInjectionPort = direct_injection
         _memory_injection: TokenInjectionPort = memory_injection
         _rollout: CodexRolloutPort = workspace
+        _command_workspace: CommandWorkspacePort = workspace
         _delegations: DelegationEvidencePort = delegations
         _service: WorkspaceServicePort = service
 
@@ -445,6 +450,7 @@ if TYPE_CHECKING:
         spools: PostgresCaptureSpools,
         access: InstallationTranscriptAccess,
         recovery: DockerSpoolRecovery,
+        sandbox_recovery: SandboxSpoolRecovery,
         work: InventoryWork,
         supervisor: ReplicationSupervisor,
         inventory_replication: InventoryReplicationWorker,
@@ -477,6 +483,8 @@ if TYPE_CHECKING:
         _access: SessionTranscriptAccessPort = access
         _recovery: SpoolRecoveryPort = recovery
         _volumes: SpoolVolumePort = recovery
+        _sandbox_recovery: SpoolRecoveryPort = sandbox_recovery
+        _sandbox_volumes: SpoolVolumePort = sandbox_recovery
         _release: SpoolReleasePort = spool_release
         _outboxes: CaptureOutboxPort = outboxes
         _work: InventoryWorkPort = work

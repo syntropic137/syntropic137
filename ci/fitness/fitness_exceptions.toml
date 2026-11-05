@@ -565,7 +565,7 @@ reason = "History: names the command removed in v0.32, in a callout that says it
 # "<path>" = { reason = "..." }
 "apps/syn-api/src/syn_api/services/reconciliation.py" = { reason = "Startup reap: force-removes agentic-ws containers after the unpushed-work guard ran inside them (#1560)." }
 "apps/syn-api/src/syn_api/services/unlabelled_containers.py" = { reason = "Force-removes unlabelled agentic-ws containers after the guard (#1560)." }
-"packages/syn-adapters/src/syn_adapters/session_inventory/capture_outboxes.py" = { reason = "Removes an outbox entry the platform itself wrote, after delivery." }
+"packages/syn-adapters/src/syn_adapters/session_inventory/capture_outboxes.py" = { reason = "Removes an outbox the platform itself wrote: after delivery, or to cancel unsent replica deletes an older build queued (#2107, purged once per destination, failures raise)." }
 "packages/syn-adapters/src/syn_adapters/session_inventory/docker_recovery.py" = { reason = "Removes its own recovery helper container, and a capture volume only once spool_release proved it drained and unreferenced." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/dependency_seed.py" = { reason = "Platform-owned dependency seed store: prunes seeds it published, and scratch copies it made." }
 "packages/syn-adapters/src/syn_adapters/workspace_backends/docker/docker_container_ops.py" = { reason = "Workspace provider teardown of the container it created." }

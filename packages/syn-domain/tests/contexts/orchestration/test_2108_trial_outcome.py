@@ -62,6 +62,7 @@ TABLE: dict[tuple[S, F | None], tuple[tuple[TrialOutcome, ...], tuple[TrialOutco
     (S.INTERRUPTED, None): ((IE, IE, IE, IE), (IE, IE, IE, IE)),  # row 5
     (S.FAILED, F.TASK): ((FL, FL, FL, FL), (FL, FL, FL, FL)),  # row 6
     (S.FAILED, F.CORRECT_REFUSAL): ((FL, FL, FL, FL), (FL, FL, FL, FL)),  # row 6
+    (S.FAILED, F.GATE): ((FL, FL, FL, FL), (FL, FL, FL, FL)),  # row 6, ADR-078 D5
     (S.FAILED, F.PLATFORM): ((IE, IE, IE, IE), (IE, IE, IE, IE)),  # row 7
     (S.FAILED, F.UNCLASSIFIED): ((IE, IE, IE, IE), (IE, IE, IE, IE)),  # row 7
     (S.FAILED, None): ((IE, IE, IE, IE), (IE, IE, IE, IE)),  # row 7, never classified

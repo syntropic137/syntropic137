@@ -45,3 +45,14 @@ def _fresh_repo_listing_cache() -> None:
     from syn_api.services.github_repo_listing_cache import reset_repo_listing_cache
 
     reset_repo_listing_cache()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_workspace_memory_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test sizes the process ledger from its own settings.
+
+    It is a process singleton sized on first use, so without this a test that
+    sets ``SYN_WORKSPACE_MEMORY_LIMIT_MB`` leaves a ledger of that size for
+    whichever test the worker runs next.
+    """
+    monkeypatch.setattr("syn_api._wiring_workspace_memory._ledger_singleton", None)

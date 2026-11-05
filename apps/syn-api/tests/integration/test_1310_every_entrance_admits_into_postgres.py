@@ -40,7 +40,7 @@ from syn_adapters.storage.legacy_tolerant_client import LegacyShapeTolerantGrpcC
 from syn_adapters.storage.repositories import EventStoreExecutionEventStream, RepositoryAdapter
 from syn_api import _wiring
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
-from syn_api.routes.executions import commands
+from syn_api.routes.executions import commands, keyed_start
 from syn_api.routes.executions.commands import ExecuteWorkflowRequest
 from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
@@ -357,7 +357,7 @@ async def test_direct_route_admits_before_its_200(
     )
     monkeypatch.setattr(commands, "_validate_execution_request", validated)
     monkeypatch.setattr(commands, "_launch_eval", ordinary)
-    monkeypatch.setattr(commands, "record_execution_request", nothing)
+    monkeypatch.setattr(keyed_start, "record_execution_request", nothing)
     monkeypatch.setattr(commands, "ensure_connected", nothing)
     monkeypatch.setattr(commands, "get_projection_mgr", lambda: projections)
     monkeypatch.setattr(_wiring, "get_execute_workflow_handler", the_handler)

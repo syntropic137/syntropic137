@@ -42,6 +42,10 @@ class TestWorkspaceSettings:
             # Per-container limits: behaviour-neutral against the 4G / 2 CPU
             # the agentic_isolation provider applied before these were wired.
             assert settings.memory_limit_mb == 4096
+            # agentic-workspace's SecurityConfig default, now owned here (okrs-51p.30).
+            assert settings.pids_limit == 256
+            assert settings.pids_max is None
+            assert settings.pids_ceiling == 256
             assert settings.cpu_limit == 2.0
 
             assert settings.docker_image == DEFAULT_WORKSPACE_IMAGE

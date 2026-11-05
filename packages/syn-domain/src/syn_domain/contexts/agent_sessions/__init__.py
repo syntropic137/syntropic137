@@ -388,6 +388,7 @@ __all__ = [
     "SessionTranscriptArchivePort",
     "SettlementDeadline",
     "SettlementDeadlinePage",
+    "SpoolBackend",
     "StartSessionCommand",
     "StartSessionHandler",
     "StoredEvidenceBatch",
@@ -464,6 +465,7 @@ from .ports.SessionCaptureSpoolPort import (
     CaptureSpoolLease,
     CaptureSpoolLeaseLost,
     SessionCaptureSpoolPort,
+    SpoolBackend,
 )
 from .ports.SessionSettlementPort import (
     SessionSettlementPort,

@@ -114,6 +114,7 @@ from syn_api._wiring_admission import (
 from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
 from syn_api._wiring_import_ledger import get_import_ledger
 from syn_api._wiring_launch import _build_resume_handler, get_execute_workflow_handler
+from syn_api._wiring_workspace_memory import get_workspace_memory_ledger, ledger_applies
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
 from syn_shared import settings as shared_settings
@@ -330,13 +331,21 @@ def build_workspace_service(
     No credential policy is passed, deliberately: the executor this wiring
     serves runs real agents, which need the host's credentials. E2B only when SYN_E2B_ENABLED (#1915).
     """
+    from syn_api._wiring_e2b import e2b_client_with_breaker
+
+    e2b = shared_settings.get_settings().e2b
+    backend = WorkspaceBackend.selected(e2b)
     return WorkspaceService.create(
-        backend=WorkspaceBackend.selected(e2b := shared_settings.get_settings().e2b),
+        backend=backend,
         e2b=e2b,
+        e2b_client=e2b_client_with_breaker() if backend is WorkspaceBackend.E2B else None,
         config=ws_config,
         environment=_build_workspace_env(),
         capture_source_instance_id=capture_source_instance_id,
         platform_tokens=get_platform_token_service(),
+        # okrs-51p.30: a phase that asks for 16 GB holds four default shares
+        # of this host's memory, which an E2B sandbox does not spend.
+        memory_ledger=get_workspace_memory_ledger() if ledger_applies() else None,
     )
 
 

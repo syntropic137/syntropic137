@@ -71,6 +71,8 @@ elif a[0] == "inspect":
         sys.exit(99)
 elif a[0] == "exec":
     print("/usr/bin/docker")
+elif a[0] == "ps":
+    pass  # This host has no executor.
 else:
     sys.exit(99)
 """

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.read_models.workspace_metrics import (
     WorkspaceMetrics,
 )
@@ -18,56 +18,21 @@ from syn_domain.contexts.orchestration.slices.workspace_metrics.projection impor
 )
 
 
-class MockProjectionStore:
-    """In-memory store for testing projections."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, dict[str, Any]] = {}
-
-    async def save(self, collection: str, key: str, data: dict) -> None:
-        if collection not in self._data:
-            self._data[collection] = {}
-        self._data[collection][key] = data
-
-    async def get(self, collection: str, key: str) -> dict | None:
-        return self._data.get(collection, {}).get(key)
-
-    async def get_all(self, collection: str) -> list[dict]:
-        return list(self._data.get(collection, {}).values())
-
-    async def query(
-        self,
-        collection: str,
-        filters: dict | None = None,
-        order_by: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[dict]:
-        data = list(self._data.get(collection, {}).values())
-        if filters:
-            for key, value in filters.items():
-                data = [d for d in data if d.get(key) == value]
-        return data[offset : offset + limit]
-
-    async def delete_all(self, collection: str) -> None:
-        self._data[collection] = {}
-
-
 @pytest.mark.integration
 class TestWorkspaceMetricsProjection:
     """Tests for workspace metrics projection."""
 
     @pytest.fixture
-    def store(self) -> MockProjectionStore:
-        return MockProjectionStore()
+    def store(self) -> InMemoryProjectionStore:
+        return InMemoryProjectionStore()
 
     @pytest.fixture
-    def projection(self, store: MockProjectionStore) -> WorkspaceMetricsProjection:
+    def projection(self, store: InMemoryProjectionStore) -> WorkspaceMetricsProjection:
         return WorkspaceMetricsProjection(store)
 
     @pytest.mark.asyncio
     async def test_on_workspace_creating(
-        self, projection: WorkspaceMetricsProjection, store: MockProjectionStore
+        self, projection: WorkspaceMetricsProjection, store: InMemoryProjectionStore
     ) -> None:
         """Test WorkspaceCreating event creates initial record."""
         event_data = {
@@ -91,7 +56,7 @@ class TestWorkspaceMetricsProjection:
 
     @pytest.mark.asyncio
     async def test_on_workspace_created(
-        self, projection: WorkspaceMetricsProjection, store: MockProjectionStore
+        self, projection: WorkspaceMetricsProjection, store: InMemoryProjectionStore
     ) -> None:
         """Test WorkspaceCreated event updates status and timing."""
         # First create the workspace
@@ -120,7 +85,7 @@ class TestWorkspaceMetricsProjection:
 
     @pytest.mark.asyncio
     async def test_on_workspace_command_executed(
-        self, projection: WorkspaceMetricsProjection, store: MockProjectionStore
+        self, projection: WorkspaceMetricsProjection, store: InMemoryProjectionStore
     ) -> None:
         """Test command execution updates counters."""
         # Setup workspace
@@ -168,7 +133,7 @@ class TestWorkspaceMetricsProjection:
 
     @pytest.mark.asyncio
     async def test_on_workspace_destroyed(
-        self, projection: WorkspaceMetricsProjection, store: MockProjectionStore
+        self, projection: WorkspaceMetricsProjection, store: InMemoryProjectionStore
     ) -> None:
         """Test destruction updates final metrics."""
         # Setup workspace
@@ -208,7 +173,7 @@ class TestWorkspaceMetricsProjection:
 
     @pytest.mark.asyncio
     async def test_on_workspace_error(
-        self, projection: WorkspaceMetricsProjection, store: MockProjectionStore
+        self, projection: WorkspaceMetricsProjection, store: InMemoryProjectionStore
     ) -> None:
         """Test error event updates status."""
         # Setup workspace
@@ -239,7 +204,7 @@ class TestWorkspaceMetricsProjection:
     async def test_get_summary(
         self,
         projection: WorkspaceMetricsProjection,
-        store: MockProjectionStore,
+        store: InMemoryProjectionStore,
     ) -> None:
         """Test aggregated summary calculation."""
         # Create multiple workspaces with different backends
@@ -294,7 +259,7 @@ class TestWorkspaceMetricsProjection:
     async def test_get_by_session(
         self,
         projection: WorkspaceMetricsProjection,
-        store: MockProjectionStore,
+        store: InMemoryProjectionStore,
     ) -> None:
         """Test querying by session ID."""
         # Create workspaces for different sessions

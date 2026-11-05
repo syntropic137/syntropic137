@@ -68,6 +68,9 @@ from syn_domain.contexts.orchestration.domain.events.EvidenceRequestedEvent impo
 from syn_domain.contexts.orchestration.domain.events.EvidenceStepSettledEvent import (
     EvidenceStepSettledEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseCommandsCompletedEvent import (
+    PhaseCommandsCompletedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent import (
     PhaseRetryScheduledEvent,
 )
@@ -335,6 +338,26 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 action=TodoAction.COLLECT_ARTIFACTS,
                 phase_id=phase_id,
                 session_id=event_data.get("session_id"),
+            ),
+        )
+
+    async def on_phase_commands_completed(self, event_data: PhaseCommandsCompletedEvent) -> None:
+        """Command Phase's steps ran → collect artifacts, whatever they said (ADR-078 D5).
+
+        A failed gate is collected too, so its logs are kept; the aggregate
+        fails the run at collection. There is no session to carry.
+        """
+        event = PhaseCommandsCompletedEvent.model_validate(event_data)
+        if not event.execution_id or not event.phase_id:
+            return
+
+        await self._advance_phase_todo(
+            event.execution_id,
+            event.phase_id,
+            TodoItem(
+                execution_id=event.execution_id,
+                action=TodoAction.COLLECT_ARTIFACTS,
+                phase_id=event.phase_id,
             ),
         )
 

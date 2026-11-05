@@ -12,11 +12,10 @@ import re
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 from event_sourcing import ConcurrencyConflictError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from syn_api._wiring import (
     ensure_connected,
@@ -25,10 +24,11 @@ from syn_api._wiring import (
     get_workflow_repo,
 )
 from syn_api.routes.executions.admission_gate import admit_or_409, refuse_while_paused
-from syn_api.routes.executions.direct_start import (
-    queue_direct_start,
-    record_execution_request,
-    start_direct_now,
+from syn_api.routes.executions.direct_start import queue_direct_start, start_direct_now
+from syn_api.routes.executions.keyed_start import (
+    already_started,
+    record_unless_started,
+    start_execution_id,
 )
 from syn_api.routes.executions.repo_access import (
     _parse_repo_from_url,
@@ -56,6 +56,8 @@ from syn_domain.contexts.orchestration import (
     TagSet,
     UnsupportedExecutionTypeError,
     UnsupportedToolPolicyForProviderError,
+    WorkspaceMemoryOverCapError,
+    WorkspacePidsOverCapError,
     launch_eval_for,
     validate_phase_declarations,
 )
@@ -293,6 +295,18 @@ class ExecuteWorkflowRequest(BaseModel):
             "eval (#967). Cannot be combined with `eval_id` (422)."
         ),
     )
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        pattern=r"^[^\x00]+$",
+        description=(
+            "Makes the start idempotent (#2129): the execution id is derived from the "
+            "workflow and this key, so every start with the same key, concurrent ones "
+            "included, answers with the one execution and `replayed: true` after the "
+            "first. A start that differs from the one that made it is refused with 409."
+        ),
+    )
     provider: str = Field(
         default="claude",
         description=(
@@ -322,6 +336,13 @@ class ExecuteWorkflowRequest(BaseModel):
             raise ValueError("task is empty; describe the work, or omit task to run without one")
         return task
 
+    @model_validator(mode="after")
+    def _one_eval_choice(self) -> ExecuteWorkflowRequest:
+        """On the model, so a keyed retry is a 422 before its replay lookup (#2129)."""
+        if self.no_eval and self.eval_id is not None:
+            raise ValueError("Pass either eval_id or no_eval, not both")
+        return self
+
 
 class ExecuteWorkflowResponse(BaseModel):
     """Response after starting workflow execution."""
@@ -330,6 +351,8 @@ class ExecuteWorkflowResponse(BaseModel):
     workflow_id: str
     status: str = "started"
     message: str = "Workflow execution started"
+    replayed: bool = False
+    """True when `idempotency_key` named a start already accepted: nothing new started (#2129)."""
 
 
 class ExecutionStatusResponse(BaseModel):
@@ -547,6 +570,10 @@ def _check_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
         UnsupportedToolNameError,
         UnsupportedToolPolicyForProviderError,
         UnrunnablePhaseSandboxError,
+        # okrs-51p.30: a phase asking for more workspace memory or pids than this
+        # deployment allows is refused before the run exists.
+        WorkspaceMemoryOverCapError,
+        WorkspacePidsOverCapError,
     ) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -655,8 +682,6 @@ async def _launch_eval(
     missing (404) or archived (409) eval is an answer to the request rather
     than a 200 followed by an execution that never starts.
     """
-    if request.no_eval and request.eval_id is not None:
-        raise HTTPException(status_code=422, detail="Pass either eval_id or no_eval, not both")
     choice = EvalChoice(eval_id=request.eval_id, ordinary=request.no_eval)
     try:
         return await launch_eval_for(get_eval_repo(), choice, workflow.default_eval_id)
@@ -747,6 +772,15 @@ async def _validate_execution_request(
     return workflow, effective_inputs, typed_repos
 
 
+def _replayed(workflow_id: str, execution_id: str) -> ExecuteWorkflowResponse:
+    return ExecuteWorkflowResponse(
+        execution_id=execution_id,
+        workflow_id=workflow_id,
+        message=f"Execution {execution_id} was already started with this idempotency_key",
+        replayed=True,
+    )
+
+
 @router.post("/{workflow_id}/execute", response_model=ExecuteWorkflowResponse)
 async def execute_workflow_endpoint(
     workflow_id: str,
@@ -756,7 +790,16 @@ async def execute_workflow_endpoint(
     """Start workflow execution in background.
 
     Returns 409 while maintenance mode is active; no execution is started.
+    With `idempotency_key`, a start already accepted is answered again, not
+    repeated (#2129).
     """
+    execution_id = start_execution_id(workflow_id, request.idempotency_key)
+    # Before the maintenance gate: a replay admits nothing, and a retry during
+    # a deploy should hear about the start it already has.
+    if request.idempotency_key is not None:
+        await ensure_connected()
+        if await already_started(workflow_id, execution_id, request):
+            return _replayed(workflow_id, execution_id)
     # #1387, SYNCHRONOUS and first: everything below the `add_task` line runs
     # after the response has been sent, so a refusal discovered there would
     # arrive as a 200 followed by an execution that never happened. Before
@@ -773,7 +816,6 @@ async def execute_workflow_endpoint(
         launch_eval.refuse_unpinned(typed_repos)
     except RepositoryOutsideBaselineError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    execution_id = f"exec-{uuid4().hex[:12]}"
 
     # Bound by the `async with` below, and closed over like every other value
     # this task carries. Passing it through `add_task` instead would say the
@@ -814,7 +856,7 @@ async def execute_workflow_endpoint(
     async with admit_or_409() as admitted:
         # #1557: durable BEFORE the 200, so a start waiting for a budget slot
         # survives a restart; the request ProcessManager starts it from here.
-        await record_execution_request(
+        if await record_unless_started(
             RequestExecutionCommand(
                 execution_id=execution_id,
                 workflow_id=workflow_id,
@@ -822,10 +864,13 @@ async def execute_workflow_endpoint(
                 task=request.task,
                 repos=typed_repos,
                 tags=request.tags,
+                idempotency_key=request.idempotency_key,
                 launch_eval=launch_eval,
             ),
             admitted,
-        )
+            request,
+        ):
+            return _replayed(workflow_id, execution_id)
         from syn_shared.settings import get_settings
 
         if get_settings().execution.run_queue_enabled:

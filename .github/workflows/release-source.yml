@@ -19,7 +19,8 @@
 # copies. Nothing here uses a secret, and the token is read-only.
 #
 # The required status check is this job's name, `Release Source`, on the
-# `release` ruleset.
+# `release` ruleset (required since 2026-10-27). Renaming the job must update
+# the ruleset in the same change, or every PR into `release` blocks.
 # =============================================================================
 
 name: Release Source

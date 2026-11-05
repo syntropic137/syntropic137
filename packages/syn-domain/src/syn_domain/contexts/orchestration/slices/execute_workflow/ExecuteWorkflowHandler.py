@@ -17,12 +17,21 @@ from event_sourcing import StreamAlreadyExistsError
 from syn_domain.contexts._shared.maintenance import refuse_if_paused
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    WorkspaceResourceRequest,
+    deployment_memory_ceiling_mb,
+    deployment_pids_ceiling,
+    require_within_caps,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    PhaseDefinition,
     PhaseExecutionType,
+    PhaseKind,
+    require_consistent_phase_kind,
     require_supported_execution_type,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
@@ -185,8 +194,60 @@ def _resolve_repos_from_template(
     return []
 
 
-def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
+def _phase_resources(phase: object) -> WorkspaceResourceRequest:
+    """A stored phase's resource request; the default for one that predates it."""
+    resources = getattr(phase, "resources", None)
+    return (
+        resources if isinstance(resources, WorkspaceResourceRequest) else WorkspaceResourceRequest()
+    )
+
+
+def _require_consistent_kind(phase: object) -> None:
+    """The kind rule, for a stored phase. Tests drive this boundary with
+    stand-ins that predate kinds, and every one of them is an agent phase."""
+    if isinstance(phase, PhaseDefinition):
+        require_consistent_phase_kind(phase)
+
+
+def _command_phase(phase: PhaseDefinition) -> ExecutablePhase:
+    """The runnable form of a command phase: its steps, and no agent (ADR-078 D3).
+
+    No agent config, prompt, plugins, skills or fallback, and the workflow's
+    own plugins and skills are not merged in: nothing here would read them.
+    The inert default ``agent_config`` is kept only because the field is not
+    optional; its timeout is the fallback ``effective_timeout_seconds`` uses
+    when the phase declares none, exactly as for an agent phase.
+    """
+    return ExecutablePhase(
+        phase_id=phase.phase_id,
+        name=phase.name,
+        order=phase.order,
+        description=phase.description,
+        kind=PhaseKind.COMMAND,
+        commands=phase.commands,
+        output_artifact_types=tuple(phase.output_artifact_types),
+        timeout_seconds=phase.timeout_seconds,
+        clone_repos=phase.clone_repos,
+        delivers_repo_changes=phase.delivers_repo_changes,
+        platform_access=phase.platform_access,
+        resources=_phase_resources(phase),
+    )
+
+
+def validate_phase_declarations(
+    workflow: WorkflowTemplateAggregate,
+    *,
+    memory_ceiling_mb: int | None = None,
+    pids_ceiling: int | None = None,
+) -> None:
     """Raise if any stored phase declares something the platform cannot honour.
+
+    ``memory_ceiling_mb`` is this deployment's workspace memory ceiling; None
+    reads it from settings (``SYN_WORKSPACE_MEMORY_MAX_MB``). A phase whose
+    ``resources.memory_mb`` exceeds it is refused here, before any phase of
+    the run is paid for, rather than at its own workspace (okrs-51p.30).
+    ``pids_ceiling`` does the same for ``resources.pids_limit``
+    (``SYN_WORKSPACE_PIDS_MAX``).
 
     THE single definition of that check (#1039). Three entry points need it and
     each one previously would have grown its own copy:
@@ -202,8 +263,15 @@ def validate_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
     historical ``WorkflowTemplateCreated`` event and never sees the YAML
     validator, so authoring-time refusal reaches none of them.
     """
+    ceiling = deployment_memory_ceiling_mb() if memory_ceiling_mb is None else memory_ceiling_mb
+    pids_cap = deployment_pids_ceiling() if pids_ceiling is None else pids_ceiling
     for phase in workflow.phases:
         phase_id = getattr(phase, "phase_id", None)
+        # A stored template never passes the YAML's kind check (ADR-078 D2).
+        _require_consistent_kind(phase)
+        require_within_caps(
+            _phase_resources(phase), memory_cap_mb=ceiling, pids_cap=pids_cap, phase_id=phase_id
+        )
         require_supported_execution_type(
             getattr(phase, "execution_type", PhaseExecutionType.SEQUENTIAL),
             phase_id=phase_id,
@@ -638,6 +706,8 @@ class ExecuteWorkflowHandler:
         # Resolution unions global + workflow + phase scopes per phase.
         workflow_refs = workflow.claude_plugins
         workflow_skill_refs = workflow.skills
+        memory_ceiling = deployment_memory_ceiling_mb()
+        pids_ceiling = deployment_pids_ceiling()
         executable_phases: list[ExecutablePhase] = []
         for phase in workflow.phases:
             # EXECUTION-BOUNDARY re-check, not a duplicate of the YAML rule.
@@ -656,6 +726,21 @@ class ExecuteWorkflowHandler:
             require_runnable_sandbox(
                 getattr(phase, "sandbox", None), phase_id=getattr(phase, "phase_id", None)
             )
+            # And the memory and pids ceilings (okrs-51p.30): refused before
+            # phase 1 is paid for, not when the phase that asked reaches its
+            # workspace.
+            require_within_caps(
+                _phase_resources(phase),
+                memory_cap_mb=memory_ceiling,
+                pids_cap=pids_ceiling,
+                phase_id=getattr(phase, "phase_id", None),
+            )
+            # And the kind (ADR-078 D2): a command phase reaching here with an
+            # agent field, from a stored template or a phase edit, is refused.
+            _require_consistent_kind(phase)
+            if isinstance(phase, PhaseDefinition) and phase.kind is PhaseKind.COMMAND:
+                executable_phases.append(_command_phase(phase))
+                continue
             agent_config = _build_agent_config_from_phase(phase)
             resolved = await self._resolve_phase_plugins(
                 workflow_refs=workflow_refs,
@@ -695,6 +780,9 @@ class ExecuteWorkflowHandler:
                     delivers_repo_changes=phase.delivers_repo_changes,
                     platform_access=phase.platform_access,
                     requires_verdict=phase.requires_verdict,
+                    # Dropped, a build phase that declared 12 GB would run in
+                    # the default and be OOM-killed mid-build (okrs-51p.30).
+                    resources=_phase_resources(phase),
                     claude_plugins=resolved,
                     skills=resolved_skills,
                 )

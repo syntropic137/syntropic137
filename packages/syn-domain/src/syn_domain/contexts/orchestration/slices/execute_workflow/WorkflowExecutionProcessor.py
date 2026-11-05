@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
 from syn_domain.contexts.orchestration._shared.shipped_ledger import ShippedLedgerProvider
 from syn_domain.contexts.orchestration._shared.shipped_recorder import shipped_recorder
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
@@ -21,7 +22,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseResult,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-    CancelExecutionCommand,
     StartExecutionCommand,
     StartResumeCommand,
     WorkflowExecutionAggregate,
@@ -41,6 +41,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown i
 from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
     CancelledWorkLedger,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.command_phase_run import (
+    gate_failed_result,
+    record_cancel,
+    run_command_phase,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.evidence_heads import (
     EvidenceHeadObserver,
 )
@@ -52,7 +57,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.failed_execution 
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
-    AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_completion import (
     complete_phase,
@@ -581,6 +585,8 @@ class WorkflowExecutionProcessor:
                     cancel_reason=aggregate.cancel_reason,
                     phase_id=dispatch_ctx.current_phase_id,
                 )
+            if aggregate.status == ExecutionStatus.FAILED:  # a command gate (ADR-078 D5)
+                return gate_failed_result(aggregate, phase_results, all_artifact_ids, started_at)
             return await self._complete_execution(
                 aggregate,
                 execution_id,
@@ -698,6 +704,18 @@ class WorkflowExecutionProcessor:
                 repos,
                 completed_phase_ids,
                 phase_outputs,
+            )
+        elif todo.action == TodoAction.RUN_AGENT and phase.kind is PhaseKind.COMMAND:
+            # The same action, a different runner (ADR-078 D3).
+            await run_command_phase(
+                self._controller,
+                todo,
+                phase,
+                aggregate,
+                runtime=self._runtimes.of(todo.execution_id),
+                workspaces=self._workspaces_for(todo.execution_id, dispatch_ctx.inputs, journal),
+                journal=journal,
+                kept=dispatch_ctx,
             )
         elif todo.action == TodoAction.RUN_AGENT:
             await self._handle_run_agent(todo, phase, aggregate, dispatch_ctx)
@@ -869,7 +887,7 @@ class WorkflowExecutionProcessor:
                     said,
                     UnfinishedPhase.INTERRUPTED,
                 )
-                await self._handle_cancel_signal(todo, result, aggregate, journal)
+                await record_cancel(todo, result.stream_result.interrupt_reason, aggregate, journal)
                 return
 
             command = result.command
@@ -931,23 +949,6 @@ class WorkflowExecutionProcessor:
             outcome=outcome,
             aggregate=aggregate,
         )
-
-    async def _handle_cancel_signal(
-        self,
-        todo: TodoItem,
-        result: AgentExecutionResult,
-        aggregate: WorkflowExecutionAggregate,
-        journal: ExecutionJournal,
-    ) -> None:
-        """Dispatch CancelExecutionCommand when the agent stream was interrupted by a cancel signal."""
-        assert todo.phase_id is not None, "phase_id must be set for a running agent todo"
-        cancel_cmd = CancelExecutionCommand(
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            reason=result.stream_result.interrupt_reason or "Cancelled by user",
-        )
-        aggregate.cancel_execution(cancel_cmd)
-        await journal.append(aggregate)
 
     async def _handle_complete_phase(
         self,
