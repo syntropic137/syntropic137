@@ -53,6 +53,7 @@ export const executeResponse: ExecuteWorkflowResponse = {
   workflow_id: "wf-issue-001",
   status: "started",
   message: "Workflow execution started with provider 'claude'",
+  replayed: false,
 };
 
 export const executionList: ExecutionListResponse = {
