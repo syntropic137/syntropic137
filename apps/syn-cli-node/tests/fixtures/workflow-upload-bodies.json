@@ -311,6 +311,70 @@
       }
     ]
   },
+  "workflows/dreamship/implement-v6/workflow.yaml": {
+    "id": "dreamship-implement-v6",
+    "name": "dreamship-implement-v6",
+    "description": "v6 of dreamship-implement. Identical to v5 (prompts, models, phase order) except the phase timeouts, sized from the DreamShip runs on record (#2172): implement 5400 -> 7200, review 2400 -> 3000, remediate 2400 -> 3600. See README.md for the evidence.\n",
+    "type": "implementation",
+    "classification": "standard",
+    "requires_repos": true,
+    "phases": [
+      {
+        "id": "implement",
+        "name": "Implement behind a failing test, then open the PR",
+        "order": 1,
+        "execution_type": "sequential",
+        "output_artifacts": [
+          "markdown"
+        ],
+        "timeout_seconds": 7200,
+        "agent": {
+          "provider": "claude",
+          "model": "opus"
+        },
+        "model": "opus",
+        "prompt_template": "# Implement this change, test-first, and open the PR before you finish\n\n$ARGUMENTS\n\n## The one hard constraint on this phase\n\n**Every git operation you need must happen in THIS phase.** Write the code,\ncommit it, push the branch, and open the pull request here. Later phases run in\nfresh containers on fresh clones: a branch you leave uncommitted, or a commit\nyou leave unpushed, does not exist as far as they are concerned. There is no\nlater phase that will \"do the git part\" for you. If you run out of time with\nwork worth keeping, push what you have and say so in the PR body.\n\n## Three things that DESTROY your work. Read these before you edit anything.\n\n**1. Never touch `.github/workflows/`.** Not to fix a job, not to add one, not\neven a comment. The App pushing on your behalf has no `workflows` permission, so\na commit containing any change under that path makes **every** push from this\nphase fail — including the quarantine push that exists to rescue your work when\na phase ends badly. A run has already been lost this way: 2511 seconds of\ncorrect work, rejected with *\"refusing to allow a GitHub App to create or update\nworkflow `.github/workflows/test.yml` without `workflows` permission\"*, and the\nrecovery ref could not be written either, so none of it was recoverable. This\nrepo also does not spend on GitHub Actions, so a CI edit is not wanted here\nregardless. If CI genuinely needs changing, say so in your output and leave the\nfile alone.\n\n**2. PUSH EARLY, and keep pushing.** Create the branch and push it as soon as\nyou have one commit worth keeping - before the work is finished, before the gates\nare green, before the PR body is written. Then push again after each meaningful\nstep. A phase that does everything and pushes at the end loses ALL of it on a\ntimeout: that is how `exec-4f269f8a067c` died at 3696 seconds with a correct\ncommit sitting on a branch no remote had. An unfinished branch on origin is\nrecoverable by anyone; a perfect branch inside a dead container is not. Open the\nPR as a draft early if that helps you push sooner.\n\n**3. Write `artifacts/output/deliverable.md` EARLY, and keep updating it.** The\nphase's contract is the artifact, not the code. A phase that does perfect work\nand never writes the file is FAILED by the platform and its workspace is torn\ndown — that is the other half of how the run above was lost. So write a first\nversion as soon as you know the branch name, and rewrite it as you go. Never\nleave it to a final step you might not reach.\n\n## Work test-first\n\nWrite the failing test BEFORE the implementation, and run it to watch it fail\nfor the right reason. A test written after the code tends to assert what the\ncode happens to do rather than what was asked for, and a test that has never\nfailed has not been shown to be capable of failing.\n\nWhere this repo already has a test for the behaviour you are changing, extend it\nrather than adding a parallel one. Where the change is a refactor with no\nbehaviour change, the test that matters is the one that pins the behaviour you\nmust not alter: find it, and say which one it is.\n\nRead `AGENTS.md` first. It is the canonical agent context. Pay attention to the\nfour Event Modeling slice patterns, the content rule (a domain event carries a\nreference, never a payload), `assert_test_env!()` as the first line of any mock,\nand the no-broken-windows rule.\n\n## Gates, before you push\n\nRun the repo's own gates and make them pass:\n\n    just bootstrap\n    APP_ENV=test cargo test --workspace   # or the narrower -p that covers your change\n    just vsa                              # hard pre-push gate on contexts/\n    just fitness --quick\n\nDo NOT edit `harness/sensors/baseline.json`. A baseline change cannot travel\nthrough `just land` by design, so a branch touching it cannot be landed. If a\nfitness floor genuinely blocks you, stop and say so in your output.\n\nDo NOT use `git push --no-verify`. If a hook is broken in a way unrelated to\nyour change, use `just push-scoped`, and say in the PR body which job you\nskipped and why.\n\nIf a gate is red and it is NOT your diff, follow AGENTS.md's red-gate triage\nladder: fix it if it takes about 15 minutes, otherwise file a bead with `br\ncreate` and leave an inline comment at the broken site pointing to that bead.\nSay which you did.\n\n## Then open the PR\n\n    git checkout -b <type>/<short-slug>\n    git add -A && git commit        # conventional commits; cog-verify gates the message\n    git push -u origin <branch>\n    gh pr create --base main --title \"...\" --body \"...\"\n\nThe PR body must state plainly: what the change does, what it does NOT do, the\nexact commands you ran and their results, and any pre-existing failure you found\nwith the bead id you filed for it. Do not describe a test as passing unless you\nran it and read the output. If something is unverified, label it unverified.\n\n## Output\n\nWrite to `artifacts/output/deliverable.md`: the PR URL and number, the branch\nname, the base SHA you branched from, what you changed and why, the commands you\nran with their results, and the single most likely way your change is wrong.\n\nThat last item is not optional. Name the weakest point, so the review phase can\nstart there instead of hunting for it."
+      },
+      {
+        "id": "review",
+        "name": "Try to falsify it, and attack it on security",
+        "order": 2,
+        "execution_type": "sequential",
+        "input_artifacts": [
+          "markdown"
+        ],
+        "output_artifacts": [
+          "markdown"
+        ],
+        "timeout_seconds": 3000,
+        "agent": {
+          "provider": "codex",
+          "model": "gpt-sol"
+        },
+        "model": "gpt-sol",
+        "prompt_template": "# Review the PR the previous phase opened\n\n$ARGUMENTS\n\nThe implement phase's report is at `artifacts/input/implement/deliverable.md` (a\nflat `artifacts/input/implement.md` alias also exists). Read it first and take\nthe PR number, the branch name and the base SHA from it. It ends with the\nauthor's own guess at the weakest point of the change. Start there.\n\nYou are a DIFFERENT model from the one that wrote this. That is the entire value\nyou add, so do not re-derive the author's reasoning and then agree with it.\n\n## Review by trying to falsify, not by reading the diff\n\nCheck the branch out and RUN things. A review that only reads the diff catches\nstyle and misses behaviour.\n\n- **Does the test actually test the thing?** Mutate the implementation so the\n  claimed behaviour is wrong, and confirm the new test FAILS. A test that still\n  passes under a mutation proves nothing, and this is the most common defect in\n  agent-written tests in this repo. Report any test that survives mutation as a\n  BLOCKER.\n- **Does it replay?** If the change touches an event type, an envelope, a\n  serialized shape, or an identifier, find this repo's pre-change fixtures and\n  confirm a record written before the change still decodes. A replay break is a\n  BLOCKER.\n- **Did the gates really pass?** Re-run them yourself. Do not trust the report's\n  transcript.\n\n## Security, explicitly\n\nSecurity is first-class on DreamShip. Check at minimum:\n\n- **The content rule.** Does any new field put content, rather than a reference,\n  on a path that reaches the event log? An append-only log cannot un-write a\n  payload, so this has to hold on the way in.\n- **Compartment isolation.** Nothing may leak out of a Compartment. Does any new\n  lookup or projection cross a compartment boundary, or match on a label that is\n  not scoped to one?\n- **Derived identifiers.** Is any new id an unkeyed hash of user text? That is\n  reversible, and it is a disclosure even when every field is compliant.\n- Secrets in code or logs, unvalidated input at a trust boundary, and any mock\n  missing `assert_test_env!()`.\n\n## Output\n\nWrite to `artifacts/output/deliverable.md`. THAT FILE IS THE DELIVERABLE and it is\nthe only thing this phase owes anyone.\n\nThen, BEST EFFORT ONLY, try to post the same text as a PR comment with\n`gh pr comment`. If that fails for any reason - no PR for the branch, a denied\npermission, a network error - say so in one line at the end of the deliverable and\nREPORT SUCCESS ANYWAY. Do not retry it, do not try to create a PR, and do not treat\nit as a reason to fail.\n\nThis is not laxity. A review that finished its work and could not deliver a copy of\nit has still done its job, and failing the phase there throws away the review, stops\nthe remediate phase from ever running, and reports the whole run as a refusal - which\nreads as \"the code was rejected\" when nothing was. Nine runs died exactly that way.\nThe artifact is collected either way.\n\nSeparate **BLOCKERS** from **NON-BLOCKING FINDINGS**, blockers first. A blocker\nis: wrong behaviour, a test that survives mutation, a replay break, a security\nfinding, or a claim in the PR body that is not true. Anything else is\nnon-blocking. Say so rather than inflating it.\n\nFor each finding give the file and line, what is wrong, and the concrete input or\nstate that makes it go wrong. \"Consider extracting this\" is not a finding.\n\nEnd with one line, exactly one of: `VERDICT: MERGE` or `VERDICT: BLOCKED`."
+      },
+      {
+        "id": "remediate",
+        "name": "Fix what the review blocked on",
+        "order": 3,
+        "execution_type": "sequential",
+        "input_artifacts": [
+          "markdown"
+        ],
+        "output_artifacts": [
+          "markdown"
+        ],
+        "timeout_seconds": 3600,
+        "agent": {
+          "provider": "claude",
+          "model": "opus"
+        },
+        "model": "opus",
+        "prompt_template": "# Address the review\n\n$ARGUMENTS\n\nThe review is at `artifacts/input/review/deliverable.md`. The implement phase's\nreport, with the PR number and branch name, is at\n`artifacts/input/implement/deliverable.md`.\n\n**If the review says `VERDICT: MERGE` with no blockers, change nothing.** Say so\nin your output and stop. Do not make cosmetic edits to look busy; an unnecessary\ncommit on a reviewed branch costs another review round.\n\nOtherwise: this is a fresh container on a fresh clone, so start by getting the\nbranch from origin.\n\n    git fetch origin <branch> && git checkout <branch>\n\n**Never touch `.github/workflows/`.** The App pushing on your behalf has no\n`workflows` permission, so any change under that path makes every push from this\nphase fail, including the quarantine push that would otherwise rescue your work.\nA run was already lost this way. Write `artifacts/output/deliverable.md` early\nand keep updating it, for the same reason: the artifact is the contract, and a\nphase that never writes one is failed and torn down.\n\nFix every BLOCKER. For each one, add or extend a test that FAILS before your fix\nand passes after, so the fix is pinned rather than asserted.\n\nNon-blocking findings: fix them only if the fix is small and safe. Otherwise file\na bead with `br create` and leave an inline comment pointing to it. Say which you\nchose for each, and why.\n\nIf you believe a blocker is wrong, do not silently ignore it. Say which one, and\ngive the evidence that refutes it: a command and its output, not an argument.\n\nRe-run the gates, then commit and push to the SAME branch so the PR updates. Do\nnot open a second PR. Then, BEST EFFORT ONLY, `gh pr comment` a short summary of\nwhat changed since the review - and if that fails, note it in your deliverable and\nREPORT SUCCESS ANYWAY. The push is the delivery; the comment is a convenience.\n\n## Output\n\nWrite to `artifacts/output/deliverable.md`: each blocker and what you did about\nit, the commands you ran with their results, the new commit SHA, and whether you\nconsider the PR ready to land. If it is not ready, say exactly what remains."
+      }
+    ]
+  },
   "workflows/evals/implement-pinned/workflow.yaml": {
     "id": "eval-implement-pinned-v1",
     "name": "Eval: implement a task at the pinned checkout, patch only (v1)",
