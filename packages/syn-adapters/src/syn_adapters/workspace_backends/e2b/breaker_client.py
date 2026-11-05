@@ -57,6 +57,9 @@ class BreakerE2BClient:
     async def pause(self, sandbox_id: str) -> None:
         await self._client.pause(sandbox_id)
 
+    async def resume(self, sandbox_id: str) -> None:
+        await self._client.resume(sandbox_id)
+
     async def start(
         self,
         sandbox_id: str,
