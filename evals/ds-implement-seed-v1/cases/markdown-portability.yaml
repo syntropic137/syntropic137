@@ -1,0 +1,35 @@
+id: markdown-portability
+source_bead: dreamship-v0-181.3.10
+commit: 2024302d42ca2524801187742cd74951cfe9f752
+fix_commit: 8b21a1366
+# The fix's tests are inline (`mod tests` in the files the agent edits), so
+# they cannot be hidden. The oracle below is written for this case and admitted
+# only if it FAILS at `commit` and PASSES at `fix_commit` (#2178).
+oracle:
+  file: oracles/markdown-portability/markdown_portability_oracle.rs
+  install_to: ws_packages/data-layer/tests/markdown_portability_oracle.rs
+  test_command: APP_ENV=test cargo test -p dream-ship-data-layer --test markdown_portability_oracle
+task: |
+  Make data portability a first-class, tested guarantee. A user can EXPORT
+  their entire space to a plain folder of human-readable and editable
+  markdown, and re-IMPORT it faithfully, in a format NOT tied to our storage
+  (no vendor lock-in).
+
+  Acceptance:
+  1. Export produces plain markdown a human can read and edit outside the app.
+  2. Import round-trips an exported tree to identical state.
+  3. A portability test proves the data is just files.
+  4. A CLI entrypoint for export and import.
+
+  Interface the scoring tests use (crate `dream-ship-data-layer`):
+  - `dream_ship_data_layer::SpaceSnapshot`, a struct with public fields
+    `signals: Vec<Signal>`, `compartments: Vec<Compartment>` and
+    `goals: Vec<Goal>` (types from `dream_ship_domain`). It implements
+    `Default`, `PartialEq` and `Debug`.
+  - `SpaceSnapshot::export_markdown(&self, out_dir: impl AsRef<Path>) -> Result<(), DataError>`
+    creates `out_dir` as needed.
+  - `SpaceSnapshot::import_markdown(in_dir: impl AsRef<Path>) -> Result<SpaceSnapshot, DataError>`.
+  - Every exported file ends in `.md` and is UTF-8. Each entity's
+    title or text appears in exactly one exported file.
+  - Import may return entities in any order. The tests compare them sorted
+    by id.
