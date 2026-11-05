@@ -356,7 +356,12 @@ def _environment(world: _Infra, stack: _Stack, role: str) -> dict[str, str]:
 def _api_environment(world: _Infra, stack: _Stack) -> dict[str, str]:
     """The API's settings, with the trap as its only Docker daemon (see the module docstring)."""
     env = _environment(world, stack, "api")
-    for selects_a_daemon in ("DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"):
+    for selects_a_daemon in (
+        "DOCKER_CONTEXT",
+        "DOCKER_TLS",
+        "DOCKER_TLS_VERIFY",
+        "DOCKER_CERT_PATH",
+    ):
         env.pop(selects_a_daemon, None)
     env["DOCKER_HOST"] = f"tcp://127.0.0.1:{stack.docker_trap_port}"
     return env
