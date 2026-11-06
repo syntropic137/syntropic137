@@ -87,7 +87,11 @@ export function readSkillTree(dir: string): SkillFilePayload[] {
  * and a root SKILL.md resolves to the named one.
  *
  * The skill name is already validated as a single safe path segment by
- * `requireSafeSkillName`, so it cannot escape the clone directory here.
+ * `requireSafeSkillName`, but a cloned repo controls its own tree: any
+ * directory on a candidate path (`skills`, `.claude`, the skill folder itself)
+ * may be a symlink to somewhere else on this machine, and reading it would
+ * upload those files as the skill. So each candidate is resolved to its real
+ * path and refused unless it stays inside the clone (review P1, #2191).
  */
 export function skillDirInClone(cloneDir: string, skillName: string): string {
   const candidates = [
@@ -96,7 +100,20 @@ export function skillDirInClone(cloneDir: string, skillName: string): string {
     path.join(cloneDir, ".claude", "skills", skillName),
     cloneDir,
   ];
+  const root = fs.realpathSync(cloneDir);
   for (const candidate of candidates) {
+    let real: string;
+    try {
+      real = fs.realpathSync(candidate);
+    } catch {
+      continue;
+    }
+    if (real !== root && !real.startsWith(root + path.sep)) {
+      throw new Error(
+        `cloned source's skill '${skillName}' resolves outside the clone ` +
+          `(${path.relative(cloneDir, candidate)} -> ${real}); refusing to read it`,
+      );
+    }
     try {
       readSkillTree(candidate);
       return candidate;

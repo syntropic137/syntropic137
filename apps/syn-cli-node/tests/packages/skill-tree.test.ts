@@ -124,6 +124,39 @@ describe("skillDirInClone", () => {
     );
   });
 
+  // A cloned repo controls its own tree. Following a link out of it would
+  // upload files from elsewhere on this machine as the skill (Codex P1, #2191).
+  it.each([
+    // [what is linked, link path inside the clone, where the skill sits under the link target]
+    ["the skill folder", [".claude", "skills", "alpha"], []],
+    ["the .claude/skills folder", [".claude", "skills"], ["alpha"]],
+    ["the skills/ folder", ["skills"], ["alpha"]],
+  ])("refuses a skill that leaves the clone through a symlinked %s", (_what, linkPath, under) => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "skilltree-outside-"));
+    try {
+      const skillHome = path.join(outside, ...under);
+      fs.mkdirSync(skillHome, { recursive: true });
+      fs.writeFileSync(path.join(skillHome, "SKILL.md"), "---\nname: alpha\ndescription: d\n---\n");
+      fs.mkdirSync(path.join(dir, ...linkPath.slice(0, -1)), { recursive: true });
+      fs.symlinkSync(outside, path.join(dir, ...linkPath));
+
+      expect(() => skillDirInClone(dir, "alpha")).toThrow(/outside the clone/);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("still finds a skill through a symlink that stays inside the clone", () => {
+    fs.mkdirSync(path.join(dir, "shared", "alpha"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "shared", "alpha", "SKILL.md"),
+      "---\nname: alpha\ndescription: d\n---\n",
+    );
+    fs.symlinkSync(path.join(dir, "shared"), path.join(dir, "skills"));
+
+    expect(skillDirInClone(dir, "alpha")).toBe(path.join(dir, "skills", "alpha"));
+  });
+
   it("falls back to the repository root for a single-skill repo", () => {
     fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: solo\ndescription: d\n---\n");
 
