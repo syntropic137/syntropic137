@@ -409,9 +409,6 @@ def decide_resume_withdrawal(
         ExecutionResumeWithdrawnEvent,
     )
 
-    if admitted.resume_execution_id != command.resume_execution_id:
-        msg = f"{execution_id} admitted no resume {command.resume_execution_id}"
-        raise ValueError(msg)
     if admitted.withdrawn:
         return None
     return ExecutionResumeWithdrawnEvent(

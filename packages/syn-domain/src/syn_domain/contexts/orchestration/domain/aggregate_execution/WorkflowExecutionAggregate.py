@@ -156,6 +156,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.RemoveExecutionTagsCommand import (
         RemoveExecutionTagsCommand,
     )
+    from syn_domain.contexts.orchestration.domain.events import ExecutionResumeWithdrawnEvent
     from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
         AgentExecutionCompletedEvent,
     )
@@ -867,6 +868,8 @@ class WorkflowExecutionAggregate(
     @command_handler("WithdrawResumeCommand")
     def withdraw_resume(self, command: WithdrawResumeCommand) -> None:
         """Withdraw the admitted resume before its child starts (#1677). Idempotent."""
+        if self._admitted_resume.resume_execution_id != command.resume_execution_id:
+            raise ValueError(f"{self.id} admitted no resume {command.resume_execution_id}")
         if event := decide_resume_withdrawal(self.id, self._admitted_resume, command):
             self._apply(event)
 
@@ -1102,7 +1105,7 @@ class WorkflowExecutionAggregate(
         self._admitted_resume = read_admitted_resume(event)
 
     @event_sourcing_handler("ExecutionResumeWithdrawn")
-    def on_execution_resume_withdrawn(self, _event: object) -> None:
+    def on_execution_resume_withdrawn(self, _event: ExecutionResumeWithdrawnEvent) -> None:
         self._admitted_resume = self._admitted_resume.model_copy(update={"withdrawn": True})
 
     @event_sourcing_handler("ExecutionForked")
