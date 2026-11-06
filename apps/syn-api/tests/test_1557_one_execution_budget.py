@@ -51,6 +51,7 @@ from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.execution_budget import ExecutionBudget, StartClaim, StartPath
 from syn_api.routes.executions import commands, control, keyed_start, queries, resume_start_info
 from syn_api.routes.executions.commands import ExecuteWorkflowRequest
+from syn_api.routes.executions.queued_start import queued_starts
 from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import EvalId, ExecuteWorkflowCommand, LaunchEval
@@ -1368,3 +1369,55 @@ class TestAQueuedResumeCanBeCancelled:
         assert (await world.resume_record(parent_id)).status == "withdrawn"
         await _release_everything(world)
         assert child not in world.agent.entered
+
+    async def test_while_it_waits_it_is_shown_cancelled_and_not_listed(
+        self, world: _World
+    ) -> None:
+        _, _, child = await _two_running_one_resume_queued(world)
+        assert child in [q.execution_id for q in await queued_starts(world.projections.store)]
+
+        await _cancel(child)
+        await world.coordinate()
+
+        # Its claim still waits for a slot, which it will give back unrun.
+        assert world.budget.position(child) is not None
+        shown = await world.shown(child)
+        assert (shown.status, shown.error_message) == ("cancelled", _REASON)
+        assert child not in [q.execution_id for q in await queued_starts(world.projections.store)]
+        await _release_everything(world)
+
+    async def test_a_withdrawal_while_the_granted_start_prepares_does_not_run(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The cancel lands after the post-grant read of the parent, while the
+        # start is still awaiting before the child's stream opens: the cancel
+        # sees no child and answers "it will not run", so it must not.
+        lookup = world.executions.get_by_id
+        target: list[str] = []
+        paused, proceed = asyncio.Event(), asyncio.Event()
+
+        async def paused_lookup(execution_id: str) -> WorkflowExecutionAggregate | None:
+            if execution_id in target and not paused.is_set():
+                paused.set()
+                await proceed.wait()
+            return await lookup(execution_id)
+
+        monkeypatch.setattr(world.executions, "get_by_id", paused_lookup)
+        running, _, child = await _two_running_one_resume_queued(world)
+        target.append(child)
+        world.agent.release(running[0])
+        async with asyncio.timeout(_WITHIN):
+            await paused.wait()
+
+        cancelled = await _cancel(child)
+        proceed.set()
+        await _release_everything(world)
+
+        assert (cancelled.state, cancelled.message) == (
+            "cancelled",
+            "Withdrawn before it started: it will not run",
+        )
+        assert child not in world.agent.entered
+        assert world.executions.streams[child].status.value == "cancelled"
+        assert world.budget.running == 0
+        assert _leases(world) == 0
