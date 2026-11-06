@@ -2016,13 +2016,19 @@ def _retry_wait(retry_after: str, attempt: int, now: datetime) -> float:
 
 
 def api_client(api_url: str | None) -> httpx.Client:
-    """The client every eval script uses against a deployed API: auth, and 429s waited out."""
-    return httpx.Client(
-        base_url=api_url or get_dev_api_url(),
-        timeout=60,
-        auth=_basic_auth(),
-        transport=RateLimitRetry(),
-    )
+    """The client every eval script uses against a deployed API: auth, and 429s waited out.
+
+    Passing `transport=` would stop httpx from routing through `HTTP(S)_PROXY` /
+    `NO_PROXY`, so the client is built plainly, letting httpx pick a transport per
+    proxy mount from the environment, and each one it picked is then wrapped.
+    """
+    client = httpx.Client(base_url=api_url or get_dev_api_url(), timeout=60, auth=_basic_auth())
+    client._transport = RateLimitRetry(client._transport)  # pyright: ignore[reportPrivateUsage]
+    client._mounts = {  # pyright: ignore[reportPrivateUsage]
+        pattern: None if transport is None else RateLimitRetry(transport)
+        for pattern, transport in client._mounts.items()  # pyright: ignore[reportPrivateUsage]
+    }
+    return client
 
 
 def _basic_auth() -> httpx.BasicAuth | None:

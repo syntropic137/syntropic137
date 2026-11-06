@@ -164,3 +164,17 @@ def test_the_referee_builds_its_client_through_api_client() -> None:
     text = (Path(__file__).resolve().parents[1] / "eval_referee.py").read_text(encoding="utf-8")
     assert "with api_client(args.api_url) as client" in text
     assert "httpx.Client(" not in text
+
+
+def test_api_client_keeps_the_environment_proxy_and_retries_through_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.test:3128")
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.test:3128")
+    monkeypatch.setenv("NO_PROXY", "internal.test")
+    with api_client("http://api.test") as client:
+        mounts = client._mounts  # pyright: ignore[reportPrivateUsage]
+        proxied = [t for t in mounts.values() if t is not None]
+        assert proxied, "the environment proxy must still be mounted"
+        assert all(isinstance(t, RateLimitRetry) for t in proxied)
+        assert None in mounts.values(), "NO_PROXY must still bypass the proxy"
