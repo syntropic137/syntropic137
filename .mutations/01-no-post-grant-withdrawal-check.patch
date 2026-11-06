@@ -1,0 +1,14 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/start_resume/StartResumeHandler.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/start_resume/StartResumeHandler.py
+index e5039655f..3bf9a780e 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/start_resume/StartResumeHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/start_resume/StartResumeHandler.py
+@@ -101,9 +101,6 @@ class StartResumeHandler:
+         # #1677: read here, once the start holds its slot - the wait for one is
+         # where a withdrawal lands. Returning ends the caller's `held` block, so
+         # the slot and the admission lease go straight back.
+-        if parent.resume_withdrawn:
+-            logger.info("Not starting the resume of %s: it was withdrawn", parent_execution_id)
+-            return None
+         command = parent.resume_start_command()
+         if await self._executions.get_by_id(command.aggregate_id) is not None:
+             logger.info(

@@ -1324,7 +1324,7 @@ class TestAQueuedResumeCanBeCancelled:
         target: list[str] = []
         running_at_grant: list[int] = []
         _withdraw_once_granted(world, monkeypatch, target, running_at_grant)
-        running, _, child = await _two_running_one_resume_queued(world)
+        running, parent_id, child = await _two_running_one_resume_queued(world)
         target.append(child)
         behind = await world.post_execute()
 
@@ -1332,6 +1332,9 @@ class TestAQueuedResumeCanBeCancelled:
         await _until_released(world, child)
 
         assert running_at_grant == [LIMIT]
+        # Withdrawn, not merely aborted: a cancel that raised inside `held`
+        # would also keep the child from running, and give no slot back cleanly.
+        assert _resume_withdrawals(world, parent_id) == 1
         await world.agent.until(lambda: behind in world.agent.inside)
         assert child not in world.agent.entered
         await _release_everything(world)
