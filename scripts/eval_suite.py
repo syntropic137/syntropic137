@@ -121,7 +121,9 @@ import time
 from collections import Counter
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
@@ -1977,32 +1979,39 @@ class RateLimitRetry(httpx.BaseTransport):
         *,
         attempts: int = RATE_LIMIT_ATTEMPTS,
         sleep: Callable[[float], None] = time.sleep,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._inner = inner or httpx.HTTPTransport()
         self._attempts = attempts
         self._sleep = sleep
+        self._now = now
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         for attempt in range(self._attempts):
             response = self._inner.handle_request(request)
             if response.status_code != 429 or attempt == self._attempts - 1:
                 return response
-            response.read()
-            response.close()
-            self._sleep(_retry_wait(response, attempt))
+            wait = _retry_wait(response.headers.get("retry-after", ""), attempt, self._now())
+            response.close()  # the refused body is never read, so it cannot fail to close
+            self._sleep(wait)
         raise AssertionError("unreachable")
 
     def close(self) -> None:
         self._inner.close()
 
 
-def _retry_wait(response: httpx.Response, attempt: int) -> float:
-    """Seconds to wait: the server's `Retry-After` when it is a number, else 2, 4, 8..."""
-    header = response.headers.get("retry-after", "")
+def _retry_wait(retry_after: str, attempt: int, now: datetime) -> float:
+    """Seconds to wait: `Retry-After` as seconds or an HTTP date, else 2, 4, 8..."""
     try:
-        wait = float(header)
+        wait = float(retry_after)
     except ValueError:
-        wait = 2.0 * 2**attempt
+        try:
+            when = parsedate_to_datetime(retry_after)
+        except (TypeError, ValueError):
+            wait = 2.0 * 2**attempt
+        else:
+            when = when if when.tzinfo else when.replace(tzinfo=UTC)
+            wait = (when - now).total_seconds()
     return min(max(wait, 0.0), RATE_LIMIT_MAX_WAIT_SECONDS)
 
 

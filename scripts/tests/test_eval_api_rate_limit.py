@@ -7,6 +7,7 @@ A shared deployment rate-limits; before this, `migrate_eval_suite_duplicates.py
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -14,7 +15,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from typing import TYPE_CHECKING
+
 from eval_suite import RATE_LIMIT_MAX_WAIT_SECONDS, RateLimitRetry, api_client
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = pytest.mark.unit
 
@@ -100,3 +106,61 @@ def test_every_eval_script_builds_its_client_through_api_client() -> None:
         assert "with api_client(args.api_url) as client" in text, name
     with api_client("http://api.test") as client:
         assert isinstance(client._transport, RateLimitRetry)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_an_http_date_retry_after_waits_until_that_time() -> None:
+    now = datetime(2026, 11, 6, 12, 0, 0, tzinfo=UTC)
+    transport, _ = _server([429, 200], headers={"retry-after": "Fri, 06 Nov 2026 12:00:45 GMT"})
+    waits: list[float] = []
+    with httpx.Client(
+        base_url="http://api.test",
+        transport=RateLimitRetry(transport, sleep=waits.append, now=lambda: now),
+    ) as client:
+        assert client.get("/evals").status_code == 200
+    assert waits == [45.0]
+
+
+def test_a_date_in_the_past_retries_at_once() -> None:
+    now = datetime(2026, 11, 6, 12, 0, 0, tzinfo=UTC)
+    transport, _ = _server([429, 200], headers={"retry-after": "Fri, 06 Nov 2026 11:00:00 GMT"})
+    waits: list[float] = []
+    with httpx.Client(
+        base_url="http://api.test",
+        transport=RateLimitRetry(transport, sleep=waits.append, now=lambda: now),
+    ) as client:
+        client.get("/evals")
+    assert waits == [0.0]
+
+
+class _BrokenBody(httpx.SyncByteStream):
+    """A 429 body that fails if anyone reads it, and records that it was closed."""
+
+    closed = False
+
+    def __iter__(self) -> Iterator[bytes]:
+        raise httpx.ReadError("connection dropped mid-body")
+
+    def close(self) -> None:
+        _BrokenBody.closed = True
+
+
+def test_a_429_whose_body_cannot_be_read_is_closed_and_retried() -> None:
+    calls: list[int] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(429, stream=_BrokenBody())
+        return httpx.Response(200, json={})
+
+    waits: list[float] = []
+    with _client(httpx.MockTransport(handle), waits) as client:
+        assert client.get("/evals").status_code == 200
+    assert _BrokenBody.closed
+    assert len(calls) == 2
+
+
+def test_the_referee_builds_its_client_through_api_client() -> None:
+    text = (Path(__file__).resolve().parents[1] / "eval_referee.py").read_text(encoding="utf-8")
+    assert "with api_client(args.api_url) as client" in text
+    assert "httpx.Client(" not in text
