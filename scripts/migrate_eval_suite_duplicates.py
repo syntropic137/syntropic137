@@ -54,20 +54,19 @@ from eval_suite import (
     DEFAULT_SUITE,
     Case,
     LoadedSuite,
-    _basic_auth,  # pyright: ignore[reportPrivateUsage]
     _case_evals,  # pyright: ignore[reportPrivateUsage]
     _Created,  # pyright: ignore[reportPrivateUsage]
     _detail,  # pyright: ignore[reportPrivateUsage]
     _Eval,  # pyright: ignore[reportPrivateUsage]
     _EvalList,  # pyright: ignore[reportPrivateUsage]
     _member_runs,  # pyright: ignore[reportPrivateUsage]
+    api_client,
     create_stable_eval,
     load_suite,
     stable_key,
 )
 
 from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import EvalId
-from syn_shared.settings.dev_tooling import get_dev_api_url
 
 
 class _Move(BaseModel):
@@ -305,9 +304,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     loaded = load_suite(args.suite)
-    with httpx.Client(
-        base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
-    ) as client:
+    with api_client(args.api_url) as client:
         journal = args.journal or args.suite / "migration-journal.jsonl"
         lines = migrate(loaded, client, dry_run=args.dry_run, journal=journal)
     print("\n".join(lines) or "nothing to migrate")

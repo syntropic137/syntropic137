@@ -150,7 +150,7 @@ from syn_shared.observed_model import is_model_alias
 from syn_shared.settings.dev_tooling import get_dev_api_url
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUITE = ROOT / "evals" / "verifier-seed-v1"
@@ -1959,6 +1959,63 @@ def _read_back(client: httpx.Client, path: str, attempts: int = 30) -> _Workflow
     raise AssertionError("unreachable")
 
 
+RATE_LIMIT_ATTEMPTS = 6
+"""Tries per request when the API answers 429, the first included."""
+RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
+
+
+class RateLimitRetry(httpx.BaseTransport):
+    """Re-send a request the API refused with 429, after `Retry-After` or a doubling wait.
+
+    A 429 means the server did not act on the request, so re-sending is safe for
+    every method, POST included. Any other status is returned as it came.
+    """
+
+    def __init__(
+        self,
+        inner: httpx.BaseTransport | None = None,
+        *,
+        attempts: int = RATE_LIMIT_ATTEMPTS,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self._inner = inner or httpx.HTTPTransport()
+        self._attempts = attempts
+        self._sleep = sleep
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        for attempt in range(self._attempts):
+            response = self._inner.handle_request(request)
+            if response.status_code != 429 or attempt == self._attempts - 1:
+                return response
+            response.read()
+            response.close()
+            self._sleep(_retry_wait(response, attempt))
+        raise AssertionError("unreachable")
+
+    def close(self) -> None:
+        self._inner.close()
+
+
+def _retry_wait(response: httpx.Response, attempt: int) -> float:
+    """Seconds to wait: the server's `Retry-After` when it is a number, else 2, 4, 8..."""
+    header = response.headers.get("retry-after", "")
+    try:
+        wait = float(header)
+    except ValueError:
+        wait = 2.0 * 2**attempt
+    return min(max(wait, 0.0), RATE_LIMIT_MAX_WAIT_SECONDS)
+
+
+def api_client(api_url: str | None) -> httpx.Client:
+    """The client every eval script uses against a deployed API: auth, and 429s waited out."""
+    return httpx.Client(
+        base_url=api_url or get_dev_api_url(),
+        timeout=60,
+        auth=_basic_auth(),
+        transport=RateLimitRetry(),
+    )
+
+
 def _basic_auth() -> httpx.BasicAuth | None:
     """Basic auth for a deployed API (gateway), from the same variables the CLI reads.
 
@@ -2714,9 +2771,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         llm = LlmJudge(HeadlessJudgeClient())
     ledger: Path = args.launches or launches_path(args.suite)
-    with httpx.Client(
-        base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
-    ) as client:
+    with api_client(args.api_url) as client:
         if args.command == "register":
             try:
                 print("\n".join(register_roster(roster, client)))
