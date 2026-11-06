@@ -29,25 +29,22 @@ import argparse
 import sys
 from pathlib import Path
 
-import httpx
 from eval_suite import (
     DEFAULT_SUITE,
     DefectCase,
     HeadlessJudgeClient,
     KeywordJudge,
     LlmJudge,
-    _basic_auth,
     _Execution,
     _get,
     _report_of,
+    api_client,
     blocking_findings,
     judge_problems,
     launches_path,
     load_suite,
     read_launches,
 )
-
-from syn_shared.settings.dev_tooling import get_dev_api_url
 
 
 def _cell(text: str) -> str:
@@ -85,9 +82,7 @@ def main(argv: list[str] | None = None) -> int:
 
     missed: list[str] = []
     matched: list[str] = []
-    with httpx.Client(
-        base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
-    ) as client:
+    with api_client(args.api_url) as client:
         for launch in launches:
             case = cases.get(launch.case)
             if not isinstance(case, DefectCase):

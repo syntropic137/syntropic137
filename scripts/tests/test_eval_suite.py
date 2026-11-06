@@ -3311,6 +3311,23 @@ def _reply(verdict: str, quote: str = "", reason: str = "r") -> str:
     return json.dumps({"verdict": verdict, "quote": quote, "reason": reason})
 
 
+@pytest.mark.unit
+def test_a_reply_that_omits_the_quote_is_read_as_an_empty_quote() -> None:
+    """The prompt says quote is empty unless match; a model left it out on a live no_match
+    (dry run 2026-11-06) and scoring crashed. Omitted means empty, so no verdict changes."""
+    no_quote = json.dumps({"verdict": "no_match", "reason": "different root cause"})
+    judgement = eval_suite.LlmJudge(_FakeModel(no_quote)).judge(
+        _EXPECTED, blocking_findings(_PARAPHRASED)
+    )
+    assert (judgement.verdict, judgement.quote) == ("no_match", "")
+
+    match_no_quote = json.dumps({"verdict": "match", "reason": "same"})
+    judgement = eval_suite.LlmJudge(_FakeModel(match_no_quote)).judge(
+        _EXPECTED, blocking_findings(_PARAPHRASED)
+    )
+    assert judgement.verdict == "unclear", "a match must still quote a finding to count"
+
+
 # The seeded defect, said in words the keyword judge does not know.
 _PARAPHRASED = _report(
     (
