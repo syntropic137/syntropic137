@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
-from event_sourcing import EventStoreRepository, StreamAlreadyExistsError
+from event_sourcing import EventStoreRepository
 from event_sourcing.client.memory import MemoryEventStoreClient
 from event_sourcing.core.event import EventEnvelope, EventMetadata
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
@@ -1370,9 +1370,7 @@ class TestAQueuedResumeCanBeCancelled:
         await _release_everything(world)
         assert child not in world.agent.entered
 
-    async def test_while_it_waits_it_is_shown_cancelled_and_not_listed(
-        self, world: _World
-    ) -> None:
+    async def test_while_it_waits_it_is_shown_cancelled_and_not_listed(self, world: _World) -> None:
         _, _, child = await _two_running_one_resume_queued(world)
         assert child in [q.execution_id for q in await queued_starts(world.projections.store)]
 
