@@ -121,7 +121,9 @@ import time
 from collections import Counter
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
@@ -150,7 +152,7 @@ from syn_shared.observed_model import is_model_alias
 from syn_shared.settings.dev_tooling import get_dev_api_url
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SUITE = ROOT / "evals" / "verifier-seed-v1"
@@ -1959,6 +1961,76 @@ def _read_back(client: httpx.Client, path: str, attempts: int = 30) -> _Workflow
     raise AssertionError("unreachable")
 
 
+RATE_LIMIT_ATTEMPTS = 6
+"""Tries per request when the API answers 429, the first included."""
+RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
+
+
+class RateLimitRetry(httpx.BaseTransport):
+    """Re-send a request the API refused with 429, after `Retry-After` or a doubling wait.
+
+    A 429 means the server did not act on the request, so re-sending is safe for
+    every method, POST included. Any other status is returned as it came.
+    """
+
+    def __init__(
+        self,
+        inner: httpx.BaseTransport | None = None,
+        *,
+        attempts: int = RATE_LIMIT_ATTEMPTS,
+        sleep: Callable[[float], None] = time.sleep,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self._inner = inner or httpx.HTTPTransport()
+        self._attempts = attempts
+        self._sleep = sleep
+        self._now = now
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        for attempt in range(self._attempts):
+            response = self._inner.handle_request(request)
+            if response.status_code != 429 or attempt == self._attempts - 1:
+                return response
+            wait = _retry_wait(response.headers.get("retry-after", ""), attempt, self._now())
+            response.close()  # the refused body is never read, so it cannot fail to close
+            self._sleep(wait)
+        raise AssertionError("unreachable")
+
+    def close(self) -> None:
+        self._inner.close()
+
+
+def _retry_wait(retry_after: str, attempt: int, now: datetime) -> float:
+    """Seconds to wait: `Retry-After` as seconds or an HTTP date, else 2, 4, 8..."""
+    try:
+        wait = float(retry_after)
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(retry_after)
+        except (TypeError, ValueError):
+            wait = 2.0 * 2**attempt
+        else:
+            when = when if when.tzinfo else when.replace(tzinfo=UTC)
+            wait = (when - now).total_seconds()
+    return min(max(wait, 0.0), RATE_LIMIT_MAX_WAIT_SECONDS)
+
+
+def api_client(api_url: str | None) -> httpx.Client:
+    """The client every eval script uses against a deployed API: auth, and 429s waited out.
+
+    Passing `transport=` would stop httpx from routing through `HTTP(S)_PROXY` /
+    `NO_PROXY`, so the client is built plainly, letting httpx pick a transport per
+    proxy mount from the environment, and each one it picked is then wrapped.
+    """
+    client = httpx.Client(base_url=api_url or get_dev_api_url(), timeout=60, auth=_basic_auth())
+    client._transport = RateLimitRetry(client._transport)  # pyright: ignore[reportPrivateUsage]
+    client._mounts = {  # pyright: ignore[reportPrivateUsage]
+        pattern: None if transport is None else RateLimitRetry(transport)
+        for pattern, transport in client._mounts.items()  # pyright: ignore[reportPrivateUsage]
+    }
+    return client
+
+
 def _basic_auth() -> httpx.BasicAuth | None:
     """Basic auth for a deployed API (gateway), from the same variables the CLI reads.
 
@@ -2714,9 +2786,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         llm = LlmJudge(HeadlessJudgeClient())
     ledger: Path = args.launches or launches_path(args.suite)
-    with httpx.Client(
-        base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
-    ) as client:
+    with api_client(args.api_url) as client:
         if args.command == "register":
             try:
                 print("\n".join(register_roster(roster, client)))

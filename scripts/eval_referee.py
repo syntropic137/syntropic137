@@ -51,16 +51,17 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-import httpx
 from eval_implementer import DEFAULT_SUITE, ImplementerCase, fix_patch, load_suite
-from eval_suite import ROOT, DefinitionError, _basic_auth, _detail
+from eval_suite import ROOT, DefinitionError, _detail, api_client
 from implementer_scorer import EXIT_CODES, PATCH_ERRORS, Pin, TestRun, read_patch
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from syn_shared.settings.dev_tooling import get_dev_api_url
 from syn_shared.settings.workspace_images import WorkspaceImageProvider, workspace_image_ref
+
+if TYPE_CHECKING:
+    import httpx
 
 SCORER = "eval_implementer.py"
 SCORER_PATH = "scripts/implementer_scorer.py"
@@ -503,9 +504,7 @@ def main(argv: list[str] | None = None) -> int:
         case = loaded.case(args.case)
         commit = scorer_commit_of(ROOT)
         version = scorer_version(loaded.suite.version, commit)
-        with httpx.Client(
-            base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
-        ) as client:
+        with api_client(args.api_url) as client:
             patches = [(str(p), read_patch(p)) for p in args.patch]
             patches += [(e, fetch_patch(client, e)) for e in args.execution]
             controls, scored = score_case(
