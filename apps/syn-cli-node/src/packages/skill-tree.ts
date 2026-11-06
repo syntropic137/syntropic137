@@ -91,7 +91,10 @@ export function readSkillTree(dir: string): SkillFilePayload[] {
  * directory on a candidate path (`skills`, `.claude`, the skill folder itself)
  * may be a symlink to somewhere else on this machine, and reading it would
  * upload those files as the skill. So each candidate is resolved to its real
- * path and refused unless it stays inside the clone (review P1, #2191).
+ * path and skipped unless it stays inside the clone (review P1, #2191). It is
+ * skipped rather than fatal so an unrelated outside link earlier in the order
+ * cannot hide a real skill later in it (review P2); when nothing is found, the
+ * error names what was skipped.
  */
 export function skillDirInClone(cloneDir: string, skillName: string): string {
   const candidates = [
@@ -101,6 +104,7 @@ export function skillDirInClone(cloneDir: string, skillName: string): string {
     cloneDir,
   ];
   const root = fs.realpathSync(cloneDir);
+  const outside: string[] = [];
   for (const candidate of candidates) {
     let real: string;
     try {
@@ -109,10 +113,8 @@ export function skillDirInClone(cloneDir: string, skillName: string): string {
       continue;
     }
     if (real !== root && !real.startsWith(root + path.sep)) {
-      throw new Error(
-        `cloned source's skill '${skillName}' resolves outside the clone ` +
-          `(${path.relative(cloneDir, candidate)} -> ${real}); refusing to read it`,
-      );
+      outside.push(`${path.relative(cloneDir, candidate)} -> ${real}`);
+      continue;
     }
     try {
       readSkillTree(candidate);
@@ -121,8 +123,10 @@ export function skillDirInClone(cloneDir: string, skillName: string): string {
       continue;
     }
   }
+  const skipped =
+    outside.length > 0 ? `; skipped, as outside the clone: ${outside.join(", ")}` : "";
   throw new Error(
     `cloned source has no skill '${skillName}' (looked for a SKILL.md in ` +
-      `${skillName}/, skills/${skillName}/, .claude/skills/${skillName}/, and the repository root)`,
+      `${skillName}/, skills/${skillName}/, .claude/skills/${skillName}/, and the repository root${skipped})`,
   );
 }

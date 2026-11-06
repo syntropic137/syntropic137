@@ -146,6 +146,23 @@ describe("skillDirInClone", () => {
     }
   });
 
+  it("an unrelated link out of the clone does not hide a real skill later in the order", () => {
+    // Codex P2, #2191: `<clone>/alpha` links elsewhere, the skill is in .claude/skills.
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "skilltree-outside-"));
+    try {
+      fs.symlinkSync(outside, path.join(dir, "alpha"));
+      fs.mkdirSync(path.join(dir, ".claude", "skills", "alpha"), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, ".claude", "skills", "alpha", "SKILL.md"),
+        "---\nname: alpha\ndescription: d\n---\n",
+      );
+
+      expect(skillDirInClone(dir, "alpha")).toBe(path.join(dir, ".claude", "skills", "alpha"));
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it("still finds a skill through a symlink that stays inside the clone", () => {
     fs.mkdirSync(path.join(dir, "shared", "alpha"), { recursive: true });
     fs.writeFileSync(
