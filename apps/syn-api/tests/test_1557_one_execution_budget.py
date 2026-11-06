@@ -1282,9 +1282,7 @@ async def _two_running_one_resume_queued(world: _World) -> tuple[list[str], str,
 
 
 class TestAQueuedResumeCanBeCancelled:
-    async def test_cancel_withdraws_it_on_its_parent_and_it_never_runs(
-        self, world: _World
-    ) -> None:
+    async def test_cancel_withdraws_it_on_its_parent_and_it_never_runs(self, world: _World) -> None:
         running, parent_id, child = await _two_running_one_resume_queued(world)
 
         cancelled = await _cancel(child)
