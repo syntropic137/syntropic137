@@ -24,6 +24,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start i
     phases_the_resume_runs,
     refuse_resume_start,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import (
+    ResumeWithdrawnError,
+)
 from syn_domain.contexts.orchestration.slices.start_resume.value_objects import ResumeChild
 
 if TYPE_CHECKING:
@@ -123,16 +126,15 @@ class StartResumeHandler:
         if self._launches is not None:
             await self._launches.record(command.workflow_id, command.aggregate_id)
         try:
-            return await self._processor.run_resume(
-                command,
-                repos=repos,
-                admitted=admitted,
-                withdrawn=lambda: self._withdrawn(parent_execution_id),
-            )
+            return await self._processor.run_resume(command, repos=repos, admitted=admitted)
         except StreamAlreadyExistsError:
             logger.info(
                 "Resume %s of %s already started", command.aggregate_id, parent_execution_id
             )
+            return None
+        except ResumeWithdrawnError:
+            # #1677: withdrawn while this start prepared; the child opened cancelled.
+            logger.info("Resume %s of %s was withdrawn", command.aggregate_id, parent_execution_id)
             return None
 
     async def validate(self, parent_execution_id: str) -> ResumeChild:
@@ -175,16 +177,6 @@ class StartResumeHandler:
             await self._remote_branches.read_branch(c.repository, c.branch)
             for c in command.continuation_candidates
         ]
-
-    async def _withdrawn(self, parent_execution_id: str) -> bool:
-        """Whether the parent's resume was withdrawn while this start prepared (#1677).
-
-        The check in `handle` is made before awaits a cancel can land during;
-        this one is made once the child's stream is open, which a cancel that
-        records the withdrawal first then sees, and cancels, if it is too late.
-        """
-        parent = await self._executions.get_by_id(parent_execution_id)
-        return parent is not None and parent.resume_withdrawn
 
     async def _command_for(self, parent_execution_id: str) -> StartResumeCommand | None:
         """The start the parent's resume admitted; None once it was withdrawn (#1677)."""
