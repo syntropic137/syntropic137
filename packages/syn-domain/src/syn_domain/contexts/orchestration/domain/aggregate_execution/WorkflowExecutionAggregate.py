@@ -177,9 +177,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
     )
-    from syn_domain.contexts.orchestration.domain.events.ExecutionResumeWithdrawnEvent import (
-        ExecutionResumeWithdrawnEvent,
-    )
     from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
         ExecutionTagsAddedEvent,
     )
@@ -346,8 +343,7 @@ class WorkflowExecutionAggregate(
         #: built under - where a None refuses the start rather than naming one.
         self._resume_execution_id: str | None = None
         self._admitted_resume = AdmittedResume()
-        #: #1677: withdrawn before its child started; `_resumed` stays True.
-        self._resume_withdrawn: bool = False
+        self._resume_withdrawn = False  # #1677; `_resumed` stays True
         #: What this run was started with, pinned so a resume of it runs the same
         #: thing (#1454, #1457). Never read back from the workflow template.
         self._pins = StartPins()
@@ -874,9 +870,10 @@ class WorkflowExecutionAggregate(
     @command_handler("WithdrawResumeCommand")
     def withdraw_resume(self, command: WithdrawResumeCommand) -> None:
         """Withdraw the admitted resume before its child starts (#1677). Idempotent."""
-        admitted = self._resume_execution_id if self._resumed else None
-        event = decide_resume_withdrawal(self.id, admitted, self._resume_withdrawn, command)
-        if event is not None:
+        withdrawn = self._resume_withdrawn
+        if event := decide_resume_withdrawal(
+            self.id, self._resume_execution_id, withdrawn, command
+        ):
             self._apply(event)
 
     @event_sourcing_handler("WorkflowExecutionStarted")
@@ -1112,8 +1109,7 @@ class WorkflowExecutionAggregate(
         self._admitted_resume = read_admitted_resume(event)
 
     @event_sourcing_handler("ExecutionResumeWithdrawn")
-    def on_execution_resume_withdrawn(self, event: ExecutionResumeWithdrawnEvent) -> None:
-        del event
+    def on_execution_resume_withdrawn(self, _event: object) -> None:
         self._resume_withdrawn = True
 
     @event_sourcing_handler("ExecutionForked")
