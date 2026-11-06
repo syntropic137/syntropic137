@@ -28,6 +28,9 @@ if TYPE_CHECKING:
         ResumeExecutionCommand,
         WithdrawResumeCommand,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+        AdmittedResume,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         InheritedEvidenceGate,
         PhaseDefinition,
@@ -393,8 +396,7 @@ def _gate_held_at(
 
 def decide_resume_withdrawal(
     execution_id: str | None,
-    admitted_resume_id: str | None,
-    withdrawn: bool,
+    admitted: AdmittedResume,
     command: WithdrawResumeCommand,
 ) -> ExecutionResumeWithdrawnEvent | None:
     """The withdrawal of an admitted resume (#1677); None if it is already withdrawn.
@@ -407,10 +409,10 @@ def decide_resume_withdrawal(
         ExecutionResumeWithdrawnEvent,
     )
 
-    if admitted_resume_id is None or admitted_resume_id != command.resume_execution_id:
+    if admitted.resume_execution_id != command.resume_execution_id:
         msg = f"{execution_id} admitted no resume {command.resume_execution_id}"
         raise ValueError(msg)
-    if withdrawn:
+    if admitted.withdrawn:
         return None
     return ExecutionResumeWithdrawnEvent(
         execution_id=str(execution_id),
