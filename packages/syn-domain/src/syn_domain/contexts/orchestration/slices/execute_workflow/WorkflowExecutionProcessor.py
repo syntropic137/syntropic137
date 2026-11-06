@@ -22,6 +22,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseResult,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+    CancelExecutionCommand,
     StartExecutionCommand,
     StartResumeCommand,
     WorkflowExecutionAggregate,
@@ -106,6 +107,8 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.shutdown_interrup
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from event_sourcing import ProjectionStore
 
     from syn_adapters.control import ExecutionController
@@ -418,6 +421,7 @@ class WorkflowExecutionProcessor:
         command: StartResumeCommand,
         repos: list[RepositoryRef] | None = None,
         admitted: AdmissionTicket | None = None,
+        withdrawn: Callable[[], Awaitable[bool]] | None = None,
     ) -> WorkflowExecutionResult:
         """Start and run the resume a parent admitted (ADR-014 s7).
 
@@ -425,6 +429,9 @@ class WorkflowExecutionProcessor:
         from the resume phase on: the aggregate and the to-do list both start
         the child with its inherited phases complete, and their outputs are
         handed forward from the parent's artifacts.
+
+        ``withdrawn`` is asked once the child's stream is open (#1677); a
+        child whose resume was withdrawn meanwhile ends cancelled, unrun.
         """
         aggregate = WorkflowExecutionAggregate()
         aggregate.start_resume(command)
@@ -436,6 +443,7 @@ class WorkflowExecutionProcessor:
             repos,
             admitted,
             origin=command.resumed_from,
+            withdrawn=withdrawn,
         )
 
     async def _run_started(
@@ -447,11 +455,30 @@ class WorkflowExecutionProcessor:
         repos: list[RepositoryRef] | None,
         admitted: AdmissionTicket | None,
         origin: ResumeOrigin | None = None,
+        withdrawn: Callable[[], Awaitable[bool]] | None = None,
     ) -> WorkflowExecutionResult:
         """Record the start, then drain here - or, with a run queue, admit and return."""
         await self._cancelled_work.settle()
         started_at = datetime.now(UTC)
         phase_outputs = await self._start(aggregate, admitted, origin)
+        # #1677: read AFTER the stream opened, as a cancel reads the stream
+        # after recording the withdrawal, so whichever lands second sees the other.
+        if origin is not None and withdrawn is not None and await withdrawn():
+            aggregate.cancel_execution(
+                CancelExecutionCommand(
+                    execution_id=aggregate.id or "",
+                    phase_id=origin.resume_phase_id,
+                    reason="Withdrawn before it started",
+                )
+            )
+            await self._journal.append(aggregate)
+            return WorkflowExecutionResult(
+                workflow_id=workflow_id,
+                execution_id=aggregate.id or "",
+                status="cancelled",
+                started_at=started_at,
+                completed_at=datetime.now(UTC),
+            )
         if self._run_queue is not None:
             return WorkflowExecutionResult(
                 workflow_id=workflow_id,

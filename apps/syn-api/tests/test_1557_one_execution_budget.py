@@ -164,35 +164,49 @@ class _Log:
 
 
 class _Executions:
-    """Execution streams, keyed by id; a second NoStream write is refused.
+    """The REAL execution repository over the one in-memory event store (#1677).
 
-    Refused too when ANY aggregate already opened a stream at that id, because
-    the server has one keyspace for every aggregate type, and so does
-    `MemoryEventStoreClient` since ESP v0.17.0 (event-sourcing-platform#345).
+    Every read rehydrates from what was stored as JSON, and a second NoStream
+    write is refused by the store itself - including when ANY aggregate already
+    opened a stream at that id, because the server has one keyspace for every
+    aggregate type, and so does `MemoryEventStoreClient` since ESP v0.17.0
+    (event-sourcing-platform#345). ``streams`` is only what the tests look at:
+    the last object each save wrote, never what a read returns.
     """
 
     def __init__(self, log: _Log, keyspace: MemoryEventStoreClient) -> None:
         self.streams: dict[str, WorkflowExecutionAggregate] = {}
         self._log = log
-        self._keyspace = keyspace
+        self._repo = RepositoryAdapter(
+            EventStoreRepository(
+                keyspace,
+                WorkflowExecutionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+                "WorkflowExecution",
+            )
+        )
 
     async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
-        for envelope in aggregate.get_uncommitted_events():
-            self._log.append(envelope.event, aggregate.id or "", "WorkflowExecution")
-        self.streams[aggregate.id or ""] = aggregate
-        aggregate.mark_events_as_committed()
+        events = list(aggregate.get_uncommitted_events())
+        await self._repo.save(aggregate)
+        self._logged(aggregate, events)
 
     async def save_new(self, aggregate: WorkflowExecutionAggregate) -> None:
-        stream = f"WorkflowExecution-{aggregate.id}"
-        if aggregate.id in self.streams or await self._keyspace.stream_exists(stream):
-            raise StreamAlreadyExistsError(stream, 1)
-        await self.save(aggregate)
+        events = list(aggregate.get_uncommitted_events())
+        await self._repo.save_new(aggregate)
+        self._logged(aggregate, events)
+
+    def _logged(
+        self, aggregate: WorkflowExecutionAggregate, events: list[EventEnvelope[DomainEvent]]
+    ) -> None:
+        for envelope in events:
+            self._log.append(envelope.event, aggregate.id or "", "WorkflowExecution")
+        self.streams[aggregate.id or ""] = aggregate
 
     async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
-        return self.streams.get(aggregate_id)
+        return await self._repo.get_by_id(aggregate_id)
 
     async def exists(self, aggregate_id: str) -> bool:
-        return aggregate_id in self.streams
+        return await self._repo.exists(aggregate_id)
 
 
 class _Requests:
@@ -223,11 +237,13 @@ class _Requests:
         await self._deliver()
 
     async def _deliver(self) -> None:
+        # The store is shared with the executions, which log their own events.
         stored = await stored_envelopes(self.client)
         for envelope in stored[self._seen :]:
-            self._log.append(
-                envelope.event, envelope.metadata.aggregate_id or "", "ExecutionRequest"
-            )
+            if envelope.metadata.aggregate_type == "ExecutionRequest":
+                self._log.append(
+                    envelope.event, envelope.metadata.aggregate_id or "", "ExecutionRequest"
+                )
         self._seen = len(stored)
 
     async def get_by_id(self, aggregate_id: str) -> ExecutionRequestAggregate | None:
