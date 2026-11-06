@@ -292,3 +292,32 @@ def _info(
     info = start_queue_info(position, record)
     assert info is not None  # one of the two is always given
     return info
+
+
+async def withdraw_queued_resume(execution_id: str, reason: str | None) -> bool:
+    """Withdraw a resume whose child waits here for a slot (#1677).
+
+    False when ``execution_id`` is not a resume start held in this process.
+    The withdrawal is recorded on the PARENT, which admitted the resume and is
+    the only stream a resume has before its child starts: durable before this
+    returns, so the waiting start reads it once granted and does not run, and
+    after a restart the parent's `resume_start` record is `withdrawn`.
+    """
+    position = get_execution_budget().position(execution_id)
+    parent_id = position.claim.resumed_from if position is not None else None
+    if parent_id is None:
+        return False
+    from syn_adapters.storage.repositories import get_workflow_execution_repository
+    from syn_domain.contexts.orchestration import WithdrawResumeCommand
+
+    executions = get_workflow_execution_repository()
+    parent = await executions.get_by_id(parent_id)
+    if parent is None or parent.resume_execution_id != execution_id:
+        return False
+    parent.withdraw_resume(
+        WithdrawResumeCommand(
+            execution_id=parent_id, resume_execution_id=execution_id, reason=reason
+        )
+    )
+    await executions.save(parent)
+    return True

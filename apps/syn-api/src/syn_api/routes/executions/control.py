@@ -266,15 +266,26 @@ async def _withdraw_queued(execution_id: str, reason: str | None) -> ControlResp
     """Withdraw an accepted start with no execution yet; None if there is none.
 
     A queued start has no `workflow_execution_details` row, which is what made
-    cancelling it a 404. Its request is withdrawn instead: durably, so neither
-    the task waiting for a slot nor a restart starts it.
+    cancelling it a 404. Its request - or, for a resume, its parent's admitted
+    resume - is withdrawn instead: durably, so neither the task waiting for a
+    slot nor a restart starts it.
     """
     from syn_api._wiring import get_projection_mgr
     from syn_api.routes.executions.direct_start import withdraw_execution_request
-    from syn_api.routes.executions.queued_start import queued_execution_id
+    from syn_api.routes.executions.queued_start import (
+        queued_execution_id,
+        withdraw_queued_resume,
+    )
 
     full_id = await queued_execution_id(get_projection_mgr(), execution_id)
-    if full_id is None or not await withdraw_execution_request(full_id, reason):
+    if full_id is None:
+        return None
+    # A direct start's request has its own stream; a resume is withdrawn on the
+    # parent that admitted it (#1677). A start is one or the other.
+    if not (
+        await withdraw_execution_request(full_id, reason)
+        or await withdraw_queued_resume(full_id, reason)
+    ):
         return None
     # Both projections asked above lag the execution's stream. A run that
     # started before the withdrawal landed is cancelled as any started run is,
