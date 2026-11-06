@@ -146,6 +146,14 @@ workflows:
     models:
       verify: gpt-5.6-terra
     revision: 1
+  # The production verifier as an explicit slug (2026-11-06): eval-verify-pinned-codex-v1
+  # declares the gpt-sol alias, which the suite now refuses. Same prompts as the
+  # variants above. A new workflow, no existing table: no version bump.
+  - id: eval-verify-pinned-codex-gpt-6-1-sol-v1
+    path: workflows/evals/verify-pinned-codex-gpt-6-1-sol/workflow.yaml
+    models:
+      verify: gpt-6.1-sol
+    revision: 1
 history:
   # v1 predates the workflow suffix in the tag.
   - version: 1

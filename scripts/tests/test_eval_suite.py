@@ -116,6 +116,7 @@ _PINNED_CODEX_WFS = {
     "eval-verify-pinned-codex-gpt-6-luna-v1": "gpt-6-luna",
     "eval-verify-pinned-codex-gpt-5-6-luna-v1": "gpt-5.6-luna",
     "eval-verify-pinned-codex-gpt-5-6-terra-v1": "gpt-5.6-terra",
+    "eval-verify-pinned-codex-gpt-6-1-sol-v1": "gpt-6.1-sol",
 }
 
 
@@ -2291,8 +2292,15 @@ def test_v5_scores_its_own_cases_under_every_verifier_without_the_v6_controls(
     }
 
 
+# Added under v8 (2026-11-06): no earlier version ran it, so version-history tests skip it.
+_ADDED_IN_V8 = frozenset({"eval-verify-pinned-codex-gpt-6-1-sol-v1"})
+_V6_VERIFIERS = [
+    w for w in (_WF, _CODEX_WF, _SONNET_WF, *_PINNED_CODEX_WFS) if w not in _ADDED_IN_V8
+]
+
+
 @pytest.mark.unit
-@pytest.mark.parametrize("workflow", [_WF, _CODEX_WF, _SONNET_WF, *_PINNED_CODEX_WFS])
+@pytest.mark.parametrize("workflow", _V6_VERIFIERS)
 def test_v6_scores_its_own_cases_under_every_verifier_without_v7s_escape(workflow: str) -> None:
     v6 = load_suite(DEFAULT_SUITE, workflow=workflow, version=6)
     current = load_suite(DEFAULT_SUITE, workflow=workflow)
@@ -4536,3 +4544,12 @@ def test_a_trial_is_scored_under_the_protocol_it_launched_with_and_no_other() ->
     rows, _ = score_suite(loaded, server.client(), [other])
     assert server.scores == []
     assert any("launched for scorer 8-llm-x" in r.status for r in rows)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("workflow", sorted(_ADDED_IN_V8))
+def test_a_verifier_added_in_v8_has_no_earlier_version(workflow: str) -> None:
+    """An earlier version never ran it, so asking for one must refuse, not borrow a table."""
+    assert load_suite(DEFAULT_SUITE, workflow=workflow).tag == f"verifier-seed-v1:v8:{workflow}"
+    with pytest.raises(DefinitionError, match="ran only"):
+        load_suite(DEFAULT_SUITE, workflow=workflow, version=6)
