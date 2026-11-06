@@ -43,9 +43,10 @@ import syn_api._wiring_admission as admission
 from syn_adapters.control import ExecutionController
 from syn_adapters.control.adapters.memory import InMemorySignalQueueAdapter
 from syn_adapters.control.commands import CancelExecution, ControlResult
+from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
-from syn_adapters.storage.repositories import RepositoryAdapter
+from syn_adapters.storage.repositories import EventStoreExecutionEventStream, RepositoryAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.execution_budget import ExecutionBudget, StartClaim, StartPath
@@ -56,6 +57,7 @@ from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import EvalId, ExecuteWorkflowCommand, LaunchEval
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice, EvalSelection
+from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration._shared.repository_baseline import RepositoryBaseline
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -81,11 +83,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.Workfl
 from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
     ExecutionRequestedEvent,
 )
+from syn_domain.contexts.orchestration.ports import ExecutorHost
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
+    WorkflowExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
@@ -1417,5 +1421,75 @@ class TestAQueuedResumeCanBeCancelled:
         )
         assert child not in world.agent.entered
         assert world.executions.streams[child].status.value == "cancelled"
+        assert world.budget.running == 0
+        assert _leases(world) == 0
+
+    async def test_a_withdrawal_while_it_opens_is_never_run_by_an_executor(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # As above, with a run queue: an executor that claims the row the
+        # moment it is promoted, and drains it to the end before the opener
+        # goes on, must find a cancelled run and start no agent.
+        lookup = world.executions.get_by_id
+        target: list[str] = []
+        paused, proceed = asyncio.Event(), asyncio.Event()
+
+        async def paused_lookup(execution_id: str) -> WorkflowExecutionAggregate | None:
+            if execution_id in target and not paused.is_set():
+                paused.set()
+                await proceed.wait()
+            return await lookup(execution_id)
+
+        monkeypatch.setattr(world.executions, "get_by_id", paused_lookup)
+        running, _, child = await _two_running_one_resume_queued(world)
+        queue = InMemoryExecutionRunQueue()
+        await queue.register(
+            ExecutorHost(
+                host_id="host-1677",
+                container_id="container-1677",
+                generation="g",
+                epoch=ORCHESTRATION_EVENT_EPOCH,
+                reap_scope="scope-1677",
+            ),
+            capacity=1,
+        )
+        await queue.heartbeat("host-1677")
+        world.dispatcher._resume_handler._processor._run_queue = queue  # pyright: ignore[reportPrivateUsage]
+        executor = _processor(world.executions, world.agent)
+        executor._execution_events = EventStoreExecutionEventStream(world.event_store)  # pyright: ignore[reportPrivateUsage]
+        executor._todo_projection_type = ExecutionTodoProjection  # pyright: ignore[reportPrivateUsage]
+        promote = queue.mark_admitted
+        drained: list[asyncio.Task[WorkflowExecutionResult]] = []
+
+        async def claim_and_drain(execution_id: str) -> None:
+            await promote(execution_id)
+            claimed = await queue.claim("host-1677")
+            assert claimed is not None
+            drain = asyncio.create_task(executor.run_claimed(claimed))
+            drained.append(drain)
+            async with asyncio.timeout(_WITHIN):
+                while not (drain.done() or child in world.agent.entered):
+                    await asyncio.sleep(0.01)
+            if drain.done():
+                await queue.close(claimed)
+
+        monkeypatch.setattr(queue, "mark_admitted", claim_and_drain)
+        target.append(child)
+        world.agent.release(running[0])
+        async with asyncio.timeout(_WITHIN):
+            await paused.wait()
+
+        cancelled = await _cancel(child)
+        proceed.set()
+        async with asyncio.timeout(_WITHIN):
+            while not (drained and (drained[0].done() or child in world.agent.entered)):
+                await asyncio.sleep(0.01)
+        entered = list(world.agent.entered)
+        await _release_everything(world)
+
+        assert cancelled.message == "Withdrawn before it started: it will not run"
+        assert child not in entered
+        assert world.executions.streams[child].status.value == "cancelled"
+        assert (await queue.in_use()).claimed == 0
         assert world.budget.running == 0
         assert _leases(world) == 0

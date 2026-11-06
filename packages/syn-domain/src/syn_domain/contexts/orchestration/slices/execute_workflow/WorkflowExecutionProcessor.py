@@ -97,7 +97,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     inherited_phase_ids,
     record_continuation,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import open_start
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import (
+    cancel_if_withdrawn,
+    open_start,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
     RunScopedTodoFold,
 )
@@ -521,6 +524,8 @@ class WorkflowExecutionProcessor:
         if aggregate is None:
             msg = f"Claimed run {claimed.execution_id} has no execution stream"
             raise LookupError(msg)
+        # #1677: a withdrawn resume drains as the cancelled run it now is.
+        await cancel_if_withdrawn(fold.journal, aggregate)
         pins = aggregate.start_pins
         repos = [RepositoryRef.from_slug(c.repository) for c in pins.source_commits]
         phase_outputs = await inherited_outputs(self._artifact_query, pins.resumed_from)

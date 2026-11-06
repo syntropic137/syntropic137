@@ -17,15 +17,13 @@ from event_sourcing import StreamAlreadyExistsError
 
 from syn_domain.contexts._shared.maintenance import refuse_if_paused
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration._shared.resume_withdrawal import ResumeWithdrawnError
 from syn_domain.contexts.orchestration._shared.workspace_resources import (
     require_phases_within_cap,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
     phases_the_resume_runs,
     refuse_resume_start,
-)
-from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import (
-    ResumeWithdrawnError,
 )
 from syn_domain.contexts.orchestration.slices.start_resume.value_objects import ResumeChild
 

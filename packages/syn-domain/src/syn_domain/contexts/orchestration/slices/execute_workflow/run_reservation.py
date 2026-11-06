@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING
 from event_sourcing import StreamAlreadyExistsError
 
 from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
+from syn_domain.contexts.orchestration._shared.resume_withdrawal import ResumeWithdrawnError
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     CancelExecutionCommand,
 )
+from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket
@@ -26,13 +28,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
         ExecutionJournal,
     )
-
-
-class ResumeWithdrawnError(Exception):
-    """A resumed child opened after its parent's resume was withdrawn (#1677).
-
-    The child is recorded cancelled before this is raised, so it never runs.
-    """
 
 
 async def reserve_run(
@@ -87,37 +82,42 @@ async def open_start(
     # ended by the worker instead, which is the other honest answer:
     # nothing started.
     await journal.open(aggregate, written=admitted.mark_durable if admitted is not None else None)
+    # #1677: before the promotion, so no executor can claim the row of a child
+    # whose resume was withdrawn while it opened. The row is still promoted,
+    # so the claimer closes it from the cancelled stream like any cancelled run.
+    withdrawn = await cancel_if_withdrawn(journal, aggregate)
     if queue is not None:
         await queue.mark_admitted(execution_id)
-    await _refuse_if_withdrawn(journal, aggregate)
+    if withdrawn:
+        raise ResumeWithdrawnError(execution_id)
 
 
-async def _refuse_if_withdrawn(
+async def cancel_if_withdrawn(
     journal: ExecutionJournal, aggregate: WorkflowExecutionAggregate
-) -> None:
-    """Cancel a resumed child whose parent's resume was withdrawn while it opened (#1677).
+) -> bool:
+    """Cancel a resumed child whose parent's resume was withdrawn; return whether it was (#1677).
 
     The start reads the parent once it holds a slot, but awaits again before
     its stream opens, and a cancel landing there finds no child and answers
     "it will not run". So the parent is read again AFTER the open, as the
     cancel reads the child after recording the withdrawal: whichever of the
-    two writes lands second sees the other, and the child never runs.
-
-    Raises:
-        ResumeWithdrawnError: it was withdrawn; the child is now cancelled.
+    two writes lands second sees the other, and the child never runs. The
+    opener asks before it promotes the row, and the claimer asks again before
+    it drains, because the ``opening`` sweep may promote a row on its own.
     """
     origin = aggregate.start_pins.resumed_from
     if origin is None:
-        return
+        return False
     parent = await journal.reload(origin.parent_execution_id)
     if parent is None or not parent.resume_withdrawn:
-        return
-    aggregate.cancel_execution(
-        CancelExecutionCommand(
-            execution_id=aggregate.id or "",
-            phase_id=origin.resume_phase_id,
-            reason="Withdrawn before it started",
+        return False
+    if aggregate.accepts_control(ControlSignalType.CANCEL):
+        aggregate.cancel_execution(
+            CancelExecutionCommand(
+                execution_id=aggregate.id or "",
+                phase_id=origin.resume_phase_id,
+                reason="Withdrawn before it started",
+            )
         )
-    )
-    await journal.append(aggregate)
-    raise ResumeWithdrawnError(aggregate.id)
+        await journal.append(aggregate)
+    return True
