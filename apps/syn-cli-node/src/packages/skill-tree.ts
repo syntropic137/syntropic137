@@ -79,7 +79,10 @@ export function readSkillTree(dir: string): SkillFilePayload[] {
  * Locate the skill directory inside a freshly cloned repository.
  *
  * A skills repo usually publishes many skills as subdirectories, but a
- * single-skill repo puts SKILL.md at its root. Candidates are tried in
+ * single-skill repo puts SKILL.md at its root. A project repo keeps its own
+ * skills where Claude Code reads them, `.claude/skills/<name>/`, so a workflow
+ * can load a target repo's skills by the same ref (DreamShip, 2026-11-06: the
+ * agent runs from /workspace, so the cloned repo's own skills never load). Candidates are tried in
  * most-specific-first order so a repo containing both a `<name>/` directory
  * and a root SKILL.md resolves to the named one.
  *
@@ -90,6 +93,7 @@ export function skillDirInClone(cloneDir: string, skillName: string): string {
   const candidates = [
     path.join(cloneDir, skillName),
     path.join(cloneDir, "skills", skillName),
+    path.join(cloneDir, ".claude", "skills", skillName),
     cloneDir,
   ];
   for (const candidate of candidates) {
@@ -102,6 +106,6 @@ export function skillDirInClone(cloneDir: string, skillName: string): string {
   }
   throw new Error(
     `cloned source has no skill '${skillName}' (looked for a SKILL.md in ` +
-      `${skillName}/, skills/${skillName}/, and the repository root)`,
+      `${skillName}/, skills/${skillName}/, .claude/skills/${skillName}/, and the repository root)`,
   );
 }

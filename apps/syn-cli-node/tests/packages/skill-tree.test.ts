@@ -109,6 +109,21 @@ describe("skillDirInClone", () => {
     expect(skillDirInClone(dir, "alpha")).toBe(path.join(dir, "skills", "alpha"));
   });
 
+  it("finds a project repo's own skill under .claude/skills/, before a root SKILL.md", () => {
+    // A project repo (not a skills repo) keeps its skills where Claude Code
+    // reads them. A root SKILL.md must not shadow the named one.
+    fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: root\ndescription: d\n---\n");
+    fs.mkdirSync(path.join(dir, ".claude", "skills", "managing-beads"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, ".claude", "skills", "managing-beads", "SKILL.md"),
+      "---\nname: managing-beads\ndescription: d\n---\n",
+    );
+
+    expect(skillDirInClone(dir, "managing-beads")).toBe(
+      path.join(dir, ".claude", "skills", "managing-beads"),
+    );
+  });
+
   it("falls back to the repository root for a single-skill repo", () => {
     fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: solo\ndescription: d\n---\n");
 
@@ -118,6 +133,6 @@ describe("skillDirInClone", () => {
   it("names every place it looked when the skill is absent", () => {
     fs.writeFileSync(path.join(dir, "README.md"), "no skill here");
 
-    expect(() => skillDirInClone(dir, "missing")).toThrow(/missing\/.*skills\/missing/s);
+    expect(() => skillDirInClone(dir, "missing")).toThrow(/missing\/.*skills\/missing.*\.claude\/skills\/missing/s);
   });
 });
