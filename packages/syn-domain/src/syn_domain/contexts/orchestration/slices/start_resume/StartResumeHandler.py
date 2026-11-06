@@ -35,9 +35,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
         StartResumeCommand,
     )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-        WorkflowExecutionAggregate,
-    )
     from syn_domain.contexts.orchestration.ports.RemoteBranchPort import RemoteBranchPort
     from syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
         WorkflowExecutionRepositoryPort,
@@ -97,14 +94,13 @@ class StartResumeHandler:
         if admitted is None and self._maintenance is not None:
             await refuse_if_paused(self._maintenance)
 
-        parent = await self._parent(parent_execution_id)
-        # #1677: read here, once the start holds its slot - the wait for one is
-        # where a withdrawal lands. Returning ends the caller's `held` block, so
-        # the slot and the admission lease go straight back.
-        if parent.resume_withdrawn:
+        # #1677: the parent is read here, once the start holds its slot - the
+        # wait for one is where a withdrawal lands. Returning ends the caller's
+        # `held` block, so the slot and the admission lease go straight back.
+        command = await self._command_for(parent_execution_id)
+        if command is None:
             logger.info("Not starting the resume of %s: it was withdrawn", parent_execution_id)
             return None
-        command = parent.resume_start_command()
         if await self._executions.get_by_id(command.aggregate_id) is not None:
             logger.info(
                 "Resume %s of %s already started", command.aggregate_id, parent_execution_id
@@ -144,11 +140,10 @@ class StartResumeHandler:
         Returns the child it would start, so the start can be queued under the
         child's own id and shown as `queued` while it waits (#1557).
         """
-        parent = await self._parent(parent_execution_id)
-        if parent.resume_withdrawn:
+        command = await self._command_for(parent_execution_id)
+        if command is None:
             msg = f"The resume of {parent_execution_id} was withdrawn"
             raise ValueError(msg)
-        command = parent.resume_start_command()
         refusal = refuse_resume_start(command)
         if refusal is not None:
             raise ValueError(refusal)
@@ -176,9 +171,12 @@ class StartResumeHandler:
             for c in command.continuation_candidates
         ]
 
-    async def _parent(self, parent_execution_id: str) -> WorkflowExecutionAggregate:
+    async def _command_for(self, parent_execution_id: str) -> StartResumeCommand | None:
+        """The start the parent's resume admitted; None once it was withdrawn (#1677)."""
         parent = await self._executions.get_by_id(parent_execution_id)
         if parent is None:
             msg = f"Cannot start the resume of {parent_execution_id}: no such execution"
             raise ValueError(msg)
-        return parent
+        if parent.resume_withdrawn:
+            return None
+        return parent.resume_start_command()
