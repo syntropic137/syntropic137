@@ -402,6 +402,10 @@ class _World:
         monkeypatch.setattr(commands, "ensure_connected", _nothing)
         monkeypatch.setattr(wiring, "get_execute_workflow_handler", self._handler)
         monkeypatch.setattr(repositories, "get_execution_request_repository", lambda: self.requests)
+        # A resume is withdrawn on its parent's stream (#1677).
+        monkeypatch.setattr(
+            repositories, "get_workflow_execution_repository", lambda: self.executions
+        )
         # Cancel asks the REAL controller, over these execution streams (#1650).
         self.signals = InMemorySignalQueueAdapter()
         controller = ExecutionController(self.executions, self.signals)  # type: ignore[arg-type]
@@ -1252,3 +1256,98 @@ class TestCancellingAStartedExecutionIsUnchanged:
         assert signal is not None
         assert signal.reason == _REASON
         await _release_everything(world)
+
+
+# -- #1677: a queued RESUME can be cancelled ----------------------------------
+
+
+def _resume_withdrawals(world: _World, parent_id: str) -> int:
+    return sum(
+        1
+        for e in world.log.envelopes
+        if e.metadata.event_type == "ExecutionResumeWithdrawn"
+        and e.metadata.aggregate_id == parent_id
+    )
+
+
+async def _two_running_one_resume_queued(world: _World) -> tuple[list[str], str, str]:
+    """Both slots taken by direct starts, then a resume whose child must wait."""
+    running = [await world.post_execute(), await world.post_execute()]
+    await world.agent.until(lambda: len(world.agent.inside) == LIMIT)
+    parent_id = "exec-parent-1677"
+    child = await world.a_failed_parent_is_resumed(parent_id)
+    assert await world.coordinate() == (1, 0)
+    assert (await world.shown(child)).status == "queued"
+    return running, parent_id, child
+
+
+class TestAQueuedResumeCanBeCancelled:
+    async def test_cancel_withdraws_it_on_its_parent_and_it_never_runs(
+        self, world: _World
+    ) -> None:
+        running, parent_id, child = await _two_running_one_resume_queued(world)
+
+        cancelled = await _cancel(child)
+
+        assert (cancelled.success, cancelled.execution_id, cancelled.state) == (
+            True,
+            child,
+            "cancelled",
+        )
+        assert _resume_withdrawals(world, parent_id) == 1
+        await world.coordinate()
+        record = await world.resume_record(parent_id)
+        assert (record.status, record.status_reason) == ("withdrawn", _REASON)
+
+        await _release_everything(world)
+
+        assert child not in world.agent.entered
+        assert child not in world.executions.streams
+        assert set(running) <= set(world.agent.entered)
+        assert world.budget.matching("exec-") == []
+        assert _leases(world) == 0, "the withdrawn resume kept its admission lease"
+        assert await world.coordinate() == (0, 0)
+
+    async def test_cancelling_it_again_withdraws_nothing_twice(self, world: _World) -> None:
+        _, parent_id, child = await _two_running_one_resume_queued(world)
+        await _cancel(child)
+
+        again = await _cancel(child)
+
+        assert again.state == "cancelled"
+        assert _resume_withdrawals(world, parent_id) == 1
+        await _release_everything(world)
+
+    async def test_a_withdrawal_after_the_grant_does_not_run_and_gives_the_slot_back(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target: list[str] = []
+        running_at_grant: list[int] = []
+        _withdraw_once_granted(world, monkeypatch, target, running_at_grant)
+        running, _, child = await _two_running_one_resume_queued(world)
+        target.append(child)
+        behind = await world.post_execute()
+
+        world.agent.release(running[0])
+        await _until_released(world, child)
+
+        assert running_at_grant == [LIMIT]
+        await world.agent.until(lambda: behind in world.agent.inside)
+        assert child not in world.agent.entered
+        await _release_everything(world)
+        assert child not in world.executions.streams
+        assert world.budget.running == 0
+        assert _leases(world) == 0
+
+    async def test_after_a_restart_the_withdrawn_resume_is_never_offered(
+        self, world: _World
+    ) -> None:
+        _, parent_id, child = await _two_running_one_resume_queued(world)
+        await _cancel(child)
+
+        await world.restart()
+
+        assert await world.coordinate() == (0, 0)
+        assert (await world.resume_record(parent_id)).status == "withdrawn"
+        await _release_everything(world)
+        assert child not in world.agent.entered
