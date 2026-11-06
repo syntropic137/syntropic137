@@ -664,49 +664,49 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 #                  Previous pins, for the record: claude-cli 14eeb7c5,
 #                  omni-agent 01e3c15f, toolchain 885be5de, all from
 #                  agentic-workspace be32a683 (release PR #80).
-# AGENTIC-WORKSPACE VERSION.JSON IN EVERY IMAGE + SCRIPTED-AGENT STUB, 2026-10-28.
-# Taken from release-branch run 40620909183 ("Release Workspace Images", push
-# to release, success) of agentic-workspace 80f0b0cc (release PR #120, after
-# #115), the commit lib/agentic-workspace pins. Each digest below is what
+# AGENTIC-WORKSPACE TRANSFER WALK PRUNED TO THE OUTPUT, 2026-11-06 (#2185, P0).
+# Taken from release-branch run 42273237513 ("Release Workspace Images", push
+# to release, success) of agentic-workspace e9f8a919 (release PR #123, after
+# #120), the commit lib/agentic-workspace pins. Each digest below is what
 # `docker buildx imagetools inspect --format '{{.Manifest.Digest}}'` returns
-# for the full-commit tag 80f0b0cc52f434fe17241a42965b3732ac3cedaa, media type
+# for the full-commit tag e9f8a919f65377f02cfe33e0aa2a09d08ac9ccdb, media type
 # application/vnd.oci.image.index.v1+json (the INDEX, amd64 + arm64). Every
-# image carries agentic.image.channel=release and revision 80f0b0cc on both
-# platforms, and `cosign verify` (v3.1.3) passes for each against the
-# release-images.yml@refs/heads/release identity with the GitHub Actions OIDC
-# issuer. This release carries AW #118 (#93: every image ships
-# /opt/agentic/version.json), #117 (publishes the scripted-agent stub image),
-# #119 (scripted-agent transcript file and pinned apss session exporter,
-# syn137#1918 slice 1) and #116 (bounded cleanup of a cancelled docker
-# create). Manifest versions did not move, so the version tags stayed on the
-# previous builds (first-write-wins); pin the digest, never the version tag.
+# image carries agentic.image.channel=release and revision e9f8a919 on both
+# platforms, and `cosign verify` (v3.1.3) passes for each against
+# AGENTIC_WORKSPACE_IDENTITY_REGEXP with the GitHub Actions OIDC issuer. This
+# release carries AW #122 only: `read_files` prunes its walk to the patterns'
+# literal prefix, so a large /workspace/.tools or .git/modules no longer ends
+# every output collection `entry_limit_exceeded`, and one `**/` may match no
+# directory, so `artifacts/output/**/*` reads a top-level deliverable.md. That
+# fix is host-side Python; the images are rebuilt only because the gitlink
+# must equal the commit they were built from. Manifest versions did not move.
 #
-# omni-agent       dd4d0e06, omni-agent manifest 1.16.0.
-# toolchain        2d617e6c, built FROM omni dd4d0e06 in the same run (label
+# omni-agent       5b1a9c6f, omni-agent manifest 1.16.0.
+# toolchain        036463fb, built FROM omni 5b1a9c6f in the same run (label
 #                  org.opencontainers.image.base.digest), toolchain manifest
 #                  1.8.0.
-# claude-cli       c7541116, claude-cli manifest 2.4.0.
-# scripted-agent   01981d26 (agentic-workspace-scripted-agent, manifest 0.1.0,
-#                  built FROM claude-cli c7541116, GHCR package public). NOT a
-#                  provider pin: SCRIPTED_AGENT_IMAGE lands with #1918 PR 3.
+# claude-cli       a28cd5f5, claude-cli manifest 2.4.0.
+# scripted-agent   fffc35ec (record only; not a provider pin, #1918 PR 3).
 #
-#                  Previous pins, for the record: claude-cli be153b5d,
-#                  omni-agent 8d5b4e5f, toolchain 23d33218, all from
-#                  agentic-workspace 896449c5 (release PR #115). Before that
-#                  claude-cli 10448737, omni-agent c98581e4, toolchain
-#                  446627b8 from 42ea28d4 (release PR #105, never on main:
-#                  #2089 was superseded), and claude-cli 172d7cc1, omni-agent
-#                  d701b1a6, toolchain 126e082f from fb696fd8 (release PR #102).
+#                  Previous pins, for the record: claude-cli c7541116,
+#                  omni-agent dd4d0e06, toolchain 2d617e6c, scripted-agent
+#                  01981d26, all from agentic-workspace 80f0b0cc (release PR
+#                  #120). Before that claude-cli be153b5d, omni-agent
+#                  8d5b4e5f, toolchain 23d33218 from 896449c5 (release PR
+#                  #115), claude-cli 10448737, omni-agent c98581e4, toolchain
+#                  446627b8 from 42ea28d4 (release PR #105, never on main), and
+#                  claude-cli 172d7cc1, omni-agent d701b1a6, toolchain 126e082f
+#                  from fb696fd8 (release PR #102).
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:c7541116f7e81628c0972afd331b0fd7d732e9d61b1c067ef65cce8bf720abb2"
+            "sha256:a28cd5f5f07798d94a7122925debc246be02c2f2ad0b8f056e4c23cdab3635ab"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:dd4d0e062f1b75ffe971562d8498d9a91af613fdfdb81955d933fb587e8d5c71"
+            "sha256:5b1a9c6ff9d558bd37283afe05009558357139021b292ac9d9ba1a598753c777"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:2d617e6c7c3431464b555387f58adf80d4c8f90bbbf87c130614617f1b804a47"
+            "sha256:036463fb3ed9ca0eb26bf6546d0f14914b92a88ed3a0c6efdf165ebef51e3f43"
         ),
     }
 )
@@ -848,4 +848,5 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:126e082fff3b3e13a8f1da177e87f9018dd3f4cfa77cf38a9bf1aeaa6ef77651",  # 7b164f10
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:446627b8d120735423fe89ccb1f9b3617519f245ff205f84e87f146dd8acae8c",  # 8711fedf (#2089, superseded before main)
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:23d33218080ba5557af95f9591b869b6f22419647601b7ddc502c14f4c38cfb7",  # f569e864 (#2149)
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:2d617e6c7c3431464b555387f58adf80d4c8f90bbbf87c130614617f1b804a47",  # 7f75a681 (#2166)
 )
