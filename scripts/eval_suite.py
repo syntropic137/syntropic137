@@ -1107,7 +1107,8 @@ def _judge_prompt(expected: Expected, findings: list[str]) -> str:
 
 class _JudgeReply(_Frozen):
     verdict: JudgeVerdict
-    quote: str
+    quote: str = ""
+    """Empty unless `match`. A model that omits it, rather than sending "", means the same."""
     reason: str
 
 
