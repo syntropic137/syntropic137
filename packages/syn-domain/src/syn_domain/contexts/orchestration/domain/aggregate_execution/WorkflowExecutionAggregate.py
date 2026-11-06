@@ -101,6 +101,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_rules import (
     ResumeRefused,
     decide_resume,
+    decide_resume_withdrawal,
     refuse_reopening,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
@@ -345,8 +346,7 @@ class WorkflowExecutionAggregate(
         #: built under - where a None refuses the start rather than naming one.
         self._resume_execution_id: str | None = None
         self._admitted_resume = AdmittedResume()
-        #: The admitted resume was withdrawn before its child started (#1677).
-        #: Still spent: `_resumed` stays True, so it is never admitted again.
+        #: #1677: withdrawn before its child started; `_resumed` stays True.
         self._resume_withdrawn: bool = False
         #: What this run was started with, pinned so a resume of it runs the same
         #: thing (#1454, #1457). Never read back from the workflow template.
@@ -873,28 +873,11 @@ class WorkflowExecutionAggregate(
 
     @command_handler("WithdrawResumeCommand")
     def withdraw_resume(self, command: WithdrawResumeCommand) -> None:
-        """Withdraw the resume this run admitted, so its child never starts (#1677).
-
-        Idempotent. Decides only about the RESUME: whether the child already
-        started is the caller's to know, and a started child is cancelled.
-        """
-        from syn_domain.contexts.orchestration.domain.events.ExecutionResumeWithdrawnEvent import (
-            ExecutionResumeWithdrawnEvent,
-        )
-
-        if not self._resumed or self._resume_execution_id != command.resume_execution_id:
-            msg = f"{self.id} admitted no resume {command.resume_execution_id}"
-            raise ValueError(msg)
-        if self._resume_withdrawn:
-            return
-        self._apply(
-            ExecutionResumeWithdrawnEvent(
-                execution_id=str(self.id),
-                resume_execution_id=command.resume_execution_id,
-                reason=command.reason,
-                withdrawn_at=datetime.now(UTC),
-            )
-        )
+        """Withdraw the admitted resume before its child starts (#1677). Idempotent."""
+        admitted = self._resume_execution_id if self._resumed else None
+        event = decide_resume_withdrawal(self.id, admitted, self._resume_withdrawn, command)
+        if event is not None:
+            self._apply(event)
 
     @event_sourcing_handler("WorkflowExecutionStarted")
     def on_execution_started(self, event: WorkflowExecutionStartedEvent) -> None:

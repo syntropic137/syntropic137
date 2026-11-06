@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
         ResumeExecutionCommand,
+        WithdrawResumeCommand,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         InheritedEvidenceGate,
@@ -33,6 +34,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
         ExecutionResumedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.ExecutionResumeWithdrawnEvent import (
+        ExecutionResumeWithdrawnEvent,
     )
 
 #: Terminal states a resume may be taken from on the request alone (ADR-014 s7).
@@ -385,3 +389,32 @@ def _gate_held_at(
     if open_gate is None or open_gate.next_phase_id != resume_phase_id:
         return None
     return open_gate
+
+
+def decide_resume_withdrawal(
+    execution_id: str | None,
+    admitted_resume_id: str | None,
+    withdrawn: bool,
+    command: WithdrawResumeCommand,
+) -> ExecutionResumeWithdrawnEvent | None:
+    """The withdrawal of an admitted resume (#1677); None if it is already withdrawn.
+
+    Decides only about the RESUME: whether the child already started is the
+    caller's to know, and a started child is cancelled. The parent stays
+    resumed, so withdrawing never re-opens the one-resume rule.
+    """
+    from syn_domain.contexts.orchestration.domain.events.ExecutionResumeWithdrawnEvent import (
+        ExecutionResumeWithdrawnEvent,
+    )
+
+    if admitted_resume_id is None or admitted_resume_id != command.resume_execution_id:
+        msg = f"{execution_id} admitted no resume {command.resume_execution_id}"
+        raise ValueError(msg)
+    if withdrawn:
+        return None
+    return ExecutionResumeWithdrawnEvent(
+        execution_id=str(execution_id),
+        resume_execution_id=command.resume_execution_id,
+        reason=command.reason,
+        withdrawn_at=datetime.now(UTC),
+    )
