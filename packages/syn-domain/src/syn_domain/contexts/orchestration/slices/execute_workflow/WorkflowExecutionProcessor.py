@@ -525,7 +525,7 @@ class WorkflowExecutionProcessor:
             msg = f"Claimed run {claimed.execution_id} has no execution stream"
             raise LookupError(msg)
         # #1677: a withdrawn resume drains as the cancelled run it now is.
-        await cancel_if_withdrawn(fold.journal, aggregate)
+        aggregate = await cancel_if_withdrawn(fold.journal, aggregate) or aggregate
         pins = aggregate.start_pins
         repos = [RepositoryRef.from_slug(c.repository) for c in pins.source_commits]
         phase_outputs = await inherited_outputs(self._artifact_query, pins.resumed_from)

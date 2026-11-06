@@ -1040,6 +1040,29 @@ def _leases(world: _World) -> int:
     return world.gate._outstanding  # pyright: ignore[reportPrivateUsage]
 
 
+async def _executor_on_a_run_queue(
+    world: _World,
+) -> tuple[InMemoryExecutionRunQueue, WorkflowExecutionProcessor]:
+    """Give the resume start a run queue, and an executor that drains its rows (#1677)."""
+    queue = InMemoryExecutionRunQueue()
+    await queue.register(
+        ExecutorHost(
+            host_id="host-1677",
+            container_id="container-1677",
+            generation="g",
+            epoch=ORCHESTRATION_EVENT_EPOCH,
+            reap_scope="scope-1677",
+        ),
+        capacity=1,
+    )
+    await queue.heartbeat("host-1677")
+    world.dispatcher._resume_handler._processor._run_queue = queue  # pyright: ignore[reportPrivateUsage]
+    executor = _processor(world.executions, world.agent)
+    executor._execution_events = EventStoreExecutionEventStream(world.event_store)  # pyright: ignore[reportPrivateUsage]
+    executor._todo_projection_type = ExecutionTodoProjection  # pyright: ignore[reportPrivateUsage]
+    return queue, executor
+
+
 async def _two_running_one_queued(world: _World) -> tuple[list[str], str]:
     running = [await world.post_execute(), await world.post_execute()]
     queued = await world.post_execute()
@@ -1442,22 +1465,7 @@ class TestAQueuedResumeCanBeCancelled:
 
         monkeypatch.setattr(world.executions, "get_by_id", paused_lookup)
         running, _, child = await _two_running_one_resume_queued(world)
-        queue = InMemoryExecutionRunQueue()
-        await queue.register(
-            ExecutorHost(
-                host_id="host-1677",
-                container_id="container-1677",
-                generation="g",
-                epoch=ORCHESTRATION_EVENT_EPOCH,
-                reap_scope="scope-1677",
-            ),
-            capacity=1,
-        )
-        await queue.heartbeat("host-1677")
-        world.dispatcher._resume_handler._processor._run_queue = queue  # pyright: ignore[reportPrivateUsage]
-        executor = _processor(world.executions, world.agent)
-        executor._execution_events = EventStoreExecutionEventStream(world.event_store)  # pyright: ignore[reportPrivateUsage]
-        executor._todo_projection_type = ExecutionTodoProjection  # pyright: ignore[reportPrivateUsage]
+        queue, executor = await _executor_on_a_run_queue(world)
         promote = queue.mark_admitted
         drained: list[asyncio.Task[WorkflowExecutionResult]] = []
 
@@ -1483,6 +1491,64 @@ class TestAQueuedResumeCanBeCancelled:
         proceed.set()
         async with asyncio.timeout(_WITHIN):
             while not (drained and (drained[0].done() or child in world.agent.entered)):
+                await asyncio.sleep(0.01)
+        entered = list(world.agent.entered)
+        await _release_everything(world)
+
+        assert cancelled.message == "Withdrawn before it started: it will not run"
+        assert child not in entered
+        assert world.executions.streams[child].status.value == "cancelled"
+        assert (await queue.in_use()).claimed == 0
+        assert world.budget.running == 0
+        assert _leases(world) == 0
+
+    async def test_a_row_the_sweep_promotes_before_the_opener_checks_is_not_run(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The ``opening`` sweep promotes a row whose stream exists without the
+        # opener: here an executor claims and drains it between the child's
+        # open and the opener's own check, so the claim must check as well.
+        lookup = world.executions.get_by_id
+        target: list[str] = []
+        paused, proceed = asyncio.Event(), asyncio.Event()
+
+        async def paused_lookup(execution_id: str) -> WorkflowExecutionAggregate | None:
+            if execution_id in target and not paused.is_set():
+                paused.set()
+                await proceed.wait()
+            return await lookup(execution_id)
+
+        monkeypatch.setattr(world.executions, "get_by_id", paused_lookup)
+        running, _, child = await _two_running_one_resume_queued(world)
+        queue, executor = await _executor_on_a_run_queue(world)
+        save_new = world.executions.save_new
+        drained: list[WorkflowExecutionResult] = []
+
+        async def opened_then_swept(aggregate: WorkflowExecutionAggregate) -> None:
+            await save_new(aggregate)
+            if aggregate.id != child:
+                return
+            await queue.mark_admitted(child)
+            claimed = await queue.claim("host-1677")
+            assert claimed is not None
+            drain = asyncio.create_task(executor.run_claimed(claimed))
+            async with asyncio.timeout(_WITHIN):
+                while not (drain.done() or child in world.agent.entered):
+                    await asyncio.sleep(0.01)
+            if drain.done():
+                drained.append(drain.result())
+                await queue.close(claimed)
+
+        monkeypatch.setattr(world.executions, "save_new", opened_then_swept)
+        target.append(child)
+        world.agent.release(running[0])
+        async with asyncio.timeout(_WITHIN):
+            await paused.wait()
+
+        cancelled = await _cancel(child)
+        proceed.set()
+        async with asyncio.timeout(_WITHIN):
+            while not (drained or child in world.agent.entered):
                 await asyncio.sleep(0.01)
         entered = list(world.agent.entered)
         await _release_everything(world)

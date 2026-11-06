@@ -88,14 +88,14 @@ async def open_start(
     withdrawn = await cancel_if_withdrawn(journal, aggregate)
     if queue is not None:
         await queue.mark_admitted(execution_id)
-    if withdrawn:
+    if withdrawn is not None:
         raise ResumeWithdrawnError(execution_id)
 
 
 async def cancel_if_withdrawn(
     journal: ExecutionJournal, aggregate: WorkflowExecutionAggregate
-) -> bool:
-    """Cancel a resumed child whose parent's resume was withdrawn; return whether it was (#1677).
+) -> WorkflowExecutionAggregate | None:
+    """Cancel a resumed child whose parent's resume was withdrawn (#1677).
 
     The start reads the parent once it holds a slot, but awaits again before
     its stream opens, and a cancel landing there finds no child and answers
@@ -104,20 +104,25 @@ async def cancel_if_withdrawn(
     two writes lands second sees the other, and the child never runs. The
     opener asks before it promotes the row, and the claimer asks again before
     it drains, because the ``opening`` sweep may promote a row on its own.
+
+    Returns:
+        The child as it now stands, cancelled, or None if it was not withdrawn.
     """
     origin = aggregate.start_pins.resumed_from
     if origin is None:
-        return False
+        return None
     parent = await journal.reload(origin.parent_execution_id)
     if parent is None or not parent.resume_withdrawn:
-        return False
-    if aggregate.accepts_control(ControlSignalType.CANCEL):
-        aggregate.cancel_execution(
+        return None
+    # Read again: the other side of the open may have cancelled it already.
+    child = await journal.reload(aggregate.id or "") or aggregate
+    if child.accepts_control(ControlSignalType.CANCEL):
+        child.cancel_execution(
             CancelExecutionCommand(
-                execution_id=aggregate.id or "",
+                execution_id=child.id or "",
                 phase_id=origin.resume_phase_id,
                 reason="Withdrawn before it started",
             )
         )
-        await journal.append(aggregate)
-    return True
+        await journal.append(child)
+    return child
