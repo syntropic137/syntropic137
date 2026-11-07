@@ -366,35 +366,45 @@ def scrub_bytes(
     start = 0
     while start <= len(content):
         end = content.find(b"\n", start)
-        if end == -1:
-            end = len(content)
+        end = len(content) if end == -1 else end
         line = str(view[start:end], "utf-8", "surrogateescape")
-        replaced = line
-        if scrubber.matches(line):
-            if len(line) > SCRUB_LINE_MAX_CHARS:
-                msg = f"a line of {len(line)} characters holds a value to scrub"
-                raise ScrubRefusedError(msg)
-            # Checked before the rewrite, so a line of short values never
-            # builds the copy it would grow to.
-            written = start if scrubbed is None else len(scrubbed)
-            if written + len(line) + scrubber.growth(line) > max_bytes:
-                msg = f"scrubbing would grow {len(content)} bytes past {max_bytes}"
-                raise ScrubRefusedError(msg)
-            replaced = scrubber.scrub(line)
+        written = start if scrubbed is None else len(scrubbed)
+        replaced = _rewrite(scrubber, line, written, max_bytes)
         if replaced != line and scrubbed is None:
             scrubbed = bytearray(view[:start])
         if scrubbed is not None:
-            out = replaced.encode("utf-8", errors="surrogateescape")
-            if len(scrubbed) + len(out) + (end < len(content)) > max_bytes:
-                msg = f"scrubbing would grow {len(content)} bytes past {max_bytes}"
-                raise ScrubRefusedError(msg)
-            scrubbed += out
-            if end < len(content):
-                scrubbed += b"\n"
-            del out
+            _append(scrubbed, replaced, newline=end < len(content), max_bytes=max_bytes)
         del line, replaced
         start = end + 1
     return content if scrubbed is None else bytes(scrubbed)
+
+
+def _rewrite(scrubber: CredentialScrubber, line: str, written: int, max_bytes: int) -> str:
+    """``line`` scrubbed, checked before the rewrite is built.
+
+    So a line of short values never builds the copy it would grow to, and a
+    line too long to rewrite cheaply is never rewritten.
+    """
+    if not scrubber.matches(line):
+        return line
+    if len(line) > SCRUB_LINE_MAX_CHARS:
+        msg = f"a line of {len(line)} characters holds a value to scrub"
+        raise ScrubRefusedError(msg)
+    if written + len(line) + scrubber.growth(line) > max_bytes:
+        msg = f"scrubbing would grow past {max_bytes} bytes"
+        raise ScrubRefusedError(msg)
+    return scrubber.scrub(line)
+
+
+def _append(scrubbed: bytearray, line: str, *, newline: bool, max_bytes: int) -> None:
+    """``line`` added to ``scrubbed``, refused if that would pass ``max_bytes``."""
+    out = line.encode("utf-8", errors="surrogateescape")
+    if len(scrubbed) + len(out) + newline > max_bytes:
+        msg = f"scrubbing would grow past {max_bytes} bytes"
+        raise ScrubRefusedError(msg)
+    scrubbed += out
+    if newline:
+        scrubbed += b"\n"
 
 
 def scrub_files(
