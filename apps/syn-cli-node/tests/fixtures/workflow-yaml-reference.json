@@ -110,6 +110,29 @@
       ],
       "document_sha256": "64f78f6d0b83ad00405b68bf9ae8bc3641c1c0e0d42553872fbbfd451e24fb5f"
     },
+    "workflows/dreamship/implement-v7/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "review",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/review.md"
+        },
+        {
+          "id": "remediate",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/remediate.md"
+        }
+      ],
+      "document_sha256": "422060e85e1968ccd6bfed5d124781affdc99403f3a32645750bf95f4008f93f"
+    },
     "workflows/evals/implement-pinned/workflow.yaml": {
       "phases": [
         {
@@ -208,6 +231,17 @@
         }
       ],
       "document_sha256": "f65bd5f8331c9134d9083df8cde2dae95c6fbaf08614ec20f7cec2c759c8bca7"
+    },
+    "workflows/evals/verify-pinned-codex-gpt-6-1-sol/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "3e8c3cc0d0f416a535efe7c5a9d28e2071527af862c21a8b66ec51bfcc7c1227"
     },
     "workflows/evals/verify-pinned-codex-gpt-6-luna/workflow.yaml": {
       "phases": [
