@@ -654,3 +654,19 @@ class ResumeExecutionCommand:
         self.resume_execution_id = resume_execution_id
         self.override_cancellation = override_cancellation
         self.acknowledge_external_effects = acknowledge_external_effects
+
+
+class WithdrawResumeCommand:
+    """Command to withdraw an admitted resume before its child starts (#1677).
+
+    Addressed to the PARENT, which admitted the resume and so is the one record
+    that can take it back. `resume_execution_id` names the child being
+    withdrawn, so a stale request cannot withdraw a different resume.
+    """
+
+    def __init__(
+        self, execution_id: str, resume_execution_id: str, reason: str | None = None
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.resume_execution_id = resume_execution_id
+        self.reason = reason

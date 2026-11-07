@@ -17,6 +17,7 @@ from event_sourcing import StreamAlreadyExistsError
 
 from syn_domain.contexts._shared.maintenance import refuse_if_paused
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration._shared.resume_withdrawal import ResumeWithdrawnError
 from syn_domain.contexts.orchestration._shared.workspace_resources import (
     require_phases_within_cap,
 )
@@ -84,7 +85,7 @@ class StartResumeHandler:
         *,
         admitted: AdmissionTicket | None = None,
     ) -> WorkflowExecutionResult | None:
-        """Run the child of ``parent_execution_id``; None if it already started.
+        """Run the child of ``parent_execution_id``; None if it started or was withdrawn.
 
         Raises when the parent does not exist, has admitted no resume, or has a
         snapshot the child may not start from (`resume_start.refuse_resume_start`).
@@ -94,7 +95,13 @@ class StartResumeHandler:
         if admitted is None and self._maintenance is not None:
             await refuse_if_paused(self._maintenance)
 
+        # #1677: the parent is read here, once the start holds its slot - the
+        # wait for one is where a withdrawal lands. Returning ends the caller's
+        # `held` block, so the slot and the admission lease go straight back.
         command = await self._command_for(parent_execution_id)
+        if command is None:
+            logger.info("Not starting the resume of %s: it was withdrawn", parent_execution_id)
+            return None
         if await self._executions.get_by_id(command.aggregate_id) is not None:
             logger.info(
                 "Resume %s of %s already started", command.aggregate_id, parent_execution_id
@@ -123,6 +130,10 @@ class StartResumeHandler:
                 "Resume %s of %s already started", command.aggregate_id, parent_execution_id
             )
             return None
+        except ResumeWithdrawnError:
+            # #1677: withdrawn while this start prepared; the child opened cancelled.
+            logger.info("Resume %s of %s was withdrawn", command.aggregate_id, parent_execution_id)
+            return None
 
     async def validate(self, parent_execution_id: str) -> ResumeChild:
         """Raise now if the child of ``parent_execution_id`` could not start.
@@ -135,6 +146,9 @@ class StartResumeHandler:
         child's own id and shown as `queued` while it waits (#1557).
         """
         command = await self._command_for(parent_execution_id)
+        if command is None:
+            msg = f"The resume of {parent_execution_id} was withdrawn"
+            raise ValueError(msg)
         refusal = refuse_resume_start(command)
         if refusal is not None:
             raise ValueError(refusal)
@@ -162,9 +176,12 @@ class StartResumeHandler:
             for c in command.continuation_candidates
         ]
 
-    async def _command_for(self, parent_execution_id: str) -> StartResumeCommand:
+    async def _command_for(self, parent_execution_id: str) -> StartResumeCommand | None:
+        """The start the parent's resume admitted; None once it was withdrawn (#1677)."""
         parent = await self._executions.get_by_id(parent_execution_id)
         if parent is None:
             msg = f"Cannot start the resume of {parent_execution_id}: no such execution"
             raise ValueError(msg)
+        if parent.resume_withdrawn:
+            return None
         return parent.resume_start_command()

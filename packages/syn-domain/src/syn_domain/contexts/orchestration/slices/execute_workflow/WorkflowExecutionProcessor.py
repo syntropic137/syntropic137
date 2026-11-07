@@ -97,9 +97,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     inherited_phase_ids,
     record_continuation,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import open_start
-from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
-    RunScopedTodoFold,
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import (
+    fold_claimed_run,
+    open_start,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.shutdown_interruption import (
     preserve_interrupted_run,
@@ -160,6 +160,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
         ExecutionEventStream,
+        RunScopedTodoFold,
         TodoProjectionType,
     )
 
@@ -511,16 +512,12 @@ class WorkflowExecutionProcessor:
         if self._execution_events is None or self._todo_projection_type is None:
             msg = "run_claimed needs execution_events and todo_projection_type (ADR-072 D8)"
             raise RuntimeError(msg)
-        fold = await RunScopedTodoFold.for_execution(
+        fold, aggregate = await fold_claimed_run(
             claimed.execution_id,
             self._execution_repo,
             self._execution_events,
             self._todo_projection_type,
         )
-        aggregate = await fold.journal.reload(claimed.execution_id)
-        if aggregate is None:
-            msg = f"Claimed run {claimed.execution_id} has no execution stream"
-            raise LookupError(msg)
         pins = aggregate.start_pins
         repos = [RepositoryRef.from_slug(c.repository) for c in pins.source_commits]
         phase_outputs = await inherited_outputs(self._artifact_query, pins.resumed_from)

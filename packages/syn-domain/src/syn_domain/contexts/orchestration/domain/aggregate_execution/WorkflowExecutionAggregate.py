@@ -45,6 +45,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     StartExecutionCommand,
     StartPhaseCommand,
     StartResumeCommand,
+    WithdrawResumeCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
     EvalMembership,
@@ -100,6 +101,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_rules import (
     ResumeRefused,
     decide_resume,
+    decide_resume_withdrawal,
     refuse_reopening,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
@@ -154,6 +156,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.RemoveExecutionTagsCommand import (
         RemoveExecutionTagsCommand,
     )
+    from syn_domain.contexts.orchestration.domain.events import ExecutionResumeWithdrawnEvent
     from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
         AgentExecutionCompletedEvent,
     )
@@ -336,10 +339,8 @@ class WorkflowExecutionAggregate(
         #: id below, which under ADR-023 can replay as None and would make the
         #: rule fail OPEN - see `resume_rules.refuse_resume`.
         self._resumed: bool = False
-
-        #: The child's id: for the refusal message, and the id its start is
-        #: built under - where a None refuses the start rather than naming one.
-        self._resume_execution_id: str | None = None
+        #: The resume admitted, child id included (None refuses its start), and
+        #: whether it was withdrawn (#1677) - which leaves `_resumed` True.
         self._admitted_resume = AdmittedResume()
         #: What this run was started with, pinned so a resume of it runs the same
         #: thing (#1454, #1457). Never read back from the workflow template.
@@ -543,7 +544,12 @@ class WorkflowExecutionAggregate(
     @property
     def resume_execution_id(self) -> str | None:
         """The resume this run admitted, or None. The other half of `resumed_from`."""
-        return self._resume_execution_id
+        return self._admitted_resume.resume_execution_id
+
+    @property
+    def resume_withdrawn(self) -> bool:
+        """Whether the resume this run admitted was withdrawn: its child must never start."""
+        return self._admitted_resume.withdrawn
 
     def resume_start_command(self) -> StartResumeCommand:
         """The start of the resume this run admitted, from this stream alone."""
@@ -843,7 +849,7 @@ class WorkflowExecutionAggregate(
             workflow_id=self._workflow_id or "",
             status=self._status,
             resumed=self._resumed,
-            resume_execution_id=self._resume_execution_id,
+            resume_execution_id=self._admitted_resume.resume_execution_id,
             phase_definitions=self._phase_definitions,
             completed_phase_ids=self._completed_phase_ids,
             phase_artifact_ids=self._phase_artifact_ids,
@@ -858,6 +864,14 @@ class WorkflowExecutionAggregate(
         if isinstance(decision, ResumeRefused):
             raise ValueError(decision.reason)
         self._apply(decision.event)
+
+    @command_handler("WithdrawResumeCommand")
+    def withdraw_resume(self, command: WithdrawResumeCommand) -> None:
+        """Withdraw the admitted resume before its child starts (#1677). Idempotent."""
+        if self._admitted_resume.resume_execution_id != command.resume_execution_id:
+            raise ValueError(f"{self.id} admitted no resume {command.resume_execution_id}")
+        if event := decide_resume_withdrawal(self.id, self._admitted_resume, command):
+            self._apply(event)
 
     @event_sourcing_handler("WorkflowExecutionStarted")
     def on_execution_started(self, event: WorkflowExecutionStartedEvent) -> None:
@@ -1088,8 +1102,11 @@ class WorkflowExecutionAggregate(
         if not resumed_event_applies(event, self.id):
             return
         self._resumed = True
-        self._resume_execution_id = evt(event, "resume_execution_id")
         self._admitted_resume = read_admitted_resume(event)
+
+    @event_sourcing_handler("ExecutionResumeWithdrawn")
+    def on_execution_resume_withdrawn(self, _event: ExecutionResumeWithdrawnEvent) -> None:
+        self._admitted_resume = self._admitted_resume.model_copy(update={"withdrawn": True})
 
     @event_sourcing_handler("ExecutionForked")
     def on_execution_forked(self, event: ExecutionResumedEvent) -> None:
@@ -1107,5 +1124,4 @@ class WorkflowExecutionAggregate(
         """
         admitted = read_admitted_forked_resume(event)
         self._resumed = True
-        self._resume_execution_id = admitted.resume_execution_id
         self._admitted_resume = admitted
