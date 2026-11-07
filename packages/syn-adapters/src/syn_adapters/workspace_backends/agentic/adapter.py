@@ -28,15 +28,12 @@ from agentic_isolation.contract import OperationError
 from agentic_isolation.providers.base import SupportsOperations
 from agentic_isolation.providers.base import Workspace as ProviderWorkspace
 from agentic_isolation.providers.capabilities import SupportsFileTransfer, TransferRoot
-from agentic_isolation.providers.file_transfer import ReadFilesResult, ReadLimits
 from agentic_isolation.providers.operation_spool import OperationFailure
 
 from syn_adapters.diagnostics import capture_signal_death
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
-    MAX_COLLECTION_BYTES,
-    MAX_COLLECTION_ENTRIES,
-    MAX_DIRECTORY_DEPTH,
     check_workspace_health,
+    collection_read_limits,
     copy_files_to_workspace,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
@@ -82,7 +79,6 @@ from syn_shared.env_constants import (
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
     ENV_SYN_WORKSPACE_HOST_DIR,
 )
-from syn_shared.settings import get_settings
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
@@ -90,6 +86,7 @@ if TYPE_CHECKING:
 
     from agentic_isolation import AgenticWorkspace
     from agentic_isolation.contract import FinalizationOutcome
+    from agentic_isolation.providers.file_transfer import ReadFilesResult
     from agentic_isolation.providers.base import CredentialResolver, Workspace, WorkspaceProvider
 
     from syn_domain.contexts.orchestration import (
@@ -768,21 +765,6 @@ class AgenticIsolationAdapter:
         )
         refused = tuple(FileRefusal(path=r.path, reason=r.reason) for r in result.refused)
         return result.files, refused
-
-
-def collection_read_limits() -> ReadLimits:
-    """The budget for one read, chosen to match what the host-mount read allowed.
-
-    The same per-file cap as artifact storage, and the same collection-wide
-    bytes, entries and depth the bind-mount walk was bounded by, so moving
-    Docker onto the provider read does not move where a collection is cut off.
-    """
-    return ReadLimits(
-        max_total_bytes=MAX_COLLECTION_BYTES,
-        max_file_bytes=get_settings().storage.max_file_size_bytes,
-        max_entries=MAX_COLLECTION_ENTRIES,
-        max_depth=MAX_DIRECTORY_DEPTH,
-    )
 
 
 def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:
