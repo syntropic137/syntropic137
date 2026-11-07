@@ -137,7 +137,10 @@ async def test_trusted_contributor_fires(association: str) -> None:
 @pytest.mark.asyncio
 async def test_pr_author_is_judged_not_the_sender() -> None:
     """A maintainer pushing to an external PR does not make its code trusted."""
-    handler, _ = await _handler("pull_request.synchronize", TRUSTED)
+    policy = ContributorPolicy(
+        mode=ContributorGuardMode.TRUSTED, allowed_logins=frozenset({"maintainer"})
+    )
+    handler, _ = await _handler("pull_request.synchronize", policy)
     payload = _pr_payload("outsider", "NONE")
     payload["sender"] = {"login": "maintainer", "type": "User"}
 
