@@ -66,7 +66,13 @@ Blocked instead of fired when a guard refuses it (`TriggerBlocked`).
 Who a GitHub event is attributed to when deciding whether it may make a Trigger
 Rule fire: the author of the content the event carries (comment, review, pull
 request or issue, most specific first), or the event's sender when it carries
-none (`check_run`, `push`).
+none (`check_run`, `push`). A polled event has no sender; its Events API
+**actor** stands in for one, for the Contributor Guard only.
+
+The most specific content with an author decides even when it has no Author
+Association (the Events API omits it on reviews): that author is then
+untrusted unless their login is allowed, and never inherits the association of
+the pull request or issue around them.
 
 Deliberately NOT the sender in general. The sender of a `check_run` is CI and
 the sender of a `pull_request.synchronize` may be a maintainer; neither makes

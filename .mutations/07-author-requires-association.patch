@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/contributor_guard.py b/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/contributor_guard.py
+index 8170906a9..8d602ba1a 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/contributor_guard.py
++++ b/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/contributor_guard.py
+@@ -137,7 +137,7 @@ def contributor_of(payload: object) -> Contributor:
+     # author decides, association or not, so an unclassified comment or review
+     # never borrows the trust of the PR or issue it sits on.
+     for content in (parsed.comment, parsed.review, parsed.pull_request, parsed.issue):
+-        if content is not None and content.user is not None and content.user.login:
++        if content is not None and content.author_association is not None and content.user is not None:
+             return Contributor(login=content.user.login, association=content.author_association)
+     for user in (parsed.sender, parsed.events_api_actor):
+         if user is not None and user.login:

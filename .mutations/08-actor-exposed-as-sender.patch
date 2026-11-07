@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/event_type_mapper.py b/packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/event_type_mapper.py
+index 987dff78b..ac1adbd6e 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/event_type_mapper.py
++++ b/packages/syn-domain/src/syn_domain/contexts/github/slices/event_pipeline/event_type_mapper.py
+@@ -82,7 +82,7 @@ def map_events_api_to_normalized(
+     # push carries no sender, only the Events API ``actor``.
+     actor = raw_event.get("actor")
+     if isinstance(actor, dict) and actor.get("login"):
+-        enriched_payload[EVENTS_API_ACTOR_KEY] = {"login": actor["login"]}
++        enriched_payload["sender"] = {"login": actor["login"]}
+ 
+     # Events API returns null for pull_request.draft — normalize to False
+     # so trigger conditions like "pull_request.draft = false" evaluate correctly.
