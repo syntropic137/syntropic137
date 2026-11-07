@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.session_inventory import SessionInventorySettings
     from syn_shared.settings.session_store import SessionStoreSettings
     from syn_shared.settings.storage import StorageSettings
+    from syn_shared.settings.trigger_contributors import TriggerContributorSettings
     from syn_shared.settings.workspace import (
         ContainerLoggingSettings,
         GitIdentitySettings,
@@ -919,6 +920,13 @@ class Settings(BaseSettings):
         from syn_shared.settings.polling import PollingSettings
 
         return PollingSettings()
+
+    @property
+    def trigger_contributors(self) -> TriggerContributorSettings:
+        """Who may make a trigger fire: the system-wide contributor guard (#580)."""
+        from syn_shared.settings.trigger_contributors import TriggerContributorSettings
+
+        return TriggerContributorSettings()
 
     # =========================================================================
     # EXECUTION (#1557) - one concurrency budget for every start path

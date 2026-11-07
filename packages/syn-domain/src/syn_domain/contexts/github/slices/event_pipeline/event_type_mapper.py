@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from syn_domain.contexts.github._shared.event_availability import build_events_api_type_map
+from syn_domain.contexts.github._shared.trigger_evaluation_types import EVENTS_API_ACTOR_KEY
 from syn_domain.contexts.github.slices.event_pipeline.dedup_keys import compute_dedup_key
 from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
     EventSource,
@@ -77,6 +78,12 @@ def map_events_api_to_normalized(
         "repository": {"full_name": repo_name},
     }
 
+    # Keep who caused the event for the contributor guard (#580): a polled
+    # push carries no sender, only the Events API ``actor``.
+    actor = raw_event.get("actor")
+    if isinstance(actor, dict) and actor.get("login"):
+        enriched_payload[EVENTS_API_ACTOR_KEY] = {"login": actor["login"]}
+
     # Events API returns null for pull_request.draft — normalize to False
     # so trigger conditions like "pull_request.draft = false" evaluate correctly.
     pr = enriched_payload.get("pull_request")
@@ -85,8 +92,7 @@ def map_events_api_to_normalized(
 
     dedup_key = compute_dedup_key(event_type, action, enriched_payload)
 
-    if created_at and created_at.endswith("Z"):
-        created_at = created_at[:-1] + "+00:00"
+    # fromisoformat accepts GitHub's trailing "Z" since Python 3.11.
     received_at = datetime.fromisoformat(created_at) if created_at else datetime.now(UTC)
 
     return NormalizedEvent(
