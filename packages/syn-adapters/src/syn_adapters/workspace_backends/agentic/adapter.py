@@ -39,7 +39,7 @@ from syn_adapters.workspace_backends.agentic.adapter_copy import (
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
 from syn_adapters.workspace_backends.agentic.credential_scrubber import (
     CredentialScrubber,
-    scrub_bytes,
+    scrub_files,
 )
 from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 
@@ -747,7 +747,8 @@ class AgenticIsolationAdapter:
         """
         files, refused = await self._read_through_provider(handle, patterns, base_path)
         scrubber = CredentialScrubber(self.credentials.withheld(()))
-        scrubbed = tuple((path, scrub_bytes(scrubber, content)) for path, content in files)
+        scrubbed, unscrubbable = scrub_files(scrubber, files)
+        refused = (*refused, *unscrubbable)
         if refused:
             raise FilesRefusedError(scrubbed, refused)
         return list(scrubbed)

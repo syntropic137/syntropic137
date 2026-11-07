@@ -49,12 +49,22 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 from typing import TYPE_CHECKING
 from urllib.parse import quote, quote_plus
 
+from syn_domain.contexts.orchestration import FileRefusal
+from syn_shared.settings.execution import (
+    COLLECTION_SCRUB_GROWTH_RATIO,
+    COLLECTION_SCRUB_GROWTH_SLACK_BYTES,
+    COLLECTION_SCRUB_LINE_MAX_CHARS,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+logger = logging.getLogger(__name__)
 
 #: What a credential value is replaced with. Never matched by any encoding of
 #: a real secret, and safe inside a JSON string.
@@ -237,16 +247,7 @@ class CredentialScrubber:
             return line
         if line.strip() in self._chunks:
             return REDACTED_MARKER
-        # Escaped newlines unescaped, so a wrapped blob inside one JSON string
-        # splits into its lines here as it does once the string is decoded.
-        if (
-            self._pattern.search(line) is None
-            and not any(
-                self._is_fragment(m.group())
-                for m in _BASE64_TOKEN.finditer(line.replace("\\n", "\n"))
-            )
-            and not any(f'"{chunk}"' in line for chunk in self._chunks)
-        ):
+        if not self.matches(line):
             return line
         try:
             document = json.loads(line)
@@ -255,6 +256,38 @@ class CredentialScrubber:
         if not isinstance(document, dict | list):
             return self._scrub_text(line)
         return json.dumps(self._scrub_json(document), ensure_ascii=False, separators=(",", ":"))
+
+    def matches(self, line: str) -> bool:
+        """Whether ``scrub`` would rewrite ``line``, decided by searching it only."""
+        if self._pattern is None:
+            return False
+        if line.strip() in self._chunks:
+            return True
+        # Escaped newlines unescaped, so a wrapped blob inside one JSON string
+        # splits into its lines here as it does once the string is decoded.
+        return (
+            self._pattern.search(line) is not None
+            or any(
+                self._is_fragment(m.group())
+                for m in _BASE64_TOKEN.finditer(line.replace("\\n", "\n"))
+            )
+            or any(f'"{chunk}"' in line for chunk in self._chunks)
+        )
+
+    def growth(self, line: str) -> int:
+        """How many characters rewriting ``line`` as text adds, counted without rewriting it.
+
+        Every match and every wrapped fragment becomes ``REDACTED_MARKER``.
+        """
+        if self._pattern is None:
+            return 0
+        values = sum(len(REDACTED_MARKER) - len(m.group()) for m in self._pattern.finditer(line))
+        fragments = sum(
+            len(REDACTED_MARKER) - len(m.group())
+            for m in _BASE64_TOKEN.finditer(line)
+            if self._is_fragment(m.group())
+        )
+        return values + fragments
 
     def _is_fragment(self, token: str) -> bool:
         """Whether ``token`` is one wrapped line of a value's base64."""
@@ -293,7 +326,22 @@ class CredentialScrubber:
         return f"CredentialScrubber(<{len(self._values)} values>)"
 
 
-def scrub_bytes(scrubber: CredentialScrubber, content: bytes) -> bytes:
+#: The longest line, in characters, the scrubber rewrites, and how far one
+#: call's files may grow: their sizes times SCRUB_GROWTH_RATIO, plus
+#: SCRUB_GROWTH_SLACK_BYTES. Content past either is refused, never held; the
+#: arithmetic is beside COLLECTION_MEMORY_MIB (#1552).
+SCRUB_LINE_MAX_CHARS = COLLECTION_SCRUB_LINE_MAX_CHARS
+SCRUB_GROWTH_RATIO = COLLECTION_SCRUB_GROWTH_RATIO
+SCRUB_GROWTH_SLACK_BYTES = COLLECTION_SCRUB_GROWTH_SLACK_BYTES
+
+
+class ScrubRefusedError(Exception):
+    """Content that cannot be scrubbed inside the collection's memory bound."""
+
+
+def scrub_bytes(
+    scrubber: CredentialScrubber, content: bytes, max_bytes: int | None = None
+) -> bytes:
     """``content`` scrubbed line by line, every byte outside a match kept.
 
     Bytes that are not UTF-8 survive the round trip as surrogate escapes, so
@@ -301,12 +349,18 @@ def scrub_bytes(scrubber: CredentialScrubber, content: bytes) -> bytes:
 
     One line is decoded at a time and the output is built only once a line
     changes, so a file nothing matches is returned as the same object and the
-    scrub never holds more than ``content``, its scrubbed copy and one decoded
-    line (#1552). Decoding the whole file and splitting it held a string
-    object per line: 288MiB for 16MiB of newlines.
+    scrub never holds more than ``content``, its scrubbed copy and one
+    rewritten line (#1552). Decoding the whole file and splitting it held a
+    string object per line: 288MiB for 16MiB of newlines.
+
+    Raises `ScrubRefusedError` when a line to rewrite is longer than
+    SCRUB_LINE_MAX_CHARS, or when the scrubbed copy would be longer than
+    ``max_bytes`` (by default, the growth one file alone is allowed).
     """
     if not scrubber.reach:
         return content
+    if max_bytes is None:
+        max_bytes = _growth_allowance(len(content))
     view = memoryview(content)
     scrubbed: bytearray | None = None
     start = 0
@@ -315,13 +369,66 @@ def scrub_bytes(scrubber: CredentialScrubber, content: bytes) -> bytes:
         if end == -1:
             end = len(content)
         line = str(view[start:end], "utf-8", "surrogateescape")
-        replaced = scrubber.scrub(line)
+        replaced = line
+        if scrubber.matches(line):
+            if len(line) > SCRUB_LINE_MAX_CHARS:
+                msg = f"a line of {len(line)} characters holds a value to scrub"
+                raise ScrubRefusedError(msg)
+            # Checked before the rewrite, so a line of short values never
+            # builds the copy it would grow to.
+            written = start if scrubbed is None else len(scrubbed)
+            if written + len(line) + scrubber.growth(line) > max_bytes:
+                msg = f"scrubbing would grow {len(content)} bytes past {max_bytes}"
+                raise ScrubRefusedError(msg)
+            replaced = scrubber.scrub(line)
         if replaced != line and scrubbed is None:
             scrubbed = bytearray(view[:start])
         if scrubbed is not None:
-            scrubbed += replaced.encode("utf-8", errors="surrogateescape")
+            out = replaced.encode("utf-8", errors="surrogateescape")
+            if len(scrubbed) + len(out) + (end < len(content)) > max_bytes:
+                msg = f"scrubbing would grow {len(content)} bytes past {max_bytes}"
+                raise ScrubRefusedError(msg)
+            scrubbed += out
             if end < len(content):
                 scrubbed += b"\n"
+            del out
         del line, replaced
         start = end + 1
     return content if scrubbed is None else bytes(scrubbed)
+
+
+def scrub_files(
+    scrubber: CredentialScrubber, files: Iterable[tuple[str, bytes]]
+) -> tuple[tuple[tuple[str, bytes], ...], tuple[FileRefusal, ...]]:
+    """Every file scrubbed, and each one that could not be, refused by name.
+
+    The files share one growth allowance, so however many there are, the
+    scrubbed copies together are never longer than SCRUB_GROWTH_RATIO times
+    what was read, plus SCRUB_GROWTH_SLACK_BYTES (#1552). A refused file is
+    never returned unscrubbed: it is named ``file_too_large``, as a read past
+    a limit is.
+    """
+    files = tuple(files)
+    allowance = _growth_allowance(sum(len(content) for _, content in files))
+    kept: list[tuple[str, bytes]] = []
+    refused: list[FileRefusal] = []
+    remaining_input = sum(len(content) for _, content in files)
+    for path, content in files:
+        remaining_input -= len(content)
+        try:
+            # Room for every later file at its own size, so one file's growth
+            # never refuses a later one that grows nothing.
+            out = scrub_bytes(scrubber, content, allowance - remaining_input)
+        except ScrubRefusedError as e:
+            # Too large to scrub within the bound, so too large to keep: the
+            # provider's own reason, so no event schema changes for it.
+            logger.warning("Refused %s: too large to scrub: %s", path, e)
+            refused.append(FileRefusal(path=path, reason="file_too_large"))
+            continue
+        allowance -= len(out)
+        kept.append((path, out))
+    return tuple(kept), tuple(refused)
+
+
+def _growth_allowance(size: int) -> int:
+    return int(size * SCRUB_GROWTH_RATIO) + SCRUB_GROWTH_SLACK_BYTES

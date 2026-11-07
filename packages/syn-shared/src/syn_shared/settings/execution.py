@@ -48,19 +48,33 @@ API_BASELINE_MEMORY_MIB = 128
 #:
 #: The cap is not the memory. Measured through scrub and conversion
 #: (test_1552_collection_fits_api_memory.py), a collection RETAINS up to
-#: COLLECTION_RETAINED_COPIES x the cap across its awaits: the scrubbed bytes,
-#: the text decoded from them (up to 4 bytes a character once one character
-#: is outside Latin-1), and that text encoded again for storage. The scrub
-#: itself is synchronous on the event loop, so only one runs at a time, and
-#: its peak above what it returns, COLLECTION_TRANSIENT_COPIES x the cap (a
-#: line decoded at 4 bytes a character, and scrubbed), is counted once per process, never
-#: per run. So, per run: 55 (#1552's measurement) + 6 x 4 = 79MiB <= 96. With
+#: COLLECTION_RETAINED_COPIES x what it scrubbed to across its awaits: the
+#: scrubbed bytes, the text decoded from them (up to 4 bytes a character once
+#: one character is outside Latin-1), and that text encoded again for storage.
+#: Scrubbing may grow what it reads (the marker is longer than a short value),
+#: but never past COLLECTION_SCRUB_GROWTH_RATIO plus a 4KiB slack per call; a
+#: file that would is refused by name. Collection scrubs twice (the adapter's
+#: values, then the workspace's), so it holds at most 1.125^2 x 4 = 5.07MiB.
+#:
+#: The scrub itself is synchronous on the event loop, so only one runs at a
+#: time, and its peak above what it returns is counted once per process,
+#: never per run. Its larger part is rewriting one line that holds a value:
+#: up to 71 times the line for JSON of empty containers (parse, rebuild,
+#: dump), so a line longer than COLLECTION_SCRUB_LINE_MAX_CHARS that holds a
+#: value refuses its file, and one rewrite costs at most 80 x 0.25 = 20MiB.
+#: That is inside the COLLECTION_TRANSIENT_COPIES x 4 = 32MiB a line read
+#: and searched costs, which is what is counted.
+#:
+#: So, per run: 55 (#1552's measurement) + 6 x 5.07 = 85.4MiB <= 96. With
 #: every run of the 2g default collecting at once:
-#: 128 + 20 x 79 + 8 x 4 = 1740MiB <= 2048. The 200MiB it replaced could not
+#: 128 + 20 x 85.4 + 8 x 4 = 1868MiB <= 2048. The 200MiB it replaced could not
 #: fit: 20 x 200MiB is twice the whole limit, before any copy.
 COLLECTION_MEMORY_MIB = 4
 COLLECTION_RETAINED_COPIES = 6
 COLLECTION_TRANSIENT_COPIES = 8
+COLLECTION_SCRUB_GROWTH_RATIO = 1.125
+COLLECTION_SCRUB_GROWTH_SLACK_BYTES = 4096
+COLLECTION_SCRUB_LINE_MAX_CHARS = 256 * 1024
 #: What #1552 measured one run holding besides its collection.
 EXECUTION_MEASURED_MEMORY_MIB = 55
 

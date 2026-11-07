@@ -209,9 +209,10 @@ class InfraSettings(BaseSettings):
             " measured slope (#1717). If you raise SYN_EXECUTION_MAX_CONCURRENT"
             " above 20, raise this to 128 + 96 x that many MiB. Artifact"
             " collection is held inside that allowance by"
-            " SYN_EXECUTION_COLLECTION_MAX_MB (default 4, held up to 6 times over"
-            " per run, plus one 8x scrub peak per process):"
-            " 128 + 20 x (55 + 6 x 4) + 8 x 4 = 1740MiB, under 2g."
+            " SYN_EXECUTION_COLLECTION_MAX_MB (default 4, grown by scrubbing to"
+            " at most 1.125^2 x 4 = 5.07MiB and held up to 6 times over per run,"
+            " plus one 8x scrub peak per process):"
+            " 128 + 20 x (55 + 6 x 5.07) + 8 x 4 = 1868MiB, under 2g."
         ),
     )
     api_cpu_limit: str = Field(

@@ -23,12 +23,19 @@ import pytest
 
 from syn_adapters.workspace_backends.agentic import adapter_copy
 from syn_adapters.workspace_backends.agentic.credential_scrubber import (
+    SCRUB_GROWTH_RATIO,
+    SCRUB_GROWTH_SLACK_BYTES,
+    SCRUB_LINE_MAX_CHARS,
     CredentialScrubber,
     scrub_bytes,
+    scrub_files,
 )
 from syn_adapters.workspace_backends.e2b import e2b_conformance as suite
 from syn_adapters.workspace_backends.e2b.test_e2b_backend import _TEMPLATE, SandboxDouble, _adapter
-from syn_domain.contexts.orchestration._shared.file_transfer import FilesRefusedError
+from syn_domain.contexts.orchestration._shared.file_transfer import (
+    FileRefusal,
+    FilesRefusedError,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationHandle,
 )
@@ -311,9 +318,113 @@ def test_the_default_cap_fits_every_run_of_the_default_api_limit() -> None:
     limit = InfraSettings().api_memory_limit
     limit_mib = int(limit[:-1]) * (1024 if limit.endswith("g") else 1)
     runs = (limit_mib - API_BASELINE_MEMORY_MIB) // EXECUTION_API_MEMORY_MIB
-    per_run = EXECUTION_MEASURED_MEMORY_MIB + COLLECTION_RETAINED_COPIES * cap_mib
+    # Scrubbed twice, each growing at most by the ratio, plus a slack a call.
+    scrubbed_mib = cap_mib * SCRUB_GROWTH_RATIO**2 + 2 * SCRUB_GROWTH_SLACK_BYTES / 2**20
+    per_run = EXECUTION_MEASURED_MEMORY_MIB + COLLECTION_RETAINED_COPIES * scrubbed_mib
 
     assert cap_mib == COLLECTION_MEMORY_MIB
     assert per_run <= EXECUTION_API_MEMORY_MIB
     transient = COLLECTION_TRANSIENT_COPIES * cap_mib
+    # Rewriting the longest line that holds a value fits inside that peak.
+    assert transient * 2**20 >= _JSON_REWRITE_FACTOR * SCRUB_LINE_MAX_CHARS
     assert API_BASELINE_MEMORY_MIB + runs * per_run + transient <= limit_mib
+
+
+#: The most rewriting a JSON line measured costing, times the line (#1552):
+#: empty containers, each a few bytes on disk and a whole object parsed,
+#: again rebuilt. 71 measured; the arithmetic counts 80.
+_JSON_REWRITE_FACTOR = 80
+_SECRET = "ghs_SECRETVALUE123456"
+
+
+def _json_line(item: bytes, size: int) -> bytes:
+    head = b'["' + _SECRET.encode() + b'",'
+    return head + item * ((size - len(head) - 5) // len(item)) + b"null]"
+
+
+#: Matching content whose rewrite costs far more than its size: a short value
+#: repeated (the marker is longer than it), and JSON of empty containers.
+_MATCHING = {
+    "short_value_repeated": ("x", b"x" * 65536),
+    "json_objects": (_SECRET, _json_line(b"{},", 48 * 1024)),
+    "json_lists": (_SECRET, _json_line(b"[],", 48 * 1024)),
+    "json_nested_lists": (_SECRET, _json_line(b"[[[]]],", 48 * 1024)),
+    "json_at_the_line_limit": (_SECRET, _json_line(b"[[[]]],", SCRUB_LINE_MAX_CHARS)),
+    "json_past_the_line_limit": (_SECRET, _json_line(b"{},", SCRUB_LINE_MAX_CHARS + 64)),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_MATCHING))
+def test_scrubbing_matching_content_stays_within_the_counted_memory(shape: str) -> None:
+    """The reviewer's counterexamples (#1552): what scrubbing a matching file costs.
+
+    Each is refused by name or kept; either way the rewrite peaks inside the
+    counted transient and what is kept stays within the counted growth.
+    """
+    secret, content = _MATCHING[shape]
+    scrubber = CredentialScrubber([secret])
+
+    tracemalloc.start()
+    try:
+        kept, refused = scrub_files(scrubber, [("artifacts/output/f.json", content)])
+        _, transient = tracemalloc.get_traced_memory()
+        tracemalloc.reset_peak()
+        retained_files = [_as_collected(path, data)[0] for path, data in kept]
+        encoded = [s.encode() if isinstance(s, str) else s for s in retained_files]
+        retained, _ = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert transient <= _JSON_REWRITE_FACTOR * min(len(content), SCRUB_LINE_MAX_CHARS) + 4096
+    grown = len(content) * SCRUB_GROWTH_RATIO + SCRUB_GROWTH_SLACK_BYTES
+    assert sum(len(data) for _, data in kept) <= grown
+    assert retained <= COLLECTION_RETAINED_COPIES * grown + 4096, retained / len(content)
+    # Nothing is lost silently, and nothing kept carries the value.
+    assert len(kept) + len(refused) == 1
+    assert all(r.reason == "file_too_large" for r in refused)
+    assert all(_SECRET.encode() not in data for data in encoded)
+
+
+def test_a_short_value_repeated_is_refused_before_its_rewrite_is_built() -> None:
+    """65536 one-character values would grow to 1.3MB; the scrub never builds it."""
+    scrubber = CredentialScrubber(["x"])
+
+    tracemalloc.start()
+    try:
+        kept, refused = scrub_files(scrubber, [("f", b"x" * 65536)])
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert kept == ()
+    assert refused == (FileRefusal(path="f", reason="file_too_large"),)
+    # The line decoded and searched; its rewrite measured 14.5MB.
+    assert peak < 4 * 65536
+
+
+def test_a_long_matching_line_is_refused_and_a_long_clean_one_kept() -> None:
+    scrubber = CredentialScrubber([_SECRET])
+    clean = b"a" * (SCRUB_LINE_MAX_CHARS + 1)
+    matching = _json_line(b"{},", SCRUB_LINE_MAX_CHARS + 64)
+
+    kept, refused = scrub_files(scrubber, [("clean", clean), ("matching", matching)])
+
+    assert kept == (("clean", clean),)
+    assert kept[0][1] is clean
+    assert refused == (FileRefusal(path="matching", reason="file_too_large"),)
+
+
+def test_files_below_the_bounds_scrub_exactly_as_scrub_bytes_did() -> None:
+    """Below the line limit and the growth allowance, nothing changes."""
+    scrubber = CredentialScrubber(["short", _SECRET])
+    files = [
+        ("a.json", b'{"t":"' + _SECRET.encode() + b'","n":[1,2]}\nshort\n'),
+        ("b.txt", b"token=short and short\n"),
+        ("c.bin", b"\xff\x00short"),
+    ]
+
+    kept, refused = scrub_files(scrubber, files)
+
+    assert refused == ()
+    assert kept == tuple((p, scrub_bytes(scrubber, c)) for p, c in files)
+    assert all(b"short" not in c and _SECRET.encode() not in c for _, c in kept)
