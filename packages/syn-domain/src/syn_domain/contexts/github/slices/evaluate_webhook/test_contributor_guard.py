@@ -408,3 +408,85 @@ async def test_unclassified_review_does_not_inherit_the_pr_authors_trust() -> No
 
     assert isinstance(refused, TriggerBlockedResult)
     assert "outsider" in refused.reason
+
+
+# GitHub's webhook schema declares a comment's or review's ``user`` nullable (a
+# deleted account). Content with a null author is still the content the event is
+# about, so it must not borrow the trust of its parent or its sender.
+_NULL_AUTHOR_CASES = [
+    ("pull_request_review_comment.created", "comment", "pull_request"),
+    ("pull_request_review.submitted", "review", "pull_request"),
+    ("issue_comment.created", "comment", "issue"),
+]
+_RESTRICTIVE = [
+    TRUSTED,
+    ContributorPolicy(
+        mode=ContributorGuardMode.ALLOWLIST,
+        allowed_logins=frozenset({"maintainer", "outsider"}),
+    ),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", _RESTRICTIVE, ids=["trusted", "allowlist"])
+@pytest.mark.parametrize(("event", "content", "parent"), _NULL_AUTHOR_CASES)
+async def test_null_author_does_not_borrow_parent_or_sender_trust(
+    event: str, content: str, parent: str, policy: ContributorPolicy
+) -> None:
+    handler, agg = await _handler(event, policy)
+    payload = {
+        "action": event.split(".")[1],
+        "sender": {"login": "outsider", "type": "User"},
+        parent: {"number": 7, "user": {"login": "maintainer"}, "author_association": "OWNER"},
+        content: {"id": 99, "user": None, "author_association": "NONE", "body": "hi"},
+    }
+
+    results = await handler.evaluate(
+        event=event, repository="org/repo", installation_id="inst-1", payload=payload
+    )
+
+    assert len(results) == 1
+    assert isinstance(results[0], TriggerBlockedResult)
+    assert results[0].guard_name == "contributor_guard"
+    blocked = [e.event for e in agg.get_uncommitted_events()]
+    assert len(blocked) == 1
+    assert isinstance(blocked[0], TriggerBlockedEvent)
+    assert blocked[0].guard_name == "contributor_guard"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", _RESTRICTIVE, ids=["trusted", "allowlist"])
+async def test_polled_review_with_null_author_does_not_borrow_trust(
+    policy: ContributorPolicy,
+) -> None:
+    raw = _polled_review("outsider", pr_author="maintainer", pr_association="OWNER")
+    raw["payload"]["review"] = {"id": 1, "user": None, "author_association": "NONE"}
+
+    refused, agg = await _evaluate_polled(_mapped(raw), policy)
+
+    assert isinstance(refused, TriggerBlockedResult)
+    assert refused.guard_name == "contributor_guard"
+    assert isinstance(agg.get_uncommitted_events()[0].event, TriggerBlockedEvent)
+
+
+@pytest.mark.asyncio
+async def test_polled_pull_request_without_author_is_judged_on_its_actor() -> None:
+    """The Events API trims a pull request to a reference with no ``user`` key.
+
+    That is not authored content with an unknown author, so the actor decides.
+    """
+    raw = _polled_review("ignored")
+    raw["type"] = "PullRequestEvent"
+    raw["actor"] = {"id": 1, "login": "maintainer", "display_login": "maintainer"}
+    raw["payload"] = {
+        "action": "opened",
+        "number": 2184,
+        "pull_request": raw["payload"]["pull_request"],
+    }
+    policy = ContributorPolicy(
+        mode=ContributorGuardMode.ALLOWLIST, allowed_logins=frozenset({"maintainer"})
+    )
+
+    allowed, _ = await _evaluate_polled(_mapped(raw), policy)
+
+    assert isinstance(allowed, TriggerMatchResult)

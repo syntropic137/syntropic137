@@ -72,7 +72,11 @@ none (`check_run`, `push`). A polled event has no sender; its Events API
 The most specific content with an author decides even when it has no Author
 Association (the Events API omits it on reviews): that author is then
 untrusted unless their login is allowed, and never inherits the association of
-the pull request or issue around them.
+the pull request or issue around them. Content whose author is `null` (a
+deleted account) still decides, as an unknown Contributor that no restrictive
+mode trusts; it never falls back to its parent or sender. A pull request the
+Events API trims to a bare reference (no `user` key) is not authored content,
+so its actor decides.
 
 Deliberately NOT the sender in general. The sender of a `check_run` is CI and
 the sender of a `pull_request.synchronize` may be a maintainer; neither makes

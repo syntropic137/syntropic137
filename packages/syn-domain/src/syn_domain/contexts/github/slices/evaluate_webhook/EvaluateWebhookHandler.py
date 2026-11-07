@@ -121,7 +121,7 @@ class EvaluateWebhookHandler:
         # System-wide, so it runs before the rule's own conditions (#580).
         refusal = self._contributor_policy.refusal(payload)
         if refusal is not None:
-            sender = payload.get("sender", {}).get("login", "") or "<unknown>"
+            sender = (payload.get("sender") or {}).get("login", "") or "<unknown>"
             logger.warning(
                 f"Trigger {rule.trigger_id} refused {event} from sender {sender}: {refusal}"
             )
@@ -360,11 +360,11 @@ def _build_payload_summary(payload: dict[str, Any], event: str) -> dict[str, obj
     elif "pull_request_review" in event:
         review = payload.get("review", {})
         summary["review_state"] = review.get("state", "")
-        summary["reviewer"] = review.get("user", {}).get("login", "")
+        summary["reviewer"] = (review.get("user") or {}).get("login", "")
     elif "issue_comment" in event:
         comment = payload.get("comment", {})
         summary["comment_id"] = comment.get("id")
-        summary["author"] = comment.get("user", {}).get("login", "")
+        summary["author"] = (comment.get("user") or {}).get("login", "")
         body = comment.get("body", "")
         summary["body_preview"] = body[:200] if body else ""
     return summary

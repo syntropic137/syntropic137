@@ -14,9 +14,10 @@ behalf of whoever wrote the commits. GitHub reports trust as
 issue). The most specific content with an author decides: a review's author
 is judged on the review's own ``author_association``, never on the pull request
 around it, and a review the Events API delivers without one is untrusted unless
-its author's login is allowed. Events that carry no such content
-(``check_run``, ``push``) are judged on their sender, which for CI events is a
-bot, or for a polled event on the Events API ``actor``.
+its author's login is allowed. Content whose author is ``null`` (a deleted
+account) is judged as nobody, never as its parent or sender. Events that carry
+no such content (``check_run``, ``push``) are judged on their sender, which for
+CI events is a bot, or for a polled event on the Events API ``actor``.
 
 Bots get no blanket pass. ``github-actions[bot]`` sends the ``check_run`` for
 an external contributor's PR, so exempting bots would let exactly the event
@@ -108,6 +109,17 @@ class _Content(BaseModel):
     user: _User | None = None
     author_association: str | None = None
 
+    @property
+    def declares_author(self) -> bool:
+        """Whether the payload says who wrote this content, even as ``null``.
+
+        A webhook comment or review by a deleted account carries ``"user":
+        null``; the Events API trims a pull request it only refers to down to
+        ``number``, ``head`` and ``base`` with no ``user`` key at all. Only the
+        first is authored content with an unknown author.
+        """
+        return bool({"user", "author_association"} & self.model_fields_set)
+
 
 class _AttributablePayload(BaseModel):
     """The slice of a GitHub webhook payload that says who it came from."""
@@ -133,12 +145,14 @@ def contributor_of(payload: object) -> Contributor:
     except ValidationError:
         return Contributor(login="", association=None)
     # Most specific first: on an issue_comment the comment is what the event is
-    # about, and the issue around it is context. The first content with an
-    # author decides, association or not, so an unclassified comment or review
-    # never borrows the trust of the PR or issue it sits on.
+    # about, and the issue around it is context. The first content that declares
+    # an author decides, association or not, so an unclassified comment or
+    # review never borrows the trust of the PR or issue it sits on, and one whose
+    # author is null is judged as nobody rather than as its parent or sender.
     for content in (parsed.comment, parsed.review, parsed.pull_request, parsed.issue):
-        if content is not None and content.user is not None and content.user.login:
-            return Contributor(login=content.user.login, association=content.author_association)
+        if content is not None and content.declares_author:
+            login = content.user.login if content.user is not None else ""
+            return Contributor(login=login, association=content.author_association)
     for user in (parsed.sender, parsed.events_api_actor):
         if user is not None and user.login:
             return Contributor(login=user.login, association=None)
