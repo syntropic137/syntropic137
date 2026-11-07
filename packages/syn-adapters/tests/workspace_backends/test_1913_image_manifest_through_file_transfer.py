@@ -26,7 +26,7 @@ from agentic_isolation.providers.file_transfer import (
     ReadLimits,
 )
 
-from syn_adapters.workspace_backends.agentic import AgenticIsolationAdapter
+from syn_adapters.workspace_backends.agentic import AgenticIsolationAdapter, adapter_copy
 from syn_adapters.workspace_backends.agentic import adapter as adapter_module
 from syn_adapters.workspace_backends.backend_kit import BackendKit
 from syn_adapters.workspace_backends.e2b import e2b_conformance as suite
@@ -128,7 +128,7 @@ class _DeepAndLinkedManifest(_SeededSandboxes):
 
     @staticmethod
     def _listing(files: Mapping[str, bytes], root: str) -> bytes:
-        too_deep = adapter_module.collection_read_limits().max_depth + 1
+        too_deep = adapter_copy.collection_read_limits().max_depth + 1
         return _LinkedManifest._listing(files, root) + f"d 1 0 {too_deep}\0a-deep\0\0".encode()
 
 
@@ -273,7 +273,7 @@ async def test_docker_artifacts_come_back_through_the_bounded_provider_read() ->
     got = await adapter.copy_from(handle, ["artifacts/output/*"])
 
     assert got == [("artifacts/output/a.bin", blob)]
-    assert provider.reads == [("/workspace", adapter_module.collection_read_limits())]
+    assert provider.reads == [("/workspace", adapter_copy.collection_read_limits())]
     assert provider.reads[0][1] != DEFAULT_READ_LIMITS
 
 
