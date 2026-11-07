@@ -11,8 +11,12 @@ about, not the sender. A ``pull_request.synchronize`` is about the PR author's
 code even when a maintainer pushed it, and a ``check_run`` is sent by CI on
 behalf of whoever wrote the commits. GitHub reports trust as
 ``author_association`` on that content (comment, review, pull request or
-issue). Events that carry no such content (``check_run``, ``push``) are judged
-on their sender, which for CI events is a bot.
+issue). The most specific content with an author decides: a review's author
+is judged on the review's own ``author_association``, never on the pull request
+around it, and a review the Events API delivers without one is untrusted unless
+its author's login is allowed. Events that carry no such content
+(``check_run``, ``push``) are judged on their sender, which for CI events is a
+bot, or for a polled event on the Events API ``actor``.
 
 Bots get no blanket pass. ``github-actions[bot]`` sends the ``check_run`` for
 an external contributor's PR, so exempting bots would let exactly the event
@@ -25,7 +29,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from syn_domain.contexts.github._shared.trigger_evaluation_types import EVENTS_API_ACTOR_KEY
 
 CONTRIBUTOR_GUARD_NAME = "contributor_guard"
 
@@ -113,10 +119,11 @@ class _AttributablePayload(BaseModel):
     pull_request: _Content | None = None
     issue: _Content | None = None
     sender: _User | None = None
+    events_api_actor: _User | None = Field(default=None, alias=EVENTS_API_ACTOR_KEY)
 
 
 def contributor_of(payload: object) -> Contributor:
-    """Attribute a webhook payload to its content's author, else to its sender.
+    """Attribute a payload to its content's author, else its sender, else its actor.
 
     A payload that does not parse is attributed to nobody, which every
     restrictive mode refuses.
@@ -126,10 +133,13 @@ def contributor_of(payload: object) -> Contributor:
     except ValidationError:
         return Contributor(login="", association=None)
     # Most specific first: on an issue_comment the comment is what the event is
-    # about, and the issue around it is context.
+    # about, and the issue around it is context. The first content with an
+    # author decides, association or not, so an unclassified comment or review
+    # never borrows the trust of the PR or issue it sits on.
     for content in (parsed.comment, parsed.review, parsed.pull_request, parsed.issue):
-        if content is not None and content.author_association is not None:
-            login = content.user.login if content.user is not None else ""
-            return Contributor(login=login, association=content.author_association)
-    login = parsed.sender.login if parsed.sender is not None else ""
-    return Contributor(login=login, association=None)
+        if content is not None and content.user is not None and content.user.login:
+            return Contributor(login=content.user.login, association=content.author_association)
+    for user in (parsed.sender, parsed.events_api_actor):
+        if user is not None and user.login:
+            return Contributor(login=user.login, association=None)
+    return Contributor(login="", association=None)

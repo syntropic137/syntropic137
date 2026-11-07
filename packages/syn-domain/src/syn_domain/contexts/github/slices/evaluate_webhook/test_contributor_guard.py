@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from syn_domain.contexts.github._shared.trigger_query_store import (
@@ -24,6 +26,14 @@ from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler i
     TriggerBlockedResult,
     TriggerMatchResult,
 )
+from syn_domain.contexts.github.slices.event_pipeline.event_type_mapper import (
+    map_events_api_to_normalized,
+)
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.github.slices.event_pipeline.normalized_event import (
+        NormalizedEvent,
+    )
 
 pytestmark = pytest.mark.unit
 
@@ -270,3 +280,131 @@ def test_comment_author_is_judged_on_an_issue_comment() -> None:
 
 def test_unparseable_payload_is_refused_under_a_restrictive_mode() -> None:
     assert TRUSTED.refusal({"pull_request": "not-an-object"}) is not None
+
+
+# Events API items as GitHub returns them (ids from syntropic137/syntropic137,
+# repo renamed to the fixture trigger's). Polled events carry ``actor``, not
+# ``sender``, and a polled review omits ``author_association``.
+def _polled_push(actor: str):
+    return {
+        "id": "26384613026",
+        "type": "PushEvent",
+        "actor": {"id": 129192050, "login": actor, "display_login": actor},
+        "repo": {"id": 1107456800, "name": "org/repo"},
+        "payload": {
+            "repository_id": 1107456800,
+            "push_id": 49289079368,
+            "ref": "refs/heads/main",
+            "head": "4f9daea474688b8f739cf0e3e8eb1cd7f5d5cbd6",
+            "before": "95f415edf4955a4caba85cc405b3bd3a99364b4a",
+        },
+        "public": True,
+        "created_at": "2026-11-06T19:33:49Z",
+    }
+
+
+def _polled_review(reviewer: str, pr_author: str | None = None, pr_association: str = ""):
+    pull_request = {"id": 1, "number": 2184, "head": {}, "base": {}}
+    if pr_author is not None:
+        pull_request = {
+            **pull_request,
+            "user": {"login": pr_author},
+            "author_association": pr_association,
+        }
+    return {
+        "id": "19394439086",
+        "type": "PullRequestReviewEvent",
+        "actor": {"id": 198982749, "login": reviewer, "display_login": reviewer},
+        "repo": {"id": 1107456800, "name": "org/repo"},
+        "payload": {
+            "action": "created",
+            "review": {
+                "id": 5809164794,
+                "user": {"login": reviewer, "type": "Bot"},
+                "state": "commented",
+            },
+            "pull_request": pull_request,
+        },
+        "public": True,
+        "created_at": "2026-11-07T01:22:44Z",
+    }
+
+
+def _mapped(raw) -> NormalizedEvent:
+    """Run a raw Events API item through the production mapper, as the poller does."""
+    normalized = map_events_api_to_normalized(raw, "inst-1")
+    assert normalized is not None
+    return normalized
+
+
+async def _evaluate_polled(
+    normalized: NormalizedEvent, policy: ContributorPolicy
+) -> tuple[TriggerMatchResult | TriggerBlockedResult, TriggerRuleAggregate]:
+    event = f"{normalized.event_type}.{normalized.action}".rstrip(".")
+    handler, agg = await _handler(event, policy)
+    results = await handler.evaluate(
+        event=event,
+        repository=normalized.repository,
+        installation_id="inst-1",
+        payload=normalized.payload,
+    )
+    result = results[0]
+    assert isinstance(result, TriggerMatchResult | TriggerBlockedResult)
+    return result, agg
+
+
+@pytest.mark.asyncio
+async def test_polled_push_is_judged_on_its_events_api_actor() -> None:
+    policy = ContributorPolicy(
+        mode=ContributorGuardMode.ALLOWLIST, allowed_logins=frozenset({"NeuralEmpowerment"})
+    )
+
+    allowed, _ = await _evaluate_polled(_mapped(_polled_push("NeuralEmpowerment")), policy)
+    refused, agg = await _evaluate_polled(_mapped(_polled_push("outsider")), policy)
+
+    assert isinstance(allowed, TriggerMatchResult)
+    assert isinstance(refused, TriggerBlockedResult)
+    assert "outsider" in refused.reason
+    blocked = [e.event for e in agg.get_uncommitted_events()]
+    assert isinstance(blocked[0], TriggerBlockedEvent)
+    assert "outsider" in blocked[0].reason
+
+
+def test_events_api_actor_is_not_exposed_as_sender() -> None:
+    """Per-trigger ``sender.*`` conditions see a polled payload as they did before #580."""
+    normalized = _mapped(_polled_push("NeuralEmpowerment"))
+    assert "sender" not in normalized.payload
+
+
+@pytest.mark.asyncio
+async def test_polled_review_without_association_is_judged_on_its_author() -> None:
+    policy = ContributorPolicy(
+        mode=ContributorGuardMode.ALLOWLIST, allowed_logins=frozenset({"Copilot"})
+    )
+
+    allowed, _ = await _evaluate_polled(_mapped(_polled_review("Copilot")), policy)
+    refused, _ = await _evaluate_polled(_mapped(_polled_review("outsider")), policy)
+
+    assert isinstance(allowed, TriggerMatchResult)
+    assert isinstance(refused, TriggerBlockedResult)
+    assert "outsider" in refused.reason
+
+
+def test_review_author_outranks_a_distinct_sender_without_association() -> None:
+    normalized = _mapped(_polled_review("Copilot"))
+    payload = {**normalized.payload, "sender": {"login": "unlisted-editor"}}
+    policy = ContributorPolicy(
+        mode=ContributorGuardMode.ALLOWLIST, allowed_logins=frozenset({"Copilot"})
+    )
+
+    assert policy.refusal(payload) is None
+
+
+@pytest.mark.asyncio
+async def test_unclassified_review_does_not_inherit_the_pr_authors_trust() -> None:
+    raw = _polled_review("outsider", pr_author="maintainer", pr_association="OWNER")
+
+    refused, _ = await _evaluate_polled(_mapped(raw), TRUSTED)
+
+    assert isinstance(refused, TriggerBlockedResult)
+    assert "outsider" in refused.reason
