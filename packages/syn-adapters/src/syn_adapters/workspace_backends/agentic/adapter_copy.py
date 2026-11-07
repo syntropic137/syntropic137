@@ -13,6 +13,8 @@ import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentic_isolation.providers.file_transfer import ReadLimits
+
 from syn_adapters.workspace_backends.agentic.workspace_walk import (
     UnopenableDirectoryError,
     WalkLimits,
@@ -20,6 +22,7 @@ from syn_adapters.workspace_backends.agentic.workspace_walk import (
     open_directory,
 )
 from syn_shared.settings import get_settings
+from syn_shared.settings.execution import COLLECTION_MEMORY_MIB
 
 if TYPE_CHECKING:
     from agentic_isolation import AgenticWorkspace
@@ -74,15 +77,34 @@ def _normalize_pattern(pattern: str) -> str:
 # below rejects anything that is not a regular file.
 _FILE_OPEN_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 _READ_CHUNK = 1024 * 1024
-# Collection-wide bounds, on top of the per-file limit: the total bytes held
-# in memory for one collection, the number of matches examined, and how many
-# directory entries finding them may list - in all, and in any one directory.
-MAX_COLLECTION_BYTES = 200 * 1024 * 1024
+# Collection-wide bounds, on top of the per-file limit: the number of matches
+# examined, and how many directory entries finding them may list - in all, and
+# in any one directory. The total bytes held in memory for one collection is a
+# setting, SYN_EXECUTION_COLLECTION_MAX_MB (#1552).
 MAX_COLLECTION_MATCHES = 10_000
 MAX_COLLECTION_ENTRIES = 100_000
 MAX_DIRECTORY_ENTRIES = 10_000
 # How many directories deep the walk goes; also how many it holds open at once.
 MAX_DIRECTORY_DEPTH = 64
+
+
+def collection_read_limits() -> ReadLimits:
+    """The budget for one collection, whichever path reads it.
+
+    Bytes come from SYN_EXECUTION_COLLECTION_MAX_MB, sized to the API memory
+    each execution is allowed (#1552): no collection holds more, and no one
+    file larger than it, or than the artifact storage cap, is read at all.
+    Entries and depth are the bounds the bind-mount walk always had, so the
+    provider read cuts a collection off where that walk did.
+    """
+    settings = get_settings()
+    total = settings.execution.collection_max_bytes
+    return ReadLimits(
+        max_total_bytes=total,
+        max_file_bytes=min(total, settings.storage.max_file_size_bytes),
+        max_entries=MAX_COLLECTION_ENTRIES,
+        max_depth=MAX_DIRECTORY_DEPTH,
+    )
 
 
 class _SkipFileError(Exception):
@@ -180,7 +202,7 @@ def collect_matching_files(
     patterns: list[str],
     *,
     max_bytes: int,
-    max_total_bytes: int = MAX_COLLECTION_BYTES,
+    max_total_bytes: int = COLLECTION_MEMORY_MIB * 1024 * 1024,
     max_matches: int = MAX_COLLECTION_MATCHES,
     max_entries: int = MAX_COLLECTION_ENTRIES,
     max_directory_entries: int = MAX_DIRECTORY_ENTRIES,
@@ -274,10 +296,12 @@ def _copy_from_workspace_blocking(
     if workspace_path is None:
         return []
 
+    limits = collection_read_limits()
     results = collect_matching_files(
         workspace_path,
         patterns,
-        max_bytes=get_settings().storage.max_file_size_bytes,
+        max_bytes=limits.max_file_bytes,
+        max_total_bytes=limits.max_total_bytes,
     )
 
     logger.info(

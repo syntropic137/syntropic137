@@ -40,6 +40,18 @@ DEFAULT_INTERRUPT_BUDGET_SECONDS = 60.0
 EXECUTION_API_MEMORY_MIB = 96
 API_BASELINE_MEMORY_MIB = 128
 
+#: The most file content one artifact collection may hold in the API process,
+#: and so also the largest single file it reads (#1552). Read as
+#: SYN_EXECUTION_COLLECTION_MAX_MB. It has to fit inside the per-run allowance
+#: above, beside the ~55MiB #1552 measured for the rest of a run: collected
+#: bytes are held twice while the credential scrub copies them, so
+#: 55 + 2 x 16 = 87MiB <= 96. With every run of the 2g default collecting at
+#: once, 128 + 20 x (55 + 2 x 16) = 1868MiB <= 2048. The 200MiB it replaced
+#: could not fit: 20 x 200MiB is twice the whole limit. Files are sized inside
+#: the workspace before they are read, so one over the cap is refused by name,
+#: never loaded.
+COLLECTION_MEMORY_MIB = 16
+
 
 def executions_that_fit(memory_limit_mib: int) -> int:
     """How many concurrent executions an API memory limit can hold, at least 1."""
@@ -126,6 +138,25 @@ class ExecutionSettings(BaseSettings):
             "SYN_POLLING_MAX_CONCURRENT_DISPATCHES, which is now ignored."
         ),
     )
+
+    collection_max_mb: int = Field(
+        default=COLLECTION_MEMORY_MIB,
+        ge=1,
+        le=EXECUTION_API_MEMORY_MIB,
+        description=(
+            "The most file content, in MiB, one artifact collection reads into the "
+            "API process, and so the largest single file it reads (#1552). Files are "
+            "sized inside the workspace first: one over the cap, or one that would "
+            "take the collection past it, is refused by name and recorded on the "
+            "execution, never loaded. Default 16 fits the ~96MiB of API memory each "
+            "execution is allowed; raise it only with API_MEMORY_LIMIT."
+        ),
+    )
+
+    @property
+    def collection_max_bytes(self) -> int:
+        """`collection_max_mb` in bytes."""
+        return self.collection_max_mb * 1024 * 1024
 
     # Sizing the budget from host capacity (#1715). The budget is
     # min(max_concurrent, cpu, memory, disk terms); see
