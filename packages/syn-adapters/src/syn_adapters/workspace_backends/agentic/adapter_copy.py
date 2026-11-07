@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import stat
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -104,6 +105,24 @@ def collection_read_limits() -> ReadLimits:
         max_file_bytes=min(total, settings.storage.max_file_size_bytes),
         max_entries=MAX_COLLECTION_ENTRIES,
         max_depth=MAX_DIRECTORY_DEPTH,
+    )
+
+
+def remaining_read_limits(spent: int) -> ReadLimits | None:
+    """`collection_read_limits()` for a phase that has already read `spent` bytes.
+
+    The byte budget is the phase's, not the read's: a phase that reads its
+    output twice draws both reads from one budget (#1552). None once nothing
+    is left, since a read limit cannot be zero.
+    """
+    full = collection_read_limits()
+    remaining = full.max_total_bytes - spent
+    if remaining < 1:
+        return None
+    return replace(
+        full,
+        max_total_bytes=remaining,
+        max_file_bytes=min(remaining, full.max_file_bytes),
     )
 
 

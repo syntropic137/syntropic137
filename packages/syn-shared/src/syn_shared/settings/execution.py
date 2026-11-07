@@ -40,17 +40,29 @@ DEFAULT_INTERRUPT_BUDGET_SECONDS = 60.0
 EXECUTION_API_MEMORY_MIB = 96
 API_BASELINE_MEMORY_MIB = 128
 
-#: The most file content one artifact collection may hold in the API process,
-#: and so also the largest single file it reads (#1552). Read as
-#: SYN_EXECUTION_COLLECTION_MAX_MB. It has to fit inside the per-run allowance
-#: above, beside the ~55MiB #1552 measured for the rest of a run: collected
-#: bytes are held twice while the credential scrub copies them, so
-#: 55 + 2 x 16 = 87MiB <= 96. With every run of the 2g default collecting at
-#: once, 128 + 20 x (55 + 2 x 16) = 1868MiB <= 2048. The 200MiB it replaced
-#: could not fit: 20 x 200MiB is twice the whole limit. Files are sized inside
-#: the workspace before they are read, so one over the cap is refused by name,
-#: never loaded.
-COLLECTION_MEMORY_MIB = 16
+#: The most file content one phase's artifact collection may read into the API
+#: process, however many times it reads, and so also the largest single file
+#: it reads (#1552). Read as SYN_EXECUTION_COLLECTION_MAX_MB. Files are sized
+#: inside the workspace before they are read, so one over the cap is refused
+#: by name, never loaded.
+#:
+#: The cap is not the memory. Measured through scrub and conversion
+#: (test_1552_collection_fits_api_memory.py), a collection RETAINS up to
+#: COLLECTION_RETAINED_COPIES x the cap across its awaits: the scrubbed bytes,
+#: the text decoded from them (up to 4 bytes a character once one character
+#: is outside Latin-1), and that text encoded again for storage. The scrub
+#: itself is synchronous on the event loop, so only one runs at a time, and
+#: its peak above what it returns, COLLECTION_TRANSIENT_COPIES x the cap (a
+#: line decoded at 4 bytes a character, and scrubbed), is counted once per process, never
+#: per run. So, per run: 55 (#1552's measurement) + 6 x 4 = 79MiB <= 96. With
+#: every run of the 2g default collecting at once:
+#: 128 + 20 x 79 + 8 x 4 = 1740MiB <= 2048. The 200MiB it replaced could not
+#: fit: 20 x 200MiB is twice the whole limit, before any copy.
+COLLECTION_MEMORY_MIB = 4
+COLLECTION_RETAINED_COPIES = 6
+COLLECTION_TRANSIENT_COPIES = 8
+#: What #1552 measured one run holding besides its collection.
+EXECUTION_MEASURED_MEMORY_MIB = 55
 
 
 def executions_that_fit(memory_limit_mib: int) -> int:
@@ -142,14 +154,16 @@ class ExecutionSettings(BaseSettings):
     collection_max_mb: int = Field(
         default=COLLECTION_MEMORY_MIB,
         ge=1,
-        le=EXECUTION_API_MEMORY_MIB,
+        le=EXECUTION_API_MEMORY_MIB // COLLECTION_RETAINED_COPIES,
         description=(
-            "The most file content, in MiB, one artifact collection reads into the "
-            "API process, and so the largest single file it reads (#1552). Files are "
-            "sized inside the workspace first: one over the cap, or one that would "
-            "take the collection past it, is refused by name and recorded on the "
-            "execution, never loaded. Default 16 fits the ~96MiB of API memory each "
-            "execution is allowed; raise it only with API_MEMORY_LIMIT."
+            "The most file content, in MiB, one phase's artifact collection reads "
+            "into the API process across all its reads, and so the largest single "
+            "file it reads (#1552). Files are sized inside the workspace first: one "
+            "over the cap, or one that would take the phase past it, is refused by "
+            "name and recorded on the execution, never loaded. Held up to 6 times "
+            "over once scrubbed, decoded and stored, so default 4 fits the ~96MiB "
+            "of API memory each execution is allowed; raise it only with "
+            "API_MEMORY_LIMIT."
         ),
     )
 

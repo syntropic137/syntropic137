@@ -33,8 +33,8 @@ from agentic_isolation.providers.operation_spool import OperationFailure
 from syn_adapters.diagnostics import capture_signal_death
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
     check_workspace_health,
-    collection_read_limits,
     copy_files_to_workspace,
+    remaining_read_limits,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
 from syn_adapters.workspace_backends.agentic.credential_scrubber import (
@@ -300,6 +300,10 @@ class AgenticIsolationAdapter:
             )
         )
         self._workspaces: dict[str, AgenticWorkspace] = {}
+        # Bytes each workspace's reads have brought into this process. A
+        # workspace serves one phase, so this is the phase's collection
+        # budget spent, however many times the phase reads (#1552).
+        self._collected_bytes: dict[str, int] = {}
 
     @property
     def credential_policy(self) -> WorkspaceCredentialPolicy:
@@ -609,6 +613,7 @@ class AgenticIsolationAdapter:
             )
             raise WorkspaceTeardownError(failure, usage)
         self._workspaces.pop(handle.isolation_id, None)
+        self._collected_bytes.pop(handle.isolation_id, None)
         return usage
 
     async def execute(
@@ -730,7 +735,8 @@ class AgenticIsolationAdapter:
         Every root of every backend, Docker's `/workspace` included (#1913):
         the provider walks and reads inside the workspace, refusing links,
         special files and anything past `collection_read_limits()`, and names
-        each refusal. The host bind mount could only log what it skipped, so
+        each refusal. The byte budget is the phase's, not the call's: every
+        read of one workspace draws on the same SYN_EXECUTION_COLLECTION_MAX_MB. The host bind mount could only log what it skipped, so
         a refusal there was a file that silently went missing.
 
         Raises `FilesRefusedError` when anything asked for was refused; the
@@ -760,8 +766,17 @@ class AgenticIsolationAdapter:
             msg = f"cannot read files from {base_path!r}: not a transfer root"
             raise ValueError(msg)
         root = cast("TransferRoot", base_path)
+        spent = self._collected_bytes.get(handle.isolation_id, 0)
+        limits = remaining_read_limits(spent)
+        if limits is None:
+            # The phase has read its whole budget: nothing more is read, and
+            # every pattern asked for is refused by name rather than missing.
+            return (), tuple(FileRefusal(path=p, reason="total_bytes_exceeded") for p in patterns)
         result: ReadFilesResult = await self._provider.read_files(
-            workspace, patterns, base_path=root, limits=collection_read_limits()
+            workspace, patterns, base_path=root, limits=limits
+        )
+        self._collected_bytes[handle.isolation_id] = spent + sum(
+            len(content) for _, content in result.files
         )
         refused = tuple(FileRefusal(path=r.path, reason=r.reason) for r in result.refused)
         return result.files, refused

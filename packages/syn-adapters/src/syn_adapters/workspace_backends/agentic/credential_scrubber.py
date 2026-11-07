@@ -298,7 +298,30 @@ def scrub_bytes(scrubber: CredentialScrubber, content: bytes) -> bytes:
 
     Bytes that are not UTF-8 survive the round trip as surrogate escapes, so
     a binary file nothing matches comes back unchanged.
+
+    One line is decoded at a time and the output is built only once a line
+    changes, so a file nothing matches is returned as the same object and the
+    scrub never holds more than ``content``, its scrubbed copy and one decoded
+    line (#1552). Decoding the whole file and splitting it held a string
+    object per line: 288MiB for 16MiB of newlines.
     """
-    text = content.decode("utf-8", errors="surrogateescape")
-    scrubbed = "\n".join(scrubber.scrub(line) for line in text.split("\n"))
-    return scrubbed.encode("utf-8", errors="surrogateescape")
+    if not scrubber.reach:
+        return content
+    view = memoryview(content)
+    scrubbed: bytearray | None = None
+    start = 0
+    while start <= len(content):
+        end = content.find(b"\n", start)
+        if end == -1:
+            end = len(content)
+        line = str(view[start:end], "utf-8", "surrogateescape")
+        replaced = scrubber.scrub(line)
+        if replaced != line and scrubbed is None:
+            scrubbed = bytearray(view[:start])
+        if scrubbed is not None:
+            scrubbed += replaced.encode("utf-8", errors="surrogateescape")
+            if end < len(content):
+                scrubbed += b"\n"
+        del line, replaced
+        start = end + 1
+    return content if scrubbed is None else bytes(scrubbed)
