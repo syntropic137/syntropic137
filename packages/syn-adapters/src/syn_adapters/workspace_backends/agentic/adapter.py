@@ -86,8 +86,8 @@ if TYPE_CHECKING:
 
     from agentic_isolation import AgenticWorkspace
     from agentic_isolation.contract import FinalizationOutcome
-    from agentic_isolation.providers.file_transfer import ReadFilesResult
     from agentic_isolation.providers.base import CredentialResolver, Workspace, WorkspaceProvider
+    from agentic_isolation.providers.file_transfer import ReadFilesResult
 
     from syn_domain.contexts.orchestration import (
         WorkspaceCredentialPolicy,
