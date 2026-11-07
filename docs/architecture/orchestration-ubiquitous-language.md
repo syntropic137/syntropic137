@@ -937,9 +937,17 @@ that read when the withdrawal lands still starts, and its own
 `WorkflowExecutionStarted` outranks the withdrawal on the to-do list; that run
 is cancelled as any other.
 
+A queued Resume has no Execution Request: its only record is the parent's
+`ExecutionResumed`. Cancelling one (#1677) withdraws it on the PARENT instead:
+`WithdrawResume` -> `ExecutionResumeWithdrawn`, naming the child. The parent
+stays resumed (the one-resume rule still holds), `StartResumeHandler` reads the
+parent again once the child's start holds its slot and does not start a
+withdrawn one, and the parent's `resume_start` record settles `withdrawn`.
+
 ## Withdrawn
 
-A request start to-do record's terminal status after `ExecutionRequestWithdrawn`.
+A start to-do record's terminal status after `ExecutionRequestWithdrawn`, or a
+resume start record's after `ExecutionResumeWithdrawn` (#1677).
 Never offered again, and no later write walks it back to owed: it yields only
 to `started`, as `failed` does. Rebuilt from the events alone on a restart, so a
 withdrawn request is never started by a new process. The API reports a Queued

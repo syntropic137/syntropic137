@@ -132,6 +132,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     FailExecutionCommand,
     InterruptExecutionCommand,
     ResumeExecutionCommand,
+    WithdrawResumeCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
     AssociationKind,
@@ -231,6 +232,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionRequestWithdrawnEv
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumeWithdrawnEvent import (
+    ExecutionResumeWithdrawnEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
@@ -516,6 +520,7 @@ __all__ = [
     "ExecutionRequestedEvent",
     # Value objects - workspace
     "ExecutionResult",
+    "ExecutionResumeWithdrawnEvent",
     "ExecutionResumedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",
@@ -621,6 +626,7 @@ __all__ = [
     "UpdateWorkflowTemplateCommand",
     "Verdict",
     "WithdrawExecutionRequestCommand",
+    "WithdrawResumeCommand",
     "WorkflowClassification",
     "WorkflowDefinition",
     "WorkflowExecutionAggregate",

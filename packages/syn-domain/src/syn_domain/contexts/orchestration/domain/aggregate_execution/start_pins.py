@@ -160,6 +160,8 @@ class AdmittedResume(BaseModel):
     resume_phase_id: str | None = None
     inherited_skipped_phase_ids: list[str] = Field(default_factory=list)
     inherited_evidence_gate: InheritedEvidenceGate | None = None
+    #: Set by `ExecutionResumeWithdrawn` (#1677): the child must never start.
+    withdrawn: bool = False
 
 
 def phase_definitions_of(phases: Sequence[ExecutablePhase]) -> list[PhaseDefinition]:

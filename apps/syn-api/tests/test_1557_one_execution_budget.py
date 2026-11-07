@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
-from event_sourcing import EventStoreRepository, StreamAlreadyExistsError
+from event_sourcing import EventStoreRepository
 from event_sourcing.client.memory import MemoryEventStoreClient
 from event_sourcing.core.event import EventEnvelope, EventMetadata
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
@@ -43,18 +43,21 @@ import syn_api._wiring_admission as admission
 from syn_adapters.control import ExecutionController
 from syn_adapters.control.adapters.memory import InMemorySignalQueueAdapter
 from syn_adapters.control.commands import CancelExecution, ControlResult
+from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
-from syn_adapters.storage.repositories import RepositoryAdapter
+from syn_adapters.storage.repositories import EventStoreExecutionEventStream, RepositoryAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api._wiring_admission import BackgroundWorkflowDispatcher
 from syn_api.execution_budget import ExecutionBudget, StartClaim, StartPath
 from syn_api.routes.executions import commands, control, keyed_start, queries, resume_start_info
 from syn_api.routes.executions.commands import ExecuteWorkflowRequest
+from syn_api.routes.executions.queued_start import queued_starts
 from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration import EvalId, ExecuteWorkflowCommand, LaunchEval
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalChoice, EvalSelection
+from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration._shared.repository_baseline import RepositoryBaseline
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -77,14 +80,19 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution_request import
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+    ExecutionCancelledEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
     ExecutionRequestedEvent,
 )
+from syn_domain.contexts.orchestration.ports import ClaimedRun, ExecutorHost
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
+    WorkflowExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
@@ -164,35 +172,49 @@ class _Log:
 
 
 class _Executions:
-    """Execution streams, keyed by id; a second NoStream write is refused.
+    """The REAL execution repository over the one in-memory event store (#1677).
 
-    Refused too when ANY aggregate already opened a stream at that id, because
-    the server has one keyspace for every aggregate type, and so does
-    `MemoryEventStoreClient` since ESP v0.17.0 (event-sourcing-platform#345).
+    Every read rehydrates from what was stored as JSON, and a second NoStream
+    write is refused by the store itself - including when ANY aggregate already
+    opened a stream at that id, because the server has one keyspace for every
+    aggregate type, and so does `MemoryEventStoreClient` since ESP v0.17.0
+    (event-sourcing-platform#345). ``streams`` is only what the tests look at:
+    the last object each save wrote, never what a read returns.
     """
 
     def __init__(self, log: _Log, keyspace: MemoryEventStoreClient) -> None:
         self.streams: dict[str, WorkflowExecutionAggregate] = {}
         self._log = log
-        self._keyspace = keyspace
+        self._repo = RepositoryAdapter(
+            EventStoreRepository(
+                keyspace,
+                WorkflowExecutionAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+                "WorkflowExecution",
+            )
+        )
 
     async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
-        for envelope in aggregate.get_uncommitted_events():
-            self._log.append(envelope.event, aggregate.id or "", "WorkflowExecution")
-        self.streams[aggregate.id or ""] = aggregate
-        aggregate.mark_events_as_committed()
+        events = list(aggregate.get_uncommitted_events())
+        await self._repo.save(aggregate)
+        self._logged(aggregate, events)
 
     async def save_new(self, aggregate: WorkflowExecutionAggregate) -> None:
-        stream = f"WorkflowExecution-{aggregate.id}"
-        if aggregate.id in self.streams or await self._keyspace.stream_exists(stream):
-            raise StreamAlreadyExistsError(stream, 1)
-        await self.save(aggregate)
+        events = list(aggregate.get_uncommitted_events())
+        await self._repo.save_new(aggregate)
+        self._logged(aggregate, events)
+
+    def _logged(
+        self, aggregate: WorkflowExecutionAggregate, events: list[EventEnvelope[DomainEvent]]
+    ) -> None:
+        for envelope in events:
+            self._log.append(envelope.event, aggregate.id or "", "WorkflowExecution")
+        self.streams[aggregate.id or ""] = aggregate
 
     async def get_by_id(self, aggregate_id: str) -> WorkflowExecutionAggregate | None:
-        return self.streams.get(aggregate_id)
+        return await self._repo.get_by_id(aggregate_id)
 
     async def exists(self, aggregate_id: str) -> bool:
-        return aggregate_id in self.streams
+        return await self._repo.exists(aggregate_id)
 
 
 class _Requests:
@@ -223,11 +245,13 @@ class _Requests:
         await self._deliver()
 
     async def _deliver(self) -> None:
+        # The store is shared with the executions, which log their own events.
         stored = await stored_envelopes(self.client)
         for envelope in stored[self._seen :]:
-            self._log.append(
-                envelope.event, envelope.metadata.aggregate_id or "", "ExecutionRequest"
-            )
+            if envelope.metadata.aggregate_type == "ExecutionRequest":
+                self._log.append(
+                    envelope.event, envelope.metadata.aggregate_id or "", "ExecutionRequest"
+                )
         self._seen = len(stored)
 
     async def get_by_id(self, aggregate_id: str) -> ExecutionRequestAggregate | None:
@@ -402,6 +426,10 @@ class _World:
         monkeypatch.setattr(commands, "ensure_connected", _nothing)
         monkeypatch.setattr(wiring, "get_execute_workflow_handler", self._handler)
         monkeypatch.setattr(repositories, "get_execution_request_repository", lambda: self.requests)
+        # A resume is withdrawn on its parent's stream (#1677).
+        monkeypatch.setattr(
+            repositories, "get_workflow_execution_repository", lambda: self.executions
+        )
         # Cancel asks the REAL controller, over these execution streams (#1650).
         self.signals = InMemorySignalQueueAdapter()
         controller = ExecutionController(self.executions, self.signals)  # type: ignore[arg-type]
@@ -1015,6 +1043,29 @@ def _leases(world: _World) -> int:
     return world.gate._outstanding  # pyright: ignore[reportPrivateUsage]
 
 
+async def _executor_on_a_run_queue(
+    world: _World,
+) -> tuple[InMemoryExecutionRunQueue, WorkflowExecutionProcessor]:
+    """Give the resume start a run queue, and an executor that drains its rows (#1677)."""
+    queue = InMemoryExecutionRunQueue()
+    await queue.register(
+        ExecutorHost(
+            host_id="host-1677",
+            container_id="container-1677",
+            generation="g",
+            epoch=ORCHESTRATION_EVENT_EPOCH,
+            reap_scope="scope-1677",
+        ),
+        capacity=1,
+    )
+    await queue.heartbeat("host-1677")
+    world.dispatcher._resume_handler._processor._run_queue = queue  # pyright: ignore[reportPrivateUsage]
+    executor = _processor(world.executions, world.agent)
+    executor._execution_events = EventStoreExecutionEventStream(world.event_store)  # pyright: ignore[reportPrivateUsage]
+    executor._todo_projection_type = ExecutionTodoProjection  # pyright: ignore[reportPrivateUsage]
+    return queue, executor
+
+
 async def _two_running_one_queued(world: _World) -> tuple[list[str], str]:
     running = [await world.post_execute(), await world.post_execute()]
     queued = await world.post_execute()
@@ -1252,3 +1303,379 @@ class TestCancellingAStartedExecutionIsUnchanged:
         assert signal is not None
         assert signal.reason == _REASON
         await _release_everything(world)
+
+
+# -- #1677: a queued RESUME can be cancelled ----------------------------------
+
+
+def _resume_withdrawals(world: _World, parent_id: str) -> int:
+    return sum(
+        1
+        for e in world.log.envelopes
+        if e.metadata.event_type == "ExecutionResumeWithdrawn"
+        and e.metadata.aggregate_id == parent_id
+    )
+
+
+async def _two_running_one_resume_queued(world: _World) -> tuple[list[str], str, str]:
+    """Both slots taken by direct starts, then a resume whose child must wait."""
+    running = [await world.post_execute(), await world.post_execute()]
+    await world.agent.until(lambda: len(world.agent.inside) == LIMIT)
+    parent_id = "exec-parent-1677"
+    child = await world.a_failed_parent_is_resumed(parent_id)
+    assert await world.coordinate() == (1, 0)
+    assert (await world.shown(child)).status == "queued"
+    return running, parent_id, child
+
+
+class TestAQueuedResumeCanBeCancelled:
+    async def test_cancel_withdraws_it_on_its_parent_and_it_never_runs(self, world: _World) -> None:
+        running, parent_id, child = await _two_running_one_resume_queued(world)
+
+        cancelled = await _cancel(child)
+
+        assert (cancelled.success, cancelled.execution_id, cancelled.state) == (
+            True,
+            child,
+            "cancelled",
+        )
+        assert _resume_withdrawals(world, parent_id) == 1
+        await world.coordinate()
+        record = await world.resume_record(parent_id)
+        assert (record.status, record.status_reason) == ("withdrawn", _REASON)
+
+        await _release_everything(world)
+
+        assert child not in world.agent.entered
+        assert child not in world.executions.streams
+        assert set(running) <= set(world.agent.entered)
+        assert world.budget.matching("exec-") == []
+        assert _leases(world) == 0, "the withdrawn resume kept its admission lease"
+        assert await world.coordinate() == (0, 0)
+
+    async def test_cancelling_it_again_withdraws_nothing_twice(self, world: _World) -> None:
+        _, parent_id, child = await _two_running_one_resume_queued(world)
+        await _cancel(child)
+
+        again = await _cancel(child)
+
+        assert again.state == "cancelled"
+        assert _resume_withdrawals(world, parent_id) == 1
+        await _release_everything(world)
+
+    async def test_a_withdrawal_after_the_grant_does_not_run_and_gives_the_slot_back(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target: list[str] = []
+        running_at_grant: list[int] = []
+        _withdraw_once_granted(world, monkeypatch, target, running_at_grant)
+        running, parent_id, child = await _two_running_one_resume_queued(world)
+        target.append(child)
+        behind = await world.post_execute()
+
+        world.agent.release(running[0])
+        await _until_released(world, child)
+
+        assert running_at_grant == [LIMIT]
+        # Withdrawn, not merely aborted: a cancel that raised inside `held`
+        # would also keep the child from running, and give no slot back cleanly.
+        assert _resume_withdrawals(world, parent_id) == 1
+        await world.agent.until(lambda: behind in world.agent.inside)
+        assert child not in world.agent.entered
+        await _release_everything(world)
+        assert child not in world.executions.streams
+        assert world.budget.running == 0
+        assert _leases(world) == 0
+
+    async def test_after_a_restart_the_withdrawn_resume_is_never_offered(
+        self, world: _World
+    ) -> None:
+        _, parent_id, child = await _two_running_one_resume_queued(world)
+        await _cancel(child)
+
+        await world.restart()
+
+        assert await world.coordinate() == (0, 0)
+        assert (await world.resume_record(parent_id)).status == "withdrawn"
+        await _release_everything(world)
+        assert child not in world.agent.entered
+
+    async def test_while_it_waits_it_is_shown_cancelled_and_not_listed(self, world: _World) -> None:
+        _, _, child = await _two_running_one_resume_queued(world)
+        assert child in [q.execution_id for q in await queued_starts(world.projections.store)]
+
+        await _cancel(child)
+        await world.coordinate()
+
+        # Its claim still waits for a slot, which it will give back unrun.
+        assert world.budget.position(child) is not None
+        shown = await world.shown(child)
+        assert (shown.status, shown.error_message) == ("cancelled", _REASON)
+        assert child not in [q.execution_id for q in await queued_starts(world.projections.store)]
+        await _release_everything(world)
+
+    async def test_a_withdrawal_while_the_granted_start_prepares_does_not_run(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The cancel lands after the post-grant read of the parent, while the
+        # start is still awaiting before the child's stream opens: the cancel
+        # sees no child and answers "it will not run", so it must not.
+        lookup = world.executions.get_by_id
+        target: list[str] = []
+        paused, proceed = asyncio.Event(), asyncio.Event()
+
+        async def paused_lookup(execution_id: str) -> WorkflowExecutionAggregate | None:
+            if execution_id in target and not paused.is_set():
+                paused.set()
+                await proceed.wait()
+            return await lookup(execution_id)
+
+        monkeypatch.setattr(world.executions, "get_by_id", paused_lookup)
+        running, _, child = await _two_running_one_resume_queued(world)
+        target.append(child)
+        world.agent.release(running[0])
+        async with asyncio.timeout(_WITHIN):
+            await paused.wait()
+
+        cancelled = await _cancel(child)
+        proceed.set()
+        await _release_everything(world)
+
+        assert (cancelled.state, cancelled.message) == (
+            "cancelled",
+            "Withdrawn before it started: it will not run",
+        )
+        assert child not in world.agent.entered
+        assert world.executions.streams[child].status.value == "cancelled"
+        assert world.budget.running == 0
+        assert _leases(world) == 0
+
+    async def test_a_withdrawal_while_it_opens_is_never_run_by_an_executor(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # As above, with a run queue: an executor that claims the row the
+        # moment it is promoted, and drains it to the end before the opener
+        # goes on, must find a cancelled run and start no agent.
+        lookup = world.executions.get_by_id
+        target: list[str] = []
+        paused, proceed = asyncio.Event(), asyncio.Event()
+
+        async def paused_lookup(execution_id: str) -> WorkflowExecutionAggregate | None:
+            if execution_id in target and not paused.is_set():
+                paused.set()
+                await proceed.wait()
+            return await lookup(execution_id)
+
+        monkeypatch.setattr(world.executions, "get_by_id", paused_lookup)
+        running, _, child = await _two_running_one_resume_queued(world)
+        queue, executor = await _executor_on_a_run_queue(world)
+        promote = queue.mark_admitted
+        drained: list[asyncio.Task[WorkflowExecutionResult]] = []
+
+        async def claim_and_drain(execution_id: str) -> None:
+            await promote(execution_id)
+            claimed = await queue.claim("host-1677")
+            assert claimed is not None
+            drain = asyncio.create_task(executor.run_claimed(claimed))
+            drained.append(drain)
+            async with asyncio.timeout(_WITHIN):
+                while not (drain.done() or child in world.agent.entered):
+                    await asyncio.sleep(0.01)
+            if drain.done():
+                await queue.close(claimed)
+
+        monkeypatch.setattr(queue, "mark_admitted", claim_and_drain)
+        target.append(child)
+        world.agent.release(running[0])
+        async with asyncio.timeout(_WITHIN):
+            await paused.wait()
+
+        cancelled = await _cancel(child)
+        proceed.set()
+        async with asyncio.timeout(_WITHIN):
+            while not (drained and (drained[0].done() or child in world.agent.entered)):
+                await asyncio.sleep(0.01)
+        entered = list(world.agent.entered)
+        await _release_everything(world)
+
+        assert cancelled.message == "Withdrawn before it started: it will not run"
+        assert child not in entered
+        assert world.executions.streams[child].status.value == "cancelled"
+        assert (await queue.in_use()).claimed == 0
+        assert world.budget.running == 0
+        assert _leases(world) == 0
+
+    async def test_a_row_the_sweep_promotes_before_the_opener_checks_is_not_run(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The ``opening`` sweep promotes a row whose stream exists without the
+        # opener: here an executor claims and drains it between the child's
+        # open and the opener's own check, so the claim must check as well.
+        lookup = world.executions.get_by_id
+        target: list[str] = []
+        paused, proceed = asyncio.Event(), asyncio.Event()
+
+        async def paused_lookup(execution_id: str) -> WorkflowExecutionAggregate | None:
+            if execution_id in target and not paused.is_set():
+                paused.set()
+                await proceed.wait()
+            return await lookup(execution_id)
+
+        monkeypatch.setattr(world.executions, "get_by_id", paused_lookup)
+        running, _, child = await _two_running_one_resume_queued(world)
+        queue, executor = await _executor_on_a_run_queue(world)
+        save_new = world.executions.save_new
+        drained: list[WorkflowExecutionResult] = []
+
+        async def opened_then_swept(aggregate: WorkflowExecutionAggregate) -> None:
+            await save_new(aggregate)
+            if aggregate.id != child:
+                return
+            await queue.mark_admitted(child)
+            claimed = await queue.claim("host-1677")
+            assert claimed is not None
+            drain = asyncio.create_task(executor.run_claimed(claimed))
+            async with asyncio.timeout(_WITHIN):
+                while not (drain.done() or child in world.agent.entered):
+                    await asyncio.sleep(0.01)
+            if drain.done():
+                drained.append(drain.result())
+                await queue.close(claimed)
+
+        monkeypatch.setattr(world.executions, "save_new", opened_then_swept)
+        target.append(child)
+        world.agent.release(running[0])
+        async with asyncio.timeout(_WITHIN):
+            await paused.wait()
+
+        cancelled = await _cancel(child)
+        proceed.set()
+        async with asyncio.timeout(_WITHIN):
+            while not (drained or child in world.agent.entered):
+                await asyncio.sleep(0.01)
+        entered = list(world.agent.entered)
+        await _release_everything(world)
+
+        assert cancelled.message == "Withdrawn before it started: it will not run"
+        assert child not in entered
+        assert world.executions.streams[child].status.value == "cancelled"
+        assert (await queue.in_use()).claimed == 0
+        assert world.budget.running == 0
+        assert _leases(world) == 0
+
+    @pytest.mark.parametrize("order", ["both_read_before_either_writes", "claimer_folded_first"])
+    async def test_the_opener_and_the_claimer_both_cancel_and_the_claim_is_freed(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch, order: str
+    ) -> None:
+        # #2184 round 3. The opener and an executor that claimed the row both
+        # find the parent withdrawn, and the opener's cancel lands first.
+        # - both_read_before_either_writes: both loaded the child at the same
+        #   version, so the claimer's append loses the version race. It must
+        #   recognise the durable cancel, not escape the drain: an escaped
+        #   drain leaves the claim charged until its lease expires.
+        # - claimer_folded_first: the claimer seeded its to-do list before the
+        #   opener's cancel and reads the child after it, so its fold is stale.
+        #   It must still end the run as cancelled, not dispatch the old
+        #   provision to-do and fail.
+        lookup = world.executions.get_by_id
+        save = world.executions.save
+        target: list[str] = []
+        parent: list[str] = []
+        drains: list[asyncio.Task[WorkflowExecutionResult]] = []
+        paused, proceed = asyncio.Event(), asyncio.Event()
+        claimer_at_save, opener_saved = asyncio.Event(), asyncio.Event()
+        claimer_folded = asyncio.Event()
+
+        def in_claimer() -> bool:
+            return bool(drains) and asyncio.current_task() is drains[0]
+
+        async def raced_lookup(execution_id: str) -> WorkflowExecutionAggregate | None:
+            if execution_id in target and not paused.is_set():
+                paused.set()
+                await proceed.wait()
+            if execution_id in target and in_claimer():
+                claimer_folded.set()  # its first read of the child follows the fold
+            if order == "claimer_folded_first" and execution_id in parent and in_claimer():
+                async with asyncio.timeout(_WITHIN):
+                    await opener_saved.wait()
+            return await lookup(execution_id)
+
+        async def raced_save(aggregate: WorkflowExecutionAggregate) -> None:
+            cancels = aggregate.id in target and any(
+                isinstance(e.event, ExecutionCancelledEvent)
+                for e in aggregate.get_uncommitted_events()
+            )
+            if not cancels:
+                await save(aggregate)
+                return
+            if in_claimer():
+                claimer_at_save.set()
+                async with asyncio.timeout(_WITHIN):
+                    await opener_saved.wait()
+                await save(aggregate)
+                return
+            if order == "both_read_before_either_writes":
+                async with asyncio.timeout(_WITHIN):
+                    await claimer_at_save.wait()
+            else:
+                async with asyncio.timeout(_WITHIN):
+                    await claimer_folded.wait()
+            await save(aggregate)
+            opener_saved.set()
+
+        monkeypatch.setattr(world.executions, "get_by_id", raced_lookup)
+        monkeypatch.setattr(world.executions, "save", raced_save)
+        running, parent_id, child = await _two_running_one_resume_queued(world)
+        parent.append(parent_id)
+        queue, executor = await _executor_on_a_run_queue(world)
+        save_new = world.executions.save_new
+        claims: list[ClaimedRun] = []
+        dispatch = executor._dispatch  # pyright: ignore[reportPrivateUsage]
+        dispatched: list[str] = []
+
+        async def recorded_dispatch(todo: TodoItem, *args: object, **kwargs: object) -> None:
+            dispatched.append(f"{todo.execution_id}:{todo.action}")
+            await dispatch(todo, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(executor, "_dispatch", recorded_dispatch)
+
+        async def opened_then_claimed(aggregate: WorkflowExecutionAggregate) -> None:
+            await save_new(aggregate)
+            if aggregate.id != child:
+                return
+            # The sweep promotes it and an executor claims it while the opener
+            # goes on to its own check.
+            await queue.mark_admitted(child)
+            claimed = await queue.claim("host-1677")
+            assert claimed is not None
+            claims.append(claimed)
+            drains.append(asyncio.create_task(executor.run_claimed(claimed)))
+
+        monkeypatch.setattr(world.executions, "save_new", opened_then_claimed)
+        target.append(child)
+        world.agent.release(running[0])
+        async with asyncio.timeout(_WITHIN):
+            await paused.wait()
+
+        cancelled = await _cancel(child)
+        proceed.set()
+        async with asyncio.timeout(_WITHIN):
+            while not (drains and (drains[0].done() or child in world.agent.entered)):
+                await asyncio.sleep(0.01)
+        entered = list(world.agent.entered)
+        # As ExecutionHost._drive: a drain that escaped leaves its claim charged.
+        escaped = drains[0].exception() if drains[0].done() else None
+        if drains[0].done() and escaped is None:
+            await queue.close(claims[0])
+        await _release_everything(world)
+
+        assert opener_saved.is_set()
+        assert cancelled.message == "Withdrawn before it started: it will not run"
+        assert child not in entered
+        assert escaped is None
+        assert not [d for d in dispatched if d.startswith(f"{child}:")]
+        assert drains[0].result().status == "cancelled"
+        assert world.executions.streams[child].status.value == "cancelled"
+        assert (await queue.in_use()).claimed == 0
+        assert world.budget.running == 0
+        assert _leases(world) == 0

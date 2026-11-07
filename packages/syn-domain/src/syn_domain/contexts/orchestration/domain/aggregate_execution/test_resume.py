@@ -32,6 +32,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     RetryPhaseCommand,
     StartExecutionCommand,
     StartPhaseCommand,
+    WithdrawResumeCommand,
     WorkflowExecutionAggregate,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
@@ -697,3 +698,51 @@ class TestTheResumeGuardFailsClosed:
             stripped.resume_execution(
                 ResumeExecutionCommand(execution_id=PARENT, resume_execution_id="exec-resume-b")
             )
+
+
+def _withdraw(store: _Store, resume_id: str = RESUME) -> None:
+    parent = store.load()
+    parent.withdraw_resume(
+        WithdrawResumeCommand(execution_id=PARENT, resume_execution_id=resume_id, reason="stale")
+    )
+    store.save(parent)
+
+
+@pytest.mark.unit
+class TestWithdrawingAQueuedResume:
+    """#1677: the parent takes back a resume its child has not started."""
+
+    def test_the_reloaded_parent_says_it_was_withdrawn(self) -> None:
+        store = _Store(_failed_between_phases())
+        _resume(store)
+
+        _withdraw(store)
+
+        assert store.load().resume_withdrawn is True
+
+    def test_withdrawing_twice_records_one_withdrawal(self) -> None:
+        store = _Store(_failed_between_phases())
+        _resume(store)
+        _withdraw(store)
+
+        _withdraw(store)
+
+        withdrawn = [e for e in store._events if e.event.event_type == "ExecutionResumeWithdrawn"]  # pyright: ignore[reportPrivateUsage]
+        assert len(withdrawn) == 1
+
+    def test_a_resume_the_parent_did_not_admit_is_refused(self) -> None:
+        store = _Store(_failed_between_phases())
+        with pytest.raises(ValueError, match="admitted no resume"):
+            _withdraw(store)
+        _resume(store)
+        with pytest.raises(ValueError, match="admitted no resume exec-other"):
+            _withdraw(store, "exec-other")
+
+    def test_a_withdrawn_resume_is_still_spent(self) -> None:
+        """Withdrawing does not re-open the one-resume rule."""
+        store = _Store(_failed_between_phases())
+        _resume(store)
+        _withdraw(store)
+
+        with pytest.raises(ValueError, match="already been resumed"):
+            _resume(store, "exec-resume-b")
