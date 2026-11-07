@@ -17,6 +17,12 @@ from syn_domain.contexts.orchestration._shared.resume_withdrawal import ResumeWi
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     CancelExecutionCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
+    EventsNotRecordedError,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
+    RunScopedTodoFold,
+)
 from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
@@ -28,6 +34,17 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal import (
         ExecutionJournal,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+        ExecutionRepository,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
+        ExecutionEventStream,
+        TodoProjectionType,
+    )
+
+_CANCEL_ATTEMPTS = 3
+"""Reads of the child a withdrawal's cancel may take. Two writers race at most
+(the opener and one claimer), so the second read already sees the winner."""
 
 
 async def reserve_run(
@@ -107,6 +124,9 @@ async def cancel_if_withdrawn(
 
     Returns:
         The child as it now stands, cancelled, or None if it was not withdrawn.
+
+    Raises:
+        EventsNotRecordedError: see `_cancel_withdrawn_child`.
     """
     origin = aggregate.start_pins.resumed_from
     if origin is None:
@@ -114,15 +134,73 @@ async def cancel_if_withdrawn(
     parent = await journal.reload(origin.parent_execution_id)
     if parent is None or not parent.resume_withdrawn:
         return None
-    # Read again: the other side of the open may have cancelled it already.
-    child = await journal.reload(aggregate.id or "") or aggregate
-    if child.accepts_control(ControlSignalType.CANCEL):
+    return await _cancel_withdrawn_child(journal, aggregate.id or "", origin.resume_phase_id)
+
+
+async def _cancel_withdrawn_child(
+    journal: ExecutionJournal, child_id: str, resume_phase_id: str
+) -> WorkflowExecutionAggregate:
+    """Cancel the child, or find it already cancelled by the other side.
+
+    The opener and a claimer may both find the child cancellable and both
+    append the cancel. The one that loses the version race reads the child
+    again and finds the cancel the other wrote, which is the answer it wanted:
+    a lost race is not an error here, and an error escaping the claimer's
+    drain would keep its claim charged until the lease expires.
+
+    Raises:
+        EventsNotRecordedError: the cancel was not shown recorded, by this
+            writer or another, after `_CANCEL_ATTEMPTS` reads of the child.
+        LookupError: the child has no stream.
+    """
+    attempt = 0
+    while True:
+        attempt += 1
+        child = await journal.reload(child_id)
+        if child is None:
+            msg = f"Withdrawn resume child {child_id} has no execution stream"
+            raise LookupError(msg)
+        if not child.accepts_control(ControlSignalType.CANCEL):
+            return child
         child.cancel_execution(
             CancelExecutionCommand(
-                execution_id=child.id or "",
-                phase_id=origin.resume_phase_id,
+                execution_id=child_id,
+                phase_id=resume_phase_id,
                 reason="Withdrawn before it started",
             )
         )
-        await journal.append(child)
-    return child
+        try:
+            await journal.append(child)
+        except EventsNotRecordedError:
+            # Lost the race, or the acknowledgment: the next read decides.
+            if attempt >= _CANCEL_ATTEMPTS:
+                raise
+            continue
+        return child
+
+
+async def fold_claimed_run(
+    execution_id: str,
+    repository: ExecutionRepository,
+    events: ExecutionEventStream,
+    projection_type: TodoProjectionType,
+) -> tuple[RunScopedTodoFold, WorkflowExecutionAggregate]:
+    """The claimed run's own to-do fold and aggregate, a withdrawn resume cancelled.
+
+    A withdrawn resume drains as the cancelled run it now is (#1677). The
+    opener may write that cancel after this fold was seeded, so it is folded
+    again: a stale fold still holds the first phase's to-do, and draining it
+    would start a phase on a cancelled run.
+
+    Raises:
+        LookupError: the claimed execution has no stream.
+    """
+    fold = await RunScopedTodoFold.for_execution(execution_id, repository, events, projection_type)
+    aggregate = await fold.journal.reload(execution_id)
+    if aggregate is None:
+        msg = f"Claimed run {execution_id} has no execution stream"
+        raise LookupError(msg)
+    if await cancel_if_withdrawn(fold.journal, aggregate) is None:
+        return fold, aggregate
+    fold = await RunScopedTodoFold.for_execution(execution_id, repository, events, projection_type)
+    return fold, await fold.journal.reload(execution_id) or aggregate

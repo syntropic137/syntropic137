@@ -80,10 +80,13 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution_request import
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
+    ExecutionCancelledEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
     ExecutionRequestedEvent,
 )
-from syn_domain.contexts.orchestration.ports import ExecutorHost
+from syn_domain.contexts.orchestration.ports import ClaimedRun, ExecutorHost
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     ExecuteWorkflowHandler,
 )
@@ -1555,6 +1558,123 @@ class TestAQueuedResumeCanBeCancelled:
 
         assert cancelled.message == "Withdrawn before it started: it will not run"
         assert child not in entered
+        assert world.executions.streams[child].status.value == "cancelled"
+        assert (await queue.in_use()).claimed == 0
+        assert world.budget.running == 0
+        assert _leases(world) == 0
+
+    @pytest.mark.parametrize("order", ["both_read_before_either_writes", "claimer_folded_first"])
+    async def test_the_opener_and_the_claimer_both_cancel_and_the_claim_is_freed(
+        self, world: _World, monkeypatch: pytest.MonkeyPatch, order: str
+    ) -> None:
+        # #2184 round 3. The opener and an executor that claimed the row both
+        # find the parent withdrawn, and the opener's cancel lands first.
+        # - both_read_before_either_writes: both loaded the child at the same
+        #   version, so the claimer's append loses the version race. It must
+        #   recognise the durable cancel, not escape the drain: an escaped
+        #   drain leaves the claim charged until its lease expires.
+        # - claimer_folded_first: the claimer seeded its to-do list before the
+        #   opener's cancel and reads the child after it, so its fold is stale.
+        #   It must still end the run as cancelled, not dispatch the old
+        #   provision to-do and fail.
+        lookup = world.executions.get_by_id
+        save = world.executions.save
+        target: list[str] = []
+        parent: list[str] = []
+        drains: list[asyncio.Task[WorkflowExecutionResult]] = []
+        paused, proceed = asyncio.Event(), asyncio.Event()
+        claimer_at_save, opener_saved = asyncio.Event(), asyncio.Event()
+        claimer_folded = asyncio.Event()
+
+        def in_claimer() -> bool:
+            return bool(drains) and asyncio.current_task() is drains[0]
+
+        async def raced_lookup(execution_id: str) -> WorkflowExecutionAggregate | None:
+            if execution_id in target and not paused.is_set():
+                paused.set()
+                await proceed.wait()
+            if execution_id in target and in_claimer():
+                claimer_folded.set()  # its first read of the child follows the fold
+            if order == "claimer_folded_first" and execution_id in parent and in_claimer():
+                async with asyncio.timeout(_WITHIN):
+                    await opener_saved.wait()
+            return await lookup(execution_id)
+
+        async def raced_save(aggregate: WorkflowExecutionAggregate) -> None:
+            cancels = aggregate.id in target and any(
+                isinstance(e.event, ExecutionCancelledEvent)
+                for e in aggregate.get_uncommitted_events()
+            )
+            if not cancels:
+                await save(aggregate)
+                return
+            if in_claimer():
+                claimer_at_save.set()
+                async with asyncio.timeout(_WITHIN):
+                    await opener_saved.wait()
+                await save(aggregate)
+                return
+            if order == "both_read_before_either_writes":
+                async with asyncio.timeout(_WITHIN):
+                    await claimer_at_save.wait()
+            else:
+                async with asyncio.timeout(_WITHIN):
+                    await claimer_folded.wait()
+            await save(aggregate)
+            opener_saved.set()
+
+        monkeypatch.setattr(world.executions, "get_by_id", raced_lookup)
+        monkeypatch.setattr(world.executions, "save", raced_save)
+        running, parent_id, child = await _two_running_one_resume_queued(world)
+        parent.append(parent_id)
+        queue, executor = await _executor_on_a_run_queue(world)
+        save_new = world.executions.save_new
+        claims: list[ClaimedRun] = []
+        dispatch = executor._dispatch  # pyright: ignore[reportPrivateUsage]
+        dispatched: list[str] = []
+
+        async def recorded_dispatch(todo: TodoItem, *args: object, **kwargs: object) -> None:
+            dispatched.append(f"{todo.execution_id}:{todo.action}")
+            await dispatch(todo, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(executor, "_dispatch", recorded_dispatch)
+
+        async def opened_then_claimed(aggregate: WorkflowExecutionAggregate) -> None:
+            await save_new(aggregate)
+            if aggregate.id != child:
+                return
+            # The sweep promotes it and an executor claims it while the opener
+            # goes on to its own check.
+            await queue.mark_admitted(child)
+            claimed = await queue.claim("host-1677")
+            assert claimed is not None
+            claims.append(claimed)
+            drains.append(asyncio.create_task(executor.run_claimed(claimed)))
+
+        monkeypatch.setattr(world.executions, "save_new", opened_then_claimed)
+        target.append(child)
+        world.agent.release(running[0])
+        async with asyncio.timeout(_WITHIN):
+            await paused.wait()
+
+        cancelled = await _cancel(child)
+        proceed.set()
+        async with asyncio.timeout(_WITHIN):
+            while not (drains and (drains[0].done() or child in world.agent.entered)):
+                await asyncio.sleep(0.01)
+        entered = list(world.agent.entered)
+        # As ExecutionHost._drive: a drain that escaped leaves its claim charged.
+        escaped = drains[0].exception() if drains[0].done() else None
+        if drains[0].done() and escaped is None:
+            await queue.close(claims[0])
+        await _release_everything(world)
+
+        assert opener_saved.is_set()
+        assert cancelled.message == "Withdrawn before it started: it will not run"
+        assert child not in entered
+        assert escaped is None
+        assert not [d for d in dispatched if d.startswith(f"{child}:")]
+        assert drains[0].result().status == "cancelled"
         assert world.executions.streams[child].status.value == "cancelled"
         assert (await queue.in_use()).claimed == 0
         assert world.budget.running == 0
