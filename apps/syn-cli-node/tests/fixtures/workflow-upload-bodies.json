@@ -613,6 +613,139 @@
       }
     ]
   },
+  "workflows/dreamship/implement-v9/workflow.yaml": {
+    "id": "dreamship-implement-v9",
+    "name": "dreamship-implement-v9",
+    "description": "v9 of dreamship-implement. v8 plus enforcement on software-leverage-review's fan-out: every per-point reviewer must load its point's skill and name the directory and commit it loaded; the orchestrator re-dispatches any that do not, and reports the run as incomplete if any reviewer is still unloaded. See README.md.\n",
+    "type": "implementation",
+    "classification": "standard",
+    "requires_repos": true,
+    "phases": [
+      {
+        "id": "implement",
+        "name": "Implement behind a failing test, then open the PR",
+        "order": 1,
+        "execution_type": "sequential",
+        "output_artifacts": [
+          "markdown"
+        ],
+        "timeout_seconds": 7200,
+        "skills": [
+          "syntropic137/software-leverage-points/software-leverage-review@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/software-complexity@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/principles-and-patterns@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/dry@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/types@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/error-handling@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/testing@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/architecture@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/security@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/documentation@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/boundary-hardening@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/ci-optimization@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/configuration@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/continuous-delivery@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/dependencies@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/developer-experience@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/environments@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/extensibility@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/logging@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/purpose-and-scope@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/versioning@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "AweHelm/dream-ship-os/managing-beads@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/canonical-knowledge@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/delivery-process@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/merging-a-pr@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/red-gates-and-fitness@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/code-quality-assurance@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/vertical-slices@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/foundational-books@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/systematic-rename@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d"
+        ],
+        "agent": {
+          "provider": "claude",
+          "model": "opus"
+        },
+        "model": "opus",
+        "prompt_template": "# Implement this change, test-first, and open the PR before you finish\n\n$ARGUMENTS\n\n## Skills for this phase (load them first)\n\nLoad each skill below with the Skill tool before you change anything, and apply it while you work. Your first output line must be `SKILLS LOADED:`, followed by the names you loaded. Name any skill you could not load, with the reason.\n\n- `software-leverage-review`\n- `software-complexity`\n- `principles-and-patterns`\n- `dry`\n- `types`\n- `error-handling`\n- `testing`\n- `architecture`\n- `security`\n- `documentation`\n- `managing-beads`\n- `canonical-knowledge`\n- `delivery-process`\n- `merging-a-pr`\n- `red-gates-and-fitness`\n- `code-quality-assurance`\n- `vertical-slices`\n- `foundational-books`\n- `systematic-rename`\n\nThe following are also installed, for `software-leverage-review`'s per-point reviewers. You do not need to load them yourself:\n\n- `boundary-hardening`\n- `ci-optimization`\n- `configuration`\n- `continuous-delivery`\n- `dependencies`\n- `developer-experience`\n- `environments`\n- `extensibility`\n- `logging`\n- `purpose-and-scope`\n- `versioning`\n\n## Run software-leverage-review in this session (required)\n\nRun it on your committed change before you open the PR. Fix every headline (auto-fix) finding, re-run the gates, then open the PR and list the promoted findings in its body.\n\nRun it here, as its orchestrator:\n- **Do not use `claude -p`.** It is not logged in inside this workspace. The skill asks for `claude -p` only so that its orchestrator is a top-level session able to dispatch subagents. You already are one.\n- **Follow its Workflow, steps 1 to 8, yourself.**\n  - TARGET: `git -C <repo> diff origin/main...HEAD > /workspace/artifacts/output/slr-implement/diff.patch` once your change is committed.\n  - OUTPUT_DIR: `/workspace/artifacts/output/slr-implement`. Files under `/workspace/artifacts/output/` are kept after this phase ends.\n  - Dispatch one reviewer per leverage point in its `slp-manifest.yaml` with the Agent tool, in parallel, each with `prompt_review-one-software-leverage-point.md`. Every point's skill is installed here.\n  - **Each reviewer must load its own point's skill.** Append this to every dispatch prompt, word for word:\n\n    > Before you read the diff, invoke the Skill tool for your software leverage point. Do not review without it. End your one-line confirmation with ` | skill: <the \"Base directory for this skill\" the Skill tool printed> @ <commit>`. The commit is `9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613` for a directory under `/workspace/.claude/skills/`, or the output of `git -C <repo> rev-parse HEAD` for a directory inside a cloned repo.\n  - **Check every confirmation before you dedup.**\n    - If a reviewer's confirmation has no `skill:` part, or names a directory that is not that point's skill, re-dispatch that reviewer once, with the same prompt.\n    - If any reviewer still has none, the review is incomplete. Post the report anyway with `INCOMPLETE` in its title, name each unloaded reviewer, end your output with `SLR INCOMPLETE: <points>`, and do not mark the PR ready.\n  - **The report starts with a table:** every reviewer, the skill directory it loaded, and the commit.\n  - Run its scripts with `uv run python`.\n- **Post the rendered markdown report as a comment on the PR.** Print `SLR REPORT:` followed by the comment's URL and the report's path.\n- **If any step cannot run,** name the step and the reason in your output and on the PR. A review you write by hand is not this skill, so do not call it one.\n\n## The one hard constraint on this phase\n\n**Every git operation you need must happen in THIS phase.** Write the code,\ncommit it, push the branch, and open the pull request here. Later phases run in\nfresh containers on fresh clones: a branch you leave uncommitted, or a commit\nyou leave unpushed, does not exist as far as they are concerned. There is no\nlater phase that will \"do the git part\" for you. If you run out of time with\nwork worth keeping, push what you have and say so in the PR body.\n\n## Three things that DESTROY your work. Read these before you edit anything.\n\n**1. Never touch `.github/workflows/`.** Not to fix a job, not to add one, not\neven a comment. The App pushing on your behalf has no `workflows` permission, so\na commit containing any change under that path makes **every** push from this\nphase fail — including the quarantine push that exists to rescue your work when\na phase ends badly. A run has already been lost this way: 2511 seconds of\ncorrect work, rejected with *\"refusing to allow a GitHub App to create or update\nworkflow `.github/workflows/test.yml` without `workflows` permission\"*, and the\nrecovery ref could not be written either, so none of it was recoverable. This\nrepo also does not spend on GitHub Actions, so a CI edit is not wanted here\nregardless. If CI genuinely needs changing, say so in your output and leave the\nfile alone.\n\n**2. PUSH EARLY, and keep pushing.** Create the branch and push it as soon as\nyou have one commit worth keeping - before the work is finished, before the gates\nare green, before the PR body is written. Then push again after each meaningful\nstep. A phase that does everything and pushes at the end loses ALL of it on a\ntimeout: that is how `exec-4f269f8a067c` died at 3696 seconds with a correct\ncommit sitting on a branch no remote had. An unfinished branch on origin is\nrecoverable by anyone; a perfect branch inside a dead container is not. Open the\nPR as a draft early if that helps you push sooner.\n\n**3. Write `artifacts/output/deliverable.md` EARLY, and keep updating it.** The\nphase's contract is the artifact, not the code. A phase that does perfect work\nand never writes the file is FAILED by the platform and its workspace is torn\ndown — that is the other half of how the run above was lost. So write a first\nversion as soon as you know the branch name, and rewrite it as you go. Never\nleave it to a final step you might not reach.\n\n## Work test-first\n\nWrite the failing test BEFORE the implementation, and run it to watch it fail\nfor the right reason. A test written after the code tends to assert what the\ncode happens to do rather than what was asked for, and a test that has never\nfailed has not been shown to be capable of failing.\n\nWhere this repo already has a test for the behaviour you are changing, extend it\nrather than adding a parallel one. Where the change is a refactor with no\nbehaviour change, the test that matters is the one that pins the behaviour you\nmust not alter: find it, and say which one it is.\n\nRead `AGENTS.md` first. It is the canonical agent context. Pay attention to the\nfour Event Modeling slice patterns, the content rule (a domain event carries a\nreference, never a payload), `assert_test_env!()` as the first line of any mock,\nand the no-broken-windows rule.\n\n## Gates, before you push\n\nRun the repo's own gates and make them pass:\n\n    just bootstrap\n    APP_ENV=test cargo test --workspace   # or the narrower -p that covers your change\n    just vsa                              # hard pre-push gate on contexts/\n    just fitness --quick\n\nDo NOT edit `harness/sensors/baseline.json`. A baseline change cannot travel\nthrough `just land` by design, so a branch touching it cannot be landed. If a\nfitness floor genuinely blocks you, stop and say so in your output.\n\nDo NOT use `git push --no-verify`. If a hook is broken in a way unrelated to\nyour change, use `just push-scoped`, and say in the PR body which job you\nskipped and why.\n\nIf a gate is red and it is NOT your diff, follow AGENTS.md's red-gate triage\nladder: fix it if it takes about 15 minutes, otherwise file a bead with `br\ncreate` and leave an inline comment at the broken site pointing to that bead.\nSay which you did.\n\n## Then open the PR\n\n    git checkout -b <type>/<short-slug>\n    git add -A && git commit        # conventional commits; cog-verify gates the message\n    git push -u origin <branch>\n    gh pr create --base main --title \"...\" --body \"...\"\n\nThe PR body must state plainly: what the change does, what it does NOT do, the\nexact commands you ran and their results, and any pre-existing failure you found\nwith the bead id you filed for it. Do not describe a test as passing unless you\nran it and read the output. If something is unverified, label it unverified.\n\n## Output\n\nWrite to `artifacts/output/deliverable.md`: the PR URL and number, the branch\nname, the base SHA you branched from, what you changed and why, the commands you\nran with their results, and the single most likely way your change is wrong.\n\nThat last item is not optional. Name the weakest point, so the review phase can\nstart there instead of hunting for it."
+      },
+      {
+        "id": "review",
+        "name": "Try to falsify it, and attack it on security",
+        "order": 2,
+        "execution_type": "sequential",
+        "input_artifacts": [
+          "markdown"
+        ],
+        "output_artifacts": [
+          "markdown"
+        ],
+        "timeout_seconds": 3000,
+        "skills": [
+          "syntropic137/software-leverage-points/software-leverage-review@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/testing@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/security@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/architecture@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "AweHelm/dream-ship-os/canonical-knowledge@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/red-gates-and-fitness@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/code-quality-assurance@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/vertical-slices@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d"
+        ],
+        "agent": {
+          "provider": "codex",
+          "model": "gpt-sol"
+        },
+        "model": "gpt-sol",
+        "prompt_template": "# Review the PR the previous phase opened\n\n$ARGUMENTS\n\n## Skills for this phase (load each one in full, first)\n\nRead each skill's `SKILL.md` with its own command, `cat /workspace/.agents/skills/<name>/SKILL.md`:\n- one file per command;\n- no `rtk` prefix;\n- never several files in one loop.\n\nA longer output is cut in the middle before you see it, and a skill you have read only half of is not loaded. Then run `wc -l` on the files.\n\nYour first output line must be `SKILLS LOADED:`, followed by each name with its line count. Name any skill you could not load, with the reason.\n\n- `software-leverage-review`\n- `testing`\n- `security`\n- `architecture`\n- `canonical-knowledge`\n- `red-gates-and-fitness`\n- `code-quality-assurance`\n- `vertical-slices`\n\nJudge the change against these skills, and name the skill behind each finding.\n\nThe implement phase ran `software-leverage-review` and posted its report on the PR. Check that its headline findings were fixed, and list any that were not.\n\n## Review by trying to falsify, not by reading the diff\n\nCheck the branch out and RUN things. A review that only reads the diff catches\nstyle and misses behaviour.\n\n- **Does the test actually test the thing?** Mutate the implementation so the\n  claimed behaviour is wrong, and confirm the new test FAILS. A test that still\n  passes under a mutation proves nothing, and this is the most common defect in\n  agent-written tests in this repo. Report any test that survives mutation as a\n  BLOCKER.\n- **Does it replay?** If the change touches an event type, an envelope, a\n  serialized shape, or an identifier, find this repo's pre-change fixtures and\n  confirm a record written before the change still decodes. A replay break is a\n  BLOCKER.\n- **Did the gates really pass?** Re-run them yourself. Do not trust the report's\n  transcript.\n\n## Security, explicitly\n\nSecurity is first-class on DreamShip. Check at minimum:\n\n- **The content rule.** Does any new field put content, rather than a reference,\n  on a path that reaches the event log? An append-only log cannot un-write a\n  payload, so this has to hold on the way in.\n- **Compartment isolation.** Nothing may leak out of a Compartment. Does any new\n  lookup or projection cross a compartment boundary, or match on a label that is\n  not scoped to one?\n- **Derived identifiers.** Is any new id an unkeyed hash of user text? That is\n  reversible, and it is a disclosure even when every field is compliant.\n- Secrets in code or logs, unvalidated input at a trust boundary, and any mock\n  missing `assert_test_env!()`.\n\n## Output\n\nWrite to `artifacts/output/deliverable.md`. THAT FILE IS THE DELIVERABLE and it is\nthe only thing this phase owes anyone.\n\nThen, BEST EFFORT ONLY, try to post the same text as a PR comment with\n`gh pr comment`. If that fails for any reason - no PR for the branch, a denied\npermission, a network error - say so in one line at the end of the deliverable and\nREPORT SUCCESS ANYWAY. Do not retry it, do not try to create a PR, and do not treat\nit as a reason to fail.\n\nThis is not laxity. A review that finished its work and could not deliver a copy of\nit has still done its job, and failing the phase there throws away the review, stops\nthe remediate phase from ever running, and reports the whole run as a refusal - which\nreads as \"the code was rejected\" when nothing was. Nine runs died exactly that way.\nThe artifact is collected either way.\n\nSeparate **BLOCKERS** from **NON-BLOCKING FINDINGS**, blockers first. A blocker\nis: wrong behaviour, a test that survives mutation, a replay break, a security\nfinding, or a claim in the PR body that is not true. Anything else is\nnon-blocking. Say so rather than inflating it.\n\nFor each finding give the file and line, what is wrong, and the concrete input or\nstate that makes it go wrong. \"Consider extracting this\" is not a finding.\n\nEnd with one line, exactly one of: `VERDICT: MERGE` or `VERDICT: BLOCKED`."
+      },
+      {
+        "id": "remediate",
+        "name": "Fix what the review blocked on",
+        "order": 3,
+        "execution_type": "sequential",
+        "input_artifacts": [
+          "markdown"
+        ],
+        "output_artifacts": [
+          "markdown"
+        ],
+        "timeout_seconds": 3600,
+        "skills": [
+          "syntropic137/software-leverage-points/software-leverage-review@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/testing@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/security@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/architecture@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/boundary-hardening@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/ci-optimization@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/configuration@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/continuous-delivery@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/dependencies@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/developer-experience@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/documentation@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/dry@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/environments@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/error-handling@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/extensibility@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/logging@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/principles-and-patterns@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/purpose-and-scope@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/software-complexity@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/types@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "syntropic137/software-leverage-points/versioning@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613",
+          "AweHelm/dream-ship-os/managing-beads@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/delivery-process@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/merging-a-pr@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d",
+          "AweHelm/dream-ship-os/red-gates-and-fitness@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d"
+        ],
+        "agent": {
+          "provider": "claude",
+          "model": "opus"
+        },
+        "model": "opus",
+        "prompt_template": "# Address the review\n\n$ARGUMENTS\n\n## Skills for this phase (load them first)\n\nLoad each skill below with the Skill tool before you change anything, and apply it while you work. Your first output line must be `SKILLS LOADED:`, followed by the names you loaded. Name any skill you could not load, with the reason.\n\n- `software-leverage-review`\n- `testing`\n- `security`\n- `architecture`\n- `managing-beads`\n- `delivery-process`\n- `merging-a-pr`\n- `red-gates-and-fitness`\n\nThe following are also installed, for `software-leverage-review`'s per-point reviewers. You do not need to load them yourself:\n\n- `boundary-hardening`\n- `ci-optimization`\n- `configuration`\n- `continuous-delivery`\n- `dependencies`\n- `developer-experience`\n- `documentation`\n- `dry`\n- `environments`\n- `error-handling`\n- `extensibility`\n- `logging`\n- `principles-and-patterns`\n- `purpose-and-scope`\n- `software-complexity`\n- `types`\n- `versioning`\n\n## Run software-leverage-review in this session (required)\n\nRun it on your own fixes before you push them. Fix every headline (auto-fix) finding it raises about your fixes.\n\nRun it here, as its orchestrator:\n- **Do not use `claude -p`.** It is not logged in inside this workspace. The skill asks for `claude -p` only so that its orchestrator is a top-level session able to dispatch subagents. You already are one.\n- **Follow its Workflow, steps 1 to 8, yourself.**\n  - TARGET: `git -C <repo> diff <the head you started from>..HEAD > /workspace/artifacts/output/slr-remediate/diff.patch` once your fixes are committed.\n  - OUTPUT_DIR: `/workspace/artifacts/output/slr-remediate`. Files under `/workspace/artifacts/output/` are kept after this phase ends.\n  - Dispatch one reviewer per leverage point in its `slp-manifest.yaml` with the Agent tool, in parallel, each with `prompt_review-one-software-leverage-point.md`. Every point's skill is installed here.\n  - **Each reviewer must load its own point's skill.** Append this to every dispatch prompt, word for word:\n\n    > Before you read the diff, invoke the Skill tool for your software leverage point. Do not review without it. End your one-line confirmation with ` | skill: <the \"Base directory for this skill\" the Skill tool printed> @ <commit>`. The commit is `9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613` for a directory under `/workspace/.claude/skills/`, or the output of `git -C <repo> rev-parse HEAD` for a directory inside a cloned repo.\n  - **Check every confirmation before you dedup.**\n    - If a reviewer's confirmation has no `skill:` part, or names a directory that is not that point's skill, re-dispatch that reviewer once, with the same prompt.\n    - If any reviewer still has none, the review is incomplete. Post the report anyway with `INCOMPLETE` in its title, name each unloaded reviewer, end your output with `SLR INCOMPLETE: <points>`, and do not mark the PR ready.\n  - **The report starts with a table:** every reviewer, the skill directory it loaded, and the commit.\n  - Run its scripts with `uv run python`.\n- **Post the rendered markdown report as a comment on the PR.** Print `SLR REPORT:` followed by the comment's URL and the report's path.\n- **If any step cannot run,** name the step and the reason in your output and on the PR. A review you write by hand is not this skill, so do not call it one.\n\n## Output\n\nWrite to `artifacts/output/deliverable.md`: each blocker and what you did about\nit, the commands you ran with their results, the new commit SHA, and whether you\nconsider the PR ready to land. If it is not ready, say exactly what remains."
+      }
+    ]
+  },
   "workflows/evals/implement-pinned/workflow.yaml": {
     "id": "eval-implement-pinned-v1",
     "name": "Eval: implement a task at the pinned checkout, patch only (v1)",
