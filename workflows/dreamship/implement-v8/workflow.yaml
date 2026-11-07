@@ -1,0 +1,113 @@
+id: dreamship-implement-v8
+name: dreamship-implement-v8
+description: >
+  v8 of dreamship-implement. v7 (same prompts, models, phase order, timeouts,
+  pinned skills) plus: implement and remediate run software-leverage-review in
+  their own session (its claude -p is not logged in inside a workspace) with all
+  20 leverage points installed for its reviewers, and review reads each skill
+  in full, one file per command. See README.md.
+type: implementation
+classification: standard
+requires_repos: true
+
+phases:
+  - id: implement
+    name: 'Implement behind a failing test, then open the PR'
+    order: 1
+    execution_type: sequential
+    prompt_file: phases/implement.md
+    output_artifacts: [markdown]
+    timeout_seconds: 7200
+    skills:
+      - syntropic137/software-leverage-points/software-leverage-review@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/software-complexity@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/principles-and-patterns@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/dry@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/types@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/error-handling@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/testing@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/architecture@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/security@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/documentation@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      # installed for software-leverage-review's per-point reviewers (its slp-manifest.yaml)
+      - syntropic137/software-leverage-points/boundary-hardening@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/ci-optimization@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/configuration@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/continuous-delivery@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/dependencies@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/developer-experience@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/environments@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/extensibility@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/logging@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/purpose-and-scope@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/versioning@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - AweHelm/dream-ship-os/managing-beads@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/canonical-knowledge@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/delivery-process@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/merging-a-pr@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/red-gates-and-fitness@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/code-quality-assurance@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/vertical-slices@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/foundational-books@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/systematic-rename@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+    agent:
+      provider: claude
+      model: opus
+  - id: review
+    name: 'Try to falsify it, and attack it on security'
+    order: 2
+    execution_type: sequential
+    prompt_file: phases/review.md
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 3000
+    skills:
+      - syntropic137/software-leverage-points/software-leverage-review@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/testing@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/security@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/architecture@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - AweHelm/dream-ship-os/canonical-knowledge@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/red-gates-and-fitness@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/code-quality-assurance@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/vertical-slices@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+    agent:
+      provider: codex
+      model: gpt-sol
+  - id: remediate
+    name: Fix what the review blocked on
+    order: 3
+    execution_type: sequential
+    prompt_file: phases/remediate.md
+    input_artifacts: [markdown]
+    output_artifacts: [markdown]
+    timeout_seconds: 3600
+    skills:
+      - syntropic137/software-leverage-points/software-leverage-review@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/testing@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/security@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/architecture@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      # installed for software-leverage-review's per-point reviewers (its slp-manifest.yaml)
+      - syntropic137/software-leverage-points/boundary-hardening@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/ci-optimization@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/configuration@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/continuous-delivery@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/dependencies@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/developer-experience@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/documentation@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/dry@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/environments@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/error-handling@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/extensibility@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/logging@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/principles-and-patterns@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/purpose-and-scope@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/software-complexity@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/types@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - syntropic137/software-leverage-points/versioning@9dad3b8fad04d1c5bfd4ccc01b69caf78bc7f613
+      - AweHelm/dream-ship-os/managing-beads@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/delivery-process@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/merging-a-pr@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+      - AweHelm/dream-ship-os/red-gates-and-fitness@a3cbd316bfee159660025f4c5d7c5a902a5f3a6d
+    agent:
+      provider: claude
+      model: opus
