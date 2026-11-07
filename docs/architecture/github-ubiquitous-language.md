@@ -61,6 +61,45 @@ guards that stop a rule firing in a loop.
 
 Blocked instead of fired when a guard refuses it (`TriggerBlocked`).
 
+## Contributor
+
+Who a GitHub event is attributed to when deciding whether it may make a Trigger
+Rule fire: the author of the content the event carries (comment, review, pull
+request or issue, most specific first), or the event's sender when it carries
+none (`check_run`, `push`).
+
+Deliberately NOT the sender in general. The sender of a `check_run` is CI and
+the sender of a `pull_request.synchronize` may be a maintainer; neither makes
+the code being acted on theirs.
+
+## Author Association
+
+GitHub's statement of a Contributor's relationship to the repository
+(`author_association` on the content). `OWNER`, `MEMBER` and `COLLABORATOR` are
+the **trusted** associations; anything else (`CONTRIBUTOR`,
+`FIRST_TIME_CONTRIBUTOR`, `NONE`, ...) or its absence is not.
+
+## Contributor Guard
+
+The one system-wide guard that refuses a Fire when the Contributor is not
+trusted by the operator's Contributor Policy. It runs before a Trigger Rule's
+own conditions and is recorded as `TriggerBlocked` with
+`guard_name="contributor_guard"`. Not a condition: conditions belong to one
+rule, the guard to every rule.
+
+## Contributor Policy
+
+The operator's rule the Contributor Guard applies, one of three modes:
+
+- **allow_all** - every Contributor may fire (the default).
+- **trusted** - Contributors with a trusted Author Association, plus the
+  Allowed Logins.
+- **allowlist** - only the Allowed Logins.
+
+**Allowed Logins** are GitHub logins that may always fire, compared
+case-insensitively. Bots are not special: a bot fires under a restrictive mode
+only when its login is an Allowed Login.
+
 ## Dispatch
 
 The act of starting a Workflow because a Trigger Rule fired, completed by

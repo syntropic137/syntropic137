@@ -1,6 +1,6 @@
 """Contributor guard settings: who may make a trigger fire (#580).
 
-See docs/deployment/github-app-security.md and ADR-040. The guard itself lives
+See infra/docs/github-app-security.md and ADR-040-github-trigger-architecture. The guard itself lives
 in the github context (``evaluate_webhook/contributor_guard.py``); this class
 only carries the operator's choice to it.
 """

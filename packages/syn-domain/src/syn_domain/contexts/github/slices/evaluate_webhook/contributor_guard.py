@@ -2,7 +2,7 @@
 
 The guard is system-wide and runs before any per-trigger condition, so an
 operator protects every trigger with one setting instead of repeating
-``sender.login`` conditions on each rule. ADR-040 anticipated it as the
+``sender.login`` conditions on each rule. ADR-040-github-trigger-architecture anticipated it as the
 "contributor allowlist" guard; a refusal is recorded as a
 ``TriggerBlockedEvent`` like every other guard.
 

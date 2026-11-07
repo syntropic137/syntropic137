@@ -83,6 +83,7 @@ Every trigger evaluation passes through safety guards before dispatching:
 
 | Guard | `guard_name` | Purpose |
 |-------|-------------|---------|
+| **Contributor** | `contributor_guard` | System-wide, runs before per-trigger conditions: refuse contributors the operator does not trust (`SYN_TRIGGER_CONTRIBUTOR_MODE`, #580) |
 | **Concurrency** | `concurrency` | Block if execution already running for same (trigger, PR) — prevents catch-up storms |
 | **Bot Sender Check** | — | Prevent infinite loops — don't trigger on the bot's own commits |
 | **Max Attempts** | `max_attempts` | Cap retries per (PR, trigger) combination |
@@ -159,7 +160,7 @@ The `TriggerHistoryProjection` projects both `TriggerFiredEvent` and `TriggerBlo
 This enables:
 - `syn triggers history <id>` shows blocked entries alongside fires
 - Operators can answer "why didn't this trigger fire?" without grepping logs
-- Future guards (#580 contributor allowlist) emit `TriggerBlockedEvent` automatically
+- The contributor guard (#580, `contributor_guard`) emits `TriggerBlockedEvent` like every other guard
 
 ## Consequences
 

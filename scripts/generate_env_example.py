@@ -416,7 +416,7 @@ def generate_env_example() -> str:
             prefix="SYN_TRIGGER_CONTRIBUTOR_",
             description=(
                 "Who may make a trigger spawn an agent run (#580). Set trusted or "
-                "allowlist on public repos. See docs/deployment/github-app-security.md"
+                "allowlist on public repos. See infra/docs/github-app-security.md"
             ),
         )
     )
