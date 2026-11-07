@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/EvaluateWebhookHandler.py b/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/EvaluateWebhookHandler.py
+index 19692b3fa..7039d9ed0 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/EvaluateWebhookHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/EvaluateWebhookHandler.py
+@@ -360,7 +360,7 @@ def _build_payload_summary(payload: dict[str, Any], event: str) -> dict[str, obj
+     elif "pull_request_review" in event:
+         review = payload.get("review", {})
+         summary["review_state"] = review.get("state", "")
+-        summary["reviewer"] = (review.get("user") or {}).get("login", "")
++        summary["reviewer"] = review.get("user", {}).get("login", "")
+     elif "issue_comment" in event:
+         comment = payload.get("comment", {})
+         summary["comment_id"] = comment.get("id")

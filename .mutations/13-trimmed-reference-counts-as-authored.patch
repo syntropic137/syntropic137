@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/contributor_guard.py b/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/contributor_guard.py
+index 049d25ead..5da29e77b 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/contributor_guard.py
++++ b/packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/contributor_guard.py
+@@ -150,7 +150,7 @@ def contributor_of(payload: object) -> Contributor:
+     # review never borrows the trust of the PR or issue it sits on, and one whose
+     # author is null is judged as nobody rather than as its parent or sender.
+     for content in (parsed.comment, parsed.review, parsed.pull_request, parsed.issue):
+-        if content is not None and content.declares_author:
++        if content is not None:
+             login = content.user.login if content.user is not None else ""
+             return Contributor(login=login, association=content.author_association)
+     for user in (parsed.sender, parsed.events_api_actor):
