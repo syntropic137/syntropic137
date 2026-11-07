@@ -232,6 +232,17 @@
       ],
       "document_sha256": "f65bd5f8331c9134d9083df8cde2dae95c6fbaf08614ec20f7cec2c759c8bca7"
     },
+    "workflows/evals/verify-pinned-codex-gpt-6-1-sol/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "3e8c3cc0d0f416a535efe7c5a9d28e2071527af862c21a8b66ec51bfcc7c1227"
+    },
     "workflows/evals/verify-pinned-codex-gpt-6-luna/workflow.yaml": {
       "phases": [
         {
