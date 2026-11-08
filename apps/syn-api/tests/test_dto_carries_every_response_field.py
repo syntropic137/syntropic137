@@ -157,6 +157,7 @@ _EXECUTION = ExecutionCost(
     cost_by_model={"claude-opus-5": Decimal("2.269134")},
     cost_by_tool={"Bash": Decimal("0.1")},
     models_by_phase={"implement": {"claude-opus-5": Decimal("2.269134")}},
+    observed_models_by_phase={"implement": ["claude-opus-5", "acme-reasoner-7b"]},
     unpriced_by_phase={"implement": 3},
     unpriced_observation_count=3,
     is_complete=True,
