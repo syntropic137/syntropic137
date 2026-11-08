@@ -1,12 +1,12 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/queries.py b/apps/syn-api/src/syn_api/routes/executions/queries.py
-index b9e966dbf..6eec75b17 100644
+index e344e7240..9ba9df103 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/queries.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/queries.py
-@@ -515,7 +515,6 @@ async def _enrich_costs(
-         # Identity is carried apart from money: a model that ran and priced to
-         # nothing is named here rather than vanishing from the split (#1743).
-         observed = observed_model_ids(exec_cost.observed_models_by_phase.get(phase.phase_id, ()))
--        phase.unpriced_models = [m for m in observed if m not in phase.cost_by_model]
-         phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
+@@ -478,7 +478,6 @@ class _EnrichedExecutionCost:
+ def _mark_unpriced_models(phase: PhaseExecution, exec_cost: ExecutionCost) -> None:
+     """Name the models ``phase`` ran that are absent from its cost split (#1743)."""
+     observed = observed_model_ids(exec_cost.observed_models_by_phase.get(phase.phase_id, ()))
+-    phase.unpriced_models = [m for m in observed if m not in phase.cost_by_model]
  
-     return _EnrichedExecutionCost(
+ 
+ async def _enrich_costs(
