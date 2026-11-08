@@ -80,7 +80,12 @@ async def _fresh_stores_with_a_workflow():
 
 @pytest.fixture
 def no_github_app(monkeypatch: pytest.MonkeyPatch):
-    """A server whose operator has not set up the GitHub App: the real factory refuses."""
+    """A server whose operator has not set up the GitHub App: the real factory refuses.
+
+    Each variable is set empty rather than deleted. Deleted, `GitHubAppSettings`
+    falls through to its `.env` source and a developer's configured App comes
+    back; an empty environment value outranks the dotenv file.
+    """
     import syn_adapters.github.client as client_module
     from syn_shared.settings import reset_settings
 
@@ -89,11 +94,21 @@ def no_github_app(monkeypatch: pytest.MonkeyPatch):
         "SYN_GITHUB_APP_PRIVATE_KEY_FILE",
         "SYN_GITHUB_PRIVATE_KEY",
     ):
-        monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv(var, "")
     monkeypatch.setattr(client_module, "_github_client", None)
     reset_settings()
     yield
     reset_settings()
+
+
+@pytest.fixture
+def developer_dotenv_configures_the_app(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    """A developer `.env` that configures an App, as a real checkout may have."""
+    from syn_shared.settings.github import GitHubAppSettings
+
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("SYN_GITHUB_APP_ID=123\nSYN_GITHUB_PRIVATE_KEY=synthetic-not-a-key\n")
+    monkeypatch.setitem(GitHubAppSettings.model_config, "env_file", str(dotenv))
 
 
 class _InstalledNowhere:
@@ -141,6 +156,25 @@ async def _stored_triggers() -> list[object]:
 async def test_no_github_app_refuses_with_the_not_configured_message(
     no_github_app: None, create
 ) -> None:
+    response = await create()
+
+    assert response.status_code == 409, response.text
+    refusal = TriggerErrorResponse.model_validate_json(response.content)
+    assert refusal.code == TriggerError.GITHUB_NOT_CONFIGURED
+    assert refusal.detail == _NOT_CONFIGURED
+    assert await _stored_triggers() == []
+
+
+@pytest.mark.parametrize("create", [_register, _enable_preset], ids=["register", "preset"])
+async def test_a_developer_dotenv_does_not_reconfigure_the_absent_app(
+    developer_dotenv_configures_the_app: None, no_github_app: None, create
+) -> None:
+    """The no-App fixture holds however the checkout's `.env` is set up."""
+    from syn_adapters.github.client import GitHubNotConfiguredError, get_github_client
+
+    with pytest.raises(GitHubNotConfiguredError):
+        get_github_client()
+
     response = await create()
 
     assert response.status_code == 409, response.text
