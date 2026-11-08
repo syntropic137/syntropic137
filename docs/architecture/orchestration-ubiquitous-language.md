@@ -1443,6 +1443,12 @@ version is a different treatment and pooling them would hide its effect. Runs
 with no recorded version group together. Derived at read time from each Run's
 execution detail (the observed models and cost are Lane 2 facts), never stored.
 
+A model is observed whether or not it priced: a delegate on a model with no
+pricing entry still ran, so it is part of the set and makes its own Variant
+(#1743). Observed models are identity, not money, and are carried apart from
+the cost split (`observed_models_by_phase` beside `models_by_phase`); an
+unpriced model is listed as such, never as a $0 cost.
+
 ## Suite
 
 A tag on Evals, not a record: `suite:<name>` plus `case:<case id>` names one
