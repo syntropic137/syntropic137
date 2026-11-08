@@ -32,6 +32,7 @@ from syn_api.types import (
 )
 from syn_domain.contexts.orchestration import (
     InvalidTagsError,
+    ReviewVerdict,
     TagSet,
 )
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
@@ -222,6 +223,7 @@ def _build_execution_summary_response(
         error_message=e.error_message,
         failure_classification=e.failure_classification,
         reported_failure_reason=e.reported_failure_reason,
+        review_verdict=e.review_verdict,
         repos=list(e.repos),
         tags=list(e.tags),
         repos_display=format_repos(e.repos),
@@ -317,6 +319,7 @@ async def _load_execution_list_data(
     tags: TagSet | None = None,
     eval_id: str | None = None,
     in_eval: bool | None = None,
+    review_verdict: ReviewVerdict | None = None,
 ) -> tuple[Page[WorkflowExecutionSummary], dict[str, _ExecutionEnrichment]]:
     """Fetch one page of domain summaries plus its tool-count and cost enrichment, once.
 
@@ -343,6 +346,7 @@ async def _load_execution_list_data(
             tags=tags,
             eval_id=eval_id,
             in_eval=in_eval,
+            review_verdict=review_verdict,
             offset=offset,
             limit=limit,
         )
@@ -376,6 +380,7 @@ def _to_execution_summary(
         total_cache_read_tokens=s.total_cache_read_tokens,
         failure_classification=s.failure_classification,
         reported_failure_reason=s.reported_failure_reason,
+        review_verdict=s.review_verdict,
         total_cost_usd=enrichment.total_cost_usd,
         unpriced_observation_count=enrichment.unpriced_observation_count,
         tool_call_count=enrichment.tool_call_count,
@@ -638,6 +643,7 @@ async def list_active(
                 error_message=s.error_message,
                 failure_classification=s.failure_classification,
                 reported_failure_reason=s.reported_failure_reason,
+                review_verdict=s.review_verdict,
                 repos=list(s.repos),
                 tags=list(s.tags),
             )
@@ -689,6 +695,13 @@ async def list_executions_endpoint(
             "false keeps only executions in no eval. Omit for both."
         ),
     ),
+    review_verdict: ReviewVerdict | None = Query(
+        None,
+        description=(
+            "Keep only executions that completed on this review verdict (#1630). "
+            "A queued start or a run that reviewed nothing has none, so is never kept."
+        ),
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
 ) -> ExecutionListResponse:
@@ -707,6 +720,7 @@ async def list_executions_endpoint(
     queued = _filter_queued(
         all_queued,
         tags=tags,
+        review_verdict=review_verdict,
         eval_id=eval_id,
         in_eval=in_eval,
         search=q,
@@ -729,6 +743,7 @@ async def list_executions_endpoint(
         tags=tags,
         eval_id=eval_id,
         in_eval=in_eval,
+        review_verdict=review_verdict,
     )
     eval_by_execution = await execution_eval_runs(manager.store, execution_page.rows)
     names = await _workflow_names(manager, {qs.workflow_id for qs in head})
@@ -779,6 +794,7 @@ def _filter_queued(
     starts: list[QueuedStart],
     *,
     tags: TagSet,
+    review_verdict: ReviewVerdict | None,
     eval_id: str | None,
     in_eval: bool | None,
     search: str | None,
@@ -787,13 +803,13 @@ def _filter_queued(
 ) -> list[QueuedStart]:
     """The queued starts the list's filters keep.
 
-    A queued start has no read model, so no tags or eval to judge: a request
-    filtering on either is not shown one, and it is in no eval, so
+    A queued start has no read model, so no tags, eval or review verdict to
+    judge: a request filtering on any of them is not shown one, and it is in no eval, so
     ``in_eval=true`` excludes it while ``in_eval=false`` keeps it. It has not started, so a time
     window judges when it was accepted - the dashboard's default 24h window
     would otherwise hide every queued start.
     """
-    if tags or eval_id or in_eval:
+    if tags or eval_id or in_eval or review_verdict is not None:
         return []
     return [qs for qs in starts if _matches(qs, search=search, after=after, before=before)]
 
