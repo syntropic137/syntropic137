@@ -201,7 +201,9 @@ class TestTheFieldsThatWereActuallyDropped:
     """
 
     def _phase(self, **extra: object) -> Mapping[str, object]:
-        return {"phase_id": "review", "name": "Review", "order": 1, **extra}
+        # An agent phase needs a prompt (#963); a command phase must not carry one.
+        prompt = {} if extra.get("kind") == "command" else {"prompt_template": "Do the work."}
+        return {"phase_id": "review", "name": "Review", "order": 1, **prompt, **extra}
 
     #: A command phase's steps as the wire carries them, built from the model so
     #: the request cannot drift from what the domain accepts (ADR-078).
@@ -275,7 +277,8 @@ class TestTheNestedAgentSpellingIsUnderstood:
                 {
                     "phase_id": "review",
                     "name": "Review",
-                    "order": 1, "prompt_template": "Do the work.",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
                     "agent": {"provider": "codex", "model": "gpt-5.6-sol"},
                 }
             ]
@@ -293,7 +296,8 @@ class TestTheNestedAgentSpellingIsUnderstood:
                 {
                     "phase_id": "review",
                     "name": "Review",
-                    "order": 1, "prompt_template": "Do the work.",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
                     "provider": "claude",
                     "agent": {"provider": "codex"},
                 }
@@ -303,7 +307,15 @@ class TestTheNestedAgentSpellingIsUnderstood:
 
     def test_an_agent_block_without_the_keys_changes_nothing(self) -> None:
         (phase,) = _build_phase_defs(
-            [{"phase_id": "r", "name": "R", "order": 1, "prompt_template": "Do the work.", "agent": {"allow_delegation": True}}]
+            [
+                {
+                    "phase_id": "r",
+                    "name": "R",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
+                    "agent": {"allow_delegation": True},
+                }
+            ]
         )
         assert phase.provider is None
         assert phase.allow_delegation is True
@@ -323,12 +335,28 @@ class TestBooleansAreNotCoerced:
         """
         with pytest.raises(ValueError, match="must be a boolean"):
             _build_phase_defs(
-                [{"phase_id": "r", "name": "R", "order": 1, "prompt_template": "Do the work.", "allow_delegation": sent}]
+                [
+                    {
+                        "phase_id": "r",
+                        "name": "R",
+                        "order": 1,
+                        "prompt_template": "Do the work.",
+                        "allow_delegation": sent,
+                    }
+                ]
             )
 
     def test_a_real_true_still_enables_it(self) -> None:
         (phase,) = _build_phase_defs(
-            [{"phase_id": "r", "name": "R", "order": 1, "prompt_template": "Do the work.", "allow_delegation": True}]
+            [
+                {
+                    "phase_id": "r",
+                    "name": "R",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
+                    "allow_delegation": True,
+                }
+            ]
         )
         assert phase.allow_delegation is True
 
@@ -353,7 +381,8 @@ class TestMultiNameSkillsExpand:
                 {
                     "phase_id": "r",
                     "name": "R",
-                    "order": 1, "prompt_template": "Do the work.",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
                     "skills": [
                         {"source": "github.com/a/b", "version": "v1", "names": ["alpha", "beta"]}
                     ],
@@ -372,7 +401,8 @@ class TestMultiNameSkillsExpand:
                 {
                     "phase_id": "r",
                     "name": "R",
-                    "order": 1, "prompt_template": "Do the work.",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
                     "skills": ["owner/repo/one-skill@v1"],
                 }
             ]
@@ -389,20 +419,32 @@ def test_a_non_integer_timeout_is_refused_at_create(sent: object) -> None:
 
 
 def test_an_integer_timeout_is_kept_at_create() -> None:
-    (phase,) = _build_phase_defs([{"name": "Build", "timeout_seconds": 60}])
+    (phase,) = _build_phase_defs(
+        [{"name": "Build", "prompt_template": "Build it.", "timeout_seconds": 60}]
+    )
 
     assert phase.timeout_seconds == 60
 
 
 def test_a_cost_limit_on_a_codex_phase_is_refused_at_create() -> None:
     """#1376: the API create path never passes the YAML validator, so it refuses too."""
-    phase = {"name": "Experiment", "max_cost_usd": 12.5, "agent": {"provider": "codex"}}
+    phase = {
+        "name": "Experiment",
+        "prompt_template": "Try it.",
+        "max_cost_usd": 12.5,
+        "agent": {"provider": "codex"},
+    }
 
     with pytest.raises(ValueError, match="max_cost_usd on provider 'codex'"):
         _build_phase_defs([phase])
 
 
 def test_a_cost_limit_on_a_claude_phase_is_kept_at_create() -> None:
-    phase = {"name": "Experiment", "max_cost_usd": 12.5, "agent": {"provider": "claude"}}
+    phase = {
+        "name": "Experiment",
+        "prompt_template": "Try it.",
+        "max_cost_usd": 12.5,
+        "agent": {"provider": "claude"},
+    }
 
     assert _build_phase_defs([phase])[0].max_cost_usd == 12.5

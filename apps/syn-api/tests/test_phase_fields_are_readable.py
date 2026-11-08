@@ -150,7 +150,9 @@ class TestALegacyRowStillReads:
                 "workflow_id": "wf-legacy",
                 "name": "Legacy",
                 "workflow_type": "custom",
-                "phases": [{"phase_id": "p", "name": "P", "order": 1, "prompt_template": "Do the work."}],
+                "phases": [
+                    {"phase_id": "p", "name": "P", "order": 1, "prompt_template": "Do the work."}
+                ],
             }
         )
 
@@ -183,7 +185,8 @@ class TestTheRowReadsBackOut:
                 {
                     "id": "p",
                     "name": "P",
-                    "order": 1, "prompt_template": "Do the work.",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
                     "provider": "codex",
                     "allow_delegation": True,
                     "claude_plugins": [{"source_url": "https://github.com/foo/bar", "name": "bar"}],
@@ -209,7 +212,15 @@ class TestTheRowReadsBackOut:
             "id": "wf-1",
             "name": "T",
             "workflow_type": "custom",
-            "phases": [{"id": "p", "name": "P", "order": 1, "prompt_template": "Do the work.", "allow_delegation": False}],
+            "phases": [
+                {
+                    "id": "p",
+                    "name": "P",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
+                    "allow_delegation": False,
+                }
+            ],
         }
 
         assert WorkflowDetail.from_dict(row).phases[0].allow_delegation is False
@@ -224,7 +235,8 @@ class TestTheRowReadsBackOut:
                 {
                     "id": "p",
                     "name": "P",
-                    "order": 1, "prompt_template": "Do the work.",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
                     "allow_delegation": True,
                     "skills": [
                         {
@@ -265,7 +277,8 @@ class TestRefsAreNotFlattened:
                 {
                     "id": "p",
                     "name": "P",
-                    "order": 1, "prompt_template": "Do the work.",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
                     "claude_plugins": [
                         {"source_url": "https://github.com/foo/bar", "name": "bar", "version": "v1"}
                     ],
@@ -288,7 +301,8 @@ class TestRefsAreNotFlattened:
                 {
                     "id": "p",
                     "name": "P",
-                    "order": 1, "prompt_template": "Do the work.",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
                     "skills": [
                         {**base, "name_overridden": True},
                         {**base, "name_overridden": False},
@@ -371,7 +385,15 @@ class TestUnreadableRefsAreDroppedNotInvented:
             "id": "wf-1",
             "name": "T",
             "workflow_type": "custom",
-            "phases": [{"id": "p", "name": "P", "order": 1, "prompt_template": "Do the work.", "skills": None}],
+            "phases": [
+                {
+                    "id": "p",
+                    "name": "P",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
+                    "skills": None,
+                }
+            ],
         }
 
         assert WorkflowDetail.from_dict(row).phases[0].skills == ()

@@ -8,7 +8,7 @@ stored before the rule existed.
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
@@ -25,6 +25,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
 from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
     validate_phase_declarations,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = pytest.mark.unit
 
@@ -82,9 +85,7 @@ def test_a_command_phase_with_no_prompt_is_accepted() -> None:
 
 
 def test_an_agent_phase_with_a_prompt_template_is_accepted() -> None:
-    yaml = _workflow(
-        "  - id: p\n    name: P\n    order: 1\n    prompt_template: Do the thing.\n"
-    )
+    yaml = _workflow("  - id: p\n    name: P\n    order: 1\n    prompt_template: Do the thing.\n")
     (phase,) = WorkflowDefinition.from_yaml(yaml).get_domain_phases()
     assert phase.prompt_template == "Do the thing."
 
