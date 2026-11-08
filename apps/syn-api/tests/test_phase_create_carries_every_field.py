@@ -275,7 +275,7 @@ class TestTheNestedAgentSpellingIsUnderstood:
                 {
                     "phase_id": "review",
                     "name": "Review",
-                    "order": 1,
+                    "order": 1, "prompt_template": "Do the work.",
                     "agent": {"provider": "codex", "model": "gpt-5.6-sol"},
                 }
             ]
@@ -293,7 +293,7 @@ class TestTheNestedAgentSpellingIsUnderstood:
                 {
                     "phase_id": "review",
                     "name": "Review",
-                    "order": 1,
+                    "order": 1, "prompt_template": "Do the work.",
                     "provider": "claude",
                     "agent": {"provider": "codex"},
                 }
@@ -303,7 +303,7 @@ class TestTheNestedAgentSpellingIsUnderstood:
 
     def test_an_agent_block_without_the_keys_changes_nothing(self) -> None:
         (phase,) = _build_phase_defs(
-            [{"phase_id": "r", "name": "R", "order": 1, "agent": {"allow_delegation": True}}]
+            [{"phase_id": "r", "name": "R", "order": 1, "prompt_template": "Do the work.", "agent": {"allow_delegation": True}}]
         )
         assert phase.provider is None
         assert phase.allow_delegation is True
@@ -323,12 +323,12 @@ class TestBooleansAreNotCoerced:
         """
         with pytest.raises(ValueError, match="must be a boolean"):
             _build_phase_defs(
-                [{"phase_id": "r", "name": "R", "order": 1, "allow_delegation": sent}]
+                [{"phase_id": "r", "name": "R", "order": 1, "prompt_template": "Do the work.", "allow_delegation": sent}]
             )
 
     def test_a_real_true_still_enables_it(self) -> None:
         (phase,) = _build_phase_defs(
-            [{"phase_id": "r", "name": "R", "order": 1, "allow_delegation": True}]
+            [{"phase_id": "r", "name": "R", "order": 1, "prompt_template": "Do the work.", "allow_delegation": True}]
         )
         assert phase.allow_delegation is True
 
@@ -353,7 +353,7 @@ class TestMultiNameSkillsExpand:
                 {
                     "phase_id": "r",
                     "name": "R",
-                    "order": 1,
+                    "order": 1, "prompt_template": "Do the work.",
                     "skills": [
                         {"source": "github.com/a/b", "version": "v1", "names": ["alpha", "beta"]}
                     ],
@@ -372,7 +372,7 @@ class TestMultiNameSkillsExpand:
                 {
                     "phase_id": "r",
                     "name": "R",
-                    "order": 1,
+                    "order": 1, "prompt_template": "Do the work.",
                     "skills": ["owner/repo/one-skill@v1"],
                 }
             ]

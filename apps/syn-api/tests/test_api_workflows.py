@@ -112,9 +112,9 @@ async def test_create_workflow_with_phases():
         name="Multi-Phase Workflow",
         workflow_type="implementation",
         phases=[
-            {"name": "Research", "order": 1, "description": "Research phase"},
-            {"name": "Implementation", "order": 2, "description": "Code it"},
-            {"name": "Review", "order": 3, "description": "Review code"},
+            {"name": "Research", "order": 1, "prompt_template": "Do the work.", "description": "Research phase"},
+            {"name": "Implementation", "order": 2, "prompt_template": "Do the work.", "description": "Code it"},
+            {"name": "Review", "order": 3, "prompt_template": "Do the work.", "description": "Review code"},
         ],
     )
     assert isinstance(result, Ok)
