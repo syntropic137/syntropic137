@@ -28,7 +28,12 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.build_info import get_build_info
-from syn_api.services import cpu_throttling, execution_capacity, inventory_lifecycle
+from syn_api.services import (
+    cpu_throttling,
+    execution_capacity,
+    inventory_lifecycle,
+    poller_lifecycle,
+)
 from syn_api.services.admission_announcement import (
     announce_admission_if_open,
     start_disk_recovery_watch,
@@ -63,7 +68,6 @@ from syn_api.services.workspace_dir_reclaim import (
 from syn_api.types import (
     DbPoolHealth,
     Err,
-    EventPollerHealth,
     HealthResponse,
     LifecycleError,
     Ok,
@@ -385,19 +389,12 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             cpu_throttling=cpu_throttling.read_cpu_throttling(),
             execution_budget=await execution_capacity.describe_execution_budget(),
             session_store=await describe_session_store(),
-            event_poller=_describe_event_poller(),
+            event_poller=poller_lifecycle.describe_event_poller(_state.event_poller),
         )
     )
 
 
 # ── Private helpers ─────────────────────────────────────────────────
-
-
-def _describe_event_poller() -> EventPollerHealth | None:
-    poller = _state.event_poller
-    if poller is None or not poller.is_running:
-        return None
-    return EventPollerHealth(unresolved_triggers=poller.unresolved_triggers)
 
 
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
@@ -791,138 +788,6 @@ async def _shutdown_subscriptions(state: LifecycleState) -> None:
         state.subscription_service = None
 
 
-async def _init_event_poller(state: LifecycleState) -> None:
-    """Start the GitHub Events API poller.
-
-    See ADR-060: Restart-safe trigger deduplication (cold-start fence, cursor persistence).
-    """
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
-
-    if not settings.github.is_configured:
-        logger.info("GitHub App not configured — event poller disabled")
-        return
-
-    if not settings.polling.enabled:
-        logger.info("Event polling disabled by configuration")
-        return
-
-    from syn_adapters.github.client import get_github_client
-    from syn_adapters.github.events_api_client import GitHubEventsAPIClient
-    from syn_api._wiring import (
-        get_event_pipeline,
-        get_trigger_store,
-        get_webhook_health_tracker,
-    )
-    from syn_domain.contexts.github.services import (
-        GitHubEventIngestionScheduler,
-        GitHubRepoIngestionService,
-    )
-
-    # ADR-060: Wire persistent cursor store for restart-safe polling.
-    # HistoricalPoller base class uses this for cold-start fence + ETag persistence.
-    cursor_store = None
-    try:
-        from syn_api._wiring_db import get_shared_db_pool
-
-        pool = get_shared_db_pool()
-        if pool is not None:
-            from syn_adapters.github.poller_cursor_store import PostgresPollerCursorStore
-
-            cursor_store = PostgresPollerCursorStore(pool)  # type: ignore[arg-type]  # asyncpg.Pool vs AsyncConnectionPool
-            logger.info("Poller cursor store initialized (ADR-060)")
-    except Exception:
-        logger.warning("Cursor store unavailable - poller will re-fetch on restart", exc_info=True)
-
-    if cursor_store is None:
-        if not settings.uses_in_memory_stores:
-            logger.error(
-                "Durable poller cursor store unavailable in production - "
-                "disabling event poller to prevent cold-start restart storms (ADR-060)"
-            )
-            return
-        from syn_adapters.github.poller_cursor_store import InMemoryPollerCursorStore
-
-        cursor_store = InMemoryPollerCursorStore()
-        logger.warning("Using in-memory cursor store - cold-start fence resets on restart")
-
-    from syn_api.services.repo_names import OrganizationRepoNames
-
-    events_client = GitHubEventsAPIClient(get_github_client())
-    repo_service = GitHubRepoIngestionService(
-        events_api=events_client,
-        pipeline=get_event_pipeline(),
-        cursor_store=cursor_store,
-    )
-    poller = GitHubEventIngestionScheduler(
-        repo_service=repo_service,
-        health_tracker=get_webhook_health_tracker(),
-        trigger_store=get_trigger_store(),
-        repo_names=OrganizationRepoNames(),
-        settings=settings.polling,
-    )
-    await poller.start()
-    state.event_poller = poller
-    logger.info("GitHub event poller started")
-
-
-async def _shutdown_event_poller(state: LifecycleState) -> None:
-    """Stop the GitHub event poller."""
-    if state.event_poller is not None:
-        await state.event_poller.stop()
-        state.event_poller = None
-
-
-async def _init_check_run_poller(state: LifecycleState) -> None:
-    """Start the check-run poller for poll-based self-healing (#602).
-
-    Polls the GitHub Checks API for CI failures on PR commits. Enables
-    self-healing without webhooks — zero-config onboarding.
-    """
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
-
-    if not settings.github.is_configured:
-        logger.info("GitHub App not configured — check-run poller disabled")
-        return
-
-    if not settings.polling.enabled:
-        logger.info("Event polling disabled — check-run poller disabled")
-        return
-
-    from syn_adapters.github.checks_api_client import GitHubChecksAPIClient
-    from syn_adapters.github.client import get_github_client
-    from syn_api._wiring import (
-        get_event_pipeline,
-        get_pending_sha_store,
-        get_trigger_store,
-        get_webhook_health_tracker,
-    )
-    from syn_domain.contexts.github.services import CheckRunIngestionService
-
-    poller = CheckRunIngestionService(
-        checks_api=GitHubChecksAPIClient(get_github_client()),
-        pipeline=get_event_pipeline(),
-        sha_store=get_pending_sha_store(),
-        health_tracker=get_webhook_health_tracker(),
-        trigger_store=get_trigger_store(),
-        settings=settings.polling,
-    )
-    get_event_pipeline().add_observer(poller.on_pr_event)
-    await poller.start()
-    state.check_run_poller = poller
-    logger.info("Check-run poller started")
-
-
-async def _shutdown_check_run_poller(state: LifecycleState) -> None:
-    """Stop the check-run poller."""
-    if state.check_run_poller is not None:
-        await state.check_run_poller.stop()
-        state.check_run_poller = None
-
-
 # ── Service Registry (ADR-057) ─────────────────────────────────────
 #
 # Single source of truth for all degradable services. To add a service:
@@ -972,16 +837,16 @@ _SERVICE_REGISTRY: tuple[_ServiceEntry, ...] = (
     ),
     _ServiceEntry(
         reason=DegradedReason.EVENT_POLLER,
-        init_fn=_init_event_poller,
+        init_fn=poller_lifecycle.init_event_poller,
         recoverable=False,
-        shutdown_fn=_shutdown_event_poller,
+        shutdown_fn=poller_lifecycle.shutdown_event_poller,
         api_only=True,
     ),
     _ServiceEntry(
         reason=DegradedReason.CHECK_RUN_POLLER,
-        init_fn=_init_check_run_poller,
+        init_fn=poller_lifecycle.init_check_run_poller,
         recoverable=False,
-        shutdown_fn=_shutdown_check_run_poller,
+        shutdown_fn=poller_lifecycle.shutdown_check_run_poller,
         api_only=True,
     ),
 )
