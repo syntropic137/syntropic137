@@ -1,0 +1,9 @@
+id: prompt-fixture
+name: Prompt fixture
+type: custom
+classification: simple
+phases:
+  - id: p
+    name: P
+    order: 1
+    prompt_file: p.md
