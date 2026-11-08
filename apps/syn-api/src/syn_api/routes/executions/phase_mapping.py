@@ -410,6 +410,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         requested_model=phase.requested_model,
         agent_provider=phase.agent_provider,
         cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
+        unpriced_models=phase.unpriced_models,
         # Same model, passed through rather than rebuilt: this constructor is
         # the hop that has dropped a field twice (#891, #1176), and a phase
         # whose branch nobody knows about is exactly the thing this field
