@@ -5,7 +5,7 @@ Every patch is meant to be killed by
 
 | Patch | Bug re-introduced | Local result (no Docker) |
 |---|---|---|
-| 01-drop-model-when-unpriced | unpriced row loses its model again | 4/4 tests fail |
+| 01-drop-model-when-unpriced | unpriced row loses its model again | 8/8 tests fail |
 | 02-eval-runs-ignore-observed | eval runs read observed models from the cost split only | 3/8 fail |
 | 03-page-omits-unpriced | execution page never sets `unpriced_models` | 2/8 fail |
 | 04-read-model-drops-on-store | `ExecutionCost.to_dict` omits `observed_models_by_phase` | 7/8 fail |
