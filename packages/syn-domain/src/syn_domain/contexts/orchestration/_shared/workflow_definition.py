@@ -685,11 +685,8 @@ class PhaseYamlDefinition(BaseModel):
     def validate_prompt_source(self) -> PhaseYamlDefinition:
         """Ensure at most one of prompt_template or prompt_file is set.
 
-        NOT enforced here: that at least one is set. A phase with no
-        instructions cannot do useful work and should be rejected, but adding
-        that guard breaks 21 existing tests whose fixtures omit the prompt, so
-        it is split into its own change rather than buried in a PR about
-        unknown keys. Tracked separately.
+        That an agent phase has at least one is a kind rule, so it lives in
+        ``require_consistent_phase_kind`` (#963), reached via ``validate_phase_kind``.
         """
         if self.prompt_template is not None and self.prompt_file is not None:
             msg = f"Phase '{self.id}': specify either 'prompt_template' or 'prompt_file', not both"
@@ -703,12 +700,17 @@ class PhaseYamlDefinition(BaseModel):
         The rule is ``require_consistent_phase_kind``, which execution applies
         again to stored templates. ``prompt_file`` is checked here because it
         never reaches the domain: the loader resolves it into the template.
+
+        Every phase is judged, agent phases included, so one without a prompt
+        is refused here (#963). The exception is a ``prompt_file`` that
+        ``from_yaml`` left unresolved: it is a prompt the domain cannot see
+        yet, and ``to_domain`` refuses it on its own terms when it is used.
         """
         if self.kind is PhaseKind.COMMAND and self.prompt_file is not None:
             raise InconsistentPhaseKindError(
                 self.id, self.kind, "prompt_file applies only to an agent phase"
             )
-        if self.kind is PhaseKind.COMMAND or self.commands:
+        if self.prompt_file is None or self.commands:
             require_consistent_phase_kind(self.to_domain())
         return self
 

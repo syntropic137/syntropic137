@@ -113,6 +113,9 @@ async def _create_workflow(*, declares_task: bool) -> str:
         name="PC-66 workflow",
         workflow_type="implementation",
         requires_repos=False,
+        # An agent phase needs a prompt (#963). This one names no task, so the
+        # declarations alone decide whether one is required.
+        phases=[{"name": "Work", "prompt_template": "Read the repo."}],
         input_declarations=declarations,
     )
     assert isinstance(result, Ok)
