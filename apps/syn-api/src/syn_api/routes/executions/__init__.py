@@ -9,7 +9,7 @@ from fastapi import APIRouter
 
 from .commands import execute
 from .commands import router as commands_router
-from .control import cancel, get_state, inject
+from .control import cancel, get_state
 from .control import router as control_router
 from .inventory import router as inventory_router
 from .queries import get, get_detail, list_, list_active
@@ -36,7 +36,6 @@ __all__ = [
     "get",
     "get_detail",
     "get_state",
-    "inject",
     "list_",
     "list_active",
     "resume",

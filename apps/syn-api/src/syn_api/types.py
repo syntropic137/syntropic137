@@ -2719,7 +2719,7 @@ class ExecutionDetailFull(BaseModel):
 
 
 class ControlResult(BaseModel):
-    """Result of a control command (pause/resume/cancel/inject)."""
+    """Result of a control command (cancel)."""
 
     success: bool
     execution_id: str
