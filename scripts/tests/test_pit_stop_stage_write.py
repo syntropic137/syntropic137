@@ -237,6 +237,29 @@ def test_a_short_transfer_leaves_the_deployed_compose_untouched(
     assert not list(host.glob(f"{_COMPOSE}.bak-*"))
 
 
+@pytest.mark.parametrize("fixture", ["compose-digest.yaml", "compose-tag.yaml"])
+def test_the_short_stub_cuts_only_the_transfer(fixture: str, dirs: tuple[Path, Path]) -> None:
+    """#2207: `head` in the short stub sees one stdin, $TMP/compose.staged.
+    Any other call routed through it (the read of the deployed compose, on
+    /dev/null) is refused here, so the stub cannot drift back to cutting them."""
+    host, tmp = dirs
+    calls = tmp / "head.calls"
+    guard = f"""head() {{
+    if ! [ /dev/stdin -ef "$TMP/compose.staged" ]; then
+        printf 'head on a stdin that is not the transfer\\n' >&2; return 93
+    fi
+    echo transfer >> {calls}
+    command head "$@"
+}}
+"""
+    proc = _run_stage(fixture, host, tmp, guard + _SHORT)
+
+    assert "head on a stdin" not in proc.stderr, proc.stdout + proc.stderr
+    assert calls.read_text() == "transfer\n", proc.stderr
+    assert "did not arrive intact" in proc.stderr, proc.stdout + proc.stderr
+    assert (host / _COMPOSE).read_bytes() == (_FIXTURES / fixture).read_bytes()
+
+
 def test_a_gateway_only_stage_repoints_one_pin_and_passes_its_own_count(
     dirs: tuple[Path, Path],
 ) -> None:
