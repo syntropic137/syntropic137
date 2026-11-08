@@ -62,4 +62,32 @@ describe('ModelBreakdown', () => {
     expect(screen.getByText('not yet attributed')).toBeTruthy()
     expect(screen.getByText('$0.1324')).toBeTruthy()
   })
+
+  it('lists a model that ran unpriced with the backend label, never as $0 (#1743)', () => {
+    render(
+      <ModelBreakdown
+        costByModel={{ 'gpt-5.6-sol': '0.19' }}
+        totalCost={0.19}
+        unpricedObservationCount={1}
+        unpricedModels={['acme-reasoner-7b']}
+        unpricedLabel="unpriced"
+      />,
+    )
+    const row = screen.getByText('acme-reasoner-7b').parentElement
+    expect(row?.textContent).toContain('unpriced')
+    expect(row?.textContent).not.toContain('$')
+  })
+
+  it('renders when the only models it has are unpriced ones (#1743)', () => {
+    render(
+      <ModelBreakdown
+        costByModel={{}}
+        totalCost={0}
+        unpricedObservationCount={1}
+        unpricedModels={['acme-reasoner-7b']}
+        unpricedLabel="unpriced"
+      />,
+    )
+    expect(screen.getByText('acme-reasoner-7b')).toBeTruthy()
+  })
 })

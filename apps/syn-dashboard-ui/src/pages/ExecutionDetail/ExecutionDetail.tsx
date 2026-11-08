@@ -86,6 +86,28 @@ function aggregateCostByModel(phases: Phase[]): Record<string, string> {
 }
 
 /**
+ * Models some phase ran that nothing priced anywhere in the execution (#1743).
+ *
+ * A model priced in one phase already has a row in the split, so only models
+ * absent from `costByModel` are listed. The label is the backend's.
+ */
+function aggregateUnpricedModels(
+  phases: Phase[],
+  costByModel: Record<string, string>,
+): { models: string[]; label: string } {
+  const models = new Set<string>()
+  let label = ''
+  for (const phase of phases) {
+    for (const model of phase.unpriced_models ?? []) {
+      if (model in costByModel) continue
+      models.add(model)
+      label = phase.unpriced_model_cost_display ?? label
+    }
+  }
+  return { models: Array.from(models).sort(), label }
+}
+
+/**
  * Whether what you are looking at is current, in one place.
  *
  * Two things can make the page stale and they used to be reported at opposite
@@ -322,6 +344,7 @@ export function ExecutionDetail() {
     { label: `Execution ${execution.workflow_execution_id.slice(0, 8)}` },
   ]
   const aggregatedCostByModel = aggregateCostByModel(execution.phases)
+  const unpricedModels = aggregateUnpricedModels(execution.phases, aggregatedCostByModel)
   const tokens = executionTokenTotals(execution)
 
   return (
@@ -355,12 +378,14 @@ export function ExecutionDetail() {
           cacheWriteRateDisplay={execution.cache_write_rate_display}
         />
       </section>
-      {Object.keys(aggregatedCostByModel).length > 0 && (
+      {(Object.keys(aggregatedCostByModel).length > 0 || unpricedModels.models.length > 0) && (
         <section id="cost-by-model">
           <ModelBreakdown
             costByModel={aggregatedCostByModel}
             totalCost={execution.total_cost_usd}
             unpricedObservationCount={execution.unpriced_observation_count}
+            unpricedModels={unpricedModels.models}
+            unpricedLabel={unpricedModels.label}
           />
         </section>
       )}
