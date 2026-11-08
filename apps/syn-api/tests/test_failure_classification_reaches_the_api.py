@@ -350,6 +350,7 @@ async def _summaries(
         tag=None,
         eval_id=None,
         in_eval=None,
+        review_verdict=None,
         page=1,
         page_size=50,
     )
