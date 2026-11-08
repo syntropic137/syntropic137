@@ -6928,6 +6928,13 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Unpriced Models */
+            unpriced_models?: string[];
+            /**
+             * Unpriced Model Cost Display
+             * @default unpriced
+             */
+            unpriced_model_cost_display: string;
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
             /** Exit Code */
