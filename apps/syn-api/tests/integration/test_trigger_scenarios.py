@@ -21,6 +21,9 @@ import pytest
 from syn_api.types import Err, Ok
 from syn_shared.agents import PhaseModelDefaults
 
+# Creating a trigger on a repository needs an installation to resolve (#1864).
+pytestmark = pytest.mark.usefixtures("github_installation_resolves")
+
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 _TEST_WEBHOOK_SECRET = "test-webhook-secret"
