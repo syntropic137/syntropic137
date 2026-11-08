@@ -57,6 +57,7 @@ def _phase(memory_mb: int | None) -> PhaseDefinition:
         phase_id="build",
         name="Build",
         order=1,
+        prompt_template="Do the work.",
         resources=WorkspaceResourceRequest(memory_mb=memory_mb),
     )
 
@@ -196,6 +197,7 @@ def _pids_phase(pids_limit: int | None) -> PhaseDefinition:
         phase_id="build",
         name="Build",
         order=1,
+        prompt_template="Do the work.",
         resources=WorkspaceResourceRequest(pids_limit=pids_limit),
     )
 

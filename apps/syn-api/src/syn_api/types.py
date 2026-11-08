@@ -3474,6 +3474,18 @@ class DiskSpaceHealth(BaseModel):
     )
 
 
+class EventPollerHealth(BaseModel):
+    """What the GitHub Events API poller could not poll, as /health reports it (#1870)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    unresolved_triggers: int = Field(
+        description="Active triggers the last poll cycle skipped because their repository "
+        "resolves to no GitHub owner/name, e.g. a syn137 repo id with no Repo record. Each "
+        "is logged once, with its trigger id, when first seen; this is the only signal after."
+    )
+
+
 class SessionStoreHealth(BaseModel):
     """Size and growth of the host session archive, as /health reports it (#2107).
 
@@ -3611,6 +3623,11 @@ class HealthResponse(_OmitsAbsentFields):
         description="Size and growth of the session archive (#2107). Omitted when the "
         "archive directory does not exist or could not be measured, and until the "
         "first background measurement completes.",
+    )
+    event_poller: EventPollerHealth | None = Field(
+        default=None,
+        description="The GitHub Events API poller (#1870). Omitted when it is not running, "
+        "e.g. with no GitHub App configured or polling disabled.",
     )
 
 

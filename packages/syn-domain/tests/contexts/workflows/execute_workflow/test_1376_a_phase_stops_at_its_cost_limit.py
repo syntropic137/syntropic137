@@ -113,7 +113,13 @@ def _limit_between_one_and_two_turns() -> float:
 class TestTheYamlValidatesTheLimit:
     def _phase(self, **extra: object) -> PhaseYamlDefinition:
         return PhaseYamlDefinition.model_validate(
-            {"id": "experiment", "name": "Experiment", "order": 1, **extra}
+            {
+                "id": "experiment",
+                "name": "Experiment",
+                "order": 1,
+                "prompt_template": "Run the experiment.",
+                **extra,
+            }
         )
 
     @pytest.mark.parametrize("bad", [0, -1.0, math.inf, math.nan])

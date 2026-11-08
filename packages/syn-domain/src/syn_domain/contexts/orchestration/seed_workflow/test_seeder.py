@@ -37,6 +37,7 @@ phases:
   - id: test-phase
     name: Test Phase
     order: 1
+    prompt_template: Do the work.
     description: A test phase
     output_artifacts:
       - test_output
@@ -121,6 +122,7 @@ phases:
   - id: p1
     name: Phase 1
     order: 1
+    prompt_template: Do the work.
 """)
         (dir_path / "workflow2.yaml").write_text("""
 id: dir-workflow-2
@@ -129,6 +131,7 @@ phases:
   - id: p1
     name: Phase 1
     order: 1
+    prompt_template: Do the work.
 """)
 
         report = await seeder.seed_from_directory(dir_path)
@@ -175,6 +178,7 @@ phases:
   - id: p1
     name: Phase 1
     order: 1
+    prompt_template: Do the work.
 """)
         f.flush()
         path = Path(f.name)
@@ -203,6 +207,7 @@ phases:
   - id: p1
     name: Phase 1
     order: 1
+    prompt_template: Do the work.
 """)
 
         report = await seeder.seed_from_directory(dir_path)
@@ -231,6 +236,7 @@ phases:
   - id: test-phase
     name: Test Phase
     order: 1
+    prompt_template: Do the work.
 """
 
 

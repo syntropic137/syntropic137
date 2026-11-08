@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
     from syn_domain.contexts.github.ports import (
         GitHubEventsAPIPort,
+        RepoNamePort,
     )
     from syn_domain.contexts.github.services.webhook_health import WebhookHealthTracker
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
@@ -246,12 +247,15 @@ class GitHubEventIngestionScheduler:
         repo_service: GitHubRepoIngestionService,
         health_tracker: WebhookHealthTracker,
         trigger_store: TriggerQueryStore,
+        repo_names: RepoNamePort,
         settings: PollingSettings,
         sleep: Callable[[float], Coroutine[object, object, None]] | None = None,
     ) -> None:
         self._repo = repo_service
         self._health = health_tracker
         self._trigger_store = trigger_store
+        self._repo_names = repo_names
+        self._reported_unresolved: set[str] = set()
         self._state = PollerState(
             base_interval=settings.poll_interval_seconds,
             safety_interval=settings.safety_net_interval_seconds,
@@ -282,6 +286,11 @@ class GitHubEventIngestionScheduler:
     def is_running(self) -> bool:
         """Whether the polling task is currently active."""
         return self._task is not None and not self._task.done()
+
+    @property
+    def unresolved_triggers(self) -> int:
+        """Active triggers the last cycle could not poll: no ``owner/name``."""
+        return self._state.unresolved_triggers
 
     async def _poll_loop(self) -> None:
         """Main polling loop -- runs until cancelled."""
@@ -332,9 +341,6 @@ class GitHubEventIngestionScheduler:
 
         max_hint = 0
         for repo_full_name, _ in repos:
-            if "/" not in repo_full_name:
-                logger.warning("Skipping malformed repo name: %s", repo_full_name)
-                continue
             await self._repo.poll(repo_full_name)
             hint = self._repo.last_poll_interval
             if hint is not None and hint > max_hint:
@@ -345,16 +351,43 @@ class GitHubEventIngestionScheduler:
         return interval
 
     async def _get_repos_to_poll(self) -> list[tuple[str, str]]:
-        """Get (repo, installation_id) pairs for repos with active triggers."""
+        """Get (owner/name, installation_id) pairs for repos with active triggers.
+
+        A trigger naming its repository by a syn137 id is polled under the id's
+        ``owner/name``. One whose name resolves to nothing is warned about once
+        per trigger and then only counted, in ``unresolved_triggers``: it is the
+        same impossible record every cycle, and a warning a minute about it
+        buried everything else (#1870).
+        """
         all_triggers = await self._trigger_store.list_all(status="active")
         seen: dict[str, str] = {}
+        unresolved: set[str] = set()
         for t in all_triggers:
-            repo: str = t.repository
-            if not repo or repo in seen:
+            if not t.repository:
+                continue
+            # Resolve before the installation check: an id that registration
+            # could not resolve is stored with no installation as well.
+            repo = await self._repo_names.full_name(t.repository)
+            if repo is None:
+                unresolved.add(t.trigger_id)
+                self._report_unresolved(t.trigger_id, t.repository)
                 continue
             inst_id = t.installation_id.strip() if t.installation_id else ""
             if not inst_id:
                 logger.debug("Skipping repo %s: no installation_id configured", repo)
                 continue
-            seen[repo] = inst_id
+            seen.setdefault(repo, inst_id)
+        self._state.unresolved_triggers = len(unresolved)
         return list(seen.items())
+
+    def _report_unresolved(self, trigger_id: str, repository: str) -> None:
+        if trigger_id in self._reported_unresolved:
+            return
+        self._reported_unresolved.add(trigger_id)
+        logger.warning(
+            "Not polling for trigger %s: its repository %r resolves to no GitHub "
+            "owner/name. Counted in /health event_poller.unresolved_triggers from "
+            "now on; re-register the trigger with the repository's owner/name.",
+            trigger_id,
+            repository,
+        )

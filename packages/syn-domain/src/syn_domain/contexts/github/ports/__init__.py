@@ -16,10 +16,12 @@ from syn_domain.contexts.github.ports.EventsApiPort import (
     EventsAPIResult,
     GitHubEventsAPIPort,
 )
+from syn_domain.contexts.github.ports.RepoNamePort import RepoNamePort
 
 __all__ = [
     "ChecksAPIResult",
     "EventsAPIResult",
     "GitHubChecksAPIPort",
     "GitHubEventsAPIPort",
+    "RepoNamePort",
 ]

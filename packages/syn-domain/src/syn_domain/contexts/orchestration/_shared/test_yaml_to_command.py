@@ -36,7 +36,7 @@ def _minimal_definition(**overrides: object) -> WorkflowDefinition:
     data: Mapping[str, object] = {
         "id": "wf-1",
         "name": "Test",
-        "phases": [{"id": "p-1", "name": "Phase 1", "order": 1}],
+        "phases": [{"id": "p-1", "name": "Phase 1", "order": 1, "prompt_template": "Do the work."}],
         **overrides,
     }
     return WorkflowDefinition.model_validate(data)

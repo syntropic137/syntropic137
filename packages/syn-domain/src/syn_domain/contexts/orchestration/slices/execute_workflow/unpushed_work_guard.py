@@ -129,6 +129,10 @@ from functools import partial
 from time import monotonic
 from typing import TYPE_CHECKING, Final
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_names import (
+    DETACHED_HEAD,
+    NO_COMMITS,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
@@ -1011,11 +1015,11 @@ def _cut_off(what: str, seconds: float) -> ExecutionResult:
 def _branch_name(head_sha: str, named: list[tuple[str, str]]) -> str:
     """The checked-out branch, or a readable stand-in when HEAD is not on one."""
     if not head_sha:
-        return "(no commits)"
+        return NO_COMMITS
     for sha, name in named:
         if sha == head_sha:
             return name
-    return "(detached HEAD)"
+    return DETACHED_HEAD
 
 
 def _dedup(shas: list[str]) -> tuple[str, ...]:

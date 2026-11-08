@@ -309,13 +309,31 @@ def require_consistent_phase_kind(phase: PhaseDefinition) -> None:
     written", because a stored template carries every field whether or not
     its author wrote it. ``model`` is judged undeclared when the platform
     defaulted it (``model_defaulted``).
+
+    An agent phase must carry a prompt (#963). Without one it was dispatched
+    with an empty prompt and still ran and billed (#961). Blank counts as
+    missing, because execution sends a blank prompt exactly as it sends none.
     """
     if phase.kind is PhaseKind.AGENT:
-        if phase.commands:
-            raise InconsistentPhaseKindError(
-                phase.phase_id, phase.kind, "'commands' applies only to kind: command"
-            )
-        return
+        _require_consistent_agent_phase(phase)
+    else:
+        _require_consistent_command_phase(phase)
+
+
+def _require_consistent_agent_phase(phase: PhaseDefinition) -> None:
+    """An agent phase runs no commands and must carry a non-blank prompt."""
+    if phase.commands:
+        raise InconsistentPhaseKindError(
+            phase.phase_id, phase.kind, "'commands' applies only to kind: command"
+        )
+    if not (phase.prompt_template or "").strip():
+        raise InconsistentPhaseKindError(
+            phase.phase_id, phase.kind, "needs 'prompt_template' or 'prompt_file'"
+        )
+
+
+def _require_consistent_command_phase(phase: PhaseDefinition) -> None:
+    """A command phase needs commands and sets no field only an agent uses."""
     if not phase.commands:
         raise InconsistentPhaseKindError(
             phase.phase_id, phase.kind, "'commands' is required and must not be empty"

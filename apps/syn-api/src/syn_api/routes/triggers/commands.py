@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from syn_adapters.repo_names import OrganizationRepoNames
 from syn_api._wiring import (
     ensure_connected,
     get_trigger_repo,
@@ -38,24 +39,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/triggers", tags=["triggers"])
 
 
-async def _resolve_repo_full_name(repository: str) -> str | None:
-    """Resolve a repository identifier to its GitHub `owner/name` form.
+async def _github_name(repository: str) -> str:
+    """The repository as GitHub names it when it resolves, else as given.
 
-    - `repo-*` (syn internal ID): look up via the repo projection.
-    - `owner/name` (GitHub standard): passed through.
-    - Anything else: `None` (caller treats as unresolvable).
+    The CLI registers triggers by syn137 `repo-*` id. Stored as given, the id
+    reached the event poller, which cannot poll it (#1870), and event matching,
+    which compares against GitHub's `owner/name`.
     """
-    if repository.startswith("repo-"):
-        from syn_domain.contexts.organization import get_repo_projection
-
-        projection = get_repo_projection()
-        repo = await projection.get(repository)
-        return repo.full_name if repo is not None else None
-
-    if "/" in repository:
-        return repository
-
-    return None
+    return await OrganizationRepoNames().full_name(repository) or repository
 
 
 async def _resolve_installation_id(
@@ -76,7 +67,7 @@ async def _resolve_installation_id(
     if installation_id or not repository:
         return Ok(installation_id)
 
-    full_name = await _resolve_repo_full_name(repository)
+    full_name = await OrganizationRepoNames().full_name(repository)
     if full_name is None:
         return Err(
             TriggerError.REPOSITORY_UNRESOLVED,
@@ -131,6 +122,7 @@ async def register_trigger(
     from syn_domain.contexts.github import RegisterTriggerCommand, RegisterTriggerHandler
 
     await ensure_connected()
+    repository = await _github_name(repository)
     resolved = await _resolve_installation_id(installation_id, repository)
     if isinstance(resolved, Err):
         return resolved
@@ -244,6 +236,7 @@ async def enable_preset(
     from syn_domain.contexts.github import RegisterTriggerHandler, create_preset_command
 
     await ensure_connected()
+    repository = await _github_name(repository)
     resolved = await _resolve_installation_id(installation_id, repository)
     if isinstance(resolved, Err):
         return resolved

@@ -48,6 +48,7 @@ from syn_domain.contexts.orchestration import (
     EvalChoice,
     EvalId,
     EvalUnavailableError,
+    InconsistentPhaseKindError,
     LaunchEval,
     RepositoryOutsideBaselineError,
     RequestExecutionCommand,
@@ -567,6 +568,7 @@ def _check_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
         validate_phase_declarations(workflow)
     except (
         UnsupportedExecutionTypeError,
+        InconsistentPhaseKindError,  # #963: an agent phase stored with no prompt
         UnsupportedToolNameError,
         UnsupportedToolPolicyForProviderError,
         UnrunnablePhaseSandboxError,

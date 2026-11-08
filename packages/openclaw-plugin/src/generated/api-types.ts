@@ -4532,6 +4532,17 @@ export interface components {
             has_more: boolean;
         };
         /**
+         * EventPollerHealth
+         * @description What the GitHub Events API poller could not poll, as /health reports it (#1870).
+         */
+        EventPollerHealth: {
+            /**
+             * Unresolved Triggers
+             * @description Active triggers the last poll cycle skipped because their repository resolves to no GitHub owner/name, e.g. a syn137 repo id with no Repo record. Each is logged once, with its trigger id, when first seen; this is the only signal after.
+             */
+            unresolved_triggers: number;
+        };
+        /**
          * EventResponse
          * @description Single event response.
          */
@@ -6076,6 +6087,8 @@ export interface components {
             execution_budget?: components["schemas"]["ExecutionBudgetHealth"] | null;
             /** @description Size and growth of the session archive (#2107). Omitted when the archive directory does not exist or could not be measured, and until the first background measurement completes. */
             session_store?: components["schemas"]["SessionStoreHealth"] | null;
+            /** @description The GitHub Events API poller (#1870). Omitted when it is not running, e.g. with no GitHub App configured or polling disabled. */
+            event_poller?: components["schemas"]["EventPollerHealth"] | null;
         };
         /**
          * HeatmapDayBucketResponse
