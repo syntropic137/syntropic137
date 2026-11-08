@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from event_sourcing.core.historical_poller import CursorData
 
+from syn_api.services.repo_names import OrganizationRepoNames
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
 from syn_domain.contexts.github.services import (
@@ -162,6 +163,7 @@ def _make_poller(
         repo_service=repo_service,
         health_tracker=WebhookHealthTracker(clock=clock),
         trigger_store=store,
+        repo_names=OrganizationRepoNames(),
         settings=MockPollingSettings(),  # type: ignore[arg-type]
         sleep=_instant_sleep,
     )
@@ -266,6 +268,7 @@ class TestPollerStartStop:
             repo_service=repo_service,
             health_tracker=WebhookHealthTracker(clock=clock),
             trigger_store=store,
+            repo_names=OrganizationRepoNames(),
             settings=MockPollingSettings(),  # type: ignore[arg-type]
             sleep=_instant_sleep,
         )

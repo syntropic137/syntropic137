@@ -63,6 +63,7 @@ from syn_api.services.workspace_dir_reclaim import (
 from syn_api.types import (
     DbPoolHealth,
     Err,
+    EventPollerHealth,
     HealthResponse,
     LifecycleError,
     Ok,
@@ -384,11 +385,19 @@ async def health_check() -> Result[HealthResponse, LifecycleError]:
             cpu_throttling=cpu_throttling.read_cpu_throttling(),
             execution_budget=await execution_capacity.describe_execution_budget(),
             session_store=await describe_session_store(),
+            event_poller=_describe_event_poller(),
         )
     )
 
 
 # ── Private helpers ─────────────────────────────────────────────────
+
+
+def _describe_event_poller() -> EventPollerHealth | None:
+    poller = _state.event_poller
+    if poller is None or not poller.is_running:
+        return None
+    return EventPollerHealth(unresolved_triggers=poller.unresolved_triggers)
 
 
 def _log_session_capture_posture(store: SessionStoreSettings, app_environment: str) -> None:
@@ -838,6 +847,8 @@ async def _init_event_poller(state: LifecycleState) -> None:
         cursor_store = InMemoryPollerCursorStore()
         logger.warning("Using in-memory cursor store - cold-start fence resets on restart")
 
+    from syn_api.services.repo_names import OrganizationRepoNames
+
     events_client = GitHubEventsAPIClient(get_github_client())
     repo_service = GitHubRepoIngestionService(
         events_api=events_client,
@@ -848,6 +859,7 @@ async def _init_event_poller(state: LifecycleState) -> None:
         repo_service=repo_service,
         health_tracker=get_webhook_health_tracker(),
         trigger_store=get_trigger_store(),
+        repo_names=OrganizationRepoNames(),
         settings=settings.polling,
     )
     await poller.start()
