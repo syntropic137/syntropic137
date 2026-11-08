@@ -978,6 +978,24 @@
             "description": "true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both."
           },
           {
+            "name": "review_verdict",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReviewVerdict"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep only executions that completed on this review verdict (#1630). A queued start or a run that reviewed nothing has none, so is never kept.",
+              "title": "Review Verdict"
+            },
+            "description": "Keep only executions that completed on this review verdict (#1630). A queued start or a run that reviewed nothing has none, so is never kept."
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -14760,6 +14778,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ReportedFailureReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewVerdict"
               },
               {
                 "type": "null"

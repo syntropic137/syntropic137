@@ -32,6 +32,7 @@ from syn_domain.contexts.orchestration.slices.list_executions.projection import 
 
 if TYPE_CHECKING:
     from syn_api.routes.executions.models import ExecutionListResponse
+    from syn_domain.contexts.orchestration import ReviewVerdict
 
 pytestmark = pytest.mark.unit
 
@@ -60,6 +61,7 @@ async def _listed(
     q: str | None = None,
     started_after: datetime | None = None,
     in_eval: bool | None = None,
+    review_verdict: ReviewVerdict | None = None,
 ) -> ExecutionListResponse:
     """`GET /executions`, as `syn execution list` and the dashboard call it."""
     return await queries.list_executions_endpoint(
@@ -71,6 +73,7 @@ async def _listed(
         tag=None,
         eval_id=None,
         in_eval=in_eval,
+        review_verdict=review_verdict,
         page=1,
         page_size=50,
     )
@@ -115,6 +118,23 @@ class TestAQueuedStartIsListed:
 
         assert (await _listed(q=queued[-6:])).total == 1
         assert (await _listed(q="nothing-like-it")).total == 0
+
+        await _release_everything(world)
+
+    async def test_it_has_no_review_verdict_so_a_verdict_filter_drops_it(
+        self, world: _World
+    ) -> None:
+        """A queued start has reviewed nothing: never kept by `?review_verdict=` (#1630)."""
+        from syn_domain.contexts.orchestration import ReviewVerdict
+
+        _, queued = await _two_running_one_queued(world)
+
+        listed = await _listed()
+        filtered = await _listed(review_verdict=ReviewVerdict.CERTIFIED)
+
+        assert {e.review_verdict for e in listed.executions} == {None}
+        assert queued not in {e.workflow_execution_id for e in filtered.executions}
+        assert "queued" not in filtered.status_counts
 
         await _release_everything(world)
 

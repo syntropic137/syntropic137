@@ -34,6 +34,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membershi
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
     ExecutionAttachedToEvalEvent,
@@ -81,7 +82,8 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
     # v10: workflow_version, the installed version a run launched from.
     # v11: resumed_from and resumed_as, so every resume already in the store
     # links both ways, not only new ones (#1881).
-    VERSION = 11
+    # v12: review_verdict, so runs completed before it are filterable too (#1630).
+    VERSION = 12
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -221,6 +223,8 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
         if existing:
             existing["status"] = "completed"
             existing["completed_at"] = event_data.get("completed_at")
+            verdict = ReviewVerdict.from_stored(event_data.get("review_verdict"))
+            existing["review_verdict"] = None if verdict is None else verdict.value
             existing["completed_phases"] = event_data.get(
                 "completed_phases", existing.get("completed_phases", 0)
             )
