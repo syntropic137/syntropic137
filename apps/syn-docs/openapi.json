@@ -13603,6 +13603,18 @@
             "type": "object",
             "title": "Cost By Model"
           },
+          "unpriced_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unpriced Models"
+          },
+          "unpriced_model_cost_display": {
+            "type": "string",
+            "title": "Unpriced Model Cost Display",
+            "default": "unpriced"
+          },
           "cost_by_tool": {
             "additionalProperties": {
               "type": "string"
@@ -18672,6 +18684,18 @@
             },
             "type": "object",
             "title": "Cost By Model"
+          },
+          "unpriced_models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unpriced Models"
+          },
+          "unpriced_model_cost_display": {
+            "type": "string",
+            "title": "Unpriced Model Cost Display",
+            "default": "unpriced"
           },
           "agent_session_ids": {
             "anyOf": [

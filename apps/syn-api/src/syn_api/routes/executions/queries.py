@@ -15,7 +15,7 @@ from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api._wiring_admission import get_execution_budget
 from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
-from syn_api.model_identity import cost_by_observed_model
+from syn_api.model_identity import cost_by_observed_model, observed_model_ids
 from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
     Err,
@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from syn_adapters.projections.manager import ProjectionManager
+    from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
     )
@@ -474,6 +475,12 @@ class _EnrichedExecutionCost:
     unpriced_observation_count: int = 0
 
 
+def _mark_unpriced_models(phase: PhaseExecution, exec_cost: ExecutionCost) -> None:
+    """Name the models ``phase`` ran that are absent from its cost split (#1743)."""
+    observed = observed_model_ids(exec_cost.observed_models_by_phase.get(phase.phase_id, ()))
+    phase.unpriced_models = [m for m in observed if m not in phase.cost_by_model]
+
+
 async def _enrich_costs(
     execution_id: str,
     manager: object,
@@ -494,13 +501,14 @@ async def _enrich_costs(
         logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
         return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
-    # Availability is decided by has_cost_data (input + output), while the
-    # number displayed below is total_tokens (all four components). Keeping
-    # those two decoupled is what makes #873 a display-only change.
-    if exec_cost is None or not exec_cost.has_cost_data:
+    if exec_cost is None:
         return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
-    for phase in phases:
+    # Availability is decided by has_cost_data (input + output), while the
+    # number displayed below is total_tokens (all four components). Keeping
+    # those two decoupled is what makes #873 a display-only change. Identity is
+    # not gated on it: a cache-only phase still ran its models (#1743).
+    for phase in phases if exec_cost.has_cost_data else ():
         phase_cost = exec_cost.cost_by_phase.get(phase.phase_id)
         if phase_cost is not None:
             phase.cost_usd = phase_cost
@@ -513,6 +521,10 @@ async def _enrich_costs(
         if phase_models:
             phase.cost_by_model = cost_by_observed_model(phase_models)
         phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
+    for phase in phases:
+        _mark_unpriced_models(phase, exec_cost)
+    if not exec_cost.has_cost_data:
+        return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
     return _EnrichedExecutionCost(
         total_tokens=exec_cost.total_tokens,

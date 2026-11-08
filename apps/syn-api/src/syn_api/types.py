@@ -2509,6 +2509,8 @@ class PhaseExecution(BaseModel):
     ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
     fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models the phase ran that nothing priced, so absent from ``cost_by_model`` (#1743)."""
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
     the store reported them.
@@ -2967,6 +2969,8 @@ class ExecutionCostData(BaseModel):
     amount; a phase in neither genuinely had no spend (#890).
     """
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models the execution ran that nothing priced, so absent from ``cost_by_model`` (#1743)."""
     cost_by_tool: dict = Field(default_factory=dict)
     is_complete: bool = False
     unpriced_observation_count: int = 0

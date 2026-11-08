@@ -53,6 +53,35 @@ describe("synGetSession", () => {
 });
 
 describe("synGetExecutionCost", () => {
+  // #1743: the backend names models that ran unpriced; the display text is a
+  // distinct string here to prove it is read from the response, never "$0".
+  const unpricedDelegate = {
+    unpriced_models: ["acme-reasoner-7b"],
+    unpriced_model_cost_display: "no rate",
+  };
+
+  it("lists an unpriced model beside the priced ones", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ...executionCost, ...unpricedDelegate }));
+
+    const result = await synGetExecutionCost(client, { execution_id: "exec-abc-123" });
+
+    expect(result.content).toContain("$0.75");
+    expect(result.content).toContain("claude-sonnet-4-6");
+    expect(result.content).toContain("- acme-reasoner-7b: no rate");
+    expect(result.content).not.toContain("acme-reasoner-7b: $");
+  });
+
+  it("lists an unpriced model when nothing priced", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ ...executionCost, cost_by_model: {}, ...unpricedDelegate }),
+    );
+
+    const result = await synGetExecutionCost(client, { execution_id: "exec-abc-123" });
+
+    expect(result.content).toContain("### Cost by Model");
+    expect(result.content).toContain("- acme-reasoner-7b: no rate");
+  });
+
   it("returns formatted cost breakdown", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse(executionCost));
 

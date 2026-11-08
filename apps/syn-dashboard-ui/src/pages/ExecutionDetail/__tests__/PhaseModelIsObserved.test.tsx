@@ -140,3 +140,28 @@ describe('Phase Pipeline model label', () => {
     }
   })
 })
+
+describe('Phase Pipeline unpriced models (#1743)', () => {
+  it('lists a model that ran unpriced beside the cost split, with the backend label', () => {
+    renderPhases([
+      phase({
+        model: 'gpt-5.6-sol',
+        cost_by_model: { 'gpt-5.6-sol': '0.19' },
+        unpriced_models: ['acme-reasoner-7b'],
+        unpriced_model_cost_display: 'unpriced',
+      }),
+    ])
+
+    const row = screen.getByText('acme-reasoner-7b').parentElement
+    expect(row?.textContent).toContain('unpriced')
+    expect(row?.textContent).not.toContain('$')
+  })
+
+  it('shows the unpriced model even when nothing in the phase priced', () => {
+    renderPhases([
+      phase({ unpriced_models: ['acme-reasoner-7b'], unpriced_model_cost_display: 'unpriced' }),
+    ])
+
+    expect(screen.getByText('acme-reasoner-7b')).toBeTruthy()
+  })
+})

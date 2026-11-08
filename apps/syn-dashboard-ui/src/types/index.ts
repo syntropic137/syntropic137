@@ -451,6 +451,10 @@ export interface PhaseExecutionDetail {
   model_display: string
   /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
   cost_by_model: Record<string, string>
+  /** Models the phase ran that nothing priced, so absent from cost_by_model (#1743). */
+  unpriced_models?: string[]
+  /** What to show in place of a cost for each of unpriced_models. Render verbatim. */
+  unpriced_model_cost_display?: string
   /**
    * The tools, skills and model this phase had when its execution STARTED,
    * read from the run's own start event (#1454) - never the current template.
