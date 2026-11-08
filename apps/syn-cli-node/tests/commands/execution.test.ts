@@ -71,6 +71,41 @@ describe("execution commands", () => {
       expect(out).not.toContain("6/10");
     });
 
+    it("shows each run's review verdict, and none for a run that reviewed nothing (#1630)", async () => {
+      const row = (id: string, review_verdict: string | null) => ({
+        workflow_execution_id: id,
+        workflow_name: "wf",
+        status: "completed",
+        review_verdict,
+        phase_progress: { display: "3 of 3" },
+        total_tokens: 0,
+        total_cost_usd: "0",
+      });
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          executions: [row("exec-cert", "certified"), row("exec-block", "blocked"), row("exec-none", null)],
+          total: 3,
+        }),
+      );
+
+      await handler({ positionals: [], values: {} });
+      const rows = stdout().split("\n");
+      expect(stdout()).toContain("Verdict");
+      expect(rows.find((r) => r.includes("exec-cert"))).toContain("certified");
+      expect(rows.find((r) => r.includes("exec-block"))).toContain("blocked");
+      expect(rows.find((r) => r.includes("exec-none"))).not.toMatch(/certified|blocked/);
+    });
+
+    it("sends --verdict as ?review_verdict=, and nothing without it (#1630)", async () => {
+      // A fresh Response per call: a body can be read only once.
+      mockFetch.mockImplementation(async () => jsonResponse({ executions: [], total: 0 }));
+      await handler({ positionals: [], values: { verdict: "blocked" } });
+      await handler({ positionals: [], values: {} });
+      const [withFlag, without] = mockFetch.mock.calls.map((c) => new URL((c[0] as Request).url));
+      expect(withFlag!.searchParams.get("review_verdict")).toBe("blocked");
+      expect(without!.searchParams.has("review_verdict")).toBe(false);
+    });
+
     it("sends every --tag as a repeated ?tag= query parameter (#967)", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ executions: [], total: 0 }));
       await handler({ positionals: [], values: { tag: ["nightly", "eval-a"] } });

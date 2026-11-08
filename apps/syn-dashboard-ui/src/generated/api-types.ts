@@ -5294,6 +5294,7 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            review_verdict?: components["schemas"]["ReviewVerdict"] | null;
             /** Repos */
             repos?: string[];
             /** Tags */
@@ -11382,6 +11383,8 @@ export interface operations {
                 eval_id?: string | null;
                 /** @description true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both. */
                 in_eval?: boolean | null;
+                /** @description Keep only executions that completed on this review verdict (#1630). A queued start or a run that reviewed nothing has none, so is never kept. */
+                review_verdict?: components["schemas"]["ReviewVerdict"] | null;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
