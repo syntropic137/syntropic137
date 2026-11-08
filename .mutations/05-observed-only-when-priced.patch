@@ -1,0 +1,19 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/timescale_query.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/timescale_query.py
+index e007a9e73..1418de091 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/timescale_query.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execution_cost/timescale_query.py
+@@ -612,12 +612,12 @@ def price_phase_rows(
+         priced = _price_session_summary_row(
+             row, _extract_group_tokens(row), cost_calculator, unreported
+         )
+-        if row_models := priced.observed_models():
+-            observed.setdefault(phase_id, set()).update(row_models)
+         if priced.unpriced_count:
+             unpriced[phase_id] = unpriced.get(phase_id, 0) + priced.unpriced_count
+         if priced.cost is None:
+             continue
++        if row_models := priced.observed_models():
++            observed.setdefault(phase_id, set()).update(row_models)
+         costs[phase_id] = costs.get(phase_id, Decimal("0")) + priced.cost
+         # A priced row with NO model still spent money. Bucketing it under a
+         # sentinel keeps sum(models_by_phase[p]) == cost_by_phase[p]; dropping

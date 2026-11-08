@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/eval_runs.py b/apps/syn-api/src/syn_api/routes/eval_runs.py
+index 7346f1a69..f94f6bb9e 100644
+--- a/apps/syn-api/src/syn_api/routes/eval_runs.py
++++ b/apps/syn-api/src/syn_api/routes/eval_runs.py
+@@ -197,7 +197,7 @@ class RunReads:
+         if by_phase:
+             split = cost_by_observed_model(by_phase)
+         seen = priced.observed_models_by_phase.get(phase.workflow_phase_id, ()) if priced else ()
+-        return _observed_models(phase.workflow_phase_id, own, split, seen)
++        return _observed_models(phase.workflow_phase_id, own, split)
+ 
+     def facts(
+         self,

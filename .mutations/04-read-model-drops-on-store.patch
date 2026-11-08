@@ -1,0 +1,14 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/execution_cost.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/execution_cost.py
+index ac76dc173..84fb65c2f 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/execution_cost.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/read_models/execution_cost.py
+@@ -287,9 +287,6 @@ class ExecutionCost:
+                 phase: {m: str(c) for m, c in models.items()}
+                 for phase, models in self.models_by_phase.items()
+             },
+-            "observed_models_by_phase": {
+-                phase: list(models) for phase, models in self.observed_models_by_phase.items()
+-            },
+             "unpriced_by_phase": dict(self.unpriced_by_phase),
+             "cost_by_model": {k: str(v) for k, v in self.cost_by_model.items()},
+             "cost_by_tool": {k: str(v) for k, v in self.cost_by_tool.items()},
