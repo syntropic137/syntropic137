@@ -99,6 +99,17 @@ def test_an_agent_phase_with_only_a_prompt_file_is_accepted_at_install(tmp_path:
     assert phase.prompt_template == "Prompt from a file."
 
 
+def test_an_empty_prompt_file_is_no_prompt_at_install(tmp_path: Path) -> None:
+    (tmp_path / "p.md").write_text("")
+    path = tmp_path / "workflow.yaml"
+    path.write_text(
+        _workflow("  - id: empty-file\n    name: P\n    order: 1\n    prompt_file: p.md\n")
+    )
+
+    with pytest.raises(ValidationError, match="Phase 'empty-file' \\(kind: agent\\)"):
+        WorkflowDefinition.from_file(path)
+
+
 def test_an_unresolved_prompt_file_still_parses_under_from_yaml() -> None:
     # from_yaml cannot read files; the prompt exists, the domain cannot see it yet.
     yaml = _workflow("  - id: p\n    name: P\n    order: 1\n    prompt_file: p.md\n")
