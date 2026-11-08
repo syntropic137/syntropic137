@@ -1,5 +1,9 @@
 /**
  * Execution control commands - cancel, status, inject, stop.
+ *
+ * `inject` is refused by the API (501, #1530): nothing delivers a message into
+ * a running agent. The command still asks, so the server's refusal is what the
+ * operator reads, and the CLI exits non-zero with it.
  * Port of apps/syn-cli/src/syn_cli/commands/control.py
  */
 
@@ -72,7 +76,8 @@ const statusCommand: CommandDef = {
 
 const injectCommand: CommandDef = {
   name: "inject",
-  description: "Inject a message into a running execution",
+  description:
+    "Not supported: the API refuses it. Cancel the execution and start again with a corrected task",
   args: [{ name: "execution-id", description: "Execution ID", required: true }],
   options: {
     message: { type: "string", short: "m", description: "Message to inject" },
@@ -88,7 +93,8 @@ const injectCommand: CommandDef = {
       }),
       "Inject message",
     );
-    print(style(`Message injected into execution ${id}`, GREEN));
+    // Only a server from before #1530 says yes, and it delivers nothing either.
+    print(style(`Queued for execution ${id}, but nothing delivers injected messages (#1530)`, YELLOW));
   },
 };
 

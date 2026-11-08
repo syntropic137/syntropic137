@@ -55,6 +55,23 @@ describe("control commands", () => {
     await expect(handler({ positionals: ["exec-1"], values: {} })).rejects.toThrow(CLIError);
   });
 
+  it("inject prints the API's refusal and exits non-zero (#1530)", async () => {
+    const refusal =
+      "Injecting a message into a running agent is not supported; cancel the execution and start again with a corrected task (#1530).";
+    mockFetch.mockResolvedValue(jsonResponse({ detail: refusal }, 501));
+    const handler = controlGroup.getCommand("inject")!.handler;
+
+    const error = await handler({ positionals: ["exec-1"], values: { message: "m" } }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(CLIError);
+    expect((error as CLIError).exitCode).not.toBe(0);
+    expect((error as CLIError).message).toContain(refusal);
+    expect(stdout()).not.toContain("injected");
+  });
+
   it("stop requires --force", async () => {
     const handler = controlGroup.getCommand("stop")!.handler;
     await expect(handler({ positionals: ["exec-1"], values: {} })).rejects.toThrow(CLIError);

@@ -106,20 +106,17 @@ export async function synInjectContext(
   };
   if (args.role) body["role"] = args.role;
 
+  // The API refuses inject (501, #1530): nothing delivers a message into a
+  // running agent. Its refusal is what the caller is told.
   const result = await client.post<ControlResponse>(
     `/executions/${encodeURIComponent(args.execution_id)}/inject`,
     body,
   );
   if (!result.ok) return formatError(result.error);
-
-  if (!result.data.success) {
-    return {
-      content: `Failed to inject context: ${result.data.error ?? "unknown error"}`,
-      isError: true,
-    };
-  }
+  // Only a server from before #1530 says yes, and it delivers nothing either.
   return {
-    content: `Context injected into execution ${result.data.execution_id}. State: **${result.data.state}**`,
+    content: `Queued for execution ${result.data.execution_id}, but nothing delivers injected messages (#1530). Cancel and start again with a corrected task.`,
+    isError: true,
   };
 }
 
@@ -161,7 +158,8 @@ export const controlToolDefs = [
   {
     name: "syn_inject_context",
     description:
-      "Send a message to a running agent execution. Useful for mid-run corrections or additional instructions.",
+      "Not supported: the API refuses it (#1530), because nothing delivers a message into a running agent. " +
+      "To correct a run, cancel it and start again with a corrected task.",
     inputSchema: {
       type: "object" as const,
       properties: {

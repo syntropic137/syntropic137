@@ -33,7 +33,7 @@ Use these tools when the user wants to:
 
 - **Executions are async** — after starting one, poll with `syn_get_execution` to check progress
 - **Resolve names to IDs** — use `syn_list_workflows` to find the workflow ID before executing
-- **Mid-run corrections** — use `syn_inject_context` to send messages to a running agent
+- **Mid-run corrections** — not supported: `syn_inject_context` is refused by the API (#1530). Cancel the run and start again with a corrected task
 - **Cost awareness** — use `syn_get_execution_cost` to check spend, especially for multi-phase workflows
 - **Metrics** — `syn_get_metrics` gives a platform-wide overview of usage and costs
 

@@ -256,10 +256,11 @@ does not touch the signal queue.
 
 Each of these is a fact about the code on the date above, not a design intent.
 
-- **Inject is accepted but not delivered** (#1530). The controller queues an
-  `INJECT` signal and answers success, but the only reader,
-  `CancelSignalPoller`, acts on `CANCEL` alone. Nothing passes
-  `inject_message` to the agent.
+- **Inject is not supported** (#1530). `POST /executions/{id}/inject` answers
+  501 and queues nothing, because no reader would deliver it: the only one,
+  `CancelSignalPoller`, acts on `CANCEL` alone. It used to answer success, and
+  in Redis's one-slot queue the INJECT could replace a pending cancel. A
+  non-cancel signal is now written with `SET NX`, so it never does.
 - **Subagent events never reach SSE.** `RealTimeProjection` has
   `on_subagent_started` and `on_subagent_stopped`, but `SubagentStarted` and
   `SubagentStopped` are not in the adapter's subscribed event types, so those
