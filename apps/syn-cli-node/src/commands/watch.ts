@@ -50,7 +50,8 @@ function renderEvent(event: SSEEvent): void {
   print(parts.join(""));
 }
 
-const executionCommand: CommandDef = {
+/** Also registered as `syn execution watch` (#1633); one definition, two paths. */
+export const watchExecutionCommand: CommandDef = {
   name: "execution",
   description: "Stream live events for a specific execution",
   args: [{ name: "execution-id", description: "Execution ID to watch", required: true }],
@@ -97,4 +98,4 @@ const activityCommand: CommandDef = {
 };
 
 export const watchGroup = new CommandGroup("watch", "Stream live execution events via SSE");
-watchGroup.command(executionCommand).command(activityCommand);
+watchGroup.command(watchExecutionCommand).command(activityCommand);

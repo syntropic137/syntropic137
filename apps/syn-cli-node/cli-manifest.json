@@ -762,6 +762,13 @@
               "takes_value": false
             }
           ]
+        },
+        {
+          "name": "watch",
+          "args": [
+            "execution-id"
+          ],
+          "options": []
         }
       ]
     },
