@@ -316,3 +316,122 @@ class TestPollerStartStop:
 
         # No API calls should have been made
         assert mock_client.poll_count == 0
+
+
+class _RecordingEventsClient(MockEventsClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.polled: list[str] = []
+
+    async def fetch_repo_events(
+        self,
+        owner: str,
+        repo: str,
+        installation_id: str,
+        etag: str | None = None,
+    ) -> Any:  # noqa: ANN401
+        self.polled.append(f"{owner}/{repo}")
+        return await super().fetch_repo_events(owner, repo, installation_id, etag)
+
+
+class _RepoRecords:
+    """``RepoNamePort`` over a fixed set of Repo records, as the organization context has them."""
+
+    def __init__(self, full_names: dict[str, str]) -> None:
+        self._full_names = full_names
+
+    async def full_name(self, repository: str) -> str | None:
+        if "/" in repository:
+            return repository
+        return self._full_names.get(repository)
+
+
+async def _index_repo_trigger(
+    store: InMemoryTriggerQueryStore, trigger_id: str, repository: str
+) -> None:
+    await store.index_trigger(
+        trigger_id=trigger_id,
+        name=trigger_id,
+        event="push",
+        repository=repository,
+        workflow_id="wf-001",
+        conditions=[],
+        input_mapping={},
+        config=TriggerConfig(),
+        installation_id="inst-1",
+        created_by="test",
+        status="active",
+    )
+
+
+async def _poller_over(
+    client: _RecordingEventsClient,
+    store: InMemoryTriggerQueryStore,
+    records: dict[str, str],
+) -> GitHubEventPoller:
+    pipeline = EventPipeline(
+        dedup=InMemoryDedup(), evaluator=EvaluateWebhookHandler(store, NullRepository())
+    )
+    repo_service = GitHubRepoPoller(
+        events_api=client, pipeline=pipeline, cursor_store=MemoryCursorStore()
+    )
+    await repo_service.initialize()
+    return GitHubEventPoller(
+        repo_service=repo_service,
+        health_tracker=WebhookHealthTracker(clock=FakeClock()),
+        trigger_store=store,
+        repo_names=_RepoRecords(records),
+        settings=MockPollingSettings(),  # type: ignore[arg-type]
+        sleep=_instant_sleep,
+    )
+
+
+class TestRepoIdTriggers:
+    """#1870: a trigger stored with a syn137 repo id instead of owner/name."""
+
+    @pytest.mark.asyncio
+    async def test_a_resolvable_repo_id_is_polled_under_its_full_name(self) -> None:
+        client = _RecordingEventsClient()
+        store = InMemoryTriggerQueryStore()
+        await _index_repo_trigger(store, "tr-id", "repo-c848b4d0")
+        poller = await _poller_over(client, store, {"repo-c848b4d0": "acme/widgets"})
+
+        await poller._run_poll_cycle()
+
+        assert client.polled == ["acme/widgets"]
+        assert poller.unresolved_triggers == 0
+
+    @pytest.mark.asyncio
+    async def test_an_unresolvable_repo_id_warns_once_and_is_counted(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        client = _RecordingEventsClient()
+        store = InMemoryTriggerQueryStore()
+        await _index_repo_trigger(store, "tr-lost", "repo-c848b4d0")
+        await _index_repo_trigger(store, "tr-ok", "owner/repo")
+        poller = await _poller_over(client, store, {})
+        assert poller.unresolved_triggers == 0
+
+        with caplog.at_level("DEBUG", logger="syn_domain.contexts.github.services"):
+            for _ in range(5):
+                await poller._run_poll_cycle()
+
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        assert "tr-lost" in warnings[0].getMessage()
+        assert poller.unresolved_triggers == 1
+        assert client.polled == ["owner/repo"] * 5
+
+    @pytest.mark.asyncio
+    async def test_owner_name_triggers_are_polled_as_before(self) -> None:
+        client = _RecordingEventsClient()
+        store = InMemoryTriggerQueryStore()
+        await _index_repo_trigger(store, "tr-a", "owner/repo")
+        await _index_repo_trigger(store, "tr-b", "owner/repo")
+        await _index_repo_trigger(store, "tr-c", "other/thing")
+        poller = await _poller_over(client, store, {})
+
+        await poller._run_poll_cycle()
+
+        assert client.polled == ["owner/repo", "other/thing"]
+        assert poller.unresolved_triggers == 0
