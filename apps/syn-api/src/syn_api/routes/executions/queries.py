@@ -71,9 +71,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from syn_adapters.projections.manager import ProjectionManager
-    from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
-        ExecutionCost,
-    )
+    from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
     )
@@ -506,19 +504,11 @@ async def _enrich_costs(
     if exec_cost is None:
         return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
-    # Identity is carried apart from money, and apart from the money guard
-    # below: a cache-only phase has no cost data yet still ran its models, and
-    # a model that priced to nothing is named rather than vanishing (#1743).
-    for phase in phases:
-        _mark_unpriced_models(phase, exec_cost)
-
     # Availability is decided by has_cost_data (input + output), while the
     # number displayed below is total_tokens (all four components). Keeping
-    # those two decoupled is what makes #873 a display-only change.
-    if not exec_cost.has_cost_data:
-        return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
-
-    for phase in phases:
+    # those two decoupled is what makes #873 a display-only change. Identity is
+    # not gated on it: a cache-only phase still ran its models (#1743).
+    for phase in phases if exec_cost.has_cost_data else ():
         phase_cost = exec_cost.cost_by_phase.get(phase.phase_id)
         if phase_cost is not None:
             phase.cost_usd = phase_cost
@@ -530,8 +520,11 @@ async def _enrich_costs(
         phase_models = exec_cost.models_by_phase.get(phase.phase_id)
         if phase_models:
             phase.cost_by_model = cost_by_observed_model(phase_models)
-        _mark_unpriced_models(phase, exec_cost)
         phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
+    for phase in phases:
+        _mark_unpriced_models(phase, exec_cost)
+    if not exec_cost.has_cost_data:
+        return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
     return _EnrichedExecutionCost(
         total_tokens=exec_cost.total_tokens,
