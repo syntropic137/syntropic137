@@ -57,3 +57,57 @@ describe("recordInstallation", () => {
     expect(names.sort()).toEqual(["code-review", "sdlc-trunk"]);
   });
 });
+
+/**
+ * A registry written before #883 can already hold two records for one
+ * package; dedup on write never touches it (issue #886).
+ */
+describe("loadInstalled with duplicate records", () => {
+  function stored(version: string, installedAt: string, ids: string[]) {
+    return {
+      package_name: "code-review",
+      package_version: version,
+      source: `org/code-review@${version}`,
+      source_ref: `v${version}`,
+      installed_at: installedAt,
+      format: "single",
+      workflows: ids.map((id) => ({ id, name: id })),
+      marketplace_source: `marketplace-${version}`,
+      git_sha: `sha-${version}`,
+    };
+  }
+
+  it("merges them into the newest record, carrying every workflow id", () => {
+    saveInstalled({
+      version: 1,
+      installations: [
+        stored("0.4.0", "2026-10-02T00:00:00.000Z", ["shared", "only-new"]),
+        stored("0.3.0", "2026-10-01T00:00:00.000Z", ["shared", "only-old"]),
+      ],
+    });
+
+    const { installations } = loadInstalled();
+    expect(installations).toHaveLength(1);
+    expect(installations[0]).toEqual({
+      ...stored("0.4.0", "2026-10-02T00:00:00.000Z", ["shared", "only-new"]),
+      workflows: [
+        { id: "shared", name: "shared" },
+        { id: "only-new", name: "only-new" },
+        { id: "only-old", name: "only-old" },
+      ],
+    });
+  });
+
+  it("returns a registry without duplicates unchanged", () => {
+    const registry = {
+      version: 1,
+      installations: [
+        stored("0.3.0", "2026-10-01T00:00:00.000Z", ["a"]),
+        { ...stored("1.0.0", "2026-09-01T00:00:00.000Z", ["b"]), package_name: "sdlc-trunk" },
+      ],
+    };
+    saveInstalled(registry);
+
+    expect(loadInstalled()).toEqual(registry);
+  });
+});
