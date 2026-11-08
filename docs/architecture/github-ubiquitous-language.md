@@ -43,6 +43,13 @@ Statuses include `ACTIVE` and `PAUSED`. A Trigger Rule fires only while
 `ACTIVE`: `can_fire()` returns `status == ACTIVE`, so pausing genuinely stops
 it.
 
+A Trigger Rule on a repository also fires only through an Installation that
+covers that repository; dispatch skips a rule with none. So registering one is
+refused (409) when no Installation resolves: no GitHub App on the server, no
+Installation on the repository, or a repository that names nothing (#1864).
+Rules stored before that refusal existed can still be `ACTIVE` with no
+Installation and never fire; surfacing them is #2202.
+
 ## Pause and Resume
 
 Pausing a Trigger Rule stops it firing (`TriggerPaused`); resuming returns it to

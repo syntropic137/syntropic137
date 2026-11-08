@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
 from syn_adapters.repo_names import OrganizationRepoNames
 from syn_api._wiring import (
@@ -23,6 +24,7 @@ from syn_api.types import (
     Result,
     TriggerActionResponse,
     TriggerError,
+    TriggerErrorResponse,
 )
 from syn_domain.contexts.github import TriggerStatus
 
@@ -47,50 +49,62 @@ async def _github_name(repository: str) -> str:
     return await OrganizationRepoNames().full_name(repository) or repository
 
 
-async def _resolve_installation_id(installation_id: str, repository: str) -> str:
-    """Auto-resolve installation_id from the GitHub App if not provided.
+async def _resolve_installation_id(
+    installation_id: str, repository: str
+) -> Result[str, TriggerError]:
+    """Resolve the GitHub App installation a trigger on `repository` fires through.
 
-    P0-3: the CLI registers triggers with syn `repo-*` IDs. Those are
-    unknown to the GitHub API, so we first resolve them to `owner/name`
-    via the repo projection, then ask the App which installation owns
-    that repo.
+    The CLI registers triggers with syn `repo-*` IDs. Those are unknown to the
+    GitHub API, so we first resolve them to `owner/name` via the repo
+    projection, then ask the App which installation owns that repo.
 
-    Returns `""` if resolution fails at any step. The trigger is then
-    persisted with empty installation_id and is skipped at polling time
-    (see ``event_ingestion._get_repos_to_poll``) until the operator
-    re-registers it; if its repository never resolved either, the poller
-    warns once and counts it in ``unresolved_triggers`` (#1870). Lazy re-resolution at polling time is
-    tracked separately as #713 for v0.26+.
+    An explicit `installation_id`, or a trigger with no repository, is taken
+    as given. Otherwise a rule with no installation can never fire: dispatch
+    skips it (``event_ingestion._get_repos_to_poll``). So every way resolution
+    can fail is an `Err` and the caller refuses the registration, rather than
+    storing an `active` rule that is silently dead (#1864).
     """
     if installation_id or not repository:
-        return installation_id
+        return Ok(installation_id)
 
     full_name = await OrganizationRepoNames().full_name(repository)
     if full_name is None:
-        logger.warning(
-            "Could not resolve repository identifier '%s' to owner/name; "
-            "trigger will be persisted with installation_id='' and skipped at "
-            "polling - re-register after the App is installed on the repo",
-            repository,
+        return Err(
+            TriggerError.REPOSITORY_UNRESOLVED,
+            message=(
+                f"Repository '{repository}' is neither a registered repo ID nor "
+                "'owner/name', so no GitHub App installation can be found for it."
+            ),
         )
-        return ""
+
+    from syn_adapters.github.client import (
+        GitHubAppError,
+        GitHubAuthError,
+        GitHubNotConfiguredError,
+        get_github_client,
+    )
 
     try:
-        from syn_adapters.github.client import get_github_client
-
-        client = get_github_client()
-        resolved = await client.get_installation_for_repo(full_name)
-        logger.info("Auto-resolved installation_id=%s for %s", resolved, full_name)
-        return str(resolved)
-    except Exception:
-        logger.warning(
-            "Could not auto-resolve installation_id for %s; "
-            "trigger will be persisted with installation_id='' and skipped at "
-            "polling - re-register after the App is installed on the repo",
-            full_name,
-            exc_info=True,
+        resolved = await get_github_client().get_installation_for_repo(full_name)
+    except GitHubNotConfiguredError as e:
+        # The same words `GET /github/repos` answers with (baca940).
+        return Err(TriggerError.GITHUB_NOT_CONFIGURED, message=str(e))
+    except GitHubAuthError as e:
+        return Err(
+            TriggerError.NO_INSTALLATION,
+            message=(f"{e}. Install the GitHub App on {full_name}, then create the trigger again."),
         )
-        return ""
+    except GitHubAppError as e:
+        logger.warning("could not resolve installation for %s", full_name, exc_info=True)
+        return Err(
+            TriggerError.GITHUB_UNAVAILABLE,
+            message=(
+                f"Could not ask GitHub which installation covers {full_name} "
+                f"({type(e).__name__}: {e}). Nothing was stored; try again."
+            ),
+        )
+    logger.info("Auto-resolved installation_id=%s for %s", resolved, full_name)
+    return Ok(str(resolved))
 
 
 async def register_trigger(
@@ -109,7 +123,10 @@ async def register_trigger(
 
     await ensure_connected()
     repository = await _github_name(repository)
-    installation_id = await _resolve_installation_id(installation_id, repository)
+    resolved = await _resolve_installation_id(installation_id, repository)
+    if isinstance(resolved, Err):
+        return resolved
+    installation_id = resolved.value
 
     workflow_repo = get_workflow_repo()
     # `exists` RAISES when the store cannot be read (ESP #310). Before that it
@@ -220,7 +237,10 @@ async def enable_preset(
 
     await ensure_connected()
     repository = await _github_name(repository)
-    installation_id = await _resolve_installation_id(installation_id, repository)
+    resolved = await _resolve_installation_id(installation_id, repository)
+    if isinstance(resolved, Err):
+        return resolved
+    installation_id = resolved.value
 
     try:
         command = create_preset_command(
@@ -388,8 +408,47 @@ async def disable_triggers(
     return Ok(paused_count)
 
 
-@router.post("", response_model=TriggerActionResponse)
-async def register_trigger_endpoint(body: RegisterTriggerRequest) -> TriggerActionResponse:
+# 409, not 422: the request is well-formed and the same body succeeds once an
+# operator configures the App or installs it on the repo. What it conflicts
+# with is the server's state. 422 is also FastAPI's own validation answer,
+# whose `detail` is a list, so sharing it would give clients two shapes to tell
+# apart on one status code (#1864).
+_TRIGGER_ERROR_STATUS: dict[TriggerError, int] = {
+    TriggerError.GITHUB_NOT_CONFIGURED: 409,
+    TriggerError.NO_INSTALLATION: 409,
+    TriggerError.REPOSITORY_UNRESOLVED: 409,
+    TriggerError.GITHUB_UNAVAILABLE: 503,
+}
+
+_CREATE_RESPONSES: dict[int | str, dict[str, type[TriggerErrorResponse] | str]] = {
+    400: {"model": TriggerErrorResponse, "description": "Invalid request; nothing stored"},
+    409: {
+        "model": TriggerErrorResponse,
+        "description": (
+            "Refused: the trigger could never fire. No GitHub App is configured, "
+            "no installation covers the repository, or the repository is unknown. "
+            "Nothing stored."
+        ),
+    },
+    503: {
+        "model": TriggerErrorResponse,
+        "description": "GitHub could not be asked for the installation; nothing stored",
+    },
+}
+
+
+def _trigger_error_response(err: Err[TriggerError]) -> JSONResponse:
+    """Render a refused trigger creation as its declared error body."""
+    body = TriggerErrorResponse(detail=err.message or err.error.value, code=err.error)
+    return JSONResponse(
+        status_code=_TRIGGER_ERROR_STATUS.get(err.error, 400), content=body.model_dump()
+    )
+
+
+@router.post("", response_model=TriggerActionResponse, responses=_CREATE_RESPONSES)
+async def register_trigger_endpoint(
+    body: RegisterTriggerRequest,
+) -> TriggerActionResponse | JSONResponse:
     """Register a new trigger rule."""
     cfg = body.config
     config_dict: dict[str, object] | None = (
@@ -418,16 +477,22 @@ async def register_trigger_endpoint(body: RegisterTriggerRequest) -> TriggerActi
     )
 
     if isinstance(result, Err):
-        raise HTTPException(status_code=400, detail=result.message)
+        return _trigger_error_response(result)
     return TriggerActionResponse(trigger_id=result.value, name=body.name, status="active")
 
 
-@router.post("/presets/{preset_name}", response_model=TriggerActionResponse)
-async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> TriggerActionResponse:
+@router.post(
+    "/presets/{preset_name}", response_model=TriggerActionResponse, responses=_CREATE_RESPONSES
+)
+async def enable_preset_endpoint(
+    preset_name: str, body: dict[str, Any]
+) -> TriggerActionResponse | JSONResponse:
     """Enable a preset for a repository."""
     repository = body.get("repository", "")
     if not repository:
-        raise HTTPException(status_code=400, detail="repository is required")
+        return _trigger_error_response(
+            Err(TriggerError.INVALID_INPUT, message="repository is required")
+        )
 
     result = await enable_preset(
         preset_name=preset_name,
@@ -437,7 +502,7 @@ async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> Trig
         workflow_id=body.get("workflow_id", ""),
     )
     if isinstance(result, Err):
-        raise HTTPException(status_code=400, detail=result.message)
+        return _trigger_error_response(result)
     return TriggerActionResponse(
         trigger_id=result.value,
         name=preset_name,

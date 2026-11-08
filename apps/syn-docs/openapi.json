@@ -5645,6 +5645,36 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid request; nothing stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused: the trigger could never fire. No GitHub App is configured, no installation covers the repository, or the repository is unknown. Nothing stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GitHub could not be asked for the installation; nothing stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -5930,6 +5960,36 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TriggerActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request; nothing stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Refused: the trigger could never fire. No GitHub App is configured, no installation covers the repository, or the repository is unknown. Nothing stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GitHub could not be asked for the installation; nothing stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerErrorResponse"
                 }
               }
             }
@@ -24646,6 +24706,46 @@
         ],
         "title": "TriggerDetail",
         "description": "Detailed trigger rule response."
+      },
+      "TriggerError": {
+        "type": "string",
+        "enum": [
+          "not_found",
+          "invalid_input",
+          "already_paused",
+          "already_active",
+          "already_deleted",
+          "preset_not_found",
+          "workflow_not_found",
+          "store_unavailable",
+          "github_not_configured",
+          "no_installation",
+          "repository_unresolved",
+          "github_unavailable"
+        ],
+        "title": "TriggerError",
+        "description": "Errors returned by trigger operations."
+      },
+      "TriggerErrorResponse": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "Human-readable reason, with the next step."
+          },
+          "code": {
+            "$ref": "#/components/schemas/TriggerError",
+            "description": "Machine-readable reason."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "detail",
+          "code"
+        ],
+        "title": "TriggerErrorResponse",
+        "description": "Why a trigger was not created. Nothing is stored when this is returned.\n\n`detail` stays a plain string, as FastAPI's own errors are, so every client\nthat prints `detail` prints the server's words (#1864)."
       },
       "TriggerHistoryEntryResponse": {
         "properties": {

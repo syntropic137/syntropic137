@@ -310,6 +310,31 @@ class TriggerError(StrEnum):
     workflow does not exist" - a confident wrong answer a caller would act on.
     The store now raises instead, and this code carries the difference through
     to the caller rather than collapsing it back into not-found."""
+    GITHUB_NOT_CONFIGURED = "github_not_configured"
+    """No GitHub App on this server, so a trigger on a repository could never
+    fire. Registration is refused rather than stored silently dead (#1864)."""
+    NO_INSTALLATION = "no_installation"
+    """The GitHub App is configured but no installation covers the repository
+    (#1864). Same consequence as GITHUB_NOT_CONFIGURED; a different fix."""
+    REPOSITORY_UNRESOLVED = "repository_unresolved"
+    """The repository is neither a known `repo-*` ID nor `owner/name`, so no
+    installation can even be looked up for it (#1864)."""
+    GITHUB_UNAVAILABLE = "github_unavailable"
+    """GitHub could not be asked which installation covers the repository
+    (outage, rate limit). Transient: the same request may succeed later."""
+
+
+class TriggerErrorResponse(BaseModel):
+    """Why a trigger was not created. Nothing is stored when this is returned.
+
+    `detail` stays a plain string, as FastAPI's own errors are, so every client
+    that prints `detail` prints the server's words (#1864).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    detail: str = Field(description="Human-readable reason, with the next step.")
+    code: TriggerError = Field(description="Machine-readable reason.")
 
 
 class OrganizationError(StrEnum):

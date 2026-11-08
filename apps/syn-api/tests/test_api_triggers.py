@@ -7,9 +7,10 @@ import os
 
 import pytest
 
-from syn_api.types import Err, Ok
+from syn_api.types import Err, Ok, TriggerError
 
-pytestmark = pytest.mark.unit
+# Creating a trigger on a repository needs an installation to resolve (#1864).
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("github_installation_resolves")]
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -453,13 +454,13 @@ class TestResolveInstallationId:
     async def test_passthrough_when_installation_id_already_set(self) -> None:
         from syn_api.routes.triggers.commands import _resolve_installation_id
 
-        assert await _resolve_installation_id("12345", "owner/repo") == "12345"
+        assert await _resolve_installation_id("12345", "owner/repo") == Ok("12345")
 
     @pytest.mark.asyncio
     async def test_empty_when_repository_empty(self) -> None:
         from syn_api.routes.triggers.commands import _resolve_installation_id
 
-        assert await _resolve_installation_id("", "") == ""
+        assert await _resolve_installation_id("", "") == Ok("")
 
     @pytest.mark.asyncio
     async def test_resolves_repo_id_via_projection(self) -> None:
@@ -488,7 +489,7 @@ class TestResolveInstallationId:
         ):
             result = await _resolve_installation_id("", "repo-abc123")
 
-        assert result == "99999"
+        assert result == Ok("99999")
         mock_projection.get.assert_awaited_once_with("repo-abc123")
         mock_client.get_installation_for_repo.assert_awaited_once_with("acme/widgets")
 
@@ -508,12 +509,12 @@ class TestResolveInstallationId:
         ):
             result = await _resolve_installation_id("", "acme/widgets")
 
-        assert result == "42"
+        assert result == Ok("42")
         mock_client.get_installation_for_repo.assert_awaited_once_with("acme/widgets")
 
     @pytest.mark.asyncio
-    async def test_returns_empty_when_repo_id_not_in_projection(self) -> None:
-        """Unknown `repo-*` ID → empty installation_id, poller re-resolves later."""
+    async def test_refuses_when_repo_id_not_in_projection(self) -> None:
+        """Unknown `repo-*` ID: no installation can be looked up, so refuse (#1864)."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
         from syn_api.routes.triggers.commands import _resolve_installation_id
@@ -527,11 +528,12 @@ class TestResolveInstallationId:
         ):
             result = await _resolve_installation_id("", "repo-unknown")
 
-        assert result == ""
+        assert isinstance(result, Err)
+        assert result.error == TriggerError.REPOSITORY_UNRESOLVED
 
     @pytest.mark.asyncio
-    async def test_returns_empty_on_github_auth_failure(self) -> None:
-        """App not installed on repo → empty installation_id, persist pending."""
+    async def test_refuses_on_github_auth_failure(self) -> None:
+        """App not installed on repo: refuse rather than store a dead rule (#1864)."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
         from syn_adapters.github.client import GitHubAuthError
@@ -548,15 +550,18 @@ class TestResolveInstallationId:
         ):
             result = await _resolve_installation_id("", "acme/widgets")
 
-        assert result == ""
+        assert isinstance(result, Err)
+        assert result.error == TriggerError.NO_INSTALLATION
 
 
 @pytest.mark.asyncio
 async def test_a_registered_unresolvable_repo_id_is_reported_once_and_counted(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """#1870: registration stores an unresolvable id with no installation id.
+    """#1870: a rule stored with an unresolvable id and no installation id.
 
+    Since #1864 registration refuses such a repository, so the record here is
+    one stored before that: the resolver is stubbed to its old answer, "".
     The poller must still warn about that trigger once and count it, not skip
     it at the installation check where nobody hears about it.
     """
@@ -567,6 +572,7 @@ async def test_a_registered_unresolvable_repo_id_is_reported_once_and_counted(
 
     from syn_adapters.projection_stores import InMemoryProjectionStore
     from syn_adapters.repo_names import OrganizationRepoNames
+    from syn_api.routes.triggers import commands as trigger_commands
     from syn_api.routes.triggers import register_trigger
     from syn_api.routes.triggers.commands import get_trigger_store
     from syn_domain.contexts import organization
@@ -574,6 +580,16 @@ async def test_a_registered_unresolvable_repo_id_is_reported_once_and_counted(
 
     projection = RepoProjection(InMemoryProjectionStore())
     monkeypatch.setattr(organization, "get_repo_projection", lambda: projection)
+    refused = await register_trigger(
+        name="unresolved", event="push", repository="repo-absent", workflow_id="wf-1"
+    )
+    assert isinstance(refused, Err)
+    assert refused.error == TriggerError.REPOSITORY_UNRESOLVED
+
+    async def _pre_1864(installation_id: str, repository: str) -> Ok[str]:
+        return Ok("")
+
+    monkeypatch.setattr(trigger_commands, "_resolve_installation_id", _pre_1864)
     result = await register_trigger(
         name="unresolved", event="push", repository="repo-absent", workflow_id="wf-1"
     )

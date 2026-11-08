@@ -64,6 +64,31 @@ describe("triggers commands", () => {
     expect(stdout()).toContain("Trigger registered");
   });
 
+  it("register prints the server's refusal and exits non-zero when no GitHub App is configured (#1864)", async () => {
+    // Before #1864 the server stored this trigger and it never fired; now it
+    // refuses with 409. The operator has to see why, in the server's words.
+    const notConfigured =
+      "GitHub App not configured. Set SYN_GITHUB_APP_ID and either " +
+      "SYN_GITHUB_APP_PRIVATE_KEY_FILE or SYN_GITHUB_PRIVATE_KEY.";
+    mockFetch.mockResolvedValue(
+      jsonResponse({ detail: notConfigured, code: "github_not_configured" }, 409),
+    );
+    const handler = triggersGroup.getCommand("register")!.handler;
+
+    const refused = await handler({
+      positionals: [],
+      values: { repo: "org/repo", workflow: "w1", event: "check_run.completed" },
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(refused).toBeInstanceOf(CLIError);
+    expect((refused as CLIError).message).toContain(notConfigured);
+    expect((refused as CLIError).exitCode).not.toBe(0);
+    expect(stdout()).not.toContain("Trigger registered");
+  });
+
   it("register names the deployment the trigger will fire workflows on (issue #1264)", async () => {
     // A trigger holds a host-relative workflow ID and fires it LATER, so the
     // ambiguity outlives the command: the report has to pin the workflow ID to
