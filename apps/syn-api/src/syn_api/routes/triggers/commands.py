@@ -497,7 +497,9 @@ async def enable_preset_endpoint(
     """Enable a preset for a repository."""
     repository = body.get("repository", "")
     if not repository:
-        raise HTTPException(status_code=400, detail="repository is required")
+        return _trigger_error_response(
+            Err(TriggerError.INVALID_INPUT, message="repository is required")
+        )
 
     result = await enable_preset(
         preset_name=preset_name,

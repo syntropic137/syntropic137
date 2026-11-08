@@ -10145,6 +10145,28 @@ export interface components {
             last_fired_at?: string | null;
         };
         /**
+         * TriggerError
+         * @description Errors returned by trigger operations.
+         * @enum {string}
+         */
+        TriggerError: "not_found" | "invalid_input" | "already_paused" | "already_active" | "already_deleted" | "preset_not_found" | "workflow_not_found" | "store_unavailable" | "github_not_configured" | "no_installation" | "repository_unresolved" | "github_unavailable";
+        /**
+         * TriggerErrorResponse
+         * @description Why a trigger was not created. Nothing is stored when this is returned.
+         *
+         *     `detail` stays a plain string, as FastAPI's own errors are, so every client
+         *     that prints `detail` prints the server's words (#1864).
+         */
+        TriggerErrorResponse: {
+            /**
+             * Detail
+             * @description Human-readable reason, with the next step.
+             */
+            detail: string;
+            /** @description Machine-readable reason. */
+            code: components["schemas"]["TriggerError"];
+        };
+        /**
          * TriggerHistoryEntryResponse
          * @description Single entry in a trigger-specific history response.
          */
@@ -14146,6 +14168,24 @@ export interface operations {
                     "application/json": components["schemas"]["TriggerActionResponse"];
                 };
             };
+            /** @description Invalid request; nothing stored */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
+                };
+            };
+            /** @description Refused: the trigger could never fire. No GitHub App is configured, no installation covers the repository, or the repository is unknown. Nothing stored. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -14153,6 +14193,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description GitHub could not be asked for the installation; nothing stored */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
                 };
             };
         };
@@ -14346,6 +14395,24 @@ export interface operations {
                     "application/json": components["schemas"]["TriggerActionResponse"];
                 };
             };
+            /** @description Invalid request; nothing stored */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
+                };
+            };
+            /** @description Refused: the trigger could never fire. No GitHub App is configured, no installation covers the repository, or the repository is unknown. Nothing stored. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -14353,6 +14420,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description GitHub could not be asked for the installation; nothing stored */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
                 };
             };
         };
