@@ -93,8 +93,13 @@ const injectCommand: CommandDef = {
       }),
       "Inject message",
     );
-    // Only a server from before #1530 says yes, and it delivers nothing either.
-    print(style(`Queued for execution ${id}, but nothing delivers injected messages (#1530)`, YELLOW));
+    // Only a server from before #1530 says yes, and it delivers nothing either:
+    // its "queued" is still a refusal, so exit non-zero as the 501 path does.
+    throw new CLIError(
+      `Inject message: injecting a message into a running agent is not supported (#1530); ` +
+        `nothing was delivered to execution ${id}. Cancel it and start again with a corrected task.`,
+      1,
+    );
   },
 };
 

@@ -72,6 +72,30 @@ describe("control commands", () => {
     expect(stdout()).not.toContain("injected");
   });
 
+  it("inject refuses non-zero when an old server answers 200 queued (#1530)", async () => {
+    // The response every server before #1530 gave: it queued, and nothing delivers.
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        success: true,
+        execution_id: "exec-1",
+        state: "running",
+        message: "Context injection queued",
+      }),
+    );
+    const handler = controlGroup.getCommand("inject")!.handler;
+
+    const error = await handler({ positionals: ["exec-1"], values: { message: "m" } }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(CLIError);
+    expect((error as CLIError).exitCode).not.toBe(0);
+    expect((error as CLIError).message).toContain("not supported");
+    expect((error as CLIError).message).toContain("start again with a corrected task");
+    expect(stdout()).toBe("");
+  });
+
   it("stop requires --force", async () => {
     const handler = controlGroup.getCommand("stop")!.handler;
     await expect(handler({ positionals: ["exec-1"], values: {} })).rejects.toThrow(CLIError);
