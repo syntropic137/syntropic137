@@ -253,3 +253,32 @@ async def test_the_execution_page_shows_a_cache_only_unpriced_delegate() -> None
     assert shown.cost_by_model == {}
     assert shown.unpriced_models == [UNPRICED_DELEGATE]
     assert shown.unpriced_model_cost_display == UNPRICED
+
+
+@pytest.mark.parametrize(
+    ("rows", "priced"),
+    [
+        ([_row(LEADER, "0.19"), _row(UNPRICED_DELEGATE, None)], {LEADER: "0.19"}),
+        ([_row(UNPRICED_DELEGATE, None)], {}),
+    ],
+    ids=["mixed", "entirely-unpriced"],
+)
+def test_the_execution_cost_endpoint_names_the_unpriced_model(
+    rows: list[_Row], priced: dict[str, str]
+) -> None:
+    """``/costs/executions/{id}`` feeds ``syn costs execution`` and OpenClaw's
+    ``Cost by Model``: the unpriced model reaches it by name, never as $0."""
+    from syn_api.routes.costs import _execution_cost_to_api, execution_cost_to_data
+
+    stored = _stored_cost("exec-a", rows)
+    phases = price_phase_rows(rows, CostCalculator())
+    cost = ExecutionCost.from_dict(
+        {**stored.to_dict(), "cost_by_model": dict(priced)} if priced else stored.to_dict()
+    )
+
+    shown = _execution_cost_to_api(execution_cost_to_data(cost))
+
+    assert shown.cost_by_model == priced
+    assert shown.unpriced_models == [UNPRICED_DELEGATE]
+    assert shown.unpriced_model_cost_display == UNPRICED
+    assert shown.total_cost_usd == sum(phases.cost_by_phase.values(), Decimal("0"))

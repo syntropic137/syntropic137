@@ -2944,6 +2944,8 @@ class ExecutionCostData(BaseModel):
     amount; a phase in neither genuinely had no spend (#890).
     """
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models the execution ran that nothing priced, so absent from ``cost_by_model`` (#1743)."""
     cost_by_tool: dict = Field(default_factory=dict)
     is_complete: bool = False
     unpriced_observation_count: int = 0

@@ -9,13 +9,19 @@ store, which is empty for cost data. See #532 for the architectural rationale.
 from __future__ import annotations
 
 from decimal import Decimal
+from itertools import chain
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from syn_api._wiring import ensure_connected, get_execution_cost_query, get_session_cost_query
-from syn_api.model_identity import CostModelKey, cost_by_observed_model
+from syn_api.model_identity import (
+    CostModelKey,
+    ObservedModelId,
+    cost_by_observed_model,
+    observed_model_ids,
+)
 from syn_api.types import (
     CostSummary,
     Err,
@@ -26,6 +32,7 @@ from syn_api.types import (
     Result,
     SessionCostData,
 )
+from syn_shared.display.formatters import UNPRICED
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
@@ -115,6 +122,15 @@ class ExecutionCostResponse(BaseModel):
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     """Cost per REPORTED model id; ``unattributed-model`` holds cost whose model
     no harness reported. Never keyed by an alias (ADR-067 D9)."""
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models this execution was observed running that are NOT in
+    ``cost_by_model`` because nothing priced them: no rate and no SDK cost (#1743).
+
+    They ran, but carry no cost, never a fabricated $0. Render each beside the
+    cost split with ``unpriced_model_cost_display``.
+    """
+    unpriced_model_cost_display: str = UNPRICED
+    """What to show in place of a cost for each of ``unpriced_models``."""
     cost_by_tool: dict[str, str] = Field(default_factory=dict)
     is_complete: bool = False
     unpriced_observation_count: int = 0
@@ -185,8 +201,12 @@ def execution_cost_to_data(c: ExecutionCost) -> ExecutionCostData:
 
     ``total_tokens`` comes straight from the read model property, which sums
     all four token components - the same figure the executions read model
-    reports under the same name (issue #873).
+    reports under the same name (issue #873). ``unpriced_models`` carries the
+    identity the money split cannot: models observed in any phase that priced
+    to nothing (#1743).
     """
+    priced = cost_by_observed_model(c.cost_by_model)
+    observed = observed_model_ids(chain.from_iterable(c.observed_models_by_phase.values()))
     return ExecutionCostData(
         execution_id=c.execution_id,
         workflow_id=c.workflow_id,
@@ -205,7 +225,8 @@ def execution_cost_to_data(c: ExecutionCost) -> ExecutionCostData:
         duration_ms=c.duration_ms,
         cost_by_phase=c.cost_by_phase,
         unpriced_by_phase=c.unpriced_by_phase,
-        cost_by_model=cost_by_observed_model(c.cost_by_model),
+        cost_by_model=priced,
+        unpriced_models=[m for m in observed if m not in priced],
         cost_by_tool=c.cost_by_tool,
         is_complete=c.is_complete,
         unpriced_observation_count=c.unpriced_observation_count,
@@ -406,6 +427,7 @@ def _execution_cost_to_api(c: ExecutionCostData) -> ExecutionCostResponse:
         cost_by_phase={k: str(v) for k, v in (c.cost_by_phase or {}).items()},
         unpriced_by_phase={k: int(v) for k, v in (c.unpriced_by_phase or {}).items()},
         cost_by_model={k: str(v) for k, v in (c.cost_by_model or {}).items()},
+        unpriced_models=list(c.unpriced_models),
         cost_by_tool={k: str(v) for k, v in (c.cost_by_tool or {}).items()},
         is_complete=c.is_complete,
         unpriced_observation_count=c.unpriced_observation_count,

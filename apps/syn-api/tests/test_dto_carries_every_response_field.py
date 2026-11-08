@@ -182,6 +182,12 @@ _CHAINS: tuple[_Chain, ...] = (
         to_api=_execution_cost_to_api,
         dto=ExecutionCostData,
         response=ExecutionCostResponse,
+        exempt={
+            "unpriced_model_cost_display": (
+                "display text the response owns (#1743), a constant with no source "
+                "value for the DTO to carry"
+            ),
+        },
     ),
 )
 
