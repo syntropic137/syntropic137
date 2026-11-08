@@ -15,11 +15,12 @@ class OrganizationRepoNames(RepoNamePort):
     """Resolves syn137 repo ids to ``owner/name`` through the repo projection."""
 
     async def full_name(self, repository: str) -> str | None:
+        # A full name first: an owner may itself be called ``repo-…``.
+        if "/" in repository:
+            return repository
         if repository.startswith("repo-"):
             from syn_domain.contexts.organization import get_repo_projection
 
             repo = await get_repo_projection().get(repository)
             return repo.full_name if repo is not None else None
-        if "/" in repository:
-            return repository
         return None

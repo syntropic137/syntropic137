@@ -549,3 +549,49 @@ class TestResolveInstallationId:
             result = await _resolve_installation_id("", "acme/widgets")
 
         assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_a_registered_unresolvable_repo_id_is_reported_once_and_counted(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#1870: registration stores an unresolvable id with no installation id.
+
+    The poller must still warn about that trigger once and count it, not skip
+    it at the installation check where nobody hears about it.
+    """
+    from test_github_event_poller import (  # pyright: ignore[reportMissingImports]
+        _poller_over,
+        _RecordingEventsClient,
+    )
+
+    from syn_adapters.projection_stores import InMemoryProjectionStore
+    from syn_api.routes.triggers import register_trigger
+    from syn_api.routes.triggers.commands import get_trigger_store
+    from syn_api.services.repo_names import OrganizationRepoNames
+    from syn_domain.contexts import organization
+    from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
+
+    projection = RepoProjection(InMemoryProjectionStore())
+    monkeypatch.setattr(organization, "get_repo_projection", lambda: projection)
+    result = await register_trigger(
+        name="unresolved", event="push", repository="repo-absent", workflow_id="wf-1"
+    )
+    assert isinstance(result, Ok)
+    store = get_trigger_store()
+    record = await store.get(result.value)
+    assert record is not None
+    assert (record.repository, record.installation_id) == ("repo-absent", "")
+
+    client = _RecordingEventsClient()
+    poller = await _poller_over(client, store, {}, OrganizationRepoNames())
+    caplog.clear()
+    with caplog.at_level("DEBUG", logger="syn_domain.contexts.github.services"):
+        for _ in range(5):
+            await poller._run_poll_cycle()
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert result.value in warnings[0].getMessage()
+    assert poller.unresolved_triggers == 1
+    assert client.polled == []

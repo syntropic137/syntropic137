@@ -6,7 +6,7 @@ See ADR-060: Restart-safe trigger deduplication (cold-start fence, HistoricalPol
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from event_sourcing.core.historical_poller import CursorData
@@ -25,6 +25,9 @@ from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler i
     EvaluateWebhookHandler,
 )
 from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.github.ports import RepoNamePort
 
 pytestmark = pytest.mark.unit
 
@@ -368,6 +371,7 @@ async def _poller_over(
     client: _RecordingEventsClient,
     store: InMemoryTriggerQueryStore,
     records: dict[str, str],
+    repo_names: RepoNamePort | None = None,
 ) -> GitHubEventPoller:
     pipeline = EventPipeline(
         dedup=InMemoryDedup(), evaluator=EvaluateWebhookHandler(store, NullRepository())
@@ -380,7 +384,7 @@ async def _poller_over(
         repo_service=repo_service,
         health_tracker=WebhookHealthTracker(clock=FakeClock()),
         trigger_store=store,
-        repo_names=_RepoRecords(records),
+        repo_names=repo_names or _RepoRecords(records),
         settings=MockPollingSettings(),  # type: ignore[arg-type]
         sleep=_instant_sleep,
     )
@@ -434,4 +438,26 @@ class TestRepoIdTriggers:
         await poller._run_poll_cycle()
 
         assert client.polled == ["owner/repo", "other/thing"]
+        assert poller.unresolved_triggers == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("repository", ["acme/widgets", "repo-owner/widgets"])
+    async def test_full_names_pass_through_the_production_resolver(
+        self, monkeypatch: pytest.MonkeyPatch, repository: str
+    ) -> None:
+        """An owner may itself be called ``repo-…``; its full name is still GitHub's."""
+        from syn_adapters.projection_stores import InMemoryProjectionStore
+        from syn_domain.contexts import organization
+        from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
+
+        projection = RepoProjection(InMemoryProjectionStore())
+        monkeypatch.setattr(organization, "get_repo_projection", lambda: projection)
+        client = _RecordingEventsClient()
+        store = InMemoryTriggerQueryStore()
+        await _index_repo_trigger(store, "tr-full", repository)
+        poller = await _poller_over(client, store, {}, OrganizationRepoNames())
+
+        await poller._run_poll_cycle()
+
+        assert client.polled == [repository]
         assert poller.unresolved_triggers == 0

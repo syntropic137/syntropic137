@@ -365,14 +365,16 @@ class GitHubEventIngestionScheduler:
         for t in all_triggers:
             if not t.repository:
                 continue
-            inst_id = t.installation_id.strip() if t.installation_id else ""
-            if not inst_id:
-                logger.debug("Skipping repo %s: no installation_id configured", t.repository)
-                continue
+            # Resolve before the installation check: an id that registration
+            # could not resolve is stored with no installation as well.
             repo = await self._repo_names.full_name(t.repository)
             if repo is None:
                 unresolved.add(t.trigger_id)
                 self._report_unresolved(t.trigger_id, t.repository)
+                continue
+            inst_id = t.installation_id.strip() if t.installation_id else ""
+            if not inst_id:
+                logger.debug("Skipping repo %s: no installation_id configured", repo)
                 continue
             seen.setdefault(repo, inst_id)
         self._state.unresolved_triggers = len(unresolved)
