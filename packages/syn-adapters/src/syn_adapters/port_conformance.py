@@ -63,6 +63,7 @@ if TYPE_CHECKING:
         PostgresMaintenanceAdapter,
         RedisMaintenanceAdapter,
     )
+    from syn_adapters.repo_names import OrganizationRepoNames
     from syn_adapters.session_inventory.capture_catalog import PostgresCaptureCatalog
     from syn_adapters.session_inventory.capture_delivery_worker import CaptureDeliveryWorker
     from syn_adapters.session_inventory.capture_outboxes import (
@@ -214,6 +215,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.feedback.ports import NonceLedgerPort, ScreeningPort
     from syn_domain.contexts.github.ports.ChecksApiPort import GitHubChecksAPIPort
     from syn_domain.contexts.github.ports.EventsApiPort import GitHubEventsAPIPort
+    from syn_domain.contexts.github.ports.RepoNamePort import RepoNamePort
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import (
         PendingSHAStore,
@@ -395,6 +397,7 @@ if TYPE_CHECKING:
         source_commits: GitHubSourceCommitResolver,
         remote_branches: GitHubRemoteBranchReader,
         revisions: GitHubRevisionResolver,
+        repo_names: OrganizationRepoNames,
     ) -> None:
         """GitHub ingestion and execution control.
 
@@ -407,6 +410,7 @@ if TYPE_CHECKING:
         _source_commits: SourceCommitResolverPort = source_commits
         _remote_branches: RemoteBranchPort = remote_branches
         _revisions: RevisionResolverPort = revisions
+        _repo_names: RepoNamePort = repo_names
         _redis_dedup: DedupPort = redis_dedup
         _postgres_dedup: DedupPort = postgres_dedup
         _memory_dedup: DedupPort = memory_dedup
