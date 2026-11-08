@@ -177,7 +177,7 @@ const executionDetailCommand: CommandDef = {
     if (e.cost_by_phase && Object.keys(e.cost_by_phase).length > 0) print(formatBreakdown(e.cost_by_phase, "Cost by Phase", safeCost));
     // A model that ran with no rate is listed by the backend's display text,
     // never as $0, beside the priced split (#1743).
-    const unpriced = Object.fromEntries((e.unpriced_models ?? []).map((m) => [m, e.unpriced_model_cost_display ?? "unpriced"]));
+    const unpriced = Object.fromEntries((e.unpriced_models ?? []).map((m) => [m, e.unpriced_model_cost_display]));
     const byModel = { ...Object.fromEntries(Object.entries(e.cost_by_model ?? {}).map(([k, v]) => [k, safeCost(v)])), ...unpriced };
     if (Object.keys(byModel).length > 0) print(formatBreakdown(byModel, "Cost by Model", undefined, formatCostModelKey));
     if (e.cost_by_tool && Object.keys(e.cost_by_tool).length > 0) print(formatBreakdown(e.cost_by_tool, "Cost by Tool", safeCost));

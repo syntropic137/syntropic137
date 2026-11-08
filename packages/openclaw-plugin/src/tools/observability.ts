@@ -50,7 +50,7 @@ export async function synGetExecutionCost(
 function buildModelSection(c: ExecutionCost): string[] {
   const priced = buildBreakdownSection("Cost by Model", Object.entries(c.cost_by_model ?? {}));
   const unpriced = (c.unpriced_models ?? []).map(
-    (model) => `- ${model}: ${c.unpriced_model_cost_display ?? "unpriced"}`,
+    (model) => `- ${model}: ${c.unpriced_model_cost_display}`,
   );
   if (unpriced.length === 0) return priced;
   return priced.length > 0 ? [...priced, ...unpriced] : ["", "### Cost by Model", ...unpriced];
