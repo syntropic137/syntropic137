@@ -105,7 +105,7 @@ def _template() -> WorkflowTemplateAggregate:
             classification=WorkflowClassification.SIMPLE,
             repository_url="https://github.com/test/repo",
             repository_ref="main",
-            phases=[PhaseDefinition(phase_id="p1", name="P1", order=1)],
+            phases=[PhaseDefinition(phase_id="p1", name="P1", order=1, prompt_template="Do the work.")],
         )
     )
     aggregate.mark_events_as_committed()
