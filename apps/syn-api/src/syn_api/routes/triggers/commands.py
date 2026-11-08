@@ -56,9 +56,10 @@ async def _resolve_installation_id(installation_id: str, repository: str) -> str
     that repo.
 
     Returns `""` if resolution fails at any step. The trigger is then
-    persisted with empty installation_id and is silently skipped at
-    polling time (see ``event_ingestion._get_repos_to_poll``) until the
-    operator re-registers it. Lazy re-resolution at polling time is
+    persisted with empty installation_id and is skipped at polling time
+    (see ``event_ingestion._get_repos_to_poll``) until the operator
+    re-registers it; if its repository never resolved either, the poller
+    warns once and counts it in ``unresolved_triggers`` (#1870). Lazy re-resolution at polling time is
     tracked separately as #713 for v0.26+.
     """
     if installation_id or not repository:
