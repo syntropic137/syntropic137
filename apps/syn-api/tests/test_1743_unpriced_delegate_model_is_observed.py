@@ -16,6 +16,7 @@ import os
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -52,32 +53,28 @@ UNPRICED_DELEGATE = "acme-reasoner-7b"
 PHASE = "p1"
 
 
+@dataclass(frozen=True)
 class _Row:
-    """asyncpg.Record as ``price_phase_rows`` reads it."""
+    """One Lane 2 phase row, read the way ``price_phase_rows`` reads asyncpg.Record."""
 
-    def __init__(self, data: Mapping[str, object]) -> None:
-        self._data = data
+    model: str
+    sdk_cost: Decimal | None
+    phase_id: str = PHASE
+    total_input: int = 1_000
+    total_output: int = 1_000
+    cache_creation: int = 0
+    cache_read: int = 0
+    observation_count: int = 1
 
     def __getitem__(self, key: str) -> object:
-        return self._data[key]
+        return getattr(self, key)
 
     def get(self, key: str, default: object = None) -> object:
-        return self._data.get(key, default)
+        return getattr(self, key, default)
 
 
 def _row(model: str, sdk_cost: str | None) -> _Row:
-    return _Row(
-        {
-            "phase_id": PHASE,
-            "model": model,
-            "total_input": 1_000,
-            "total_output": 1_000,
-            "cache_creation": 0,
-            "cache_read": 0,
-            "sdk_cost": Decimal(sdk_cost) if sdk_cost is not None else None,
-            "observation_count": 1,
-        }
-    )
+    return _Row(model=model, sdk_cost=Decimal(sdk_cost) if sdk_cost is not None else None)
 
 
 def _stored_cost(execution_id: str, rows: list[_Row]) -> ExecutionCost:
