@@ -182,13 +182,19 @@ class RunReads:
         return observed_model_of(session.agent_model, session.requested_model).observed
 
     def phase_models(
-        self, phase: PhaseExecutionDetail, priced: ExecutionCost | None
+        self,
+        phase: PhaseExecutionDetail,
+        priced: ExecutionCost | None,
+        stored: ExecutionCost | None = None,
     ) -> tuple[PhaseModel, ...]:
         """The models one phase ran, by the rules the execution page applies.
 
         Own model: the session's OBSERVED model (``observed_model_of``). Split:
         the execution cost's ``models_by_phase`` when it has one for the phase,
         else the session's own (``_enrich_costs`` and ``_load_session_cost``).
+        Observed identity is read from ``stored`` whether or not it has cost
+        data: ``has_cost_data`` selects money, and a cache-only run still ran
+        its models (#1743).
         """
         session = self.sessions.get(phase.session_id) if phase.session_id else None
         own = self.own_model(phase)
@@ -196,7 +202,7 @@ class RunReads:
         by_phase = priced.models_by_phase.get(phase.workflow_phase_id) if priced else None
         if by_phase:
             split = cost_by_observed_model(by_phase)
-        seen = priced.observed_models_by_phase.get(phase.workflow_phase_id, ()) if priced else ()
+        seen = stored.observed_models_by_phase.get(phase.workflow_phase_id, ()) if stored else ()
         return _observed_models(phase.workflow_phase_id, own, split, seen)
 
     def facts(
@@ -220,7 +226,7 @@ class RunReads:
         else:
             stored = self.costs.get(pg_safe(execution_id))
             priced = stored if stored is not None and stored.has_cost_data else None
-            models = tuple(m for p in detail.phases for m in self.phase_models(p, priced))
+            models = tuple(m for p in detail.phases for m in self.phase_models(p, priced, stored))
             cost = decimal_or_none(priced.total_cost_usd) if priced is not None else Decimal(0)
             total = DurationTotal.over(phase_duration(p) for p in detail.phases)
             duration, unknown_phases = total.seconds, total.unknown_phase_count

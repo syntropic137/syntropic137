@@ -77,14 +77,22 @@ def _row(model: str, sdk_cost: str | None) -> _Row:
     return _Row(model=model, sdk_cost=Decimal(sdk_cost) if sdk_cost is not None else None)
 
 
+def _cache_only_row(model: str) -> _Row:
+    """A row with only cache reads, so its execution cost has no ``has_cost_data``."""
+    return _Row(model=model, sdk_cost=None, total_input=0, total_output=0, cache_read=1_000)
+
+
 def _stored_cost(execution_id: str, rows: list[_Row]) -> ExecutionCost:
     """The execution cost as built from Lane 2 rows, then stored and read back."""
     phases = price_phase_rows(rows, CostCalculator())
     built = ExecutionCost(
         execution_id=execution_id,
         total_cost_usd=sum(phases.cost_by_phase.values(), Decimal("0")),
-        input_tokens=10,
-        output_tokens=10,
+        # Derived from the rows, never hardcoded: ``has_cost_data`` reads these,
+        # and a fixed positive pair hid the cache-only case.
+        input_tokens=sum(r.total_input for r in rows),
+        output_tokens=sum(r.total_output for r in rows),
+        cache_read_tokens=sum(r.cache_read for r in rows),
         cost_by_phase=phases.cost_by_phase,
         models_by_phase=phases.models_by_phase,
         observed_models_by_phase=phases.observed_models_by_phase,
@@ -210,5 +218,38 @@ async def test_the_execution_page_shows_the_unpriced_delegate_as_unpriced() -> N
     shown = _map_phase_to_response(phase)
 
     assert shown.cost_by_model == {LEADER: "0.19"}
+    assert shown.unpriced_models == [UNPRICED_DELEGATE]
+    assert shown.unpriced_model_cost_display == UNPRICED
+
+
+def test_a_cache_only_unpriced_delegate_is_still_a_model_the_run_used() -> None:
+    reads, summaries = _reads(
+        {"exec-with": [_cache_only_row(UNPRICED_DELEGATE)], "exec-without": []}
+    )
+    assert not reads.costs["exec-with"].has_cost_data
+
+    with_delegate = next(s for s in summaries if s.workflow_execution_id == "exec-with")
+    assert {m.model for m in reads.facts(with_delegate, None).models} == {
+        LEADER,
+        UNPRICED_DELEGATE,
+    }
+    summary = summarize(reads.facts(s, None) for s in summaries)
+    assert {v.models for v in summary.variants} == {
+        (LEADER,),
+        tuple(sorted((LEADER, UNPRICED_DELEGATE))),
+    }
+
+
+async def test_the_execution_page_shows_a_cache_only_unpriced_delegate() -> None:
+    cost = _stored_cost("exec-a", [_cache_only_row(UNPRICED_DELEGATE)])
+    assert not cost.has_cost_data
+    phase = PhaseExecution(phase_id=PHASE, name="phase", status="completed", requested_model=None)
+
+    enriched = await _enrich_costs("exec-a", _Manager(cost), [phase], 7, Decimal("0.05"))
+    shown = _map_phase_to_response(phase)
+
+    # Money keeps its cache-only fallback (#873); identity does not depend on it.
+    assert (enriched.total_tokens, enriched.total_cost_usd) == (7, Decimal("0.05"))
+    assert shown.cost_by_model == {}
     assert shown.unpriced_models == [UNPRICED_DELEGATE]
     assert shown.unpriced_model_cost_display == UNPRICED

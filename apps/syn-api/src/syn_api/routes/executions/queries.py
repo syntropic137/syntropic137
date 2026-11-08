@@ -71,6 +71,9 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from syn_adapters.projections.manager import ProjectionManager
+    from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
+        ExecutionCost,
+    )
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
     )
@@ -474,6 +477,12 @@ class _EnrichedExecutionCost:
     unpriced_observation_count: int = 0
 
 
+def _mark_unpriced_models(phase: PhaseExecution, exec_cost: ExecutionCost) -> None:
+    """Name the models ``phase`` ran that are absent from its cost split (#1743)."""
+    observed = observed_model_ids(exec_cost.observed_models_by_phase.get(phase.phase_id, ()))
+    phase.unpriced_models = [m for m in observed if m not in phase.cost_by_model]
+
+
 async def _enrich_costs(
     execution_id: str,
     manager: object,
@@ -494,10 +503,19 @@ async def _enrich_costs(
         logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
         return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
+    if exec_cost is None:
+        return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
+
+    # Identity is carried apart from money, and apart from the money guard
+    # below: a cache-only phase has no cost data yet still ran its models, and
+    # a model that priced to nothing is named rather than vanishing (#1743).
+    for phase in phases:
+        _mark_unpriced_models(phase, exec_cost)
+
     # Availability is decided by has_cost_data (input + output), while the
     # number displayed below is total_tokens (all four components). Keeping
     # those two decoupled is what makes #873 a display-only change.
-    if exec_cost is None or not exec_cost.has_cost_data:
+    if not exec_cost.has_cost_data:
         return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
     for phase in phases:
@@ -512,10 +530,7 @@ async def _enrich_costs(
         phase_models = exec_cost.models_by_phase.get(phase.phase_id)
         if phase_models:
             phase.cost_by_model = cost_by_observed_model(phase_models)
-        # Identity is carried apart from money: a model that ran and priced to
-        # nothing is named here rather than vanishing from the split (#1743).
-        observed = observed_model_ids(exec_cost.observed_models_by_phase.get(phase.phase_id, ()))
-        phase.unpriced_models = [m for m in observed if m not in phase.cost_by_model]
+        _mark_unpriced_models(phase, exec_cost)
         phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
 
     return _EnrichedExecutionCost(
