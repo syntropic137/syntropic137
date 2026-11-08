@@ -465,6 +465,7 @@ class ExecutionCostQueryService:
             ),
             cost_by_phase=phases.cost_by_phase,
             models_by_phase=phases.models_by_phase,
+            observed_models_by_phase=phases.observed_models_by_phase,
             unpriced_by_phase=phases.unpriced_by_phase,
             cost_by_model=grouped.cost_by_model,
             unpriced_observation_count=grouped.unpriced_observation_count,

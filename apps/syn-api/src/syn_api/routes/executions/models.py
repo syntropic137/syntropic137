@@ -35,6 +35,7 @@ from syn_domain.contexts.orchestration import (
     StartStatus,
 )
 from syn_shared.display import EM_DASH
+from syn_shared.display.formatters import UNPRICED
 from syn_shared.observed_model import format_observed_model
 
 
@@ -125,6 +126,16 @@ class PhaseExecutionInfo(BaseModel):
     ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
     fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models this phase was observed running that are NOT in ``cost_by_model``
+    because nothing priced them: no rate and no SDK cost (#1743).
+
+    They ran - a delegate on a model with no pricing entry is still a model the
+    phase used - but carry no cost, never a fabricated $0. Render each beside
+    the cost split with ``unpriced_model_cost_display``.
+    """
+    unpriced_model_cost_display: str = UNPRICED
+    """What to show in place of a cost for each of ``unpriced_models``."""
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
     the store reported them.

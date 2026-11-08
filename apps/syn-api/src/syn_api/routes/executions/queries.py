@@ -15,7 +15,7 @@ from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api._wiring_admission import get_execution_budget
 from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
-from syn_api.model_identity import cost_by_observed_model
+from syn_api.model_identity import cost_by_observed_model, observed_model_ids
 from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
     Err,
@@ -512,6 +512,10 @@ async def _enrich_costs(
         phase_models = exec_cost.models_by_phase.get(phase.phase_id)
         if phase_models:
             phase.cost_by_model = cost_by_observed_model(phase_models)
+        # Identity is carried apart from money: a model that ran and priced to
+        # nothing is named here rather than vanishing from the split (#1743).
+        observed = observed_model_ids(exec_cost.observed_models_by_phase.get(phase.phase_id, ()))
+        phase.unpriced_models = [m for m in observed if m not in phase.cost_by_model]
         phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
 
     return _EnrichedExecutionCost(

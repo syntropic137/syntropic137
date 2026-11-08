@@ -31,7 +31,12 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
-from syn_api.model_identity import UNKNOWN_MODEL_KEY, cost_by_observed_model, observed_model_of
+from syn_api.model_identity import (
+    UNKNOWN_MODEL_KEY,
+    cost_by_observed_model,
+    observed_model_ids,
+    observed_model_of,
+)
 from syn_api.routes.executions.queries import DurationTotal, phase_duration
 from syn_api.types import (
     EvalRunListResponse,
@@ -119,17 +124,22 @@ def decimal_or_none(value: Decimal | str) -> Decimal | None:
 
 
 def _observed_models(
-    phase_id: str, own_model: str | None, cost_by_model: Mapping[str, Decimal]
+    phase_id: str,
+    own_model: str | None,
+    cost_by_model: Mapping[str, Decimal],
+    unpriced_observed: Iterable[str] = (),
 ) -> tuple[PhaseModel, ...]:
     """Every model the phase was observed running, sorted: its own and its delegates'.
 
     The phase's own reported model is always in, priced or not. ``cost_by_model``
     (the per-model split of the phase's Lane 2 cost) adds its delegates' models:
     a codex phase that delegated to claude ran both. Its unknown bucket is not a
-    model and is dropped. Known limit: the split holds only PRICED rows, so a
-    delegate whose model has no rate and no SDK cost is not seen here (#1743).
+    model and is dropped. The split holds only PRICED rows, so
+    ``unpriced_observed`` (the execution cost's ``observed_models_by_phase``)
+    adds a delegate whose model has no rate and no SDK cost (#1743).
     """
     observed = {key for key in cost_by_model if key != UNKNOWN_MODEL_KEY}
+    observed.update(observed_model_ids(unpriced_observed))
     if own_model:
         observed.add(own_model)
     return tuple(PhaseModel(phase_id, model) for model in sorted(observed))
@@ -186,7 +196,8 @@ class RunReads:
         by_phase = priced.models_by_phase.get(phase.workflow_phase_id) if priced else None
         if by_phase:
             split = cost_by_observed_model(by_phase)
-        return _observed_models(phase.workflow_phase_id, own, split)
+        seen = priced.observed_models_by_phase.get(phase.workflow_phase_id, ()) if priced else ()
+        return _observed_models(phase.workflow_phase_id, own, split, seen)
 
     def facts(
         self,
