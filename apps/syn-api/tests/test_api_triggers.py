@@ -566,9 +566,9 @@ async def test_a_registered_unresolvable_repo_id_is_reported_once_and_counted(
     )
 
     from syn_adapters.projection_stores import InMemoryProjectionStore
+    from syn_adapters.repo_names import OrganizationRepoNames
     from syn_api.routes.triggers import register_trigger
     from syn_api.routes.triggers.commands import get_trigger_store
-    from syn_api.services.repo_names import OrganizationRepoNames
     from syn_domain.contexts import organization
     from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
 

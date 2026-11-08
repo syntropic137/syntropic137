@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 
+from syn_adapters.repo_names import OrganizationRepoNames
 from syn_api._wiring import (
     ensure_connected,
     get_trigger_repo,
@@ -15,7 +16,6 @@ from syn_api._wiring import (
     get_workflow_repo,
     sync_published_events_to_projections,
 )
-from syn_api.services.repo_names import OrganizationRepoNames
 from syn_api.types import (
     Err,
     Ok,

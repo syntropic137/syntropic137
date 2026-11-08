@@ -91,7 +91,7 @@ async def init_event_poller(state: PollerState) -> None:
         cursor_store = InMemoryPollerCursorStore()
         logger.warning("Using in-memory cursor store - cold-start fence resets on restart")
 
-    from syn_api.services.repo_names import OrganizationRepoNames
+    from syn_adapters.repo_names import OrganizationRepoNames
 
     events_client = GitHubEventsAPIClient(get_github_client())
     repo_service = GitHubRepoIngestionService(

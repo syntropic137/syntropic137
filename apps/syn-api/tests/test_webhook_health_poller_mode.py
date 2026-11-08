@@ -14,7 +14,7 @@ import pytest
 if TYPE_CHECKING:
     from event_sourcing.core.historical_poller import CursorData
 
-from syn_api.services.repo_names import OrganizationRepoNames
+from syn_adapters.repo_names import OrganizationRepoNames
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
 from syn_domain.contexts.github.services import (
