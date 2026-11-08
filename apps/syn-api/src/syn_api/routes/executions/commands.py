@@ -568,9 +568,7 @@ def _check_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
         validate_phase_declarations(workflow)
     except (
         UnsupportedExecutionTypeError,
-        # #963: an agent phase stored with no prompt, e.g. the placeholder a
-        # bare `POST /workflows` installs until `PUT .../phases` sets one.
-        InconsistentPhaseKindError,
+        InconsistentPhaseKindError,  # #963: an agent phase stored with no prompt
         UnsupportedToolNameError,
         UnsupportedToolPolicyForProviderError,
         UnrunnablePhaseSandboxError,
