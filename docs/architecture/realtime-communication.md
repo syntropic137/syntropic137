@@ -159,11 +159,14 @@ Control is ordinary request/response, defined in
 | Route | Body | Does |
 |-------|------|------|
 | `POST /executions/{execution_id}/cancel` | `CancelRequest` (`reason`, optional) | queues a cancel signal, or withdraws a start still queued for a slot (#1650) |
-| `POST /executions/{execution_id}/inject` | `InjectRequest` (`message`, `role`: `user` or `system`) | queues an inject signal; see [Known gaps](#known-gaps) |
+| `POST /executions/{execution_id}/inject` | `InjectRequest` (`message`, `role`: `user` or `system`) | refused, always: HTTP 501 `ControlNotSupportedResponse` (`detail`), queues nothing; see [Known gaps](#known-gaps) |
 | `GET /executions/{execution_id}/state` | none | `StateResponse`: the execution's status, read from its event stream |
 
-Cancel and inject return `ControlResponse` (`success`, `execution_id`, `state`,
-`message`, `error`); a refused request is HTTP 400. These routes accept a full
+Cancel returns `ControlResponse` (`success`, `execution_id`, `state`,
+`message`, `error`); a refused cancel is HTTP 400. Inject is not supported
+(#1530): it answers 501 with `ControlNotSupportedResponse {detail}` telling the
+caller to cancel and start again with a corrected task, resolves no id, and
+queues nothing. Cancel and state accept a full
 id or an id prefix (`_resolve_execution_id`). A full id found in the event
 store is used as is, without the read model. Anything else is expanded through
 the `workflow_execution_details` read model: an ambiguous prefix is 409, and a
@@ -204,8 +207,8 @@ sequenceDiagram
 - **Who decides.** `ExecutionController`
   (`packages/syn-adapters/src/syn_adapters/control/controller.py`) holds no
   rule of its own. It rehydrates the aggregate on every request and asks
-  `WorkflowExecutionAggregate.accepts_control()`, which admits cancel and
-  inject only while the status is `RUNNING` (ADR-014 s7). An execution with no
+  `WorkflowExecutionAggregate.accepts_control()`, which admits cancel
+  only while the status is `RUNNING` (ADR-014 s7) and inject never (#1530). An execution with no
   stream, or a store that cannot be read, is refused.
 - **For a started execution, a 200 means queued, not done.** The diagram
   above is that case: an execution that has already started and is `RUNNING`.
@@ -232,8 +235,8 @@ sequenceDiagram
   `CANCEL_POLL_SECONDS` (2.0).
 
 CLI commands (`apps/syn-cli-node/src/commands/control.ts`, group `control`):
-`cancel`, `stop` (cancel with `--force` and a default reason), `inject` and
-`status` (`GET .../state`). The dashboard (`src/api/executions.ts`) and syn-ui
+`cancel`, `stop` (cancel with `--force` and a default reason), `inject` (prints
+the API's refusal and exits non-zero, #1530) and `status` (`GET .../state`). The dashboard (`src/api/executions.ts`) and syn-ui
 (`data/src/resources/executions.ts`) call the cancel route.
 
 `POST /executions/{execution_id}/resume` (`routes/executions/resume.py`) is

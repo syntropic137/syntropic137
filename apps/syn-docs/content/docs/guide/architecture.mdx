@@ -82,7 +82,7 @@ Control commands are sent via standard REST API calls rather than a persistent c
   </div>
 </div>
 
-**Cancel**: The platform checks for a cancel every few lines of agent output and interrupts the agent. Inject is accepted by the API but not yet delivered to the agent.
+**Cancel**: The platform checks for a cancel every few lines of agent output and interrupts the agent. Injecting a message into a running agent is not supported: the API refuses it (HTTP 501) and queues nothing, so cancel and start again with a corrected task.
 
 **Resume**: A `FAILED` or `INTERRUPTED` execution can be resumed, which creates a new execution. See [Resuming Failed Executions](/docs/guide/resuming-executions).
 
