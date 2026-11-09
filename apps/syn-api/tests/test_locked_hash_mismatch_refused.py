@@ -175,7 +175,7 @@ class TestTheCallerSeesTheRefusal:
             skills = (_skill_ref(_PINNED_VERSION),)
 
         class _Workflow:
-            phases = [_Phase()]
+            phases = (_Phase(),)
             skills = ()
 
         with pytest.raises(HTTPException) as exc:
@@ -190,6 +190,7 @@ class TestTheCallerSeesTheRefusal:
     ) -> None:
         """Workflow install is where a plugin ref is checked for the caller."""
         import syn_api._wiring as wiring
+
         yaml_content = f"""
 id: pinned-plugin-wf
 name: Pinned plugin workflow

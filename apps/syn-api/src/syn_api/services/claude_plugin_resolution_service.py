@@ -157,7 +157,9 @@ class ClaudePluginResolutionService:
             # WHY here as well as at resolution: install is where the caller
             # gets a typed 422. Execute-time resolution runs in the background
             # handler, so a refusal there fails the execution instead (#889).
-            _require_pin_holds(existing.source_url, existing.version, ref.name, existing.resolved_sha)
+            _require_pin_holds(
+                existing.source_url, existing.version, ref.name, existing.resolved_sha
+            )
 
     async def _collect_unique_refs(
         self,
