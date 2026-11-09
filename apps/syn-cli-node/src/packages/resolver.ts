@@ -4,6 +4,7 @@ import path from "node:path";
 import { synPath } from "../persistence/store.js";
 import { readJsonFile, writeJsonFile } from "../persistence/store.js";
 import {
+  type InstallationRecord,
   type InstalledRegistry,
   InstalledRegistrySchema,
   type InstalledWorkflowRef,
@@ -25,7 +26,46 @@ const INSTALLED_PATH = synPath("workflows", "installed.json");
 
 export function loadInstalled(): InstalledRegistry {
   const fallback: InstalledRegistry = { version: 1, installations: [] };
-  return readJsonFile(INSTALLED_PATH, InstalledRegistrySchema, fallback);
+  return canonicalize(readJsonFile(INSTALLED_PATH, InstalledRegistrySchema, fallback));
+}
+
+/**
+ * One record per package, whatever the file says (issue #886).
+ *
+ * WHY on load: `recordInstallation` has deduped since #822/#883, but only on
+ * its next write, so a registry written before then can still hold several
+ * records for one package. Every reader takes this one, and they disagreed
+ * about duplicates: `findInstallation` returned the first, `removeInstallation`
+ * dropped them all, so `uninstall` archived only the first record's workflows
+ * and forgot the rest while they were still live on the server.
+ *
+ * Duplicates merge into the newest record (by `installed_at`; a tie goes to
+ * the later one, since writes append) carrying every workflow id any of them
+ * tracked. Nothing is written here; the merged form reaches disk on the next
+ * install, update or uninstall. A registry without duplicates is returned as
+ * is.
+ */
+function canonicalize(registry: InstalledRegistry): InstalledRegistry {
+  const byPackage = new Map<string, InstallationRecord>();
+  for (const record of registry.installations) {
+    const seen = byPackage.get(record.package_name);
+    if (seen === undefined) {
+      byPackage.set(record.package_name, record);
+      continue;
+    }
+    const recordIsNewer = Date.parse(record.installed_at) >= Date.parse(seen.installed_at);
+    const [newer, older] = recordIsNewer ? [record, seen] : [seen, record];
+    // One ref per id across BOTH lists: a single record can already repeat an
+    // id (two YAML files declaring the same workflow), and the newer record's
+    // ref wins where they overlap.
+    const workflows = new Map<string, InstalledWorkflowRef>();
+    for (const ref of [...newer.workflows, ...older.workflows]) {
+      if (!workflows.has(ref.id)) workflows.set(ref.id, ref);
+    }
+    byPackage.set(record.package_name, { ...newer, workflows: [...workflows.values()] });
+  }
+  if (byPackage.size === registry.installations.length) return registry;
+  return { version: registry.version, installations: [...byPackage.values()] };
 }
 
 export function saveInstalled(registry: InstalledRegistry): void {
