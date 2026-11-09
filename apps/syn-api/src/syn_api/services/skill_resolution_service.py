@@ -20,7 +20,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration import SkillNotRegistered
+from syn_domain.contexts.orchestration import (
+    SkillLockedHashMismatch,
+    SkillNotRegistered,
+    content_pin_is_satisfied,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -93,6 +97,14 @@ class SkillResolutionService:
                 },
             )
             raise SkillNotRegistered(ref.source_url, ref.version, ref.skill_name)
+        # WHY: the materializer fetches by resolved_sha alone, so a lock record
+        # that predates the registration guard would otherwise install content
+        # its sha256- version does not name (#889). Same check as the plugin
+        # resolution service; divergence between the two is the defect.
+        if not content_pin_is_satisfied(entry.version, entry.resolved_sha):
+            raise SkillLockedHashMismatch(
+                entry.source_url, entry.version, entry.skill_name, entry.resolved_sha
+            )
         return ResolvedSkill(
             skill_name=entry.skill_name,
             source_url=entry.source_url,
