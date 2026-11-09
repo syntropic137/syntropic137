@@ -135,7 +135,7 @@ async def test_bound_credentials_reach_the_workload_and_nothing_else(
         # left. Its marker here means the provider kept that promise.
         assert f"grant={PROVIDER_REDACTED.decode()}" in lines
         assert not any(_TOKEN in line or _GRANT in line for line in lines)
-        assert adapter.last_exit_code == 7
+        assert adapter.exit_code_of(handle) == 7
 
         inspected = json.loads(
             subprocess.run(

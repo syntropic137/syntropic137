@@ -238,9 +238,14 @@ class EventStreamPort(Protocol):
         """
         ...
 
-    @property
-    def last_exit_code(self) -> int | None:
-        """Exit code from the most recent stream() call."""
+    def exit_code_of(self, handle: IsolationHandle) -> int | None:
+        """Exit code from the most recent stream() in ``handle``'s workspace.
+
+        Per workspace, never per adapter: one adapter serves every workspace of
+        its service, so a phase must read its own stream's code and not the
+        one a concurrent phase's stream ended with last (#980). None when no
+        stream there has completed.
+        """
         ...
 
     async def run_bounded(
