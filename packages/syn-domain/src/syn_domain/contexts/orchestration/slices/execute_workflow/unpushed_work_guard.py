@@ -124,7 +124,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from functools import partial
 from time import monotonic
 from typing import TYPE_CHECKING, Final
@@ -522,30 +522,20 @@ def quarantined_records(
     return saved.quarantined
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
 class _UnsavedWork:
     """A repository's unsaved state: what is missing, and from which tips."""
 
-    __slots__ = ("branch", "commit_count", "files", "parents", "submodules")
-
-    def __init__(
-        self,
-        *,
-        branch: str,
-        commit_count: int,
-        files: tuple[str, ...],
-        parents: tuple[str, ...],
-        submodules: tuple[str, ...],
-    ) -> None:
-        self.branch = branch
-        self.commit_count = commit_count
-        self.files = files
-        #: Commits the quarantine commit must descend from for every unpushed
-        #: commit to be reachable through the one ref. HEAD first, so the
-        #: recovered history reads as the phase left it.
-        self.parents = parents
-        #: Submodules with work in them, which the quarantine commit holds
-        #: only as a gitlink: see `QuarantinedWork.unsaved_submodules`.
-        self.submodules = submodules
+    branch: str
+    commit_count: int
+    files: tuple[str, ...]
+    #: Commits the quarantine commit must descend from for every unpushed
+    #: commit to be reachable through the one ref. HEAD first, so the
+    #: recovered history reads as the phase left it.
+    parents: tuple[str, ...]
+    #: Submodules with work in them, which the quarantine commit holds only
+    #: as a gitlink: see `QuarantinedWork.unsaved_submodules`.
+    submodules: tuple[str, ...]
 
 
 def _read_only_mount(mount_table: str, path: str) -> bool:
