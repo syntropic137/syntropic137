@@ -1535,6 +1535,12 @@ validate-pre-merge-quick:
 apparmor-setup *args:
     bash infra/scripts/apparmor-setup.sh {{args}}
 
+# Opt-in per host; once installed, selfhost-up/update keep it pinned and fail
+# on a weak guard (infra/scripts/agent-guard-setup.sh).
+# Install + validate the pinned dcg agent guard (root-owned, sha256+minisign)
+agent-guard-setup *args:
+    bash infra/scripts/agent-guard-setup.sh {{args}}
+
 _selfhost-preflight:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1563,6 +1569,10 @@ _selfhost-preflight:
         # Codex workspaces need the agentic-codex-sandbox AppArmor profile on
         # AppArmor hosts (#1398). Installs + loads it (sudo); skips elsewhere.
         if ! bash infra/scripts/apparmor-setup.sh; then
+            ERRORS=$((ERRORS + 1))
+        fi
+        # Agent hosts that opted in keep dcg at its pin; a weak guard fails here.
+        if ! bash infra/scripts/agent-guard-setup.sh --if-installed; then
             ERRORS=$((ERRORS + 1))
         fi
     fi

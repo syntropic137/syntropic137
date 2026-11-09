@@ -9,7 +9,9 @@
 #      agentic-workspace pin (skips hosts without AppArmor). A profile updated
 #      by the pull but not reloaded would leave the kernel enforcing the old
 #      rules; a missing one refuses every Codex workspace.
-#   2. Workspace image + signer: move a copied, previously shipped default
+#   2. Agent guard: on hosts that opted in (`just agent-guard-setup`), keep
+#      dcg at its pinned release and stop the update if validation fails.
+#   3. Workspace image + signer: move a copied, previously shipped default
 #      SYN_WORKSPACE_DOCKER_IMAGE and SYN_IMAGE_VERIFY_CERTIFICATE_IDENTITY_REGEXP
 #      in .env to the new defaults. A value in .env overrides the code default,
 #      so without this the upgrade keeps running the old image, or verifies the
@@ -29,6 +31,13 @@ echo "  AppArmor (Codex sandbox profile):"
 if ! bash "${REPO_ROOT}/infra/scripts/apparmor-setup.sh"; then
     echo "  ❌ Update stopped before restarting services: fix the AppArmor step above," >&2
     echo "     then re-run 'just selfhost-update'." >&2
+    exit 1
+fi
+
+echo "  Agent guard (dcg):"
+if ! bash "${REPO_ROOT}/infra/scripts/agent-guard-setup.sh" --if-installed; then
+    echo "  ❌ Update stopped before restarting services: the dcg agent guard failed" >&2
+    echo "     validation above. Fix it, then re-run 'just selfhost-update'." >&2
     exit 1
 fi
 
