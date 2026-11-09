@@ -37,16 +37,16 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
         """Initialize adapter - validates test environment."""
         super().__init__()
         self._streams: dict[str, list[str]] = {}  # isolation_id -> lines
-        self._last_exit_code: int | None = None
+        # isolation_id -> the exit code its last stream ended with.
+        self._exit_codes: dict[str, int | None] = {}
         # isolation_id -> the result each `sh -c <run>` returns, by its run line.
         self._bounded: dict[str, dict[str, BoundedCommandResult]] = {}
         #: Every bounded command run, in order, as (isolation_id, argv).
         self.bounded_runs: list[tuple[str, list[str]]] = []
 
-    @property
-    def last_exit_code(self) -> int | None:
-        """Exit code from the most recent stream() call. Always 0 for mock."""
-        return self._last_exit_code
+    def exit_code_of(self, handle: IsolationHandle) -> int | None:
+        """Exit code from ``handle``'s most recent stream() call. Always 0 for mock."""
+        return self._exit_codes.get(handle.isolation_id)
 
     async def stream(
         self,
@@ -85,7 +85,7 @@ class MemoryEventStreamAdapter(InMemoryAdapter):
         lines = self._streams.get(handle.isolation_id, [])
         for line in lines:
             yield line
-        self._last_exit_code = 0
+        self._exit_codes[handle.isolation_id] = 0
 
     async def run_bounded(
         self,

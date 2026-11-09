@@ -97,7 +97,7 @@ class _StreamInterruptedMidRun(MemoryEventStreamAdapter):
             yield '{"type":"assistant","message":{"content":[]}}'
         # Only reached if nobody interrupted: a status the cancelled run
         # must never be credited with.
-        self._last_exit_code = 0
+        self._exit_codes[handle.isolation_id] = 0
 
 
 class _ControllerThatCancels:

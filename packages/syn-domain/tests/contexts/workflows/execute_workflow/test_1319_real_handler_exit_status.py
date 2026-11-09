@@ -80,7 +80,7 @@ class _StreamEndingWith(MemoryEventStreamAdapter):
 
     The memory adapter always finishes by setting its exit code to 0, which is
     the one value that cannot demonstrate anything here. This overrides the end
-    of the stream and nothing else: `None` leaves `last_exit_code` unset, which
+    of the stream and nothing else: `None` leaves the exit code unset, which
     is precisely the shape `ManagedWorkspace.last_stream_exit_code` takes when
     the container is gone before it could be asked.
     """
@@ -106,7 +106,7 @@ class _StreamEndingWith(MemoryEventStreamAdapter):
         # must produce (#1476) and its outcome is decided by the exit status
         # under test rather than by having said nothing.
         yield json.dumps({"type": "result", "result": _ANSWER, "usage": {}})
-        self._last_exit_code = self._status
+        self._exit_codes[handle.isolation_id] = self._status
 
 
 def _processor_over(stream: MemoryEventStreamAdapter) -> WorkflowExecutionProcessor:
