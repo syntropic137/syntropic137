@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/workspace_git.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/workspace_git.py
+index 0ccf38abb..f6fe289bf 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/workspace_git.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/workspace_git.py
+@@ -509,7 +509,7 @@ async def git_status(
+     overrides = [arg for pair in config for arg in ("-c", pair)]
+     return await checked(
+         workspace,
+-        git_argv(repo, *overrides, "status", *flags, hardened=hardened),
++        git_argv(repo, *overrides, "status", *flags, "--untracked-files=no", hardened=hardened),
+         doing=f"running 'git status' in {repo}",
+         timeout_seconds=STATUS_TIMEOUT_SECONDS,
+     )

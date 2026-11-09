@@ -8,3 +8,5 @@ Tests: `packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute
 | 02 | the guard's v1 status goes back to plain `git(...)` | same |
 | 03 | `moved_gitlinks`' v2 status goes back to plain `git(...)` | `test_modified_and_untracked...` |
 | 04 | the status bound becomes effectively unbounded | `test_the_status_bound_is_still_a_bound...[an-hour-keeps-the-directory]` |
+| 05 | both statuses pass `--untracked-files=no` | `test_modified_and_untracked...[untracked-only]` |
+| 06 | the orphan guard ignores `unsaved_submodules` and reclaims after a superproject-only quarantine | `test_work_inside_a_submodule_keeps_the_directory...[modified-only]`, `[untracked-only]` |

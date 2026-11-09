@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/orphaned_workspace.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/orphaned_workspace.py
+index 14f5459e4..c870fd607 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/orphaned_workspace.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/orphaned_workspace.py
+@@ -435,7 +435,7 @@ def _anything_at_risk(saved: SavedWork) -> bool:
+     """Whether deleting now could lose work: an unfinished walk, a refused push,
+     or a submodule worked in, which no quarantine push carries (#1678)."""
+     return saved.unreadable is not None or any(
+-        r.pushed_ref is None or r.unsaved_submodules for r in saved.quarantined
++        r.pushed_ref is None for r in saved.quarantined
+     )
+ 
+ 
