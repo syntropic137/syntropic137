@@ -397,7 +397,12 @@ export interface paths {
         put?: never;
         /**
          * Inject Context Endpoint
-         * @description Inject a message into the execution context.
+         * @description Refused, always: no execution path reads an injected message (#1530).
+         *
+         *     It used to answer 200 "Context injection queued" for a message nothing
+         *     would ever deliver, and the queued signal could replace a pending cancel.
+         *     Nothing is resolved or queued now. The route stays so clients keep a
+         *     stable contract and get this answer instead of a 404.
          */
         post: operations["inject_context_endpoint_executions__execution_id__inject_post"];
         delete?: never;
@@ -3272,6 +3277,17 @@ export interface components {
             filter?: {
                 [key: string]: string | null;
             };
+        };
+        /**
+         * ControlNotSupportedResponse
+         * @description 501: a control the API names but nothing in the system can carry out.
+         *
+         *     Shaped as FastAPI's own error body (`detail`), so a client that reads
+         *     errors already reads this one.
+         */
+        ControlNotSupportedResponse: {
+            /** Detail */
+            detail: string;
         };
         /**
          * ControlResponse
@@ -11595,15 +11611,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ControlResponse"];
-                };
-            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -11611,6 +11618,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Successful Response */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlNotSupportedResponse"];
                 };
             };
         };

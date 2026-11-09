@@ -1,6 +1,8 @@
 ---
 title: Control
-description: Cancel and inject context into running executions
+description: >-
+  Cancel running executions and read their control state (inject is refused,
+  #1530)
 full: false
 _openapi:
   toc:
@@ -24,7 +26,18 @@ _openapi:
     contents:
       - content: Cancel an execution, or withdraw a start still queued for one (#1650).
         heading: cancel-execution-endpoint
-      - content: Inject a message into the execution context.
+      - content: >-
+          Refused, always: no execution path reads an injected message (#1530).
+
+
+          It used to answer 200 "Context injection queued" for a message nothing
+
+          would ever deliver, and the queued signal could replace a pending
+          cancel.
+
+          Nothing is resolved or queued now. The route stays so clients keep a
+
+          stable contract and get this answer instead of a 404.
         heading: inject-context-endpoint
       - content: Get current execution state.
         heading: get-execution-state-endpoint

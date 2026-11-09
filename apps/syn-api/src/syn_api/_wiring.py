@@ -629,7 +629,7 @@ _controller_singleton: ExecutionController | None = None
 
 
 def get_controller() -> ExecutionController:
-    """Return a singleton ExecutionController for pause/resume/cancel/inject.
+    """Return a singleton ExecutionController for cancel.
 
     Returns the same instance on every call so the execution engine and API
     endpoints share the same signal queue; signals enqueued by an HTTP

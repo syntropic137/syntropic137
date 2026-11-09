@@ -26,7 +26,6 @@ from syn_adapters.control.commands import (
     ControlResult,
     ControlSignal,
     ControlSignalType,
-    InjectContext,
 )
 
 if TYPE_CHECKING:
@@ -55,7 +54,6 @@ class ExecutionController:
     #: What each command asks for, and what the operator is told on success.
     _SIGNALS: ClassVar[dict[type[ControlCommand], tuple[ControlSignalType, str]]] = {
         CancelExecution: (ControlSignalType.CANCEL, "Cancel signal queued"),
-        InjectContext: (ControlSignalType.INJECT, "Context injection queued"),
     }
 
     async def handle_command(self, cmd: ControlCommand) -> ControlResult:
@@ -127,12 +125,9 @@ def _signal_for(cmd: ControlCommand, signal_type: ControlSignalType) -> ControlS
     return ControlSignal(
         signal_type=signal_type,
         execution_id=cmd.execution_id,
-        reason=cmd.reason if isinstance(cmd, CancelExecution) else None,
-        inject_message=cmd.message if isinstance(cmd, InjectContext) else None,
+        reason=cmd.reason,
     )
 
 
 def _refusal(signal_type: ControlSignalType, state: str) -> str:
-    if signal_type is ControlSignalType.INJECT:
-        return "Cannot inject into terminal execution"
     return f"Cannot {signal_type.value} execution in state {state}"

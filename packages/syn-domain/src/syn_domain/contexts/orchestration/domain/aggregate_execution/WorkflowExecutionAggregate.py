@@ -408,9 +408,8 @@ class WorkflowExecutionAggregate(
         """
         if self.id is None:
             return False
-        match signal:
-            case ControlSignalType.CANCEL | ControlSignalType.INJECT:
-                return self._status is ExecutionStatus.RUNNING
+        # INJECT is never admitted: nothing delivers it to the agent (#1530).
+        return signal is ControlSignalType.CANCEL and self._status is ExecutionStatus.RUNNING
 
     def attempts_for(self, phase_id: str) -> int:
         """How many times this phase has been attempted, 0 if never started."""

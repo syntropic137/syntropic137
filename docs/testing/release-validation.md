@@ -1191,13 +1191,18 @@ the signal. It was deleted rather than finished - `cancel` already covers
 stopping a run, and `resume` now means resuming a FAILED or INTERRUPTED
 execution from its first incomplete phase (`syn execution resume`).
 
-### Inject context into running execution
+### Inject is refused (#1530)
+
+Nothing delivers a message into a running agent, so inject is refused rather
+than reported as queued. Confirm the refusal, and that a cancel sent before it
+still stops the run:
 
 ```bash
 syn control inject <execution-id> --message "Focus on the auth module"
 ```
 
-- [ ] Injection accepted (or graceful error if execution not in injectable state)
+- [ ] Exits non-zero, printing "Injecting a message into a running agent is not supported; cancel the execution and start again with a corrected task"
+- [ ] `syn control cancel <execution-id> --force` then `syn control inject ...`: the execution still reaches `cancelled`
 
 ### Verify session recorded
 

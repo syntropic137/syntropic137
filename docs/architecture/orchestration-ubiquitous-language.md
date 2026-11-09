@@ -1982,7 +1982,9 @@ a person-started Resume is a new decision. Code:
   `PauseExecutionCommand`, `ResumeExecutionCommand`, `ControlSignalType.PAUSE`
   and `.RESUME`, `POST /executions/{id}/pause` and its `resume` twin, and
   `syn control pause` / `syn control resume`. The control plane now carries
-  `cancel` and `inject` only.
+  `cancel` only. `inject` is refused at the API (501) and is never admitted
+  by `accepts_control`, for the same reason pause went: no executor reads it
+  (#1530).
 
   **Admission pause is NOT this.** `POST /maintenance` pauses ADMISSION: the
   system stops accepting new Executions while a deploy drains. That is a
