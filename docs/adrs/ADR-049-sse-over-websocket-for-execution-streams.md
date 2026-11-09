@@ -99,7 +99,7 @@ _queues: dict[str, set[SSEQueue]]   # channel → subscriber queues
 ```
 POST /executions/{id}/resume
 POST /executions/{id}/cancel
-POST /executions/{id}/inject
+POST /executions/{id}/inject    # refused with 501 since #1530: nothing delivers it
 GET  /executions/{id}/state
 ```
 

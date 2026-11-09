@@ -121,7 +121,7 @@ syn execution show <id>              # Show execution detail
 
 syn control cancel <id> --force      # Cancel execution
 syn control status <id>              # Check execution state
-syn control inject <id> -m "msg"     # Inject a message
+syn control inject <id> -m "msg"     # Not supported (#1530): refused; cancel and start again
 ```
 
 ### Sessions & Observability

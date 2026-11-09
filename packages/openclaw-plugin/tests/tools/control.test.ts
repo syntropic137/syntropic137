@@ -25,9 +25,9 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-function jsonResponse(data: unknown): Response {
+function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
-    status: 200,
+    status,
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -101,8 +101,9 @@ describe("synCancelExecution", () => {
 });
 
 describe("synInjectContext", () => {
-  it("injects context successfully", async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse(controlInject));
+  it("reports the API's refusal as an error (#1530)", async () => {
+    const refusal = "Injecting a message into a running agent is not supported";
+    mockFetch.mockResolvedValueOnce(jsonResponse({ detail: refusal }, 501));
 
     const result = await synInjectContext(client, {
       execution_id: "exec-abc-123",
@@ -110,8 +111,17 @@ describe("synInjectContext", () => {
       role: "user",
     });
 
-    expect(result.isError).toBeUndefined();
-    expect(result.content).toContain("Context injected");
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain(refusal);
+  });
+
+  it("never reports a message as injected, even if a server accepts it", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(controlInject));
+
+    const result = await synInjectContext(client, { execution_id: "exec-abc-123", message: "m" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).not.toContain("Context injected");
   });
 
   it("sends message and role in body", async () => {
@@ -127,24 +137,5 @@ describe("synInjectContext", () => {
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.message).toBe("hello");
     expect(body.role).toBe("system");
-  });
-
-  it("handles failure response", async () => {
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        success: false,
-        execution_id: "e1",
-        state: "failed",
-        message: null,
-        error: "No active agent",
-      }),
-    );
-
-    const result = await synInjectContext(client, {
-      execution_id: "e1",
-      message: "test",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content).toContain("No active agent");
   });
 });

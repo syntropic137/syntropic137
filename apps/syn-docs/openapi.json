@@ -1311,7 +1311,7 @@
           "control"
         ],
         "summary": "Inject Context Endpoint",
-        "description": "Inject a message into the execution context.",
+        "description": "Refused, always: no execution path reads an injected message (#1530).\n\nIt used to answer 200 \"Context injection queued\" for a message nothing\nwould ever deliver, and the queued signal could replace a pending cancel.\nNothing is resolved or queued now. The route stays so clients keep a\nstable contract and get this answer instead of a 404.",
         "operationId": "inject_context_endpoint_executions__execution_id__inject_post",
         "parameters": [
           {
@@ -1335,12 +1335,12 @@
           }
         },
         "responses": {
-          "200": {
+          "501": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ControlResponse"
+                  "$ref": "#/components/schemas/ControlNotSupportedResponse"
                 }
               }
             }
@@ -9849,6 +9849,21 @@
         ],
         "title": "ContributionHeatmapResponse",
         "description": "Contribution heatmap data."
+      },
+      "ControlNotSupportedResponse": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ControlNotSupportedResponse",
+        "description": "501: a control the API names but nothing in the system can carry out.\n\nShaped as FastAPI's own error body (`detail`), so a client that reads\nerrors already reads this one."
       },
       "ControlResponse": {
         "properties": {
@@ -26364,7 +26379,7 @@
     },
     {
       "name": "control",
-      "description": "Cancel and inject context into running executions"
+      "description": "Cancel running executions and read their control state (inject is refused, #1530)"
     },
     {
       "name": "conversations",

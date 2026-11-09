@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal
 
 # Re-exported, not defined here. The enum moved to syn_shared so that domain
 # slice code can compare against it without importing the adapter layer
@@ -22,7 +21,6 @@ __all__ = [
     "ControlResult",
     "ControlSignal",
     "ControlSignalType",
-    "InjectContext",
 ]
 
 
@@ -35,18 +33,10 @@ class CancelExecution:
     requested_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
-@dataclass(frozen=True)
-class InjectContext:
-    """Command to inject a message into agent context."""
-
-    execution_id: str
-    message: str
-    role: Literal["user", "system"] = "user"
-    requested_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-
-# Union type for all commands
-ControlCommand = CancelExecution | InjectContext
+# Every command the controller admits. Cancel is the only one: injecting a
+# message has no consumer, so it is refused at the API and has no command here
+# that could queue it (#1530).
+ControlCommand = CancelExecution
 
 
 @dataclass(frozen=True)

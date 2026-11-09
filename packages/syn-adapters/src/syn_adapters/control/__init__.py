@@ -1,6 +1,6 @@
 """Control plane for execution management.
 
-Provides cancel and context-injection functionality with hexagonal architecture.
+Provides execution cancel with hexagonal architecture.
 
 Usage:
     from syn_adapters.control import ExecutionController, CancelExecution
@@ -15,7 +15,6 @@ from syn_adapters.control.commands import (
     ControlResult,
     ControlSignal,
     ControlSignalType,
-    InjectContext,
 )
 from syn_adapters.control.controller import ExecutionController
 from syn_adapters.control.ports import SignalQueuePort
@@ -27,6 +26,5 @@ __all__ = [
     "ControlSignal",
     "ControlSignalType",
     "ExecutionController",
-    "InjectContext",
     "SignalQueuePort",
 ]
