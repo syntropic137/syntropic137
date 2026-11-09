@@ -22,7 +22,12 @@ _SDLC = Path(__file__).resolve().parents[2] / "workflows" / "sdlc"
 
 #: Every arm compared with v4-precheck, which must hold the limit equal so the
 #: limit is not a second variable between them.
-_ARMS = ("implement-v3", "implement-v4-precheck", "implement-v4-precheck-sonnet-fix", "implement-v7")
+_ARMS = (
+    "implement-v3",
+    "implement-v4-precheck",
+    "implement-v4-precheck-sonnet-fix",
+    "implement-v7",
+)
 _GATE_PHASES = {"implement", "verify", "fix", "reverify", "fix_2", "reverify_2"}
 _HEADROOM = 1024
 
@@ -45,7 +50,7 @@ def test_every_gate_phase_gets_the_headroom(arm: str) -> None:
 
 
 def test_v4_precheck_has_every_gate_phase() -> None:
-    assert _GATE_PHASES <= _pids("implement-v4-precheck").keys()
+    assert _pids("implement-v4-precheck").keys() >= _GATE_PHASES
 
 
 @pytest.mark.parametrize("arm", _ARMS)
