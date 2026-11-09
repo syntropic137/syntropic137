@@ -2,19 +2,31 @@
 
 One `AgenticEventStreamAdapter` serves every workspace of its service, so two
 phases stream through the same object at once. Each test here drives the REAL
-adapter, and the real `ManagedWorkspace` reading it, with two workspaces whose
-streams overlap: one ends, the other ends differently, and only then is the
-first one's outcome read. That is the Codex window, where the handler reads the
-exit code only after `record_session_summary()` has awaited.
+adapter, and the real `ManagedWorkspace` reading it, with two workspaces on it:
+
+- exit code: A is mid-stream when B starts and settles; A ends 0, then B times
+  out again before A's code is read. That is the Codex window, where the
+  handler reads the exit code only after `record_session_summary()` has awaited.
+- signal death: A is suspended inside its settle, in the kernel read of
+  `capture_signal_death`, while B runs start to finish; only then does A resume.
+- lost output: A has already lost bytes and is still streaming when B runs
+  start to finish; only then does A end.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-from agentic_isolation.contract import MISSING, OperationRef, OperationSpec, OperationStatus
+from agentic_isolation.contract import (
+    MISSING,
+    ObservationPage,
+    OperationRef,
+    OperationSpec,
+    OperationStatus,
+)
 from test_stream_on_operations import RecordingOperations, _credentials, _Host
 
 from syn_adapters.workspace_backends.agentic.stream_adapter import AgenticEventStreamAdapter
@@ -39,20 +51,33 @@ class _PerWorkspaceOperations(RecordingOperations):
 
     ``ends`` maps an isolation id to ``(state, exit_code, signal)``; the spec's
     ``execution_id`` is the isolation id, so the status is chosen per stream.
+    ``pages_of`` does the same for the output, for a workspace not on ``pages``.
     """
 
     def __init__(
         self,
         pages: Sequence[bytes | int | None],
         ends: dict[str, tuple[str, int | None, str | None]],
+        pages_of: dict[str, Sequence[bytes | int | None]] | None = None,
     ) -> None:
         super().__init__(_credentials(), pages)
         self._ends = ends
+        self._default_pages = list(pages)
+        self._pages_of = pages_of or {}
         self._workspace_of: dict[str, str] = {}
 
     async def start(self, workspace: Workspace, spec: OperationSpec) -> OperationRef:
         self._workspace_of[spec.operation_key] = spec.execution_id
         return await super().start(workspace, spec)
+
+    async def observe(
+        self, ref: OperationRef, *, cursor: str | None, max_bytes: int, wait_seconds: float = 0
+    ) -> ObservationPage:
+        isolation_id = self._workspace_of[ref.operation_key]
+        self._pages = list(self._pages_of.get(isolation_id, self._default_pages))
+        return await super().observe(
+            ref, cursor=cursor, max_bytes=max_bytes, wait_seconds=wait_seconds
+        )
 
     async def status(self, ref: OperationRef) -> OperationStatus:
         isolation_id = self._workspace_of[ref.operation_key]
@@ -71,8 +96,10 @@ class _PerWorkspaceOperations(RecordingOperations):
 def _adapter(
     ends: dict[str, tuple[str, int | None, str | None]],
     pages: Sequence[bytes | int | None] = (b"first\n", b"last\n"),
+    pages_of: dict[str, Sequence[bytes | int | None]] | None = None,
 ) -> AgenticEventStreamAdapter:
-    host = _Host(_PerWorkspaceOperations(pages, ends), _credentials())  # type: ignore[arg-type]
+    operations = _PerWorkspaceOperations(pages, ends, pages_of)
+    host = _Host(operations, _credentials())  # type: ignore[arg-type]
     # The diagnostic must not read this host's kernel log in a unit test.
     host.shares_host_kernel = False
     return AgenticEventStreamAdapter(host)  # type: ignore[arg-type]
@@ -105,12 +132,32 @@ async def test_a_success_does_not_inherit_a_concurrent_timeout() -> None:
     assert b.last_stream_exit_code == 124
 
 
-async def test_a_clean_exit_does_not_erase_a_concurrent_signal_death() -> None:
+async def test_a_clean_exit_does_not_erase_a_concurrent_signal_death(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def kernel_read_held_open() -> tuple[tuple[str, ...], str | None]:
+        entered.set()
+        await release.wait()
+        return (), "synthetic: no kernel log in a unit test"
+
+    monkeypatch.setattr(
+        "syn_adapters.diagnostics.signal_capture._kernel_fault_lines", kernel_read_held_open
+    )
     adapter = _adapter({"ws-a": ("failed", None, "SIGSEGV"), "ws-b": ("succeeded", 0, None)})
+    adapter._host.shares_host_kernel = True  # type: ignore[attr-defined]  # A's settle must await
     a, b = _workspace(adapter, _A), _workspace(adapter, _B)
 
-    await _drain(a.stream(["claude"]))
-    await _drain(b.stream(["claude"]))
+    settling_a = asyncio.create_task(_drain(a.stream(["claude"])))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)  # A is suspended in its settle ...
+        await _drain(b.stream(["claude"]))  # ... while B runs start to finish
+        assert b.last_stream_exit_code == 0
+        assert adapter.signal_death_of(_B) is None
+    finally:
+        release.set()
+        await settling_a
 
     death = adapter.signal_death_of(_A)
     assert death is not None, "B's clean exit must not erase how A died"
@@ -123,13 +170,15 @@ async def test_a_clean_exit_does_not_erase_a_concurrent_signal_death() -> None:
 async def test_one_workspaces_lost_output_is_not_reset_by_another_stream() -> None:
     adapter = _adapter(
         {"ws-a": ("succeeded", 0, None), "ws-b": ("succeeded", 0, None)},
-        pages=(b"first\n", 42, b"last\n"),
+        pages_of={"ws-a": (b"first\n", 42, b"after\n", b"last\n"), "ws-b": (b"clean\n",)},
     )
-    operations: _PerWorkspaceOperations = adapter._host.operations  # type: ignore[attr-defined]
 
-    await _drain(adapter.stream(_A, ["claude"]))  # A loses 42 bytes ...
-    operations._pages = [b"clean\n"]
-    await _drain(adapter.stream(_B, ["claude"]))  # ... B loses nothing
+    stream_a = adapter.stream(_A, ["claude"])
+    assert await anext(stream_a) == "first"
+    assert await anext(stream_a) == "after"  # A has lost 42 bytes and is still running ...
+    await _drain(adapter.stream(_B, ["claude"]))  # ... when B runs start to finish, losing nothing
+    assert adapter.lost_bytes_of(_B) == 0
+    await _drain(stream_a)
 
     assert adapter.lost_bytes_of(_A) == 42
     assert adapter.lost_bytes_of(_B) == 0
