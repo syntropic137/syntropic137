@@ -75,6 +75,33 @@ def test_bytes_are_allocated_blocks_and_a_linked_file_counts_once(
     assert (usage.object_count, usage.added_bytes_24h) == (1, ref + obj)
 
 
+def test_a_capture_unlinking_its_temporary_mid_walk_still_counts_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The temporary is counted with two links; the object's name then reads one (#2216)."""
+    obj = _write(tmp_path, ".capture-tmp", 300, 0.1)
+    os.link(tmp_path / ".capture-tmp", tmp_path / ("a" * 64))
+    scandir = os.scandir
+
+    def unlinking(entries: list[os.DirEntry[str]]) -> Iterator[os.DirEntry[str]]:
+        for entry in entries:
+            yield entry
+            if entry.name == ".capture-tmp":
+                (tmp_path / entry.name).unlink()
+
+    @contextlib.contextmanager
+    def ordered(path: Path) -> Iterator[Iterator[os.DirEntry[str]]]:
+        with scandir(path) as entries:
+            yield unlinking(sorted(entries, key=lambda e: not e.name.startswith(".capture")))
+
+    monkeypatch.setattr(archive_usage.os, "scandir", ordered)
+    usage = measure_archive_usage(tmp_path, NOW)
+    assert usage is not None
+    assert not (tmp_path / ".capture-tmp").exists()  # the unlink ran between the two names
+    assert usage.stored_bytes == obj
+    assert usage.object_count == 1
+
+
 def test_a_missing_archive_is_not_measured(tmp_path: Path) -> None:
     assert measure_archive_usage(tmp_path / "absent", NOW) is None
 
