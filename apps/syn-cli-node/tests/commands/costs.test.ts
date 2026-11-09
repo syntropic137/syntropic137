@@ -102,13 +102,17 @@ describe("costs commands", () => {
           { model: "gpt-6-sol", cost_usd: "4.00" },
           { model: "unattributed-model", cost_usd: "1.00" },
         ],
-        top_sessions: [],
+        top_sessions: [
+          { session_id: "sess-expensive-1", total_cost_usd: "3.25", total_tokens: 42000 },
+        ],
       }),
     );
     await costsGroup.getCommand("summary")!.handler({ positionals: [], values: {} });
     const out = stdout();
     expect(out).toContain("gpt-6-sol");
     expect(out).toContain("$4.00");
+    expect(out).toContain("sess-expensi...");
+    expect(out).toContain("$3.25");
     expect(out).toContain("unknown");
     expect(out).not.toContain("unattributed-model");
   });
