@@ -135,11 +135,11 @@ class WorkspaceDirReclaimer:
     delete_tree: Callable[[str, tuple[int, int], float], bool] = field(
         default=lambda path, identity, deadline: _delete_tree(path, identity, deadline)
     )
-    #: Canonical host path of the workspace base (``SYN_WORKSPACE_HOST_DIR``); a
-    #: container binding it or any ancestor reaches every workspace. None is
-    #: unknown, and unknown keeps every directory.
+    #: Canonical host path of the workspace base (``SYN_WORKSPACE_HOST_DIR``),
+    #: which names each directory as a host path a mount source can be compared
+    #: to. None is unknown, and unknown keeps every directory.
     host_base_dir: str | None = None
-    #: This process's own container id (prefix): the one bind of the base exempt.
+    #: This process's own container id (prefix): exempt even where it binds a directory.
     own_container: str | None = None
     #: Container names the operator declares pure observers of the host tree
     #: (``SYN_DISK_RECLAIM_OBSERVER_CONTAINERS``). Exempt only while their
@@ -228,7 +228,7 @@ class WorkspaceDirReclaimer:
             return Retained(
                 RetainedReason.MOUNTED,
                 "the host path of the workspace base is unknown (SYN_WORKSPACE_HOST_DIR), "
-                "so a bind of it or an ancestor cannot be ruled out",
+                "so a bind of the directory itself cannot be ruled out",
             )
         own = self.own_container
         binding: list[str] = []

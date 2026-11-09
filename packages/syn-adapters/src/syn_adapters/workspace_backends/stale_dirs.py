@@ -259,26 +259,31 @@ class ContainerMounts:
         return f"{self.name or 'unnamed'} ({self.container_id[:12]})"
 
     def blocks(self, workspace_id: str, host_base: str) -> bool:
-        """Whether any source can reach the workspace directory under any of its names.
+        """Whether any source is the workspace directory, under any of its names, or inside it.
 
         Compared as canonical host paths: a source that is the directory (as
-        itself, claimed or being deleted), anything inside it, or any
-        ANCESTOR of it - the base, its parent, ``/`` - reaches it. Only the
-        caller's own container is exempt, and the caller decides that
-        (`own_container_id`), not this method.
+        itself, claimed or being deleted) or anything inside it blocks, rw or
+        ro. Only the caller's own container is exempt, and the caller decides
+        that (`own_container_id`), not this method.
 
-        Read-only binds block like any other: read-only does not mean unused,
-        and ``RW: false`` alone does not keep submounts read-only. The one
-        other exemption is an operator-listed observer that passes every
-        observer condition, and the reclaimer decides that (`_bound`).
+        A bind of the base or of any ANCESTOR of it - the base's parent, ``/``
+        - does NOT block, rw or ro (#2215). Permanent platform containers hold
+        such binds (the executor writes the whole base; the docker-create guard
+        and node-exporter read it), so counting them kept every directory.
+        Such a container reaches the directory only through paths it was given
+        for an Execution; the reclaimer's proof that the directory's owner
+        Execution is terminal and settled, with its capture proven
+        (`_judge_owner`), is what rules out a live writer there. A bind naming
+        the directory itself carries no such proof, so it still blocks.
+
+        The one other exemption is an operator-listed observer that passes
+        every observer condition, and the reclaimer decides that (`_bound`).
         """
         base = PurePosixPath(posixpath.normpath(host_base))
         names = (workspace_id, CLAIM_PREFIX + workspace_id, DELETE_PREFIX + workspace_id)
         dirs = [base / name for name in names]
         for raw in self.sources:
             source = PurePosixPath(posixpath.normpath(raw))
-            if base == source or base.is_relative_to(source):
-                return True
             if any(source == d or source.is_relative_to(d) for d in dirs):
                 return True
         return False
