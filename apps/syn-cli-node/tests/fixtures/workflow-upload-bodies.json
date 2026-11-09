@@ -2206,6 +2206,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2238,6 +2241,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -2268,6 +2274,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2300,6 +2309,9 @@
           "markdown"
         ],
         "timeout_seconds": 1800,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -2330,6 +2342,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2362,6 +2377,9 @@
           "markdown"
         ],
         "timeout_seconds": 1800,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -2471,6 +2489,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2503,6 +2524,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -2533,6 +2557,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2565,6 +2592,9 @@
           "markdown"
         ],
         "timeout_seconds": 1800,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -2595,6 +2625,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2627,6 +2660,9 @@
           "markdown"
         ],
         "timeout_seconds": 1800,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -2736,6 +2772,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2768,6 +2807,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -2798,6 +2840,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2830,6 +2875,9 @@
           "markdown"
         ],
         "timeout_seconds": 1800,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -2860,6 +2908,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2892,6 +2943,9 @@
           "markdown"
         ],
         "timeout_seconds": 1800,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -3001,6 +3055,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -3033,6 +3090,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -3063,6 +3123,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -3095,6 +3158,9 @@
           "markdown"
         ],
         "timeout_seconds": 1800,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
@@ -3125,6 +3191,9 @@
           "markdown"
         ],
         "timeout_seconds": 3600,
+        "resources": {
+          "pids_limit": 1024
+        },
         "allowed_tools": [
           "Read",
           "Grep",
@@ -3157,6 +3226,9 @@
           "markdown"
         ],
         "timeout_seconds": 1800,
+        "resources": {
+          "pids_limit": 1024
+        },
         "delivers_repo_changes": false,
         "requires_verdict": true,
         "agent": {
