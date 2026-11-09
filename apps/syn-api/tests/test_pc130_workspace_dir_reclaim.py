@@ -281,25 +281,62 @@ async def test_any_container_binding_the_dir_or_below_keeps_it(
     assert ws.exists()
 
 
-async def test_only_this_process_own_bind_of_the_base_is_exempt(base: Path, tmp_path: Path) -> None:
-    """The API binds the whole base; its own container, and only it, may."""
-    _workspace(base, "ws-base-bound", tmp_path)
-    own = ContainerMounts("api0000000001ffff", ("/srv/workspaces", "/var/run/docker.sock"))
+async def test_only_this_process_own_bind_of_the_dir_is_exempt(base: Path, tmp_path: Path) -> None:
+    """Its own container, and only it, may bind the directory itself."""
+    _workspace(base, "ws-own-bound", tmp_path)
+    own = ContainerMounts(
+        "api0000000001ffff", ("/srv/workspaces/ws-own-bound", "/var/run/docker.sock")
+    )
     result = await _reclaimer(base, containers=[own]).run_once()
-    assert result.reclaimed == ("ws-base-bound",)
+    assert result.reclaimed == ("ws-own-bound",)
+
+
+#: The three permanent containers on the VPS that held every directory (#2215):
+#: the executor writes the whole base, the guard reads it, node-exporter reads ``/``.
+_PLATFORM_BINDS = [
+    ContainerMounts("e0e0e0e0e0e0", ("/srv/workspaces",), True, "syn137-executor"),
+    ContainerMounts("9a9a9a9a9a9a", ("/srv/workspaces",), True, "syn137-docker-create-guard"),
+    ContainerMounts("0e0e0e0e0e0e", ("/",), True, "flywheel-observability-node-exporter"),
+]
+
+
+async def test_platform_binds_of_the_base_or_an_ancestor_do_not_keep_a_dir(
+    base: Path, tmp_path: Path
+) -> None:
+    """#2215: binds of the base or above it reach every directory, so counting them
+    retained all of them. The owner being terminal and settled is the proof."""
+    ws = _workspace(base, "ws-platform", tmp_path)
+    result = await _reclaimer(base, containers=_PLATFORM_BINDS).run_once()
+    assert result.reclaimed == ("ws-platform",)
+    assert not ws.exists()
+
+
+async def test_platform_binds_leave_a_running_owner_dir_to_the_owner_check(
+    base: Path, tmp_path: Path
+) -> None:
+    """With the ancestor rule gone, the owner check is what keeps a live directory."""
+    ws = _workspace(base, "ws-live", tmp_path)
+    result = await _reclaimer(base, containers=_PLATFORM_BINDS, status="running").run_once()
+    assert _reason(result, "ws-live") is RetainedReason.NOT_TERMINAL
+    assert ws.exists()
 
 
 @pytest.mark.parametrize("source", ["/srv/workspaces", "/srv/workspaces/", "/srv", "/"])
-async def test_another_container_binding_the_base_or_an_ancestor_keeps_every_dir(
-    base: Path, tmp_path: Path, source: str
+def test_a_bind_of_the_base_or_an_ancestor_does_not_block(source: str) -> None:
+    assert not ContainerMounts("tool0000000002", (source,)).blocks("ws-a", HOST_BASE)
+
+
+async def test_a_bind_of_another_workspace_does_not_keep_this_one(
+    base: Path, tmp_path: Path
 ) -> None:
-    """Codex r1 finding 5: through an ancestor bind a container reaches every workspace,
-    under any name, so it blocks deletion like a direct bind."""
-    ws = _workspace(base, "ws-ancestor", tmp_path)
-    other = ContainerMounts("tool0000000002", (source,), running=True)
+    ws = _workspace(base, "ws-free", tmp_path)
+    other = ContainerMounts(
+        "sidecar01",
+        ("/srv/workspaces/ws-other", "/srv/workspaces/ws-free-other", "/srv/workspaces/ws-fre"),
+    )
     result = await _reclaimer(base, containers=[other]).run_once()
-    assert _reason(result, "ws-ancestor") is RetainedReason.MOUNTED
-    assert ws.exists()
+    assert result.reclaimed == ("ws-free",)
+    assert not ws.exists()
 
 
 async def test_an_unknown_host_base_keeps_every_dir(base: Path, tmp_path: Path) -> None:
