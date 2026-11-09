@@ -21034,6 +21034,32 @@
         "title": "SSEHealthResponse",
         "description": "Health status of the SSE subsystem."
       },
+      "SessionCostEntry": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "total_cost_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Cost Usd",
+            "default": "0"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "SessionCostEntry",
+        "description": "One session's share of a cost total.\n\nField names are the ones ``SessionCostResponse`` uses for the same values."
+      },
       "SessionCostResponse": {
         "properties": {
           "session_id": {
@@ -26300,8 +26326,7 @@
           },
           "top_sessions": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/SessionCostEntry"
             },
             "type": "array",
             "title": "Top Sessions"
