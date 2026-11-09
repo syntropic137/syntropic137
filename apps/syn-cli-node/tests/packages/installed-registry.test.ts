@@ -98,6 +98,20 @@ describe("loadInstalled with duplicate records", () => {
     });
   });
 
+  // One record can already repeat an id: two YAML files declaring the same
+  // workflow resolve to two refs, and recordInstallation stores both.
+  for (const repeatIn of ["newer", "older"] as const) {
+    it(`admits each id once when the ${repeatIn} record repeats one`, () => {
+      const repeated = ["repeated", "repeated"];
+      const newer = stored("0.4.0", "2026-10-02T00:00:00.000Z", repeatIn === "newer" ? repeated : ["unique"]);
+      const older = stored("0.3.0", "2026-10-01T00:00:00.000Z", repeatIn === "older" ? repeated : ["unique"]);
+      saveInstalled({ version: 1, installations: [older, newer] });
+
+      const ids = loadInstalled().installations[0]?.workflows.map((w) => w.id);
+      expect([...(ids ?? [])].sort()).toEqual(["repeated", "unique"]);
+    });
+  }
+
   it("returns a registry without duplicates unchanged", () => {
     const registry = {
       version: 1,

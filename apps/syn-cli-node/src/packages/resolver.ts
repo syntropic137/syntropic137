@@ -55,11 +55,14 @@ function canonicalize(registry: InstalledRegistry): InstalledRegistry {
     }
     const recordIsNewer = Date.parse(record.installed_at) >= Date.parse(seen.installed_at);
     const [newer, older] = recordIsNewer ? [record, seen] : [seen, record];
-    const tracked = new Set(newer.workflows.map((w) => w.id));
-    byPackage.set(record.package_name, {
-      ...newer,
-      workflows: [...newer.workflows, ...older.workflows.filter((w) => !tracked.has(w.id))],
-    });
+    // One ref per id across BOTH lists: a single record can already repeat an
+    // id (two YAML files declaring the same workflow), and the newer record's
+    // ref wins where they overlap.
+    const workflows = new Map<string, InstalledWorkflowRef>();
+    for (const ref of [...newer.workflows, ...older.workflows]) {
+      if (!workflows.has(ref.id)) workflows.set(ref.id, ref);
+    }
+    byPackage.set(record.package_name, { ...newer, workflows: [...workflows.values()] });
   }
   if (byPackage.size === registry.installations.length) return registry;
   return { version: registry.version, installations: [...byPackage.values()] };
