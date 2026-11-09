@@ -1,8 +1,13 @@
-"""GET /costs/summary ranks the models and sessions that spent the money.
+"""GET /costs/summary ranks the models that spent the money.
 
-``top_models`` and ``top_sessions`` were built as ``[]`` literals and never
-implemented (#701), so every summary claimed nothing had been spent by anyone.
-They now rank the same rows the totals are summed from, most expensive first.
+``top_models`` was built as a ``[]`` literal and never implemented (#701), so
+every summary claimed no model had spent anything. It now ranks the same
+execution rows the totals are summed from, most expensive first.
+
+``top_sessions`` stays empty until sessions can be ranked by cost in SQL
+(#2228): ranking ``SessionCostQueryService.list_all()`` in Python loads every
+session's token rows and only sees the newest 500 summaries. A test pins that
+the summary does not touch the session list at all.
 
 The token half of #701 was fixed by #873; the last test pins it for this route.
 """
@@ -16,7 +21,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 
 if TYPE_CHECKING:
@@ -37,16 +41,6 @@ class _FakeExecutionCostQuery:
     costs: list[ExecutionCost]
 
     async def list_all(self, limit: int = 500) -> list[ExecutionCost]:
-        return self.costs[:limit]
-
-
-@dataclass
-class _FakeSessionCostQuery:
-    """Stands in for SessionCostQueryService."""
-
-    costs: list[SessionCost]
-
-    async def list_all(self, limit: int = 500) -> list[SessionCost]:
         return self.costs[:limit]
 
 
@@ -96,30 +90,23 @@ def _executions() -> list[ExecutionCost]:
     ]
 
 
-def _sessions(n: int) -> list[SessionCost]:
-    # Cheapest first, so a passing order cannot be the input order.
-    return [
-        SessionCost(
-            session_id=f"sess-{i}",
-            total_cost_usd=Decimal(i) / Decimal(10),
-            input_tokens=i,
-            cache_read_tokens=1_000 * i,
-        )
-        for i in range(1, n + 1)
-    ]
+def _session_list_is_unbounded() -> object:
+    raise AssertionError(
+        "the summary must not load the session list: it is unbounded and only"
+        " sees the newest 500 summaries (#2228)"
+    )
 
 
 async def _summary(
     monkeypatch: pytest.MonkeyPatch,
     executions: list[ExecutionCost],
-    sessions: list[SessionCost],
 ) -> CostSummaryResponse:
     from syn_api.routes import costs
 
     monkeypatch.setattr(
         costs, "get_execution_cost_query", lambda: _FakeExecutionCostQuery(executions)
     )
-    monkeypatch.setattr(costs, "get_session_cost_query", lambda: _FakeSessionCostQuery(sessions))
+    monkeypatch.setattr(costs, "get_session_cost_query", _session_list_is_unbounded)
     return await costs.get_cost_summary_endpoint()
 
 
@@ -128,7 +115,7 @@ async def test_top_models_sums_each_model_across_executions_most_expensive_first
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The wire shape, which is what the CLI and dashboard read.
-    body = (await _summary(monkeypatch, _executions(), _sessions(1))).model_dump(mode="json")
+    body = (await _summary(monkeypatch, _executions())).model_dump(mode="json")
 
     assert body["top_models"] == [
         {"model": OPUS, "cost_usd": "3"},
@@ -137,24 +124,14 @@ async def test_top_models_sums_each_model_across_executions_most_expensive_first
 
 
 @pytest.mark.asyncio
-async def test_top_sessions_are_most_expensive_first_and_bounded(
+async def test_top_sessions_stays_empty_without_loading_every_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The wire shape, which is what the CLI and dashboard read.
-    from syn_api.routes.costs import TOP_N
+    body = (await _summary(monkeypatch, _executions())).model_dump(mode="json")
 
-    body = (await _summary(monkeypatch, _executions(), _sessions(TOP_N + 2))).model_dump(
-        mode="json"
-    )
-
-    top = body["top_sessions"]
-    assert isinstance(top, list)
-    assert [s["session_id"] for s in top] == [f"sess-{i}" for i in range(TOP_N + 2, 2, -1)]
-    assert top[0] == {
-        "session_id": f"sess-{TOP_N + 2}",
-        "total_cost_usd": str(Decimal(TOP_N + 2) / Decimal(10)),
-        "total_tokens": (TOP_N + 2) * 1_001,
-    }
+    assert body["top_sessions"] == []
+    # The route swallows errors into an empty response, so prove it really ran.
+    assert body["total_executions"] == 2
 
 
 @pytest.mark.asyncio
@@ -164,7 +141,7 @@ async def test_total_tokens_is_the_sum_of_execution_total_tokens_including_cache
     executions = _executions()
 
     # The wire shape, which is what the CLI and dashboard read.
-    body = (await _summary(monkeypatch, executions, [])).model_dump(mode="json")
+    body = (await _summary(monkeypatch, executions)).model_dump(mode="json")
 
     assert body["total_tokens"] == sum(c.total_tokens for c in executions)
     # Pinned to the literal too: excluding cache tokens would give 132.

@@ -340,20 +340,23 @@ async def get_execution_cost(
 
 
 TOP_N = 5
-"""How many models and sessions ``get_cost_summary`` ranks (#701)."""
+"""How many models ``get_cost_summary`` ranks (#701)."""
 
 
 async def get_cost_summary() -> Result[CostSummary, MetricsError]:
     """Get overall cost summary across all executions.
 
-    Uses ExecutionCostQueryService and SessionCostQueryService (TimescaleDB)
-    for reads. See #532. ``top_models`` and ``top_sessions`` rank the same rows
-    the totals are summed from, most expensive first, ``TOP_N`` of each (#701).
+    Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532.
+    ``top_models`` ranks the same execution rows the totals are summed from,
+    most expensive first, ``TOP_N`` of them (#701).
+
+    ``top_sessions`` stays empty until the session cost query service can rank
+    by cost in SQL: ranking ``list_all()`` in Python loads every session and
+    only sees the newest 500 summaries, so it can miss the most expensive one.
     """
     await ensure_connected()
     try:
         all_costs = await get_execution_cost_query().list_all()
-        session_costs = await get_session_cost_query().list_all()
 
         total_cost = Decimal(str(sum(c.total_cost_usd for c in all_costs)))
         total_tokens = sum(c.total_tokens for c in all_costs)
@@ -368,7 +371,8 @@ async def get_cost_summary() -> Result[CostSummary, MetricsError]:
                 total_tokens=total_tokens,
                 total_tool_calls=total_tool_calls,
                 top_models=_top_models(all_costs),
-                top_sessions=_top_sessions(session_costs),
+                # TODO(#2228): rank sessions by cost with a bounded SQL query.
+                top_sessions=[],
             )
         )
     except Exception as e:
@@ -383,17 +387,6 @@ def _top_models(costs: list[ExecutionCost]) -> list[ModelCostEntry]:
             by_model[model] = by_model.get(model, Decimal("0")) + cost
     ranked = sorted(by_model.items(), key=lambda kv: kv[1], reverse=True)[:TOP_N]
     return [ModelCostEntry(model=model, cost_usd=cost) for model, cost in ranked]
-
-
-def _top_sessions(costs: list[SessionCost]) -> list[SessionCostEntry]:
-    """Keep the ``TOP_N`` most expensive sessions."""
-    ranked = sorted(costs, key=lambda c: c.total_cost_usd, reverse=True)[:TOP_N]
-    return [
-        SessionCostEntry(
-            session_id=c.session_id, total_cost_usd=c.total_cost_usd, total_tokens=c.total_tokens
-        )
-        for c in ranked
-    ]
 
 
 # =============================================================================
