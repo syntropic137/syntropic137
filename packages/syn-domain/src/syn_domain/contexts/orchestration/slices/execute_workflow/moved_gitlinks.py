@@ -25,6 +25,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git imp
     GitWorkspace,
     git,
     git_remote,
+    git_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,14 +104,12 @@ async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
     same paths the same way. Everything else - a staged gitlink, a rename - is
     left as the work it looks like.
     """
-    status = await git(
+    status = await git_status(
         workspace,
         repo,
-        "-c",
-        "status.showUntrackedFiles=all",
-        "status",
         "--porcelain=v2",
         "--ignore-submodules=none",
+        config=("status.showUntrackedFiles=all",),
         hardened=True,
     )
     moved: set[str] = set()

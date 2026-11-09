@@ -168,6 +168,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git imp
     GitWorkspace,
     checked,
     git,
+    git_status,
     push,
     repositories,
     run_bounded,
@@ -614,7 +615,8 @@ async def _unsaved_work(
     # --ignore-submodules=none: a repository's `submodule.<path>.ignore` or
     # `diff.ignoreSubmodules` would otherwise drop a dirty submodule's line
     # from this listing altogether, and with it the only report of the work.
-    status = await git(workspace, repo, "status", "--porcelain", "--ignore-submodules=none")
+    # Its own, larger bound: the first walk of a cold worktree (#1678).
+    status = await git_status(workspace, repo, "--porcelain", "--ignore-submodules=none")
     tips = await git(
         workspace, repo, "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads"
     )
