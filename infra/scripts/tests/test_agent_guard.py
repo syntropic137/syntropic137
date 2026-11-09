@@ -314,6 +314,22 @@ def test_ensure_refuses_to_write_through_a_symlinked_directory(host: Host, tmp_p
             ),
             "codex: dcg not registered",
         ),
+        (
+            lambda h: h.edit_json(
+                "/etc/claude-code/managed-settings.json", lambda d: d.update(disableAllHooks=True)
+            ),
+            "claude: hooks are switched off globally",
+        ),
+        (
+            lambda h: h.edit_json(
+                "/etc/gemini-cli/settings.json", lambda d: d.update(hooksConfig={"enabled": False})
+            ),
+            "gemini: hooks are switched off globally",
+        ),
+        (
+            lambda h: _exe(h.home / ".claude/settings.json", '{"disableAllHooks": true}'),
+            ".claude/settings.json: hooks are switched off globally",
+        ),
         (lambda h: h.knob("ALLOW_ALL"), "known-bad payload was not denied: git reset --hard"),
         (lambda h: h.knob("DENY_ALL"), "harmless 'ls' was denied"),
         (lambda h: h.knob("FAIL_OPEN"), "unparseable hook input was allowed"),
@@ -351,6 +367,9 @@ def test_ensure_refuses_to_write_through_a_symlinked_directory(host: Host, tmp_p
         "claude-wrong-matcher",
         "gemini-wrong-type",
         "codex-wrong-matcher",
+        "claude-disable-all-hooks",
+        "gemini-hooks-disabled",
+        "user-disables-all-hooks",
         "bad-payload-allowed",
         "denies-everything",
         "fails-open",
@@ -399,7 +418,7 @@ def test_ensure_refuses_without_root_outside_tests() -> None:
 def _deploy_hook(host: Host) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(_WRAPPER), "--if-installed"],
-        env={**host.env, "SYN_AGENT_GUARD_SUDO": ""},
+        env={**host.env, "SYN_AGENT_GUARD_SUDO": "", "SYN_AGENT_GUARD_TEST": "1"},
         capture_output=True,
         text=True,
         timeout=120,
@@ -428,3 +447,14 @@ def test_deploy_hook_treats_a_partial_install_as_enrolled(host: Host, left: str)
     assert "not installed on this host" not in result.stdout
     assert host.path("/usr/local/bin/dcg").exists(), result.stderr
     assert host.path("/etc/dcg/config.toml").read_bytes() == _POLICY.read_bytes()
+
+
+def test_download_never_uses_an_inherited_tmpdir(host: Host, tmp_path: Path) -> None:
+    """The verified binary is probed in a root-owned 0700 dir, not under TMPDIR."""
+    agent_tmp = tmp_path / "agent-tmp"
+    agent_tmp.mkdir()
+    result = host.run("ensure", extra_env={"TMPDIR": str(agent_tmp)})
+    assert result.returncode == 0, result.stderr
+    assert not any(agent_tmp.iterdir())
+    work = host.path("/var/lib/syn137-agent-guard")
+    assert work.stat().st_mode & 0o777 == 0o700

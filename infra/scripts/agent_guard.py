@@ -78,6 +78,7 @@ BIN = "/usr/local/bin/dcg"
 POLICY = "/etc/dcg/config.toml"
 HOOK_COMMAND = f"/usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent DCG_NO_UPDATE_CHECK=1 {BIN}"
 MARKER = "# Managed by syntropic137 infra/scripts/agent_guard.py."
+WORK_DIR = "/var/lib/syn137-agent-guard"  # root-owned 0700 download/probe area
 
 CLAUDE_SETTINGS = "/etc/claude-code/managed-settings.json"
 CODEX_REQUIREMENTS = "/etc/codex/requirements.toml"
@@ -217,20 +218,64 @@ def make_dirs(directory: Path) -> None:
         own_by_root(p)
 
 
-def write_root_file(out: Output) -> None:
-    """Atomically replace out.path through an exclusive, randomly named temp file."""
-    make_dirs(out.path.parent)
-    fd, tmp_name = tempfile.mkstemp(dir=out.path.parent, prefix=f".{out.path.name}.")
+def stage_file(path: Path, data: bytes, mode: int) -> Path:
+    """Write DATA to an exclusive, randomly named sibling of PATH; return it."""
+    make_dirs(path.parent)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as f:
-            f.write(out.data)
-        tmp.chmod(out.mode)
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.chmod(mode)
         own_by_root(tmp)
-        tmp.replace(out.path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+    return tmp
+
+
+def commit_outputs(outputs: list[Output]) -> None:
+    """Stage every new file AND every rollback copy first (the step that can run
+    out of space), then swap them in with renames. A failed swap is undone item
+    by item, each restore attempted even if another fails."""
+    staged: list[tuple[Output, Path, Path | None]] = []
+    try:
+        for out in outputs:
+            backup = (
+                stage_file(out.path, out.path.read_bytes(), out.mode) if out.path.exists() else None
+            )
+            staged.append((out, stage_file(out.path, out.data, out.mode), backup))
+    except BaseException:
+        for _, new, backup in staged:
+            new.unlink(missing_ok=True)
+            if backup:
+                backup.unlink(missing_ok=True)
+        raise
+    swapped: list[tuple[Output, Path | None]] = []
+    try:
+        for out, new, backup in staged:
+            new.replace(out.path)
+            swapped.append((out, backup))
+    except BaseException:
+        failures: list[str] = []
+        for out, backup in reversed(swapped):
+            try:
+                if backup is None:
+                    out.path.unlink(missing_ok=True)
+                else:
+                    backup.replace(out.path)
+            except OSError as exc:
+                failures.append(f"{out.path}: {exc}")
+        if failures:
+            print("  ❌ agent guard: could not restore " + "; ".join(failures), file=sys.stderr)
+        raise
+    finally:
+        for _, new, backup in staged:
+            new.unlink(missing_ok=True)
+            if backup:
+                backup.unlink(missing_ok=True)
 
 
 # --- ensure ------------------------------------------------------------------
@@ -360,27 +405,23 @@ def ensure() -> None:
         json_output(host(GEMINI_SETTINGS), "BeforeTool", "run_shell_command", GEMINI_HOOK),
         codex_output(host(CODEX_REQUIREMENTS)),
     ]
-    with tempfile.TemporaryDirectory(prefix="dcg-") as tmp:
-        outputs.insert(0, Output(host(BIN), verified_binary(pin, Path(tmp)), 0o755))
-    unsafe = [p for out in outputs for p in chain_problems(out.path)]
+    # Download and probe inside a root-owned 0700 directory, never under an
+    # inherited TMPDIR an agent could own and swap the verified binary in.
+    work_parent = host(WORK_DIR)
+    unsafe = [
+        p
+        for path in [*(out.path for out in outputs), host(BIN), work_parent]
+        for p in chain_problems(path)
+    ]
     if unsafe:
         raise GuardError(
             "refusing to write through an unsafe path: " + "; ".join(sorted(set(unsafe)))
         )
-    previous = {out.path: out.path.read_bytes() if out.path.exists() else None for out in outputs}
-    written: list[Output] = []
-    try:
-        for out in outputs:
-            write_root_file(out)
-            written.append(out)
-    except BaseException:
-        for out in reversed(written):
-            old = previous[out.path]
-            if old is None:
-                out.path.unlink(missing_ok=True)
-            else:
-                write_root_file(Output(out.path, old, out.mode))
-        raise
+    make_dirs(work_parent)
+    work_parent.chmod(0o700)
+    with tempfile.TemporaryDirectory(prefix="dcg-", dir=work_parent) as tmp:
+        outputs.insert(0, Output(host(BIN), verified_binary(pin, Path(tmp)), 0o755))
+    commit_outputs(outputs)
     print(f"  dcg {pin.version} installed at {BIN}; policy {POLICY}; hooks: claude, codex, gemini")
 
 
@@ -435,6 +476,29 @@ def has_handler(groups: list[object], matcher: str, handler: JsonObject) -> bool
     return False
 
 
+def globally_disabled(data: object) -> bool:
+    """Claude's ``disableAllHooks`` or Gemini's ``hooksConfig.enabled = false``."""
+    if not isinstance(data, dict):
+        return False
+    hooks_config = data.get("hooksConfig")
+    gemini_off = isinstance(hooks_config, dict) and hooks_config.get("enabled") is False
+    return data.get("disableAllHooks") is True or gemini_off
+
+
+def user_disables(homes: list[Path]) -> list[str]:
+    """A user-level settings file that switches every hook off, managed ones included."""
+    problems: list[str] = []
+    for home in homes:
+        for settings in (home / ".claude/settings.json", home / ".gemini/settings.json"):
+            try:
+                data = json.loads(settings.read_text())
+            except (OSError, ValueError):
+                continue
+            if globally_disabled(data):
+                problems.append(f"{settings}: hooks are switched off globally")
+    return problems
+
+
 def registration_problems() -> list[str]:
     problems: list[str] = []
     for name, path, event, matcher, handler in (
@@ -449,6 +513,8 @@ def registration_problems() -> list[str]:
             problems.append(
                 f"{name}: dcg not registered in {path} ({event}/{matcher}, type command)"
             )
+        if globally_disabled(data):
+            problems.append(f"{name}: hooks are switched off globally in {path}")
     try:
         codex = tomllib.loads(host(CODEX_REQUIREMENTS).read_text())
     except (OSError, ValueError):
@@ -588,6 +654,7 @@ def validate(homes: list[Path]) -> list[str]:
                 problems.append(f"{harness}: harmless 'ls' was denied (policy blocks everything)")
             if not hook_denies("not json", cwd):
                 problems.append(f"{harness}: unparseable hook input was allowed (not fail-closed)")
+    problems += user_disables(homes)
     for home in homes:
         for name in UNSUPPORTED_HARNESSES:
             if found := find_harness(name, home):

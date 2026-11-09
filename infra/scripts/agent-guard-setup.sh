@@ -27,6 +27,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GUARD="${REPO_ROOT}/infra/scripts/agent_guard.py"
+# Test injection only: without SYN_AGENT_GUARD_TEST=1 the overrides are ignored,
+# so a stray env cannot point enrollment elsewhere or drop privilege.
+if [[ "${SYN_AGENT_GUARD_TEST:-}" != 1 ]]; then
+    unset SYN_AGENT_GUARD_ROOT SYN_AGENT_GUARD_SUDO
+fi
 ROOT="${SYN_AGENT_GUARD_ROOT:-}"
 if [[ -n "${SYN_AGENT_GUARD_SUDO+set}" ]]; then
     SUDO="$SYN_AGENT_GUARD_SUDO"
