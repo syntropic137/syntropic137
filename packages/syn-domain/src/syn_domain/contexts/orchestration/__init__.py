@@ -33,6 +33,7 @@ from syn_domain.contexts.orchestration._shared.command_phase import (
     InconsistentPhaseKindError,
     PhaseKind,
 )
+from syn_domain.contexts.orchestration._shared.content_pin import content_pin_is_satisfied
 from syn_domain.contexts.orchestration._shared.eval_admission import (
     EvalUnavailableError,
     launch_eval_for,
@@ -656,6 +657,7 @@ __all__ = [
     "build_command_from_definition",
     "classify_trial",
     "compare_pair",
+    "content_pin_is_satisfied",
     "created_pull_requests",
     "declared_model_tags",
     "declared_models_of",

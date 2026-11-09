@@ -30,8 +30,8 @@ from syn_domain.contexts.orchestration import (
     ClaudePluginLockedHashMismatch,
     ClaudePluginNotRegistered,
     ClaudePluginRef,
+    content_pin_is_satisfied,
 )
-from syn_domain.contexts.orchestration._shared.content_pin import content_pin_is_satisfied
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence

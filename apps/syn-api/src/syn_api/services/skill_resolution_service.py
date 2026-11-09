@@ -20,8 +20,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration import SkillLockedHashMismatch, SkillNotRegistered
-from syn_domain.contexts.orchestration._shared.content_pin import content_pin_is_satisfied
+from syn_domain.contexts.orchestration import (
+    SkillLockedHashMismatch,
+    SkillNotRegistered,
+    content_pin_is_satisfied,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
