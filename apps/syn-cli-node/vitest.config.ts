@@ -1,24 +1,11 @@
 import { defineConfig } from "vitest/config";
-import os from "node:os";
-import path from "node:path";
-
-// WHY: many CLI modules read SYN_CONFIG_DIR at import time
-// (persistence/store.ts captures it into a module-level const). Setting it
-// here forces tests to write into an isolated tmp tree instead of the
-// developer's real ~/.syntropic137/ directory.
-const SYN_TEST_CONFIG_DIR = path.join(
-  os.tmpdir(),
-  `syn-cli-vitest-${process.pid}`,
-);
 
 export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     environment: "node",
-    // Unsets the CLI's own env vars before each test file imports anything.
+    // Unsets the CLI's own env vars and gives each test file its own
+    // SYN_CONFIG_DIR, before the file imports anything.
     setupFiles: ["tests/setup-env.ts"],
-    env: {
-      SYN_CONFIG_DIR: SYN_TEST_CONFIG_DIR,
-    },
   },
 });
