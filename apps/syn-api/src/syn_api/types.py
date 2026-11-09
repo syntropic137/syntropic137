@@ -2994,6 +2994,20 @@ class ModelCostEntry(BaseModel):
     cost_usd: Decimal = Decimal("0")
 
 
+class SessionCostEntry(BaseModel):
+    """One session's share of a cost total.
+
+    Field names are the ones ``SessionCostResponse`` uses for the same values.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    session_id: str
+    total_cost_usd: Decimal = Decimal("0")
+    total_tokens: int = 0
+    """All four token components (issue #873)."""
+
+
 class CostSummary(BaseModel):
     """Overall cost summary across all executions."""
 
@@ -3004,7 +3018,7 @@ class CostSummary(BaseModel):
     """Sum of all four token components across executions (issue #873)."""
     total_tool_calls: int = 0
     top_models: list[ModelCostEntry] = Field(default_factory=list)
-    top_sessions: list[dict] = Field(default_factory=list)
+    top_sessions: list[SessionCostEntry] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

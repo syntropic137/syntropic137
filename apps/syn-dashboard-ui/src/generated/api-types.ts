@@ -8301,6 +8301,26 @@ export interface components {
             active_connections?: number | null;
         };
         /**
+         * SessionCostEntry
+         * @description One session's share of a cost total.
+         *
+         *     Field names are the ones ``SessionCostResponse`` uses for the same values.
+         */
+        SessionCostEntry: {
+            /** Session Id */
+            session_id: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+        };
+        /**
          * SessionCostResponse
          * @description Cost for a single session.
          */
@@ -10874,9 +10894,7 @@ export interface components {
             /** Top Models */
             top_models?: components["schemas"]["ModelCostEntry"][];
             /** Top Sessions */
-            top_sessions?: {
-                [key: string]: unknown;
-            }[];
+            top_sessions?: components["schemas"]["SessionCostEntry"][];
         };
         /**
          * CostSummaryResponse

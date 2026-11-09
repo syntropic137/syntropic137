@@ -813,5 +813,5 @@ export interface CostSummary {
   total_tokens: number
   total_tool_calls: number
   top_models: Array<{ model: string; cost_usd: string }>
-  top_sessions: Array<{ session_id: string; cost_usd: string; tokens: number }>
+  top_sessions: Array<{ session_id: string; total_cost_usd: string; total_tokens: number }>
 }
