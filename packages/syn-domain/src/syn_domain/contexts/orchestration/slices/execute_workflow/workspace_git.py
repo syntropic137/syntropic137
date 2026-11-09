@@ -103,6 +103,29 @@ REMOTE_TIMEOUT_SECONDS: Final[int] = 20
 LOCAL_TIMEOUT_SECONDS: Final[int] = 30
 KILL_AFTER_SECONDS: Final[int] = 5
 
+#: How long `git status` is given: a bound of its own, because it is the first
+#: command to walk the worktree and so the one that pays for it cold (#1678).
+#: Under `LOCAL_TIMEOUT_SECONDS` a large checkout in a fresh container never
+#: finished it, so the guard could never prove the work safe and every such
+#: execution kept its directory on the host.
+#:
+#: The cost is the index refresh, not the untracked search: git lstat()s every
+#: TRACKED entry and re-reads the content of every "racy" one, which after a
+#: fresh checkout is most of them, and `--ignore-submodules=none` does it again
+#: inside every submodule. Ignored trees (`target/`, `node_modules/`) are never
+#: entered. Measured on git 2.39.5 against this repository's 5,518 tracked
+#: files, warm page cache: the refresh took 0.374s on the first status after a
+#: clone and 0.017s on the second, because status writes the refreshed index
+#: back. So the first walk is the expensive one, cold disk multiplies it, and
+#: everything after it is cheap.
+#:
+#: Six times the local bound: generous for a walk that is real work rather
+#: than a hang, and still a bound, so a hanging `clean` filter costs minutes
+#: rather than the backend's hour. Past it the directory is kept, exactly as
+#: before. Read through the module global, like the others, so a test can
+#: lower it.
+STATUS_TIMEOUT_SECONDS: Final[int] = 180
+
 #: The one directory this platform's credential cannot push, by decision
 #: (#1024): the GitHub App holds no `workflows` permission, so GitHub refuses
 #: any push whose new commits create, change or delete a file under it - and
@@ -468,6 +491,28 @@ async def _workspace_home(workspace: GitWorkspace) -> str | None:
         await checked(workspace, ["printenv", "HOME"], doing="reading the workspace user's home")
     ).strip()
     return home if home.startswith("/") else None
+
+
+async def git_status(
+    workspace: GitWorkspace,
+    repo: str,
+    *flags: str,
+    config: tuple[str, ...] = (),
+    hardened: bool = False,
+) -> str:
+    """Stdout of ``git status <flags>`` in ``repo``, under the status bound.
+
+    Exists so that `STATUS_TIMEOUT_SECONDS` is named in exactly one module, for
+    the reason `git_remote` gives. ``config`` is ``key=value`` pairs, each put
+    in front of ``status`` as ``-c``.
+    """
+    overrides = [arg for pair in config for arg in ("-c", pair)]
+    return await checked(
+        workspace,
+        git_argv(repo, *overrides, "status", *flags, hardened=hardened),
+        doing=f"running 'git status' in {repo}",
+        timeout_seconds=STATUS_TIMEOUT_SECONDS,
+    )
 
 
 async def git_remote(

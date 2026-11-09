@@ -463,6 +463,8 @@ async def test_a_clean_filter_that_never_returns_cannot_hold_the_save_open(
     silently as the hang.
     """
     monkeypatch.setattr(workspace_git, "LOCAL_TIMEOUT_SECONDS", 3)
+    # `git status` runs the filter too, under a bound of its own (#1678).
+    monkeypatch.setattr(workspace_git, "STATUS_TIMEOUT_SECONDS", 3)
     processor = await _provisioned(clone)
     clone.commit("state_machine.py", "an hour of work\n")
     clone.hang_the_clean_filter(seconds=30)

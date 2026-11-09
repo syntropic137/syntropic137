@@ -121,7 +121,7 @@ async def guard_orphaned_workspace(orphan: OrphanedWorkspace) -> ReclaimableDir 
             "all be shown safe, so these files may be the last copy. %s",
             orphan.host_dir,
             orphan.execution_id,
-            saved.unreadable or "A quarantine push was refused.",
+            saved.unreadable or _at_risk_detail(saved),
         )
         return None
     if saved.quarantined:
@@ -432,5 +432,16 @@ def remove_reclaimed_dir(
 
 
 def _anything_at_risk(saved: SavedWork) -> bool:
-    """Whether deleting now could lose work: an unfinished walk, or a refused push."""
-    return saved.unreadable is not None or any(r.pushed_ref is None for r in saved.quarantined)
+    """Whether deleting now could lose work: an unfinished walk, a refused push,
+    or a submodule worked in, which no quarantine push carries (#1678)."""
+    return saved.unreadable is not None or any(
+        r.pushed_ref is None or r.unsaved_submodules for r in saved.quarantined
+    )
+
+
+def _at_risk_detail(saved: SavedWork) -> str:
+    """Which records `_anything_at_risk` kept the directory for, when the walk finished."""
+    unsaved = [f"{r.repo}/{path}" for r in saved.quarantined for path in r.unsaved_submodules]
+    if unsaved:
+        return "Submodule work no quarantine push carries, only as a gitlink: " + ", ".join(unsaved)
+    return "A quarantine push was refused."

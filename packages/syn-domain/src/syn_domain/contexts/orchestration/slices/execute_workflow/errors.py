@@ -775,6 +775,12 @@ class QuarantinedWork:
     #: ``git diff --stat`` prints it (#1547). None when nothing landed or it
     #: could not be read inside its bound.
     diffstat: str | None = None
+    #: Submodules somebody worked in - edited, left untracked files or a
+    #: commit no remote has in - whose contents ``commit`` does NOT hold: a
+    #: snapshot of the superproject stores a submodule as a gitlink, and its
+    #: objects belong to another remote (#1499). Landing the ref therefore
+    #: saves none of them, and the worktree is still their only copy (#1678).
+    unsaved_submodules: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if (self.pushed_ref is None) == (self.push_error is None):
