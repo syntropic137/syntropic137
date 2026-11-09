@@ -8,35 +8,34 @@ TABLE``). This module puts it where an agent cannot switch it off:
 
 ``ensure`` (root)
     Download the release pinned in ``infra/agent-guard/dcg-version.toml``,
-    verify its SHA256 and minisign signature, install the binary root-owned at
+    verify SHA256 then minisign, and install root-owned: the binary at
     ``/usr/local/bin/dcg``, the policy at ``/etc/dcg/config.toml``, and the
-    hook in each harness's ROOT-OWNED settings layer:
+    hook in each harness's ROOT-OWNED settings layer (Claude Code
+    managed-settings.json, Codex requirements.toml managed hooks, Gemini system
+    settings). Every output is computed and every destination checked BEFORE
+    anything is written; a failed write restores what was there.
 
-    - Claude Code  ``/etc/claude-code/managed-settings.json``  PreToolUse/Bash
-    - Codex        ``/etc/codex/requirements.toml``  managed PreToolUse/Bash
-      (managed hooks need no per-user trust; user hooks are silently skipped
-      until trusted)
-    - Gemini CLI   ``/etc/gemini-cli/settings.json``  BeforeTool/run_shell_command
+    The hook runs dcg with an EMPTY environment and HOME=/nonexistent, so the
+    agent's environment (DCG_BYPASS, DCG_CONFIG, ...) and its ~/.config/dcg
+    cannot weaken it: only the root-owned /etc/dcg/config.toml applies.
 
-    Per-user settings are agent-writable, so they are never the guard. Existing
-    user hooks (and the repo's Claude sdlc hook) are left alone as extra layers.
-
-``validate`` (any user)
-    Exit 1 unless: the binary is the pinned version and not writable by
-    agents; every supported harness is registered; the EFFECTIVE policy each
-    agent sees (a user's ~/.config/dcg overrides /etc/dcg) is fail-closed with
-    the required packs; every known-bad payload is denied through each
-    harness's hook protocol; no unsupported agent harness is installed; Codex
-    is new enough to run PreToolUse hooks.
+``validate`` (the agent account, never root)
+    Exit 1 unless: nothing in the chain is a symlink or writable by a non-root
+    user; the binary is the pinned version; each harness registration is
+    exactly the expected matcher/type/command; the policy is fail-closed with
+    the required packs; the four known-bad payloads are denied and ``ls`` is
+    allowed through each harness's hook protocol, run with the exact
+    registered command; no unregistered agent CLI is installed; Codex is new
+    enough to run PreToolUse hooks (read from its package.json, never run).
 
 dcg is a guardrail, not a sandbox: an agent can still write a script to disk
 and run it, and Codex's ``unified_exec`` path can skip PreToolUse. Workspace
 containers carry their own copy (agentic-workspace images).
 
 Standard library only: ``ensure`` runs as root with the system python3.
-Test overrides: SYN_AGENT_GUARD_ROOT (path prefix for every host path),
-SYN_AGENT_GUARD_OWNER_UID (expected owner, default 0),
-SYN_AGENT_GUARD_RELEASE_URL, SYN_AGENT_GUARD_PLATFORM, SYN_AGENT_GUARD_VERSION_FILE.
+Test overrides (honoured only when NOT root): SYN_AGENT_GUARD_ROOT (path
+prefix for every host path), SYN_AGENT_GUARD_OWNER_UID, SYN_AGENT_GUARD_RELEASE_URL,
+SYN_AGENT_GUARD_PLATFORM, SYN_AGENT_GUARD_VERSION_FILE, SYN_AGENT_GUARD_MINISIGN.
 """
 
 from __future__ import annotations
@@ -48,6 +47,7 @@ import os
 import platform
 import pwd
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -62,34 +62,46 @@ from pathlib import Path
 type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
 type JsonObject = dict[str, JsonValue]
 
+IS_ROOT = os.geteuid() == 0
+
+
+def override(name: str, default: str) -> str:
+    """A test override, ignored as root so a preserved env cannot steer an install."""
+    return default if IS_ROOT else os.environ.get(name, default)
+
+
 GUARD_DIR = Path(__file__).resolve().parent.parent / "agent-guard"
-VERSION_FILE = Path(os.environ.get("SYN_AGENT_GUARD_VERSION_FILE", GUARD_DIR / "dcg-version.toml"))
+VERSION_FILE = Path(override("SYN_AGENT_GUARD_VERSION_FILE", str(GUARD_DIR / "dcg-version.toml")))
 POLICY_FILE = GUARD_DIR / "dcg-config.toml"
 
 BIN = "/usr/local/bin/dcg"
 POLICY = "/etc/dcg/config.toml"
-HOOK_COMMAND = f"/usr/bin/env DCG_NO_UPDATE_CHECK=1 {BIN}"
+HOOK_COMMAND = f"/usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent DCG_NO_UPDATE_CHECK=1 {BIN}"
 MARKER = "# Managed by syntropic137 infra/scripts/agent_guard.py."
 
 CLAUDE_SETTINGS = "/etc/claude-code/managed-settings.json"
 CODEX_REQUIREMENTS = "/etc/codex/requirements.toml"
 GEMINI_SETTINGS = "/etc/gemini-cli/settings.json"
+CLAUDE_HOOK: JsonObject = {"type": "command", "command": HOOK_COMMAND}
+GEMINI_HOOK: JsonObject = {
+    "name": "dcg",
+    "type": "command",
+    "command": HOOK_COMMAND,
+    "timeout": 5000,
+}
 
 REQUIRED_PACKS = ("core.git", "core.filesystem", "database.postgresql", "containers.docker")
-BAD_COMMANDS = ("rm -rf ./src", "git reset --hard", "docker volume rm x", "psql -c 'DROP TABLE x'")
-SUPPORTED_HARNESSES = ("claude", "codex", "gemini")
-# Agent CLIs dcg can guard but this host step does not register: their
-# presence means an unguarded agent, so validation fails until one is added.
-UNSUPPORTED_HARNESSES = (
-    "opencode",
-    "grok",
-    "cursor-agent",
-    "amp",
-    "droid",
-    "crush",
-    "agy",
-    "hermes",
+BAD_COMMANDS = (
+    "rm -rf ./src",
+    "git reset --hard",
+    "docker volume rm x",
+    "psql -c 'DROP TABLE x'",
 )
+SUPPORTED_HARNESSES = ("claude", "codex", "gemini")
+# Agent CLIs this host step does not register: present means unguarded.
+UNSUPPORTED_HARNESSES = (
+    "opencode", "grok", "cursor-agent", "amp", "droid", "crush", "agy", "hermes",
+)  # fmt: skip
 CODEX_MIN_VERSION = (0, 125, 0)
 
 CODEX_REQUIREMENTS_BODY = f"""{MARKER} Do not edit on the host.
@@ -124,42 +136,109 @@ class Pin:
 
 
 @dataclass(frozen=True)
-class Probe:
-    harness: str
-    command: str
+class Output:
+    """One file ``ensure`` writes: computed in full before anything is touched."""
+
+    path: Path
+    data: bytes
+    mode: int
 
 
 def host(path: str) -> Path:
     """A host path, under SYN_AGENT_GUARD_ROOT in tests."""
-    return Path(os.environ.get("SYN_AGENT_GUARD_ROOT", "/")) / path.lstrip("/")
+    return Path(override("SYN_AGENT_GUARD_ROOT", "/")) / path.lstrip("/")
+
+
+def expected_owner() -> int:
+    return int(override("SYN_AGENT_GUARD_OWNER_UID", "0"))
 
 
 def platform_key() -> str:
-    override = os.environ.get("SYN_AGENT_GUARD_PLATFORM")
-    if override:
-        return override
-    machine = {"amd64": "x86_64", "arm64": "aarch64"}.get(
-        platform.machine().lower(), platform.machine().lower()
-    )
-    return f"{machine}-{platform.system().lower()}"
+    machine = platform.machine().lower()
+    machine = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+    return override("SYN_AGENT_GUARD_PLATFORM", f"{machine}-{platform.system().lower()}")
 
 
 def load_pin() -> Pin:
     data = tomllib.loads(VERSION_FILE.read_text())
     key = platform_key()
-    assets = data["assets"]
-    if key not in assets:
+    if key not in data["assets"]:
         raise GuardError(f"no pinned dcg asset for platform {key} in {VERSION_FILE}")
-    entry = assets[key]
+    entry = data["assets"][key]
     return Pin(
         version=str(data["version"]),
-        release_url=os.environ.get("SYN_AGENT_GUARD_RELEASE_URL", str(data["release_url"])),
+        release_url=override("SYN_AGENT_GUARD_RELEASE_URL", str(data["release_url"])),
         minisign_public_key=str(data["minisign_public_key"]),
         asset=Asset(name=str(entry["name"]), sha256=str(entry["sha256"])),
     )
 
 
+# --- path safety --------------------------------------------------------------
+
+
+def chain_problems(path: Path) -> list[str]:
+    """PATH and its ancestors: no symlinks, owned by root, not group/world writable."""
+    problems: list[str] = []
+    owner = expected_owner()
+    top = host("/")
+    for p in [path, *path.parents]:
+        if not p.is_relative_to(top):
+            break
+        try:
+            st = p.lstat()
+        except FileNotFoundError:
+            continue  # a missing parent is created root-owned by ensure
+        if stat.S_ISLNK(st.st_mode):
+            problems.append(f"{p} is a symlink")
+        elif st.st_uid != owner:
+            problems.append(f"{p} is owned by uid {st.st_uid}, not {owner}")
+        elif st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            problems.append(f"{p} is group/world writable")
+        if p == top:
+            break
+    return problems
+
+
+def check_locked(path: Path) -> list[str]:
+    if not path.exists() and not path.is_symlink():
+        return [f"{path} is missing"]
+    return chain_problems(path)
+
+
+def own_by_root(path: Path) -> None:
+    if IS_ROOT:
+        os.chown(path, 0, 0, follow_symlinks=False)
+
+
+def make_dirs(directory: Path) -> None:
+    missing = [p for p in [directory, *directory.parents] if not p.exists()]
+    for p in reversed(missing):
+        p.mkdir(mode=0o755)
+        own_by_root(p)
+
+
+def write_root_file(out: Output) -> None:
+    """Atomically replace out.path through an exclusive, randomly named temp file."""
+    make_dirs(out.path.parent)
+    fd, tmp_name = tempfile.mkstemp(dir=out.path.parent, prefix=f".{out.path.name}.")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(out.data)
+        tmp.chmod(out.mode)
+        own_by_root(tmp)
+        tmp.replace(out.path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 # --- ensure ------------------------------------------------------------------
+
+
+def trusted_tool(name: str, absolute: str) -> str:
+    """A tool by absolute system path; tests may point at a stand-in (not as root)."""
+    return override(f"SYN_AGENT_GUARD_{name.upper()}", absolute)
 
 
 def fetch(url: str, dest: Path) -> None:
@@ -175,22 +254,17 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def ensure_minisign() -> str:
-    found = shutil.which("minisign")
-    if found:
-        return found
-    if shutil.which("apt-get"):
-        subprocess.run(["apt-get", "install", "-y", "-qq", "minisign"], check=True)
-        found = shutil.which("minisign")
-    if not found:
-        raise GuardError(
-            "minisign is required to verify the dcg release; install it with the OS package manager"
-        )
-    return found
+def minisign_binary() -> str:
+    minisign = trusted_tool("minisign", "/usr/bin/minisign")
+    if not Path(minisign).is_file() and IS_ROOT and Path("/usr/bin/apt-get").is_file():
+        subprocess.run(["/usr/bin/apt-get", "install", "-y", "-qq", "minisign"], check=True)
+    if not Path(minisign).is_file():
+        raise GuardError(f"{minisign} is required to verify the dcg release; install minisign")
+    return minisign
 
 
-def verified_binary(pin: Pin, work: Path) -> Path:
-    """Download the pinned archive, verify SHA256 then minisign, return the dcg binary."""
+def verified_binary(pin: Pin, work: Path) -> bytes:
+    """Download the pinned archive; verify SHA256, then minisign; return dcg's bytes."""
     archive = work / pin.asset.name
     signature = work / f"{pin.asset.name}.minisig"
     base = f"{pin.release_url}/{pin.version}"
@@ -200,20 +274,11 @@ def verified_binary(pin: Pin, work: Path) -> Path:
     if actual != pin.asset.sha256:
         raise GuardError(f"{pin.asset.name}: sha256 {actual} is not the pinned {pin.asset.sha256}")
     verify = subprocess.run(
-        [
-            ensure_minisign(),
-            "-V",
-            "-q",
-            "-m",
-            str(archive),
-            "-x",
-            str(signature),
-            "-P",
-            pin.minisign_public_key,
-        ],
+        [minisign_binary(), "-V", "-q", "-m", str(archive), "-x", str(signature),
+         "-P", pin.minisign_public_key],
         capture_output=True,
         text=True,
-    )
+    )  # fmt: skip
     if verify.returncode != 0:
         raise GuardError(
             f"{pin.asset.name}: minisign signature did not verify: {verify.stderr.strip()}"
@@ -227,26 +292,14 @@ def verified_binary(pin: Pin, work: Path) -> Path:
         source = tar.extractfile(members[0])
         if source is None:
             raise GuardError(f"{pin.asset.name}: dcg member is unreadable")
-        binary = work / "dcg"
-        with source, binary.open("wb") as out:
-            shutil.copyfileobj(source, out)
-    binary.chmod(0o755)
-    return binary
-
-
-def own_by_root(path: Path) -> None:
-    if os.geteuid() == 0:
-        os.chown(path, 0, 0)
-
-
-def write_root_file(path: Path, data: bytes, mode: int) -> None:
-    """Atomically replace PATH with DATA, root-owned, parents 0755."""
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
-    tmp = path.with_name(f".{path.name}.new")
-    tmp.write_bytes(data)
-    tmp.chmod(mode)
-    own_by_root(tmp)
-    tmp.replace(path)
+        with source:
+            data = source.read()
+    probe = work / "dcg"
+    probe.write_bytes(data)
+    probe.chmod(0o700)
+    if (version := run_version(probe)) != pin.version.lstrip("v"):
+        raise GuardError(f"downloaded dcg reports {version!r}, pinned {pin.version}")
+    return data
 
 
 def merged_hook(settings: JsonObject, event: str, matcher: str, hook: JsonObject) -> JsonObject:
@@ -275,7 +328,7 @@ def is_dcg_command(command: JsonValue) -> bool:
     return isinstance(command, str) and bool(re.search(r"(^|[\s/])dcg$", command.strip()))
 
 
-def register_json(path: Path, event: str, matcher: str, hook: JsonObject) -> None:
+def json_output(path: Path, event: str, matcher: str, hook: JsonObject) -> Output:
     current: JsonObject = {}
     if path.exists():
         loaded = json.loads(path.read_text() or "{}")
@@ -283,38 +336,51 @@ def register_json(path: Path, event: str, matcher: str, hook: JsonObject) -> Non
             raise GuardError(f"{path} is not a JSON object")
         current = loaded
     updated = merged_hook(current, event, matcher, hook)
-    write_root_file(path, (json.dumps(updated, indent=2) + "\n").encode(), 0o644)
+    return Output(path, (json.dumps(updated, indent=2) + "\n").encode(), 0o644)
 
 
-def register_codex(path: Path) -> None:
-    if path.exists() and not path.read_text().startswith(MARKER):
+def codex_output(path: Path) -> Output:
+    # Ours only if byte-identical: anything an administrator added (sandbox
+    # limits, other hooks) is never silently dropped by a refresh.
+    if path.exists() and path.read_text() != CODEX_REQUIREMENTS_BODY:
         raise GuardError(
-            f"{path} exists and is not managed by agent_guard.py; merge the dcg [hooks] block by hand"
+            f"{path} exists and is not exactly the managed file; merge the dcg [hooks] block by hand"
         )
-    write_root_file(path, CODEX_REQUIREMENTS_BODY.encode(), 0o644)
+    return Output(path, CODEX_REQUIREMENTS_BODY.encode(), 0o644)
 
 
 def ensure() -> None:
-    if os.geteuid() != 0 and "SYN_AGENT_GUARD_ROOT" not in os.environ:
+    if not IS_ROOT and "SYN_AGENT_GUARD_ROOT" not in os.environ:
         raise GuardError("ensure installs root-owned files: run it as root (sudo)")
     pin = load_pin()
+    # Plan every output and check every destination before touching anything.
+    outputs = [
+        Output(host(POLICY), POLICY_FILE.read_bytes(), 0o644),
+        json_output(host(CLAUDE_SETTINGS), "PreToolUse", "Bash", CLAUDE_HOOK),
+        json_output(host(GEMINI_SETTINGS), "BeforeTool", "run_shell_command", GEMINI_HOOK),
+        codex_output(host(CODEX_REQUIREMENTS)),
+    ]
     with tempfile.TemporaryDirectory(prefix="dcg-") as tmp:
-        binary = verified_binary(pin, Path(tmp))
-        version = run_version(binary)
-        if version != pin.version.lstrip("v"):
-            raise GuardError(f"downloaded dcg reports {version!r}, pinned {pin.version}")
-        write_root_file(host(BIN), binary.read_bytes(), 0o755)
-    write_root_file(host(POLICY), POLICY_FILE.read_bytes(), 0o644)
-    register_json(
-        host(CLAUDE_SETTINGS), "PreToolUse", "Bash", {"type": "command", "command": HOOK_COMMAND}
-    )
-    register_json(
-        host(GEMINI_SETTINGS),
-        "BeforeTool",
-        "run_shell_command",
-        {"name": "dcg", "type": "command", "command": HOOK_COMMAND, "timeout": 5000},
-    )
-    register_codex(host(CODEX_REQUIREMENTS))
+        outputs.insert(0, Output(host(BIN), verified_binary(pin, Path(tmp)), 0o755))
+    unsafe = [p for out in outputs for p in chain_problems(out.path)]
+    if unsafe:
+        raise GuardError(
+            "refusing to write through an unsafe path: " + "; ".join(sorted(set(unsafe)))
+        )
+    previous = {out.path: out.path.read_bytes() if out.path.exists() else None for out in outputs}
+    written: list[Output] = []
+    try:
+        for out in outputs:
+            write_root_file(out)
+            written.append(out)
+    except BaseException:
+        for out in reversed(written):
+            old = previous[out.path]
+            if old is None:
+                out.path.unlink(missing_ok=True)
+            else:
+                write_root_file(Output(out.path, old, out.mode))
+        raise
     print(f"  dcg {pin.version} installed at {BIN}; policy {POLICY}; hooks: claude, codex, gemini")
 
 
@@ -322,64 +388,76 @@ def ensure() -> None:
 
 
 def run_version(binary: Path) -> str:
-    out = subprocess.run(
-        [str(binary), "--version"], capture_output=True, text=True, env=clean_env(None)
-    ).stdout
-    match = re.search(r"\b(\d+\.\d+\.\d+)\b", out)
+    result = subprocess.run(
+        [str(binary), "--version"], capture_output=True, text=True, env=hook_env(), timeout=30
+    )
+    match = re.search(r"\b(\d+\.\d+\.\d+)\b", result.stdout)
     return match.group(1) if match else ""
 
 
-def clean_env(home: Path | None) -> dict[str, str]:
-    """No inherited DCG_* overrides: validate what the files say."""
-    env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "NO_COLOR": "1", "DCG_NO_UPDATE_CHECK": "1"}
-    if home is not None:
-        env["HOME"] = str(home)
-    return env
+def hook_env() -> dict[str, str]:
+    """Exactly what the registered command gives dcg."""
+    return {
+        "PATH": "/usr/bin:/bin",
+        "HOME": "/nonexistent",
+        "DCG_NO_UPDATE_CHECK": "1",
+        "NO_COLOR": "1",
+    }
 
 
-def expected_owner() -> int:
-    return int(os.environ.get("SYN_AGENT_GUARD_OWNER_UID", "0"))
+def registered_argv() -> list[str]:
+    """The registered command as argv, with dcg's path under the test root."""
+    argv = shlex.split(HOOK_COMMAND)
+    argv[-1] = str(host(argv[-1]))
+    return argv
 
 
-def check_locked(path: Path) -> list[str]:
-    """PATH and every ancestor: owned by root, not group/world writable."""
+def hook_groups(data: object, event: str) -> list[object]:
+    if not isinstance(data, dict):
+        return []
+    hooks = data.get("hooks")
+    groups = hooks.get(event) if isinstance(hooks, dict) else None
+    return groups if isinstance(groups, list) else []
+
+
+def has_handler(groups: list[object], matcher: str, handler: JsonObject) -> bool:
+    """A group with exactly MATCHER holding an enabled handler with HANDLER's fields."""
+    for group in groups:
+        if not isinstance(group, dict) or group.get("matcher") != matcher:
+            continue
+        for h in group.get("hooks") or []:
+            if (
+                isinstance(h, dict)
+                and all(h.get(k) == v for k, v in handler.items())
+                and h.get("enabled", True) is not False
+            ):
+                return True
+    return False
+
+
+def registration_problems() -> list[str]:
     problems: list[str] = []
-    if not path.exists():
-        return [f"{path} is missing"]
-    owner = expected_owner()
-    root = host("/").resolve()
-    for p in [path, *path.parents]:
-        if os.environ.get("SYN_AGENT_GUARD_ROOT") and not p.resolve().is_relative_to(root):
-            break
-        st = p.stat()
-        if st.st_uid != owner:
-            problems.append(f"{p} is owned by uid {st.st_uid}, not {owner}")
-        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-            problems.append(f"{p} is group/world writable")
+    for name, path, event, matcher, handler in (
+        ("claude", CLAUDE_SETTINGS, "PreToolUse", "Bash", CLAUDE_HOOK),
+        ("gemini", GEMINI_SETTINGS, "BeforeTool", "run_shell_command", GEMINI_HOOK),
+    ):
+        try:
+            data = json.loads(host(path).read_text())
+        except (OSError, ValueError):
+            data = None
+        if not has_handler(hook_groups(data, event), matcher, handler):
+            problems.append(
+                f"{name}: dcg not registered in {path} ({event}/{matcher}, type command)"
+            )
+    try:
+        codex = tomllib.loads(host(CODEX_REQUIREMENTS).read_text())
+    except (OSError, ValueError):
+        codex = None
+    if not has_handler(hook_groups(codex, "PreToolUse"), "^Bash$", CLAUDE_HOOK):
+        problems.append(
+            f"codex: dcg not registered in {CODEX_REQUIREMENTS} (PreToolUse/^Bash$, type command)"
+        )
     return problems
-
-
-def registered_json(path: Path, event: str) -> bool:
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return False
-    groups = data.get("hooks", {}).get(event, []) if isinstance(data, dict) else []
-    return any(
-        isinstance(h, dict) and h.get("command") == HOOK_COMMAND
-        for g in groups
-        if isinstance(g, dict)
-        for h in (g.get("hooks") or [])
-    )
-
-
-def registered_codex(path: Path) -> bool:
-    try:
-        data = tomllib.loads(path.read_text())
-    except (OSError, ValueError):
-        return False
-    groups = data.get("hooks", {}).get("PreToolUse", [])
-    return any(h.get("command") == HOOK_COMMAND for g in groups for h in g.get("hooks", []))
 
 
 def payload(harness: str, command: str, cwd: Path) -> str:
@@ -389,38 +467,22 @@ def payload(harness: str, command: str, cwd: Path) -> str:
         "transcript_path": None,
     }
     if harness == "gemini":
-        body: JsonObject = {
-            **base,
-            "hook_event_name": "BeforeTool",
-            "timestamp": "1970-01-01T00:00:00Z",
-            "tool_name": "run_shell_command",
-            "tool_input": {"command": command},
-        }
+        body: JsonObject = {**base, "hook_event_name": "BeforeTool", "timestamp": "1970-01-01T00:00:00Z",
+                            "tool_name": "run_shell_command", "tool_input": {"command": command}}  # fmt: skip
     elif harness == "codex":
-        body = {
-            **base,
-            "turn_id": "agent-guard-validate",
-            "hook_event_name": "PreToolUse",
-            "tool_name": "Bash",
-            "tool_use_id": "agent-guard-validate",
-            "tool_input": {"command": command},
-        }
+        body = {**base, "turn_id": "agent-guard-validate", "hook_event_name": "PreToolUse",
+                "tool_name": "Bash", "tool_use_id": "agent-guard-validate",
+                "tool_input": {"command": command}}  # fmt: skip
     else:
-        body = {
-            **base,
-            "hook_event_name": "PreToolUse",
-            "tool_name": "Bash",
-            "tool_input": {"command": command},
-        }
+        body = {**base, "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                "tool_input": {"command": command}}  # fmt: skip
     return json.dumps(body)
 
 
-def hook_denies(stdin: str, home: Path, cwd: Path) -> bool:
-    """Run the registered hook command as the harness would; True when it denies."""
-    argv: list[str] = [*HOOK_COMMAND.split()]
-    argv[-1] = str(host(argv[-1]))
+def hook_denies(stdin: str, cwd: Path) -> bool:
+    """Run the registered hook command as a harness would; True when it denies."""
     result = subprocess.run(
-        argv, input=stdin, capture_output=True, text=True, env=clean_env(home), cwd=cwd, timeout=30
+        registered_argv(), input=stdin, capture_output=True, text=True, cwd=cwd, timeout=30
     )
     if result.returncode == 2:
         return True
@@ -436,15 +498,10 @@ def hook_denies(stdin: str, home: Path, cwd: Path) -> bool:
     return decision.get("decision") in ("deny", "block")
 
 
-def effective_policy(home: Path) -> list[str]:
-    out = subprocess.run(
-        [str(host(BIN)), "config"],
-        capture_output=True,
-        text=True,
-        env=clean_env(home),
-        cwd=home,
-        timeout=30,
-    ).stdout
+def policy_problems(cwd: Path) -> list[str]:
+    argv = registered_argv()
+    argv = [*argv[:-1], "NO_COLOR=1", argv[-1], "config"]
+    out = subprocess.run(argv, capture_output=True, text=True, cwd=cwd, timeout=30).stdout
     problems: list[str] = []
     for label, want in (
         ("Fail closed", "true"),
@@ -454,39 +511,37 @@ def effective_policy(home: Path) -> list[str]:
         match = re.search(rf"^\s*{label}:\s*(\S+)", out, re.MULTILINE)
         if not match or match.group(1) != want:
             problems.append(
-                f"{home}: effective '{label}' is {match.group(1) if match else 'missing'}, want {want}"
+                f"policy: '{label}' is {match.group(1) if match else 'missing'}, want {want}"
             )
-    enabled = set(
-        re.findall(
-            r"^\s+- (\S+)$",
-            out.split("Enabled packs:", 1)[-1].split("Disabled packs:", 1)[0],
-            re.MULTILINE,
-        )
-    )
-    missing = [p for p in REQUIRED_PACKS if p not in enabled]
-    if missing:
-        problems.append(f"{home}: required packs not enabled: {', '.join(missing)}")
+    section = out.split("Enabled packs:", 1)[-1].split("Disabled packs:", 1)[0]
+    enabled = set(re.findall(r"^\s+- (\S+)$", section, re.MULTILINE))
+    if missing := [p for p in REQUIRED_PACKS if p not in enabled]:
+        problems.append(f"policy: required packs not enabled: {', '.join(missing)}")
     return problems
 
 
 def find_harness(name: str, home: Path) -> Path | None:
-    dirs = [
-        home / ".local/bin",
-        home / ".bun/bin",
-        home / ".npm-global/bin",
-        host("/usr/local/bin"),
-        host("/usr/bin"),
-    ]
-    for d in dirs:
+    for d in (home / ".local/bin", home / ".bun/bin", home / ".npm-global/bin",
+              host("/usr/local/bin"), host("/usr/bin")):  # fmt: skip
         candidate = d / name
-        if candidate.is_file() and os.access(candidate, os.X_OK):
+        if candidate.exists() and os.access(candidate, os.X_OK):
             return candidate
     return None
 
 
-def version_tuple(text: str) -> tuple[int, ...]:
-    match = re.search(r"(\d+)\.(\d+)\.(\d+)", text)
-    return tuple(int(x) for x in match.groups()) if match else ()
+def codex_version(binary: Path) -> tuple[int, ...]:
+    """Codex's version from its npm package.json, without executing anything."""
+    for parent in binary.resolve().parents:
+        manifest = parent / "package.json"
+        if manifest.is_file():
+            try:
+                data = json.loads(manifest.read_text())
+            except ValueError:
+                continue
+            if isinstance(data, dict) and data.get("name") == "@openai/codex":
+                match = re.match(r"(\d+)\.(\d+)\.(\d+)", str(data.get("version", "")))
+                return tuple(int(x) for x in match.groups()) if match else ()
+    return ()
 
 
 def agent_homes(users: list[str]) -> list[Path]:
@@ -502,58 +557,45 @@ def agent_homes(users: list[str]) -> list[Path]:
 
 
 def validate(homes: list[Path]) -> list[str]:
+    if IS_ROOT:
+        raise GuardError(
+            "run validate as the agent account, not root: it inspects agent-owned paths"
+        )
+    if not homes:
+        return ["no agent account to validate: pass --user or --home"]
     pin = load_pin()
     problems: list[str] = []
-    for path in (
-        host(BIN),
-        host(POLICY),
-        host(CLAUDE_SETTINGS),
-        host(CODEX_REQUIREMENTS),
-        host(GEMINI_SETTINGS),
-    ):
+    for path in (host(BIN), host(POLICY), host(CLAUDE_SETTINGS), host(CODEX_REQUIREMENTS),
+                 host(GEMINI_SETTINGS)):  # fmt: skip
         problems += check_locked(path)
-    if host(BIN).exists() and (v := run_version(host(BIN))) != pin.version.lstrip("v"):
-        problems.append(f"{BIN} reports {v or 'no version'}, pinned {pin.version}")
-    if host(POLICY).exists() and host(POLICY).read_bytes() != POLICY_FILE.read_bytes():
-        problems.append(f"{POLICY} differs from {POLICY_FILE}")
-    if not registered_json(host(CLAUDE_SETTINGS), "PreToolUse"):
-        problems.append(f"claude: dcg not registered in {CLAUDE_SETTINGS}")
-    if not registered_codex(host(CODEX_REQUIREMENTS)):
-        problems.append(f"codex: dcg not registered in {CODEX_REQUIREMENTS}")
-    if not registered_json(host(GEMINI_SETTINGS), "BeforeTool"):
-        problems.append(f"gemini: dcg not registered in {GEMINI_SETTINGS}")
     if problems:
-        return problems  # the probes below would only restate a missing install
+        return problems  # never execute or trust anything in an unsafe chain
+    if (version := run_version(host(BIN))) != pin.version.lstrip("v"):
+        problems.append(f"{BIN} reports {version or 'no version'}, pinned {pin.version}")
+    if host(POLICY).read_bytes() != POLICY_FILE.read_bytes():
+        problems.append(f"{POLICY} differs from {POLICY_FILE}")
+    problems += registration_problems()
+    if problems:
+        return problems
     with tempfile.TemporaryDirectory(prefix="dcg-validate-") as tmp:
         cwd = Path(tmp)
-        for home in homes:
-            problems += effective_policy(home)
-            for harness in SUPPORTED_HARNESSES:
-                probes = [Probe(harness, c) for c in BAD_COMMANDS]
-                for probe in probes:
-                    if not hook_denies(payload(probe.harness, probe.command, cwd), home, cwd):
-                        problems.append(
-                            f"{home} {harness}: known-bad payload was not denied: {probe.command}"
-                        )
-                if hook_denies(payload(harness, "ls", cwd), home, cwd):
-                    problems.append(
-                        f"{home} {harness}: harmless 'ls' was denied (policy blocks everything)"
-                    )
-                if not hook_denies("not json", home, cwd):
-                    problems.append(
-                        f"{home} {harness}: unparseable hook input was allowed (not fail-closed)"
-                    )
-            for name in UNSUPPORTED_HARNESSES:
-                if found := find_harness(name, home):
-                    problems.append(f"{found}: agent harness with no dcg registration on this host")
-            if codex := find_harness("codex", home):
-                out = subprocess.run(
-                    [str(codex), "--version"], capture_output=True, text=True, timeout=30
-                ).stdout
-                if version_tuple(out) < CODEX_MIN_VERSION:
-                    problems.append(
-                        f"{codex}: {out.strip() or 'unknown version'} is older than 0.125.0; PreToolUse hooks do not run"
-                    )
+        problems += policy_problems(cwd)
+        for harness in SUPPORTED_HARNESSES:
+            for command in BAD_COMMANDS:
+                if not hook_denies(payload(harness, command, cwd), cwd):
+                    problems.append(f"{harness}: known-bad payload was not denied: {command}")
+            if hook_denies(payload(harness, "ls", cwd), cwd):
+                problems.append(f"{harness}: harmless 'ls' was denied (policy blocks everything)")
+            if not hook_denies("not json", cwd):
+                problems.append(f"{harness}: unparseable hook input was allowed (not fail-closed)")
+    for home in homes:
+        for name in UNSUPPORTED_HARNESSES:
+            if found := find_harness(name, home):
+                problems.append(f"{found}: agent harness with no dcg registration on this host")
+        if (codex := find_harness("codex", home)) and codex_version(codex) < CODEX_MIN_VERSION:
+            problems.append(
+                f"{codex}: version unknown or older than 0.125.0; PreToolUse hooks do not run"
+            )
     return problems
 
 
@@ -563,10 +605,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("ensure", help="install the pinned dcg and register it (root)")
     check = sub.add_parser("validate", help="exit 1 unless every guard check passes")
     check.add_argument(
-        "--user",
-        action="append",
-        default=[],
-        help="agent user to check (default: every login user)",
+        "--user", action="append", default=[], help="agent user (default: every login user)"
     )
     check.add_argument("--home", action="append", default=[], type=Path, help="agent home to check")
     args = parser.parse_args(argv)
@@ -575,14 +614,14 @@ def main(argv: list[str] | None = None) -> int:
             ensure()
             return 0
         problems = validate(args.home or agent_homes(args.user))
-    except (GuardError, OSError, subprocess.SubprocessError, KeyError) as exc:
+    except (GuardError, OSError, subprocess.SubprocessError, KeyError, ValueError) as exc:
         print(f"  ❌ agent guard: {exc}", file=sys.stderr)
         return 1
     for problem in problems:
         print(f"  ❌ agent guard: {problem}", file=sys.stderr)
     if not problems:
         print(
-            "  ✅ agent guard: dcg pinned, root-owned, registered for claude/codex/gemini, known-bad payloads denied"
+            "  ✅ agent guard: dcg pinned, root-owned, registered for claude/codex/gemini, bad payloads denied"
         )
     return 1 if problems else 0
 
