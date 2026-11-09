@@ -370,10 +370,14 @@ def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
     a directory this pass deletes, so no one directory can tell, and the
     fix belongs to whoever sums across directories. Directory entries
     themselves are not counted.
+
+    Every inode is remembered, whatever its link count: a live cache links
+    and unlinks while the walk runs, so a count read at one name says
+    nothing about a name already passed or still to come.
     """
     stat = directory.lstat()
     size = 0
-    linked: set[tuple[int, int]] = set()
+    seen: set[tuple[int, int]] = set()
     session_store = False
     unreadable: str | None = None
     try:
@@ -387,10 +391,9 @@ def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
             for name in filenames:
                 found = (here / name).lstat()
                 inode = (found.st_dev, found.st_ino)
-                if found.st_nlink > 1:
-                    if inode in linked:
-                        continue
-                    linked.add(inode)
+                if inode in seen:
+                    continue
+                seen.add(inode)
                 size += found.st_blocks * _BLOCK
     except OSError as exc:
         unreadable = f"{type(exc).__name__}: {exc}"

@@ -8,14 +8,16 @@ hard-linked seed cache counted once per link and a sparse file by its length:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.workspace_backends import stale_dirs
 from syn_adapters.workspace_backends.stale_dirs import measure_workspace_dir
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable, Iterator
 
 pytestmark = pytest.mark.unit
 
@@ -38,6 +40,56 @@ def test_a_file_hard_linked_three_times_is_sized_once(tmp_path: Path) -> None:
     listing = measure_workspace_dir(ws)
 
     assert listing.size_bytes == _allocated(cache / "a")
+    assert listing.unreadable is None
+
+
+def _walk_then(
+    after: Path, change: Callable[[], None]
+) -> Callable[
+    [Path, Callable[[OSError], object] | None], Iterator[tuple[str, list[str], list[str]]]
+]:
+    """The real ``os.walk``, in name order, running ``change`` once ``after`` is consumed."""
+    real = os.walk
+
+    def walk(
+        top: Path, onerror: Callable[[OSError], object] | None = None
+    ) -> Iterator[tuple[str, list[str], list[str]]]:
+        for dirpath, dirnames, filenames in real(top, onerror=onerror):
+            dirnames.sort()
+            yield dirpath, dirnames, filenames
+            if Path(dirpath) == after:
+                change()
+
+    return walk
+
+
+@pytest.mark.parametrize("transition", ["unlinked", "linked"])
+def test_an_inode_whose_link_count_changes_mid_walk_is_sized_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transition: str
+) -> None:
+    # A live seed cache links and unlinks while the reclaimer walks it: the
+    # second name may then report one link (2 -> 1) or the first did (1 -> 2).
+    ws = tmp_path / "ws-live-cache"
+    first, second = ws / "first", ws / "second"
+    first.mkdir(parents=True)
+    second.mkdir()
+    blob = first / "blob"
+    blob.write_bytes(os.urandom(8192))
+    expected = _allocated(blob)
+    if transition == "unlinked":
+        os.link(blob, second / "blob")
+        change: Callable[[], None] = blob.unlink
+    else:
+
+        def change() -> None:
+            os.link(blob, second / "blob")
+
+    monkeypatch.setattr(stale_dirs.os, "walk", _walk_then(first, change))
+
+    listing = measure_workspace_dir(ws)
+
+    assert (second / "blob").exists()  # the change ran, between the two directories
+    assert listing.size_bytes == expected
     assert listing.unreadable is None
 
 
