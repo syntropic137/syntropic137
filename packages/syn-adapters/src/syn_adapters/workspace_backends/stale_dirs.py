@@ -42,19 +42,18 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import NoReturn
 
-from syn_shared.pytest_temp import (
-    PYTEST_TEMP_PREFIX,
-    EntryKind,
-    TempTreeEntry,
-    is_pytest_temp_root,
-)
-
 from syn_adapters.workspace_backends.orphaned import docker_inspect_raw, parse_inspect
 from syn_adapters.workspace_backends.reclaim_delete import (
     AUTH_DIRNAME,
     CLAIM_PREFIX,
     DELETE_PREFIX,
     is_being_deleted,
+)
+from syn_shared.pytest_temp import (
+    PYTEST_TEMP_PREFIX,
+    EntryKind,
+    TempTreeEntry,
+    is_pytest_temp_root,
 )
 
 __all__ = ["CLAIM_PREFIX", "DELETE_PREFIX", "is_being_deleted"]
@@ -78,6 +77,7 @@ SESSION_STORE_DIRNAME = ".agentic-session-store"
 #: the bind of the workspace directory. It is the ONE place the platform
 #: itself puts a temp tree, so it is the only place one is recognised.
 WORKSPACE_TMPDIR = ".tmp"
+
 
 def pytest_temp_roots(directory: Path) -> frozenset[Path]:
     """The pytest temp trees in ``directory``'s TMPDIR that pytest provably made.

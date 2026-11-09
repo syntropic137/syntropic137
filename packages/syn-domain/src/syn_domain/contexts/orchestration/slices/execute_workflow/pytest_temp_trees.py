@@ -19,15 +19,14 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
+    run_bounded,
+)
 from syn_shared.pytest_temp import (
     PYTEST_TEMP_PREFIX,
     EntryKind,
     TempTreeEntry,
     is_pytest_temp_root,
-)
-
-from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git import (
-    run_bounded,
 )
 
 if TYPE_CHECKING:
@@ -106,9 +105,7 @@ async def _made_by_pytest(workspace: GitWorkspace, root: str) -> bool:
     )
     complete = result.stdout.endswith("\0")
     if not result.success or result.exit_code != 0 or result.timed_out or not complete:
-        logger.info(
-            "Could not list %s (exit %d), so it is judged as work.", root, result.exit_code
-        )
+        logger.info("Could not list %s (exit %d), so it is judged as work.", root, result.exit_code)
         return False
     root_is_dir = False
     children: list[TempTreeEntry] = []
