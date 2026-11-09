@@ -119,3 +119,43 @@ def codex_login_fault_in(line: str) -> str | None:
         return None
     status = _HTTP_AUTH_STATUS_RE.search(line)
     return codex_login_fault_reason(status.group(1) if status else "", line)
+
+
+# --- The workspace ran out of processes (#2227) --------------------------------
+#
+# A workspace container has a pids limit (`resources.pids_limit`, default 256).
+# When the agent's commands use it up, the next fork fails with EAGAIN and bash
+# says so in the command's output:
+#
+#   /usr/bin/bash: fork: retry: Resource temporarily unavailable
+#   /usr/bin/bash: fork: Resource temporarily unavailable
+#
+# Codex itself then cannot fork either, and its stream stops without
+# `turn.completed`. Reported as the generic "stream ended" reason, that cost an
+# operator the cause: exec-f02a26a13856 read as a codex fault for a verify phase
+# that had simply run two parallel builds into the limit.
+#
+# Anchored to bash's `fork:` spelling, not to EAGAIN's text alone: "Resource
+# temporarily unavailable" is also what a non-blocking read says when it has
+# nothing to read, which is not a fault at all.
+_FORK_FAILURE_RE = re.compile(r"\bfork: (?:retry: )?Resource temporarily unavailable")
+
+
+def codex_pids_fault_in(output: str, pids_limit: int | None) -> str | None:
+    """The pids-exhaustion reason a command's output carries, or ``None``.
+
+    ``pids_limit`` is the limit the workspace was provisioned with, named in the
+    reason because raising it is the fix; None when nobody recorded it.
+
+    A REAL fault, deliberately not a refinement of the "stream ended" reason:
+    a phase that ends on it is neither retried (#1335, the same limit hits the
+    same wall) nor completed on its deliverable (#1111, the commands it
+    depended on could not run).
+    """
+    if not _FORK_FAILURE_RE.search(output):
+        return None
+    limit = "" if pids_limit is None else f" ({pids_limit})"
+    return (
+        f"workspace hit its pids limit{limit}: fork failed "
+        "(`Resource temporarily unavailable`); raise the phase's resources.pids_limit"
+    )

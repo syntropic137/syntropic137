@@ -769,6 +769,7 @@ class WorkspaceService:
                 isolation_handle=isolation_handle,
                 sidecar_handle=sidecar_handle,
                 image_manifest=image_manifest,
+                pids_limit=isolation_config.security_policy.pids_limit,
                 _service=self,
             )
 

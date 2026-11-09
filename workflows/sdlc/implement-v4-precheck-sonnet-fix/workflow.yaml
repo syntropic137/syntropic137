@@ -114,6 +114,8 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 3600
+    resources:
+      pids_limit: 1024
     allowed_tools:
       - Read
       - Grep
@@ -140,6 +142,8 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 3600
+    resources:
+      pids_limit: 1024
     # Its deliverable is a report, not a branch. The gate exempts an
     # uncommitted change here only once the repo is also mounted read-only,
     # which production does not do yet (#1308, #1342), so this declaration is
@@ -181,6 +185,8 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 3600
+    resources:
+      pids_limit: 1024
     allowed_tools:
       - Read
       - Grep
@@ -209,6 +215,8 @@ phases:
     # Half of verify's budget: this pass checks a delta, not the whole change,
     # and its prompt forbids re-reviewing what the first pass already certified.
     timeout_seconds: 1800
+    resources:
+      pids_limit: 1024
     # Its deliverable is a report, not a branch. The gate exempts an
     # uncommitted change here only once the repo is also mounted read-only,
     # which production does not do yet (#1308, #1342), so this declaration is
@@ -281,6 +289,8 @@ phases:
     output_artifacts:
       - markdown
     timeout_seconds: 3600
+    resources:
+      pids_limit: 1024
     allowed_tools:
       - Read
       - Grep
@@ -309,6 +319,8 @@ phases:
     # Half of verify's budget: this pass checks a delta, not the whole change,
     # and its prompt forbids re-reviewing what the first pass already certified.
     timeout_seconds: 1800
+    resources:
+      pids_limit: 1024
     # Its deliverable is a report, not a branch. The gate exempts an
     # uncommitted change here only once the repo is also mounted read-only,
     # which production does not do yet (#1308, #1342), so this declaration is
