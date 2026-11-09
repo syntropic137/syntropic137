@@ -48,6 +48,7 @@ class _ScriptedWorkspace:
 
     id = "ws-1376"
     last_stream_exit_code = 0
+    pids_limit = None
 
     def __init__(self, lines: list[str]) -> None:
         self._lines = lines
