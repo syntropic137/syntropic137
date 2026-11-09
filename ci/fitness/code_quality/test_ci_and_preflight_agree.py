@@ -212,6 +212,7 @@ _NOT_A_CHECK: dict[str, frozenset[str]] = {
             "session-archive-compress",
             "session-archive-dedupe",
             "apparmor-setup",
+            "agent-guard-setup",
             "pit-stop",
             "github-reconfigure",
         }
