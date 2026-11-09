@@ -32,6 +32,7 @@ from syn_api.services.workspace_dir_reclaim import (
     WorkspaceDirReclaimer,
     reclaim_on_a_clock,
 )
+from syn_api.services.workspace_reclaim_status import ReclaimStatus
 from syn_domain.contexts.orchestration import OwnerExecution, RetainedReason
 
 pytestmark = pytest.mark.unit
@@ -377,6 +378,22 @@ async def test_unreadable_docker_skips_the_whole_pass(base: Path, tmp_path: Path
     assert ws.exists()
 
 
+async def test_health_tallies_a_hard_linked_cache_once(base: Path, tmp_path: Path) -> None:
+    """#2216: /health's retained bytes are the disk the directory holds, not its names."""
+    ws = _workspace(base, "ws-seeded", tmp_path)
+    cache = ws / "seeds" / "pnpm"
+    cache.mkdir(parents=True)
+    (cache / "blob").write_bytes(os.urandom(4 * 1024 * 1024))
+    for n in range(9):
+        os.link(cache / "blob", cache / f"link-{n}")
+    blob = (cache / "blob").lstat().st_blocks * 512
+    status = ReclaimStatus()
+    status.record(await _reclaimer(base).run_once(), at=0.0)
+    [tally] = status.snapshot(0.0).retained
+    assert tally.reason is RetainedReason.UNVERSIONED
+    assert blob <= tally.size_bytes < 2 * blob  # once, where ten links read 40 MiB
+
+
 # --- fully readable ---
 
 
@@ -638,7 +655,8 @@ def test_a_session_store_inside_a_pytest_temp_tree_is_not_capture(
     [listing] = scan_workspace_dirs(str(base))
     assert listing.session_store is False
     assert listing.unreadable is None
-    assert listing.size_bytes - before.size_bytes == len("{}\n")  # still walked and sized
+    allocated = (store / "envelope.jsonl").lstat().st_blocks * 512
+    assert listing.size_bytes - before.size_bytes == allocated  # still walked and sized
 
 
 def test_a_pytest_temp_tree_does_not_hide_a_store_beside_it(base: Path, tmp_path: Path) -> None:
