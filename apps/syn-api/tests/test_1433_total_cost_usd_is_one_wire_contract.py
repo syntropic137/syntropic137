@@ -128,6 +128,7 @@ async def test_the_execution_list_sends_the_cost_as_a_json_string(
         tag=None,
         eval_id=None,
         in_eval=None,
+        review_verdict=None,
         page=1,
         page_size=50,
     )

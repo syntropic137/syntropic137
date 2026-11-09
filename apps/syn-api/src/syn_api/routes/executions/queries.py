@@ -32,6 +32,7 @@ from syn_api.types import (
 )
 from syn_domain.contexts.orchestration import (
     InvalidTagsError,
+    ReviewVerdict,
     TagSet,
 )
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
@@ -61,7 +62,7 @@ from .phase_mapping import (
     _map_phase_to_response,
     load_configured_models,
 )
-from .queued_start import QueuedStart, not_yet_started, queued_starts
+from .queued_start import filter_queued, not_yet_started, queued_starts
 from .resume_lineage import ResumeLineage, resumed_from_info
 from .resume_start_info import resume_start_of
 from .start_config import load_start_configs
@@ -222,6 +223,7 @@ def _build_execution_summary_response(
         error_message=e.error_message,
         failure_classification=e.failure_classification,
         reported_failure_reason=e.reported_failure_reason,
+        review_verdict=e.review_verdict,
         repos=list(e.repos),
         tags=list(e.tags),
         repos_display=format_repos(e.repos),
@@ -317,6 +319,7 @@ async def _load_execution_list_data(
     tags: TagSet | None = None,
     eval_id: str | None = None,
     in_eval: bool | None = None,
+    review_verdict: ReviewVerdict | None = None,
 ) -> tuple[Page[WorkflowExecutionSummary], dict[str, _ExecutionEnrichment]]:
     """Fetch one page of domain summaries plus its tool-count and cost enrichment, once.
 
@@ -343,6 +346,7 @@ async def _load_execution_list_data(
             tags=tags,
             eval_id=eval_id,
             in_eval=in_eval,
+            review_verdict=review_verdict,
             offset=offset,
             limit=limit,
         )
@@ -376,6 +380,7 @@ def _to_execution_summary(
         total_cache_read_tokens=s.total_cache_read_tokens,
         failure_classification=s.failure_classification,
         reported_failure_reason=s.reported_failure_reason,
+        review_verdict=s.review_verdict,
         total_cost_usd=enrichment.total_cost_usd,
         unpriced_observation_count=enrichment.unpriced_observation_count,
         tool_call_count=enrichment.tool_call_count,
@@ -638,6 +643,7 @@ async def list_active(
                 error_message=s.error_message,
                 failure_classification=s.failure_classification,
                 reported_failure_reason=s.reported_failure_reason,
+                review_verdict=s.review_verdict,
                 repos=list(s.repos),
                 tags=list(s.tags),
             )
@@ -689,6 +695,13 @@ async def list_executions_endpoint(
             "false keeps only executions in no eval. Omit for both."
         ),
     ),
+    review_verdict: ReviewVerdict | None = Query(
+        None,
+        description=(
+            "Keep only executions that completed on this review verdict (#1630). "
+            "A queued start or a run that reviewed nothing has none, so is never kept."
+        ),
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
 ) -> ExecutionListResponse:
@@ -704,9 +717,10 @@ async def list_executions_endpoint(
     manager = get_projection_mgr()
     selected = parse_statuses(statuses, status)
     all_queued = await queued_starts(manager.store)
-    queued = _filter_queued(
+    queued = filter_queued(
         all_queued,
         tags=tags,
+        review_verdict=review_verdict,
         eval_id=eval_id,
         in_eval=in_eval,
         search=q,
@@ -729,6 +743,7 @@ async def list_executions_endpoint(
         tags=tags,
         eval_id=eval_id,
         in_eval=in_eval,
+        review_verdict=review_verdict,
     )
     eval_by_execution = await execution_eval_runs(manager.store, execution_page.rows)
     names = await _workflow_names(manager, {qs.workflow_id for qs in head})
@@ -775,45 +790,9 @@ def _read_model_statuses(selected: list[str] | None) -> list[str] | None:
     return [s for s in selected if s != QUEUED] or [QUEUED]
 
 
-def _filter_queued(
-    starts: list[QueuedStart],
-    *,
-    tags: TagSet,
-    eval_id: str | None,
-    in_eval: bool | None,
-    search: str | None,
-    after: datetime | None,
-    before: datetime | None,
-) -> list[QueuedStart]:
-    """The queued starts the list's filters keep.
-
-    A queued start has no read model, so no tags or eval to judge: a request
-    filtering on either is not shown one, and it is in no eval, so
-    ``in_eval=true`` excludes it while ``in_eval=false`` keeps it. It has not started, so a time
-    window judges when it was accepted - the dashboard's default 24h window
-    would otherwise hide every queued start.
-    """
-    if tags or eval_id or in_eval:
-        return []
-    return [qs for qs in starts if _matches(qs, search=search, after=after, before=before)]
-
-
 def _with_queued_count(counts: dict[str, int], queued: int) -> dict[str, int]:
     """The read model's counts plus queued, present only when something has it."""
     return {**counts, QUEUED: queued} if queued else dict(counts)
-
-
-def _matches(
-    start: QueuedStart, *, search: str | None, after: datetime | None, before: datetime | None
-) -> bool:
-    """The list's search and window, as they apply to a start that has not started."""
-    queued_at = start.queue.queued_at
-    if (after is not None and queued_at < after) or (before is not None and queued_at > before):
-        return False
-    if not search:
-        return True
-    needle = search.lower()
-    return needle in start.execution_id.lower() or needle in start.workflow_id.lower()
 
 
 async def _workflow_names(manager: ProjectionManager, workflow_ids: set[str]) -> dict[str, str]:

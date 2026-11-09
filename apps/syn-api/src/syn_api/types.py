@@ -859,6 +859,9 @@ class ExecutionSummary(BaseModel):
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63), as on `ExecutionDetail`.
+    On the summary so a list can be filtered certified from blocked (#1630)."""
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
     tags: list[str] = Field(default_factory=list)

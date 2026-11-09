@@ -539,6 +539,12 @@ class ExecutionSummaryResponse(BaseModel):
     dashboard with nothing to quote falls back to showing the measurement
     alone, which is the state #1392 was opened about.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63), as on the detail.
+
+    `blocked` on a `completed` run means it completed with unresolved findings.
+    Null for a run that reviewed nothing or has not completed, and for every
+    queued start. Filter on it with `?review_verdict=` (#1630)."""
     repos: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     """The execution's current tags, normalised and sorted (#967)."""
