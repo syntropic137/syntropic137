@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
+index 7c45d2b4c..a56437db1 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
+@@ -923,7 +923,7 @@ class CodexStreamProcessor:
+         exit_code = item.get("exit_code")
+         success = exit_code == 0
+         output = str(item.get("aggregated_output") or "")
+-        self._pids_fault_candidate = codex_pids_fault_in(output, self._pids_limit)
++        self._pids_fault_candidate = self._pids_fault_candidate or codex_pids_fault_in(output, self._pids_limit)
+         # item.completed repeats the command, so a delegation is still counted
+         # if the matching item.started never arrived (truncated stream).
+         self._note_delegation_attempt(tool_use_id, str(item.get("command", "")))
