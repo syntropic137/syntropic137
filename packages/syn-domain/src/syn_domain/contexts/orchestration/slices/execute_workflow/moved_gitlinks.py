@@ -55,6 +55,10 @@ class SplitStatus:
     authored: tuple[str, ...]
     #: The decoded paths of the submodules git moved, not anybody wrote in.
     moved: frozenset[str]
+    #: The decoded paths of every OTHER submodule git reports: edited, holding
+    #: untracked files or a commit no remote has. A quarantine snapshot of the
+    #: superproject holds each only as a gitlink, never its files (#1678).
+    worked_in: frozenset[str] = frozenset()
 
 
 async def split_moved_gitlinks(
@@ -67,15 +71,15 @@ async def split_moved_gitlinks(
     """
     if not files:
         return SplitStatus(authored=files, moved=frozenset())
-    moved = await _moved_gitlinks(workspace, repo)
+    moved, worked_in = await _submodules(workspace, repo)
     authored = tuple(
         line for line in files if not (line[:3] == " M " and _unquote(line[3:]) in moved)
     )
-    return SplitStatus(authored=authored, moved=moved)
+    return SplitStatus(authored=authored, moved=moved, worked_in=worked_in)
 
 
-async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
-    """The paths of submodules git moved, not anybody wrote in.
+async def _submodules(workspace: GitWorkspace, repo: str) -> tuple[frozenset[str], frozenset[str]]:
+    """The paths of submodules git moved, not anybody wrote in, and of the rest it reports.
 
     The line is only exempted on evidence from both sides of the gitlink:
 
@@ -113,16 +117,42 @@ async def _moved_gitlinks(workspace: GitWorkspace, repo: str) -> frozenset[str]:
         hardened=True,
     )
     moved: set[str] = set()
+    worked_in: set[str] = set()
     for entry in status.splitlines():
         # `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>`: the path is the
         # ninth field and the only one that may itself contain spaces.
         fields = entry.split(" ", 8)
-        if len(fields) != 9 or fields[:3] != ["1", ".M", "SC.."]:
+        if len(fields) != 9 or not fields[2].startswith("S"):
             continue
-        path = _unquote(fields[8])
-        if not await _stranded_commits(workspace, f"{repo}/{path}"):
+        path = _submodule_path(entry)
+        if fields[:3] == ["1", ".M", "SC.."] and not await _stranded_commits(
+            workspace, f"{repo}/{path}"
+        ):
             moved.add(path)
-    return frozenset(moved)
+        else:
+            worked_in.add(path)
+    return frozenset(moved), frozenset(worked_in)
+
+
+#: Fields before the path in each kind of v2 entry that can name a submodule:
+#: changed, renamed or copied (`<X><score>` precedes the path), unmerged.
+_FIELDS_BEFORE_PATH: Final = {"1": 8, "2": 9, "u": 10}
+
+
+def _submodule_path(entry: str) -> str:
+    """The decoded path of a v2 entry whose submodule token starts with ``S``.
+
+    A rename carries ``<path><tab><origPath>``; the path is the one now on
+    disk. An entry kind not listed keeps its whole line, which matches no path
+    but still counts as a submodule somebody worked in.
+    """
+    before = _FIELDS_BEFORE_PATH.get(entry[:1])
+    if before is None:
+        return entry
+    fields = entry.split(" ", before)
+    if len(fields) != before + 1:
+        return entry
+    return _unquote(fields[before].split("\t", 1)[0])
 
 
 async def _stranded_commits(workspace: GitWorkspace, submodule: str) -> bool:

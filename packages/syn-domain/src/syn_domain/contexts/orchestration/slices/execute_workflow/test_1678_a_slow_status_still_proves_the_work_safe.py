@@ -35,7 +35,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_unpushed_wor
     _EXECUTION_ID,
     _Clone,
     _clone_repository,
+    _git,
     _unbounded,
+    _WithSubmodule,
 )
 
 if TYPE_CHECKING:
@@ -171,31 +173,100 @@ async def test_the_status_bound_is_still_a_bound_and_still_says_so(
     assert "timed out, so it did not finish" in kept[0], kept[0]
 
 
+@pytest.mark.parametrize(
+    ("path", "content", "change"),
+    [
+        ("README.md", "an edit nobody committed\n", "modified"),
+        ("notes.md", "a file nobody added\n", "untracked"),
+    ],
+    ids=["modified-only", "untracked-only"],
+)
 async def test_modified_and_untracked_files_are_still_work_under_a_slow_status(
-    clone: _Clone,
+    clone: _Clone, path: str, content: str, change: str
 ) -> None:
     """The larger bound buys time, not leniency: what the walk finds is still work.
 
-    Both statuses on this path are slow here - the v1 listing and the v2 one
-    `moved_gitlinks` asks once anything is dirty - so a hop left on the old
-    bound fails this as surely as the first one would. The proof is the
-    origin: the edit and the new file are in the quarantine commit.
+    One kind of change per case, so neither rides on the other: a tracked edit
+    alone makes `git add --all` save an untracked file too, which would let a
+    status that hid untracked files pass unseen. Both statuses on this path are
+    slow here - the v1 listing and the v2 one `moved_gitlinks` asks once
+    anything is dirty - so a hop left on the old bound fails this as surely as
+    the first one would. The proof is the origin: the change is in the
+    quarantine commit.
     """
-    (clone.path / "README.md").write_text("an edit nobody committed\n")
-    (clone.path / "notes.md").write_text("a file nobody added\n")
+    (clone.path / path).write_text(content)
     workspace = _SlowStatus(clone.workspace, seconds=_COLD_WALK_SECONDS)
 
     reclaimable = await guard_orphaned_workspace(_orphan(workspace))
 
     ref = f"refs/syn/lost/{_EXECUTION_ID}/orphaned-{_WORKSPACE_ID}"
     assert ref in clone.origin_refs(), (
-        f"uncommitted work was not quarantined under a {_COLD_WALK_SECONDS}s status "
+        f"{change} work was not quarantined under a {_COLD_WALK_SECONDS}s status "
         f"(bounds {workspace.bounds}); origin has {sorted(clone.origin_refs())}"
     )
-    assert clone.origin_git("show", f"{ref}:README.md") == "an edit nobody committed"
-    assert clone.origin_git("show", f"{ref}:notes.md") == "a file nobody added"
+    assert clone.origin_git("show", f"{ref}:{path}") == content.rstrip("\n")
     assert len(workspace.bounds) >= 2, (
         f"expected the v1 and v2 statuses both to run, saw bounds {workspace.bounds}"
     )
     # Quarantined and landed, so only now is the directory reclaimable.
     assert reclaimable is not None
+
+
+@pytest.mark.parametrize(
+    ("name", "change"),
+    [("plugin.txt", "modified"), ("last copy.txt", "untracked")],
+    ids=["modified-only", "untracked-only"],
+)
+async def test_work_inside_a_submodule_keeps_the_directory_under_a_slow_status(
+    clone: _Clone, name: str, change: str
+) -> None:
+    """A landed quarantine is not proof a SUBMODULE's work survived.
+
+    The superproject snapshot holds a submodule as a gitlink and none of its
+    files, so pushing it saves nothing written in there. Under the old bound
+    such a status timed out and the directory was kept by accident; under the
+    new one it finishes, and the directory must be kept on purpose. The proof
+    is twofold: the guard returns nothing to delete, and the content is still
+    only in the worktree - not in the submodule's origin.
+    """
+    submodule = _WithSubmodule(clone, at="plugin with spaces")
+    submodule.move_the_gitlink()
+    content = f"last copy of {change} work\n"
+    (submodule.path / name).write_text(content)
+    workspace = _SlowStatus(clone.workspace, seconds=_COLD_WALK_SECONDS)
+
+    reclaimable = await guard_orphaned_workspace(_orphan(workspace))
+
+    assert reclaimable is None, (
+        f"{change} work in a submodule was offered for deletion after a "
+        f"{_COLD_WALK_SECONDS}s status (bounds {workspace.bounds}), though no push carried it"
+    )
+    assert (submodule.path / name).read_text() == content
+    published = _git(
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "main",
+        cwd=clone.root / "plugin.origin.git",
+        home=clone.root / "home",
+    ).stdout.splitlines()
+    if change == "untracked":
+        assert name not in published
+    else:
+        remote = _git(
+            "show", f"main:{name}", cwd=clone.root / "plugin.origin.git", home=clone.root / "home"
+        )
+        assert remote.stdout != content
+
+
+async def test_a_clean_moved_submodule_is_still_reclaimed_under_a_slow_status(
+    clone: _Clone,
+) -> None:
+    """Keeping on submodule work must not keep on a gitlink git merely moved (#1499)."""
+    submodule = _WithSubmodule(clone, at="plugin with spaces")
+    submodule.move_the_gitlink()
+    workspace = _SlowStatus(clone.workspace, seconds=_COLD_WALK_SECONDS)
+
+    reclaimable = await guard_orphaned_workspace(_orphan(workspace))
+
+    assert reclaimable == ReclaimableDir(host_dir=_HOST_DIR, workspace_id=_WORKSPACE_ID)

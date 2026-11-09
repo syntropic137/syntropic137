@@ -525,7 +525,7 @@ def quarantined_records(
 class _UnsavedWork:
     """A repository's unsaved state: what is missing, and from which tips."""
 
-    __slots__ = ("branch", "commit_count", "files", "parents")
+    __slots__ = ("branch", "commit_count", "files", "parents", "submodules")
 
     def __init__(
         self,
@@ -534,6 +534,7 @@ class _UnsavedWork:
         commit_count: int,
         files: tuple[str, ...],
         parents: tuple[str, ...],
+        submodules: tuple[str, ...],
     ) -> None:
         self.branch = branch
         self.commit_count = commit_count
@@ -542,6 +543,9 @@ class _UnsavedWork:
         #: commit to be reachable through the one ref. HEAD first, so the
         #: recovered history reads as the phase left it.
         self.parents = parents
+        #: Submodules with work in them, which the quarantine commit holds
+        #: only as a gitlink: see `QuarantinedWork.unsaved_submodules`.
+        self.submodules = submodules
 
 
 def _read_only_mount(mount_table: str, path: str) -> bool:
@@ -646,6 +650,7 @@ async def _unsaved_work(
     # porcelain line cannot say so: see `moved_gitlinks`.
     split = await split_moved_gitlinks(workspace, repo, files)
     authored, moved = split.authored, split.moved
+    submodules = tuple(sorted(split.worked_in)) if uncommitted_is_work else ()
     # THE ONE LINE THE EXEMPTION DECIDES (#1308). An uncommitted change is
     # evidence of work unless the phase both disclaimed it and was unable to
     # write it, in which case the same line is a build tool that dirtied a
@@ -689,6 +694,7 @@ async def _unsaved_work(
         commit_count=len(unpushed),
         files=files,
         parents=_dedup([head_sha, *(sha for sha, _ in named if sha in unpushed)]),
+        submodules=submodules,
     )
 
 
@@ -816,6 +822,7 @@ def _record(
         files=work.files,
         pushed_ref=ref,
         commit=commit,
+        unsaved_submodules=work.submodules,
     )
     if pushed.exit_code == 0:
         logger.warning("Quarantined unpushed work from %s at %s", repo, ref)
