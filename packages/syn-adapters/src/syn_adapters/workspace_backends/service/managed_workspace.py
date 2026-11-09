@@ -254,11 +254,12 @@ class ManagedWorkspace:
 
     @property
     def last_stream_exit_code(self) -> int | None:
-        """Exit code from the most recent stream() call.
+        """Exit code from this workspace's most recent stream() call.
 
-        Returns None if no stream has completed yet.
+        Returns None if no stream has completed here yet. Never another
+        workspace's: the event stream is shared by the whole service (#980).
         """
-        return self._service._event_stream.last_exit_code
+        return self._service._event_stream.exit_code_of(self.isolation_handle)
 
     async def inject_tokens(
         self,

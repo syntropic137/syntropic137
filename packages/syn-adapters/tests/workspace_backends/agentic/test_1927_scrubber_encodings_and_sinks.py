@@ -66,7 +66,7 @@ async def test_bound_value_is_absent_from_signal_diagnostic(caplog):
         ]
     assert lines == [REDACTED_MARKER]
     assert _CANARY not in caplog.text
-    assert _CANARY not in adapter.last_signal_death.describe()
+    assert _CANARY not in adapter.signal_death_of(_HANDLE).describe()
 
 
 @pytest.mark.parametrize("secret", ["ghs_CANARY/0b6f2c+Zq9X", "short7"])
