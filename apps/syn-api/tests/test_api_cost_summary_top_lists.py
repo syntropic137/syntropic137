@@ -12,11 +12,15 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
+
+if TYPE_CHECKING:
+    from syn_api.routes.costs import CostSummaryResponse
 
 pytestmark = pytest.mark.unit
 
@@ -109,21 +113,22 @@ async def _summary(
     monkeypatch: pytest.MonkeyPatch,
     executions: list[ExecutionCost],
     sessions: list[SessionCost],
-) -> dict[str, object]:
+) -> CostSummaryResponse:
     from syn_api.routes import costs
 
-    monkeypatch.setattr(costs, "get_execution_cost_query", lambda: _FakeExecutionCostQuery(executions))
+    monkeypatch.setattr(
+        costs, "get_execution_cost_query", lambda: _FakeExecutionCostQuery(executions)
+    )
     monkeypatch.setattr(costs, "get_session_cost_query", lambda: _FakeSessionCostQuery(sessions))
-    response = await costs.get_cost_summary_endpoint()
-    # The wire shape, which is what the CLI and dashboard read.
-    return response.model_dump(mode="json")
+    return await costs.get_cost_summary_endpoint()
 
 
 @pytest.mark.asyncio
 async def test_top_models_sums_each_model_across_executions_most_expensive_first(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    body = await _summary(monkeypatch, _executions(), _sessions(1))
+    # The wire shape, which is what the CLI and dashboard read.
+    body = (await _summary(monkeypatch, _executions(), _sessions(1))).model_dump(mode="json")
 
     assert body["top_models"] == [
         {"model": OPUS, "cost_usd": "3"},
@@ -135,9 +140,12 @@ async def test_top_models_sums_each_model_across_executions_most_expensive_first
 async def test_top_sessions_are_most_expensive_first_and_bounded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The wire shape, which is what the CLI and dashboard read.
     from syn_api.routes.costs import TOP_N
 
-    body = await _summary(monkeypatch, _executions(), _sessions(TOP_N + 2))
+    body = (await _summary(monkeypatch, _executions(), _sessions(TOP_N + 2))).model_dump(
+        mode="json"
+    )
 
     top = body["top_sessions"]
     assert isinstance(top, list)
@@ -155,7 +163,8 @@ async def test_total_tokens_is_the_sum_of_execution_total_tokens_including_cache
 ) -> None:
     executions = _executions()
 
-    body = await _summary(monkeypatch, executions, [])
+    # The wire shape, which is what the CLI and dashboard read.
+    body = (await _summary(monkeypatch, executions, [])).model_dump(mode="json")
 
     assert body["total_tokens"] == sum(c.total_tokens for c in executions)
     # Pinned to the literal too: excluding cache tokens would give 132.

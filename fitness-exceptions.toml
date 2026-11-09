@@ -121,7 +121,8 @@ issue = "#673"
 path = "apps/syn-api"
 # 146 -> 145 (#1516): the capture-status route projects each stored row as it
 # reads it, so the window of raw mappings it used to annotate is gone.
-value = 145
+# 145 -> 144 (#701): /costs/summary's top_sessions is a SessionCostEntry model.
+value = 144
 issue = "#673"
 
 [untyped-dicts.syn-collector]
