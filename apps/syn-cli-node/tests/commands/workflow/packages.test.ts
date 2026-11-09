@@ -163,4 +163,30 @@ describe("workflow packages", () => {
       expect(out).toContain("No packages installed yet.");
     });
   });
+
+  it("lists a package with two stored records once (issue #886)", async () => {
+    const stored = (version: string, installedAt: string, id: string) => ({
+      package_name: "dup-pkg",
+      package_version: version,
+      source: "org/listed",
+      source_ref: "main",
+      installed_at: installedAt,
+      format: "single",
+      workflows: [{ id, name: id }],
+    });
+    saveInstalled({
+      version: 1,
+      installations: [
+        stored("1.0.0", "2026-10-01T00:00:00.000Z", "wf-a"),
+        stored("2.0.0", "2026-10-02T00:00:00.000Z", "wf-b"),
+      ],
+    });
+
+    await packagesCommand.handler({ positionals: [], values: {} });
+
+    const out = stdout();
+    expect(out.match(/dup-pkg/g)).toHaveLength(1);
+    expect(out).toContain("2.0.0");
+    expect(out).not.toContain("1.0.0");
+  });
 });
