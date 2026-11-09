@@ -465,6 +465,23 @@ class CodexStreamProcessor:
         await workspace.interrupt()
         return True, over
 
+    async def _read_lines(
+        self,
+        stream: AsyncIterator[str],
+        read: StreamRead,
+        conversation_lines: list[str],
+        workspace: InterruptibleWorkspace,
+    ) -> None:
+        """Feed every line to ``_step`` until the stream ends or the agent is stopped."""
+        async with contextlib.aclosing(read.lines(stream)) as lines:
+            async for line in lines:
+                if line.strip():
+                    conversation_lines.append(line)
+                stop, reason = await self._step(line, read.line_count, workspace)
+                if stop:
+                    read.stop(reason)
+                    break
+
     async def _process_stream(
         self,
         stream: AsyncIterator[str],
@@ -475,14 +492,7 @@ class CodexStreamProcessor:
         conversation_lines: list[str] = []
 
         read = StreamRead(self._cancel_poller, workspace)
-        async with contextlib.aclosing(read.lines(stream)) as lines:
-            async for line in lines:
-                if line.strip():
-                    conversation_lines.append(line)
-                stop, reason = await self._step(line, read.line_count, workspace)
-                if stop:
-                    read.stop(reason)
-                    break
+        await self._read_lines(stream, read, conversation_lines, workspace)
 
         if not self._totals.saw_terminal_turn:
             # THE single place `_error_reason` is decided. Nothing mid-stream
