@@ -16,6 +16,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
     ClaudePluginError,
     ClaudePluginInvalidName,
     ClaudePluginInvalidPath,
+    ClaudePluginLockedHashMismatch,
     ClaudePluginManifestInvalid,
     ClaudePluginManifestMissing,
     ClaudePluginNotRegistered,
@@ -64,6 +65,7 @@ from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
 from syn_domain.contexts.orchestration._shared.skill_errors import (
     SkillError,
     SkillInvalidName,
+    SkillLockedHashMismatch,
     SkillNotRegistered,
 )
 from syn_domain.contexts.orchestration._shared.skill_ref import (
@@ -474,6 +476,7 @@ __all__ = [
     "ClaudePluginNotFoundError",
     "ClaudePluginNotRegistered",
     "ClaudePluginRef",
+    "ClaudePluginLockedHashMismatch",
     "ClaudePluginVersionHashMismatch",
     "CommandStep",
     "CommandTerminal",
@@ -604,6 +607,7 @@ __all__ = [
     "SidecarConfig",
     "SkillError",
     "SkillInvalidName",
+    "SkillLockedHashMismatch",
     "SkillNotRegistered",
     "SkillRef",
     "StaleWorkspaceDir",
