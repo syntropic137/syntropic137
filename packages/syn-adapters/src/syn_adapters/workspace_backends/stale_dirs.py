@@ -223,12 +223,17 @@ class UnsafeRepositoryError(HostGitError):
     """
 
 
+_BLOCK = 512
+"""POSIX ``st_blocks`` unit, whatever the filesystem's block size."""
+
+
 @dataclass(frozen=True)
 class WorkspaceDirListing:
     """One directory under the workspace base, measured in a single walk."""
 
     workspace_id: str
     host_dir: str
+    #: Allocated bytes of its files, each inode once: see `measure_workspace_dir`.
     size_bytes: int
     #: ``(st_dev, st_ino)`` of the directory itself: a rename keeps it, a
     #: replacement does not.
@@ -356,9 +361,28 @@ def scan_workspace_dirs(base: str) -> list[WorkspaceDirListing]:
 
 
 def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
-    """One directory, sized in a single walk that fails closed. Blocking."""
+    """One directory, sized in a single walk that fails closed. Blocking.
+
+    ``size_bytes`` is the bytes the walk saw allocated to files
+    (``st_blocks * 512``), each inode once (#2216). A length overstates a
+    sparse file, and the uv and pnpm caches under ``seeds/`` hard-link one
+    inode under many names, so summing ``st_size`` per name read about 14x
+    the disk the directories occupy.
+
+    It is not exactly what a delete frees: an inode that also has links
+    outside the directory stays allocated after it goes. That is left
+    counted, not subtracted by ``st_nlink``: a link outside may itself be in
+    a directory this pass deletes, so no one directory can tell, and the
+    fix belongs to whoever sums across directories. Directory entries
+    themselves are not counted.
+
+    Every inode is remembered, whatever its link count: a live cache links
+    and unlinks while the walk runs, so a count read at one name says
+    nothing about a name already passed or still to come.
+    """
     stat = directory.lstat()
     size = 0
+    seen: set[tuple[int, int]] = set()
     session_store = False
     unreadable: str | None = None
     try:
@@ -370,7 +394,12 @@ def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
             ) and not _inside_any(here, fixtures):
                 session_store = True
             for name in filenames:
-                size += (here / name).lstat().st_size
+                found = (here / name).lstat()
+                inode = (found.st_dev, found.st_ino)
+                if inode in seen:
+                    continue
+                seen.add(inode)
+                size += found.st_blocks * _BLOCK
     except OSError as exc:
         unreadable = f"{type(exc).__name__}: {exc}"
     return WorkspaceDirListing(
