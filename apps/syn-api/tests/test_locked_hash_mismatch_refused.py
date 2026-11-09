@@ -16,6 +16,7 @@ import os
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi import HTTPException
@@ -39,6 +40,9 @@ from syn_domain.contexts.orchestration.slices.register_claude_plugin.projection 
 from syn_domain.contexts.orchestration.slices.register_skill.projection import (
     SkillLockProjection,
 )
+
+if TYPE_CHECKING:
+    from starlette.types import Message
 
 pytestmark = pytest.mark.unit
 
@@ -220,7 +224,7 @@ phases:
 
         from syn_api.routes.workflows.commands import create_workflow_from_yaml_endpoint
 
-        async def _receive() -> dict[str, object]:
+        async def _receive() -> Message:
             return {"type": "http.request", "body": yaml_content.encode(), "more_body": False}
 
         request = Request(
@@ -231,7 +235,7 @@ phases:
                 "headers": [(b"content-type", b"application/yaml")],
                 "query_string": b"",
             },
-            _receive,  # type: ignore[arg-type]
+            _receive,
         )
 
         with pytest.raises(HTTPException) as exc:
