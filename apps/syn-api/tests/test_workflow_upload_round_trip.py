@@ -64,6 +64,24 @@ def _reset_storage() -> Iterator[None]:
     reset_projection_manager()
 
 
+@pytest.fixture(autouse=True)
+def _pids_ceiling_the_shipped_workflows_need(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The deployment these workflows are written for: SYN_WORKSPACE_PIDS_MAX=1024.
+
+    The sdlc implement workflows' gate phases request 1024 pids (#2227). An
+    unset ceiling is the 256 default, so a deployment that has not raised it
+    refuses them at install - which is the operator's prerequisite, not what
+    this round trip measures.
+    """
+    from syn_shared.settings import reset_settings
+
+    monkeypatch.setenv("SYN_WORKSPACE_PIDS_MAX", "1024")
+    reset_settings()
+    yield
+    monkeypatch.undo()
+    reset_settings()
+
+
 def test_every_phase_bearing_workflow_has_an_upload_body() -> None:
     with_phases = {rel for rel, ref in _REFERENCE.files.items() if ref.phases}
     assert set(_UPLOADS) == with_phases
