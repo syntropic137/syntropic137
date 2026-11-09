@@ -143,3 +143,27 @@ class ClaudePluginVersionHashMismatch(ClaudePluginError):
         self.source_url = source_url
         self.declared = declared
         self.actual_sha = actual_sha
+
+
+class ClaudePluginLockedHashMismatch(ClaudePluginError):
+    """A lock record pins a ``sha256-<hash>`` version its ``resolved_sha`` contradicts.
+
+    The registration guard (#887) refuses such a record from now on, but a
+    record written before it can still carry one, and the materializer fetches
+    by ``resolved_sha`` alone. So resolution refuses the record rather than
+    install content the version does not name (#889). Mirrors
+    ``SkillLockedHashMismatch``: the two pin content the same way.
+    """
+
+    error_code = "claude_plugin_locked_hash_mismatch"
+
+    def __init__(self, source_url: str, version: str, name: str, resolved_sha: str) -> None:
+        super().__init__(
+            f"Claude plugin {name!r} from {source_url}@{version} is locked to resolved_sha "
+            f"{resolved_sha!r}, but its version pins {version.removeprefix('sha256-')!r}. "
+            "The lock record contradicts its own pin; re-register the plugin from source."
+        )
+        self.source_url = source_url
+        self.version = version
+        self.name = name
+        self.resolved_sha = resolved_sha

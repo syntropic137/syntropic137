@@ -27,8 +27,10 @@ from typing import TYPE_CHECKING
 # hot loop does not pay a per-iteration import cost. Public-API import (ADR-063)
 # keeps the API tier off of orchestration internals.
 from syn_domain.contexts.orchestration import (
+    ClaudePluginLockedHashMismatch,
     ClaudePluginNotRegistered,
     ClaudePluginRef,
+    content_pin_is_satisfied,
 )
 
 if TYPE_CHECKING:
@@ -102,6 +104,17 @@ def _select_innermost_per_name(
     return chosen
 
 
+def _require_pin_holds(source_url: str, version: str, name: str, resolved_sha: str) -> None:
+    """Refuse a lock record whose ``sha256-`` version contradicts its resolved_sha (#889).
+
+    The materializer fetches by ``resolved_sha`` alone, so a record that
+    predates the registration guard (#887) would otherwise install content the
+    version does not name. Same check as ``skill_resolution_service``.
+    """
+    if not content_pin_is_satisfied(version, resolved_sha):
+        raise ClaudePluginLockedHashMismatch(source_url, version, name, resolved_sha)
+
+
 class ClaudePluginResolutionService:
     """Resolution service: lock-projection-only after Phase A redesign."""
 
@@ -141,6 +154,12 @@ class ClaudePluginResolutionService:
                     },
                 )
                 raise ClaudePluginNotRegistered(ref.name, ref.version)
+            # WHY here as well as at resolution: install is where the caller
+            # gets a typed 422. Execute-time resolution runs in the background
+            # handler, so a refusal there fails the execution instead (#889).
+            _require_pin_holds(
+                existing.source_url, existing.version, ref.name, existing.resolved_sha
+            )
 
     async def _collect_unique_refs(
         self,
@@ -225,6 +244,7 @@ class ClaudePluginResolutionService:
                 "during workflow install or global add before execute time."
             )
             raise LookupError(msg)
+        _require_pin_holds(entry.source_url, entry.version, name, entry.resolved_sha)
         return ResolvedClaudePlugin(
             name=name,
             source_url=entry.source_url,
