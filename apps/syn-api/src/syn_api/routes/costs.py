@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from itertools import chain
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -31,6 +31,7 @@ from syn_api.types import (
     Ok,
     Result,
     SessionCostData,
+    SessionCostEntry,
 )
 from syn_shared.display.formatters import UNPRICED
 
@@ -153,7 +154,7 @@ class CostSummaryResponse(BaseModel):
     total_tokens: int = 0
     total_tool_calls: int = 0
     top_models: list[ModelCostEntry] = Field(default_factory=list)
-    top_sessions: list[dict[str, Any]] = Field(default_factory=list)
+    top_sessions: list[SessionCostEntry] = Field(default_factory=list)
 
 
 # =============================================================================
@@ -338,36 +339,61 @@ async def get_execution_cost(
         return Err(MetricsError.QUERY_FAILED, message=str(e))
 
 
+TOP_N = 5
+"""How many models and sessions ``get_cost_summary`` ranks (#701)."""
+
+
 async def get_cost_summary() -> Result[CostSummary, MetricsError]:
     """Get overall cost summary across all executions.
 
-    Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532.
-
-    Args:
+    Uses ExecutionCostQueryService and SessionCostQueryService (TimescaleDB)
+    for reads. See #532. ``top_models`` and ``top_sessions`` rank the same rows
+    the totals are summed from, most expensive first, ``TOP_N`` of each (#701).
     """
     await ensure_connected()
     try:
-        query_svc = get_execution_cost_query()
-        all_costs = await query_svc.list_all()
+        all_costs = await get_execution_cost_query().list_all()
+        session_costs = await get_session_cost_query().list_all()
 
-        total_cost = Decimal(str(sum(c.total_cost_usd for c in (all_costs or []))))
-        total_tokens = sum(c.total_tokens for c in (all_costs or []))
-        total_sessions = sum(c.session_count for c in (all_costs or []))
-        total_tool_calls = sum(c.tool_calls for c in (all_costs or []))
+        total_cost = Decimal(str(sum(c.total_cost_usd for c in all_costs)))
+        total_tokens = sum(c.total_tokens for c in all_costs)
+        total_sessions = sum(c.session_count for c in all_costs)
+        total_tool_calls = sum(c.tool_calls for c in all_costs)
 
         return Ok(
             CostSummary(
                 total_cost_usd=total_cost,
                 total_sessions=total_sessions,
-                total_executions=len(all_costs or []),
+                total_executions=len(all_costs),
                 total_tokens=total_tokens,
                 total_tool_calls=total_tool_calls,
-                top_models=[],
-                top_sessions=[],
+                top_models=_top_models(all_costs),
+                top_sessions=_top_sessions(session_costs),
             )
         )
     except Exception as e:
         return Err(MetricsError.QUERY_FAILED, message=str(e))
+
+
+def _top_models(costs: list[ExecutionCost]) -> list[ModelCostEntry]:
+    """Sum each model's cost across executions and keep the ``TOP_N`` largest."""
+    by_model: dict[str, Decimal] = {}
+    for c in costs:
+        for model, cost in c.cost_by_model.items():
+            by_model[model] = by_model.get(model, Decimal("0")) + cost
+    ranked = sorted(by_model.items(), key=lambda kv: kv[1], reverse=True)[:TOP_N]
+    return [ModelCostEntry(model=model, cost_usd=cost) for model, cost in ranked]
+
+
+def _top_sessions(costs: list[SessionCost]) -> list[SessionCostEntry]:
+    """Keep the ``TOP_N`` most expensive sessions."""
+    ranked = sorted(costs, key=lambda c: c.total_cost_usd, reverse=True)[:TOP_N]
+    return [
+        SessionCostEntry(
+            session_id=c.session_id, total_cost_usd=c.total_cost_usd, total_tokens=c.total_tokens
+        )
+        for c in ranked
+    ]
 
 
 # =============================================================================
@@ -557,5 +583,5 @@ async def get_cost_summary_endpoint() -> CostSummaryResponse:
         total_tokens=s.total_tokens,
         total_tool_calls=s.total_tool_calls,
         top_models=list(s.top_models),
-        top_sessions=s.top_sessions,
+        top_sessions=list(s.top_sessions),
     )
