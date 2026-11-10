@@ -24786,6 +24786,17 @@
               }
             ],
             "title": "Last Fired At"
+          },
+          "unable_to_fire_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unable To Fire Reason"
           }
         },
         "type": "object",
@@ -25081,6 +25092,17 @@
               }
             ],
             "title": "Created At"
+          },
+          "unable_to_fire_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unable To Fire Reason"
           }
         },
         "type": "object",
