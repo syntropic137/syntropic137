@@ -502,21 +502,12 @@ class WorkflowExecutionProcessor:
         folded from this execution's stream at the claim and kept current by
         the run's own saves, never read from the shared `execution_todo`
         store, whose other writers this run cannot see. Closing the run row
-        is the claimer's (1.5), not this.
-
-        Raises:
-            RuntimeError: the processor was built without the event stream and
-                projection type the fold is made from - a wiring defect.
-            LookupError: the claimed execution has no stream.
+        is the claimer's (1.5), not this. Raises as `run_recovered` does.
         """
         return await self.run_recovered(claimed.execution_id)
 
     async def run_recovered(self, execution_id: str) -> WorkflowExecutionResult:
-        """Drain a started run from its stream alone, wherever its to-do list stands.
-
-        `run_claimed`'s drain, without a claim: boot reconciliation hands over a
-        run whose stranded command Phase it collected green (ADR-078 D6, #2169),
-        so the next to-do is the next Phase, or none and the run completes.
+        """`run_claimed` without a claim: a run boot collected green goes on (ADR-078 D6).
 
         Raises:
             RuntimeError: built without the fold inputs - a wiring defect.
