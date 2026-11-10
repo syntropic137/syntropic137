@@ -261,8 +261,10 @@ run's). If the report also lists open handoffs, put its handoff table in the
 same comment, so the blocker and what the orchestrator owes are on one
 thread. The run then completes with unresolved findings, and a person continues
 it by resuming it: the resume re-runs round 2's fix against this comment, then
-its re-verification and this phase. A draft carrying a known defect with the
-blocker written on it is recoverable; a branch nobody can find is not.
+its re-verification and this phase. Post a new comment on every blocked bound
+and never edit an earlier one: the resume reads only the most recent, so the
+newest comment must name the current head. A draft carrying a known defect
+with the blocker written on it is recoverable; a branch nobody can find is not.
 
 Do not merge. Never push, never force push, never rebase.
 
