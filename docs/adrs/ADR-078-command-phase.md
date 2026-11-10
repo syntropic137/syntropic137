@@ -229,9 +229,9 @@ stranded command Phase depends on whether its verdict was recorded (#2169):
 | before `PhaseCommandsCompleted` | the Execution fails as `OrphanedByRestart` (`platform`), as an agent Phase's does |
 | after `PhaseCommandsCompleted`, before collection | collected from the event exactly as the lost-workspace row above, through the same function: `commands.json` with `tails_lost: true`, then D5 rules. A red gate fails the Execution as `CommandPhaseFailed` (`gate`) and nothing is written over it; a green one completes the Phase, and the Execution is then closed as `OrphanedByRestart` naming the Phase that was kept, as after an agent Phase's stranded salvage |
 
-The aggregate answers "is there a recorded, uncollected verdict for the running
-Phase" (`stranded_commands`). A retry's `PhaseStarted` closes that window, so an
-earlier attempt's verdict is never collected for a later one.
+`recorded_commands_for` holds a verdict only until it is collected or the Phase
+starts again, so an earlier attempt's verdict is never collected for a later
+one.
 
 ### D7. Output, credentials and cost
 

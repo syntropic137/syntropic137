@@ -57,7 +57,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.command_report im
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.command_gate import (
         RecordedCommands,
-        StrandedCommands,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
@@ -172,9 +171,11 @@ async def salvage_stranded_phase(
     A command Phase's salvage may END the execution: a red gate fails it as
     `gate` (ADR-078 D5), and `ended_the_run` says so.
     """
-    commands = aggregate.stranded_commands
-    if commands is not None:
-        return await _salvage_commands(aggregate, commands, collector=collector)
+    phase_id = aggregate.running_phase_id
+    if aggregate.status is ExecutionStatus.RUNNING and phase_id is not None:
+        commands = aggregate.recorded_commands_for(phase_id)
+        if commands is not None:
+            return await _salvage_commands(aggregate, phase_id, commands, collector=collector)
     stranded = aggregate.stranded_deliverable
     if stranded is None:
         return None
@@ -251,7 +252,8 @@ async def salvage_stranded_phase(
 
 async def _salvage_commands(
     aggregate: WorkflowExecutionAggregate,
-    commands: StrandedCommands,
+    phase_id: str,
+    commands: RecordedCommands,
     *,
     collector: ArtifactCollector,
 ) -> SalvagedPhase:
@@ -259,31 +261,32 @@ async def _salvage_commands(
     collected = await collect_recorded_commands(
         aggregate,
         collector=collector,
-        phase_id=commands.phase_id,
+        phase_id=phase_id,
         phase_name=commands.phase_name,
         session_id=None,
-        recorded=commands.recorded,
+        recorded=commands,
         # Nobody ran an agent, and nobody is left to say who ran the steps.
         agent=AgentIdentity(provider=None, model=None),
     )
-    if commands.recorded.success:
+    execution_id = aggregate.aggregate_id or ""
+    if commands.success:
         _complete_salvaged(
             aggregate,
-            commands.execution_id,
-            commands.workflow_id,
-            commands.phase_id,
+            execution_id,
+            aggregate.workflow_id or "",
+            phase_id,
             session_id=None,
             artifact_id=collected.artifact_id,
         )
     logger.warning(
         "Collected the recorded verdict of command phase %s (%s) in execution %s "
         "after a restart; its step output was lost with the workspace (#2169)",
-        commands.phase_id,
+        phase_id,
         commands.phase_name,
-        commands.execution_id,
+        execution_id,
     )
     return SalvagedPhase(
-        phase_id=commands.phase_id,
+        phase_id=phase_id,
         phase_name=commands.phase_name,
         artifact_id=collected.artifact_id,
         recovered_from=(
