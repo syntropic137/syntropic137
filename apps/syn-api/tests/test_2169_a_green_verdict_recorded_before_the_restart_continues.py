@@ -18,7 +18,7 @@ import os
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -60,6 +60,11 @@ from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
 )
 from syn_domain.testing.stored_replay import stored_envelopes
 
+if TYPE_CHECKING:
+    from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
+    )
+
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 _REAPED = CleanupResult(fully_reaped=True)
@@ -91,12 +96,12 @@ class _Summary:
 
 class _ArtifactRepository:
     def __init__(self) -> None:
-        self.saved: list[Any] = []
+        self.saved: list[ArtifactAggregate] = []
 
-    async def save(self, aggregate: Any) -> None:
+    async def save(self, aggregate: ArtifactAggregate) -> None:
         self.saved.append(aggregate)
 
-    async def save_new(self, aggregate: Any) -> None:
+    async def save_new(self, aggregate: ArtifactAggregate) -> None:
         await self.save(aggregate)
 
 

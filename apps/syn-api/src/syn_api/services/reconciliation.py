@@ -119,7 +119,9 @@ async def _continue(execution_id: str) -> None:
     except Exception:
         logger.exception("Could not continue recovered execution %s", execution_id)
         return
-    logger.warning("Recovered execution %s continued after the restart: %s", execution_id, result.status)
+    logger.warning(
+        "Recovered execution %s continued after the restart: %s", execution_id, result.status
+    )
 
 
 def _continue_recovered(execution_ids: list[str]) -> list[asyncio.Task[None]]:
