@@ -26329,7 +26329,8 @@
               "$ref": "#/components/schemas/SessionCostEntry"
             },
             "type": "array",
-            "title": "Top Sessions"
+            "title": "Top Sessions",
+            "description": "The most expensive completed sessions with a reported cost, most expensive first. Sessions still in progress, and completed sessions whose summary reports no cost, are not ranked."
           }
         },
         "type": "object",
