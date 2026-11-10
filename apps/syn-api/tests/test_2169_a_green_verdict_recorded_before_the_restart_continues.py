@@ -6,8 +6,10 @@ reconciliation collects it from the event and hands the run back to a REAL
 list from the stream alone: the next Phase is dispatched, or, when `build` was
 the last one, the run completes. Neither ends as `OrphanedByRestart`.
 
-The workspace is a double whose setup fails, so a dispatched `review` is seen as
-its `PhaseStarted` and a provision attempt, and nothing runs an agent.
+The workspace is a double: a dispatched `review` is seen as its `PhaseStarted`
+and as what was injected into its workspace, and then it stops, so nothing runs
+an agent. What `build` completed is carried on: into `review`'s inputs, and into
+the totals of the run that ends.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.repositories import EventStoreExecutionEventStream, RepositoryAdapter
 from syn_api.services import reconciliation
 from syn_api.services.reconciliation import CleanupResult, reconcile_orphaned_executions
+from syn_domain.contexts.artifacts._shared.value_objects import PhaseOutputFile
 from syn_domain.contexts.orchestration._shared.command_phase import CommandStep, PhaseKind
 from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import (
     CommandStepOutcome,
@@ -49,9 +52,15 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
+    ArtifactCollector,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.command_report import (
     COMMANDS_REPORT_PATH,
     CommandsReport,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+    WorkspaceProvisionHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
@@ -106,6 +115,28 @@ class _ArtifactRepository:
         await self.save(aggregate)
 
 
+class _ArtifactQuery:
+    """The artifact projection after the restart: it serves what was stored."""
+
+    def __init__(self, artifacts: _ArtifactRepository) -> None:
+        self._artifacts = artifacts
+
+    async def get_files_for_phase_injection(
+        self, execution_id: str, completed_phase_ids: list[str]
+    ) -> dict[str, list[PhaseOutputFile]]:
+        files: dict[str, list[PhaseOutputFile]] = {}
+        for a in self._artifacts.saved:
+            if a.execution_id == execution_id and a.phase_id in completed_phase_ids:
+                files.setdefault(a.phase_id, []).append(
+                    PhaseOutputFile(source_path=a.source_path, content=a.content)
+                )
+        return files
+
+
+class _StopAfterInjection(RuntimeError):
+    """`review` got as far as its inputs; nothing past them is under test."""
+
+
 def _failing_workspace() -> MagicMock:
     workspace_service = MagicMock()
     workspace_service.create_workspace.return_value.__aenter__.return_value.run_setup_phase = (
@@ -144,7 +175,7 @@ class _World:
             workspace_service=self.workspace,
             artifact_repository=AsyncMock(),
             artifact_content_storage=None,
-            artifact_query=None,
+            artifact_query=_ArtifactQuery(self.artifacts),  # type: ignore[arg-type]
             conversation_storage=None,
             observability_writer=None,
             controller=None,
@@ -244,8 +275,40 @@ async def test_a_green_verdict_dispatches_the_next_phase(
 ) -> None:
     world = _World([BUILD, REVIEW])
     await world.strand()
+    injected: list[str] = []
+    resolved: list[list[str]] = []
+    real_inject = ArtifactCollector.inject_from_previous_phases_explicit
+
+    async def _nothing(*_: object, **__: object) -> None:
+        return None
+
+    async def _record_inputs(
+        self: ArtifactCollector,
+        workspace: MagicMock,
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
+        execution_id: str = "",
+        phase_files: dict[str, list[PhaseOutputFile]] | None = None,
+    ) -> None:
+        resolved.append(list(completed_phase_ids))
+        workspace.inject_files = AsyncMock(
+            side_effect=lambda files: injected.extend(path for path, _ in files)
+        )
+        await real_inject(
+            self, workspace, completed_phase_ids, phase_outputs, execution_id, phase_files
+        )
+        raise _StopAfterInjection
+
+    # Hydration and agent staging are a container's; the inputs are what is checked.
+    monkeypatch.setattr(WorkspaceProvisionHandler, "_hydrate_workspace", _nothing)
+    monkeypatch.setattr(WorkspaceProvisionHandler, "_prepare_for_agent", _nothing)
+    monkeypatch.setattr(ArtifactCollector, "inject_from_previous_phases_explicit", _record_inputs)
 
     await _restart(world, monkeypatch)
+
+    assert resolved == [["build"]], "review was not told build completed"
+    assert "artifacts/input/build/commands.json" in injected, injected
+    assert "artifacts/input/build.md" in injected, injected
 
     report = world.stored_report()
     assert report.tails_lost is True
@@ -257,8 +320,9 @@ async def test_a_green_verdict_dispatches_the_next_phase(
     world.workspace.create_workspace.assert_called()
     failed = await world.named("WorkflowFailed")
     assert all(f.error_type != "OrphanedByRestart" for f in failed)
-    # `review`'s setup fails on purpose, so that is the only failure there is.
+    # `review` stops after its inputs on purpose, so that is the only failure there is.
     assert [f.failed_phase_id for f in failed] == ["review"]
+    assert failed[0].completed_phases == 1
 
 
 async def test_a_green_verdict_on_the_last_phase_completes_the_run(
@@ -272,5 +336,10 @@ async def test_a_green_verdict_on_the_last_phase_completes_the_run(
     assert world.stored_report().tails_lost is True
     assert [e.phase_id for e in await world.named("PhaseCompleted")] == ["build"]
     assert await world.named("WorkflowFailed") == []
-    assert len(await world.named("WorkflowCompleted")) == 1
+    completed = await world.named("WorkflowCompleted")
+    assert len(completed) == 1
+    # The totals are the run's, `build` included, not a fresh drain's zeroes.
+    assert (completed[0].completed_phases, completed[0].total_phases) == (1, 1)
+    assert completed[0].artifact_ids == [a.aggregate_id for a in world.artifacts.saved]
+    assert world.artifacts.saved, "the recovered report was never stored"
     world.workspace.create_workspace.assert_not_called()

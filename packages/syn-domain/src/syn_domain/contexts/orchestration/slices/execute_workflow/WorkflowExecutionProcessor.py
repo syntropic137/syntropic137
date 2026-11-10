@@ -94,9 +94,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     inherited_outputs,
-    inherited_phase_ids,
     record_continuation,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_progress import RunProgress
 from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import (
     fold_claimed_run,
     open_start,
@@ -466,8 +466,8 @@ class WorkflowExecutionProcessor:
             phases,
             _DispatchContext(inputs=inputs),
             repos,
-            origin,
             phase_outputs,
+            RunProgress.starting(origin),
             started_at,
         )
 
@@ -525,14 +525,18 @@ class WorkflowExecutionProcessor:
         pins = aggregate.start_pins
         repos = [RepositoryRef.from_slug(c.repository) for c in pins.source_commits]
         phase_outputs = await inherited_outputs(self._artifact_query, pins.resumed_from)
+        # What the run completed before it stopped is totalled and handed on too.
+        progress = RunProgress.from_stream(
+            pins.resumed_from, await self._execution_events.read(execution_id)
+        )
         return await self._drain(
             aggregate,
             aggregate.workflow_id or "",
             pins.pinned_phases,
             _DispatchContext(inputs=dict(pins.inputs), fold=fold),
             repos or None,
-            pins.resumed_from,
             phase_outputs,
+            progress,
             datetime.now(UTC),
         )
 
@@ -543,8 +547,8 @@ class WorkflowExecutionProcessor:
         phases: list[ExecutablePhase],
         dispatch_ctx: _DispatchContext,
         repos: list[RepositoryRef] | None,
-        origin: ResumeOrigin | None,
         phase_outputs: PhaseOutputCache,
+        progress: RunProgress,
         started_at: datetime,
     ) -> WorkflowExecutionResult:
         """Drain the to-do list of a started run until it ends."""
@@ -552,9 +556,9 @@ class WorkflowExecutionProcessor:
         journal = self._journal_of(dispatch_ctx)
         phase_map = {p.phase_id: p for p in phases}
 
-        phase_results: list[PhaseResult] = []
-        all_artifact_ids: list[str] = []
-        completed_phase_ids = inherited_phase_ids(origin)
+        phase_results = progress.phase_results
+        all_artifact_ids = progress.artifact_ids
+        completed_phase_ids = progress.completed_phase_ids
         try:
             await self._drain_todo_list(
                 execution_id=execution_id,
