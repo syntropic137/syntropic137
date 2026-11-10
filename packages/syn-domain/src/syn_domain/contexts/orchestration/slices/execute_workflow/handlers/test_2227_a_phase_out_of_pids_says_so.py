@@ -130,7 +130,9 @@ async def test_a_stream_cut_off_after_running_out_of_pids_names_the_pids_limit()
 
     reason = result.stream_result.error_reason
     assert reason is not None
-    assert reason.startswith(f"workspace hit its pids limit ({_LIMIT}): bash could not start a process")
+    assert reason.startswith(
+        f"workspace hit its pids limit ({_LIMIT}): bash could not start a process"
+    )
     assert "`fork: Resource temporarily unavailable`" in reason
     assert MISSING_TERMINAL_TURN_REASON not in reason
 
