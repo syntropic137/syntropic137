@@ -525,10 +525,6 @@ class WorkflowExecutionProcessor:
         pins = aggregate.start_pins
         repos = [RepositoryRef.from_slug(c.repository) for c in pins.source_commits]
         phase_outputs = await inherited_outputs(self._artifact_query, pins.resumed_from)
-        # What the run completed before it stopped is totalled and handed on too.
-        progress = RunProgress.from_stream(
-            pins.resumed_from, await self._execution_events.read(execution_id)
-        )
         return await self._drain(
             aggregate,
             aggregate.workflow_id or "",
@@ -536,7 +532,7 @@ class WorkflowExecutionProcessor:
             _DispatchContext(inputs=dict(pins.inputs), fold=fold),
             repos or None,
             phase_outputs,
-            progress,
+            await RunProgress.read(self._execution_events, execution_id, pins.resumed_from),
             datetime.now(UTC),
         )
 

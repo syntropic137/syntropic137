@@ -33,6 +33,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ResumeOrigin,
     )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
+        ExecutionEventStream,
+    )
 
 
 @dataclass
@@ -47,6 +50,13 @@ class RunProgress:
     def starting(cls, origin: ResumeOrigin | None) -> RunProgress:
         """A run whose stream holds no phase of its own yet."""
         return cls(completed_phase_ids=inherited_phase_ids(origin))
+
+    @classmethod
+    async def read(
+        cls, events: ExecutionEventStream, execution_id: str, origin: ResumeOrigin | None
+    ) -> RunProgress:
+        """A run picked up mid-way, from its own stream: what it already did counts."""
+        return cls.from_stream(origin, await events.read(execution_id))
 
     @classmethod
     def from_stream(cls, origin: ResumeOrigin | None, events: Sequence[object]) -> RunProgress:
