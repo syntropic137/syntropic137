@@ -86,8 +86,9 @@ How it ended is a `CommandStepOutcome`: `passed`, `failed`, `timed_out`,
 The Lane 1 event a Command Phase's steps record (ADR-078 D5): every step's
 outcome, exit code and duration, `success` and `timed_out`, and no session,
 provider or model. The to-do list goes on to collection whatever it says, so a
-failed build's logs are kept; a restart that lost the Workspace rebuilds
-`commands.json` from it with `tails_lost: true` (D6).
+failed build's logs are kept; a lost Workspace, in process or across a
+restart of the API, rebuilds `commands.json` from it with `tails_lost: true`
+(D6, #2169).
 
 ## Gate Failure
 
