@@ -124,21 +124,28 @@ def codex_login_fault_in(line: str) -> str | None:
 # --- The workspace ran out of processes (#2227) --------------------------------
 #
 # A workspace container has a pids limit (`resources.pids_limit`, default 256).
-# When the agent's commands use it up, the next fork fails with EAGAIN and bash
-# says so in the command's output:
+# When the agent's commands use it up, the next process cannot start (EAGAIN)
+# and bash says so in the command's output:
 #
 #   /usr/bin/bash: fork: retry: Resource temporarily unavailable
 #   /usr/bin/bash: fork: Resource temporarily unavailable
 #
-# Codex itself then cannot fork either, and its stream stops without
+# Codex itself then cannot start processes either, and its stream stops without
 # `turn.completed`. Reported as the generic "stream ended" reason, that cost an
 # operator the cause: exec-f02a26a13856 read as a codex fault for a verify phase
 # that had simply run two parallel builds into the limit.
 #
-# Anchored to bash's `fork:` spelling, not to EAGAIN's text alone: "Resource
+# Anchored to bash's two spellings, not to EAGAIN's text alone: "Resource
 # temporarily unavailable" is also what a non-blocking read says when it has
-# nothing to read, which is not a fault at all.
-_FORK_FAILURE_RE = re.compile(r"\bfork: (?:retry: )?Resource temporarily unavailable")
+# nothing to read, which is not a fault at all. They are spelled out whole
+# because the orchestration context reserves the bare word for an execution
+# operation (ci/fitness/code_quality/test_reserved_domain_words.py), and only
+# these exact process-limit messages are exempt from that gate.
+_BASH_OUT_OF_PIDS = (
+    "fork: retry: Resource temporarily unavailable",
+    "fork: Resource temporarily unavailable",
+)
+_OUT_OF_PIDS_RE = re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, _BASH_OUT_OF_PIDS)) + ")")
 
 
 def codex_pids_fault_in(output: str, pids_limit: int | None) -> str | None:
@@ -152,10 +159,10 @@ def codex_pids_fault_in(output: str, pids_limit: int | None) -> str | None:
     same wall) nor completed on its deliverable (#1111, the commands it
     depended on could not run).
     """
-    if not _FORK_FAILURE_RE.search(output):
+    if not _OUT_OF_PIDS_RE.search(output):
         return None
     limit = "" if pids_limit is None else f" ({pids_limit})"
     return (
-        f"workspace hit its pids limit{limit}: fork failed "
-        "(`Resource temporarily unavailable`); raise the phase's resources.pids_limit"
+        f"workspace hit its pids limit{limit}: bash could not start a process "
+        "(`fork: Resource temporarily unavailable`); raise the phase's resources.pids_limit"
     )

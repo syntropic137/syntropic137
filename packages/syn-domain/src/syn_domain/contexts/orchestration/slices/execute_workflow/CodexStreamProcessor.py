@@ -406,9 +406,9 @@ class CodexStreamProcessor:
         #: candidate is informative at all it is because the stream was cut
         #: off - which is the last such line, not the first.
         self._parse_fault_candidate: str | None = None
-        #: A fork failure in the LAST completed command's output, held until
-        #: end-of-stream (#2227). Each command overwrites it: a fork that failed
-        #: and was followed by commands that ran is pressure that passed, not
+        #: An out-of-pids failure in the LAST completed command's output, held
+        #: until end-of-stream (#2227). Each command overwrites it: one followed
+        #: by commands that ran is pressure that passed, not
         #: why the stream stopped.
         self._pids_fault_candidate: str | None = None
 
@@ -483,8 +483,8 @@ class CodexStreamProcessor:
             # `turn.completed` cannot be failed by something it recovered from.
             #
             # Order is deliberate, most specific first: a fault codex itself
-            # reported beats an inferred auth fault, which beats a fork failure
-            # in the last command's output, which beats an unparseable
+            # reported beats an inferred auth fault, which beats running out of
+            # pids in the last command's output, which beats an unparseable
             # `{`-leading line, which beats the generic "it just stopped".
             #
             # The parse fault ranks LAST of the three because it is the weakest

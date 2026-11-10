@@ -2,7 +2,7 @@
 
 exec-f02a26a13856's verify phase ran two parallel builds into the 256 pids
 limit. bash reported `fork: Resource temporarily unavailable`, codex could no
-longer fork, and its stream stopped without `turn.completed`. The phase error
+longer start processes, and its stream stopped without `turn.completed`. The phase error
 read only "codex stream ended without a terminal turn.completed event", which
 names a symptom and no subsystem.
 
@@ -42,7 +42,7 @@ pytestmark = pytest.mark.unit
 _LIMIT = 1024
 
 #: What bash wrote in exec-f02a26a13856's last tool call.
-_FORK_FAILURE = (
+_OUT_OF_PIDS = (
     "/usr/bin/bash: fork: retry: Resource temporarily unavailable\n"
     "/usr/bin/bash: fork: Resource temporarily unavailable\n"
 )
@@ -125,29 +125,29 @@ async def _run(lines: list[str], pids_limit: int | None = _LIMIT) -> AgentExecut
 
 
 @pytest.mark.asyncio
-async def test_a_stream_cut_off_after_a_fork_failure_names_the_pids_limit() -> None:
-    result = await _run(_cut_off_after(_command("item_1", _FORK_FAILURE, 254)))
+async def test_a_stream_cut_off_after_running_out_of_pids_names_the_pids_limit() -> None:
+    result = await _run(_cut_off_after(_command("item_1", _OUT_OF_PIDS, 254)))
 
     reason = result.stream_result.error_reason
     assert reason is not None
-    assert reason.startswith(f"workspace hit its pids limit ({_LIMIT}): fork failed")
-    assert "Resource temporarily unavailable" in reason
+    assert reason.startswith(f"workspace hit its pids limit ({_LIMIT}): bash could not start a process")
+    assert "`fork: Resource temporarily unavailable`" in reason
     assert MISSING_TERMINAL_TURN_REASON not in reason
 
 
 @pytest.mark.asyncio
-async def test_without_fork_evidence_the_reason_stays_the_generic_one() -> None:
+async def test_without_pids_evidence_the_reason_stays_the_generic_one() -> None:
     result = await _run(_cut_off_after(_command("item_1", "error: build failed\n", 1)))
 
     assert result.stream_result.error_reason == MISSING_TERMINAL_TURN_REASON
 
 
 @pytest.mark.asyncio
-async def test_a_fork_failure_followed_by_a_command_that_ran_is_not_the_cause() -> None:
+async def test_running_out_of_pids_followed_by_a_command_that_ran_is_not_the_cause() -> None:
     """The LAST command's output is the evidence: earlier pressure that passed is not."""
     result = await _run(
         _cut_off_after(
-            _command("item_1", _FORK_FAILURE, 254),
+            _command("item_1", _OUT_OF_PIDS, 254),
             _command("item_2", "On branch main\n", 0),
         )
     )
@@ -156,9 +156,9 @@ async def test_a_fork_failure_followed_by_a_command_that_ran_is_not_the_cause() 
 
 
 @pytest.mark.asyncio
-async def test_a_fork_failure_the_turn_survived_fails_nothing() -> None:
+async def test_running_out_of_pids_the_turn_survived_fails_nothing() -> None:
     lines = [
-        *_cut_off_after(_command("item_1", _FORK_FAILURE, 254)),
+        *_cut_off_after(_command("item_1", _OUT_OF_PIDS, 254)),
         json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 1}}),
     ]
 
@@ -169,15 +169,15 @@ async def test_a_fork_failure_the_turn_survived_fails_nothing() -> None:
 
 @pytest.mark.asyncio
 async def test_an_unrecorded_limit_is_still_named_as_the_pids_limit() -> None:
-    result = await _run(_cut_off_after(_command("item_1", _FORK_FAILURE, 254)), pids_limit=None)
+    result = await _run(_cut_off_after(_command("item_1", _OUT_OF_PIDS, 254)), pids_limit=None)
 
     reason = result.stream_result.error_reason
     assert reason is not None
-    assert reason.startswith("workspace hit its pids limit: fork failed")
+    assert reason.startswith("workspace hit its pids limit: bash could not start a process")
 
 
 @pytest.mark.asyncio
-async def test_resource_temporarily_unavailable_alone_is_not_a_fork_failure() -> None:
+async def test_resource_temporarily_unavailable_alone_is_not_running_out_of_pids() -> None:
     """EAGAIN's text is also a non-blocking read with nothing to read."""
     output = "BlockingIOError: [Errno 11] Resource temporarily unavailable\n"
     result = await _run(_cut_off_after(_command("item_1", output, 1)))
