@@ -97,10 +97,14 @@ async def test_a_pids_request_above_the_ceiling_is_refused_before_any_container(
     assert isolation._instances == {}
 
 
-def test_the_pids_ceiling_comes_from_settings_and_unset_means_the_default() -> None:
+def test_the_pids_ceiling_comes_from_settings_and_unset_means_1024() -> None:
+    """Unset admits the 1024 the shipped SDLC gate phases request (#2227)."""
     with patch.dict(os.environ, {}, clear=True):
         unset = WorkspaceServiceConfig.from_settings(WorkspaceSettings(_env_file=None))
-        assert unset.pids_max == unset.pids_limit == 256
+        assert (unset.pids_limit, unset.pids_max) == (256, 1024)
+    with patch.dict(os.environ, {"SYN_WORKSPACE_PIDS_LIMIT": "2048"}, clear=True):
+        high = WorkspaceServiceConfig.from_settings(WorkspaceSettings(_env_file=None))
+        assert (high.pids_limit, high.pids_max) == (2048, 2048)
     env = {"SYN_WORKSPACE_PIDS_LIMIT": "512", "SYN_WORKSPACE_PIDS_MAX": "4096"}
     with patch.dict(os.environ, env, clear=True):
         raised = WorkspaceServiceConfig.from_settings(WorkspaceSettings(_env_file=None))
