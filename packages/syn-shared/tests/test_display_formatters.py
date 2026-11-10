@@ -365,17 +365,28 @@ class TestFormatPhase:
 
 @pytest.mark.unit
 class TestFormatRepos:
+    """Stored repos are full URLs, not slugs: the label must not start ``/github.com`` (#1837)."""
+
     @pytest.mark.parametrize(
         ("value", "expected"),
         [
             (None, None),
             ([], None),
             ((), None),
-            (["acme/foo"], "foo"),
-            (["acme/foo", "acme/bar"], "foo +1"),
-            (["acme/foo", "acme/bar", "acme/baz"], "foo +2"),
-            (["  acme/foo  ", "", "acme/bar"], "foo +1"),
+            (["", "  "], None),
+            (["acme/foo"], "acme/foo"),
+            (["https://github.com/acme/widgets"], "acme/widgets"),
+            (["http://github.com/acme/widgets"], "acme/widgets"),
+            (["https://github.com/acme/widgets.git"], "acme/widgets"),
+            (["https://github.com/acme/widgets/"], "acme/widgets"),
+            (["https://gitlab.example.com/acme/widgets"], "acme/widgets"),
+            (["git@github.com:acme/widgets.git"], "acme/widgets"),
+            (["ssh://git@github.com/acme/widgets"], "acme/widgets"),
+            (["https://github.com/acme/foo", "acme/bar"], "acme/foo +1"),
+            (["acme/foo", "acme/bar", "acme/baz"], "acme/foo +2"),
+            (["  https://github.com/acme/foo  ", "", "acme/bar"], "acme/foo +1"),
             (["singletoken"], "singletoken"),
+            (["/singletoken/"], "singletoken"),
         ],
     )
     def test_renders_expected_string(
