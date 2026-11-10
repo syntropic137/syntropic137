@@ -895,7 +895,9 @@ run at once by the same factor (docs/north-star.md).
    lavapipe suites exceed it and fail with fork/EAGAIN. A phase declares
    `resources: {pids_limit: N}` (floor 64). syn137 now owns the default
    (`SYN_WORKSPACE_PIDS_LIMIT`, 256, so nothing changes until someone asks) and
-   the ceiling (`SYN_WORKSPACE_PIDS_MAX`; unset means the default), checked and
+   the ceiling (`SYN_WORKSPACE_PIDS_MAX`; unset means 1024, or the default
+   limit if higher, so the SDLC gate phases' 1024 (#2227) runs on a default
+   install), checked and
    refused at exactly the points memory is. The effective limit rides
    `SecurityPolicy.pids_limit` to the adapter, which passes it as
    `WorkspaceConfig.security = dataclasses.replace(<provider policy>,

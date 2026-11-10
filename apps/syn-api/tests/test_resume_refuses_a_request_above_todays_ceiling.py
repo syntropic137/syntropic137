@@ -198,7 +198,9 @@ async def test_the_dispatcher_refuses_a_pids_request_before_it_spawns_the_start(
 
     handler = StartResumeHandler.__new__(StartResumeHandler)
     handler._executions = executions  # type: ignore[assignment]
+    # Today's ceiling, set explicitly: unset it would be 1024 and admit 256.
     monkeypatch.setenv("SYN_WORKSPACE_PIDS_LIMIT", "128")
+    monkeypatch.setenv("SYN_WORKSPACE_PIDS_MAX", "128")
     from syn_shared.settings import reset_settings
 
     reset_settings()
@@ -207,4 +209,5 @@ async def test_the_dispatcher_refuses_a_pids_request_before_it_spawns_the_start(
             await handler.validate(PARENT)
     finally:
         monkeypatch.delenv("SYN_WORKSPACE_PIDS_LIMIT")
+        monkeypatch.delenv("SYN_WORKSPACE_PIDS_MAX")
         reset_settings()

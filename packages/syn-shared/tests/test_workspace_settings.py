@@ -45,11 +45,26 @@ class TestWorkspaceSettings:
             # agentic-workspace's SecurityConfig default, now owned here (okrs-51p.30).
             assert settings.pids_limit == 256
             assert settings.pids_max is None
-            assert settings.pids_ceiling == 256
+            # Unset ceiling admits the SDLC gate phases' 1024 (#2227).
+            assert settings.pids_ceiling == 1024
             assert settings.cpu_limit == 2.0
 
             assert settings.docker_image == DEFAULT_WORKSPACE_IMAGE
             assert settings.runtime is None  # auto: agentic-workspace decides
+
+    @pytest.mark.parametrize(
+        ("env", "ceiling"),
+        [
+            ({"SYN_WORKSPACE_PIDS_LIMIT": "2048"}, 2048),
+            ({"SYN_WORKSPACE_PIDS_MAX": "512"}, 512),
+            ({"SYN_WORKSPACE_PIDS_LIMIT": "512", "SYN_WORKSPACE_PIDS_MAX": "4096"}, 4096),
+        ],
+        ids=["unset-follows-a-higher-default", "set-below-1024-is-kept", "set-above"],
+    )
+    def test_pids_ceiling(self, env: dict[str, str], ceiling: int) -> None:
+        """Unset is 1024 or the default limit if higher; a set ceiling is used as given."""
+        with patch.dict(os.environ, env, clear=True):
+            assert WorkspaceSettings(_env_file=None).pids_ceiling == ceiling
 
     def test_container_limits_override(self) -> None:
         """Per-container limits are read from SYN_WORKSPACE_* env vars."""
