@@ -22,7 +22,10 @@ Two halves have to agree, and each is tested where it lives:
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -518,6 +521,120 @@ class TestAResumedFixBuildsOnThePushedHead:
         assert "saying `2 of 2` repair rounds ran" in rounds
         assert "`2 of 2`" in blocked
         assert "gives the head SHA it applies to" in blocked
+
+
+def _latest_blocked_comment(comments: list[tuple[str, str, str]]) -> str:
+    """The head SHA in the comment the resumed fix round picks (#1616).
+
+    `comments` are `(createdAt, url, body)` as `gh pr view --json comments`
+    returns them. The jq program is read from the prompt and run as written,
+    so what is tested is the selector the agent is told to use.
+    """
+    rounds = _section(
+        (_WORKFLOW.parent / "phases" / f"{_LAST_FIX}.md").read_text(), "Which round this is"
+    )
+    found = re.search(r"--json comments --jq '([^']+)'", rounds)
+    assert found, f"{_LAST_FIX} no longer gives the command that picks the BLOCKED comment"
+    jq = shutil.which("jq")
+    assert jq, "jq is needed to run the selector the prompt gives"
+    payload = {"comments": [{"createdAt": c, "url": u, "body": b} for c, u, b in comments]}
+    out = subprocess.run(
+        [jq, "-c", found.group(1)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    picked = json.loads(out.stdout)
+    sha = re.search(r"\b[0-9a-f]{40}\b", picked["body"])
+    assert sha, picked
+    return sha.group(0)
+
+
+class TestASecondBlockedBoundResumesFromTheLatestComment:
+    """Two blocked bounds leave two `2 of 2` comments, each naming its head.
+
+    The older comment names A, the head before the second blocked attempt
+    pushed B. Picking A makes the remote check fail on B and the resumed round
+    stops before repairing anything (#1616).
+    """
+
+    A, B, C = "a" * 40, "b" * 40, "c" * 40
+
+    @staticmethod
+    def _blocked(sha: str) -> str:
+        return f"BLOCKED: tests fail. Head `{sha}`. `2 of 2` repair rounds ran."
+
+    @pytest.mark.parametrize("newest_first", [False, True])
+    def test_the_newer_comment_is_the_verified_sha(self, newest_first: bool) -> None:
+        comments = [
+            ("2026-11-01T10:00:00Z", "https://x/c/1", self._blocked(self.A)),
+            ("2026-11-02T10:00:00Z", "https://x/c/2", self._blocked(self.B)),
+            # Newer than both, but not a BLOCKED comment: it must not be picked.
+            ("2026-11-03T10:00:00Z", "https://x/c/3", f"LGTM at {self.C}"),
+        ]
+        if newest_first:
+            comments.reverse()
+        picked = _latest_blocked_comment(comments)
+        assert picked == self.B
+        got = _fix_checkout(_LAST_FIX, reported=self.A, remote=self.B, resume_comment=picked)
+        assert got == self.B
+
+    def test_a_latest_comment_off_the_remote_head_stops_rather_than_falling_back(self) -> None:
+        # The older comment happens to name the remote head; the newer one does
+        # not. Falling back to the older one would "repair" a head nobody
+        # verified last, so the round must stop instead.
+        picked = _latest_blocked_comment(
+            [
+                ("2026-11-01T10:00:00Z", "https://x/c/1", self._blocked(self.B)),
+                ("2026-11-02T10:00:00Z", "https://x/c/2", self._blocked(self.C)),
+            ]
+        )
+        assert picked == self.C
+        assert (
+            _fix_checkout(_LAST_FIX, reported=self.A, remote=self.B, resume_comment=picked) is None
+        )
+        rounds = re.sub(
+            r"\s+",
+            " ",
+            _section(
+                (_WORKFLOW.parent / "phases" / f"{_LAST_FIX}.md").read_text(), "Which round this is"
+            ),
+        )
+        assert "**Never fall back to an older comment**" in rounds
+        assert "report both SHAs and the comment's URL" in rounds
+
+    def test_every_copy_carries_the_latest_comment_rule(self) -> None:
+        # Not every copy is held byte-equal to implement-v3 by another test
+        # (the sonnet-fix arm's fix_2.md differs elsewhere), so check each.
+        sdlc = _REPO_ROOT / "workflows" / "sdlc"
+        copies = {p.parent.parent.name: p for p in sdlc.glob("*/phases/fix_2.md")}
+        assert {
+            "implement-v3",
+            "implement-v4-precheck",
+            "implement-v4-precheck-sonnet-fix",
+            "implement-v7",
+            "reverify-pr",
+        } <= set(copies)
+        rule = re.sub(
+            r"\s+",
+            " ",
+            _section(
+                (_WORKFLOW.parent / "phases" / f"{_LAST_FIX}.md").read_text(), "Which round this is"
+            ),
+        )
+        selector = "sort_by(.createdAt) | last"
+        assert selector in rule
+        for name, path in copies.items():
+            text = re.sub(r"\s+", " ", _section(path.read_text(), "Which round this is"))
+            assert selector in text, name
+            assert "**Never fall back to an older comment**" in text, name
+            finalize = re.sub(
+                r"\s+", " ", _section((path.parent / "finalize_pr.md").read_text(), "If BLOCKED")
+            )
+            assert "Post a new comment on every blocked bound and never edit an earlier one" in (
+                finalize
+            ), name
 
 
 @pytest.mark.parametrize(

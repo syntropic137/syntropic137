@@ -50,11 +50,11 @@ gh pr view <n> --json comments --jq '[.comments[] | select(.body | contains("2 o
 ```
 
 Its findings are your scope too, and **on a resume the verified SHA is the
-head SHA that comment names**, not the one `reverify` verified: that older SHA is
-the head before the previous attempt pushed, so checking it out would discard that attempt's commits and the remote
-head can never equal it. Use the comment's SHA wherever the sections below say
-"the verified SHA", including in both `rev-parse` checks, and paste the comment's
-URL into your report beside it. If it is not the remote head that
+head SHA that comment names**, not the one `reverify` verified: that older SHA
+is the head before the previous attempt pushed, so checking it out would discard
+that attempt's commits and the remote head can never equal it. Use the comment's
+SHA wherever the sections below say "the verified SHA", including in both
+`rev-parse` checks, and paste the comment's URL into your report beside it. If it is not the remote head that
 `git rev-parse origin/<branch>` reads, stop as that check says and report both
 SHAs and the comment's URL. **Never fall back to an older comment** to find one
 that matches: an older comment names a head from before a later blocked attempt
