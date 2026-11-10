@@ -14,7 +14,6 @@ event stream, never off a return value.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -42,6 +41,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.command_report import (
     COMMANDS_REPORT_PATH,
+    CommandsReport,
 )
 
 if TYPE_CHECKING:
@@ -188,13 +188,12 @@ def _install(
     )
 
 
-def _stored_report(artifacts: _ArtifactRepository) -> dict[str, Any]:
+def _stored_report(artifacts: _ArtifactRepository) -> CommandsReport:
     assert len(artifacts.saved) == 1, "the recorded verdict was not stored as commands.json"
     stored = artifacts.saved[0]
     assert stored.phase_id == "build"
     assert stored.source_path == COMMANDS_REPORT_PATH
-    report: dict[str, Any] = json.loads(stored.content)
-    return report
+    return CommandsReport.model_validate_json(stored.content)
 
 
 async def test_a_red_gate_recorded_before_the_restart_fails_as_a_gate(
@@ -207,9 +206,9 @@ async def test_a_red_gate_recorded_before_the_restart_fails_as_a_gate(
     await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
 
     report = _stored_report(artifacts)
-    assert report["tails_lost"] is True
-    assert report["success"] is False
-    assert [(s["name"], s["exit_code"]) for s in report["steps"]] == [
+    assert report.tails_lost is True
+    assert report.success is False
+    assert [(s.name, s.exit_code) for s in report.steps] == [
         ("cargo-build", 0),
         ("wasm", 2),
     ]
@@ -240,8 +239,8 @@ async def test_a_green_gate_recorded_before_the_restart_completes_its_phase(
     await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
 
     report = _stored_report(artifacts)
-    assert report["tails_lost"] is True
-    assert report["success"] is True
+    assert report.tails_lost is True
+    assert report.success is True
 
     completed = store.events_named("PhaseCompleted")
     assert len(completed) == 1, "a passed gate's phase was discarded with the run"
