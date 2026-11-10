@@ -49,6 +49,12 @@ from syn_adapters.workspace_backends.reclaim_delete import (
     DELETE_PREFIX,
     is_being_deleted,
 )
+from syn_shared.pytest_temp import (
+    PYTEST_TEMP_PREFIX,
+    EntryKind,
+    TempTreeEntry,
+    is_pytest_temp_root,
+)
 
 __all__ = ["CLAIM_PREFIX", "DELETE_PREFIX", "is_being_deleted"]
 
@@ -71,23 +77,6 @@ SESSION_STORE_DIRNAME = ".agentic-session-store"
 #: the bind of the workspace directory. It is the ONE place the platform
 #: itself puts a temp tree, so it is the only place one is recognised.
 WORKSPACE_TMPDIR = ".tmp"
-
-#: pytest's per-user temp root under TMPDIR, ``<tmp>/pytest-of-<user>``
-#: (``_pytest/tmpdir.py``, ``TempPathFactory.getbasetemp``). Agents run test
-#: suites in their workspace, and the reclaimer's own tests create session
-#: stores as fixtures there (#2095).
-PYTEST_TEMP_PREFIX = "pytest-of-"
-
-#: What pytest writes directly inside ``pytest-of-<user>`` and nothing else
-#: (``_pytest/pathlib.py``): numbered run dirs ``pytest-<N>``
-#: (``make_numbered_dir``), a ``pytest-current`` symlink to the newest
-#: (``_force_symlink``), and ``garbage-<uuid4>`` dirs it is part way through
-#: deleting (``maybe_delete_a_numbered_dir``).
-_PYTEST_RUN_DIR = re.compile(r"pytest-[0-9]+")
-_PYTEST_GARBAGE_DIR = re.compile(
-    r"garbage-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-)
-_PYTEST_CURRENT_LINK = "pytest-current"
 
 
 def pytest_temp_roots(directory: Path) -> frozenset[Path]:
@@ -114,17 +103,16 @@ def pytest_temp_roots(directory: Path) -> frozenset[Path]:
 
 
 def _is_pytest_shaped(root: Path) -> bool:
+    """`is_pytest_temp_root`, asked of a real directory on this filesystem."""
     if root.is_symlink() or not root.is_dir():
         return False
-    for child in root.iterdir():
-        if child.is_symlink():
-            if child.name != _PYTEST_CURRENT_LINK:
-                return False
-        elif not child.is_dir() or not (
-            _PYTEST_RUN_DIR.fullmatch(child.name) or _PYTEST_GARBAGE_DIR.fullmatch(child.name)
-        ):
-            return False
-    return True
+    return is_pytest_temp_root(root.name, (_entry(child) for child in root.iterdir()))
+
+
+def _entry(child: Path) -> TempTreeEntry:
+    if child.is_symlink():
+        return TempTreeEntry(child.name, EntryKind.SYMLINK)
+    return TempTreeEntry(child.name, EntryKind.DIRECTORY if child.is_dir() else EntryKind.OTHER)
 
 
 def _inside_any(path: Path, roots: frozenset[Path]) -> bool:

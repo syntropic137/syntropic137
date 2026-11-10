@@ -146,6 +146,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks import (
     split_moved_gitlinks,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.pytest_temp_trees import (
+    split_pytest_temp_trees,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_diffstat import diffstat
 from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_rehearsal import (
     run_quarantine_rehearsal,
@@ -639,7 +642,9 @@ async def _unsaved_work(
     # A gitlink git moved is not a change anybody made (#1499), and the
     # porcelain line cannot say so: see `moved_gitlinks`.
     split = await split_moved_gitlinks(workspace, repo, files)
-    authored, moved = split.authored, split.moved
+    # Nor is pytest's temp root (#2200): see `pytest_temp_trees`.
+    authored = (await split_pytest_temp_trees(workspace, repo, split.authored)).authored
+    moved = split.moved
     submodules = tuple(sorted(split.worked_in)) if uncommitted_is_work else ()
     # THE ONE LINE THE EXEMPTION DECIDES (#1308). An uncommitted change is
     # evidence of work unless the phase both disclaimed it and was unable to
