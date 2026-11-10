@@ -176,8 +176,8 @@ Execution.
 ## Workspace Pids Ceiling
 
 The highest [Workspace Pids Limit](#workspace-pids-limit) one Phase may request
-on this deployment (`SYN_WORKSPACE_PIDS_MAX`; unset means the default, so
-nothing above it). Refused, never clamped, at the same four points as the
+on this deployment (`SYN_WORKSPACE_PIDS_MAX`; unset means 1024, or the
+default limit if that is higher). Refused, never clamped, at the same four points as the
 [Workspace Memory Ceiling](#workspace-memory-ceiling): a build given fewer pids
 than it declared fails late with EAGAIN ("Resource temporarily
 unavailable"), which reads as a code bug.

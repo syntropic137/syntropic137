@@ -258,10 +258,10 @@ def test_start_refuses_a_stored_pids_request_above_the_ceiling() -> None:
 
 
 def test_start_reads_the_deployment_pids_ceiling_when_none_is_passed() -> None:
-    """Unset SYN_WORKSPACE_PIDS_MAX is the default limit, 256: 2048 is refused."""
+    """Unset SYN_WORKSPACE_PIDS_MAX is 1024: the SDLC gate phases' 1024 passes, 2048 is refused."""
     with pytest.raises(WorkspacePidsOverCapError):
         validate_phase_declarations(_Template(_pids_phase(2048)))  # type: ignore[arg-type]
-    validate_phase_declarations(_Template(_pids_phase(256)))  # type: ignore[arg-type]
+    validate_phase_declarations(_Template(_pids_phase(1024)))  # type: ignore[arg-type]
 
 
 async def test_a_direct_handler_caller_is_refused_above_the_pids_ceiling() -> None:

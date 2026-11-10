@@ -51,6 +51,7 @@ from syn_shared.settings.workspace import (
     DEFAULT_WORKSPACE_CPU_LIMIT,
     DEFAULT_WORKSPACE_MEMORY_LIMIT_MB,
     DEFAULT_WORKSPACE_PIDS_LIMIT,
+    DEFAULT_WORKSPACE_PIDS_MAX,
     WorkspaceRuntime,
 )
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
@@ -137,7 +138,7 @@ class WorkspaceServiceConfig:
     memory_limit_mb: int = DEFAULT_WORKSPACE_MEMORY_LIMIT_MB
     memory_max_mb: int = DEFAULT_WORKSPACE_MEMORY_LIMIT_MB
     pids_limit: int = DEFAULT_WORKSPACE_PIDS_LIMIT
-    pids_max: int = DEFAULT_WORKSPACE_PIDS_LIMIT
+    pids_max: int = DEFAULT_WORKSPACE_PIDS_MAX
     cpu_limit_cores: float = DEFAULT_WORKSPACE_CPU_LIMIT
     timeout_seconds: int = 3600  # 1 hour
     allowed_hosts: tuple[str, ...] = (
@@ -164,8 +165,8 @@ class WorkspaceServiceConfig:
                 else settings.memory_max_mb
             ),
             pids_limit=settings.pids_limit,
-            # Unset is "no phase may ask for more than the default".
-            pids_max=(settings.pids_limit if settings.pids_max is None else settings.pids_max),
+            # One rule for the ceiling, shared with install and start.
+            pids_max=settings.pids_ceiling,
             cpu_limit_cores=settings.cpu_limit,
             runtime=settings.runtime,
         )
