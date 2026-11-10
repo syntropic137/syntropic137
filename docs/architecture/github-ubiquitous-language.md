@@ -48,7 +48,21 @@ covers that repository; dispatch skips a rule with none. So registering one is
 refused (409) when no Installation resolves: no GitHub App on the server, no
 Installation on the repository, or a repository that names nothing (#1864).
 Rules stored before that refusal existed can still be `ACTIVE` with no
-Installation and never fire; surfacing them is #2202.
+Installation and never fire. Such a rule is **Unable to fire**.
+
+## Unable to fire
+
+A Trigger Rule that names a repository but has no Installation, so no event
+can ever make it Fire, whatever its status. It is a property of the stored rule,
+derived on the read path and never recorded as an event: `GET /triggers` and
+`GET /triggers/{id}` carry the reason in `unable_to_fire_reason` (None for any
+other rule), `syn triggers list` and `show` print it, and the poller warns once
+per rule as it skips it (#2202). A rule with no repository needs no
+Installation and is never Unable to fire.
+
+**Not Blocked.** Blocked is one Fire that a safety guard refused
+(`TriggerBlocked`, `block_reason`). Unable to fire means no Fire can happen at
+all. A rule that is Unable to fire never reaches the guards.
 
 ## Pause and Resume
 
