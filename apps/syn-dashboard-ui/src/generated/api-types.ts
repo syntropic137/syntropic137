@@ -10207,6 +10207,8 @@ export interface components {
             created_by: string;
             /** Last Fired At */
             last_fired_at?: string | null;
+            /** Unable To Fire Reason */
+            unable_to_fire_reason?: string | null;
         };
         /**
          * TriggerError
@@ -10368,6 +10370,8 @@ export interface components {
             fire_count: number;
             /** Created At */
             created_at?: string | null;
+            /** Unable To Fire Reason */
+            unable_to_fire_reason?: string | null;
         };
         /**
          * TypeCount

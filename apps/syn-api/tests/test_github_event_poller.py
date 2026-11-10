@@ -321,6 +321,43 @@ class TestPollerStartStop:
         assert mock_client.poll_count == 0
 
 
+class TestNoInstallationTriggers:
+    """#2202: an active trigger with no installation is unable to fire."""
+
+    @pytest.mark.asyncio
+    async def test_it_is_warned_about_once_naming_the_trigger_and_repo(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        client = _RecordingEventsClient()
+        store = InMemoryTriggerQueryStore()
+        await _index_repo_trigger(store, "tr-ok", "owner/repo")
+        await store.index_trigger(
+            trigger_id="tr-no-inst",
+            name="tr-no-inst",
+            event="push",
+            repository="acme/widgets",
+            workflow_id="wf-001",
+            conditions=[],
+            input_mapping={},
+            config=TriggerConfig(),
+            installation_id="",
+            created_by="test",
+            status="active",
+        )
+        poller = await _poller_over(client, store, {})
+
+        with caplog.at_level("DEBUG", logger="syn_domain.contexts.github.services"):
+            for _ in range(2):
+                await poller._run_poll_cycle()
+
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        message = warnings[0].getMessage()
+        assert "tr-no-inst" in message
+        assert "acme/widgets" in message
+        assert client.polled == ["owner/repo"] * 2
+
+
 class _RecordingEventsClient(MockEventsClient):
     def __init__(self) -> None:
         super().__init__()

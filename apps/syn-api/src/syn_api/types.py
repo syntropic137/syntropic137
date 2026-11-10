@@ -1891,6 +1891,7 @@ class TriggerSummary(BaseModel):
     status: str
     fire_count: int = 0
     created_at: datetime | None = None
+    unable_to_fire_reason: str | None = None
 
 
 class TriggerDetail(BaseModel):
@@ -1911,6 +1912,7 @@ class TriggerDetail(BaseModel):
     installation_id: str = ""
     created_by: str = ""
     last_fired_at: datetime | None = None
+    unable_to_fire_reason: str | None = None
 
 
 class TriggerHistoryEntry(BaseModel):

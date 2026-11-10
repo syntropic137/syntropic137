@@ -123,6 +123,22 @@ async def _resolve_trigger_id(trigger_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def unable_to_fire_reason(repository: str, installation_id: str | None) -> str | None:
+    """Why a stored rule can never fire, or None when nothing stops it.
+
+    A rule on a repository fires only through that repository's GitHub App
+    installation; the poller skips one stored without it on every cycle. Rules
+    created before #2201 refused that can still be ``active`` in that state
+    (#2202). A rule with no repository needs no installation and is not flagged.
+    """
+    if not repository or (installation_id or "").strip():
+        return None
+    return (
+        f"no GitHub installation: install the GitHub App on {repository}, "
+        "then re-create the trigger"
+    )
+
+
 async def list_triggers(
     repository: str | None = None,
     status: str | None = None,
@@ -153,6 +169,9 @@ async def list_triggers(
                 status=t.status,
                 fire_count=t.fire_count,
                 created_at=t.created_at if hasattr(t, "created_at") else None,
+                unable_to_fire_reason=unable_to_fire_reason(
+                    repo_names.get(t.repository, t.repository), t.installation_id
+                ),
             )
             for t in triggers
         ]
@@ -211,6 +230,7 @@ async def get_trigger(
             installation_id=indexed.installation_id or "",
             created_by=indexed.created_by or "",
             last_fired_at=indexed.last_fired_at if hasattr(indexed, "last_fired_at") else None,
+            unable_to_fire_reason=unable_to_fire_reason(display_repo, indexed.installation_id),
         )
     )
 
@@ -265,24 +285,11 @@ async def list_triggers_endpoint(
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
+    # list_triggers() already returns the response model. Rebuilding each
+    # summary here field by field dropped created_at once (#955) and would
+    # drop every field added since, so the summaries pass through as built.
     return TriggerListResponse(
-        triggers=[
-            TriggerSummary(
-                trigger_id=t.trigger_id,
-                name=t.name,
-                event=t.event,
-                repository=t.repository,
-                workflow_id=t.workflow_id,
-                workflow_name=t.workflow_name,
-                status=str(t.status),
-                fire_count=t.fire_count,
-                # Same omission as #955 one file over: list_triggers() resolves
-                # created_at, and rebuilding the summary here without it let the
-                # model default (None) answer instead.
-                created_at=t.created_at,
-            )
-            for t in result.value
-        ],
+        triggers=result.value,
         total=len(result.value),
     )
 
