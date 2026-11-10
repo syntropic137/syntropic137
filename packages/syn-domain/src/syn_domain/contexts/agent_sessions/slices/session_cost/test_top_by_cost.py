@@ -9,9 +9,9 @@ ORDER BY, so which session wins is pinned against real SQL in
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,7 +20,9 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.query_service import
     _TOP_BY_COST_QUERY,
     SessionCostQueryService,
 )
-from syn_shared.events import SESSION_SUMMARY
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
@@ -39,8 +41,7 @@ class _HistoryConnection:
     async def fetch(self, query: str, *args: object) -> list[dict[str, str]]:
         self.queries.append(query)
         assert query == _TOP_BY_COST_QUERY
-        event_type, limit = args
-        assert event_type == SESSION_SUMMARY
+        (limit,) = args
         assert isinstance(limit, int)
         ranked = sorted(self.costs, key=lambda sid: self.costs[sid], reverse=True)[:limit]
         self.rows_returned += len(ranked)
@@ -100,7 +101,7 @@ async def test_the_limit_is_pushed_to_sql_and_only_those_ids_are_priced() -> Non
     top = await service.top_by_cost(5)
 
     assert conn.queries == [_TOP_BY_COST_QUERY]
-    assert "LIMIT $2" in _TOP_BY_COST_QUERY
+    assert "LIMIT $1" in _TOP_BY_COST_QUERY
     assert conn.rows_returned == 5
     assert asked == [
         ["sess-oldest-expensive", "sess-09999", "sess-09998", "sess-09997", "sess-09996"]

@@ -4,8 +4,10 @@ WHY THIS FILE EXISTS (#2228). The first ranking of `/costs/summary`
 `top_sessions` sorted `list_all()` in Python, and `list_all()` sees only the
 newest 500 summaries by TIME. An older, expensive session was simply not there
 to be ranked (review of PR #2225). Which session wins is decided by the query's
-ORDER BY and DISTINCT ON, which a fake connection never executes, so it is
-pinned here against a real database.
+ORDER BY and DISTINCT ON over the usage rollup, which a fake connection never
+executes, so it is pinned here against a real database. The summaries are
+written to agent_events through the production writer; the rollup trigger is
+what carries them to the table the ranking reads.
 
 Costs are near the canonical ceiling ($100,000) so sessions other tests leave in
 a shared database cannot outrank the ones these tests assert on.

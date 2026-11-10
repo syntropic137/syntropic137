@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from syn_shared.observed_model import RecordedModel
 
 from syn_domain import tool_call_counts
+from syn_domain.contexts.agent_sessions.canonical_usage import SUMMARY_USAGE_TABLE
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
     CostField,
     SessionCost,
@@ -98,26 +99,25 @@ WHERE event_type = $1
 GROUP BY session_id, {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
-# Rank sessions by the cost their newest summary reports (#2228). DISTINCT ON
-# keeps the newest summary per session, as in timescale_query.py, so a
-# re-reported session ranks by its final cost and appears once. Only ids leave
-# the database: pricing stays on the one ``get_many`` path, and the LIMIT is
-# what bounds the read however long the history is. A summary without a
-# reported cost is not ranked - its cost is priced from token rows, which SQL
-# cannot order by.
-_TOP_BY_COST_QUERY = """
+# Rank sessions by the cost their newest summary reports (#2228). Read from the
+# usage rollup, never from agent_events: the rollup holds one row per
+# session_summary, so this grows with sessions rather than telemetry and no
+# compressed chunk is decompressed to rank them. DISTINCT ON keeps the newest
+# summary per session, as in timescale_query.py, so a re-reported session ranks
+# by its final cost and appears once. Only ids leave the database: pricing stays
+# on the one ``get_many`` path, and the LIMIT bounds what is priced however long
+# the history is. A summary without a reported cost is not ranked - its cost is
+# priced from token rows, which SQL cannot order by.
+_TOP_BY_COST_QUERY = f"""
 SELECT session_id
 FROM (
-    SELECT DISTINCT ON (session_id)
-        session_id,
-        (data->>'total_cost_usd')::numeric as sdk_cost
-    FROM agent_events
-    WHERE event_type = $1
+    SELECT DISTINCT ON (session_id) session_id, vendor_cost_usd
+    FROM {SUMMARY_USAGE_TABLE}
     ORDER BY session_id, time DESC
 ) newest_summary
-WHERE sdk_cost IS NOT NULL
-ORDER BY sdk_cost DESC, session_id
-LIMIT $2
+WHERE vendor_cost_usd IS NOT NULL
+ORDER BY vendor_cost_usd DESC, session_id
+LIMIT $1
 """
 
 _STARTED_AT_BY_SESSION_QUERY = """
@@ -194,7 +194,7 @@ class SessionCostQueryService:
         report no cost, are not ranked (#2228).
         """
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch(_TOP_BY_COST_QUERY, SESSION_SUMMARY, limit)
+            rows = await conn.fetch(_TOP_BY_COST_QUERY, limit)
         ranked_ids = [row["session_id"] for row in rows]  # type: ignore[index]
         costs = await self.get_many(ranked_ids)
         return [costs[sid] for sid in ranked_ids if sid in costs]
