@@ -9,16 +9,20 @@ executes, so it is pinned here against a real database. The summaries are
 written to agent_events through the production writer; the rollup trigger is
 what carries them to the table the ranking reads.
 
-Costs are near the canonical ceiling ($100,000) so sessions other tests leave in
-a shared database cannot outrank the ones these tests assert on.
+A ranking is a global leaderboard, so a unique session id isolates nothing: any
+expensive session another test left behind takes a slot. Each test therefore
+gets a database of its own, schema and rollup trigger included, and drops it
+afterwards.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
+import asyncpg
 import pytest
 
 from syn_shared.events import SESSION_SUMMARY
@@ -31,12 +35,28 @@ _LIST_ALL_WINDOW = 500
 
 @pytest.fixture
 async def event_store(test_infrastructure):
+    """An AgentEventStore on a throwaway database, so no other test's history ranks."""
     from syn_adapters.events import AgentEventStore
 
-    store = AgentEventStore(test_infrastructure.timescaledb_url)
-    await store.initialize()
-    yield store
-    await store.close()
+    admin_url = test_infrastructure.timescaledb_url
+    name = f"top_by_cost_{uuid4().hex[:12]}"
+    admin = await asyncpg.connect(admin_url)
+    try:
+        await admin.execute(f'CREATE DATABASE "{name}"')
+    finally:
+        await admin.close()
+    parts = urlsplit(admin_url)
+    store = AgentEventStore(urlunsplit(parts._replace(path=f"/{name}")))
+    try:
+        await store.initialize()
+        yield store
+    finally:
+        await store.close()
+        admin = await asyncpg.connect(admin_url)
+        try:
+            await admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        finally:
+            await admin.close()
 
 
 def _summary(session_id: str, cost: Decimal | None, at: datetime):
