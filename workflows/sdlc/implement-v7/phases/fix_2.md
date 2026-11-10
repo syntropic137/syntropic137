@@ -41,20 +41,36 @@ section's case. Write `Round: 2 of 2` as the first line of your report.
 already ran once, pushed, and was BLOCKED after it. You can tell: the draft PR
 carries a `finalize_pr` comment saying `2 of 2` repair rounds ran. Round 2's
 findings are not in `artifacts/input/`; that comment names the blocking finding
-and the head SHA it applies to. A run blocked more than once carries one such
-comment per blocked bound, each naming a different head, so **use the most
-recent by creation time and only that one**:
+and the head SHA it applies to. **Only `finalize_pr`'s BLOCKED report counts:**
+its body begins with the line `<!-- syn:finalize_pr:blocked -->` and gives the
+head on a line `Head: <sha>`. Any other comment that says `2 of 2` - a fix
+round's summary, a person's note - is discussion, not a report, however recent.
+List every report on the PR, oldest first:
 
 ```
-gh pr view <n> --json comments --jq '[.comments[] | select(.body | contains("2 of 2"))] | sort_by(.createdAt) | last | {url, createdAt, body}'
+gh pr view <n> --json comments --jq '[.comments[] | select(.body | startswith("<!-- syn:finalize_pr:blocked -->"))] | sort_by(.createdAt) | .[] | {url, createdAt, body}'
 ```
+
+A run blocked more than once carries one report per blocked bound, each naming
+a different head, so **use the most recent report by creation time and only
+that one**:
+
+```
+gh pr view <n> --json comments --jq '[.comments[] | select(.body | startswith("<!-- syn:finalize_pr:blocked -->"))] | sort_by(.createdAt) | last // empty | {url, createdAt, body}'
+```
+
+If that prints nothing, no comment carries the marker (a report posted before
+the marker existed, or one edited away). Do not pick a comment by its wording
+instead: stop, and report that no `finalize_pr` BLOCKED report was found with
+the URLs of any comments that mention `2 of 2`, so a person can repost it.
 
 Its findings are your scope too, and **on a resume the verified SHA is the
-head SHA that comment names**, not the one `reverify` verified: that older SHA
-is the head before the previous attempt pushed, so checking it out would discard
-that attempt's commits and the remote head can never equal it. Use the comment's
-SHA wherever the sections below say "the verified SHA", including in both
-`rev-parse` checks, and paste the comment's URL into your report beside it. If it is not the remote head that
+head SHA that comment names** on its `Head:` line, not the one `reverify`
+verified: that older SHA is the head before the previous attempt pushed, so
+checking it out would discard that attempt's commits and the remote head can
+never equal it. Use the comment's SHA wherever the sections below say "the
+verified SHA", including in both `rev-parse` checks, and paste the comment's URL
+into your report beside it. If it is not the remote head that
 `git rev-parse origin/<branch>` reads, stop as that check says and report both
 SHAs and the comment's URL. **Never fall back to an older comment** to find one
 that matches: an older comment names a head from before a later blocked attempt
