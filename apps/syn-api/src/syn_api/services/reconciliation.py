@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Final
 from syn_shared.display import format_exit_code
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration import ReclaimableDir
+    from syn_domain.contexts.orchestration import ReclaimableDir, SalvagedPhase
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
@@ -60,10 +60,9 @@ _ORPHAN_REASON: Final[str] = (
 )
 
 _ORPHAN_REASON_AFTER_SALVAGE: Final[str] = (
-    _ORPHAN_REASON + ". Phase '{phase_name}' had already finished its agent run, so its "
-    "deliverable was recovered from the transcript and stored (#1300) before "
-    "this execution was closed; the run did not survive, that phase's output "
-    "did"
+    _ORPHAN_REASON + ". Phase '{phase_name}' {recovered_from}, and it was stored "
+    "(#1300, #2169) before this execution was closed; the run did not survive, "
+    "that phase's output did"
 )
 
 
@@ -108,7 +107,7 @@ async def _artifact_collector() -> ArtifactCollector:
 
 async def _salvage_before_failing(
     aggregate: WorkflowExecutionAggregate, execution_id: str
-) -> str | None:
+) -> SalvagedPhase | None:
     """Rescue a stranded phase's deliverable, or report that none was rescued.
 
     Best-effort ON PURPOSE, and narrower than the caller's own guard: closing
@@ -118,7 +117,7 @@ async def _salvage_before_failing(
     leaves things exactly where they were before #1300 - which is the state
     every one of these executions was in until now.
 
-    Returns the salvaged phase's name, or None.
+    Returns what was salvaged, or None.
     """
     from syn_domain.contexts.orchestration import salvage_stranded_phase
 
@@ -132,7 +131,7 @@ async def _salvage_before_failing(
             execution_id,
         )
         return None
-    return None if rescued is None else rescued.phase_name
+    return rescued
 
 
 async def reconcile_orphaned_executions(
@@ -274,7 +273,7 @@ async def _reconcile_one(
     # `repository.save` that persists the failure, but it is a real event on
     # the aggregate the moment it returns, and a count that forgets it
     # understates what was recovered.
-    salvaged_phase: str | None = None
+    salvaged_phase: SalvagedPhase | None = None
     try:
         aggregate = await repository.get_by_id(execution_id)
         if aggregate is None:
@@ -293,13 +292,23 @@ async def _reconcile_one(
         # workspace, the container and the processor are gone.
         salvaged_phase = await _salvage_before_failing(aggregate, execution_id)
 
+        # A command Phase's recorded red gate already failed the run as `gate`
+        # while it was collected (ADR-078 D5, #2169): a restart did not cause
+        # that failure and must not be recorded over it.
+        if salvaged_phase is not None and salvaged_phase.ended_the_run:
+            await repository.save(aggregate)
+            return _ReconcileOutcome(failed=1, salvaged=1)
+
         aggregate.fail_execution(
             FailExecutionCommand(
                 execution_id=execution_id,
                 error=(
                     _ORPHAN_REASON
                     if salvaged_phase is None
-                    else _ORPHAN_REASON_AFTER_SALVAGE.format(phase_name=salvaged_phase)
+                    else _ORPHAN_REASON_AFTER_SALVAGE.format(
+                        phase_name=salvaged_phase.phase_name,
+                        recovered_from=salvaged_phase.recovered_from,
+                    )
                 ),
                 error_type="OrphanedByRestart",
                 # The phase that was mid-flight, so both phase read models

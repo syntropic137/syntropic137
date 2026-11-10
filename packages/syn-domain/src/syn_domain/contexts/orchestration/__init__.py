@@ -341,6 +341,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     inherited_outputs,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
+    SalvagedPhase,
     salvage_stranded_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
@@ -595,6 +596,7 @@ __all__ = [
     "Retained",
     "RetainedReason",
     "ReviewVerdict",
+    "SalvagedPhase",
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
     "SetWorkflowDefaultEvalHandler",

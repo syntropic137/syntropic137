@@ -27,6 +27,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continu
 from syn_domain.contexts.orchestration.domain.aggregate_execution.command_gate import (
     CommandGateRecord,
     RecordedCommands,
+    StrandedCommands,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (  # noqa: TC001 - re-exported + used at runtime by @command_handler
     AgentExecutionCompletedCommand,
@@ -458,6 +459,29 @@ class WorkflowExecutionAggregate(
             phase_name=run.phase_name,
             session_id=run.session_id,
             last_agent_message=run.last_agent_message,
+        )
+
+    @property
+    def stranded_commands(self) -> StrandedCommands | None:
+        """The running command Phase's recorded verdict, if nothing collected it (#2169).
+
+        `stranded_deliverable`'s counterpart for a command Phase, which has no
+        agent run: non-None between `PhaseCommandsCompleted` and that phase's
+        `ArtifactsCollectedForPhase`, in an execution that is still RUNNING.
+        """
+        execution_id = self.aggregate_id
+        phase_id = self._running_phase_id
+        if self._status != ExecutionStatus.RUNNING or execution_id is None or phase_id is None:
+            return None
+        recorded = self._command_gates.uncollected(phase_id)
+        if recorded is None:
+            return None
+        return StrandedCommands(
+            execution_id=execution_id,
+            workflow_id=self._workflow_id or "",
+            phase_id=phase_id,
+            phase_name=self._phase_names.get(phase_id, phase_id),
+            recorded=recorded,
         )
 
     @property
@@ -950,6 +974,8 @@ class WorkflowExecutionAggregate(
             # died in between - must not have been billed to the budget, or a
             # restart would find the phase out of attempts having run once.
             self._phase_attempts[phase_id] = self._phase_attempts.get(phase_id, 0) + 1
+            # A new attempt has not run its steps yet, whatever an earlier one recorded.
+            self._command_gates.close(phase_id)
 
     @event_sourcing_handler("PhaseCompleted")
     def on_phase_completed(self, event: PhaseCompletedEvent) -> None:
@@ -1044,6 +1070,7 @@ class WorkflowExecutionAggregate(
         # is also what makes `stranded_deliverable` answer None once the
         # output is safely stored.
         self._finished_agent_runs.pop(phase_id, None)
+        self._command_gates.close(phase_id)
         self._reviews.collect(phase_id)
         self._evidence.observe(phase_id, read_observed_heads(evt(event, "observed_heads")))
 
