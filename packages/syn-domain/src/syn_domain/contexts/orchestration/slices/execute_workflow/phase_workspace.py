@@ -38,10 +38,9 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from syn_domain.contexts.artifacts import ContentType, PhaseOutputFile
+from syn_domain.contexts.artifacts import PhaseOutputFile
 from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
-    ArtifactsCollectedCommand,
     RecordRefusedOutputCommand,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -56,7 +55,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.command_report import (
     COMMANDS_REPORT_PATH,
-    CommandsReport,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import RESCUE_PATCH_NAME
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
@@ -68,6 +66,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
+    collect_recorded_commands,
 )
 
 if TYPE_CHECKING:
@@ -499,40 +500,20 @@ class PhaseWorkspace:
     ) -> None:
         """Store `commands.json` rebuilt from the event, tails lost, then collect as normal."""
         assert todo.phase_id is not None
-        report = CommandsReport.from_record(
-            todo.phase_id,
-            success=recorded.success,
-            timed_out=recorded.timed_out,
-            steps=recorded.steps,
-        )
-        ((path, body),) = report.files()
-        content = body.decode()
-        artifact_id = str(uuid4())
-        await self._collector().create_artifact(
-            artifact_id=artifact_id,
-            workflow_id=aggregate.workflow_id or "",
+        collected = await collect_recorded_commands(
+            aggregate,
+            collector=self._collector(),
             phase_id=todo.phase_id,
-            execution_id=todo.execution_id,
-            session_id=todo.session_id or "",
-            artifact_type="json",
-            content=content,
-            title=f"{phase.name}: {path}",
+            phase_name=phase.name,
+            session_id=todo.session_id,
+            recorded=recorded,
             agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
-            source_path=path,
-            content_type=ContentType.APPLICATION_JSON,
         )
-        all_artifact_ids.append(artifact_id)
-        self._runtime.record_artifacts(todo.phase_id, [artifact_id])
+        all_artifact_ids.append(collected.artifact_id)
+        self._runtime.record_artifacts(todo.phase_id, [collected.artifact_id])
         phase_outputs.record(
-            todo.phase_id, content, [PhaseOutputFile(source_path=path, content=content)]
-        )
-        aggregate.artifacts_collected(
-            ArtifactsCollectedCommand(
-                execution_id=todo.execution_id,
-                phase_id=todo.phase_id,
-                artifact_ids=[artifact_id],
-                first_content_preview=content[:500],
-                session_id=todo.session_id,
-            )
+            todo.phase_id,
+            collected.content,
+            [PhaseOutputFile(source_path=collected.source_path, content=collected.content)],
         )
         await self._journal.append(aggregate)

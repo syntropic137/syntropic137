@@ -119,6 +119,7 @@ class RecordedCommands:
     success: bool
     timed_out: bool
     steps: tuple[CommandStepResult, ...]
+    phase_name: str
 
 
 @dataclass
@@ -126,11 +127,23 @@ class CommandGateRecord:
     """Each command Phase's latest recorded verdict, replayed from the stream.
 
     Overwritten per run of a phase, so a retried phase is judged by its last
-    attempt only.
+    attempt only. A recorded verdict is held only until it is collected or the
+    phase starts again, so `recorded` never hands back one already collected,
+    or an earlier attempt's (#2169).
     """
 
     _failures: dict[str, GateFailure | None] = field(default_factory=dict)
     _recorded: dict[str, RecordedCommands] = field(default_factory=dict)
+    _names: dict[str, str] = field(default_factory=dict)
+
+    def started(self, phase_id: str, phase_name: str) -> None:
+        """A new attempt of this phase began: it has recorded nothing yet."""
+        self._names[phase_id] = phase_name
+        self._recorded.pop(phase_id, None)
+
+    def collected(self, phase_id: str) -> None:
+        """This phase's output is collected: its verdict no longer awaits collection."""
+        self._recorded.pop(phase_id, None)
 
     def report(
         self, phase_id: str, *, success: bool, timed_out: bool, steps: Sequence[object]
@@ -140,7 +153,9 @@ class CommandGateRecord:
             step if isinstance(step, CommandStepResult) else CommandStepResult.model_validate(step)
             for step in steps
         )
-        self._recorded[phase_id] = RecordedCommands(success, timed_out, results)
+        self._recorded[phase_id] = RecordedCommands(
+            success, timed_out, results, self._names.get(phase_id, phase_id)
+        )
         self._failures[phase_id] = judge_commands(
             phase_id, success=success, timed_out=timed_out, steps=results
         )
@@ -150,7 +165,7 @@ class CommandGateRecord:
         return self._failures.get(phase_id)
 
     def recorded(self, phase_id: str) -> RecordedCommands | None:
-        """The steps this phase last recorded; None for an agent Phase or one not yet run."""
+        """The steps this attempt recorded; None for an agent Phase, before them, or once collected."""
         return self._recorded.get(phase_id)
 
     def report_event(self, event: PhaseCommandsCompletedEvent) -> None:

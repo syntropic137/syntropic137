@@ -94,9 +94,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     inherited_outputs,
-    inherited_phase_ids,
     record_continuation,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_progress import RunProgress
 from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import (
     fold_claimed_run,
     open_start,
@@ -466,8 +466,8 @@ class WorkflowExecutionProcessor:
             phases,
             _DispatchContext(inputs=inputs),
             repos,
-            origin,
             phase_outputs,
+            RunProgress.starting(origin),
             started_at,
         )
 
@@ -502,18 +502,22 @@ class WorkflowExecutionProcessor:
         folded from this execution's stream at the claim and kept current by
         the run's own saves, never read from the shared `execution_todo`
         store, whose other writers this run cannot see. Closing the run row
-        is the claimer's (1.5), not this.
+        is the claimer's (1.5), not this. Raises as `run_recovered` does.
+        """
+        return await self.run_recovered(claimed.execution_id)
+
+    async def run_recovered(self, execution_id: str) -> WorkflowExecutionResult:
+        """`run_claimed` without a claim: a run boot collected green goes on (ADR-078 D6).
 
         Raises:
-            RuntimeError: the processor was built without the event stream and
-                projection type the fold is made from - a wiring defect.
-            LookupError: the claimed execution has no stream.
+            RuntimeError: built without the fold inputs - a wiring defect.
+            LookupError: the execution has no stream.
         """
         if self._execution_events is None or self._todo_projection_type is None:
             msg = "run_claimed needs execution_events and todo_projection_type (ADR-072 D8)"
             raise RuntimeError(msg)
         fold, aggregate = await fold_claimed_run(
-            claimed.execution_id,
+            execution_id,
             self._execution_repo,
             self._execution_events,
             self._todo_projection_type,
@@ -527,8 +531,8 @@ class WorkflowExecutionProcessor:
             pins.pinned_phases,
             _DispatchContext(inputs=dict(pins.inputs), fold=fold),
             repos or None,
-            pins.resumed_from,
             phase_outputs,
+            await RunProgress.read(self._execution_events, execution_id, pins.resumed_from),
             datetime.now(UTC),
         )
 
@@ -539,8 +543,8 @@ class WorkflowExecutionProcessor:
         phases: list[ExecutablePhase],
         dispatch_ctx: _DispatchContext,
         repos: list[RepositoryRef] | None,
-        origin: ResumeOrigin | None,
         phase_outputs: PhaseOutputCache,
+        progress: RunProgress,
         started_at: datetime,
     ) -> WorkflowExecutionResult:
         """Drain the to-do list of a started run until it ends."""
@@ -548,9 +552,9 @@ class WorkflowExecutionProcessor:
         journal = self._journal_of(dispatch_ctx)
         phase_map = {p.phase_id: p for p in phases}
 
-        phase_results: list[PhaseResult] = []
-        all_artifact_ids: list[str] = []
-        completed_phase_ids = inherited_phase_ids(origin)
+        phase_results = progress.phase_results
+        all_artifact_ids = progress.artifact_ids
+        completed_phase_ids = progress.completed_phase_ids
         try:
             await self._drain_todo_list(
                 execution_id=execution_id,
