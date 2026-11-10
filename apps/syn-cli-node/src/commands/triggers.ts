@@ -7,9 +7,9 @@ import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/com
 import { CLIError } from "../framework/errors.js";
 import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
-import { print, printError, printDim, printSuccess } from "../output/console.js";
+import { print, printError, printDim, printSuccess, printWarning } from "../output/console.js";
 import { printStarted } from "../output/started.js";
-import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
+import { style, BOLD, CYAN, DIM, YELLOW } from "../output/ansi.js";
 import { formatCost, formatStatus, formatTimestamp } from "../output/format.js";
 import { Table } from "../output/table.js";
 
@@ -160,11 +160,18 @@ const listCommand: CommandDef = {
         t.event,
         t.repository.slice(0, 12),
         (t.workflow_name ?? t.workflow_id).slice(0, 12),
-        formatStatus(t.status),
+        t.unable_to_fire_reason ? `${formatStatus(t.status)} ${style("(unable to fire)", YELLOW)}` : formatStatus(t.status),
         String(t.fire_count),
       );
     }
     table.print();
+
+    // An active rule that can never fire must not read as healthy (#2202).
+    for (const t of items) {
+      if (t.unable_to_fire_reason) {
+        printWarning(`${t.trigger_id.slice(0, 12)} is unable to fire: ${t.unable_to_fire_reason}`);
+      }
+    }
   },
 };
 
@@ -174,6 +181,9 @@ function renderTriggerDetail(d: TriggerDetail, fallbackId?: string): void {
   print(`  Repo:       ${d.repository}`);
   print(`  Workflow:   ${d.workflow_name ?? d.workflow_id}`);
   print(`  Status:     ${formatStatus(d.status)}`);
+  if (d.unable_to_fire_reason) {
+    print(`  ${style("Unable to fire:", YELLOW)} ${d.unable_to_fire_reason}`);
+  }
   const maxFires = (d.config?.["max_attempts"] as number | undefined) ?? null;
   const cooldown = (d.config?.["cooldown_seconds"] as number | undefined) ?? null;
   print(`  Fires:      ${d.fire_count}${maxFires != null ? ` / max ${maxFires}` : ""}`);
