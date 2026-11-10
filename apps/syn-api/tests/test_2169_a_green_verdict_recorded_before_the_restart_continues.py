@@ -27,6 +27,7 @@ from event_sourcing.client.memory import MemoryEventStoreClient
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.repositories import EventStoreExecutionEventStream, RepositoryAdapter
+from syn_api.services import reconciliation
 from syn_api.services.reconciliation import CleanupResult, reconcile_orphaned_executions
 from syn_domain.contexts.orchestration._shared.command_phase import CommandStep, PhaseKind
 from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import (
@@ -232,7 +233,8 @@ class _World:
 
 async def _restart(world: _World, monkeypatch: pytest.MonkeyPatch) -> None:
     world.install(monkeypatch)
-    continuing = await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
+    await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
+    continuing = list(reconciliation._CONTINUING)
     assert len(continuing) == 1, "the green run was not handed back to the processor"
     await asyncio.wait_for(asyncio.gather(*continuing), timeout=30)
 

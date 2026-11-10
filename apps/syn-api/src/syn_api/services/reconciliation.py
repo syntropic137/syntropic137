@@ -124,7 +124,7 @@ async def _continue(execution_id: str) -> None:
     )
 
 
-def _continue_recovered(execution_ids: list[str]) -> list[asyncio.Task[None]]:
+def _continue_recovered(execution_ids: list[str]) -> None:
     """Hand each run whose stranded Phase was collected green back to the processor.
 
     In the background, not awaited: this runs before the API serves traffic,
@@ -137,7 +137,6 @@ def _continue_recovered(execution_ids: list[str]) -> list[asyncio.Task[None]]:
     for task in tasks:
         _CONTINUING.add(task)
         task.add_done_callback(_CONTINUING.discard)
-    return tasks
 
 
 async def _salvage_before_failing(
@@ -171,7 +170,7 @@ async def _salvage_before_failing(
 
 async def reconcile_orphaned_executions(
     cleanup: CleanupResult, *, started_before: datetime
-) -> list[asyncio.Task[None]]:
+) -> None:
     """Fail executions stranded in 'running' by a restart, through the aggregate.
 
     WHY (issue #1120). `cleanup_orphaned_containers` reaps every `agentic-ws-`
@@ -224,8 +223,8 @@ async def reconcile_orphaned_executions(
     EXCEPT A GREEN COMMAND VERDICT (#2169, ADR-078 D6). A command Phase whose
     steps recorded a pass has its whole result in the stream, so once it is
     collected the run is not lost at all: it is handed back to the processor,
-    whose to-do list goes on to the next Phase or completes the run. Returns
-    those drains, which run in the background.
+    whose to-do list goes on to the next Phase or completes the run, in the
+    background (`_CONTINUING`).
     """
     if not cleanup.fully_reaped:
         logger.warning(
@@ -234,7 +233,7 @@ async def reconcile_orphaned_executions(
             "of a reap that may have removed nothing.",
             "; ".join(cleanup.failures) or "reason not recorded",
         )
-        return []
+        return
 
     try:
         from syn_adapters.storage.repositories import get_workflow_execution_repository
@@ -248,12 +247,12 @@ async def reconcile_orphaned_executions(
         )
     except Exception:
         logger.exception("Could not list stranded executions (non-fatal)")
-        return []
+        return
 
     stranded = [row for row in stranded if _started_before(row, started_before)]
     if not stranded:
         logger.debug("No stranded executions found")
-        return []
+        return
 
     repository = get_workflow_execution_repository()
     failed = 0
@@ -280,7 +279,7 @@ async def reconcile_orphaned_executions(
             "Hit the %d-execution reconciliation ceiling; more may remain for the next startup",
             _MAX_ORPHANS_PER_STARTUP,
         )
-    return _continue_recovered(continued)
+    _continue_recovered(continued)
 
 
 @dataclass(frozen=True)
