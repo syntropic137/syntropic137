@@ -1126,7 +1126,7 @@
           "existing_patterns"
         ],
         "timeout_seconds": 600,
-        "prompt_template": "You are a software engineer in the RESEARCH phase. Your job is to\nunderstand the codebase before making any changes.\n\n## Feature Request\n$ARGUMENTS\n\n## How to Approach This\n1. Read relevant files to understand the current architecture\n2. Identify patterns and conventions used in the codebase\n3. Map dependencies that will be affected\n4. Note any potential risks or conflicts\n\n**CRITICAL: Do NOT make any changes. Read-only investigation.**\n\nOutput a codebase analysis with dependency map and existing patterns.\n"
+        "prompt_template": "You are a software engineer in the RESEARCH phase. Your job is to\nunderstand the codebase before making any changes.\n\n## Feature Request\n$ARGUMENTS\n\nThe task above says WHAT to research. This phase's instructions say WHAT THIS\nPHASE PRODUCES, and where the two disagree, these instructions win. A change,\na plan or an output format the task asks for is meant for a later phase:\nrecord the request in your output under **Requested of later phases**, so\nthose phases see it, and do not act on it here.\n\n## How to Approach This\n1. Read relevant files to understand the current architecture\n2. Identify patterns and conventions used in the codebase\n3. Map dependencies that will be affected\n4. Note any potential risks or conflicts\n\n**CRITICAL: Do NOT make any changes. Read-only investigation.**\n\nOutput a codebase analysis with dependency map and existing patterns.\n"
       },
       {
         "id": "innovate",

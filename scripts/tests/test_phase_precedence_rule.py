@@ -57,6 +57,11 @@ _MAP_AND_PLAN_PHASES = [
         "You are not proposing a solution",
     ),
     ("workflows/sdlc/decision-record/workflow.yaml", "options", "A later phase chooses"),
+    (
+        "workflows/examples/implementation.yaml",
+        "research",
+        "Output a codebase analysis with dependency map",
+    ),
 ]
 
 
