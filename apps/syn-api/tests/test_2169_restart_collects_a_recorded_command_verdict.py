@@ -4,7 +4,8 @@ THE GAP. A command Phase has no agent run, so the #1300 salvage, which recovers
 a deliverable from what the agent last said, never reached it: boot
 reconciliation failed the run `OrphanedByRestart` (platform) even when the
 stream held the steps' verdict as `PhaseCommandsCompleted`. A red build was
-reported as the platform's fault, and a green one was thrown away.
+reported as the platform's fault, and a green one was thrown away. The green
+case continues the run, and is pinned beside this module.
 
 WHAT IT RULES OUT. As in the #1300 test beside this one, the aggregate is
 rebuilt from stored envelopes by a fresh `WorkflowExecutionAggregate`, there is
@@ -222,38 +223,6 @@ async def test_a_red_gate_recorded_before_the_restart_fails_as_a_gate(
     assert failed[0].failed_phase_id == "build"
     assert list(failed[0].failed_phase_artifact_ids) == [artifacts.saved[0].aggregate_id]
     assert store.events_named("PhaseCompleted") == []
-
-
-async def test_a_green_gate_recorded_before_the_restart_completes_its_phase(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The phase survives and its next phase is decided; the run itself still closes.
-
-    Nothing at boot can execute `review`, the same as after an agent salvage
-    (ADR-078 D6, ADR-072), so the run ends naming what was kept.
-    """
-    store = await _stranded([PASSED], success=True)
-    artifacts = _ArtifactRepository()
-    _install(monkeypatch, store, artifacts)
-
-    await reconcile_orphaned_executions(_REAPED, started_before=_CUTOFF)
-
-    report = _stored_report(artifacts)
-    assert report.tails_lost is True
-    assert report.success is True
-
-    completed = store.events_named("PhaseCompleted")
-    assert len(completed) == 1, "a passed gate's phase was discarded with the run"
-    assert completed[0].phase_id == "build"
-    assert completed[0].artifact_id == artifacts.saved[0].aggregate_id
-    ready = store.events_named("NextPhaseReady")
-    assert [e.next_phase_id for e in ready] == ["review"]
-
-    failed = store.events_named("WorkflowFailed")
-    assert len(failed) == 1
-    assert failed[0].error_type == "OrphanedByRestart"
-    assert "commands.json was rebuilt from the event stream" in failed[0].error_message
-    assert failed[0].failed_phase_id is None
 
 
 async def test_a_command_phase_stranded_before_its_verdict_is_still_orphaned(

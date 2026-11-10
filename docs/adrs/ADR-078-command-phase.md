@@ -219,15 +219,15 @@ the Phase fails, as an agent Phase would.
 The exit codes and timing are the gate's result and are in the event, so a
 lost workspace loses only the output tails, never the verdict.
 
-**The processor restarts.** Mid-phase crash survival is not provided (ADR-072),
-so nothing executes the Execution's remaining Phases and a resume re-provisions
-the Phase and re-runs every step. What boot reconciliation does with the
-stranded command Phase depends on whether its verdict was recorded (#2169):
+**The processor restarts.** Mid-phase crash survival is not provided (ADR-072):
+a step that was running is not re-attached, and a resume re-provisions the Phase
+and re-runs every step. What boot reconciliation does with the stranded command
+Phase depends on whether its verdict was recorded (#2169):
 
 | point | recovery at boot |
 |---|---|
 | before `PhaseCommandsCompleted` | the Execution fails as `OrphanedByRestart` (`platform`), as an agent Phase's does |
-| after `PhaseCommandsCompleted`, before collection | collected from the event exactly as the lost-workspace row above, through the same function: `commands.json` with `tails_lost: true`, then D5 rules. A red gate fails the Execution as `CommandPhaseFailed` (`gate`) and nothing is written over it; a green one completes the Phase, and the Execution is then closed as `OrphanedByRestart` naming the Phase that was kept, as after an agent Phase's stranded salvage |
+| after `PhaseCommandsCompleted`, before collection | collected from the event exactly as the lost-workspace row above, through the same function: `commands.json` with `tails_lost: true`, then D5 rules. A red gate fails the Execution as `CommandPhaseFailed` (`gate`) and nothing is written over it. A green one completes the Phase and the Execution goes on: reconciliation hands it to the processor (`run_recovered`, the drain `run_claimed` uses), whose to-do list, folded from the stream, dispatches the next Phase or completes the Execution. The steps are not re-run |
 
 `recorded_commands_for` holds a verdict only until it is collected or the Phase
 starts again, so an earlier attempt's verdict is never collected for a later

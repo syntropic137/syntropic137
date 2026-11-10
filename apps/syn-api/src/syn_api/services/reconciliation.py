@@ -105,6 +105,39 @@ async def _artifact_collector() -> ArtifactCollector:
     return ArtifactCollector(get_artifact_repository(), await get_artifact_storage(), None)
 
 
+#: Runs handed back to the processor at boot, held so a task is not collected
+#: mid-drain (#2169).
+_CONTINUING: set[asyncio.Task[None]] = set()
+
+
+async def _continue(execution_id: str) -> None:
+    """Drain a recovered run to its end, logging what a background task would swallow."""
+    from syn_api._wiring import get_execution_processor
+
+    try:
+        result = await (await get_execution_processor()).run_recovered(execution_id)
+    except Exception:
+        logger.exception("Could not continue recovered execution %s", execution_id)
+        return
+    logger.warning("Recovered execution %s continued after the restart: %s", execution_id, result.status)
+
+
+def _continue_recovered(execution_ids: list[str]) -> list[asyncio.Task[None]]:
+    """Hand each run whose stranded Phase was collected green back to the processor.
+
+    In the background, not awaited: this runs before the API serves traffic,
+    and a drain lasts as long as the run's remaining Phases do.
+    """
+    tasks = [
+        asyncio.create_task(_continue(execution_id), name=f"recovered-{execution_id}")
+        for execution_id in execution_ids
+    ]
+    for task in tasks:
+        _CONTINUING.add(task)
+        task.add_done_callback(_CONTINUING.discard)
+    return tasks
+
+
 async def _salvage_before_failing(
     aggregate: WorkflowExecutionAggregate, execution_id: str
 ) -> SalvagedPhase | None:
@@ -136,7 +169,7 @@ async def _salvage_before_failing(
 
 async def reconcile_orphaned_executions(
     cleanup: CleanupResult, *, started_before: datetime
-) -> None:
+) -> list[asyncio.Task[None]]:
     """Fail executions stranded in 'running' by a restart, through the aggregate.
 
     WHY (issue #1120). `cleanup_orphaned_containers` reaps every `agentic-ws-`
@@ -185,6 +218,12 @@ async def reconcile_orphaned_executions(
     run. The run still ends - nothing can execute its remaining phases - but it
     ends with the finished phase's output stored and marked recovered rather
     than with nothing at all.
+
+    EXCEPT A GREEN COMMAND VERDICT (#2169, ADR-078 D6). A command Phase whose
+    steps recorded a pass has its whole result in the stream, so once it is
+    collected the run is not lost at all: it is handed back to the processor,
+    whose to-do list goes on to the next Phase or completes the run. Returns
+    those drains, which run in the background.
     """
     if not cleanup.fully_reaped:
         logger.warning(
@@ -193,7 +232,7 @@ async def reconcile_orphaned_executions(
             "of a reap that may have removed nothing.",
             "; ".join(cleanup.failures) or "reason not recorded",
         )
-        return
+        return []
 
     try:
         from syn_adapters.storage.repositories import get_workflow_execution_repository
@@ -207,33 +246,39 @@ async def reconcile_orphaned_executions(
         )
     except Exception:
         logger.exception("Could not list stranded executions (non-fatal)")
-        return
+        return []
 
     stranded = [row for row in stranded if _started_before(row, started_before)]
     if not stranded:
         logger.debug("No stranded executions found")
-        return
+        return []
 
     repository = get_workflow_execution_repository()
     failed = 0
     salvaged = 0
+    continued: list[str] = []
     for summary in stranded:
         outcome = await _reconcile_one(summary, repository=repository)
         failed += outcome.failed
         salvaged += outcome.salvaged
+        if outcome.continued:
+            continued.append(summary.workflow_execution_id)
 
     logger.warning(
         "Reconciled %d of %d stranded execution(s) -> marked as failed; "
-        "%d had a finished phase whose deliverable was recovered rather than discarded",
+        "%d had a finished phase whose deliverable was recovered rather than discarded; "
+        "%d continue",
         failed,
         len(stranded),
         salvaged,
+        len(continued),
     )
     if len(stranded) == _MAX_ORPHANS_PER_STARTUP:
         logger.warning(
             "Hit the %d-execution reconciliation ceiling; more may remain for the next startup",
             _MAX_ORPHANS_PER_STARTUP,
         )
+    return _continue_recovered(continued)
 
 
 @dataclass(frozen=True)
@@ -247,6 +292,8 @@ class _ReconcileOutcome:
 
     failed: int = 0
     salvaged: int = 0
+    continued: bool = False
+    """Saved still RUNNING, for the processor to drain (#2169)."""
 
 
 async def _reconcile_one(
@@ -298,6 +345,11 @@ async def _reconcile_one(
         if salvaged_phase is not None and salvaged_phase.ended_the_run:
             await repository.save(aggregate)
             return _ReconcileOutcome(failed=1, salvaged=1)
+        # A green one completed its phase from the recorded verdict, so the
+        # run lost nothing and goes on (ADR-078 D6, #2169).
+        if salvaged_phase is not None and salvaged_phase.continues:
+            await repository.save(aggregate)
+            return _ReconcileOutcome(salvaged=1, continued=True)
 
         aggregate.fail_execution(
             FailExecutionCommand(

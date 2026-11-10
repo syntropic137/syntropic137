@@ -28,7 +28,8 @@ A COMMAND PHASE HAS NO TRANSCRIPT (#2169). Its verdict is the
 collects one whose workspace is gone (ADR-078 D6): `commands.json` rebuilt from
 the event with `tails_lost`, through `collect_recorded_commands`, which both
 paths call. Collection then rules as it always does (D5): a red gate fails the
-execution as `gate` right there, and a green one completes the phase.
+execution as `gate` right there, and a green one completes the phase and, as
+`continues` says, leaves a run that lost nothing for the processor to drain.
 """
 
 from __future__ import annotations
@@ -92,6 +93,8 @@ class SalvagedPhase:
     """How the deliverable was recovered, worded to finish "Phase 'x' ..."."""
     ended_the_run: bool = False
     """The collection itself ended the execution: a red command gate (ADR-078 D5)."""
+    continues: bool = False
+    """A green command gate: the phase completed and the run has lost nothing (#2169)."""
 
 
 @dataclass(frozen=True)
@@ -294,6 +297,7 @@ async def _salvage_commands(
             "rebuilt from the event stream with its step output lost"
         ),
         ended_the_run=aggregate.status is not ExecutionStatus.RUNNING,
+        continues=commands.success and aggregate.status is ExecutionStatus.RUNNING,
     )
 
 

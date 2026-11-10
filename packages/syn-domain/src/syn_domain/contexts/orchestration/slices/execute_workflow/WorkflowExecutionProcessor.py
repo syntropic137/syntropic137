@@ -509,11 +509,24 @@ class WorkflowExecutionProcessor:
                 projection type the fold is made from - a wiring defect.
             LookupError: the claimed execution has no stream.
         """
+        return await self.run_recovered(claimed.execution_id)
+
+    async def run_recovered(self, execution_id: str) -> WorkflowExecutionResult:
+        """Drain a started run from its stream alone, wherever its to-do list stands.
+
+        `run_claimed`'s drain, without a claim: boot reconciliation hands over a
+        run whose stranded command Phase it collected green (ADR-078 D6, #2169),
+        so the next to-do is the next Phase, or none and the run completes.
+
+        Raises:
+            RuntimeError: built without the fold inputs - a wiring defect.
+            LookupError: the execution has no stream.
+        """
         if self._execution_events is None or self._todo_projection_type is None:
             msg = "run_claimed needs execution_events and todo_projection_type (ADR-072 D8)"
             raise RuntimeError(msg)
         fold, aggregate = await fold_claimed_run(
-            claimed.execution_id,
+            execution_id,
             self._execution_repo,
             self._execution_events,
             self._todo_projection_type,
