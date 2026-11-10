@@ -3021,6 +3021,11 @@ class CostSummary(BaseModel):
     total_tool_calls: int = 0
     top_models: list[ModelCostEntry] = Field(default_factory=list)
     top_sessions: list[SessionCostEntry] = Field(default_factory=list)
+    """Completed sessions with a reported cost, most expensive first (#2228).
+
+    In-progress sessions and summaries without ``total_cost_usd`` are not
+    ranked: their cost is priced from token rows, which SQL cannot order by.
+    """
 
 
 # ---------------------------------------------------------------------------

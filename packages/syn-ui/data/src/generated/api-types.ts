@@ -10897,7 +10897,10 @@ export interface components {
             total_tool_calls: number;
             /** Top Models */
             top_models?: components["schemas"]["ModelCostEntry"][];
-            /** Top Sessions */
+            /**
+             * Top Sessions
+             * @description The most expensive completed sessions with a reported cost, most expensive first. Sessions still in progress, and completed sessions whose summary reports no cost, are not ranked.
+             */
             top_sessions?: components["schemas"]["SessionCostEntry"][];
         };
         /**
