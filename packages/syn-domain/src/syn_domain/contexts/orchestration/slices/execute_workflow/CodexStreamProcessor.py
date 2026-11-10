@@ -50,7 +50,6 @@ which assumed ``item.item.id``): ``item`` fields live directly under the
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import time
@@ -465,23 +464,6 @@ class CodexStreamProcessor:
         await workspace.interrupt()
         return True, over
 
-    async def _read_lines(
-        self,
-        stream: AsyncIterator[str],
-        read: StreamRead,
-        conversation_lines: list[str],
-        workspace: InterruptibleWorkspace,
-    ) -> None:
-        """Feed every line to ``_step`` until the stream ends or the agent is stopped."""
-        async with contextlib.aclosing(read.lines(stream)) as lines:
-            async for line in lines:
-                if line.strip():
-                    conversation_lines.append(line)
-                stop, reason = await self._step(line, read.line_count, workspace)
-                if stop:
-                    read.stop(reason)
-                    break
-
     async def _process_stream(
         self,
         stream: AsyncIterator[str],
@@ -489,10 +471,10 @@ class CodexStreamProcessor:
     ) -> StreamResult:
         """Process the JSONL event stream from ``codex exec --json``."""
         started_at = time.monotonic()
-        conversation_lines: list[str] = []
-
         read = StreamRead(self._cancel_poller, workspace)
-        await self._read_lines(stream, read, conversation_lines, workspace)
+        conversation_lines = await read.drive(
+            stream, lambda line, count: self._step(line, count, workspace)
+        )
 
         if not self._totals.saw_terminal_turn:
             # THE single place `_error_reason` is decided. Nothing mid-stream
