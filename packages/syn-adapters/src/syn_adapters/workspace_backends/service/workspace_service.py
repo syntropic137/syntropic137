@@ -53,6 +53,7 @@ from syn_shared.settings.workspace import (
     DEFAULT_WORKSPACE_PIDS_LIMIT,
     DEFAULT_WORKSPACE_PIDS_MAX,
     WorkspaceRuntime,
+    effective_pids_ceiling,
 )
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
@@ -166,7 +167,7 @@ class WorkspaceServiceConfig:
             ),
             pids_limit=settings.pids_limit,
             # One rule for the ceiling, shared with install and start.
-            pids_max=settings.pids_ceiling,
+            pids_max=effective_pids_ceiling(settings.pids_limit, settings.pids_max),
             cpu_limit_cores=settings.cpu_limit,
             runtime=settings.runtime,
         )

@@ -57,6 +57,18 @@ install and at start. A ``SYN_WORKSPACE_PIDS_LIMIT`` above it raises the
 ceiling with it, so a deployment's own default is never refused."""
 
 
+def effective_pids_ceiling(pids_limit: int, pids_max: int | None) -> int:
+    """The highest pids limit a phase may request: ``pids_max`` when set.
+
+    Unset, ``DEFAULT_WORKSPACE_PIDS_MAX`` or the deployment's default limit,
+    whichever is higher. The one rule install, start, resume and provisioning
+    share.
+    """
+    if pids_max is not None:
+        return pids_max
+    return max(pids_limit, DEFAULT_WORKSPACE_PIDS_MAX)
+
+
 #: What `WorkspaceSettings.runtime` reads (env_prefix + field name). Named so
 #: the doctor reports the same variable the settings parse.
 ENV_SYN_WORKSPACE_RUNTIME = "SYN_WORKSPACE_RUNTIME"
@@ -203,14 +215,8 @@ class WorkspaceSettings(BaseSettings):
 
     @property
     def pids_ceiling(self) -> int:
-        """The highest pids limit a phase may request.
-
-        The ceiling when set; unset, ``DEFAULT_WORKSPACE_PIDS_MAX`` or the
-        deployment's default limit, whichever is higher.
-        """
-        if self.pids_max is not None:
-            return self.pids_max
-        return max(self.pids_limit, DEFAULT_WORKSPACE_PIDS_MAX)
+        """The highest pids limit a phase may request (``effective_pids_ceiling``)."""
+        return effective_pids_ceiling(self.pids_limit, self.pids_max)
 
     cpu_limit: float = Field(
         default=DEFAULT_WORKSPACE_CPU_LIMIT,
