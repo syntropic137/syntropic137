@@ -154,7 +154,14 @@ class CostSummaryResponse(BaseModel):
     total_tokens: int = 0
     total_tool_calls: int = 0
     top_models: list[ModelCostEntry] = Field(default_factory=list)
-    top_sessions: list[SessionCostEntry] = Field(default_factory=list)
+    top_sessions: list[SessionCostEntry] = Field(
+        default_factory=list,
+        description=(
+            "The most expensive completed sessions with a reported cost, most"
+            " expensive first. Sessions still in progress, and completed sessions"
+            " whose summary reports no cost, are not ranked."
+        ),
+    )
 
 
 # =============================================================================
@@ -340,7 +347,7 @@ async def get_execution_cost(
 
 
 TOP_N = 5
-"""How many models ``get_cost_summary`` ranks (#701)."""
+"""How many models and sessions ``get_cost_summary`` ranks (#701, #2228)."""
 
 
 async def get_cost_summary() -> Result[CostSummary, MetricsError]:
@@ -350,9 +357,9 @@ async def get_cost_summary() -> Result[CostSummary, MetricsError]:
     ``top_models`` ranks the same execution rows the totals are summed from,
     most expensive first, ``TOP_N`` of them (#701).
 
-    ``top_sessions`` stays empty until the session cost query service can rank
-    by cost in SQL: ranking ``list_all()`` in Python loads every session and
-    only sees the newest 500 summaries, so it can miss the most expensive one.
+    ``top_sessions`` is ranked in SQL by the session cost query service, not by
+    sorting ``list_all()``: that loads every session and only sees the newest
+    500 summaries, so it can miss the most expensive one (#2228).
     """
     await ensure_connected()
     try:
@@ -371,8 +378,14 @@ async def get_cost_summary() -> Result[CostSummary, MetricsError]:
                 total_tokens=total_tokens,
                 total_tool_calls=total_tool_calls,
                 top_models=_top_models(all_costs),
-                # TODO(#2228): rank sessions by cost with a bounded SQL query.
-                top_sessions=[],
+                top_sessions=[
+                    SessionCostEntry(
+                        session_id=c.session_id,
+                        total_cost_usd=Decimal(str(c.total_cost_usd)),
+                        total_tokens=c.total_tokens,
+                    )
+                    for c in await get_session_cost_query().top_by_cost(TOP_N)
+                ],
             )
         )
     except Exception as e:

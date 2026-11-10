@@ -98,6 +98,28 @@ WHERE event_type = $1
 GROUP BY session_id, {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
+# Rank sessions by the cost their newest summary reports (#2228). DISTINCT ON
+# keeps the newest summary per session, as in timescale_query.py, so a
+# re-reported session ranks by its final cost and appears once. Only ids leave
+# the database: pricing stays on the one ``get_many`` path, and the LIMIT is
+# what bounds the read however long the history is. A summary without a
+# reported cost is not ranked - its cost is priced from token rows, which SQL
+# cannot order by.
+_TOP_BY_COST_QUERY = """
+SELECT session_id
+FROM (
+    SELECT DISTINCT ON (session_id)
+        session_id,
+        (data->>'total_cost_usd')::numeric as sdk_cost
+    FROM agent_events
+    WHERE event_type = $1
+    ORDER BY session_id, time DESC
+) newest_summary
+WHERE sdk_cost IS NOT NULL
+ORDER BY sdk_cost DESC, session_id
+LIMIT $2
+"""
+
 _STARTED_AT_BY_SESSION_QUERY = """
 SELECT session_id, MIN(time) as started_at
 FROM agent_events
@@ -162,6 +184,20 @@ class SessionCostQueryService:
         """
         query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
         return await query.calculate_many(session_ids)
+
+    async def top_by_cost(self, limit: int) -> list[SessionCost]:
+        """The ``limit`` most expensive completed sessions, most expensive first.
+
+        Ranked by the cost each session's newest summary reports, across the
+        whole history - not just the newest ``list_all`` page - and priced
+        through ``get_many``. Sessions still in progress, and summaries that
+        report no cost, are not ranked (#2228).
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(_TOP_BY_COST_QUERY, SESSION_SUMMARY, limit)
+        ranked_ids = [row["session_id"] for row in rows]  # type: ignore[index]
+        costs = await self.get_many(ranked_ids)
+        return [costs[sid] for sid in ranked_ids if sid in costs]
 
     async def list_all(self, limit: int = 500) -> list[SessionCost]:
         """List cost data for all sessions.
