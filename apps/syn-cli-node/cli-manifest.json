@@ -1795,7 +1795,13 @@
           "args": [
             "workflow-id"
           ],
-          "options": []
+          "options": [
+            {
+              "name": "full",
+              "short": null,
+              "takes_value": false
+            }
+          ]
         },
         {
           "name": "status",
