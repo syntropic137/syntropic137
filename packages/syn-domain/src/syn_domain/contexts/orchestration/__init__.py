@@ -266,6 +266,9 @@ from syn_domain.contexts.orchestration.domain.read_models.phase_progress import 
 from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
     DefinitionChangeKind,
 )
+from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
+    PhaseExecutionDetail,
+)
 from syn_domain.contexts.orchestration.slices.archive_eval.ArchiveEvalHandler import (
     ArchiveEvalHandler,
 )
@@ -560,6 +563,7 @@ __all__ = [
     "OwnerExecution",
     "Percentiles",
     "PhaseDefinition",
+    "PhaseExecutionDetail",
     "PhaseExecutionType",
     "PhaseKind",
     "PhaseProfileQueryService",

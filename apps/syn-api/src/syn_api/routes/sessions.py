@@ -49,9 +49,7 @@ from syn_api.types import (
     TokenTypeCostResponse,
     ToolOperation,
 )
-from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
-    PhaseExecutionDetail,
-)
+from syn_domain.contexts.orchestration import PhaseExecutionDetail
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
 )
