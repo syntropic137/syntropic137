@@ -267,7 +267,11 @@ class TestAPrefixDuringTheRebuild:
             del reason
             asked.append(execution_id)
             return control.ControlResponse(
-                success=True, execution_id=EXECUTION, state="cancelled", message="withdrawn"
+                success=True,
+                execution_id=EXECUTION,
+                state="cancelled",
+                applied=True,
+                message="withdrawn",
             )
 
         monkeypatch.setattr(control, "_withdraw_queued", _withdraw)

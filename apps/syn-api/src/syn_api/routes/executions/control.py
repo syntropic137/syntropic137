@@ -10,7 +10,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import get_controller
 from syn_api.types import (
@@ -107,7 +107,22 @@ class ControlResponse(BaseModel):
 
     success: bool
     execution_id: str
-    state: str
+    state: str = Field(
+        description=(
+            "The execution's state when the command was accepted. For a queued "
+            "signal (`applied` is false) this is the state BEFORE the command takes "
+            "effect: re-read `GET /executions/{execution_id}` until it reads "
+            "`cancelled` (#1062)."
+        )
+    )
+    applied: bool = Field(
+        description=(
+            "Whether the command has already taken effect. False when a signal was "
+            "queued for the executor to act on, as for a cancel of a running "
+            "execution; true when nothing is left to happen, as for a queued start "
+            "that was withdrawn and is already `cancelled`."
+        )
+    )
     message: str | None = None
     error: str | None = None
 
@@ -227,10 +242,13 @@ async def _handle_control_result(
     if not ctrl.success:
         raise HTTPException(status_code=400, detail=ctrl.error)
 
+    # The controller only ever queues a signal; the executor acts on it later,
+    # so the state read on admission is not yet the state that results (#1062).
     return ControlResponse(
         success=ctrl.success,
         execution_id=ctrl.execution_id,
         state=ctrl.new_state,
+        applied=False,
         message=ctrl.message,
     )
 
@@ -240,7 +258,13 @@ async def cancel_execution_endpoint(
     execution_id: str,
     request: CancelRequest | None = None,
 ) -> ControlResponse:
-    """Cancel an execution, or withdraw a start still queued for one (#1650)."""
+    """Cancel an execution, or withdraw a start still queued for one (#1650).
+
+    Cancelling a started execution is asynchronous: the signal is queued and the
+    executor acts on it later, so the response has `applied: false` and `state`
+    is still the pre-cancel state. Re-read `GET /executions/{execution_id}` until
+    it reads `cancelled` (#1062). A withdrawn queued start is final at once.
+    """
     reason = request.reason if request else None
     try:
         resolved = await _resolve_execution_id(execution_id)
@@ -291,6 +315,7 @@ async def _withdraw_queued(execution_id: str, reason: str | None) -> ControlResp
         success=True,
         execution_id=full_id,
         state="cancelled",
+        applied=True,
         message="Withdrawn before it started: it will not run",
     )
 
