@@ -194,3 +194,57 @@ async def test_a_non_string_task_lists_as_the_detail_shows_it(
     assert rows["exec-numeric-1075"].task_display == "42"
     # The rest of the list is still served beside it.
     assert rows["exec-darkmode-1075"].task == "Add dark mode"
+
+
+@pytest.mark.parametrize(
+    ("repos", "listed"),
+    [
+        (None, []),
+        (False, []),
+        (0, []),
+        ("syntropic137/syntropic137", ["syntropic137/syntropic137"]),
+    ],
+)
+async def test_reading_the_task_leaves_the_listed_repos_as_they_were(
+    monkeypatch: pytest.MonkeyPatch,
+    repos: object,
+    listed: list[str],
+) -> None:
+    """Only the task is read as text; an unset `repos` still lists no repository.
+
+    Normalising every input before reading `repos` turned a `None` into the
+    repository `"None"` (and `False`, `0` into `"False"`, `"0"`), changing the
+    list's repository display and filtering during a task-only change.
+    """
+    import json
+
+    from syn_api.routes.executions import queries
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        StartExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
+
+    aggregate = WorkflowExecutionAggregate()
+    aggregate.start_execution(
+        StartExecutionCommand(
+            execution_id="exec-repos-1075",
+            workflow_id=WORKFLOW_ID,
+            workflow_name="one workflow",
+            total_phases=1,
+            inputs={TASK_INPUT_KEY: 42, "repos": repos},
+        )
+    )
+    started = json.loads(aggregate.get_uncommitted_events()[0].event.model_dump_json())
+
+    await _serve(monkeypatch)
+    manager = queries.get_projection_mgr()
+    for projection in (manager.workflow_execution_detail, manager.workflow_execution_list):
+        await projection.on_workflow_execution_started(started)
+
+    rows = await _listed()
+    detail = await queries.get_execution_endpoint("exec-repos-1075")
+    assert list(rows["exec-repos-1075"].repos) == listed
+    assert detail.task == "42"
+    assert rows["exec-repos-1075"].task == detail.task

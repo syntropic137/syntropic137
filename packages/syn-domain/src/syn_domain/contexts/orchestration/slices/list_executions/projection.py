@@ -122,8 +122,9 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
         if not execution_id:
             raise UnappliableStartError(self.PROJECTION_NAME)
 
-        inputs = recorded_inputs(event_data.get("inputs"))
-        # Extract repos from inputs field (ADR-058: stored as comma-separated string)
+        inputs = event_data.get("inputs") or {}
+        # Extract repos from inputs field (ADR-058: stored as comma-separated string).
+        # Read raw: an unset repos (None, False, 0) lists no repository, not "None".
         repos_raw = inputs.get("repos", "")
         repos = (
             tuple(u.strip() for u in str(repos_raw).split(",") if u.strip()) if repos_raw else ()
@@ -156,7 +157,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             association_kind=AssociationKind.LAUNCHED.value if eval_id else None,
             workflow_version=event_data.get("workflow_version"),
             resumed_from=ResumedFrom.of_started(event_data.get("resumed_from")),
-            task=dispatched_task(inputs),
+            task=dispatched_task(recorded_inputs(inputs)),
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 
