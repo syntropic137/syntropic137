@@ -66,6 +66,7 @@ const listCommand: CommandDef = {
     const table = new Table({ title: `Executions (page ${page}, ${total} total)` });
     table.addColumn("ID", { style: CYAN });
     table.addColumn("Workflow");
+    table.addColumn("Task");
     table.addColumn("Status");
     table.addColumn("Verdict");
     table.addColumn("Started");
@@ -84,6 +85,9 @@ const listCommand: CommandDef = {
       table.addRow(
         ex.workflow_execution_id,
         ex.workflow_name,
+        // What tells two runs of one workflow apart (#1075): the API's
+        // one-line summary, made server-side; a run asked nothing has none.
+        ex.task_display ?? "-",
         formatStatus(ex.status),
         // The API's word as-is (#1630); a run that reviewed nothing has none.
         ex.review_verdict ?? "-",

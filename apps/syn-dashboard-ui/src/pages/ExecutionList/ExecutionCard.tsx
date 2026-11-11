@@ -34,6 +34,14 @@ export function ExecutionCard({ exec }: { exec: ExecutionListItem }) {
             {workflowLabel}
           </span>
         </div>
+        {exec.task_display && (
+          <div
+            className="truncate text-xs text-[var(--color-text-secondary)]"
+            title={exec.task ?? undefined}
+          >
+            {exec.task_display}
+          </div>
+        )}
         <div
           className="text-xs text-[var(--color-text-muted)]"
           title={formatTimestampLocale(exec.started_at) ?? undefined}
