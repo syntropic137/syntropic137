@@ -117,8 +117,29 @@ export function recordInstallation(opts: {
 // `true` (opt-out). `repository:` presence plays no part. The server applies
 // the same rule in `infer_requires_repos` (yaml_to_command.py); they must
 // agree, or the CLI reports a gate the server does not enforce (#1050).
+//
+// The server field is `bool | None` under Pydantic's lax mode, which coerces
+// some non-boolean YAML values. Mirror that coercion exactly, and refuse what
+// the server refuses, so a quoted "false" or a 0 cannot mean opposite things
+// on each side (#1050 review).
+const TRUE_STRINGS = new Set(["1", "on", "t", "true", "y", "yes"]);
+const FALSE_STRINGS = new Set(["0", "off", "f", "false", "n", "no"]);
+
 function inferRequiresRepos(data: Record<string, unknown>): boolean {
-  return data["requires_repos"] !== false;
+  const value = data["requires_repos"];
+  if (value === undefined || value === null) return true;
+  if (typeof value === "boolean") return value;
+  if (value === 1) return true;
+  if (value === 0) return false;
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase();
+    if (TRUE_STRINGS.has(lowered)) return true;
+    if (FALSE_STRINGS.has(lowered)) return false;
+  }
+  throw new Error(
+    `requires_repos must be true or false (got ${JSON.stringify(value)}); ` +
+      "the server rejects any other value (ADR-058)",
+  );
 }
 
 // ---------------------------------------------------------------------------

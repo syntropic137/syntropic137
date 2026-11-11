@@ -288,3 +288,44 @@ describe("requires_repos inference (ADR-058)", () => {
     });
   });
 });
+
+// The server field is `bool | None` under Pydantic lax mode. This table mirrors
+// TestInferRequiresRepos.test_coerced_values_match_cli / _rejected_values_match_cli
+// in test_yaml_to_command.py. Change both or neither (#1050 review).
+describe("requires_repos coercion parity (ADR-058)", () => {
+  let tmpDir: string;
+
+  afterEach(() => {
+    if (tmpDir) cleanup(tmpDir);
+  });
+
+  function resolveWith(field: string): ReturnType<typeof resolvePackage> {
+    tmpDir = makeTmpDir();
+    fs.writeFileSync(
+      path.join(tmpDir, "workflow.yaml"),
+      `id: wf\nname: Wf\nrequires_repos: ${field}\nphases:\n  - id: only\n    prompt_template: hi\n`,
+      "utf-8",
+    );
+    return resolvePackage(tmpDir);
+  }
+
+  it.each([
+    ['"false"', false],
+    ['"0"', false],
+    ['"no"', false],
+    ['"off"', false],
+    ['"FALSE"', false],
+    ["0", false],
+    ['"true"', true],
+    ['"1"', true],
+    ['"yes"', true],
+    ['"on"', true],
+    ["1", true],
+  ])("requires_repos: %s resolves %s, as on the server", (field, expected) => {
+    expect(resolveWith(field).workflows[0]!.requires_repos).toBe(expected);
+  });
+
+  it.each(['""', '"maybe"', "2", "[]", "{}"])("requires_repos: %s is refused, as on the server", (field) => {
+    expect(() => resolveWith(field)).toThrow(/requires_repos must be true or false/);
+  });
+});
