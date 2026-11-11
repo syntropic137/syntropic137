@@ -89,11 +89,6 @@ def test_org_event_handler_methods_exist():
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(  # #444
-    reason="TODO(#444): 2 EVENT_HANDLERS entries reference methods that don't exist yet "
-    "(CostRecorded). These events are silently dropped.",
-    strict=True,
-)
 def test_all_handler_methods_exist_on_projections():
     """Every method referenced in EVENT_HANDLERS must exist on its projection.
 
@@ -128,11 +123,6 @@ def test_all_handler_methods_exist_on_projections():
 
 
 @pytest.mark.unit
-@pytest.mark.xfail(  # #444
-    reason="TODO(#444): 5 orphaned on_* handlers exist but are not wired in EVENT_HANDLERS "
-    "(WorkflowPhaseUpdated, WorkflowInterrupted, PhaseStarted). These handlers are never called.",
-    strict=True,
-)
 def test_no_orphaned_on_handlers():
     """Every on_* handler on registered projections should be wired in EVENT_HANDLERS.
 
@@ -163,6 +153,14 @@ def test_no_orphaned_on_handlers():
     # methods are called by the adapter's handle_event, not EVENT_HANDLERS.
     adapter_routed_projections = {"organization_list", "system_list", "repo_list"}
 
+    # Handlers deliberately left out of EVENT_HANDLERS, each with its reason.
+    # This is the only escape hatch: anything else unwired fails the test.
+    deliberately_unrouted = {
+        # Takes the typed ExecutionCancelledPayload that RealTimeProjectionAdapter
+        # validates from the JSON dump; this map hands handlers a raw dict.
+        ("realtime", "on_execution_cancelled"),
+    }
+
     # Check all registered projections for orphaned on_* methods
     failures = []
     for proj_name, projection in manager._projections.items():
@@ -177,6 +175,8 @@ def test_no_orphaned_on_handlers():
             # Skip methods from base classes (ABC, Protocol)
             if attr_name in ("on_event",):
                 continue
+            if (proj_name, attr_name) in deliberately_unrouted:
+                continue
             if (proj_name, attr_name) not in wired:
                 failures.append(
                     f"'{proj_name}.{attr_name}' exists but is not wired in EVENT_HANDLERS"
@@ -186,7 +186,7 @@ def test_no_orphaned_on_handlers():
         "Projection handlers exist but are not wired in EVENT_HANDLERS (orphaned):\n"
         + "\n".join(f"  - {f}" for f in failures)
         + "\n\nIf a handler is intentionally not in EVENT_HANDLERS "
-        "(e.g. called from another handler), add it to the exclusion list in this test."
+        "(e.g. called from another handler), add it to deliberately_unrouted with its reason."
     )
 
 
