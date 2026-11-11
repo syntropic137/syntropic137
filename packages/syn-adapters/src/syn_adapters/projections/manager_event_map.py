@@ -121,6 +121,7 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "WorkflowTemplateArchived": [
         ("workflow_list", "on_workflow_template_archived"),
     ],
+    "WorkflowPhaseUpdated": [("workflow_detail", "on_workflow_phase_updated")],
     # WHY (#967): tag edits after creation. The coordinator dispatches these by
     # method name; this map is what the in-process sync path reads, so without
     # them an edit is persisted and never reaches the read models in test or
@@ -150,6 +151,7 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "PhaseStarted": [
         ("workflow_execution_detail", "on_phase_started"),
         ("workflow_phase_metrics", "on_phase_started"),
+        ("dashboard_metrics", "on_phase_started"),
         ("realtime", "on_phase_started"),
     ],
     "PhaseCompleted": [
@@ -176,21 +178,55 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("repo_cost", "on_workflow_failed"),
         ("realtime", "on_workflow_failed"),
         ("execution_todo", "on_workflow_failed"),
+        ("workflow_phase_metrics", "on_workflow_failed"),
+    ],
+    "WorkflowInterrupted": [
+        ("workflow_execution_list", "on_workflow_interrupted"),
+        ("workflow_execution_detail", "on_workflow_interrupted"),
+        ("workflow_phase_metrics", "on_workflow_interrupted"),
+        ("execution_todo", "on_workflow_interrupted"),
     ],
     "WorkspaceProvisionedForPhase": [
         ("execution_todo", "on_workspace_provisioned_for_phase"),
         ("workflow_execution_detail", "on_workspace_provisioned_for_phase"),
     ],
-    "AgentExecutionCompleted": [("execution_todo", "on_agent_execution_completed")],
+    "AgentExecutionCompleted": [
+        ("execution_todo", "on_agent_execution_completed"),
+        ("workflow_execution_detail", "on_agent_execution_completed"),
+    ],
     "PhaseCommandsCompleted": [("execution_todo", "on_phase_commands_completed")],
     "ArtifactsCollectedForPhase": [("execution_todo", "on_artifacts_collected_for_phase")],
-    "NextPhaseReady": [("execution_todo", "on_next_phase_ready")],
+    "NextPhaseReady": [
+        ("execution_todo", "on_next_phase_ready"),
+        ("workflow_execution_list", "on_next_phase_ready"),
+        ("workflow_execution_detail", "on_next_phase_ready"),
+    ],
+    "EvidenceRequested": [("execution_todo", "on_evidence_requested")],
+    "EvidenceStepSettled": [("execution_todo", "on_evidence_step_settled")],
     "PhaseRetryScheduled": [("execution_todo", "on_phase_retry_scheduled")],
     "ExecutionCancelled": [
         ("workflow_execution_list", "on_execution_cancelled"),
         ("workflow_execution_detail", "on_execution_cancelled"),
         ("execution_todo", "on_execution_cancelled"),
+        ("workflow_phase_metrics", "on_execution_cancelled"),
     ],
+    # ExecutionForked is the pre-rename name of ExecutionResumed (#1881); a
+    # stored one is the same resume, so both reach the same read models.
+    "ExecutionResumed": [
+        ("workflow_execution_list", "on_execution_resumed"),
+        ("workflow_execution_detail", "on_execution_resumed"),
+    ],
+    "ExecutionForked": [
+        ("workflow_execution_list", "on_execution_forked"),
+        ("workflow_execution_detail", "on_execution_forked"),
+    ],
+    "ExecutionAttachedToEval": [("workflow_execution_list", "on_execution_attached_to_eval")],
+    "ExecutionDetachedFromEval": [("workflow_execution_list", "on_execution_detached_from_eval")],
+    "EvalCreated": [("evals", "on_eval_created")],
+    "EvalUpdated": [("evals", "on_eval_updated")],
+    "EvalFrozen": [("evals", "on_eval_frozen")],
+    "EvalArchived": [("evals", "on_eval_archived")],
+    "EvalRunScored": [("evals", "on_eval_run_scored")],
     "ExecutionTagsAdded": [
         ("workflow_execution_list", "on_execution_tags_added"),
         ("workflow_execution_detail", "on_execution_tags_added"),
@@ -199,6 +235,7 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_execution_list", "on_execution_tags_removed"),
         ("workflow_execution_detail", "on_execution_tags_removed"),
     ],
+    "AgentLaunched": [("session_list", "on_agent_launched")],
     "SessionStarted": [
         ("session_list", "on_session_started"),
         ("dashboard_metrics", "on_session_started"),
@@ -251,7 +288,6 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("session_cost", "on_session_summary"),
         ("execution_cost", "on_session_summary"),
     ],
-    "CostRecorded": [("session_cost", "on_cost_recorded"), ("execution_cost", "on_cost_recorded")],
     "SessionCostFinalized": [
         ("session_cost", "on_session_cost_finalized"),
         ("execution_cost", "on_session_cost_finalized"),
