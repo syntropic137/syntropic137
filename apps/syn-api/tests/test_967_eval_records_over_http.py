@@ -75,9 +75,9 @@ async def _stream_event_types(eval_id: str) -> list[str]:
 async def _catch_up() -> None:
     """The coordinator catching the eval read model up: replay the store into it.
 
-    The in-process sync path does not deliver Eval events (they are typed
-    handlers, and the legacy event map passes dicts), so this is the lag a
-    client sees until the coordinator runs. Replay is idempotent.
+    The in-process sync path delivers Eval events since #821, so this is now
+    belt and braces: it pins these tests to the coordinator's replay rather
+    than to the test-mode map. Replay is idempotent.
     """
     from event_sourcing.client.memory import MemoryEventStoreClient
     from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
@@ -205,7 +205,6 @@ class TestReadEvals:
     ) -> None:
         eval_id = await _create(client)
         await _launch_into(eval_id, "exec-eval-967-a")
-        assert (await client.get(f"/evals/{eval_id}")).status_code == 404  # lagging
         await _catch_up()
 
         listed = (await client.get("/evals")).json()
@@ -229,7 +228,6 @@ class TestReadEvals:
         await _launch_into(eval_id, "exec-eval-967-in")
         await _launch_into(other, "exec-eval-967-out")
         # The eval id resolves against the eval read model, as on show (#508).
-        assert (await client.get(f"/evals/{eval_id}/runs")).status_code == 404  # lagging
         await _catch_up()
 
         runs = (await client.get(f"/evals/{eval_id}/runs")).json()
