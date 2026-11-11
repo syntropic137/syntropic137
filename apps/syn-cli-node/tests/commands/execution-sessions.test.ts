@@ -1,5 +1,8 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executionSessionsCommand } from "../../src/commands/execution-sessions.js";
+import { RATE_LIMIT_POLICY } from "../../src/client/rate-limit.js";
+import { CLIError } from "../../src/framework/errors.js";
+import type { components } from "../../src/generated/api-types.js";
 
 const fetchMock = vi.fn();
 const run = { source_instance_id: "installation", execution_id: "execution" };
@@ -363,4 +366,84 @@ it("continues node cursors without requiring a section field", async () => {
   const url = urls()[1]!;
   expect(url.pathname).toMatch(/\/node$/);
   expect(url.searchParams.get("cursor")).toBe("server-node");
+});
+
+describe("--all on a rate-limited API (#1491)", () => {
+  type PageBody = components["schemas"]["SessionInventoryPageResponse"];
+  const typedPage = (id: string, next: string | null): PageBody => ({
+    snapshot: snapshot as PageBody["snapshot"], kind: "node", filters: {}, item_keys: [{ node_key: "k".repeat(64) }],
+    items: [{ ref: { kind: "transcript", local_id: id, harness: "fake", source_instance_id: "installation" } }] as PageBody["items"],
+    body_overrides: [], capture_hashes: [], next_cursor: next,
+  });
+  const limited = (headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify({ detail: "rate limited" }), { status: 429, headers: { "Content-Type": "application/json", ...headers } });
+  const pageUrls = () => urls().slice(1);
+  let sleep: ReturnType<typeof vi.fn<(ms: number) => Promise<void>>>;
+  beforeEach(() => {
+    sleep = vi.fn(async (_ms: number) => undefined);
+    vi.spyOn(RATE_LIMIT_POLICY, "sleep").mockImplementation(sleep);
+  });
+  const readAll = () => executionSessionsCommand.handler({ positionals: ["execution"], values: { all: true, kind: "node", json: true, limit: "1" } });
+
+  it("waits Retry-After seconds and resends the same cursor on the same pinned revision", async () => {
+    fetchMock.mockResolvedValueOnce(response(status))
+      .mockResolvedValueOnce(response(typedPage("native-one", "server-cursor-1")))
+      .mockResolvedValueOnce(limited({ "Retry-After": "2" }))
+      .mockResolvedValueOnce(response(typedPage("native-two", null)));
+    await readAll();
+    const result = JSON.parse(output());
+    expect(result.pages.map((p: PageBody) => p.items.length)).toEqual([1, 1]);
+    expect(result.next_cursor).toBeNull();
+    const [, limitedRequest, retried] = pageUrls();
+    expect(limitedRequest!.searchParams.get("cursor")).toBe("server-cursor-1");
+    expect(retried!.searchParams.get("cursor")).toBe("server-cursor-1");
+    expect(retried!.pathname).toBe(limitedRequest!.pathname);
+    expect(retried!.pathname).toContain(snapshot.snapshot_id);
+    expect(sleep.mock.calls).toEqual([[2000]]);
+  });
+
+  it("waits the default second when Retry-After is absent", async () => {
+    fetchMock.mockResolvedValueOnce(response(status))
+      .mockResolvedValueOnce(limited())
+      .mockResolvedValueOnce(response(typedPage("native-one", null)));
+    await readAll();
+    expect(pageUrls()).toHaveLength(2);
+    expect(sleep.mock.calls).toEqual([[1000]]);
+  });
+
+  it("gives up after six rate-limited attempts, naming the attempts and the cursor to resume from", async () => {
+    fetchMock.mockResolvedValueOnce(response(status))
+      .mockResolvedValueOnce(response(typedPage("native-one", "server-cursor-1")))
+      .mockImplementation(async () => limited({ "Retry-After": "1" }));
+    const error = await Promise.resolve(readAll()).then(() => undefined, (e: unknown) => e);
+    expect(error).toBeInstanceOf(CLIError);
+    const message = (error as CLIError).message;
+    expect(message).toContain("rate-limited");
+    expect(message).toContain("6 attempts");
+    const resume = /--cursor (\S+)/.exec(message)![1]!;
+    expect(JSON.parse(Buffer.from(resume, "base64url").toString())).toMatchObject({
+      server: "server-cursor-1", snapshot: snapshot.snapshot_id, kind: "node",
+    });
+    expect(pageUrls()).toHaveLength(7); // the first page, then six attempts at the second
+    expect(sleep).toHaveBeenCalledTimes(5);
+  });
+
+  it("does not retry a 500", async () => {
+    fetchMock.mockResolvedValueOnce(response(status))
+      .mockResolvedValueOnce(response({ detail: "boom" }, 500))
+      .mockResolvedValueOnce(response(typedPage("native-one", null)));
+    await expect(readAll()).rejects.toThrow("Failed to read inventory page: boom");
+    expect(pageUrls()).toHaveLength(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a 429 without --all", async () => {
+    fetchMock.mockResolvedValueOnce(response(status))
+      .mockResolvedValueOnce(limited())
+      .mockResolvedValueOnce(response(typedPage("native-one", null)));
+    await expect(executionSessionsCommand.handler({ positionals: ["execution"], values: { json: true } }))
+      .rejects.toThrow("Failed to read inventory page: rate limited");
+    expect(pageUrls()).toHaveLength(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
 });

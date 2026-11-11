@@ -33,8 +33,11 @@ export const RATE_LIMIT_POLICY: RateLimitPolicy = {
 export function retryAfterMs(header: string | null, policy: RateLimitPolicy): number {
   const value = header?.trim() ?? "";
   let wait = policy.defaultWaitMs;
+  // An HTTP-date always names its weekday and month; the letters stop
+  // Date.parse reading "-4" as the year -4.
+  const date = /[A-Za-z]/.test(value) ? Date.parse(value) : Number.NaN;
   if (/^\d+$/.test(value)) wait = Number(value) * 1_000;
-  else if (value !== "" && !Number.isNaN(Date.parse(value))) wait = Math.max(0, Date.parse(value) - policy.now());
+  else if (!Number.isNaN(date)) wait = Math.max(0, date - policy.now());
   return Math.min(wait, policy.maxWaitMs);
 }
 
