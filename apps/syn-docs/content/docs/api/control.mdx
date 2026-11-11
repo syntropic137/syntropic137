@@ -24,7 +24,21 @@ _openapi:
       - content: Get Execution State Endpoint
         id: get-execution-state-endpoint
     contents:
-      - content: Cancel an execution, or withdraw a start still queued for one (#1650).
+      - content: >-
+          Cancel an execution, or withdraw a start still queued for one (#1650).
+
+
+          Cancelling a started execution is asynchronous: the signal is queued
+          and the
+
+          executor acts on it later, so the response has `applied: false` and
+          `state`
+
+          is still the pre-cancel state. Re-read `GET
+          /executions/{execution_id}` until
+
+          it reads `cancelled` (#1062). A withdrawn queued start is final at
+          once.
         heading: cancel-execution-endpoint
       - content: >-
           Refused, always: no execution path reads an injected message (#1530).

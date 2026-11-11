@@ -26,6 +26,8 @@ syn control cancel <execution-id> [options]
 | `--reason`, `-r` | `text` | --- | Reason for cancelling |
 | `--force`, `-f` | `boolean` | `false` | Skip confirmation prompt |
 
+Cancelling a started execution is asynchronous: the signal is queued and the executor acts on it shortly after. Until then the response's state, and any re-read, still shows the state before the cancel (usually running), and the command says the cancel is queued. Run `syn execution show <execution-id>` until it reads cancelled. Cancelling a start that is still queued withdraws it at once: it reads cancelled straight away and never runs.
+
 ---
 
 ## `syn control inject`
@@ -86,5 +88,7 @@ syn control stop <execution-id> [options]
 |------|------|---------|-------------|
 | `--reason`, `-r` | `text` | --- | Reason for stopping |
 | `--force`, `-f` | `boolean` | `false` | Skip confirmation prompt |
+
+Cancelling a started execution is asynchronous: the signal is queued and the executor acts on it shortly after. Until then the response's state, and any re-read, still shows the state before the cancel (usually running), and the command says the cancel is queued. Run `syn execution show <execution-id>` until it reads cancelled. Cancelling a start that is still queued withdraws it at once: it reads cancelled straight away and never runs.
 
 ---

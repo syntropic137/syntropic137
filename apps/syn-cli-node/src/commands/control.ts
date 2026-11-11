@@ -18,6 +18,23 @@ import { formatStatus } from "../output/format.js";
 type ControlResponse = components["schemas"]["ControlResponse"];
 type StateResponse = components["schemas"]["StateResponse"];
 
+/**
+ * A cancel of a started execution is queued, and the executor acts on it
+ * later: until then `state` is the state before the cancel (#1062).
+ */
+const CANCEL_NOTES =
+  "Cancelling a started execution is asynchronous: the signal is queued and the " +
+  "executor acts on it shortly after. Until then the response's state, and any " +
+  "re-read, still shows the state before the cancel (usually running), and the " +
+  "command says the cancel is queued. Run `syn execution show <execution-id>` " +
+  "until it reads cancelled. Cancelling a start that is still queued withdraws it " +
+  "at once: it reads cancelled straight away and never runs.";
+
+function printIfQueued(data: ControlResponse, id: string): void {
+  if (data.applied !== false) return;
+  printDim(`  Queued, not yet applied: run \`syn execution show ${id}\` until it reads cancelled.`);
+}
+
 function reqId(parsed: ParsedArgs): string {
   const id = parsed.positionals[0];
   if (!id) {
@@ -31,6 +48,7 @@ function reqId(parsed: ParsedArgs): string {
 const cancelCommand: CommandDef = {
   name: "cancel",
   description: "Cancel a running execution",
+  notes: CANCEL_NOTES,
   args: [{ name: "execution-id", description: "Execution ID to cancel", required: true }],
   options: {
     reason: { type: "string", short: "r", description: "Reason for cancelling" },
@@ -54,6 +72,7 @@ const cancelCommand: CommandDef = {
     print(`  State: ${data.state}`);
     // #1650: a queued start is withdrawn, not signalled; the message says which.
     if (data.message) print(`  Message: ${data.message}`);
+    printIfQueued(data, id);
   },
 };
 
@@ -106,6 +125,7 @@ const injectCommand: CommandDef = {
 const stopCommand: CommandDef = {
   name: "stop",
   description: "Forcefully stop a running execution via SIGINT",
+  notes: CANCEL_NOTES,
   args: [{ name: "execution-id", description: "Execution ID to stop", required: true }],
   options: {
     reason: { type: "string", short: "r", description: "Reason for stopping" },
@@ -128,6 +148,7 @@ const stopCommand: CommandDef = {
     print(style(`Stop signal sent for execution ${id}`, YELLOW));
     print(`  State: ${data.state}`);
     if (data.message) print(`  Message: ${data.message}`);
+    printIfQueued(data, id);
   },
 };
 
