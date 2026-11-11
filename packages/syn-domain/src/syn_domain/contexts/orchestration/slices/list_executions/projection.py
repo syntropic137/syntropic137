@@ -51,6 +51,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent i
 from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
     NextPhaseReadyEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    dispatched_task,
+)
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
     inherited_phase_count,
     record_skips,
@@ -83,7 +86,8 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
     # v11: resumed_from and resumed_as, so every resume already in the store
     # links both ways, not only new ones (#1881).
     # v12: review_verdict, so runs completed before it are filterable too (#1630).
-    VERSION = 12
+    # v13: task, so rows started before it can be told apart too (#1075).
+    VERSION = 13
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -117,8 +121,9 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
         if not execution_id:
             raise UnappliableStartError(self.PROJECTION_NAME)
 
+        inputs = event_data.get("inputs") or {}
         # Extract repos from inputs field (ADR-058: stored as comma-separated string)
-        repos_raw = event_data.get("inputs", {}).get("repos", "")
+        repos_raw = inputs.get("repos", "")
         repos = (
             tuple(u.strip() for u in str(repos_raw).split(",") if u.strip()) if repos_raw else ()
         )
@@ -150,6 +155,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             association_kind=AssociationKind.LAUNCHED.value if eval_id else None,
             workflow_version=event_data.get("workflow_version"),
             resumed_from=ResumedFrom.of_started(event_data.get("resumed_from")),
+            task=dispatched_task(inputs),
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 

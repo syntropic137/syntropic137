@@ -5335,6 +5335,10 @@ export interface components {
             resumed_as?: string | null;
             /** Repos Display */
             repos_display?: string | null;
+            /** Task */
+            task?: string | null;
+            /** Task Display */
+            task_display?: string | null;
             eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };

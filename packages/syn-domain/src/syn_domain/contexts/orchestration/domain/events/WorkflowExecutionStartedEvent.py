@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from event_sourcing import DomainEvent, event
 from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
@@ -29,6 +32,17 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 #: reads it back out have to agree; a second literal spelled somewhere else is
 #: how they stop agreeing.
 TASK_INPUT_KEY = "task"
+
+
+def dispatched_task(inputs: Mapping[str, object] | None) -> str | None:
+    """What a run was asked to do, read from the inputs it was started with.
+
+    ``None`` when it was asked nothing: a workflow whose phases take no
+    ``$ARGUMENTS`` is dispatched without a task. The one derivation every read
+    model uses (#1075), so the list and the detail cannot disagree about it.
+    """
+    task = (inputs or {}).get(TASK_INPUT_KEY)
+    return None if task is None else str(task)
 
 
 #: Fields a release before #1513 does not know: omitted when None.
