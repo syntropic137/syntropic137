@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 type WorkflowResponse = components["schemas"]["WorkflowResponse"];
+type PhaseDefinitionResponse = components["schemas"]["PhaseDefinitionResponse"];
 
 // ---------------------------------------------------------------------------
 // create
@@ -264,7 +265,27 @@ function phaseCapabilityNotes(phase: {
   return notes;
 }
 
-function renderWorkflowDetail(detail: WorkflowResponse): void {
+/** What the phase tells its agent and what it lets it do (#950, `--full`).
+ *
+ * Labels are the API field names, so a reader can map a line straight back to
+ * `GET /workflows/{id}`. Empty values print an explicit marker rather than
+ * nothing: "no tools declared" and "line was omitted" must not look alike.
+ */
+function renderPhaseFull(phase: PhaseDefinitionResponse): void {
+  const tools = phase.allowed_tools ?? [];
+  print(`        ${style("allowed_tools:", DIM)} ${tools.length > 0 ? tools.join(", ") : "(none declared)"}`);
+  print(`        ${style("timeout_seconds:", DIM)} ${phase.timeout_seconds}`);
+  if (phase.max_cost_usd != null) print(`        ${style("max_cost_usd:", DIM)} ${phase.max_cost_usd}`);
+  if (phase.argument_hint) print(`        ${style("argument_hint:", DIM)} ${phase.argument_hint}`);
+  if (!phase.prompt_template) {
+    print(`        ${style("prompt_template:", DIM)} (no prompt)`);
+    return;
+  }
+  print(`        ${style("prompt_template:", DIM)}`);
+  for (const line of phase.prompt_template.split("\n")) print(`          ${line}`);
+}
+
+function renderWorkflowDetail(detail: WorkflowResponse, full: boolean): void {
   print("");
   print(style("Workflow Details", BOLD));
   print(`  ${style("ID:", DIM)} ${detail.id}`);
@@ -281,6 +302,7 @@ function renderWorkflowDetail(detail: WorkflowResponse): void {
 
       const notes = phaseCapabilityNotes(phase);
       if (notes.length > 0) print(`        ${notes.join(style(" · ", DIM))}`);
+      if (full) renderPhaseFull(phase);
     }
   } else {
     printDim("  No phases defined");
@@ -292,6 +314,9 @@ export const showCommand: CommandDef = {
   name: "show",
   description: "Show details of a workflow",
   args: [{ name: "workflow-id", description: "Workflow ID (partial match supported)", required: true }],
+  options: {
+    full: { type: "boolean", description: "Also print each phase's prompt_template, allowed_tools, timeout_seconds, max_cost_usd and argument_hint", default: false },
+  },
   handler: async (parsed: ParsedArgs) => {
     const partialId = parsed.positionals[0];
     if (!partialId) {
@@ -306,7 +331,7 @@ export const showCommand: CommandDef = {
       }),
       "Failed to get workflow",
     );
-    renderWorkflowDetail(data);
+    renderWorkflowDetail(data, parsed.values["full"] === true);
   },
 };
 

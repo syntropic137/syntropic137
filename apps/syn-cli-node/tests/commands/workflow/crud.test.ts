@@ -417,6 +417,88 @@ describe("workflow crud commands", () => {
       expect(out).toContain("branch");
     });
 
+    // Fixtures shaped from the generated PhaseDefinitionResponse (#950).
+    const promptedPhase = {
+      phase_id: "implement",
+      name: "implement",
+      order: 1,
+      agent_type: "claude",
+      prompt_template: "Fix issue {{issue}}.\n\nRun the gates before pushing.",
+      timeout_seconds: 1800,
+      max_cost_usd: 4.25,
+      allowed_tools: ["Read", "Bash(git:*)"],
+      argument_hint: "<issue-number>",
+      allow_delegation: false,
+      require_delegation: false,
+      clone_repos: true,
+      delivers_repo_changes: true,
+    };
+    const barePhase = {
+      phase_id: "notify",
+      name: "notify",
+      order: 2,
+      agent_type: "claude",
+      prompt_template: null,
+      timeout_seconds: 300,
+      max_cost_usd: null,
+      allowed_tools: [],
+      argument_hint: null,
+      allow_delegation: false,
+      require_delegation: false,
+      clone_repos: true,
+      delivers_repo_changes: true,
+    };
+
+    async function showWith(phases: unknown[], values: Record<string, unknown>): Promise<string> {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [{ id: "wf-full-123456789", name: "Full", workflow_type: "custom", phase_count: phases.length }],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-full-123456789",
+            name: "Full",
+            workflow_type: "custom",
+            classification: "multi-phase",
+            phases,
+            input_declarations: [],
+          }),
+        );
+      await showCommand.handler({ positionals: ["wf-full"], values });
+      return stdout();
+    }
+
+    it("--full prints the prompt verbatim, allowed_tools, timeout, cost and hint", async () => {
+      const out = await showWith([promptedPhase], { full: true });
+      expect(out).toContain("          Fix issue {{issue}}.\n          \n          Run the gates before pushing.\n");
+      expect(out).toContain("Read, Bash(git:*)");
+      expect(out).toContain("timeout_seconds:");
+      expect(out).toContain("1800");
+      expect(out).toContain("max_cost_usd:");
+      expect(out).toContain("4.25");
+      expect(out).toContain("<issue-number>");
+    });
+
+    it("without --full, default output carries none of the full fields", async () => {
+      const out = await showWith([promptedPhase], {});
+      expect(out).toContain("implement");
+      for (const absent of ["Fix issue", "Run the gates", "allowed_tools", "Bash(git:*)", "timeout_seconds", "1800", "max_cost_usd", "4.25", "<issue-number>", "prompt_template"]) {
+        expect(out).not.toContain(absent);
+      }
+    });
+
+    it("--full marks a null prompt and empty allowed_tools explicitly", async () => {
+      const out = await showWith([barePhase], { full: true });
+      expect(out).toContain("(no prompt)");
+      expect(out).toContain("(none declared)");
+      expect(out).toContain("300");
+      expect(out).not.toContain("max_cost_usd");
+      expect(out).not.toContain("argument_hint");
+    });
+
     it("throws CLIError when workflow-id is missing", async () => {
       await expect(
         showCommand.handler({ positionals: [], values: {} }),
