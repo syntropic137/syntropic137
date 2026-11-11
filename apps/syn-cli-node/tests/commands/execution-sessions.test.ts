@@ -370,9 +370,13 @@ it("continues node cursors without requiring a section field", async () => {
 
 describe("--all on a rate-limited API (#1491)", () => {
   type PageBody = components["schemas"]["SessionInventoryPageResponse"];
+  const pinned: PageBody["snapshot"] = {
+    ...snapshot, coverage: { state: "unknown", missing_keys: [] },
+    counts: { node: 2, membership: 0, edge: 0, capture: 0, gap: 0, retraction: 0, binding: 0 },
+  };
   const typedPage = (id: string, next: string | null): PageBody => ({
-    snapshot: snapshot as PageBody["snapshot"], kind: "node", filters: {}, item_keys: [{ node_key: "k".repeat(64) }],
-    items: [{ ref: { kind: "transcript", local_id: id, harness: "fake", source_instance_id: "installation" } }] as PageBody["items"],
+    snapshot: pinned, kind: "node", filters: {}, item_keys: [{ node_key: "k".repeat(64) }],
+    items: [{ ref: { kind: "transcript", local_id: id, harness: "fake", source_instance_id: "installation" }, evidence: [] }],
     body_overrides: [], capture_hashes: [], next_cursor: next,
   });
   const limited = (headers: Record<string, string> = {}) =>
