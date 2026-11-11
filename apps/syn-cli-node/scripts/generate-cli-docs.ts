@@ -59,6 +59,7 @@ interface CmdInfo {
   help: string;
   params: ParamInfo[];
   examples: readonly string[];
+  notes: string | undefined;
 }
 
 interface GrpInfo {
@@ -123,6 +124,7 @@ function extractCommand(def: CommandDef): CmdInfo {
     help: def.description,
     params,
     examples: def.examples ?? [],
+    notes: def.notes,
   };
 }
 
@@ -221,6 +223,10 @@ function renderCommandMdx(groupName: string, cmd: CmdInfo): string[] {
   lines.push("");
   if (cmd.params.length > 0) {
     lines.push(renderParamTable(cmd.params));
+  }
+  if (cmd.notes) {
+    lines.push(cmd.notes); // Markdown, written by hand: inline code may hold `<...>`.
+    lines.push("");
   }
   if (cmd.examples.length > 0) {
     lines.push("**Examples:**");
