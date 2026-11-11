@@ -478,6 +478,11 @@ def _phase_name(names: PhaseNames, execution_id: str | None, phase_id: str | Non
     return names.get((execution_id, phase_id))
 
 
+def _phase_display(phase_name: str | None, phase_id: str | None) -> str | None:
+    """The recorded name when there is one; the formatted id otherwise (older rows)."""
+    return phase_name or format_phase(phase_id)
+
+
 def _to_session_summary(s: DomainSessionSummary) -> SessionSummary:
     """Convert a domain read-model row into the API-layer summary."""
     return SessionSummary(
@@ -844,7 +849,7 @@ def _build_session_summary_response(
         parent_session_id=s.parent_session_id,
         root_session_id=s.root_session_id,
         phase_name=phase_name,
-        phase_display=phase_name or format_phase(s.phase_id),
+        phase_display=_phase_display(phase_name, s.phase_id),
         status=s.status,
         agent_provider=s.agent_type,
         agent_model=info.agent_model,
@@ -1019,7 +1024,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         parent_session_id=detail.parent_session_id,
         root_session_id=detail.root_session_id,
         phase_name=phase_name,
-        phase_display=phase_name or format_phase(detail.phase_id),
+        phase_display=_phase_display(phase_name, detail.phase_id),
         milestone_id=None,
         agent_provider=detail.agent_type,
         agent_model=detail.agent_model,
