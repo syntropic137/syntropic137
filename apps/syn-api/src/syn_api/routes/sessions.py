@@ -49,6 +49,10 @@ from syn_api.types import (
     TokenTypeCostResponse,
     ToolOperation,
 )
+from syn_domain.contexts.orchestration import PhaseExecutionDetail
+from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
+    WorkflowExecutionDetailProjection,
+)
 from syn_domain.contexts.orchestration.slices.list_workflows.projection import (
     WorkflowListProjection,
 )
@@ -110,6 +114,13 @@ class SessionSummaryResponse(BaseModel):
     parent_session_id: str | None = None
     #: The top of the delegation chain. Equals ``id`` for a leader.
     root_session_id: str | None = None
+    phase_name: str | None = Field(
+        default=None,
+        description=(
+            "The phase's name as the execution recorded it, or null when it "
+            "recorded none (older rows). phase_display is this when known."
+        ),
+    )
     phase_display: str | None = None
     status: str
     agent_provider: str | None
@@ -234,6 +245,13 @@ class SessionResponse(BaseModel):
     parent_session_id: str | None = None
     #: The top of the delegation chain. Equals ``id`` for a leader.
     root_session_id: str | None = None
+    phase_name: str | None = Field(
+        default=None,
+        description=(
+            "The phase's name as the execution recorded it, or null when it "
+            "recorded none (older rows). phase_display is this when known."
+        ),
+    )
     phase_display: str | None = None
     milestone_id: str | None
     agent_provider: str | None
@@ -411,6 +429,56 @@ async def _build_workflow_name_map(workflow_ids: set[str]) -> dict[str, str] | N
         if isinstance(name, str) and name:
             names[wf_id] = name
     return names
+
+
+#: ``(execution_id, phase_id)`` -> the phase's recorded name.
+PhaseNames = dict[tuple[str, str], str]
+
+
+async def _load_phase_names(execution_ids: set[str]) -> PhaseNames:
+    """The recorded name of every phase of these executions, in ONE store read.
+
+    A session knows only its phase's id, which is a slug or, on older rows, a
+    UUID; the name is on ``PhaseStarted``, which the execution detail read
+    model keeps and the session projection never sees (#1029). So a page of
+    sessions reads its executions once, keyed by id, never one per row.
+
+    The projection stores the id as the name when ``PhaseStarted`` carried
+    none, so a name equal to its id is no name and is left out. A failed read
+    is logged and gives no names: every caller then falls back to
+    ``format_phase``, which is what a missing name means anyway.
+    """
+    if not execution_ids:
+        return {}
+    manager = get_projection_mgr()
+    try:
+        documents = await read_by_keys(
+            manager.store, WorkflowExecutionDetailProjection.PROJECTION_NAME, sorted(execution_ids)
+        )
+    except Exception:
+        logger.warning("Could not load phase names for sessions", exc_info=True)
+        return {}
+    names: PhaseNames = {}
+    for execution_id, document in documents.items():
+        phases = document.get("phases")
+        for raw in phases if isinstance(phases, list) else []:
+            if not isinstance(raw, dict):
+                continue
+            phase = PhaseExecutionDetail.from_dict(raw)
+            if phase.name and phase.name != phase.workflow_phase_id:
+                names[(execution_id, phase.workflow_phase_id)] = phase.name
+    return names
+
+
+def _phase_name(names: PhaseNames, execution_id: str | None, phase_id: str | None) -> str | None:
+    if execution_id is None or phase_id is None:
+        return None
+    return names.get((execution_id, phase_id))
+
+
+def _phase_display(phase_name: str | None, phase_id: str | None) -> str | None:
+    """The recorded name when there is one; the formatted id otherwise (older rows)."""
+    return phase_name or format_phase(phase_id)
 
 
 def _to_session_summary(s: DomainSessionSummary) -> SessionSummary:
@@ -747,6 +815,7 @@ def _build_session_summary_response(
     s: SessionSummary,
     workflow_name: str | None,
     info: _SummaryEnrichment,
+    phase_name: str | None = None,
 ) -> SessionSummaryResponse:
     """Compose a SessionSummaryResponse from a domain summary + enrichment.
 
@@ -777,7 +846,8 @@ def _build_session_summary_response(
         phase_id=s.phase_id,
         parent_session_id=s.parent_session_id,
         root_session_id=s.root_session_id,
-        phase_display=format_phase(s.phase_id),
+        phase_name=phase_name,
+        phase_display=_phase_display(phase_name, s.phase_id),
         status=s.status,
         agent_provider=s.agent_type,
         agent_model=info.agent_model,
@@ -862,11 +932,13 @@ async def list_sessions_endpoint(
     wf_names = await _build_workflow_name_map(wf_ids)
     # Lane 2: enrich each session's cost/model/duration from the session_cost projection (#695)
     enrichment = await _load_session_costs([s.id for s in summaries])
+    phase_names = await _load_phase_names({s.execution_id for s in summaries if s.execution_id})
     responses = [
         _build_session_summary_response(
             s,
             wf_names.get(s.workflow_id) if wf_names is not None and s.workflow_id else None,
             enrichment.get(s.id, _SummaryEnrichment()),
+            _phase_name(phase_names, s.execution_id, s.phase_id),
         )
         for s in summaries
     ]
@@ -939,6 +1011,8 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         {detail.agent_model} if detail.agent_model else set()
     )
     cache_rates = cache_rate_display(session_models)
+    phase_names = await _load_phase_names({detail.execution_id} if detail.execution_id else set())
+    phase_name = _phase_name(phase_names, detail.execution_id, detail.phase_id)
     return SessionResponse(
         id=detail.id,
         workflow_id=detail.workflow_id,
@@ -947,7 +1021,8 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         phase_id=detail.phase_id,
         parent_session_id=detail.parent_session_id,
         root_session_id=detail.root_session_id,
-        phase_display=format_phase(detail.phase_id),
+        phase_name=phase_name,
+        phase_display=_phase_display(phase_name, detail.phase_id),
         milestone_id=None,
         agent_provider=detail.agent_type,
         agent_model=detail.agent_model,
