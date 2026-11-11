@@ -449,6 +449,9 @@ def test_the_json_401_keeps_the_status_and_the_challenge_and_names_no_user(tmp_p
     }
     assert _UNUSUAL_USER not in returned.group(2)
     assert re.search(r"^\s*default_type application/json;", named, flags=re.M)
+    # default_type is only the fallback: an inherited MIME table would still
+    # type /api/v1/x.html as text/html, so the named location must empty it.
+    assert re.search(r"^\s*types\s*\{\s*\}", named, flags=re.M), named
 
     realm = re.search(r'auth_basic "([^"]+)";', _ENTRYPOINT.read_text())
     assert realm

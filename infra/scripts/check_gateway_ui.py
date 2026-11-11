@@ -15,11 +15,19 @@ Usage: python3 infra/scripts/check_gateway_ui.py [BASE_URL] [--mode next|legacy]
 Both modes also assert /api/v1/ still reaches the API proxy (a 502 from nginx
 with no API behind it counts; an SPA index.html does not). Stdlib only, so CI
 and a laptop run it as is.
+
+``--auth-base URL --auth-user USER`` also checks a listener that asks for
+Basic auth (#1571): a wrong user and a wrong password on an API path get 401,
+a Basic challenge, ``application/json`` whatever the path's suffix, and one
+fixed body that never names USER; the dashboard keeps nginx's HTML 401 so a
+browser still shows its credentials prompt.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import json
 import re
 import sys
 import urllib.error
@@ -43,9 +51,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_NoRedirect, urllib.request.ProxyHandler({}))
 
 
-def fetch(base: str, path: str) -> tuple[int, dict[str, str], str]:
+def fetch(
+    base: str, path: str, auth: tuple[str, str] | None = None
+) -> tuple[int, dict[str, str], str]:
+    request = urllib.request.Request(base + path)
+    if auth:
+        token = base64.b64encode(f"{auth[0]}:{auth[1]}".encode()).decode()
+        request.add_header("Authorization", f"Basic {token}")
     try:
-        with _opener.open(base + path, timeout=10) as r:
+        with _opener.open(request, timeout=10) as r:
             return (
                 r.status,
                 {k.lower(): v for k, v in r.headers.items()},
@@ -119,10 +133,67 @@ def check_legacy(base: str, check: Callable[[bool, str], None]) -> None:
     check_assets(base, index, "/next/", check)
 
 
+#: The gateway's fixed API 401 body (docker-entrypoint.sh, @api_unauthorized).
+API_401_BODY = {
+    "detail": "unauthorized",
+    "hint": "check SYN_API_USER / SYN_API_PASSWORD for this deployment",
+}
+
+#: An extensionless path, then suffixes nginx's mime.types maps. The named
+#: location keeps the request URI, so these are what an inherited MIME table
+#: would mistype as text/html, text/plain and application/javascript.
+API_401_PATHS = (
+    "/api/v1/workflows",
+    "/api/v1/workflows/example.html",
+    "/api/v1/workflows/example.txt",
+    "/api/v1/workflows/example.js",
+    "/api/v1/stream",
+    "/ws/",
+)
+
+
+def check_unauthorized(base: str, user: str, check: Callable[[bool, str], None]) -> None:
+    # Neither credential is the deployment's password; the user is right in
+    # one and wrong in the other, and the two must be indistinguishable.
+    for creds in ((user, "wrong-password"), (user + "-wrong", "wrong-password")):
+        who = "wrong user" if creds[0] != user else "wrong password"
+        for path in API_401_PATHS:
+            status, headers, body = fetch(base, path, creds)
+            what = f"{path} ({who})"
+            check(status == 401, f"{what} -> 401 (got {status})")
+            check(
+                headers.get("www-authenticate", "").startswith("Basic "),
+                f"{what} -> Basic challenge kept",
+            )
+            check(
+                headers.get("content-type", "").startswith("application/json"),
+                f"{what} -> application/json (got {headers.get('content-type')})",
+            )
+            try:
+                parsed = json.loads(body)
+            except ValueError:
+                parsed = None
+            check(parsed == API_401_BODY, f"{what} -> the fixed JSON body")
+            check(user not in body, f"{what} -> body names no username")
+
+    status, headers, body = fetch(base, "/", (user, "wrong-password"))
+    check(status == 401, f"/ (wrong password) -> 401 (got {status})")
+    check(
+        headers.get("www-authenticate", "").startswith("Basic "),
+        "/ -> Basic challenge kept (browser prompt)",
+    )
+    check(
+        "text/html" in headers.get("content-type", "") and API_401_BODY["hint"] not in body,
+        "/ -> nginx's HTML 401, not the API's JSON",
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("base", nargs="?", default="http://127.0.0.1:8137")
     parser.add_argument("--mode", choices=("next", "legacy"), default="next")
+    parser.add_argument("--auth-base", help="a listener that requires Basic auth")
+    parser.add_argument("--auth-user", default="admin", help="its SYN_API_USER")
     args = parser.parse_args()
     base = str(args.base).rstrip("/")
     failures: list[str] = []
@@ -145,6 +216,9 @@ def main() -> int:
         SYN_UI_MARK not in body and REACT_MARK not in body and status != 404,
         f"/api/v1/ -> proxied to the API (got {status}, not an SPA page)",
     )
+
+    if args.auth_base:
+        check_unauthorized(str(args.auth_base).rstrip("/"), str(args.auth_user), check)
 
     if failures:
         print(f"\n{len(failures)} check(s) failed", file=sys.stderr)

@@ -140,8 +140,12 @@ location = /api/v1/webhooks/github {
 # rate-limit.conf count 401s) and the challenge is re-sent so clients still
 # know Basic auth is wanted. One body for a wrong user and a wrong password,
 # and it names no username. The dashboard locations do not use this, so a
-# browser there still gets the native credentials prompt.
+# browser there still gets the native credentials prompt. `types {}` empties
+# the MIME table here: a named location keeps the request URI, so without it
+# /api/v1/x.html would answer this JSON as text/html, and default_type is only
+# the fallback for a suffix the table does not map.
 location @api_unauthorized {
+    types {}
     default_type application/json;
     add_header WWW-Authenticate 'Basic realm="Syntropic137"' always;
     include /etc/nginx/conf.d/security-headers.conf;
