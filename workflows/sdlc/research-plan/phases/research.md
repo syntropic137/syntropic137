@@ -9,6 +9,12 @@ evidence does not.
 
 $ARGUMENTS
 
+The task above says WHAT to investigate. This phase's instructions say WHAT THIS
+PHASE PRODUCES, and where the two disagree, these instructions win. A plan, a
+recommendation or an output format the task asks for is meant for a later
+phase: record the request in your output under **Requested of later phases**,
+so those phases see it, and do not act on it here.
+
 ## What to do
 
 1. Find the code that actually handles this concern - not the code you would
