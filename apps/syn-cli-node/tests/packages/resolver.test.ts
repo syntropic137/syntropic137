@@ -251,6 +251,9 @@ function cleanup(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// ADR-058 (v0.25.2 update): explicit `requires_repos` wins; unset means true.
+// The server pins the same rule in test_yaml_to_command.py
+// (TestInferRequiresRepos); #1050 was the two disagreeing on the unset case.
 describe("requires_repos inference (ADR-058)", () => {
   let tmpDir: string;
 
@@ -258,41 +261,30 @@ describe("requires_repos inference (ADR-058)", () => {
     if (tmpDir) cleanup(tmpDir);
   });
 
-  describe("resolveStandaloneYaml (via resolvePackage)", () => {
-    it("defaults to false when requires_repos is absent (standalone has no repository field)", () => {
-      tmpDir = makeTmpDir();
-      fs.writeFileSync(
-        path.join(tmpDir, "my-workflow.yaml"),
-        "id: standalone\nname: Standalone\nphases:\n  - id: only\n    prompt_template: hi\n",
-        "utf-8",
-      );
-      const { workflows } = resolvePackage(tmpDir);
-      expect(workflows).toHaveLength(1);
-      expect(workflows[0]!.requires_repos).toBe(false);
-    });
+  const cases = [
+    { name: "defaults to true when neither requires_repos nor repository is set", field: "", expected: true },
+    { name: "keeps an explicit requires_repos: false", field: "requires_repos: false\n", expected: false },
+    { name: "keeps an explicit requires_repos: true", field: "requires_repos: true\n", expected: true },
+  ];
 
-    it("returns true when requires_repos: true is explicit in standalone YAML", () => {
-      tmpDir = makeTmpDir();
-      fs.writeFileSync(
-        path.join(tmpDir, "my-workflow.yaml"),
-        "id: standalone\nname: Standalone\nrequires_repos: true\nphases:\n  - id: only\n    prompt_template: hi\n",
-        "utf-8",
-      );
-      const { workflows } = resolvePackage(tmpDir);
-      expect(workflows).toHaveLength(1);
-      expect(workflows[0]!.requires_repos).toBe(true);
-    });
+  // Two resolver paths call inferRequiresRepos: a package with a root
+  // workflow.yaml (resolveWorkflowYaml) and a directory of standalone YAMLs.
+  const layouts = [
+    { layout: "workflow.yaml package", file: "workflow.yaml" },
+    { layout: "standalone YAML", file: "my-workflow.yaml" },
+  ];
 
-    it("returns false when requires_repos: false is explicit in standalone YAML", () => {
+  describe.each(layouts)("$layout", ({ file }) => {
+    it.each(cases)("$name", ({ field, expected }) => {
       tmpDir = makeTmpDir();
       fs.writeFileSync(
-        path.join(tmpDir, "my-workflow.yaml"),
-        "id: standalone\nname: Standalone\nrequires_repos: false\nphases:\n  - id: only\n    prompt_template: hi\n",
+        path.join(tmpDir, file),
+        `id: wf\nname: Wf\n${field}phases:\n  - id: only\n    prompt_template: hi\n`,
         "utf-8",
       );
       const { workflows } = resolvePackage(tmpDir);
       expect(workflows).toHaveLength(1);
-      expect(workflows[0]!.requires_repos).toBe(false);
+      expect(workflows[0]!.requires_repos).toBe(expected);
     });
   });
 });

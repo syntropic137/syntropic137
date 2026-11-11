@@ -853,7 +853,8 @@ class WorkflowDefinition(BaseModel):
     # added here rather than deleting the documented capability.
     repos: list[str] = Field(default_factory=list)
 
-    # Execution gate (ADR-058 #666): None = infer from repository presence
+    # Execution gate (ADR-058 #666): None = True (opt-out, v0.25.2 update);
+    # resolved by infer_requires_repos in yaml_to_command.py
     requires_repos: bool | None = None
 
     # Project association

@@ -526,7 +526,9 @@ async def _preflight_repos_or_reject(
             status_code=422,
             detail=(
                 f"Workflow '{workflow_id}' requires a repository, but none was "
-                "resolved. Pass one via the 'repos' field (ADR-058)."
+                "resolved. Pass one via the 'repos' field (`-R` in the CLI), or, "
+                "if the workflow needs no repository, declare "
+                "`requires_repos: false` in its YAML (ADR-058)."
             ),
         )
     await _validate_all_repos_access(preflight_repos)

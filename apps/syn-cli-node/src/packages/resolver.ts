@@ -113,10 +113,12 @@ export function recordInstallation(opts: {
 // ADR-058: requires_repos default inference
 // ---------------------------------------------------------------------------
 
+// ADR-058 (v0.25.2 update): an explicit `requires_repos` wins; unset means
+// `true` (opt-out). `repository:` presence plays no part. The server applies
+// the same rule in `infer_requires_repos` (yaml_to_command.py); they must
+// agree, or the CLI reports a gate the server does not enforce (#1050).
 function inferRequiresRepos(data: Record<string, unknown>): boolean {
-  if (data["requires_repos"] === true) return true;
-  if (data["requires_repos"] === false) return false;
-  return data["repository"] != null;
+  return data["requires_repos"] !== false;
 }
 
 // ---------------------------------------------------------------------------
