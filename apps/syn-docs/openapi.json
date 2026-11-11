@@ -21998,6 +21998,18 @@
             ],
             "title": "Root Session Id"
           },
+          "phase_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Name",
+            "description": "The phase's name as the execution recorded it, or null when it recorded none (older rows). phase_display is this when known."
+          },
           "phase_display": {
             "anyOf": [
               {
@@ -22428,6 +22440,18 @@
               }
             ],
             "title": "Root Session Id"
+          },
+          "phase_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Name",
+            "description": "The phase's name as the execution recorded it, or null when it recorded none (older rows). phase_display is this when known."
           },
           "phase_display": {
             "anyOf": [
