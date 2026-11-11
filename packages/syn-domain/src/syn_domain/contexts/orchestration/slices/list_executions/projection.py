@@ -53,6 +53,7 @@ from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import 
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     dispatched_task,
+    recorded_inputs,
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
     inherited_phase_count,
@@ -121,7 +122,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
         if not execution_id:
             raise UnappliableStartError(self.PROJECTION_NAME)
 
-        inputs = event_data.get("inputs") or {}
+        inputs = recorded_inputs(event_data.get("inputs"))
         # Extract repos from inputs field (ADR-058: stored as comma-separated string)
         repos_raw = inputs.get("repos", "")
         repos = (

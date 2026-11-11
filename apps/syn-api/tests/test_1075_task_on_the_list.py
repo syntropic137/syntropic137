@@ -146,3 +146,51 @@ async def test_the_list_and_the_detail_report_the_same_task(
     for execution_id in TASKS:
         detail = await queries.get_execution_endpoint(execution_id)
         assert rows[execution_id].task == detail.task, execution_id
+
+
+async def test_a_non_string_task_lists_as_the_detail_shows_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The aggregate admits any input value; the list reads it as the detail does.
+
+    Driven through the real producer: `StartExecutionCommand.inputs` is not
+    narrowed to strings, so a task of `42` is written to the event as a number.
+    The detail has always shown it as `"42"`; a list projection reading inputs
+    raw failed to build the row, and one such row fails the whole list.
+    """
+    import json
+
+    from syn_api.routes.executions import queries
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+        StartExecutionCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
+
+    aggregate = WorkflowExecutionAggregate()
+    aggregate.start_execution(
+        StartExecutionCommand(
+            execution_id="exec-numeric-1075",
+            workflow_id=WORKFLOW_ID,
+            workflow_name="one workflow",
+            total_phases=1,
+            inputs={TASK_INPUT_KEY: 42},
+        )
+    )
+    # As the store hands it back: serialised, then read.
+    started = json.loads(aggregate.get_uncommitted_events()[0].event.model_dump_json())
+    assert started["inputs"][TASK_INPUT_KEY] == 42
+
+    await _serve(monkeypatch)
+    manager = queries.get_projection_mgr()
+    for projection in (manager.workflow_execution_detail, manager.workflow_execution_list):
+        await projection.on_workflow_execution_started(started)
+
+    rows = await _listed()
+    detail = await queries.get_execution_endpoint("exec-numeric-1075")
+    assert detail.task == "42"
+    assert rows["exec-numeric-1075"].task == detail.task
+    assert rows["exec-numeric-1075"].task_display == "42"
+    # The rest of the list is still served beside it.
+    assert rows["exec-darkmode-1075"].task == "Add dark mode"
