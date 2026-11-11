@@ -1251,7 +1251,7 @@
           "control"
         ],
         "summary": "Cancel Execution Endpoint",
-        "description": "Cancel an execution, or withdraw a start still queued for one (#1650).\n\nCancelling a started execution is asynchronous: the signal is queued and the\nexecutor acts on it later, so the response has `applied: false` and `state`\nis still the pre-cancel state. Re-read `GET /executions/{execution_id}` until\nit reads `cancelled` (#1062). A withdrawn queued start is final at once.",
+        "description": "Cancel an execution, or withdraw a start still queued for one (#1650).\n\nCancelling a started execution is asynchronous: the signal is queued and the\nexecutor acts on it later, so the response has `applied: false` and `state`\nis still the pre-cancel state. Re-read `GET /executions/{execution_id}` until\nit reads `cancelled` (#1062). A withdrawn queued start is final at once\n(`applied: true`), though a re-read can still show `queued` until the\nwithdrawal is projected.",
         "operationId": "cancel_execution_endpoint_executions__execution_id__cancel_post",
         "parameters": [
           {
@@ -9883,7 +9883,7 @@
           "applied": {
             "type": "boolean",
             "title": "Applied",
-            "description": "Whether the command has already taken effect. False when a signal was queued for the executor to act on, as for a cancel of a running execution; true when nothing is left to happen, as for a queued start that was withdrawn and is already `cancelled`."
+            "description": "Whether the command has already taken effect. False when a signal was queued for the executor to act on, as for a cancel of a running execution; true when nothing is left to happen, as for a queued start that was withdrawn and will not run. A later `GET /executions/{execution_id}` can still read `queued` until the withdrawal is projected."
           },
           "message": {
             "anyOf": [

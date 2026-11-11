@@ -28,7 +28,9 @@ const CANCEL_NOTES =
   "re-read, still shows the state before the cancel (usually running), and the " +
   "command says the cancel is queued. Run `syn execution show <execution-id>` " +
   "until it reads cancelled. Cancelling a start that is still queued withdraws it " +
-  "at once: it reads cancelled straight away and never runs.";
+  "at once and it never runs: the response reads cancelled straight away, but " +
+  "`syn execution show` can still read queued for a moment until the withdrawal " +
+  "reaches the read model, so re-read it the same way.";
 
 function printIfQueued(data: ControlResponse, id: string): void {
   if (data.applied !== false) return;

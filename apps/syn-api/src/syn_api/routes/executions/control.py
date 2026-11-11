@@ -120,7 +120,8 @@ class ControlResponse(BaseModel):
             "Whether the command has already taken effect. False when a signal was "
             "queued for the executor to act on, as for a cancel of a running "
             "execution; true when nothing is left to happen, as for a queued start "
-            "that was withdrawn and is already `cancelled`."
+            "that was withdrawn and will not run. A later `GET /executions/{execution_id}` "
+            "can still read `queued` until the withdrawal is projected."
         )
     )
     message: str | None = None
@@ -263,7 +264,9 @@ async def cancel_execution_endpoint(
     Cancelling a started execution is asynchronous: the signal is queued and the
     executor acts on it later, so the response has `applied: false` and `state`
     is still the pre-cancel state. Re-read `GET /executions/{execution_id}` until
-    it reads `cancelled` (#1062). A withdrawn queued start is final at once.
+    it reads `cancelled` (#1062). A withdrawn queued start is final at once
+    (`applied: true`), though a re-read can still show `queued` until the
+    withdrawal is projected.
     """
     reason = request.reason if request else None
     try:
