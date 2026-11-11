@@ -8748,6 +8748,11 @@ export interface components {
             parent_session_id?: string | null;
             /** Root Session Id */
             root_session_id?: string | null;
+            /**
+             * Phase Name
+             * @description The phase's name as the execution recorded it, or null when it recorded none (older rows). phase_display is this when known.
+             */
+            phase_name?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Milestone Id */
@@ -8956,6 +8961,11 @@ export interface components {
             parent_session_id?: string | null;
             /** Root Session Id */
             root_session_id?: string | null;
+            /**
+             * Phase Name
+             * @description The phase's name as the execution recorded it, or null when it recorded none (older rows). phase_display is this when known.
+             */
+            phase_name?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Status */
