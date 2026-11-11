@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     from syn_shared.observed_model import RecordedModel
 
-from syn_domain import tool_call_counts
+from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions.canonical_usage import SUMMARY_USAGE_TABLE
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
     CostField,
@@ -209,7 +209,10 @@ class SessionCostQueryService:
         Args:
             limit: Maximum number of results (pushed down to SQL).
         """
-        async with self._pool.acquire() as conn:
+        # One snapshot for all four reads (#983): a session that finished
+        # between the summary read and the turn read was reported from its
+        # placeholder turn rows instead of its summary.
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY, limit)
             summarized_session_ids = {row["session_id"] for row in summary_rows}  # type: ignore[index]
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
