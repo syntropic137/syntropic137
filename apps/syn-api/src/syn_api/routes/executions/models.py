@@ -555,6 +555,14 @@ class ExecutionSummaryResponse(BaseModel):
     """The execution that resumed this one. A run is resumed at most once, so
     this is one id or None (#1881)."""
     repos_display: str | None = None
+    task: str | None = None
+    """What this run was asked to do, in full: the same value, from the same
+    derivation, as ``task`` on ``GET /executions/{id}`` (#1075). None when it
+    was asked nothing, and for a queued start, which has no read model yet.
+    The run's other ``inputs`` are deliberately not listed."""
+    task_display: str | None = None
+    """``task`` as one line of at most 80 characters, ellipsised, for a list row.
+    None exactly when ``task`` is None or blank."""
     eval: ExecutionEvalRunResponse | None = None
     """The eval this execution is a current run of, with its verdict. Null in no eval.
 

@@ -134,6 +134,14 @@ class WorkflowExecutionSummary:
     resumed_as: str | None = None
     """The execution that resumed this one, if any. At most one (#1881)."""
 
+    task: str | None = None
+    """What this run was asked to do (#1075), or ``None`` if it was asked nothing.
+
+    The same value the detail derives, by the same ``dispatched_task``, from
+    the same ``WorkflowExecutionStarted`` inputs. Only the task is kept: the
+    list carries no ``inputs``, which are author-controlled and unbounded.
+    """
+
     @property
     def phase_progress(self) -> PhaseProgress:
         """How far through its phases the run is, skipped phases accounted for."""
@@ -191,6 +199,7 @@ class WorkflowExecutionSummary:
             workflow_version=data.get("workflow_version"),
             resumed_from=ResumedFrom.from_stored(data.get("resumed_from")),
             resumed_as=data.get("resumed_as"),
+            task=data.get("task"),
         )
 
     @staticmethod
@@ -235,4 +244,5 @@ class WorkflowExecutionSummary:
             "workflow_version": self.workflow_version,
             "resumed_from": None if self.resumed_from is None else self.resumed_from.to_stored(),
             "resumed_as": self.resumed_as,
+            "task": self.task,
         }

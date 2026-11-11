@@ -18,6 +18,7 @@ from syn_shared.display import (
     format_model_compact,
     format_phase,
     format_repos,
+    format_task_summary,
     format_tokens,
     format_utc_timestamp,
     resolve_duration_seconds,
@@ -474,3 +475,32 @@ class TestFormatUtcTimestamp:
 
     def test_naive_instant_is_taken_as_utc(self) -> None:
         assert format_utc_timestamp(datetime(2026, 1, 2, 3, 4)) == "2026-01-02 03:04 UTC"
+
+
+@pytest.mark.unit
+class TestFormatTaskSummary:
+    """A run's task as the one line a list row shows (#1075)."""
+
+    def test_collapses_newlines_and_runs_of_space(self) -> None:
+        assert format_task_summary("Fix the bug\n\n  in\tauth.py\n") == "Fix the bug in auth.py"
+
+    def test_truncates_long_text_with_an_ellipsis(self) -> None:
+        summary = format_task_summary("word " * 40)
+        assert summary is not None
+        assert len(summary) == 80
+        assert summary.endswith("…")
+        assert summary.startswith("word word")
+
+    def test_leaves_short_text_unchanged(self) -> None:
+        assert format_task_summary("Add dark mode") == "Add dark mode"
+
+    def test_text_of_exactly_the_limit_is_not_ellipsised(self) -> None:
+        exact = "x" * 80
+        assert format_task_summary(exact) == exact
+
+    def test_no_task_and_a_blank_task_have_no_summary(self) -> None:
+        assert format_task_summary(None) is None
+        assert format_task_summary(" \n\t ") is None
+
+    def test_markup_is_kept_as_text(self) -> None:
+        assert format_task_summary("Make <b>login</b> work") == "Make <b>login</b> work"

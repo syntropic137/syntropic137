@@ -349,6 +349,29 @@ def format_repos(repos: list[str] | tuple[str, ...] | None) -> str | None:
     return f"{first} +{len(items) - 1}"
 
 
+#: How long a one-line task summary may be before it is ellipsised (#1075).
+TASK_SUMMARY_MAX_CHARS = 80
+
+
+def format_task_summary(task: str | None, max_chars: int = TASK_SUMMARY_MAX_CHARS) -> str | None:
+    """Render a run's task as one line a list row can show (#1075).
+
+    Every run of space (newlines and tabs included) collapses to one space,
+    and text longer than ``max_chars`` is cut to exactly ``max_chars`` with a
+    trailing ``…``. Short text is returned as written, apart from the
+    collapsing. ``None`` and blank text
+    return ``None``: a run asked nothing has no summary.
+    """
+    if task is None:
+        return None
+    line = " ".join(task.split())
+    if not line:
+        return None
+    if len(line) <= max_chars:
+        return line
+    return f"{line[: max_chars - 1].rstrip()}…"
+
+
 def format_exit_code(exit_code: int | None) -> str:
     """Render a process exit status so nobody has to decode it by hand.
 

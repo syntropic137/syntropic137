@@ -39,6 +39,17 @@ ref first. Nobody decided the work should stop, so it can be resumed, like
 out before the event is written, the Execution stays `running`, and the next
 start's reconciliation fails it as `OrphanedByRestart`.
 
+## Task
+
+What an Execution was asked to do: the free text it was dispatched with, which
+is what `$ARGUMENTS` resolves to in a Phase prompt. It is folded into the
+Execution's inputs under the `task` key before `WorkflowExecutionStarted` is
+written, and read back out by one derivation, `dispatched_task`, so the
+execution list and the execution page cannot disagree about it (#1307, #1075).
+An Execution with no Task was asked nothing, which is a real answer and not a
+Task nobody recorded. The list shows `task_display`, the Task as one line of at
+most 80 characters, and never the other inputs.
+
 ## Phase
 
 One step of a Workflow inside an Execution, with its own timeout and its own

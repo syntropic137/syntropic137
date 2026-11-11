@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executionGroup } from "../../src/commands/execution.js";
 import { CLIError } from "../../src/framework/errors.js";
+import type { components } from "../../src/generated/api-types.js";
+
+type ExecutionSummaryResponse = components["schemas"]["ExecutionSummaryResponse"];
 
 describe("execution commands", () => {
   const mockFetch = vi.fn();
@@ -94,6 +97,39 @@ describe("execution commands", () => {
       expect(rows.find((r) => r.includes("exec-cert"))).toContain("certified");
       expect(rows.find((r) => r.includes("exec-block"))).toContain("blocked");
       expect(rows.find((r) => r.includes("exec-none"))).not.toMatch(/certified|blocked/);
+    });
+
+    it("shows each run's task summary, so runs of one workflow read apart (#1075)", async () => {
+      // Typed against the generated schema: a field the API does not return
+      // under exactly this name is a compile error here, not a blank column.
+      type TaskFields = Pick<ExecutionSummaryResponse, "task" | "task_display">;
+      const row = (id: string, task: TaskFields) => ({
+        workflow_execution_id: id,
+        workflow_name: "same-workflow",
+        status: "completed",
+        phase_progress: { display: "1 of 1" },
+        total_tokens: 0,
+        total_cost_usd: "0",
+        ...task,
+      });
+      mockFetch.mockResolvedValue(
+        jsonResponse({
+          executions: [
+            row("exec-a", { task: "Fix the login bug\nin auth.py", task_display: "Fix the login bug in auth.py" }),
+            row("exec-b", { task: "Add dark mode", task_display: "Add dark mode" }),
+            row("exec-none", { task: null, task_display: null }),
+          ],
+          total: 3,
+        }),
+      );
+
+      await handler({ positionals: [], values: {} });
+      const rows = stdout().split("\n");
+      expect(stdout()).toContain("Task");
+      // The server's summary, never the raw multi-line task.
+      expect(rows.find((r) => r.includes("exec-a"))).toContain("Fix the login bug in auth.py");
+      expect(rows.find((r) => r.includes("exec-b"))).toContain("Add dark mode");
+      expect(rows.find((r) => r.includes("exec-none"))).not.toMatch(/login|dark mode/);
     });
 
     it("sends --verdict as ?review_verdict=, and nothing without it (#1630)", async () => {

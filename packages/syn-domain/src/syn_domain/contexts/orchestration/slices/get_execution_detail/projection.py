@@ -47,6 +47,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent i
 from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
     NextPhaseReadyEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    recorded_inputs,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
     WorkspaceProvisionedForPhaseEvent,
 )
@@ -298,7 +301,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # that died on the platform dispatches these again. Reading one key out
         # of it and discarding the rest is what left an execution unable to say
         # what its own task was.
-        inputs = {str(k): str(v) for k, v in (event_data.get("inputs") or {}).items()}
+        inputs = recorded_inputs(event_data.get("inputs"))
 
         repos = self._repos_from(inputs.get("repos", ""))
         launch_tags = self._launch_tags(event_data.get("tags"))

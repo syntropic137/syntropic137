@@ -37,9 +37,19 @@ const WORKFLOW: ColumnDef<ExecutionListItem, ExecutionSortKey> = {
   cellClassName: 'text-sm text-[var(--color-text-primary)]',
   // An eval run carries its badge under the name, so it reads apart from an
   // ordinary run at a glance; the width cap is what makes a long name truncate.
+  // The task line is what tells two runs of one workflow apart (#1075): the
+  // API's one-line summary, with the full task on hover. Text, never markup.
   render: (e) => (
     <div className="flex min-w-0 max-w-[18rem] flex-col items-start gap-1">
       <span>{e.workflow_name || e.workflow_id}</span>
+      {e.task_display && (
+        <span
+          className="max-w-full truncate text-xs text-[var(--color-text-secondary)]"
+          title={e.task ?? undefined}
+        >
+          {e.task_display}
+        </span>
+      )}
       <ExecutionEvalBadge evalRun={e.eval} />
     </div>
   ),
