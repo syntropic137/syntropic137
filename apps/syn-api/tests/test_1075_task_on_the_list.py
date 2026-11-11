@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -25,6 +26,9 @@ from syn_domain.contexts.orchestration.slices.get_execution_detail.projection im
 from syn_domain.contexts.orchestration.slices.list_executions.projection import (
     WorkflowExecutionListProjection,
 )
+
+if TYPE_CHECKING:
+    from syn_api.routes.executions.models import ExecutionSummaryResponse
 
 pytestmark = pytest.mark.unit
 
@@ -76,8 +80,8 @@ async def _serve(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_wiring, "get_projection_mgr", lambda: manager)
 
 
-async def _listed() -> dict[str, dict[str, object]]:
-    """`GET /executions`, as execution id -> the row on the wire."""
+async def _listed() -> dict[str, ExecutionSummaryResponse]:
+    """`GET /executions`, as execution id -> the row the route returns."""
     from syn_api.routes.executions import queries
 
     # Every parameter explicit: called outside FastAPI, `Query(...)` defaults
@@ -95,21 +99,17 @@ async def _listed() -> dict[str, dict[str, object]]:
         page=1,
         page_size=50,
     )
-    return {
-        e.workflow_execution_id: e.model_dump(mode="json")
-        for e in response.executions
-        if e.workflow_id == WORKFLOW_ID
-    }
+    return {e.workflow_execution_id: e for e in response.executions if e.workflow_id == WORKFLOW_ID}
 
 
 async def test_runs_of_one_workflow_list_their_own_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
     await _serve(monkeypatch)
     rows = await _listed()
 
-    assert rows["exec-darkmode-1075"]["task"] == "Add dark mode"
-    assert rows["exec-darkmode-1075"]["task_display"] == "Add dark mode"
-    assert rows["exec-login-1075"]["task"] == LONG_TASK
-    display = rows["exec-login-1075"]["task_display"]
+    assert rows["exec-darkmode-1075"].task == "Add dark mode"
+    assert rows["exec-darkmode-1075"].task_display == "Add dark mode"
+    assert rows["exec-login-1075"].task == LONG_TASK
+    display = rows["exec-login-1075"].task_display
     assert isinstance(display, str)
     assert display.startswith("Fix the flaky login test then explain the root cause")
     assert display.endswith("…")
@@ -121,8 +121,8 @@ async def test_a_run_dispatched_without_a_task_lists_none(monkeypatch: pytest.Mo
     await _serve(monkeypatch)
     row = (await _listed())["exec-untasked-1075"]
 
-    assert row["task"] is None
-    assert row["task_display"] is None
+    assert row.task is None
+    assert row.task_display is None
 
 
 async def test_the_list_carries_the_task_and_never_the_inputs(
@@ -131,8 +131,9 @@ async def test_the_list_carries_the_task_and_never_the_inputs(
     await _serve(monkeypatch)
     row = (await _listed())["exec-login-1075"]
 
-    assert "inputs" not in row
-    assert "author text" not in str(row)
+    wire = row.model_dump_json()
+    assert '"inputs"' not in wire
+    assert "author text" not in wire
 
 
 async def test_the_list_and_the_detail_report_the_same_task(
@@ -144,4 +145,4 @@ async def test_the_list_and_the_detail_report_the_same_task(
     rows = await _listed()
     for execution_id in TASKS:
         detail = await queries.get_execution_endpoint(execution_id)
-        assert rows[execution_id]["task"] == detail.task, execution_id
+        assert rows[execution_id].task == detail.task, execution_id

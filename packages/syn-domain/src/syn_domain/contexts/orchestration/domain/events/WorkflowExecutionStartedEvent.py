@@ -34,15 +34,14 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 TASK_INPUT_KEY = "task"
 
 
-def dispatched_task(inputs: Mapping[str, object] | None) -> str | None:
+def dispatched_task(inputs: Mapping[str, str] | None) -> str | None:
     """What a run was asked to do, read from the inputs it was started with.
 
     ``None`` when it was asked nothing: a workflow whose phases take no
     ``$ARGUMENTS`` is dispatched without a task. The one derivation every read
     model uses (#1075), so the list and the detail cannot disagree about it.
     """
-    task = (inputs or {}).get(TASK_INPUT_KEY)
-    return None if task is None else str(task)
+    return (inputs or {}).get(TASK_INPUT_KEY)
 
 
 #: Fields a release before #1513 does not know: omitted when None.
