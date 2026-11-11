@@ -406,7 +406,10 @@ def _locations(conf: str) -> dict[str, str]:
 
 def _api_locations(tmp_path: Path) -> dict[str, str]:
     result = _run_entrypoint(
-        tmp_path, bind=_EXPOSED_ADDRESS, password=_PASSWORD, extra_env={"SYN_API_USER": _UNUSUAL_USER}
+        tmp_path,
+        bind=_EXPOSED_ADDRESS,
+        password=_PASSWORD,
+        extra_env={"SYN_API_USER": _UNUSUAL_USER},
     )
     assert result.returncode == 0, result.stderr
     return _locations(_generated(tmp_path)["locations.conf"])
@@ -461,7 +464,9 @@ def test_dashboard_locations_keep_the_browser_prompt(tmp_path: Path, ui_mode: st
         tmp_path, bind=_EXPOSED_ADDRESS, password=_PASSWORD, extra_env={"SYN_GATEWAY_UI": ui_mode}
     )
     locations = _locations(_generated(tmp_path)["locations.conf"])
-    ui = {spec: body for spec, body in locations.items() if not re.match(r"(= )?(/(api|ws)/|@)", spec)}
+    ui = {
+        spec: body for spec, body in locations.items() if not re.match(r"(= )?(/(api|ws)/|@)", spec)
+    }
     assert "/" in ui, sorted(locations)
     for spec, body in ui.items():
         assert "error_page 401" not in body, f"location {spec} would answer the browser with JSON"

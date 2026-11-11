@@ -135,6 +135,15 @@ bypasses all failed) but surfaced four gaps, now closed:
 - Security → Rate Limiting: rule matching path `/*` AND response status `401`,
   threshold ~10/min per client IP, mitigation block ~15 min.
 
+**401 body on API paths (#1571).** The API locations (`/api/v1/`,
+`/api/v1/stream`, `/api/v1/ws`, `/ws/`) hand a failed Basic Auth to
+`@api_unauthorized` in `docker-entrypoint.sh`. It answers a fixed JSON body with
+the same `WWW-Authenticate` challenge, so CLI and `curl | jq` callers can parse
+it. The status is still `401`, which is what the Cloudflare rule above and the
+`auth` backstop count. The body is the same for a wrong user and a wrong
+password, and it names no username. The dashboard locations keep nginx's own
+401, so browsers still show the credentials prompt.
+
 ---
 
 ## References
