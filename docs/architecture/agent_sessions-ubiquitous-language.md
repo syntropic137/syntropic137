@@ -143,6 +143,12 @@ Rebuilding one run's session inventory snapshot from host evidence, one durable
   and open two jobs (#1534). It is asked for once and never waited on: a
   manager that does not get it skips the run this tick and the wakeup stays
   pending, as with coalesce.
+- **Held schedule:** what holding the scheduling guard gives a manager: the
+  run's last scheduled request, recorded durably under the guard before it is
+  saved. "Is a job open?" reads that job's own stream, so a job the projection
+  has not caught up with still holds its run (#2254). A recorded job whose
+  stream is absent is not free: its save may still commit, so the next holder
+  retries that same request rather than scheduling a successor.
 
 ## Capture Spool
 

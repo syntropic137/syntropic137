@@ -92,7 +92,10 @@ if TYPE_CHECKING:
     from syn_adapters.session_inventory.replication_worker import InventoryReplicationWorker
     from syn_adapters.session_inventory.runtime import InventoryWork
     from syn_adapters.session_inventory.sandbox_recovery import SandboxSpoolRecovery
-    from syn_adapters.session_inventory.scheduling_guard import PostgresInventorySchedulingGuard
+    from syn_adapters.session_inventory.scheduling_guard import (
+        PostgresHeldInventorySchedule,
+        PostgresInventorySchedulingGuard,
+    )
     from syn_adapters.session_inventory.spool_release import (
         CaptureSpoolRetention,
         SpoolVolumePort,
@@ -164,6 +167,7 @@ if TYPE_CHECKING:
         HistoryBackfillQueuePort,
     )
     from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
+        HeldInventorySchedule,
         InventorySchedulingGuardPort,
     )
     from syn_domain.contexts.agent_sessions.ports.NativeSessionEvidencePort import (
@@ -452,6 +456,7 @@ if TYPE_CHECKING:
         inventory: PostgresSessionInventory,
         jobs: PostgresSessionInventoryJobs,
         scheduling_guard: PostgresInventorySchedulingGuard,
+        held_schedule: PostgresHeldInventorySchedule,
         archive: LocalSessionTranscriptArchive,
         native: AgenticNativeSessionEvidence,
         conversation: AgenticTranscriptConversation,
@@ -485,6 +490,7 @@ if TYPE_CHECKING:
         _inventory_write: SessionInventoryWritePort = inventory
         _jobs: SessionInventoryJobPort = jobs
         _scheduling_guard: InventorySchedulingGuardPort = scheduling_guard
+        _held_schedule: HeldInventorySchedule = held_schedule
         _archive: SessionTranscriptArchivePort = archive
         _native: NativeSessionEvidencePort = native
         _conversation: TranscriptConversationPort = conversation
