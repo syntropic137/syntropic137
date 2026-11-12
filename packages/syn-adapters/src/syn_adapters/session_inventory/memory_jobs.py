@@ -34,7 +34,11 @@ from syn_domain.contexts.agent_sessions import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
-    from syn_domain.contexts.agent_sessions import InventoryItem, ItemKind
+    from syn_domain.contexts.agent_sessions import (
+        InventoryItem,
+        ItemKind,
+        RequestInventoryReconciliationCommand,
+    )
 
 _OPEN = (ReconciliationStage.PENDING, ReconciliationStage.PUBLISHING)
 
@@ -261,14 +265,27 @@ class InMemoryInventorySchedulingGuard(InMemoryAdapter):
     def __init__(self) -> None:
         super().__init__()
         self.held: set[RunIdentity] = set()
+        self.scheduled: dict[RunIdentity, RequestInventoryReconciliationCommand] = {}
 
     @asynccontextmanager
-    async def hold(self, run: RunIdentity) -> AsyncIterator[bool]:
+    async def hold(self, run: RunIdentity) -> AsyncIterator[_InMemorySchedule | None]:
         if run in self.held:
-            yield False
+            yield None
             return
         self.held.add(run)
         try:
-            yield True
+            yield _InMemorySchedule(self.scheduled, run)
         finally:
             self.held.discard(run)
+
+
+@dataclass(frozen=True)
+class _InMemorySchedule:
+    scheduled: dict[RunIdentity, RequestInventoryReconciliationCommand]
+    run: RunIdentity
+
+    async def last_scheduled(self) -> RequestInventoryReconciliationCommand | None:
+        return self.scheduled.get(self.run)
+
+    async def record_scheduled(self, command: RequestInventoryReconciliationCommand) -> None:
+        self.scheduled[self.run] = command
