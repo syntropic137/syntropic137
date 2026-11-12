@@ -11,6 +11,7 @@ not match its snapshot; this handler only loads, asks and hands over.
 from __future__ import annotations
 
 import logging
+from contextlib import AbstractAsyncContextManager, nullcontext
 from typing import TYPE_CHECKING
 
 from event_sourcing import StreamAlreadyExistsError
@@ -121,19 +122,26 @@ class StartResumeHandler:
         # #1588: on the template's stream before the child's own stream exists,
         # as ExecuteWorkflowHandler does. Raises TemplateArchivedError if the
         # template was archived since the parent ran.
-        if self._launches is not None:
-            await self._launches.record(command.workflow_id, command.aggregate_id)
-        try:
-            return await self._processor.run_resume(command, repos=repos, admitted=admitted)
-        except StreamAlreadyExistsError:
-            logger.info(
-                "Resume %s of %s already started", command.aggregate_id, parent_execution_id
-            )
-            return None
-        except ResumeWithdrawnError:
-            # #1677: withdrawn while this start prepared; the child opened cancelled.
-            logger.info("Resume %s of %s was withdrawn", command.aggregate_id, parent_execution_id)
-            return None
+        # #1635: held until the start has an outcome, as there.
+        launching: AbstractAsyncContextManager[None] = (
+            self._launches.launching(command.workflow_id, command.aggregate_id)
+            if self._launches is not None
+            else nullcontext()
+        )
+        async with launching:
+            try:
+                return await self._processor.run_resume(command, repos=repos, admitted=admitted)
+            except StreamAlreadyExistsError:
+                logger.info(
+                    "Resume %s of %s already started", command.aggregate_id, parent_execution_id
+                )
+                return None
+            except ResumeWithdrawnError:
+                # #1677: withdrawn while this start prepared; the child opened cancelled.
+                logger.info(
+                    "Resume %s of %s was withdrawn", command.aggregate_id, parent_execution_id
+                )
+                return None
 
     async def validate(self, parent_execution_id: str) -> ResumeChild:
         """Raise now if the child of ``parent_execution_id`` could not start.

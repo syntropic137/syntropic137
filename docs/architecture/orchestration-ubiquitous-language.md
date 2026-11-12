@@ -1606,9 +1606,25 @@ cannot both succeed (#1588).
 
 Starting an Execution of a Workflow template. Recorded on the TEMPLATE's stream
 as `WorkflowTemplateExecutionLaunched`, before the Execution's own stream exists,
-and refused if the template is Archived. A launch whose Execution stream never
-appears stops counting as active after a grace period (`LAUNCH_GRACE`), so a
-dispatch that died before starting cannot block an archive forever.
+and refused if the template is Archived. A launch stays active until its start
+has an outcome, however long the start takes (#1635): either the Execution's
+stream exists, and its own status decides, or the launch is Abandoned. A
+launch with neither stops counting as active after a backstop
+(`LAUNCH_BACKSTOP`, 24 hours), so a process that died mid-start cannot block
+an archive forever. Wall-clock time is only that backstop, never the rule.
+
+## Abandoned Launch
+
+A Launch whose start failed, recorded on the template's stream as
+`WorkflowTemplateExecutionLaunchAbandoned` when the start raises. It ends the
+wait for the Execution's stream, so an archive is no longer held by it; an
+Execution whose stream did open is still judged by its own status. Each start
+of an execution id is its own claim, named by the time it recorded its Launch:
+a failure abandons only that start's claim, and the Launch is Abandoned only
+once every start of it has failed. A retry overlapping a live start, in either
+order, never releases it. Not the same
+word as an Abandoned Branch, and not a cancellation: nothing is stopped, the
+start had already given up.
 
 ## Default Eval
 
