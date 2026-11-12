@@ -24,6 +24,9 @@ if TYPE_CHECKING:
         InventoryReconciliationAggregate,
     )
     from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import RunIdentity
+    from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
+        InventorySchedulingGuardPort,
+    )
     from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
         PendingEvidence,
         SessionEvidenceWritePort,
@@ -44,13 +47,27 @@ class SchedulePendingInventoryHandler:
         inventory: SessionInventoryReadPort,
         repository: Repository[InventoryReconciliationAggregate],
         jobs: SessionInventoryJobPort,
+        guard: InventorySchedulingGuardPort,
     ) -> None:
         self._outbox, self._inventory, self._repository = outbox, inventory, repository
-        self._jobs = jobs
+        self._jobs, self._guard = jobs, guard
         self._request = RequestInventoryReconciliationHandler(repository)
 
     async def handle(self) -> None:
         for item in await self._outbox.pending():
+            await self._dispatch(item)
+
+    async def _dispatch(self, item: PendingEvidence) -> None:
+        # The open-job check and the schedule are one step per run (#1534).
+        # Without the guard, two managers holding different watermarks for the
+        # run both see no open job and open two jobs (distinct identities, so
+        # nothing collides); the later one only loses at publication.
+        async with self._guard.hold(item.run) as held:
+            if not held:
+                # Another manager is scheduling this run right now. Skip it this
+                # tick without acknowledging: the wakeup stays durable, exactly
+                # as in the coalesce branch below.
+                return
             if await self._in_flight(item.run):
                 # Coalesce (#1528). The open job fixed its expected head before
                 # this evidence arrived, so a second job for the run now could
@@ -59,7 +76,7 @@ class SchedulePendingInventoryHandler:
                 # the latest watermark, so once the open job ends the next tick
                 # schedules everything that arrived meanwhile, against the head
                 # that job published.
-                continue
+                return
             await self._schedule(item)
             # If scheduling raises (including a concurrent first writer), leave
             # the wakeup durable. A later tick retries the same command identity.

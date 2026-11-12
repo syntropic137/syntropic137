@@ -116,6 +116,9 @@ from syn_domain.contexts.agent_sessions.ports.HistoryBackfillQueuePort import (
     HistoryBackfillItem,
     HistoryBackfillLease,
 )
+from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
+    InventorySchedulingGuardPort,
+)
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
     EvidenceBatch,
     EvidencePage,
@@ -324,6 +327,7 @@ __all__ = [
     "InventoryReconciliationProcessManager",
     "InventoryReconciliationSweepEvent",
     "InventoryReplicationProcessManager",
+    "InventorySchedulingGuardPort",
     "InventorySnapshot",
     "InventoryStepHandler",
     "InventoryStepOutcome",
