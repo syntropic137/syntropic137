@@ -10244,7 +10244,7 @@ export interface components {
          * @description Errors returned by trigger operations.
          * @enum {string}
          */
-        TriggerError: "not_found" | "invalid_input" | "already_paused" | "already_active" | "already_deleted" | "preset_not_found" | "workflow_not_found" | "store_unavailable" | "github_not_configured" | "no_installation" | "repository_unresolved" | "github_unavailable";
+        TriggerError: "not_found" | "invalid_input" | "already_paused" | "already_active" | "already_deleted" | "preset_not_found" | "workflow_not_found" | "workflow_ambiguous" | "store_unavailable" | "github_not_configured" | "no_installation" | "repository_unresolved" | "github_unavailable";
         /**
          * TriggerErrorResponse
          * @description Why a trigger was not created. Nothing is stored when this is returned.
@@ -14277,7 +14277,7 @@ export interface operations {
                     "application/json": components["schemas"]["TriggerErrorResponse"];
                 };
             };
-            /** @description Refused: the trigger could never fire. No GitHub App is configured, no installation covers the repository, or the repository is unknown. Nothing stored. */
+            /** @description Refused; nothing stored. Either the trigger could never fire (no GitHub App is configured, no installation covers the repository, or the repository is unknown), or the workflow ID prefix matches more than one workflow. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14504,7 +14504,7 @@ export interface operations {
                     "application/json": components["schemas"]["TriggerErrorResponse"];
                 };
             };
-            /** @description Refused: the trigger could never fire. No GitHub App is configured, no installation covers the repository, or the repository is unknown. Nothing stored. */
+            /** @description Refused; nothing stored. Either the trigger could never fire (no GitHub App is configured, no installation covers the repository, or the repository is unknown), or the workflow ID prefix matches more than one workflow. */
             409: {
                 headers: {
                     [name: string]: unknown;
