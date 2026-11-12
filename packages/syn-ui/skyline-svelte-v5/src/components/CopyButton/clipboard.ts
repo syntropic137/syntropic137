@@ -45,9 +45,12 @@ function copyThroughTextarea(text: string): void {
  * Where the fallback textarea goes. While a native modal `<dialog>` is open,
  * everything outside it is inert and cannot be selected, and Chromium still
  * returns true from execCommand('copy') with the clipboard unchanged (#742).
- * So the textarea goes inside the top-most modal: the one holding focus, else
- * the last one in document order, since a modal opened later stacks above
- * (#2263). With no modal open it goes into the body.
+ * So the textarea goes inside the modal that holds focus: a modal moves focus
+ * into itself when opened, and every copy control in this app runs from inside
+ * it, so that is the top-most one in practice. With focus outside every modal,
+ * the last `:modal` in document order is a best guess only: the top layer
+ * stacks modals by the order `showModal()` was called, which the DOM does not
+ * record (#2263). With no modal open it goes into the body.
  */
 function fallbackHost(): HTMLElement {
   const active = document.activeElement
