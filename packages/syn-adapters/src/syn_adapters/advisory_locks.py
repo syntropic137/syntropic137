@@ -39,7 +39,8 @@ def inventory_schedule_lock_key(source_instance_id: str, execution_id: str) -> i
 
     One key per run, not one for all scheduling, so managers working on
     different runs never skip each other. Derived from an encoding that cannot
-    be mistaken for a startup name, so it cannot land on one of the keys above.
+    be mistaken for a startup name, so no input aliases one of the keys above;
+    the 64-bit hash can still collide, with negligible probability.
     """
     return advisory_lock_key(
         json.dumps(("session_inventory:schedule", source_instance_id, execution_id))
