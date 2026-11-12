@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
+index 48ab0ec82..6d28027b9 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
+@@ -96,7 +96,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
+         leaves the count alone.
+         """
+         workflow_id = event_data.get("workflow_id")
+-        if not workflow_id or not await self._is_archived(workflow_id):
++        if not workflow_id:
+             return
+         await self._store.delete(self.PROJECTION_NAME, self._archived_key(workflow_id))
+         metrics = await self._get_or_create_metrics()

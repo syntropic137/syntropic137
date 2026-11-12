@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
+index 48ab0ec82..507a99691 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
+@@ -79,7 +79,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
+         template again, and makes a repeated archive a no-op.
+         """
+         workflow_id = event_data.get("workflow_id")
+-        if not workflow_id or await self._is_archived(workflow_id):
++        if not workflow_id:
+             return
+         await self._store.save(
+             self.PROJECTION_NAME, self._archived_key(workflow_id), {"workflow_id": workflow_id}
