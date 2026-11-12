@@ -6,7 +6,7 @@
 <script lang="ts">
   import { listExecutions, listSessions, listWorkflows } from '@syn137/syn-ui-data'
   import { buildPalette, filterPalette, pageForAgent, type PaletteCommand, type PaletteItem } from '@syn137/skyline-core/screens/palette'
-  import { CommandDialog, type CommandGroup } from '@syn137/skyline-svelte-v5'
+  import { CommandDialog, writeClipboard, type CommandGroup } from '@syn137/skyline-svelte-v5'
   import { HELP_LINKS } from '../lib/links'
   import { resource } from '../lib/load.svelte'
   import { page } from '../lib/page.svelte'
@@ -48,9 +48,9 @@
 
   async function copy(text: string) {
     try {
-      await navigator.clipboard.writeText(text)
+      await writeClipboard(text)
     } catch {
-      // Clipboard refused (permissions, insecure origin): nothing to recover.
+      // Both the Clipboard API and the execCommand fallback refused: nothing to recover.
     }
   }
 
