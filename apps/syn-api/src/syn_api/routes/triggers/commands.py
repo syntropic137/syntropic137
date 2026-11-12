@@ -467,10 +467,10 @@ _CREATE_RESPONSES: dict[int | str, dict[str, type[TriggerErrorResponse] | str]] 
     409: {
         "model": TriggerErrorResponse,
         "description": (
-            "Refused: the trigger could never fire. No GitHub App is configured, "
-            "no installation covers the repository, or the repository is unknown. "
-            "Or the workflow ID prefix matches more than one workflow. "
-            "Nothing stored."
+            "Refused; nothing stored. Either the trigger could never fire (no "
+            "GitHub App is configured, no installation covers the repository, or "
+            "the repository is unknown), or the workflow ID prefix matches more "
+            "than one workflow."
         ),
     },
     503: {
