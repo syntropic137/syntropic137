@@ -7,7 +7,9 @@ NoStream: one execution exists and is running, and the caller must hear that,
 not a 500 that tells it to dispatch - and pay for - a second run.
 
 These go through the real `execute()`, so the typed `DuplicateExecutionError`
-the handler raises is what the route sees, not an `Err` built by the test.
+the handler raises is what the route sees, not an `Err` built by the test. The
+race itself runs in #1557's world: the real request ProcessManager, dispatcher,
+`ExecuteWorkflowHandler` and processor over one event store.
 """
 
 from __future__ import annotations
@@ -17,10 +19,15 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
+from test_1557_one_execution_budget import (  # pyright: ignore[reportMissingImports]
+    WORKFLOW_ID,
+    _World,  # pyright: ignore[reportPrivateUsage]
+)
 
+from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_api import _wiring
-from syn_api.routes.executions import commands
+from syn_api.routes.executions import commands, keyed_start
 from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts.orchestration import (
     DuplicateExecutionError,
@@ -32,6 +39,7 @@ from syn_shared.settings import get_settings
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts.orchestration import ExecuteWorkflowCommand
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
@@ -145,3 +153,50 @@ async def test_a_start_that_genuinely_failed_is_still_a_500(
     assert refused.value.status_code == 500
     assert "event store unreachable" in str(refused.value.detail)
     assert len(started) == 1
+
+
+@pytest.mark.usefixtures("run_queue_flag")
+@pytest.mark.parametrize("idempotency_key", [None, "race-2259"])
+async def test_when_the_request_processmanager_starts_it_first_there_is_one_execution(
+    monkeypatch: pytest.MonkeyPatch, idempotency_key: str | None
+) -> None:
+    """The race of #2259, with the real winner: the request is durable, the
+    request ProcessManager starts it from that record, and only then does the
+    route's inline start run."""
+    world = _World(monkeypatch)
+    world.handler._processor._run_queue = InMemoryExecutionRunQueue()  # pyright: ignore[reportPrivateUsage]
+    world.dispatcher._admits_to_run_queue = True  # pyright: ignore[reportPrivateUsage]
+    record = keyed_start.record_execution_request
+    won: list[str] = []
+
+    async def processmanager_wins(
+        command: ExecuteWorkflowCommand, admitted: AdmissionTicket
+    ) -> None:
+        await record(command, admitted)
+        assert await world.coordinate() == (0, 1), "the ProcessManager offers the request"
+        assert command.execution_id is not None
+        assert command.execution_id in world.executions.streams
+        won.append(command.execution_id)
+
+    monkeypatch.setattr(keyed_start, "record_execution_request", processmanager_wins)
+    tasks = BackgroundTasks()
+
+    response = await commands.execute_workflow_endpoint(
+        WORKFLOW_ID,
+        commands.ExecuteWorkflowRequest(idempotency_key=idempotency_key),
+        tasks,
+    )
+
+    assert response.replayed is True
+    assert won == [response.execution_id], "the 200 names the run that is running"
+    assert list(world.executions.streams) == [response.execution_id], "one execution"
+    starts = [
+        e.metadata.aggregate_id
+        for e in world.log.envelopes
+        if e.metadata.event_type == "WorkflowExecutionStarted"
+    ]
+    assert starts == [response.execution_id], "started once"
+    assert tasks.tasks == [], "no second start queued behind the 200"
+    assert await world.coordinate() == (0, 0), "and nothing left to offer"
+    # #1387 unchanged: both tickets settled, so a pause does not wait on them.
+    await world.gate.set_mode(active=True, reason="deploy", actor="test")
