@@ -261,14 +261,27 @@ class InMemoryInventorySchedulingGuard(InMemoryAdapter):
     def __init__(self) -> None:
         super().__init__()
         self.held: set[RunIdentity] = set()
+        self.scheduled: dict[RunIdentity, str] = {}
 
     @asynccontextmanager
-    async def hold(self, run: RunIdentity) -> AsyncIterator[bool]:
+    async def hold(self, run: RunIdentity) -> AsyncIterator[_InMemorySchedule | None]:
         if run in self.held:
-            yield False
+            yield None
             return
         self.held.add(run)
         try:
-            yield True
+            yield _InMemorySchedule(self.scheduled, run)
         finally:
             self.held.discard(run)
+
+
+@dataclass(frozen=True)
+class _InMemorySchedule:
+    scheduled: dict[RunIdentity, str]
+    run: RunIdentity
+
+    async def last_scheduled(self) -> str | None:
+        return self.scheduled.get(self.run)
+
+    async def record_scheduled(self, job_id: str) -> None:
+        self.scheduled[self.run] = job_id

@@ -332,3 +332,13 @@ CREATE TABLE IF NOT EXISTS session_capture_outbox_retirements (
 CREATE INDEX IF NOT EXISTS session_capture_spools_run_unsettled
     ON session_capture_spools(source_instance_id,(payload->'run'->>'execution_id'))
     WHERE settled_at IS NULL;
+
+-- The job each run last scheduled, written under the run's scheduling guard
+-- before the job's request is saved (#2254). The job projection lags the
+-- schedule; this row does not.
+CREATE TABLE IF NOT EXISTS session_inventory_schedules (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    PRIMARY KEY (source_instance_id, execution_id)
+);

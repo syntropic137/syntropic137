@@ -117,6 +117,7 @@ from syn_domain.contexts.agent_sessions.ports.HistoryBackfillQueuePort import (
     HistoryBackfillLease,
 )
 from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
+    HeldInventorySchedule,
     InventorySchedulingGuardPort,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
@@ -297,6 +298,7 @@ __all__ = [
     "EvidencePage",
     "EvidenceReference",
     "EvidenceRetraction",
+    "HeldInventorySchedule",
     "HistoricalAcquisition",
     "HistoricalAcquisitionQuotaExceeded",
     "HistoryBackfillItem",

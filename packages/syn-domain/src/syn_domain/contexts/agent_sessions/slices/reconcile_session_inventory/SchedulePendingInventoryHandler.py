@@ -9,6 +9,7 @@ from uuid import NAMESPACE_URL, uuid5
 from syn_domain.contexts.agent_sessions._shared.inventory_reconciliation import (
     ReconciliationRequest,
     ReconciliationStage,
+    ReconciliationState,
 )
 from syn_domain.contexts.agent_sessions.domain.commands.RequestInventoryReconciliationCommand import (
     RequestInventoryReconciliationCommand,
@@ -62,13 +63,13 @@ class SchedulePendingInventoryHandler:
         # Without the guard, two managers holding different watermarks for the
         # run both see no open job and open two jobs (distinct identities, so
         # nothing collides); the later one only loses at publication.
-        async with self._guard.hold(item.run) as held:
-            if not held:
+        async with self._guard.hold(item.run) as schedule:
+            if schedule is None:
                 # Another manager is scheduling this run right now. Skip it this
                 # tick without acknowledging: the wakeup stays durable, exactly
                 # as in the coalesce branch below.
                 return
-            if await self._in_flight(item.run):
+            if await self._in_flight(item.run, await schedule.last_scheduled()):
                 # Coalesce (#1528). The open job fixed its expected head before
                 # this evidence arrived, so a second job for the run now could
                 # only lose the head race to it (publication_superseded). The
@@ -77,19 +78,29 @@ class SchedulePendingInventoryHandler:
                 # schedules everything that arrived meanwhile, against the head
                 # that job published.
                 return
-            await self._schedule(item)
+            command = await self._command(item)
+            # Recorded before the save: a failed save leaves a pointer to a
+            # stream that does not exist, which reads as "no open job", and the
+            # retry records the same identity again.
+            await schedule.record_scheduled(command.aggregate_id)
+            await self._request.handle(command)
             # If scheduling raises (including a concurrent first writer), leave
             # the wakeup durable. A later tick retries the same command identity.
             await self._outbox.acknowledge_dispatch(item)
 
-    async def _in_flight(self, run: RunIdentity) -> bool:
+    async def _in_flight(self, run: RunIdentity, last_scheduled: str | None) -> bool:
+        # The projection lags the schedule, so a job scheduled moments ago may
+        # not be in it yet (#2254). The run's last scheduled job is read from
+        # its own stream instead, which reflects every save; the projection
+        # still covers jobs scheduled before that record existed.
+        if last_scheduled is not None:
+            aggregate = await self._repository.get_by_id(last_scheduled)
+            if aggregate is not None and _open(aggregate.state):
+                return True
         latest = await self._jobs.latest(run)
-        return latest is not None and latest.state.stage in (
-            ReconciliationStage.PENDING,
-            ReconciliationStage.PUBLISHING,
-        )
+        return latest is not None and _open(latest.state)
 
-    async def _schedule(self, item: PendingEvidence) -> None:
+    async def _command(self, item: PendingEvidence) -> RequestInventoryReconciliationCommand:
         head = await self._inventory.head(item.run)
         expected_head = None if head is None else head.snapshot_id
         identity = json.dumps(
@@ -105,15 +116,20 @@ class SchedulePendingInventoryHandler:
             separators=(",", ":"),
         )
         job_id = uuid5(NAMESPACE_URL, identity)
-        await self._request.handle(
-            RequestInventoryReconciliationCommand(
-                aggregate_id=str(job_id),
-                request=ReconciliationRequest(
-                    run=item.run,
-                    evidence_watermark=item.watermark,
-                    expected_head=expected_head,
-                    snapshot_id=job_id,
-                    resolver_version=RESOLVER_VERSION,
-                ),
-            )
+        return RequestInventoryReconciliationCommand(
+            aggregate_id=str(job_id),
+            request=ReconciliationRequest(
+                run=item.run,
+                evidence_watermark=item.watermark,
+                expected_head=expected_head,
+                snapshot_id=job_id,
+                resolver_version=RESOLVER_VERSION,
+            ),
         )
+
+
+def _open(state: ReconciliationState | None) -> bool:
+    return state is not None and state.stage in (
+        ReconciliationStage.PENDING,
+        ReconciliationStage.PUBLISHING,
+    )

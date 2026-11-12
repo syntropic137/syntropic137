@@ -6,6 +6,10 @@ before it schedules; evidence then advances the run's watermark and manager B
 ticks. Without a per-run guard both pass the check and the store gets two jobs
 for one run with different identities (watermark 1 and watermark 2).
 
+The guard alone is not enough (#2254): a job is projected after it is saved,
+so a manager that re-takes the guard before then reads the run as free. Every
+race here therefore runs on a job projection that never catches up.
+
 The unit half runs on in-memory twins. The integration half runs the same race
 on the real Postgres outbox and the real advisory-lock guard, two pooled
 connections standing for two processes.
@@ -159,6 +163,8 @@ async def _race(
     await asyncio.wait_for(manager_b.handle(), timeout=5)
     paused.resume.set()
     await asyncio.wait_for(tick_a, timeout=5)
+    # B re-takes the free guard while A's job is still unprojected (#2254).
+    await asyncio.wait_for(manager_b.handle(), timeout=5)
     return await _job_streams(client, run)
 
 
@@ -199,14 +205,115 @@ async def test_a_run_whose_guard_is_held_is_skipped_and_its_wakeup_kept() -> Non
         guard,
     )
 
-    async with guard.hold(held) as taken:
-        assert taken
+    async with guard.hold(held) as schedule:
+        assert schedule is not None
         await handler.handle()
 
     # The held run was neither scheduled nor acknowledged; the free run was both.
     assert await evidence.pending() == (PendingEvidence(run=held, watermark=1),)
     page, _, _ = await client.read_all(from_global_nonce=0, max_count=100)
     assert {envelope.event.model_dump()["execution_id"] for envelope in page} == {"free"}
+
+
+def _store() -> tuple[MemoryEventStoreClient, RepositoryAdapter[InventoryReconciliationAggregate]]:
+    client = MemoryEventStoreClient()
+    return client, RepositoryAdapter(
+        EventStoreRepository(
+            client,
+            InventoryReconciliationAggregate,  # type: ignore[arg-type]  # ESP SDK TEvent invariance
+            "InventoryReconciliation",
+        )
+    )
+
+
+@pytest.mark.unit
+async def test_a_job_scheduled_but_not_yet_projected_still_holds_its_run() -> None:
+    # #2254: one manager schedules and releases the guard; evidence advances;
+    # the next tick takes the guard before the job reaches the projection.
+    run = RunIdentity(source_instance_id="guard-test", execution_id="lagging")
+    guard = InMemoryInventorySchedulingGuard()
+    evidence = _Evidence()
+    client, repository = _store()
+    manager = SchedulePendingInventoryHandler(
+        evidence,
+        InMemorySessionInventory(),
+        repository,
+        _NoJobs(),  # type: ignore[arg-type]  # latest() only
+        guard,
+    )
+    await evidence.append(_batch(run, "first"))
+    await manager.handle()
+    await evidence.append(_batch(run, "second"))
+
+    await manager.handle()
+
+    assert len(await _job_streams(client, run)) == 1
+    # Coalesced, not dropped: the watermark-2 wakeup waits for the open job.
+    assert await evidence.pending() == (PendingEvidence(run=run, watermark=2),)
+
+
+@pytest.mark.unit
+async def test_a_recorded_job_whose_save_never_landed_does_not_strand_its_run() -> None:
+    # The record is written before the save, so a crash between the two leaves
+    # it naming a stream that does not exist. That must read as "no open job".
+    run = RunIdentity(source_instance_id="guard-test", execution_id="crashed")
+    guard = InMemoryInventorySchedulingGuard()
+    async with guard.hold(run) as schedule:
+        assert schedule is not None
+        await schedule.record_scheduled(str(uuid4()))
+    evidence = _Evidence()
+    client, repository = _store()
+    manager = SchedulePendingInventoryHandler(
+        evidence,
+        InMemorySessionInventory(),
+        repository,
+        _NoJobs(),  # type: ignore[arg-type]  # latest() only
+        guard,
+    )
+    await evidence.append(_batch(run, "first"))
+
+    await manager.handle()
+
+    streams = await _job_streams(client, run)
+    assert len(streams) == 1
+    assert await evidence.pending() == ()
+    assert guard.scheduled[run] in streams
+
+
+class _SizedPool:
+    """``max_size`` connections; an acquire past that waits, as asyncpg's does."""
+
+    def __init__(self, max_size: int) -> None:
+        self._max_size = max_size
+        self._slots = asyncio.Semaphore(max_size)
+
+    def get_max_size(self) -> int:
+        return self._max_size
+
+    @asynccontextmanager
+    async def acquire(self) -> AsyncIterator[_OneShotConnection]:
+        async with self._slots:
+            yield _OneShotConnection(granted=True)
+
+
+@pytest.mark.unit
+async def test_a_pool_too_small_for_the_critical_section_is_refused_at_wiring() -> None:
+    from syn_adapters.session_inventory.scheduling_guard import PostgresInventorySchedulingGuard
+
+    run = RunIdentity(source_instance_id="guard-test", execution_id="pool")
+
+    async def wire_and_schedule(pool: _SizedPool) -> None:
+        guard = PostgresInventorySchedulingGuard(pool)  # type: ignore[arg-type]  # Pool double
+        async with guard.hold(run) as schedule:
+            assert schedule is not None
+            # What the open-job check does next: a second connection, same pool.
+            async with pool.acquire():
+                pass
+
+    # Never a hang (#2254): a size-1 pool is refused before anything is held.
+    with pytest.raises(ValueError, match="at least 2 connections, got 1"):
+        await asyncio.wait_for(wire_and_schedule(_SizedPool(1)), timeout=2)
+    await asyncio.wait_for(wire_and_schedule(_SizedPool(2)), timeout=2)
 
 
 @pytest.mark.unit
