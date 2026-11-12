@@ -138,6 +138,11 @@ Rebuilding one run's session inventory snapshot from host evidence, one durable
 - **Coalesce:** while a run has an open job, new evidence for that run waits.
   The next job picks up the latest watermark, so one job is minted per
   catch-up and not one per watermark.
+- **Scheduling guard:** held for one run across "is a job open?" and
+  "schedule one", so two inventory managers cannot both find the run free
+  and open two jobs (#1534). It is asked for once and never waited on: a
+  manager that does not get it skips the run this tick and the wakeup stays
+  pending, as with coalesce.
 
 ## Capture Spool
 
