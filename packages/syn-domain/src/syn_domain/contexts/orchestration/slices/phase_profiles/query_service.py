@@ -317,8 +317,6 @@ class PhaseProfileQueryService:
             return PhaseProfiles(workflow_id=workflow_id, since=since, until=until, executions=0)
         # One snapshot for both reads, or a phase committed between them has
         # tokens and no resources, or the reverse (#2251).
-        # One snapshot for both reads, or a phase committed between them has
-        # tokens and no resources, or the reverse (#2251).
         async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             token_rows = await conn.fetch(_TOKEN_QUERY, ids, since, until)
             resource_rows = await conn.fetch(

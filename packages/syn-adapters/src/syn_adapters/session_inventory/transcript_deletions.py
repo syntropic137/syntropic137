@@ -112,7 +112,6 @@ class PostgresTranscriptDeletions:
         if capture.run.source_instance_id != self._source:
             raise PermissionError("transcript is outside this installation")
         # One snapshot: local status and replica status describe one moment (#2251).
-        # One snapshot: local status and replica status describe one moment (#2251).
         async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # this module's Connection types __aexit__ narrower than SpanTransaction; asyncpg satisfies both
             rows = await conn.fetch(
                 f"""SELECT reason,content_hash,{_UTC.format("requested_at")} AS requested_at,
