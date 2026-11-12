@@ -107,7 +107,9 @@ class DashboardMetricsProjection(AutoDispatchProjection):
         return f"{self.ARCHIVED_KEY_PREFIX}{workflow_id}"
 
     async def _is_archived(self, workflow_id: str) -> bool:
-        return await self._store.get(self.PROJECTION_NAME, self._archived_key(workflow_id)) is not None
+        return (
+            await self._store.get(self.PROJECTION_NAME, self._archived_key(workflow_id)) is not None
+        )
 
     async def on_workflow_execution_started(self, _event_data: dict) -> None:
         """Handle WorkflowExecutionStarted - increment active workflows."""
