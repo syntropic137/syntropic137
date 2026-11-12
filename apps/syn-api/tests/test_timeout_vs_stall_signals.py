@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
-from syn_adapters.projections.manager_event_map import EVENT_HANDLERS
 from syn_adapters.projections.session_tools import ToolOperation
 from syn_api.routes.executions.phase_mapping import _map_phase_detail, _map_phase_to_response
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import PhaseUsage
@@ -237,9 +236,7 @@ async def _phase_as_an_api_client_sees_it(
             session_id=session_id or "",
             provisioned_at=provisioned_at,
         ).model_dump(mode="json")
-        for projection_name, method in EVENT_HANDLERS["WorkspaceProvisionedForPhase"]:
-            if projection_name == "workflow_execution_detail":
-                await getattr(projection, method)(provisioned_event)
+        await projection.on_workspace_provisioned_for_phase(provisioned_event)
     await projection.on_workflow_failed(
         {
             "execution_id": EXECUTION_ID,

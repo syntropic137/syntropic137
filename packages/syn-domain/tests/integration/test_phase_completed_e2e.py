@@ -159,24 +159,18 @@ class TestPhaseCompletedE2EFlow:
 
         PhaseCompleted should route to EXECUTION projections, not template projections.
         """
-        from syn_adapters.projections.manager import EVENT_HANDLERS
-
-        # Verify PhaseCompleted is in the event handlers registry
-        assert "PhaseCompleted" in EVENT_HANDLERS, "PhaseCompleted not registered in EVENT_HANDLERS"
-
-        handlers = EVENT_HANDLERS["PhaseCompleted"]
-
-        # Should route to workflow_execution_detail projection (not workflow_detail)
-        projection_names = [h[0] for h in handlers]
-        assert "workflow_execution_detail" in projection_names, (
-            "PhaseCompleted not routed to workflow_execution_detail projection"
+        from syn_domain.contexts.orchestration.slices.get_execution_detail import (
+            WorkflowExecutionDetailProjection,
+        )
+        from syn_domain.contexts.orchestration.slices.get_workflow_detail import (
+            WorkflowDetailProjection,
         )
 
-        # Verify handler method name
-        exec_detail_handler = next(h for h in handlers if h[0] == "workflow_execution_detail")
-        assert exec_detail_handler[1] == "on_phase_completed", (
-            "Wrong handler method for PhaseCompleted"
+        # Routing is derived from on_* names, in test mode and production alike (#2265).
+        assert WorkflowExecutionDetailProjection._discover_handlers()["PhaseCompleted"] == (
+            "on_phase_completed"
         )
+        assert "PhaseCompleted" not in WorkflowDetailProjection._discover_handlers()
 
     @pytest.mark.asyncio
     async def test_full_flow_aggregate_to_projection(

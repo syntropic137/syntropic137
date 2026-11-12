@@ -939,7 +939,12 @@ class TestProjectionManagerEventRegistration:
 
     def test_execution_events_registered_to_execution_list_projection(self) -> None:
         """REGRESSION: Execution events must be routed to workflow_execution_list projection."""
-        from syn_adapters.projections.manager import EVENT_HANDLERS
+        from syn_domain.contexts.orchestration.slices.list_executions import (
+            WorkflowExecutionListProjection,
+        )
+
+        # Routing is derived from on_* names, in test mode and production alike (#2265).
+        subscribed = WorkflowExecutionListProjection._discover_handlers()
 
         # Verify execution events are routed to workflow_execution_list
         execution_events = [
@@ -949,15 +954,18 @@ class TestProjectionManagerEventRegistration:
             "WorkflowFailed",
         ]
         for event in execution_events:
-            assert event in EVENT_HANDLERS, f"Event {event} not in handlers"
-            projections = [h[0] for h in EVENT_HANDLERS[event]]
-            assert "workflow_execution_list" in projections, (
+            assert event in subscribed, (
                 f"Event {event} not routed to workflow_execution_list projection"
             )
 
     def test_execution_events_registered_to_execution_detail_projection(self) -> None:
         """REGRESSION: Execution events must be routed to workflow_execution_detail projection."""
-        from syn_adapters.projections.manager import EVENT_HANDLERS
+        from syn_domain.contexts.orchestration.slices.get_execution_detail import (
+            WorkflowExecutionDetailProjection,
+        )
+
+        # Routing is derived from on_* names, in test mode and production alike (#2265).
+        subscribed = WorkflowExecutionDetailProjection._discover_handlers()
 
         execution_events = [
             "WorkflowExecutionStarted",
@@ -966,8 +974,6 @@ class TestProjectionManagerEventRegistration:
             "WorkflowFailed",
         ]
         for event in execution_events:
-            assert event in EVENT_HANDLERS, f"Event {event} not in handlers"
-            projections = [h[0] for h in EVENT_HANDLERS[event]]
-            assert "workflow_execution_detail" in projections, (
+            assert event in subscribed, (
                 f"Event {event} not routed to workflow_execution_detail projection"
             )
