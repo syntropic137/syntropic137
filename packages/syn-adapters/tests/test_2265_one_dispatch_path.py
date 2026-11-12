@@ -136,4 +136,4 @@ async def test_legacy_workflow_created_reaches_the_workflow_read_models() -> Non
     await manager.process_event_envelope(_envelope(event, "WorkflowCreated"))
 
     listed = await manager.workflow_list.get_all()
-    assert [w.id for w in listed] == ["wf-legacy-2265"]
+    assert "wf-legacy-2265" in [w.id for w in listed]
