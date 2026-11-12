@@ -118,9 +118,17 @@ def _batch(run: RunIdentity, name: str) -> EvidenceBatch:
     return EvidenceBatch(batch_id=name, producer_id="host", evidence=SessionEvidence(run=run))
 
 
-async def _job_streams(client: MemoryEventStoreClient) -> set[str]:
+async def _job_streams(client: MemoryEventStoreClient, run: RunIdentity) -> set[str]:
+    # Only this run's jobs: on the shared Postgres outbox the handler also
+    # schedules wakeups left pending by earlier tests (each race leaves its
+    # watermark-2 wakeup pending by design), which are not this race's jobs.
     page, _, _ = await client.read_all(from_global_nonce=0, max_count=10_000)
-    return {envelope.metadata.aggregate_id for envelope in page}
+    return {
+        envelope.metadata.aggregate_id
+        for envelope in page
+        if envelope.event.model_dump().get("source_instance_id") == run.source_instance_id
+        and envelope.event.model_dump().get("execution_id") == run.execution_id
+    }
 
 
 async def _race(
@@ -151,7 +159,7 @@ async def _race(
     await asyncio.wait_for(manager_b.handle(), timeout=5)
     paused.resume.set()
     await asyncio.wait_for(tick_a, timeout=5)
-    return await _job_streams(client)
+    return await _job_streams(client, run)
 
 
 @pytest.mark.unit
