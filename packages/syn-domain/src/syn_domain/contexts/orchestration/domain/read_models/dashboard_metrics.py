@@ -9,6 +9,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
+
+class TemplateCreatedRef(BaseModel):
+    """The one field the workflow count needs from a template's creation payload (#641).
+
+    Not WorkflowTemplateCreatedEvent itself: the in-process map also routes the
+    legacy WorkflowCreated to the same handler, whose payload is shaped
+    differently, so every other field is ignored rather than validated.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    workflow_id: str = ""
+
 
 @dataclass(frozen=True)
 class DashboardMetrics:

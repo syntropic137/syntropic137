@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
-from pydantic import BaseModel, ConfigDict
 
 from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
     WorkflowTemplateArchivedEvent,
@@ -21,20 +20,8 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEven
 )
 from syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics import (
     DashboardMetrics,
+    TemplateCreatedRef,
 )
-
-
-class TemplateCreatedRef(BaseModel):
-    """The one field the count needs from a template's creation payload.
-
-    Not WorkflowTemplateCreatedEvent itself: the in-process map also routes the
-    legacy WorkflowCreated here, whose payload is shaped differently, so every
-    other field is ignored rather than validated.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="ignore")
-
-    workflow_id: str = ""
 
 
 class DashboardMetricsProjection(AutoDispatchProjection):
