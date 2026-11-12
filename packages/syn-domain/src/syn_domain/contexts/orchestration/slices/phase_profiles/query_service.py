@@ -314,7 +314,12 @@ class PhaseProfileQueryService:
         ids = sorted({pg_safe(eid) for eid in execution_ids})
         if not ids:
             return PhaseProfiles(workflow_id=workflow_id, since=since, until=until, executions=0)
-        async with self._pool.acquire() as conn:
+        # One snapshot for both reads, or a phase committed between them has
+        # tokens and no resources, or the reverse (#2251).
+        async with (
+            self._pool.acquire() as conn,
+            conn.transaction(isolation="repeatable_read", readonly=True),
+        ):
             token_rows = await conn.fetch(_TOKEN_QUERY, ids, since, until)
             resource_rows = await conn.fetch(
                 _RESOURCE_QUERY, ids, since, until, WORKSPACE_RESOURCE_USAGE

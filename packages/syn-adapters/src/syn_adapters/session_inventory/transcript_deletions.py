@@ -110,7 +110,11 @@ class PostgresTranscriptDeletions:
     async def state(self, capture: CataloguedCapture) -> TranscriptDeletion | None:
         if capture.run.source_instance_id != self._source:
             raise PermissionError("transcript is outside this installation")
-        async with self._pool.acquire() as conn:
+        # One snapshot: local status and replica status describe one moment (#2251).
+        async with (
+            self._pool.acquire() as conn,
+            conn.transaction(isolation="repeatable_read", readonly=True),
+        ):
             rows = await conn.fetch(
                 f"""SELECT reason,content_hash,{_UTC.format("requested_at")} AS requested_at,
                 {_UTC.format("deleted_at")} AS deleted_at
