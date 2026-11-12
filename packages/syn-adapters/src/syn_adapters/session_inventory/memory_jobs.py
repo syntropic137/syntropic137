@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID  # noqa: TC003 - dataclass field
@@ -31,7 +32,7 @@ from syn_domain.contexts.agent_sessions import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncIterator, Callable
 
     from syn_domain.contexts.agent_sessions import InventoryItem, ItemKind
 
@@ -249,3 +250,25 @@ class InMemorySessionInventoryJobs(InMemoryAdapter):
     def _held(self, lease: InventoryJobLease) -> _Row | None:
         row = self._rows.get(lease.job.job_id)
         return row if row is not None and row.lease_token == lease.token else None
+
+
+class InMemoryInventorySchedulingGuard(InMemoryAdapter):
+    """Twin of ``PostgresInventorySchedulingGuard``: one try per hold, never waits.
+
+    Share one instance between handlers to model managers on one database.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.held: set[RunIdentity] = set()
+
+    @asynccontextmanager
+    async def hold(self, run: RunIdentity) -> AsyncIterator[bool]:
+        if run in self.held:
+            yield False
+            return
+        self.held.add(run)
+        try:
+            yield True
+        finally:
+            self.held.discard(run)
