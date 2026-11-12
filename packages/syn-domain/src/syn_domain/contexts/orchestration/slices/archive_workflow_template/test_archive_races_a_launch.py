@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
 from event_sourcing import ConcurrencyConflictError
 
 from syn_domain.contexts.orchestration._shared.template_launch import (
-    LAUNCH_GRACE,
+    LAUNCH_BACKSTOP,
     TemplateArchivedError,
     TemplateLaunches,
 )
@@ -159,9 +159,9 @@ class TestArchiveAgainstUnprojectedExecutions:
         assert result is not None and result.success
         assert repo.current().is_archived
 
-    async def test_a_launch_that_never_started_stops_blocking_after_the_grace(self) -> None:
+    async def test_a_launch_that_never_started_stops_blocking_after_the_backstop(self) -> None:
         repo = await _launched("exec-1")
-        repo.current()._launches["exec-1"] = datetime.now(UTC) - LAUNCH_GRACE * 2
+        repo.current()._launches["exec-1"] = datetime.now(UTC) - LAUNCH_BACKSTOP * 2
         result = await _archive(repo, Executions()).handle(
             ArchiveWorkflowTemplateCommand(workflow_id=WF)
         )
@@ -196,13 +196,13 @@ class TestLaunchAndArchiveShareOneStream:
         with pytest.raises(TemplateArchivedError, match="archived"):
             await TemplateLaunches(repo).record(WF, "exec-late")  # type: ignore[arg-type]
 
-    async def test_a_retry_after_the_grace_renews_the_claim_and_blocks_the_archive(
+    async def test_a_retry_after_the_backstop_renews_the_claim_and_blocks_the_archive(
         self,
     ) -> None:
         # The first dispatch recorded the launch and died before the execution
-        # stream was written; the grace has passed, so it no longer counts.
+        # stream was written; the backstop has passed, so it no longer counts.
         repo = await _launched("exec-1")
-        repo.current()._launches["exec-1"] = datetime.now(UTC) - LAUNCH_GRACE * 2
+        repo.current()._launches["exec-1"] = datetime.now(UTC) - LAUNCH_BACKSTOP * 2
         version = repo.current().version
         # A retry of the same id is about to start it: it must write again.
         await TemplateLaunches(repo).record(WF, "exec-1")  # type: ignore[arg-type]
@@ -215,7 +215,7 @@ class TestLaunchAndArchiveShareOneStream:
 
     async def test_an_archive_racing_a_retry_conflicts(self) -> None:
         repo = await _launched("exec-1")
-        repo.current()._launches["exec-1"] = datetime.now(UTC) - LAUNCH_GRACE * 2
+        repo.current()._launches["exec-1"] = datetime.now(UTC) - LAUNCH_BACKSTOP * 2
         executions = Executions()
 
         async def the_retry_lands() -> None:
@@ -392,3 +392,127 @@ class TestAResumedChildIsALaunch:
         with pytest.raises(TemplateArchivedError):
             await handler.handle("exec-parent")  # type: ignore[attr-defined]
         run_resume.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestALaunchIsHeldUntilItsStartHasAnOutcome:
+    """#1635: a launch's active window ends with the start's outcome, not a clock."""
+
+    @staticmethod
+    def _handler(repo: VersionedRepository) -> tuple[object, AsyncMock]:
+        return TestTheExecuteHandlerRecordsTheLaunch._handler(repo)
+
+    @staticmethod
+    def _command() -> object:
+        return TestTheExecuteHandlerRecordsTheLaunch._command()
+
+    async def test_a_start_slower_than_the_old_grace_still_blocks_the_archive(self) -> None:
+        repo = await _launched()
+        handler, run = self._handler(repo)
+        outcomes: list[object] = []
+
+        async def archive_while_the_start_resolves_commits(**_: object) -> None:
+            # Eleven minutes into the start, and its stream is still not open.
+            repo.current()._launches["exec-abc123"] = datetime.now(UTC) - timedelta(minutes=11)
+            outcomes.append(
+                await _archive(repo, Executions()).handle(
+                    ArchiveWorkflowTemplateCommand(workflow_id=WF)
+                )
+            )
+
+        run.side_effect = archive_while_the_start_resolves_commits
+        await handler.handle(self._command())  # type: ignore[attr-defined]
+
+        result = outcomes[0]
+        assert result is not None and not result.success  # type: ignore[attr-defined]
+        assert "1 active execution" in (result.error or "")  # type: ignore[attr-defined]
+        assert not repo.current().is_archived
+
+    async def test_a_start_that_fails_before_its_stream_opens_releases_the_archive(
+        self,
+    ) -> None:
+        repo = await _launched()
+        handler, run = self._handler(repo)
+        run.side_effect = RuntimeError("GitHub unavailable while resolving commits")
+
+        with pytest.raises(RuntimeError, match="GitHub unavailable"):
+            await handler.handle(self._command())  # type: ignore[attr-defined]
+
+        assert "exec-abc123" in repo.current().abandoned_launches
+        result = await _archive(repo, Executions()).handle(
+            ArchiveWorkflowTemplateCommand(workflow_id=WF)
+        )
+        assert result is not None and result.success
+        assert repo.current().is_archived
+
+    async def test_an_abandoned_launch_whose_stream_did_open_is_judged_by_its_status(
+        self,
+    ) -> None:
+        repo = await _launched()
+        handler, run = self._handler(repo)
+        run.side_effect = RuntimeError("failed after the start was durable")
+        with pytest.raises(RuntimeError):
+            await handler.handle(self._command())  # type: ignore[attr-defined]
+
+        result = await _archive(repo, Executions({"exec-abc123": "running"})).handle(
+            ArchiveWorkflowTemplateCommand(workflow_id=WF)
+        )
+        assert result is not None and not result.success
+        assert not repo.current().is_archived
+
+    async def test_a_retry_after_an_abandoned_start_blocks_the_archive_again(self) -> None:
+        repo = await _launched("exec-1")
+        template = await repo.get_by_id(WF)
+        assert template is not None
+        template.record_launch_abandoned("exec-1", datetime.now(UTC))
+        await repo.save(template)
+
+        await TemplateLaunches(repo).record(WF, "exec-1")  # type: ignore[arg-type]
+
+        assert "exec-1" not in repo.current().abandoned_launches
+        result = await _archive(repo, Executions()).handle(
+            ArchiveWorkflowTemplateCommand(workflow_id=WF)
+        )
+        assert result is not None and not result.success
+
+    async def test_a_lost_abandon_write_never_masks_the_start_error(self) -> None:
+        repo = await _launched()
+        handler, run = self._handler(repo)
+
+        async def fail_and_lose_the_store(**_: object) -> None:
+            async def store_down(_aggregate: object) -> None:
+                raise ConnectionError("event store unreachable")
+
+            repo.save = store_down  # type: ignore[method-assign]
+            raise RuntimeError("the start's own failure")
+
+        run.side_effect = fail_and_lose_the_store
+        with pytest.raises(RuntimeError, match="the start's own failure"):
+            await handler.handle(self._command())  # type: ignore[attr-defined]
+        # Nothing was recorded, so only the backstop releases it.
+        assert "exec-abc123" not in repo.current().abandoned_launches
+
+    async def test_a_process_that_died_mid_start_is_released_by_the_backstop(self) -> None:
+        # Launch recorded, then nothing: no stream, no abandoned outcome.
+        repo = await _launched("exec-1")
+        repo.current()._launches["exec-1"] = (
+            datetime.now(UTC) - LAUNCH_BACKSTOP - timedelta(minutes=1)
+        )
+        result = await _archive(repo, Executions()).handle(
+            ArchiveWorkflowTemplateCommand(workflow_id=WF)
+        )
+        assert result is not None and result.success
+
+    async def test_a_resumed_child_whose_start_fails_releases_the_archive(self) -> None:
+        repo = await _launched()
+        handler, run_resume = TestAResumedChildIsALaunch._handler(repo)
+        run_resume.side_effect = RuntimeError("inheritance unreadable")
+
+        with pytest.raises(RuntimeError, match="inheritance unreadable"):
+            await handler.handle("exec-parent")  # type: ignore[attr-defined]
+
+        assert "exec-child" in repo.current().abandoned_launches
+        result = await _archive(repo, Executions()).handle(
+            ArchiveWorkflowTemplateCommand(workflow_id=WF)
+        )
+        assert result is not None and result.success

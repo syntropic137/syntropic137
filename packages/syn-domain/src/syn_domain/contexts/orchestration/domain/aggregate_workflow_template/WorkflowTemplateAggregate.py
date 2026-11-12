@@ -77,6 +77,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchAbandonedEvent import (
+        WorkflowTemplateExecutionLaunchAbandonedEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchedEvent import (
         WorkflowTemplateExecutionLaunchedEvent,
     )
@@ -254,6 +257,8 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # Every execution launched from this template, and when (#1588). The
         # archive guard asks the execution aggregates about exactly these.
         self._launches: dict[str, datetime] = {}
+        # The launches whose start gave up before it finished (#1635).
+        self._abandoned_launches: set[str] = set()
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -788,10 +793,42 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             )
         )
 
+    @property
+    def abandoned_launches(self) -> frozenset[str]:
+        """The launches whose start gave up, and that no later launch renewed (#1635)."""
+        return frozenset(self._abandoned_launches)
+
+    def record_launch_abandoned(self, execution_id: str, abandoned_at: datetime) -> None:
+        """Record that a launch's start failed, so it is no longer in flight (#1635).
+
+        Never refused, archived or not: it only ever releases a claim. Records
+        nothing for a launch this stream does not hold, or one already
+        abandoned, so repeating it is safe.
+        """
+        from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchAbandonedEvent import (
+            WorkflowTemplateExecutionLaunchAbandonedEvent,
+        )
+
+        if execution_id not in self._launches or execution_id in self._abandoned_launches:
+            return
+        self._apply(
+            WorkflowTemplateExecutionLaunchAbandonedEvent(
+                workflow_id=str(self.id), execution_id=execution_id, abandoned_at=abandoned_at
+            )
+        )
+
     @event_sourcing_handler("WorkflowTemplateExecutionLaunched")
     def on_execution_launched(self, event: WorkflowTemplateExecutionLaunchedEvent) -> None:
         """Apply WorkflowTemplateExecutionLaunchedEvent."""
         self._launches[event.execution_id] = event.launched_at
+        self._abandoned_launches.discard(event.execution_id)
+
+    @event_sourcing_handler("WorkflowTemplateExecutionLaunchAbandoned")
+    def on_execution_launch_abandoned(
+        self, event: WorkflowTemplateExecutionLaunchAbandonedEvent
+    ) -> None:
+        """Apply WorkflowTemplateExecutionLaunchAbandonedEvent."""
+        self._abandoned_launches.add(event.execution_id)
 
     @event_sourcing_handler("WorkflowTemplateArchived")
     def on_workflow_archived(self, _event: WorkflowTemplateArchivedEvent) -> None:
