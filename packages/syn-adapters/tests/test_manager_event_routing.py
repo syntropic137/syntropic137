@@ -229,6 +229,7 @@ async def test_dashboard_total_workflows_follows_archive_and_reinstall():
 
     os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+    from syn_adapters.projection_stores import reset_projection_store
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         PhaseDefinition,
@@ -242,6 +243,9 @@ async def test_dashboard_total_workflows_follows_archive_and_reinstall():
         WorkflowTemplateUpdatedEvent,
     )
 
+    # Fresh store: the in-memory singleton is shared with every test on this
+    # xdist worker, so other tests' templates would otherwise be counted.
+    reset_projection_store()
     manager = ProjectionManager()
     for workflow_id in ("wf-1", "wf-2", "wf-3"):
         await manager._dispatch_to_handlers(
