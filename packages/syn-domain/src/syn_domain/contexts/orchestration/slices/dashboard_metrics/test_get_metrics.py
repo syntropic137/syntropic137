@@ -315,6 +315,63 @@ class TestTotalWorkflowsExcludesArchived:
         assert result.total_workflows == 2
 
     @pytest.mark.asyncio
+    async def test_archiving_a_template_never_counted_changes_nothing(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        """A legacy template the list never showed: archiving it must not subtract another."""
+        await projection.on_workflow_template_created({"workflow_id": "wf-new"})
+        await projection.on_workflow_template_archived(_archived("wf-legacy"))
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("step", ["archive", "reinstall"])
+    async def test_a_failed_save_retried_still_counts_right(
+        self,
+        memory_store: InMemoryProjectionStore,
+        handler: GetDashboardMetricsHandler,
+        projection: DashboardMetricsProjection,
+        step: str,
+    ):
+        """A save that fails, then the same event retried, must land the change once."""
+        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
+        if step == "reinstall":
+            await projection.on_workflow_template_archived(_archived("wf-1"))
+        expected = 0 if step == "archive" else 1
+
+        async def apply() -> None:
+            if step == "archive":
+                await projection.on_workflow_template_archived(_archived("wf-1"))
+            else:
+                await projection.on_workflow_template_updated(_reinstalled("wf-1"))
+
+        save = memory_store.save
+        failed = False
+
+        async def save_failing_once(projection_name: str, key: str, data: dict) -> None:
+            # Fail the first write of the metrics record itself: any other
+            # record the handler wrote before it has already landed.
+            nonlocal failed
+            if key == DashboardMetricsProjection.METRICS_KEY and not failed:
+                failed = True
+                raise RuntimeError("store unavailable")
+            await save(projection_name, key, data)
+
+        memory_store.save = save_failing_once  # type: ignore[method-assign]
+        try:
+            with pytest.raises(RuntimeError):
+                await apply()
+            await apply()  # the coordinator retries the unacknowledged event
+        finally:
+            memory_store.save = save  # type: ignore[method-assign]
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == expected
+
+    @pytest.mark.asyncio
     async def test_rebuild_clears_archived_markers(
         self,
         projection: DashboardMetricsProjection,
