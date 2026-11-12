@@ -32,22 +32,32 @@ DESTINATION = "replica-1"
 
 
 class _Connection:
-    """Answers the tombstone read, then the replica read; records each read's snapshot."""
+    """Answers the tombstone read, then the replica read.
+
+    Records each transaction it opens, and which one (if any) each read ran in.
+    """
 
     def __init__(self) -> None:
-        self.reads_in_snapshot: list[bool] = []
-        self._in_snapshot = False
+        self.transactions: list[tuple[str, bool]] = []
+        self.reads: list[int | None] = []
+        self.executes: list[tuple[int | None, str]] = []
+        self._open: int | None = None
 
     @asynccontextmanager
     async def transaction(self, *, isolation: str, readonly: bool) -> AsyncIterator[None]:
-        self._in_snapshot = isolation == "repeatable_read" and readonly
+        self.transactions.append((isolation, readonly))
+        self._open = len(self.transactions) - 1
         try:
             yield
         finally:
-            self._in_snapshot = False
+            self._open = None
+
+    async def execute(self, query: str, *_args: object) -> str:
+        self.executes.append((self._open, query))
+        return "SET"
 
     async def fetch(self, query: str, *_args: object) -> list[object]:
-        self.reads_in_snapshot.append(self._in_snapshot)
+        self.reads.append(self._open)
         if "count(*)" in query:
             return [{"state": "queued", "n": "1"}]
         return [
@@ -63,9 +73,11 @@ class _Connection:
 class _Pool:
     def __init__(self, conn: _Connection) -> None:
         self._conn = conn
+        self.acquisitions = 0
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[_Connection]:
+        self.acquisitions += 1
         yield self._conn
 
 
@@ -83,14 +95,20 @@ async def test_local_and_replica_status_come_from_one_snapshot(tmp_path: Path) -
         }
     )
     conn = _Connection()
-    pool = cast("Pool", _Pool(conn))
+    fake_pool = _Pool(conn)
+    pool = cast("Pool", fake_pool)
     deletions = PostgresTranscriptDeletions(
         pool, SOURCE, DESTINATION, archive=archive, fence=DeletionFence(pool, SOURCE)
     )
 
     state = await deletions.state(capture)
 
-    assert conn.reads_in_snapshot == [True, True]
+    # The fence and archive do not acquire; only state() does.
+    assert fake_pool.acquisitions == 1
+    assert conn.transactions == [("repeatable_read", True)]
+    assert conn.reads == [0, 0]
+    # agent_event_span.custom_plans: the plan setting, inside that one transaction.
+    assert conn.executes == [(0, "SET LOCAL plan_cache_mode = force_custom_plan")]
     assert state is not None
     assert state.local_status == "pending"
     assert [r.status for r in state.replicas] == ["queued"]

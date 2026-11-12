@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.agent_sessions import PricingResolver
 
+from syn_domain import agent_event_span
 from syn_domain.contexts._shared.host_capacity import RunDemand
 from syn_domain.contexts.agent_sessions import (
     CANONICAL_MODEL_COLUMNS,
@@ -316,10 +317,9 @@ class PhaseProfileQueryService:
             return PhaseProfiles(workflow_id=workflow_id, since=since, until=until, executions=0)
         # One snapshot for both reads, or a phase committed between them has
         # tokens and no resources, or the reverse (#2251).
-        async with (
-            self._pool.acquire() as conn,
-            conn.transaction(isolation="repeatable_read", readonly=True),
-        ):
+        # One snapshot for both reads, or a phase committed between them has
+        # tokens and no resources, or the reverse (#2251).
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             token_rows = await conn.fetch(_TOKEN_QUERY, ids, since, until)
             resource_rows = await conn.fetch(
                 _RESOURCE_QUERY, ids, since, until, WORKSPACE_RESOURCE_USAGE
