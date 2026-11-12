@@ -19,9 +19,12 @@ export function insecureClipboard(): InsecureClipboard {
   Object.defineProperty(document, 'execCommand', {
     configurable: true,
     value: (command: string) => {
-      const area = document.body.querySelector<HTMLTextAreaElement>(':scope > textarea[readonly]')
+      const area = document.querySelector<HTMLTextAreaElement>('textarea[readonly]')
       if (blocked || command !== 'copy' || !area) return false
-      copied.push(area.value)
+      // Outside an open modal dialog the page is inert: Chromium returns true
+      // and copies nothing, so record nothing.
+      const modal = document.querySelector('dialog[open]')
+      if (!modal || modal.contains(area)) copied.push(area.value)
       return true
     },
   })
