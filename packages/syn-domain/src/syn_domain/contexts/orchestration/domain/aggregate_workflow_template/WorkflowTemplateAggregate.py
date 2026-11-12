@@ -77,6 +77,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
     )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchAbandonedEvent import (
+        WorkflowTemplateExecutionLaunchAbandonedEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchedEvent import (
         WorkflowTemplateExecutionLaunchedEvent,
     )
@@ -254,6 +257,10 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # Every execution launched from this template, and when (#1588). The
         # archive guard asks the execution aggregates about exactly these.
         self._launches: dict[str, datetime] = {}
+        # Each launch's starts that have no failure outcome yet, by the time
+        # each recorded. A retry overlapping a live start adds its own entry,
+        # so one failing never releases the other (#1635).
+        self._open_starts: dict[str, set[datetime]] = {}
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -788,10 +795,48 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             )
         )
 
+    @property
+    def abandoned_launches(self) -> frozenset[str]:
+        """The launches every one of whose starts gave up (#1635)."""
+        return frozenset(eid for eid, starts in self._open_starts.items() if not starts)
+
+    def record_launch_abandoned(
+        self, execution_id: str, launched_at: datetime, abandoned_at: datetime
+    ) -> None:
+        """Record that a launch's start failed, so it is no longer in flight (#1635).
+
+        ``launched_at`` is the launch the failed start recorded. Never refused,
+        archived or not: it only ever releases that start's own claim. Records
+        nothing unless that start is still open, so repeating it is safe, and
+        any other start of the same launch, older or newer, keeps holding it.
+        """
+        from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchAbandonedEvent import (
+            WorkflowTemplateExecutionLaunchAbandonedEvent,
+        )
+
+        if launched_at not in self._open_starts.get(execution_id, ()):
+            return
+        self._apply(
+            WorkflowTemplateExecutionLaunchAbandonedEvent(
+                workflow_id=str(self.id),
+                execution_id=execution_id,
+                launched_at=launched_at,
+                abandoned_at=abandoned_at,
+            )
+        )
+
     @event_sourcing_handler("WorkflowTemplateExecutionLaunched")
     def on_execution_launched(self, event: WorkflowTemplateExecutionLaunchedEvent) -> None:
         """Apply WorkflowTemplateExecutionLaunchedEvent."""
         self._launches[event.execution_id] = event.launched_at
+        self._open_starts.setdefault(event.execution_id, set()).add(event.launched_at)
+
+    @event_sourcing_handler("WorkflowTemplateExecutionLaunchAbandoned")
+    def on_execution_launch_abandoned(
+        self, event: WorkflowTemplateExecutionLaunchAbandonedEvent
+    ) -> None:
+        """Apply WorkflowTemplateExecutionLaunchAbandonedEvent."""
+        self._open_starts.get(event.execution_id, set()).discard(event.launched_at)
 
     @event_sourcing_handler("WorkflowTemplateArchived")
     def on_workflow_archived(self, _event: WorkflowTemplateArchivedEvent) -> None:
