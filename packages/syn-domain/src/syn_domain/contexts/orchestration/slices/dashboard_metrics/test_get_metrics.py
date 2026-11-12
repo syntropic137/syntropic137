@@ -12,6 +12,17 @@ import pytest
 os.environ["APP_ENVIRONMENT"] = "test"
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    PhaseDefinition,
+    WorkflowClassification,
+    WorkflowType,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
+    WorkflowTemplateArchivedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
+    WorkflowTemplateUpdatedEvent,
+)
 from syn_domain.contexts.orchestration.domain.queries.get_dashboard_metrics import (
     GetDashboardMetricsQuery,
 )
@@ -23,6 +34,24 @@ from syn_domain.contexts.orchestration.slices.dashboard_metrics.projection impor
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _archived(workflow_id: str) -> dict:
+    """A WorkflowTemplateArchived payload as the dispatch paths deliver it."""
+    return WorkflowTemplateArchivedEvent(workflow_id=workflow_id).model_dump()
+
+
+def _reinstalled(workflow_id: str) -> dict:
+    """A WorkflowTemplateUpdated payload: what a reinstall emits (#822)."""
+    return WorkflowTemplateUpdatedEvent(
+        workflow_id=workflow_id,
+        name=workflow_id,
+        workflow_type=WorkflowType.RESEARCH,
+        classification=WorkflowClassification.SIMPLE,
+        repository_url="",
+        repository_ref="main",
+        phases=[PhaseDefinition(phase_id="p1", name="P1", order=1)],
+    ).model_dump()
 
 
 @pytest.fixture
@@ -219,7 +248,7 @@ class TestTotalWorkflowsExcludesArchived:
     ):
         for workflow_id in ("wf-1", "wf-2", "wf-3"):
             await projection.on_workflow_template_created({"workflow_id": workflow_id})
-        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
+        await projection.on_workflow_template_archived(_archived("wf-2"))
 
         result = await handler.handle(GetDashboardMetricsQuery())
         assert result.total_workflows == 2
@@ -230,8 +259,8 @@ class TestTotalWorkflowsExcludesArchived:
         projection: DashboardMetricsProjection,
         handler: GetDashboardMetricsHandler,
     ):
-        await projection.on_workflow_template_archived({"workflow_id": "wf-1"})
-        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
+        await projection.on_workflow_template_archived(_archived("wf-1"))
+        await projection.on_workflow_template_archived(_archived("wf-2"))
 
         result = await handler.handle(GetDashboardMetricsQuery())
         assert result.total_workflows == 0
@@ -244,8 +273,8 @@ class TestTotalWorkflowsExcludesArchived:
     ):
         for workflow_id in ("wf-1", "wf-2", "wf-3"):
             await projection.on_workflow_template_created({"workflow_id": workflow_id})
-        await projection.on_workflow_template_archived({"workflow_id": "wf-1"})
-        await projection.on_workflow_template_archived({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_archived(_archived("wf-1"))
+        await projection.on_workflow_template_archived(_archived("wf-1"))
 
         result = await handler.handle(GetDashboardMetricsQuery())
         assert result.total_workflows == 2
@@ -259,14 +288,14 @@ class TestTotalWorkflowsExcludesArchived:
         """A reinstall emits WorkflowTemplateUpdated and un-archives the template (#822)."""
         for workflow_id in ("wf-1", "wf-2", "wf-3"):
             await projection.on_workflow_template_created({"workflow_id": workflow_id})
-        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
-        await projection.on_workflow_template_updated({"workflow_id": "wf-2"})
+        await projection.on_workflow_template_archived(_archived("wf-2"))
+        await projection.on_workflow_template_updated(_reinstalled("wf-2"))
 
         result = await handler.handle(GetDashboardMetricsQuery())
         assert result.total_workflows == 3
 
         # Archiving it again after the reinstall is counted again.
-        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
+        await projection.on_workflow_template_archived(_archived("wf-2"))
         result = await handler.handle(GetDashboardMetricsQuery())
         assert result.total_workflows == 2
 
@@ -278,9 +307,9 @@ class TestTotalWorkflowsExcludesArchived:
     ):
         for workflow_id in ("wf-1", "wf-2", "wf-3"):
             await projection.on_workflow_template_created({"workflow_id": workflow_id})
-        await projection.on_workflow_template_archived({"workflow_id": "wf-3"})
-        await projection.on_workflow_template_updated({"workflow_id": "wf-1"})
-        await projection.on_workflow_template_updated({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_archived(_archived("wf-3"))
+        await projection.on_workflow_template_updated(_reinstalled("wf-1"))
+        await projection.on_workflow_template_updated(_reinstalled("wf-1"))
 
         result = await handler.handle(GetDashboardMetricsQuery())
         assert result.total_workflows == 2
@@ -293,11 +322,11 @@ class TestTotalWorkflowsExcludesArchived:
     ):
         """A VERSION-bump rebuild replays from scratch; no archive survives it."""
         await projection.on_workflow_template_created({"workflow_id": "wf-1"})
-        await projection.on_workflow_template_archived({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_archived(_archived("wf-1"))
         await projection.clear_all_data()
 
         await projection.on_workflow_template_created({"workflow_id": "wf-1"})
-        await projection.on_workflow_template_updated({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_updated(_reinstalled("wf-1"))
 
         result = await handler.handle(GetDashboardMetricsQuery())
         assert result.total_workflows == 1

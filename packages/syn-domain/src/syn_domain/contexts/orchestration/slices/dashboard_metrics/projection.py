@@ -12,6 +12,12 @@ if TYPE_CHECKING:
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
+    WorkflowTemplateArchivedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
+    WorkflowTemplateUpdatedEvent,
+)
 from syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics import (
     DashboardMetrics,
 )
@@ -71,15 +77,17 @@ class DashboardMetricsProjection(AutoDispatchProjection):
         metrics["total_workflows"] = metrics.get("total_workflows", 0) + 1
         await self._save_metrics(metrics)
 
-    async def on_workflow_template_archived(self, event_data: dict) -> None:
+    async def on_workflow_template_archived(
+        self, event_data: WorkflowTemplateArchivedEvent
+    ) -> None:
         """Handle WorkflowTemplateArchived - stop counting the template.
 
         total_workflows matches GET /workflows, which hides archived templates.
         The marker remembers the archive so a later reinstall can count the
         template again, and makes a repeated archive a no-op.
         """
-        workflow_id = event_data.get("workflow_id")
-        if not workflow_id or await self._is_archived(workflow_id):
+        workflow_id = WorkflowTemplateArchivedEvent.model_validate(event_data).workflow_id
+        if await self._is_archived(workflow_id):
             return
         await self._store.save(
             self.PROJECTION_NAME, self._archived_key(workflow_id), {"workflow_id": workflow_id}
@@ -88,15 +96,15 @@ class DashboardMetricsProjection(AutoDispatchProjection):
         metrics["total_workflows"] = max(0, metrics.get("total_workflows", 0) - 1)
         await self._save_metrics(metrics)
 
-    async def on_workflow_template_updated(self, event_data: dict) -> None:
+    async def on_workflow_template_updated(self, event_data: WorkflowTemplateUpdatedEvent) -> None:
         """Handle WorkflowTemplateUpdated - count a reinstalled archived template again.
 
         A reinstall emits Updated and clears the archived flag (#822). An update
         to a template that was never archived is not a new template, so it
         leaves the count alone.
         """
-        workflow_id = event_data.get("workflow_id")
-        if not workflow_id or not await self._is_archived(workflow_id):
+        workflow_id = WorkflowTemplateUpdatedEvent.model_validate(event_data).workflow_id
+        if not await self._is_archived(workflow_id):
             return
         await self._store.delete(self.PROJECTION_NAME, self._archived_key(workflow_id))
         metrics = await self._get_or_create_metrics()

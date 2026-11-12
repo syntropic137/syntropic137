@@ -230,19 +230,39 @@ async def test_dashboard_total_workflows_follows_archive_and_reinstall():
     os.environ.setdefault("APP_ENVIRONMENT", "test")
 
     from syn_adapters.projections.manager import ProjectionManager
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        PhaseDefinition,
+        WorkflowClassification,
+        WorkflowType,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
+        WorkflowTemplateArchivedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
+        WorkflowTemplateUpdatedEvent,
+    )
 
     manager = ProjectionManager()
     for workflow_id in ("wf-1", "wf-2", "wf-3"):
         await manager._dispatch_to_handlers(
             "WorkflowTemplateCreated", {"workflow_id": workflow_id, "name": workflow_id}
         )
-    await manager._dispatch_to_handlers("WorkflowTemplateArchived", {"workflow_id": "wf-2"})
+    await manager._dispatch_to_handlers(
+        "WorkflowTemplateArchived", WorkflowTemplateArchivedEvent(workflow_id="wf-2").model_dump()
+    )
 
     metrics = await manager.dashboard_metrics.get_metrics()
     assert metrics.total_workflows == 2
 
-    await manager._dispatch_to_handlers(
-        "WorkflowTemplateUpdated", {"workflow_id": "wf-2", "name": "wf-2"}
+    reinstall = WorkflowTemplateUpdatedEvent(
+        workflow_id="wf-2",
+        name="wf-2",
+        workflow_type=WorkflowType.RESEARCH,
+        classification=WorkflowClassification.SIMPLE,
+        repository_url="",
+        repository_ref="main",
+        phases=[PhaseDefinition(phase_id="p1", name="P1", order=1)],
     )
+    await manager._dispatch_to_handlers("WorkflowTemplateUpdated", reinstall.model_dump())
     metrics = await manager.dashboard_metrics.get_metrics()
     assert metrics.total_workflows == 3
