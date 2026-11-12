@@ -9,9 +9,14 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from syn_adapters.projection_stores.prefix_match import (
+    format_ambiguous_error,
+    resolve_by_prefix,
+)
 from syn_adapters.repo_names import OrganizationRepoNames
 from syn_api._wiring import (
     ensure_connected,
+    get_projection_mgr,
     get_trigger_repo,
     get_trigger_store,
     get_workflow_repo,
@@ -107,6 +112,64 @@ async def _resolve_installation_id(
     return Ok(str(resolved))
 
 
+async def _resolve_workflow_id(workflow_id: str) -> Result[str, TriggerError]:
+    """The full id of the workflow `workflow_id` names, or `workflow_id` as given.
+
+    `syn workflow list` prints 8-character prefixes, and the trigger stores the
+    id it fires later, so a prefix must become the full id here (#642). Same
+    resolution the workflow routes use (#508), against the same projection.
+
+    A prefix that matches nothing is handed back unchanged rather than refused:
+    the projection may lag the event store (#1570), so only
+    `_check_workflow_exists` can say a workflow is missing. A prefix that
+    matches several is refused, never guessed at.
+    """
+    try:
+        match = await resolve_by_prefix(get_projection_mgr().store, "workflow_details", workflow_id)
+    except Exception as exc:
+        logger.warning("could not resolve workflow id %s", workflow_id, exc_info=True)
+        return Err(
+            TriggerError.STORE_UNAVAILABLE,
+            message=(
+                f"Could not resolve workflow '{workflow_id}': the workflow read model "
+                f"could not be read ({type(exc).__name__}). "
+                "This is not a statement that the workflow is missing."
+            ),
+        )
+    if match.is_ambiguous:
+        return Err(
+            TriggerError.WORKFLOW_AMBIGUOUS,
+            message=format_ambiguous_error("Workflow", workflow_id, match.candidates),
+        )
+    return Ok(match.full_id or workflow_id)
+
+
+async def _check_workflow_exists(workflow_id: str) -> Result[None, TriggerError]:
+    """Refuse a trigger on a workflow the event store does not hold."""
+    # `exists` RAISES when the store cannot be read (ESP #310). Before that it
+    # answered False, so an outage reached this branch as "no such workflow" -
+    # a confident wrong answer. Catching it here keeps the two apart instead of
+    # letting the exception escape as a 500 with no explanation.
+    try:
+        workflow_exists = await get_workflow_repo().exists(workflow_id)
+    except Exception as exc:
+        logger.warning("could not determine whether workflow %s exists", workflow_id, exc_info=True)
+        return Err(
+            TriggerError.STORE_UNAVAILABLE,
+            message=(
+                f"Could not determine whether workflow '{workflow_id}' exists: "
+                f"the event store could not be read ({type(exc).__name__}). "
+                "This is not a statement that the workflow is missing."
+            ),
+        )
+    if not workflow_exists:
+        return Err(
+            TriggerError.WORKFLOW_NOT_FOUND,
+            message=f"Workflow '{workflow_id}' does not exist. Seed workflows before creating triggers.",
+        )
+    return Ok(None)
+
+
 async def register_trigger(
     name: str,
     event: str,
@@ -128,28 +191,13 @@ async def register_trigger(
         return resolved
     installation_id = resolved.value
 
-    workflow_repo = get_workflow_repo()
-    # `exists` RAISES when the store cannot be read (ESP #310). Before that it
-    # answered False, so an outage reached this branch as "no such workflow" -
-    # a confident wrong answer. Catching it here keeps the two apart instead of
-    # letting the exception escape as a 500 with no explanation.
-    try:
-        workflow_exists = await workflow_repo.exists(workflow_id)
-    except Exception as exc:
-        logger.warning("could not determine whether workflow %s exists", workflow_id, exc_info=True)
-        return Err(
-            TriggerError.STORE_UNAVAILABLE,
-            message=(
-                f"Could not determine whether workflow '{workflow_id}' exists: "
-                f"the event store could not be read ({type(exc).__name__}). "
-                "This is not a statement that the workflow is missing."
-            ),
-        )
-    if not workflow_exists:
-        return Err(
-            TriggerError.WORKFLOW_NOT_FOUND,
-            message=f"Workflow '{workflow_id}' does not exist. Seed workflows before creating triggers.",
-        )
+    found = await _resolve_workflow_id(workflow_id)
+    if isinstance(found, Err):
+        return found
+    workflow_id = found.value
+    checked = await _check_workflow_exists(workflow_id)
+    if isinstance(checked, Err):
+        return checked
 
     try:
         command = RegisterTriggerCommand(
@@ -242,6 +290,15 @@ async def enable_preset(
         return resolved
     installation_id = resolved.value
 
+    # Only an id the caller typed is resolved. The preset's own default is a
+    # full id already, and resolving it would let a lagging projection bind it
+    # to whichever workflow happens to share its prefix.
+    if workflow_id:
+        found = await _resolve_workflow_id(workflow_id)
+        if isinstance(found, Err):
+            return found
+        workflow_id = found.value
+
     try:
         command = create_preset_command(
             preset_name=preset_name,
@@ -253,27 +310,9 @@ async def enable_preset(
     except (ValueError, KeyError):
         return Err(TriggerError.PRESET_NOT_FOUND, message=f"Preset '{preset_name}' not found")
 
-    workflow_repo = get_workflow_repo()
-    # Same distinction as above: an unreadable store is not a missing workflow.
-    try:
-        workflow_exists = await workflow_repo.exists(command.workflow_id)
-    except Exception as exc:
-        logger.warning(
-            "could not determine whether workflow %s exists", command.workflow_id, exc_info=True
-        )
-        return Err(
-            TriggerError.STORE_UNAVAILABLE,
-            message=(
-                f"Could not determine whether workflow '{command.workflow_id}' exists: "
-                f"the event store could not be read ({type(exc).__name__}). "
-                "This is not a statement that the workflow is missing."
-            ),
-        )
-    if not workflow_exists:
-        return Err(
-            TriggerError.WORKFLOW_NOT_FOUND,
-            message=f"Workflow '{command.workflow_id}' does not exist. Seed workflows before creating triggers.",
-        )
+    checked = await _check_workflow_exists(command.workflow_id)
+    if isinstance(checked, Err):
+        return checked
 
     dedup = await _check_preset_duplicate(repository, command.name, command.event)
     if isinstance(dedup, Err):
@@ -418,6 +457,9 @@ _TRIGGER_ERROR_STATUS: dict[TriggerError, int] = {
     TriggerError.NO_INSTALLATION: 409,
     TriggerError.REPOSITORY_UNRESOLVED: 409,
     TriggerError.GITHUB_UNAVAILABLE: 503,
+    # As on the workflow routes (#508): the id is fine, there is just more
+    # than one workflow it could mean (#642).
+    TriggerError.WORKFLOW_AMBIGUOUS: 409,
 }
 
 _CREATE_RESPONSES: dict[int | str, dict[str, type[TriggerErrorResponse] | str]] = {
@@ -427,6 +469,7 @@ _CREATE_RESPONSES: dict[int | str, dict[str, type[TriggerErrorResponse] | str]] 
         "description": (
             "Refused: the trigger could never fire. No GitHub App is configured, "
             "no installation covers the repository, or the repository is unknown. "
+            "Or the workflow ID prefix matches more than one workflow. "
             "Nothing stored."
         ),
     },

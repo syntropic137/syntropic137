@@ -302,6 +302,9 @@ class TriggerError(StrEnum):
     ALREADY_DELETED = "already_deleted"
     PRESET_NOT_FOUND = "preset_not_found"
     WORKFLOW_NOT_FOUND = "workflow_not_found"
+    WORKFLOW_AMBIGUOUS = "workflow_ambiguous"
+    """The workflow ID is a prefix of more than one workflow (#642). Refused
+    rather than guessed at: the trigger would fire the wrong one later."""
     STORE_UNAVAILABLE = "store_unavailable"
     """The event store could not be read, so existence is UNKNOWN.
 
