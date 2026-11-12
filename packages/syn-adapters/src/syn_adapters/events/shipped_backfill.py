@@ -243,14 +243,13 @@ async def _retry_pending(
         if not await _retry_round(pool, ledger, attributions, limits, clock, report):
             break
     async with pool.acquire() as conn:
-        report.pending = int(
-            await conn.fetchval("SELECT count(*) FROM shipped_backfill_pending WHERE NOT abandoned")
-            or 0
+        # One statement, so both counts come from one snapshot (#2251).
+        counts = await conn.fetchrow(
+            "SELECT count(*) FILTER (WHERE NOT abandoned) AS pending,"
+            " count(*) FILTER (WHERE abandoned) AS abandoned FROM shipped_backfill_pending"
         )
-        report.abandoned = int(
-            await conn.fetchval("SELECT count(*) FROM shipped_backfill_pending WHERE abandoned")
-            or 0
-        )
+        report.pending = int(counts["pending"] or 0) if counts else 0
+        report.abandoned = int(counts["abandoned"] or 0) if counts else 0
         if report.pending == 0:
             await conn.execute("UPDATE shipped_ledger_meta SET backfill_done_at = now()")
             report.done = True
