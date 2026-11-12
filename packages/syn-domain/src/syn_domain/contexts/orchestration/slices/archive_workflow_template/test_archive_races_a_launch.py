@@ -536,3 +536,29 @@ class TestALaunchIsHeldUntilItsStartHasAnOutcome:
             ArchiveWorkflowTemplateCommand(workflow_id=WF)
         )
         assert result is not None and not result.success
+
+    async def test_a_retry_that_fails_never_releases_an_earlier_start_still_opening(
+        self,
+    ) -> None:
+        repo = await _launched()
+        first, first_run = self._handler(repo)
+        retry, retry_run = self._handler(repo)
+        retry_run.side_effect = RuntimeError("the retry failed; the first is still opening")
+        outcomes: list[object] = []
+
+        async def a_retry_fails_while_this_start_resolves_commits(**_: object) -> None:
+            with pytest.raises(RuntimeError, match="the retry failed"):
+                await retry.handle(self._command())  # type: ignore[attr-defined]
+            outcomes.append(
+                await _archive(repo, Executions()).handle(
+                    ArchiveWorkflowTemplateCommand(workflow_id=WF)
+                )
+            )
+
+        first_run.side_effect = a_retry_fails_while_this_start_resolves_commits
+        await first.handle(self._command())  # type: ignore[attr-defined]
+
+        assert "exec-abc123" not in repo.current().abandoned_launches
+        result = outcomes[0]
+        assert result is not None and not result.success  # type: ignore[attr-defined]
+        assert not repo.current().is_archived

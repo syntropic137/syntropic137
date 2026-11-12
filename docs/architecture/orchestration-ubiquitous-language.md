@@ -1618,8 +1618,11 @@ an archive forever. Wall-clock time is only that backstop, never the rule.
 A Launch whose start failed, recorded on the template's stream as
 `WorkflowTemplateExecutionLaunchAbandoned` when the start raises. It ends the
 wait for the Execution's stream, so an archive is no longer held by it; an
-Execution whose stream did open is still judged by its own status. Launching
-the same execution id again renews the Launch and supersedes it. Not the same
+Execution whose stream did open is still judged by its own status. Each start
+of an execution id is its own claim, named by the time it recorded its Launch:
+a failure abandons only that start's claim, and the Launch is Abandoned only
+once every start of it has failed. A retry overlapping a live start, in either
+order, never releases it. Not the same
 word as an Abandoned Branch, and not a cancellation: nothing is stopped, the
 start had already given up.
 

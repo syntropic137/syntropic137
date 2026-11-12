@@ -257,8 +257,10 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         # Every execution launched from this template, and when (#1588). The
         # archive guard asks the execution aggregates about exactly these.
         self._launches: dict[str, datetime] = {}
-        # The launches whose start gave up before it finished (#1635).
-        self._abandoned_launches: set[str] = set()
+        # Each launch's starts that have no failure outcome yet, by the time
+        # each recorded. A retry overlapping a live start adds its own entry,
+        # so one failing never releases the other (#1635).
+        self._open_starts: dict[str, set[datetime]] = {}
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -795,8 +797,8 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
 
     @property
     def abandoned_launches(self) -> frozenset[str]:
-        """The launches whose start gave up, and that no later launch renewed (#1635)."""
-        return frozenset(self._abandoned_launches)
+        """The launches every one of whose starts gave up (#1635)."""
+        return frozenset(eid for eid, starts in self._open_starts.items() if not starts)
 
     def record_launch_abandoned(
         self, execution_id: str, launched_at: datetime, abandoned_at: datetime
@@ -804,17 +806,15 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         """Record that a launch's start failed, so it is no longer in flight (#1635).
 
         ``launched_at`` is the launch the failed start recorded. Never refused,
-        archived or not: it only ever releases a claim. Records nothing unless
-        that launch is still the current one and not already abandoned, so
-        repeating it is safe and a start that renewed the launch since keeps it.
+        archived or not: it only ever releases that start's own claim. Records
+        nothing unless that start is still open, so repeating it is safe, and
+        any other start of the same launch, older or newer, keeps holding it.
         """
         from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateExecutionLaunchAbandonedEvent import (
             WorkflowTemplateExecutionLaunchAbandonedEvent,
         )
 
-        if self._launches.get(execution_id) != launched_at:
-            return
-        if execution_id in self._abandoned_launches:
+        if launched_at not in self._open_starts.get(execution_id, ()):
             return
         self._apply(
             WorkflowTemplateExecutionLaunchAbandonedEvent(
@@ -829,14 +829,14 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def on_execution_launched(self, event: WorkflowTemplateExecutionLaunchedEvent) -> None:
         """Apply WorkflowTemplateExecutionLaunchedEvent."""
         self._launches[event.execution_id] = event.launched_at
-        self._abandoned_launches.discard(event.execution_id)
+        self._open_starts.setdefault(event.execution_id, set()).add(event.launched_at)
 
     @event_sourcing_handler("WorkflowTemplateExecutionLaunchAbandoned")
     def on_execution_launch_abandoned(
         self, event: WorkflowTemplateExecutionLaunchAbandonedEvent
     ) -> None:
         """Apply WorkflowTemplateExecutionLaunchAbandonedEvent."""
-        self._abandoned_launches.add(event.execution_id)
+        self._open_starts.get(event.execution_id, set()).discard(event.launched_at)
 
     @event_sourcing_handler("WorkflowTemplateArchived")
     def on_workflow_archived(self, _event: WorkflowTemplateArchivedEvent) -> None:
