@@ -45,6 +45,7 @@ from .postgres_jobs import PostgresSessionInventoryJobs
 from .postgres_settlements import PostgresSettlementDeadlines
 from .postgres_spools import PostgresCaptureSpools
 from .recovery_worker import CaptureRecoveryWorker, SpoolRecoveryPort
+from .scheduling_guard import PostgresInventorySchedulingGuard
 from .replication_runtime import (
     capture_destination_id,
     capture_outboxes,
@@ -264,7 +265,9 @@ async def create_inventory_runtime(
         )
         if recovery
         else None,
-        scheduler=SchedulePendingInventoryHandler(evidence, inventory, repository, jobs),
+        scheduler=SchedulePendingInventoryHandler(
+            evidence, inventory, repository, jobs, PostgresInventorySchedulingGuard(pool)
+        ),
         step=InventoryStepHandler(
             repository, jobs, builder, evidence, lease_seconds=settings.lease_seconds
         ),

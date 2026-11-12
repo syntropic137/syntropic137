@@ -124,6 +124,9 @@ from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
     SessionEvidenceWritePort,
     StoredEvidenceBatch,
 )
+from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
+    InventorySchedulingGuardPort,
+)
 from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import (
     InventoryJob,
     InventoryJobLease,
@@ -324,6 +327,7 @@ __all__ = [
     "InventoryReconciliationProcessManager",
     "InventoryReconciliationSweepEvent",
     "InventoryReplicationProcessManager",
+    "InventorySchedulingGuardPort",
     "InventorySnapshot",
     "InventoryStepHandler",
     "InventoryStepOutcome",
