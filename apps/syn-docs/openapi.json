@@ -14862,6 +14862,28 @@
             ],
             "title": "Repos Display"
           },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
+          },
+          "task_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Display"
+          },
           "eval": {
             "anyOf": [
               {

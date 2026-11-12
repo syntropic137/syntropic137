@@ -870,6 +870,8 @@ class ExecutionSummary(BaseModel):
     """The execution this run resumed, or None for a fresh run (#1881)."""
     resumed_as: str | None = None
     """The execution that resumed this one, or None. At most one (#1881)."""
+    task: str | None = None
+    """What this run was asked to do, or None if it was asked nothing (#1075)."""
 
 
 class ExecutionDetail(BaseModel):

@@ -46,6 +46,7 @@ from syn_shared.display import (
     format_cost,
     format_duration_seconds,
     format_repos,
+    format_task_summary,
     format_tokens,
     resolve_duration_seconds,
 )
@@ -227,6 +228,8 @@ def _build_execution_summary_response(
         repos=list(e.repos),
         tags=list(e.tags),
         repos_display=format_repos(e.repos),
+        task=e.task,
+        task_display=format_task_summary(e.task),
         resumed_from=e.resumed_from,
         resumed_as=e.resumed_as,
         eval=eval_run,
@@ -389,6 +392,7 @@ def _to_execution_summary(
         tags=list(s.tags),
         resumed_from=resumed_from_info(s.resumed_from),
         resumed_as=s.resumed_as,
+        task=s.task,
     )
 
 
@@ -646,6 +650,7 @@ async def list_active(
                 review_verdict=s.review_verdict,
                 repos=list(s.repos),
                 tags=list(s.tags),
+                task=s.task,
             )
             for s in active
         ]
