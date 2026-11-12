@@ -123,7 +123,17 @@ async def _resolve_workflow_id(workflow_id: str) -> Result[str, TriggerError]:
     the projection may lag the event store (#1570), so only
     `_check_workflow_exists` can say a workflow is missing. A prefix that
     matches several is refused, never guessed at.
+
+    An id the event store already holds is taken as given before any prefix
+    is tried. Otherwise `self-heal-pr`, missing from a lagging projection,
+    would resolve as the prefix of `self-heal-pr-v2` and bind the trigger to
+    the wrong workflow.
     """
+    exact = await _workflow_exists(workflow_id)
+    if isinstance(exact, Err):
+        return exact
+    if exact.value:
+        return Ok(workflow_id)
     try:
         match = await resolve_by_prefix(get_projection_mgr().store, "workflow_details", workflow_id)
     except Exception as exc:
@@ -144,8 +154,8 @@ async def _resolve_workflow_id(workflow_id: str) -> Result[str, TriggerError]:
     return Ok(match.full_id or workflow_id)
 
 
-async def _check_workflow_exists(workflow_id: str) -> Result[None, TriggerError]:
-    """Refuse a trigger on a workflow the event store does not hold."""
+async def _workflow_exists(workflow_id: str) -> Result[bool, TriggerError]:
+    """Whether the event store holds `workflow_id`, or why it could not say."""
     # `exists` RAISES when the store cannot be read (ESP #310). Before that it
     # answered False, so an outage reached this branch as "no such workflow" -
     # a confident wrong answer. Catching it here keeps the two apart instead of
@@ -162,7 +172,15 @@ async def _check_workflow_exists(workflow_id: str) -> Result[None, TriggerError]
                 "This is not a statement that the workflow is missing."
             ),
         )
-    if not workflow_exists:
+    return Ok(workflow_exists)
+
+
+async def _check_workflow_exists(workflow_id: str) -> Result[None, TriggerError]:
+    """Refuse a trigger on a workflow the event store does not hold."""
+    found = await _workflow_exists(workflow_id)
+    if isinstance(found, Err):
+        return found
+    if not found.value:
         return Err(
             TriggerError.WORKFLOW_NOT_FOUND,
             message=f"Workflow '{workflow_id}' does not exist. Seed workflows before creating triggers.",

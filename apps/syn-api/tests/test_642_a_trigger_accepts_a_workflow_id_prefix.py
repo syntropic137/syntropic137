@@ -200,3 +200,37 @@ async def test_an_unreadable_read_model_is_not_reported_as_not_found(
     assert refusal.code == TriggerError.STORE_UNAVAILABLE
     assert "not a statement that the workflow is missing" in refusal.detail
     assert await _stored_workflow_ids() == []
+
+
+@_CREATE
+@pytest.mark.parametrize(
+    "longer",
+    [("self-heal-pr-v2",), ("self-heal-pr-v2", "self-heal-pr-v3")],
+    ids=["one-longer", "two-longer"],
+)
+async def test_an_exact_id_whose_read_model_lags_is_not_retargeted(
+    create, longer: tuple[str, ...]
+) -> None:
+    """An exact id the event store holds wins over a prefix match on a longer one.
+
+    With `self-heal-pr` missing from the projection, the prefix scan sees only
+    `self-heal-pr-v2`: resolving first would bind the trigger to it.
+    """
+    from syn_api._wiring import (
+        get_projection_mgr,
+        get_trigger_repo,
+        sync_published_events_to_projections,
+    )
+
+    for workflow_id in ("self-heal-pr", *longer):
+        await _seed_workflow(workflow_id)
+    await sync_published_events_to_projections()
+    await get_projection_mgr().store.delete("workflow_details", "self-heal-pr")
+
+    response = await create("self-heal-pr")
+
+    assert response.status_code == 200, response.text
+    aggregate = await get_trigger_repo().get_by_id(response.json()["trigger_id"])
+    assert aggregate is not None
+    assert aggregate.workflow_id == "self-heal-pr"
+    assert await _stored_workflow_ids() == ["self-heal-pr"]
