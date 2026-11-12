@@ -266,6 +266,9 @@ from syn_domain.contexts.orchestration.domain.read_models.phase_progress import 
 from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
     DefinitionChangeKind,
 )
+from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
+    PhaseExecutionDetail,
+)
 from syn_domain.contexts.orchestration.slices.archive_eval.ArchiveEvalHandler import (
     ArchiveEvalHandler,
 )
@@ -341,6 +344,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     inherited_outputs,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
+    SalvagedPhase,
     salvage_stranded_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
@@ -559,6 +563,7 @@ __all__ = [
     "OwnerExecution",
     "Percentiles",
     "PhaseDefinition",
+    "PhaseExecutionDetail",
     "PhaseExecutionType",
     "PhaseKind",
     "PhaseProfileQueryService",
@@ -595,6 +600,7 @@ __all__ = [
     "Retained",
     "RetainedReason",
     "ReviewVerdict",
+    "SalvagedPhase",
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
     "SetWorkflowDefaultEvalHandler",

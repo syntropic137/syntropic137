@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { controlGroup } from "../../src/commands/control.js";
 import { CLIError } from "../../src/framework/errors.js";
+import type { components } from "../../src/generated/api-types.js";
+
+type ControlResponse = components["schemas"]["ControlResponse"];
 
 describe("control commands", () => {
   const mockFetch = vi.fn();
@@ -94,6 +97,39 @@ describe("control commands", () => {
     expect((error as CLIError).message).toContain("not supported");
     expect((error as CLIError).message).toContain("start again with a corrected task");
     expect(stdout()).toBe("");
+  });
+
+  // #1062: a cancel of a started execution is queued; its `state` is still the old one.
+  const queuedCancel: ControlResponse = {
+    success: true,
+    execution_id: "exec-1",
+    state: "running",
+    applied: false,
+    message: "Cancel signal queued",
+  };
+  const withdrawnStart: ControlResponse = {
+    success: true,
+    execution_id: "exec-1",
+    state: "cancelled",
+    applied: true,
+    message: "Withdrawn before it started: it will not run",
+  };
+
+  it.each(["cancel", "stop"])("%s says a queued cancel is not yet applied and how to confirm it", async (name) => {
+    mockFetch.mockResolvedValue(jsonResponse(queuedCancel));
+    const handler = controlGroup.getCommand(name)!.handler;
+    await handler({ positionals: ["exec-1"], values: { force: true } });
+    expect(stdout()).toContain("Queued, not yet applied");
+    expect(stdout()).toContain("syn execution show exec-1");
+  });
+
+  it.each(["cancel", "stop"])("%s prints no queued line once the cancel has applied", async (name) => {
+    mockFetch.mockResolvedValue(jsonResponse(withdrawnStart));
+    const handler = controlGroup.getCommand(name)!.handler;
+    await handler({ positionals: ["exec-1"], values: { force: true } });
+    expect(stdout()).toContain("cancelled");
+    expect(stdout()).not.toContain("Queued, not yet applied");
+    expect(stdout()).not.toContain("syn execution show");
   });
 
   it("stop requires --force", async () => {

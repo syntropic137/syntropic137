@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
@@ -564,37 +565,41 @@ class ExecuteWorkflowHandler:
 
         # #1588: on the template's stream, before this execution's own stream
         # exists, so an archive racing this launch either sees it or conflicts.
-        # Raises TemplateArchivedError if the archive won.
-        if self._launches is not None:
-            await self._launches.record(command.aggregate_id, execution_id)
-
-        try:
-            # #1387: the ticket travels all the way to the write. The lease it
-            # represents ends when this execution's start event is durable -
-            # the processor is the only place that knows when that is - and
-            # until then `set_mode(active=True)` waits, so a deploy cannot
-            # drain past work that is admitted but not yet visible.
-            return await self._processor.run(
-                workflow_id=command.aggregate_id,
-                workflow_name=workflow.name or "",
-                phases=phases,
-                inputs=merged_inputs,
-                execution_id=execution_id,
-                repos=repos,
-                admitted=admitted,
-                source_commits=await source_commits_for(
-                    self._commit_resolver, repos, launch_eval.baseline
-                ),
-                tags=tags,
-                launch_eval=launch_eval,
-                workflow_version=self._installed_version(workflow),
-            )
-        except StreamAlreadyExistsError:
-            logger.warning(
-                "Duplicate dispatch detected for execution %s, skipping",
-                execution_id,
-            )
-            raise DuplicateExecutionError(execution_id) from None
+        # Raises TemplateArchivedError if the archive won. #1635: held until
+        # the start has an outcome, however long it takes to open the stream.
+        launching: AbstractAsyncContextManager[None] = (
+            self._launches.launching(command.aggregate_id, execution_id)
+            if self._launches is not None
+            else nullcontext()
+        )
+        async with launching:
+            try:
+                # #1387: the ticket travels all the way to the write. The lease it
+                # represents ends when this execution's start event is durable -
+                # the processor is the only place that knows when that is - and
+                # until then `set_mode(active=True)` waits, so a deploy cannot
+                # drain past work that is admitted but not yet visible.
+                return await self._processor.run(
+                    workflow_id=command.aggregate_id,
+                    workflow_name=workflow.name or "",
+                    phases=phases,
+                    inputs=merged_inputs,
+                    execution_id=execution_id,
+                    repos=repos,
+                    admitted=admitted,
+                    source_commits=await source_commits_for(
+                        self._commit_resolver, repos, launch_eval.baseline
+                    ),
+                    tags=tags,
+                    launch_eval=launch_eval,
+                    workflow_version=self._installed_version(workflow),
+                )
+            except StreamAlreadyExistsError:
+                logger.warning(
+                    "Duplicate dispatch detected for execution %s, skipping",
+                    execution_id,
+                )
+                raise DuplicateExecutionError(execution_id) from None
 
     @staticmethod
     def _installed_version(workflow: WorkflowTemplateAggregate) -> str | None:

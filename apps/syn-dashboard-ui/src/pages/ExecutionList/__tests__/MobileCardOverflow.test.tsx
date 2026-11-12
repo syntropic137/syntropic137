@@ -38,9 +38,10 @@ const REPOS = [LONG_REPO, 'syntropic137/event-sourcing-platform']
 
 /**
  * `repos_display` exactly as the API builds it: `format_repos`
- * (syn_shared/display/formatters.py) gives the first repo's name and `+N`.
+ * (syn_shared/display/formatters.py) gives the first repo's `owner/repo` and
+ * `+N` (#1837).
  */
-const LONG_REPOS = `${'r'.repeat(90)} +1`
+const LONG_REPOS = `${LONG_REPO} +1`
 
 serveListEndpoint({
   path: '/api/v1/executions',

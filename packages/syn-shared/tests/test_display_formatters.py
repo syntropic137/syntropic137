@@ -18,6 +18,7 @@ from syn_shared.display import (
     format_model_compact,
     format_phase,
     format_repos,
+    format_task_summary,
     format_tokens,
     format_utc_timestamp,
     resolve_duration_seconds,
@@ -365,17 +366,38 @@ class TestFormatPhase:
 
 @pytest.mark.unit
 class TestFormatRepos:
+    """Stored repos are full URLs, not slugs: the label must not start ``/github.com`` (#1837)."""
+
     @pytest.mark.parametrize(
         ("value", "expected"),
         [
             (None, None),
             ([], None),
             ((), None),
-            (["acme/foo"], "foo"),
-            (["acme/foo", "acme/bar"], "foo +1"),
-            (["acme/foo", "acme/bar", "acme/baz"], "foo +2"),
-            (["  acme/foo  ", "", "acme/bar"], "foo +1"),
+            (["", "  "], None),
+            (["acme/foo"], "acme/foo"),
+            (["https://github.com/acme/widgets"], "acme/widgets"),
+            (["http://github.com/acme/widgets"], "acme/widgets"),
+            (["https://github.com/acme/widgets.git"], "acme/widgets"),
+            (["https://github.com/acme/widgets/"], "acme/widgets"),
+            (["https://gitlab.example.com/acme/widgets"], "acme/widgets"),
+            (["git@github.com:acme/widgets.git"], "acme/widgets"),
+            (["ssh://git@github.com/acme/widgets"], "acme/widgets"),
+            (["https://github.com/acme/foo", "acme/bar"], "acme/foo +1"),
+            (["acme/foo", "acme/bar", "acme/baz"], "acme/foo +2"),
+            (["  https://github.com/acme/foo  ", "", "acme/bar"], "acme/foo +1"),
             (["singletoken"], "singletoken"),
+            (["/singletoken/"], "singletoken"),
+            # A host is found by its grammar, not by its name: `github.com` as
+            # an owner or a repo is an ordinary path segment.
+            (["acme/github.com"], "acme/github.com"),
+            (["acme/github.com.git"], "acme/github.com"),
+            (["https://git.example/acme/github.com.git"], "acme/github.com"),
+            (["https://git.example/github.com/widgets"], "github.com/widgets"),
+            (["git@git.example:github.com/widgets.git"], "github.com/widgets"),
+            # Not a repo: shown as written, never re-punctuated into a slug.
+            (["not:a-repo"], "not:a-repo"),
+            (["C:\\Users\\acme\\widgets"], "C:\\Users\\acme\\widgets"),
         ],
     )
     def test_renders_expected_string(
@@ -453,3 +475,32 @@ class TestFormatUtcTimestamp:
 
     def test_naive_instant_is_taken_as_utc(self) -> None:
         assert format_utc_timestamp(datetime(2026, 1, 2, 3, 4)) == "2026-01-02 03:04 UTC"
+
+
+@pytest.mark.unit
+class TestFormatTaskSummary:
+    """A run's task as the one line a list row shows (#1075)."""
+
+    def test_collapses_newlines_and_runs_of_space(self) -> None:
+        assert format_task_summary("Fix the bug\n\n  in\tauth.py\n") == "Fix the bug in auth.py"
+
+    def test_truncates_long_text_with_an_ellipsis(self) -> None:
+        summary = format_task_summary("word " * 40)
+        assert summary is not None
+        assert len(summary) == 80
+        assert summary.endswith("…")
+        assert summary.startswith("word word")
+
+    def test_leaves_short_text_unchanged(self) -> None:
+        assert format_task_summary("Add dark mode") == "Add dark mode"
+
+    def test_text_of_exactly_the_limit_is_not_ellipsised(self) -> None:
+        exact = "x" * 80
+        assert format_task_summary(exact) == exact
+
+    def test_no_task_and_a_blank_task_have_no_summary(self) -> None:
+        assert format_task_summary(None) is None
+        assert format_task_summary(" \n\t ") is None
+
+    def test_markup_is_kept_as_text(self) -> None:
+        assert format_task_summary("Make <b>login</b> work") == "Make <b>login</b> work"

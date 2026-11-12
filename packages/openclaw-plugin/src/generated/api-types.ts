@@ -378,6 +378,13 @@ export interface paths {
         /**
          * Cancel Execution Endpoint
          * @description Cancel an execution, or withdraw a start still queued for one (#1650).
+         *
+         *     Cancelling a started execution is asynchronous: the signal is queued and the
+         *     executor acts on it later, so the response has `applied: false` and `state`
+         *     is still the pre-cancel state. Re-read `GET /executions/{execution_id}` until
+         *     it reads `cancelled` (#1062). A withdrawn queued start is final at once
+         *     (`applied: true`), though a re-read can still show `queued` until the
+         *     withdrawal is projected.
          */
         post: operations["cancel_execution_endpoint_executions__execution_id__cancel_post"];
         delete?: never;
@@ -3298,8 +3305,16 @@ export interface components {
             success: boolean;
             /** Execution Id */
             execution_id: string;
-            /** State */
+            /**
+             * State
+             * @description The execution's state when the command was accepted. For a queued signal (`applied` is false) this is the state BEFORE the command takes effect: re-read `GET /executions/{execution_id}` until it reads `cancelled` (#1062).
+             */
             state: string;
+            /**
+             * Applied
+             * @description Whether the command has already taken effect. False when a signal was queued for the executor to act on, as for a cancel of a running execution; true when nothing is left to happen, as for a queued start that was withdrawn and will not run. A later `GET /executions/{execution_id}` can still read `queued` until the withdrawal is projected.
+             */
+            applied: boolean;
             /** Message */
             message?: string | null;
             /** Error */
@@ -5320,6 +5335,10 @@ export interface components {
             resumed_as?: string | null;
             /** Repos Display */
             repos_display?: string | null;
+            /** Task */
+            task?: string | null;
+            /** Task Display */
+            task_display?: string | null;
             eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
@@ -8705,6 +8724,11 @@ export interface components {
             parent_session_id?: string | null;
             /** Root Session Id */
             root_session_id?: string | null;
+            /**
+             * Phase Name
+             * @description The phase's name as the execution recorded it, or null when it recorded none (older rows). phase_display is this when known.
+             */
+            phase_name?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Milestone Id */
@@ -8913,6 +8937,11 @@ export interface components {
             parent_session_id?: string | null;
             /** Root Session Id */
             root_session_id?: string | null;
+            /**
+             * Phase Name
+             * @description The phase's name as the execution recorded it, or null when it recorded none (older rows). phase_display is this when known.
+             */
+            phase_name?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Status */
@@ -10207,13 +10236,15 @@ export interface components {
             created_by: string;
             /** Last Fired At */
             last_fired_at?: string | null;
+            /** Unable To Fire Reason */
+            unable_to_fire_reason?: string | null;
         };
         /**
          * TriggerError
          * @description Errors returned by trigger operations.
          * @enum {string}
          */
-        TriggerError: "not_found" | "invalid_input" | "already_paused" | "already_active" | "already_deleted" | "preset_not_found" | "workflow_not_found" | "store_unavailable" | "github_not_configured" | "no_installation" | "repository_unresolved" | "github_unavailable";
+        TriggerError: "not_found" | "invalid_input" | "already_paused" | "already_active" | "already_deleted" | "preset_not_found" | "workflow_not_found" | "workflow_ambiguous" | "store_unavailable" | "github_not_configured" | "no_installation" | "repository_unresolved" | "github_unavailable";
         /**
          * TriggerErrorResponse
          * @description Why a trigger was not created. Nothing is stored when this is returned.
@@ -10368,6 +10399,8 @@ export interface components {
             fire_count: number;
             /** Created At */
             created_at?: string | null;
+            /** Unable To Fire Reason */
+            unable_to_fire_reason?: string | null;
         };
         /**
          * TypeCount
@@ -10893,7 +10926,10 @@ export interface components {
             total_tool_calls: number;
             /** Top Models */
             top_models?: components["schemas"]["ModelCostEntry"][];
-            /** Top Sessions */
+            /**
+             * Top Sessions
+             * @description The most expensive completed sessions with a reported cost, most expensive first. Sessions still in progress, and completed sessions whose summary reports no cost, are not ranked.
+             */
             top_sessions?: components["schemas"]["SessionCostEntry"][];
         };
         /**
@@ -14241,7 +14277,7 @@ export interface operations {
                     "application/json": components["schemas"]["TriggerErrorResponse"];
                 };
             };
-            /** @description Refused: the trigger could never fire. No GitHub App is configured, no installation covers the repository, or the repository is unknown. Nothing stored. */
+            /** @description Refused; nothing stored. Either the trigger could never fire (no GitHub App is configured, no installation covers the repository, or the repository is unknown), or the workflow ID prefix matches more than one workflow. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14468,7 +14504,7 @@ export interface operations {
                     "application/json": components["schemas"]["TriggerErrorResponse"];
                 };
             };
-            /** @description Refused: the trigger could never fire. No GitHub App is configured, no installation covers the repository, or the repository is unknown. Nothing stored. */
+            /** @description Refused; nothing stored. Either the trigger could never fire (no GitHub App is configured, no installation covers the repository, or the repository is unknown), or the workflow ID prefix matches more than one workflow. */
             409: {
                 headers: {
                     [name: string]: unknown;

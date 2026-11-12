@@ -44,6 +44,12 @@ phases:
       ## Feature Request
       $ARGUMENTS
 
+      The task above says WHAT to research. This phase's instructions say WHAT THIS
+      PHASE PRODUCES, and where the two disagree, these instructions win. A change,
+      a plan or an output format the task asks for is meant for a later phase:
+      record the request in your output under **Requested of later phases**, so
+      those phases see it, and do not act on it here.
+
       ## How to Approach This
       1. Read relevant files to understand the current architecture
       2. Identify patterns and conventions used in the codebase

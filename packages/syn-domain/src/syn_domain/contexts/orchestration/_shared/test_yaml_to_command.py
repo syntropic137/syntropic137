@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -161,3 +162,29 @@ class TestInferRequiresRepos:
             repository={"url": "https://github.com/test/repo", "ref": "main"},
         )
         assert infer_requires_repos(definition) is True
+
+    # The CLI mirrors this exact table in resolver.test.ts
+    # ("requires_repos coercion parity"). Change both or neither (#1050).
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("false", False),
+            ("0", False),
+            ("no", False),
+            ("off", False),
+            ("FALSE", False),
+            (0, False),
+            ("true", True),
+            ("1", True),
+            ("yes", True),
+            ("on", True),
+            (1, True),
+        ],
+    )
+    def test_coerced_values_match_cli(self, raw: object, expected: bool) -> None:
+        assert infer_requires_repos(_minimal_definition(requires_repos=raw)) is expected
+
+    @pytest.mark.parametrize("raw", ["", "maybe", 2, [], {}])
+    def test_rejected_values_match_cli(self, raw: object) -> None:
+        with pytest.raises(ValidationError):
+            _minimal_definition(requires_repos=raw)

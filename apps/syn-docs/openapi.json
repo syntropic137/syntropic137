@@ -1251,7 +1251,7 @@
           "control"
         ],
         "summary": "Cancel Execution Endpoint",
-        "description": "Cancel an execution, or withdraw a start still queued for one (#1650).",
+        "description": "Cancel an execution, or withdraw a start still queued for one (#1650).\n\nCancelling a started execution is asynchronous: the signal is queued and the\nexecutor acts on it later, so the response has `applied: false` and `state`\nis still the pre-cancel state. Re-read `GET /executions/{execution_id}` until\nit reads `cancelled` (#1062). A withdrawn queued start is final at once\n(`applied: true`), though a re-read can still show `queued` until the\nwithdrawal is projected.",
         "operationId": "cancel_execution_endpoint_executions__execution_id__cancel_post",
         "parameters": [
           {
@@ -5674,7 +5674,7 @@
             }
           },
           "409": {
-            "description": "Refused: the trigger could never fire. No GitHub App is configured, no installation covers the repository, or the repository is unknown. Nothing stored.",
+            "description": "Refused; nothing stored. Either the trigger could never fire (no GitHub App is configured, no installation covers the repository, or the repository is unknown), or the workflow ID prefix matches more than one workflow.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5993,7 +5993,7 @@
             }
           },
           "409": {
-            "description": "Refused: the trigger could never fire. No GitHub App is configured, no installation covers the repository, or the repository is unknown. Nothing stored.",
+            "description": "Refused; nothing stored. Either the trigger could never fire (no GitHub App is configured, no installation covers the repository, or the repository is unknown), or the workflow ID prefix matches more than one workflow.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9877,7 +9877,13 @@
           },
           "state": {
             "type": "string",
-            "title": "State"
+            "title": "State",
+            "description": "The execution's state when the command was accepted. For a queued signal (`applied` is false) this is the state BEFORE the command takes effect: re-read `GET /executions/{execution_id}` until it reads `cancelled` (#1062)."
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied",
+            "description": "Whether the command has already taken effect. False when a signal was queued for the executor to act on, as for a cancel of a running execution; true when nothing is left to happen, as for a queued start that was withdrawn and will not run. A later `GET /executions/{execution_id}` can still read `queued` until the withdrawal is projected."
           },
           "message": {
             "anyOf": [
@@ -9906,7 +9912,8 @@
         "required": [
           "success",
           "execution_id",
-          "state"
+          "state",
+          "applied"
         ],
         "title": "ControlResponse",
         "description": "Response from a control command."
@@ -14854,6 +14861,28 @@
               }
             ],
             "title": "Repos Display"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
+          },
+          "task_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Display"
           },
           "eval": {
             "anyOf": [
@@ -21991,6 +22020,18 @@
             ],
             "title": "Root Session Id"
           },
+          "phase_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Name",
+            "description": "The phase's name as the execution recorded it, or null when it recorded none (older rows). phase_display is this when known."
+          },
           "phase_display": {
             "anyOf": [
               {
@@ -22421,6 +22462,18 @@
               }
             ],
             "title": "Root Session Id"
+          },
+          "phase_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase Name",
+            "description": "The phase's name as the execution recorded it, or null when it recorded none (older rows). phase_display is this when known."
           },
           "phase_display": {
             "anyOf": [
@@ -24786,6 +24839,17 @@
               }
             ],
             "title": "Last Fired At"
+          },
+          "unable_to_fire_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unable To Fire Reason"
           }
         },
         "type": "object",
@@ -24810,6 +24874,7 @@
           "already_deleted",
           "preset_not_found",
           "workflow_not_found",
+          "workflow_ambiguous",
           "store_unavailable",
           "github_not_configured",
           "no_installation",
@@ -25081,6 +25146,17 @@
               }
             ],
             "title": "Created At"
+          },
+          "unable_to_fire_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unable To Fire Reason"
           }
         },
         "type": "object",
@@ -26329,7 +26405,8 @@
               "$ref": "#/components/schemas/SessionCostEntry"
             },
             "type": "array",
-            "title": "Top Sessions"
+            "title": "Top Sessions",
+            "description": "The most expensive completed sessions with a reported cost, most expensive first. Sessions still in progress, and completed sessions whose summary reports no cost, are not ranked."
           }
         },
         "type": "object",

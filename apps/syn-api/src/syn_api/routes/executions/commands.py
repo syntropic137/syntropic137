@@ -525,8 +525,8 @@ async def _preflight_repos_or_reject(
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Workflow '{workflow_id}' requires a repository, but none was "
-                "resolved. Pass one via the 'repos' field (ADR-058)."
+                f"Workflow '{workflow_id}' requires a repository, but none was resolved. Pass one "
+                "with -R ('repos'), or if it needs none declare `requires_repos: false` (ADR-058)."
             ),
         )
     await _validate_all_repos_access(preflight_repos)

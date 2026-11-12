@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from syn_domain import agent_event_span
 from syn_domain.contexts.agent_sessions import TranscriptDeletion, TranscriptDeletionReplica
 
 from .capture_deletion_worker import PROPAGATED_REASONS
@@ -110,7 +111,8 @@ class PostgresTranscriptDeletions:
     async def state(self, capture: CataloguedCapture) -> TranscriptDeletion | None:
         if capture.run.source_instance_id != self._source:
             raise PermissionError("transcript is outside this installation")
-        async with self._pool.acquire() as conn:
+        # One snapshot: local status and replica status describe one moment (#2251).
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # this module's Connection types __aexit__ narrower than SpanTransaction; asyncpg satisfies both
             rows = await conn.fetch(
                 f"""SELECT reason,content_hash,{_UTC.format("requested_at")} AS requested_at,
                 {_UTC.format("deleted_at")} AS deleted_at

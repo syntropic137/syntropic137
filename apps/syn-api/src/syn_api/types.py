@@ -302,6 +302,9 @@ class TriggerError(StrEnum):
     ALREADY_DELETED = "already_deleted"
     PRESET_NOT_FOUND = "preset_not_found"
     WORKFLOW_NOT_FOUND = "workflow_not_found"
+    WORKFLOW_AMBIGUOUS = "workflow_ambiguous"
+    """The workflow ID is a prefix of more than one workflow (#642). Refused
+    rather than guessed at: the trigger would fire the wrong one later."""
     STORE_UNAVAILABLE = "store_unavailable"
     """The event store could not be read, so existence is UNKNOWN.
 
@@ -870,6 +873,8 @@ class ExecutionSummary(BaseModel):
     """The execution this run resumed, or None for a fresh run (#1881)."""
     resumed_as: str | None = None
     """The execution that resumed this one, or None. At most one (#1881)."""
+    task: str | None = None
+    """What this run was asked to do, or None if it was asked nothing (#1075)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -1891,6 +1896,7 @@ class TriggerSummary(BaseModel):
     status: str
     fire_count: int = 0
     created_at: datetime | None = None
+    unable_to_fire_reason: str | None = None
 
 
 class TriggerDetail(BaseModel):
@@ -1911,6 +1917,7 @@ class TriggerDetail(BaseModel):
     installation_id: str = ""
     created_by: str = ""
     last_fired_at: datetime | None = None
+    unable_to_fire_reason: str | None = None
 
 
 class TriggerHistoryEntry(BaseModel):
@@ -3019,6 +3026,11 @@ class CostSummary(BaseModel):
     total_tool_calls: int = 0
     top_models: list[ModelCostEntry] = Field(default_factory=list)
     top_sessions: list[SessionCostEntry] = Field(default_factory=list)
+    """Completed sessions with a reported cost, most expensive first (#2228).
+
+    In-progress sessions and summaries without ``total_cost_usd`` are not
+    ranked: their cost is priced from token rows, which SQL cannot order by.
+    """
 
 
 # ---------------------------------------------------------------------------

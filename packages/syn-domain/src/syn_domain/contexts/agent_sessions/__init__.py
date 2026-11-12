@@ -71,6 +71,9 @@ from syn_domain.contexts.agent_sessions.delegate_usage import (
 from syn_domain.contexts.agent_sessions.domain.aggregate_inventory_reconciliation.InventoryReconciliationAggregate import (
     InventoryReconciliationAggregate,
 )
+from syn_domain.contexts.agent_sessions.domain.commands.RequestInventoryReconciliationCommand import (
+    RequestInventoryReconciliationCommand,
+)
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
@@ -115,6 +118,10 @@ from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort impor
 from syn_domain.contexts.agent_sessions.ports.HistoryBackfillQueuePort import (
     HistoryBackfillItem,
     HistoryBackfillLease,
+)
+from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
+    HeldInventorySchedule,
+    InventorySchedulingGuardPort,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
     EvidenceBatch,
@@ -294,6 +301,7 @@ __all__ = [
     "EvidencePage",
     "EvidenceReference",
     "EvidenceRetraction",
+    "HeldInventorySchedule",
     "HistoricalAcquisition",
     "HistoricalAcquisitionQuotaExceeded",
     "HistoryBackfillItem",
@@ -324,6 +332,7 @@ __all__ = [
     "InventoryReconciliationProcessManager",
     "InventoryReconciliationSweepEvent",
     "InventoryReplicationProcessManager",
+    "InventorySchedulingGuardPort",
     "InventorySnapshot",
     "InventoryStepHandler",
     "InventoryStepOutcome",
@@ -364,6 +373,7 @@ __all__ = [
     "RecordOperationHandler",
     "RecordSessionInvocationCommand",
     "RefreshSessionInventoryHandler",
+    "RequestInventoryReconciliationCommand",
     "ResolvedInventory",
     "RolloutDocument",
     "RolloutRecord",

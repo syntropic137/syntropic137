@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from syn_domain.contexts.agent_sessions.canonical_usage import PricingResolver
 
+from syn_domain import agent_event_span
 from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_MODEL_COLUMNS,
     price_canonical_row,
@@ -129,7 +130,10 @@ class CanonicalUsageQueryService:
         sessions_sql = self._render(_SESSION_COUNT_QUERY, filtered)
         args = [[pg_safe(eid) for eid in execution_ids]] if execution_ids is not None else []
 
-        async with self._pool.acquire() as conn:
+        # One snapshot for both reads (#983), so the tokens and the session
+        # count describe the same moment: two autocommit statements could
+        # report a new session's tokens without the session, or the reverse.
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             rows = await conn.fetch(totals_sql, *args)
             session_row = await conn.fetchrow(sessions_sql, *args)
 

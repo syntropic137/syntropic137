@@ -25,6 +25,12 @@ export interface CommandDef {
   /** Example invocations shown under `--help` and in the generated CLI docs. */
   examples?: readonly string[];
   /**
+   * What the option tables cannot say: how the command behaves. Shown after
+   * the options under `--help` and in the generated CLI docs, which are
+   * overwritten from this metadata, so prose for a command goes here. Markdown.
+   */
+  notes?: string;
+  /**
    * Skip the CLI's preflight (the server-version check, #1473). Set it only on
    * commands that never contact the API. Leaving it unset is the safe mistake:
    * a local command pays one silent request, whereas an API command wrongly

@@ -39,6 +39,17 @@ ref first. Nobody decided the work should stop, so it can be resumed, like
 out before the event is written, the Execution stays `running`, and the next
 start's reconciliation fails it as `OrphanedByRestart`.
 
+## Task
+
+What an Execution was asked to do: the free text it was dispatched with, which
+is what `$ARGUMENTS` resolves to in a Phase prompt. It is folded into the
+Execution's inputs under the `task` key before `WorkflowExecutionStarted` is
+written, and read back out by one derivation, `dispatched_task`, so the
+execution list and the execution page cannot disagree about it (#1307, #1075).
+An Execution with no Task was asked nothing, which is a real answer and not a
+Task nobody recorded. The list shows `task_display`, the Task as one line of at
+most 80 characters, and never the other inputs.
+
 ## Phase
 
 One step of a Workflow inside an Execution, with its own timeout and its own
@@ -86,8 +97,9 @@ How it ended is a `CommandStepOutcome`: `passed`, `failed`, `timed_out`,
 The Lane 1 event a Command Phase's steps record (ADR-078 D5): every step's
 outcome, exit code and duration, `success` and `timed_out`, and no session,
 provider or model. The to-do list goes on to collection whatever it says, so a
-failed build's logs are kept; a restart that lost the Workspace rebuilds
-`commands.json` from it with `tails_lost: true` (D6).
+failed build's logs are kept; a lost Workspace, in process or across a
+restart of the API, rebuilds `commands.json` from it with `tails_lost: true`
+(D6, #2169).
 
 ## Gate Failure
 
@@ -1594,9 +1606,25 @@ cannot both succeed (#1588).
 
 Starting an Execution of a Workflow template. Recorded on the TEMPLATE's stream
 as `WorkflowTemplateExecutionLaunched`, before the Execution's own stream exists,
-and refused if the template is Archived. A launch whose Execution stream never
-appears stops counting as active after a grace period (`LAUNCH_GRACE`), so a
-dispatch that died before starting cannot block an archive forever.
+and refused if the template is Archived. A launch stays active until its start
+has an outcome, however long the start takes (#1635): either the Execution's
+stream exists, and its own status decides, or the launch is Abandoned. A
+launch with neither stops counting as active after a backstop
+(`LAUNCH_BACKSTOP`, 24 hours), so a process that died mid-start cannot block
+an archive forever. Wall-clock time is only that backstop, never the rule.
+
+## Abandoned Launch
+
+A Launch whose start failed, recorded on the template's stream as
+`WorkflowTemplateExecutionLaunchAbandoned` when the start raises. It ends the
+wait for the Execution's stream, so an archive is no longer held by it; an
+Execution whose stream did open is still judged by its own status. Each start
+of an execution id is its own claim, named by the time it recorded its Launch:
+a failure abandons only that start's claim, and the Launch is Abandoned only
+once every start of it has failed. A retry overlapping a live start, in either
+order, never releases it. Not the same
+word as an Abandoned Branch, and not a cancellation: nothing is stopped, the
+start had already given up.
 
 ## Default Eval
 

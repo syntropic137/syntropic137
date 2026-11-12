@@ -256,6 +256,7 @@ class GitHubEventIngestionScheduler:
         self._trigger_store = trigger_store
         self._repo_names = repo_names
         self._reported_unresolved: set[str] = set()
+        self._reported_no_installation: set[str] = set()
         self._state = PollerState(
             base_interval=settings.poll_interval_seconds,
             safety_interval=settings.safety_net_interval_seconds,
@@ -357,7 +358,8 @@ class GitHubEventIngestionScheduler:
         ``owner/name``. One whose name resolves to nothing is warned about once
         per trigger and then only counted, in ``unresolved_triggers``: it is the
         same impossible record every cycle, and a warning a minute about it
-        buried everything else (#1870).
+        buried everything else (#1870). One with no installation is unable to
+        fire and is warned about once per trigger the same way (#2202).
         """
         all_triggers = await self._trigger_store.list_all(status="active")
         seen: dict[str, str] = {}
@@ -374,11 +376,23 @@ class GitHubEventIngestionScheduler:
                 continue
             inst_id = t.installation_id.strip() if t.installation_id else ""
             if not inst_id:
-                logger.debug("Skipping repo %s: no installation_id configured", repo)
+                self._report_no_installation(t.trigger_id, repo)
                 continue
             seen.setdefault(repo, inst_id)
         self._state.unresolved_triggers = len(unresolved)
         return list(seen.items())
+
+    def _report_no_installation(self, trigger_id: str, repository: str) -> None:
+        if trigger_id in self._reported_no_installation:
+            return
+        self._reported_no_installation.add(trigger_id)
+        logger.warning(
+            "Not polling for trigger %s: it is unable to fire, as it has no GitHub "
+            "installation for %s. Install the GitHub App on the repository, then "
+            "re-create the trigger (#2202).",
+            trigger_id,
+            repository,
+        )
 
     def _report_unresolved(self, trigger_id: str, repository: str) -> None:
         if trigger_id in self._reported_unresolved:
