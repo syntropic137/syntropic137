@@ -34,7 +34,6 @@ USAGE_ROLLUP_SCHEMA_LOCK_KEY: int = advisory_lock_key("agent_usage_rollup:schema
 RUN_QUEUE_SCHEMA_LOCK_KEY: int = advisory_lock_key("execution_run_queue:schema")
 
 
-
 def inventory_schedule_lock_key(source_instance_id: str, execution_id: str) -> int:
     """The key one run's inventory scheduling holds across check + schedule (#1534).
 

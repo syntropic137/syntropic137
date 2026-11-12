@@ -116,6 +116,9 @@ from syn_domain.contexts.agent_sessions.ports.HistoryBackfillQueuePort import (
     HistoryBackfillItem,
     HistoryBackfillLease,
 )
+from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
+    InventorySchedulingGuardPort,
+)
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
     EvidenceBatch,
     EvidencePage,
@@ -123,9 +126,6 @@ from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
     SessionEvidenceReadPort,
     SessionEvidenceWritePort,
     StoredEvidenceBatch,
-)
-from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
-    InventorySchedulingGuardPort,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import (
     InventoryJob,

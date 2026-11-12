@@ -45,12 +45,12 @@ from .postgres_jobs import PostgresSessionInventoryJobs
 from .postgres_settlements import PostgresSettlementDeadlines
 from .postgres_spools import PostgresCaptureSpools
 from .recovery_worker import CaptureRecoveryWorker, SpoolRecoveryPort
-from .scheduling_guard import PostgresInventorySchedulingGuard
 from .replication_runtime import (
     capture_destination_id,
     capture_outboxes,
     create_replication_manager,
 )
+from .scheduling_guard import PostgresInventorySchedulingGuard
 from .spool_drain import LocalSpoolDrain
 from .spool_release import CaptureSpoolRetention, SpoolVolumePort
 from .transcript_access import InstallationTranscriptAccess

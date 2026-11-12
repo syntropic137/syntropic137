@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/SchedulePendingInventoryHandler.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/SchedulePendingInventoryHandler.py
+index 82b412fcf..c32157208 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/SchedulePendingInventoryHandler.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/reconcile_session_inventory/SchedulePendingInventoryHandler.py
+@@ -63,7 +63,7 @@ class SchedulePendingInventoryHandler:
+         # run both see no open job and open two jobs (distinct identities, so
+         # nothing collides); the later one only loses at publication.
+         async with self._guard.hold(item.run) as held:
+-            if not held:
++            if False:
+                 # Another manager is scheduling this run right now. Skip it this
+                 # tick without acknowledging: the wakeup stays durable, exactly
+                 # as in the coalesce branch below.

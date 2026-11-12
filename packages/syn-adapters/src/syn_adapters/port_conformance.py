@@ -163,6 +163,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.ports.HistoryBackfillQueuePort import (
         HistoryBackfillQueuePort,
     )
+    from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
+        InventorySchedulingGuardPort,
+    )
     from syn_domain.contexts.agent_sessions.ports.NativeSessionEvidencePort import (
         NativeSessionEvidencePort,
     )
@@ -178,9 +181,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
         SessionEvidenceReadPort,
         SessionEvidenceWritePort,
-    )
-    from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
-        InventorySchedulingGuardPort,
     )
     from syn_domain.contexts.agent_sessions.ports.SessionInventoryJobPort import (
         SessionInventoryJobPort,
