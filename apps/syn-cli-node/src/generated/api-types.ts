@@ -6586,6 +6586,7 @@ export interface components {
         MetricsResponse: {
             /**
              * Total Workflows
+             * @description Workflow templates that are not archived; matches the default total of GET /workflows
              * @default 0
              */
             total_workflows: number;

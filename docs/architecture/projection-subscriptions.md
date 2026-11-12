@@ -71,7 +71,7 @@ graph LR
 
 - **Events with projections:** 82
 - **Unique projections:** 27
-- **Total event-to-projection mappings:** 132
+- **Total event-to-projection mappings:** 134
 
 ---
 
