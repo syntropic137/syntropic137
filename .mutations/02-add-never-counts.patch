@@ -1,13 +1,13 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
-index ddee55553..beb4c4c1d 100644
+index 39ba2bf0a..7233de2de 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
-@@ -104,7 +104,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
-         leaves the count alone.
-         """
-         workflow_id = WorkflowTemplateUpdatedEvent.model_validate(event_data).workflow_id
--        if not await self._is_archived(workflow_id):
-+        if False:  # mutation: every update increments
-             return
-         await self._store.delete(self.PROJECTION_NAME, self._archived_key(workflow_id))
+@@ -106,7 +106,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
          metrics = await self._get_or_create_metrics()
+         live = set(metrics.get(self.LIVE_TEMPLATES_KEY, []))
+         if add:
+-            live.add(add)
++            pass  # mutation: create/reinstall never counts
+         if remove:
+             live.discard(remove)
+         metrics[self.LIVE_TEMPLATES_KEY] = sorted(live)
