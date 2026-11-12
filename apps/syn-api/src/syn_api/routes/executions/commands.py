@@ -428,6 +428,7 @@ async def execute(
         Ok(ExecutionSummary) on success, Err(WorkflowError) on failure.
     """
     from syn_domain.contexts.orchestration import (
+        DuplicateExecutionError,
         ExecuteWorkflowCommand,
         WorkflowNotFoundError,
     )
@@ -458,6 +459,10 @@ async def execute(
         result = await handler.handle(cmd, admitted=admitted)
     except WorkflowNotFoundError:
         return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
+    except DuplicateExecutionError as e:
+        # #2259: another starter opened this execution's stream first. Typed, so
+        # a caller can tell "already running" from a start that failed.
+        return Err(WorkflowError.ALREADY_EXISTS, message=str(e))
     except Exception as e:
         logger.exception("Workflow execution error for %s", workflow_id)
         return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
@@ -778,7 +783,7 @@ def _replayed(workflow_id: str, execution_id: str) -> ExecuteWorkflowResponse:
     return ExecuteWorkflowResponse(
         execution_id=execution_id,
         workflow_id=workflow_id,
-        message=f"Execution {execution_id} was already started with this idempotency_key",
+        message=f"Execution {execution_id} was already started",
         replayed=True,
     )
 
@@ -880,6 +885,10 @@ async def execute_workflow_endpoint(
             # The start has already happened or failed here, so a failure is
             # the caller's answer, not a log line behind a 200.
             admission = await start_direct_now(admitted, _execute)
+            # #2259: the request ProcessManager started this same request from
+            # its durable record first. One execution exists; the 200 is true.
+            if isinstance(admission, Err) and admission.error is WorkflowError.ALREADY_EXISTS:
+                return _replayed(workflow_id, execution_id)
             if isinstance(admission, Err):
                 raise HTTPException(
                     status_code=500,
