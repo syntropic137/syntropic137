@@ -104,6 +104,11 @@ class ProjectionManager:
         from syn_adapters.subscriptions.read_model_dispatch import as_checkpointed, deliver
 
         provenance = EventProvenance.from_envelope(envelope)
+        if envelope.metadata.event_type is None:
+            # The store sets the type on read (ADR-027) and handle_event routes
+            # on it; an envelope taken from the publisher was never read back.
+            metadata = envelope.metadata.model_copy(update={"event_type": provenance.event_type})
+            envelope = envelope.model_copy(update={"metadata": metadata})
         self._ensure_initialized()
         if self._delivered is None:
             adapted = (as_checkpointed(p) for p in self._projections.values())
