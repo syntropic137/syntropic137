@@ -69,7 +69,17 @@ class SchedulePendingInventoryHandler:
                 # tick without acknowledging: the wakeup stays durable, exactly
                 # as in the coalesce branch below.
                 return
-            if await self._in_flight(item.run, await schedule.last_scheduled()):
+            last = await schedule.last_scheduled()
+            recorded = None if last is None else await self._repository.get_by_id(last.aggregate_id)
+            if last is not None and recorded is None:
+                # The recorded job's stream is absent, but its save may still be
+                # committing: a failed Append is not proof it never lands
+                # (#2254). Retry exactly that job, never a successor at a newer
+                # watermark; the same identity cannot open a second stream. The
+                # job is now open, so the wakeup stays, as in the coalesce below.
+                await self._request.handle(last)
+                return
+            if await self._in_flight(item.run, recorded):
                 # Coalesce (#1528). The open job fixed its expected head before
                 # this evidence arrived, so a second job for the run now could
                 # only lose the head race to it (publication_superseded). The
@@ -79,24 +89,24 @@ class SchedulePendingInventoryHandler:
                 # that job published.
                 return
             command = await self._command(item)
-            # Recorded before the save: a failed save leaves a pointer to a
-            # stream that does not exist, which reads as "no open job", and the
-            # retry records the same identity again.
-            await schedule.record_scheduled(command.aggregate_id)
+            # Recorded before the save, whole: a save that fails or whose
+            # outcome is unknown leaves this request on record, and the next
+            # holder retries it above instead of scheduling past it.
+            await schedule.record_scheduled(command)
             await self._request.handle(command)
             # If scheduling raises (including a concurrent first writer), leave
             # the wakeup durable. A later tick retries the same command identity.
             await self._outbox.acknowledge_dispatch(item)
 
-    async def _in_flight(self, run: RunIdentity, last_scheduled: str | None) -> bool:
+    async def _in_flight(
+        self, run: RunIdentity, recorded: InventoryReconciliationAggregate | None
+    ) -> bool:
         # The projection lags the schedule, so a job scheduled moments ago may
         # not be in it yet (#2254). The run's last scheduled job is read from
         # its own stream instead, which reflects every save; the projection
         # still covers jobs scheduled before that record existed.
-        if last_scheduled is not None:
-            aggregate = await self._repository.get_by_id(last_scheduled)
-            if aggregate is not None and _open(aggregate.state):
-                return True
+        if recorded is not None and _open(recorded.state):
+            return True
         latest = await self._jobs.latest(run)
         return latest is not None and _open(latest.state)
 

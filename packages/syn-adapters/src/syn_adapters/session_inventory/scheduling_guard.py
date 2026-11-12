@@ -5,8 +5,8 @@ A session-level lock on its own pooled connection, taken with one
 this tick, leaving its wakeup in the outbox. The lock spans processes and is
 freed if the holder's connection dies, so a crashed manager cannot strand a run.
 
-While held, the run's ``session_inventory_schedules`` row is read and written on
-that same connection. The rest of the critical section (job projection, inventory
+While held, the run's ``session_inventory_schedules`` row (the run's last
+scheduled request) is read and written on that same connection. The rest of the critical section (job projection, inventory
 head, outbox acknowledgement) acquires from the pool while the guard's
 connection is out, so the pool must have room for one more (#2254).
 """
@@ -17,6 +17,9 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from syn_adapters.advisory_locks import inventory_schedule_lock_key, try_session_advisory_lock
+from syn_domain.contexts.agent_sessions.domain.commands.RequestInventoryReconciliationCommand import (
+    RequestInventoryReconciliationCommand,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -42,30 +45,37 @@ class PostgresInventorySchedulingGuard:
         self._pool = pool
 
     @asynccontextmanager
-    async def hold(self, run: RunIdentity) -> AsyncIterator[_PostgresSchedule | None]:
+    async def hold(self, run: RunIdentity) -> AsyncIterator[PostgresHeldInventorySchedule | None]:
         key = inventory_schedule_lock_key(run.source_instance_id, run.execution_id)
         async with self._pool.acquire() as conn, try_session_advisory_lock(conn, key) as held:
-            yield _PostgresSchedule(conn, run) if held else None
+            yield PostgresHeldInventorySchedule(conn, run) if held else None
 
 
-class _PostgresSchedule:
+class PostgresHeldInventorySchedule:
+    """The run's schedule row, on the connection that holds the run's lock."""
+
     def __init__(self, conn: Connection, run: RunIdentity) -> None:
         self._conn, self._run = conn, run
 
-    async def last_scheduled(self) -> str | None:
-        return await self._conn.fetchval(
-            """SELECT job_id FROM session_inventory_schedules
+    async def last_scheduled(self) -> RequestInventoryReconciliationCommand | None:
+        raw = await self._conn.fetchval(
+            """SELECT command::text FROM session_inventory_schedules
             WHERE source_instance_id=$1 AND execution_id=$2""",
             self._run.source_instance_id,
             self._run.execution_id,
         )
+        return (
+            None if raw is None else RequestInventoryReconciliationCommand.model_validate_json(raw)
+        )
 
-    async def record_scheduled(self, job_id: str) -> None:
+    async def record_scheduled(self, command: RequestInventoryReconciliationCommand) -> None:
         await self._conn.execute(
-            """INSERT INTO session_inventory_schedules (source_instance_id,execution_id,job_id)
-            VALUES ($1,$2,$3) ON CONFLICT (source_instance_id,execution_id)
-            DO UPDATE SET job_id=EXCLUDED.job_id""",
+            """INSERT INTO session_inventory_schedules
+            (source_instance_id,execution_id,job_id,command) VALUES ($1,$2,$3,$4::jsonb)
+            ON CONFLICT (source_instance_id,execution_id)
+            DO UPDATE SET job_id=EXCLUDED.job_id,command=EXCLUDED.command""",
             self._run.source_instance_id,
             self._run.execution_id,
-            job_id,
+            command.aggregate_id,
+            command.model_dump_json(),
         )

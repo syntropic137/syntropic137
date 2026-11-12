@@ -7,22 +7,27 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
+    from syn_domain.contexts.agent_sessions.domain.commands.RequestInventoryReconciliationCommand import (
+        RequestInventoryReconciliationCommand,
+    )
     from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory import RunIdentity
 
 
 class HeldInventorySchedule(Protocol):
     """One run's scheduling record, readable and writable only while its guard is held."""
 
-    async def last_scheduled(self) -> str | None:
-        """The job ID last recorded for the run, durable from the moment it was recorded.
+    async def last_scheduled(self) -> RequestInventoryReconciliationCommand | None:
+        """The request last recorded for the run, durable from the moment it was recorded.
 
         Unlike the job projection, this never lags the schedule: it is written
-        under the guard before the job's request is saved (#2254).
+        under the guard before the job's request is saved (#2254). It carries
+        the whole request, not only its job ID, so a save whose outcome is
+        unknown can be retried as exactly that job.
         """
         ...
 
-    async def record_scheduled(self, job_id: str) -> None:
-        """Durably record ``job_id`` as the run's latest scheduled job."""
+    async def record_scheduled(self, command: RequestInventoryReconciliationCommand) -> None:
+        """Durably record ``command`` as the run's latest scheduled request."""
         ...
 
 
