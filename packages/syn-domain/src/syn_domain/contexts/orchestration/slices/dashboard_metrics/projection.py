@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from event_sourcing import ProjectionStore
 
 from event_sourcing import AutoDispatchProjection
+from pydantic import BaseModel, ConfigDict
 
 from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
     WorkflowTemplateArchivedEvent,
@@ -21,6 +22,19 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEven
 from syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics import (
     DashboardMetrics,
 )
+
+
+class TemplateCreatedRef(BaseModel):
+    """The one field the count needs from a template's creation payload.
+
+    Not WorkflowTemplateCreatedEvent itself: the in-process map also routes the
+    legacy WorkflowCreated here, whose payload is shaped differently, so every
+    other field is ignored rather than validated.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    workflow_id: str = ""
 
 
 class DashboardMetricsProjection(AutoDispatchProjection):
@@ -80,13 +94,9 @@ class DashboardMetricsProjection(AutoDispatchProjection):
     # Updated (a reinstall upserts and clears archived, #822) show it, Archived
     # hides it, and an Archived for a template never shown changes nothing.
 
-    async def on_workflow_template_created(self, event_data: dict) -> None:
-        """Handle WorkflowTemplateCreated - count the new template.
-
-        A plain dict, as before #641: the in-process map also routes the legacy
-        WorkflowCreated here, whose payload is not a WorkflowTemplateCreatedEvent.
-        """
-        workflow_id = str(event_data.get("workflow_id") or "")
+    async def on_workflow_template_created(self, event_data: TemplateCreatedRef) -> None:
+        """Handle WorkflowTemplateCreated - count the new template."""
+        workflow_id = TemplateCreatedRef.model_validate(event_data).workflow_id
         if workflow_id:
             await self._update_live_templates(add=workflow_id)
 
