@@ -5334,6 +5334,10 @@
         "execution_id": {
           "type": "string"
         },
+        "launched_at": {
+          "format": "date-time",
+          "type": "string"
+        },
         "workflow_id": {
           "type": "string"
         }
@@ -5341,6 +5345,7 @@
       "required": [
         "workflow_id",
         "execution_id",
+        "launched_at",
         "abandoned_at"
       ],
       "type": "object"

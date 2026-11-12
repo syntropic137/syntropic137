@@ -85,25 +85,29 @@ class TemplateLaunches:
         is still judged by its own status. Raises ``TemplateArchivedError``,
         before the block runs, if the template is archived.
         """
-        await self.record(workflow_id, execution_id)
+        launched_at = await self.record(workflow_id, execution_id)
         try:
             yield
         except Exception:
-            await self._abandon(workflow_id, execution_id)
+            await self._abandon(workflow_id, execution_id, launched_at)
             raise
 
-    async def record(self, workflow_id: str, execution_id: str) -> None:
-        """Record the launch, or raise ``TemplateArchivedError`` if the template is archived."""
+    async def record(self, workflow_id: str, execution_id: str) -> datetime:
+        """Record the launch and return its time, or raise ``TemplateArchivedError``
+        if the template is archived."""
+        launched_at = datetime.now(UTC)
         await self._retrying(
-            workflow_id, lambda t: t.record_execution_launch(execution_id, datetime.now(UTC))
+            workflow_id, lambda t: t.record_execution_launch(execution_id, launched_at)
         )
+        return launched_at
 
-    async def _abandon(self, workflow_id: str, execution_id: str) -> None:
+    async def _abandon(self, workflow_id: str, execution_id: str, launched_at: datetime) -> None:
         # Never masks the start's own error. If this write is lost too, the
         # launch is held until LAUNCH_BACKSTOP, exactly as after a crash.
         try:
             await self._retrying(
-                workflow_id, lambda t: t.record_launch_abandoned(execution_id, datetime.now(UTC))
+                workflow_id,
+                lambda t: t.record_launch_abandoned(execution_id, launched_at, datetime.now(UTC)),
             )
         except Exception:
             logger.exception(

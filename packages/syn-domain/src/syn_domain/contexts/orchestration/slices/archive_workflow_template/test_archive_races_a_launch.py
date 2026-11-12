@@ -464,7 +464,7 @@ class TestALaunchIsHeldUntilItsStartHasAnOutcome:
         repo = await _launched("exec-1")
         template = await repo.get_by_id(WF)
         assert template is not None
-        template.record_launch_abandoned("exec-1", datetime.now(UTC))
+        template.record_launch_abandoned("exec-1", template.launches["exec-1"], datetime.now(UTC))
         await repo.save(template)
 
         await TemplateLaunches(repo).record(WF, "exec-1")  # type: ignore[arg-type]
@@ -516,3 +516,23 @@ class TestALaunchIsHeldUntilItsStartHasAnOutcome:
             ArchiveWorkflowTemplateCommand(workflow_id=WF)
         )
         assert result is not None and result.success
+
+    async def test_one_failed_start_never_releases_a_concurrent_start_of_the_same_id(
+        self,
+    ) -> None:
+        repo = await _launched()
+        handler, run = self._handler(repo)
+
+        async def a_second_dispatch_renews_then_this_one_fails(**_: object) -> None:
+            await TemplateLaunches(repo).record(WF, "exec-abc123")  # type: ignore[arg-type]
+            raise RuntimeError("this start failed; the other is still opening")
+
+        run.side_effect = a_second_dispatch_renews_then_this_one_fails
+        with pytest.raises(RuntimeError):
+            await handler.handle(self._command())  # type: ignore[attr-defined]
+
+        assert "exec-abc123" not in repo.current().abandoned_launches
+        result = await _archive(repo, Executions()).handle(
+            ArchiveWorkflowTemplateCommand(workflow_id=WF)
+        )
+        assert result is not None and not result.success
