@@ -205,3 +205,99 @@ class TestGetDashboardMetricsHandler:
         assert result.total_workflows == 1
         assert result.total_sessions == 1
         assert result.total_artifacts == 1
+
+
+@pytest.mark.unit
+class TestTotalWorkflowsExcludesArchived:
+    """total_workflows matches GET /workflows, which hides archived templates (#641)."""
+
+    @pytest.mark.asyncio
+    async def test_archived_template_is_not_counted(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        for workflow_id in ("wf-1", "wf-2", "wf-3"):
+            await projection.on_workflow_template_created({"workflow_id": workflow_id})
+        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 2
+
+    @pytest.mark.asyncio
+    async def test_archive_never_drives_count_below_zero(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        await projection.on_workflow_template_archived({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 0
+
+    @pytest.mark.asyncio
+    async def test_repeated_archive_counts_once(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        for workflow_id in ("wf-1", "wf-2", "wf-3"):
+            await projection.on_workflow_template_created({"workflow_id": workflow_id})
+        await projection.on_workflow_template_archived({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_archived({"workflow_id": "wf-1"})
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 2
+
+    @pytest.mark.asyncio
+    async def test_reinstalling_an_archived_template_counts_it_again(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        """A reinstall emits WorkflowTemplateUpdated and un-archives the template (#822)."""
+        for workflow_id in ("wf-1", "wf-2", "wf-3"):
+            await projection.on_workflow_template_created({"workflow_id": workflow_id})
+        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
+        await projection.on_workflow_template_updated({"workflow_id": "wf-2"})
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 3
+
+        # Archiving it again after the reinstall is counted again.
+        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 2
+
+    @pytest.mark.asyncio
+    async def test_updating_a_live_template_does_not_count_it_twice(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        for workflow_id in ("wf-1", "wf-2", "wf-3"):
+            await projection.on_workflow_template_created({"workflow_id": workflow_id})
+        await projection.on_workflow_template_archived({"workflow_id": "wf-3"})
+        await projection.on_workflow_template_updated({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_updated({"workflow_id": "wf-1"})
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 2
+
+    @pytest.mark.asyncio
+    async def test_rebuild_clears_archived_markers(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        """A VERSION-bump rebuild replays from scratch; no archive survives it."""
+        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_archived({"workflow_id": "wf-1"})
+        await projection.clear_all_data()
+
+        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_updated({"workflow_id": "wf-1"})
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 1

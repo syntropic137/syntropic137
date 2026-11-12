@@ -215,3 +215,34 @@ def test_organization_events_are_routed():
         f"Organization context events missing from EVENT_HANDLERS: {missing}\n"
         "This causes creates to succeed but data to never appear in list/show."
     )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_dashboard_total_workflows_follows_archive_and_reinstall():
+    """The in-process sync path must route archive/reinstall to dashboard_metrics (#641).
+
+    Without the EVENT_HANDLERS entries the projection handlers exist but never
+    run, and the dashboard keeps counting archived templates.
+    """
+    import os
+
+    os.environ.setdefault("APP_ENVIRONMENT", "test")
+
+    from syn_adapters.projections.manager import ProjectionManager
+
+    manager = ProjectionManager()
+    for workflow_id in ("wf-1", "wf-2", "wf-3"):
+        await manager._dispatch_to_handlers(
+            "WorkflowTemplateCreated", {"workflow_id": workflow_id, "name": workflow_id}
+        )
+    await manager._dispatch_to_handlers("WorkflowTemplateArchived", {"workflow_id": "wf-2"})
+
+    metrics = await manager.dashboard_metrics.get_metrics()
+    assert metrics.total_workflows == 2
+
+    await manager._dispatch_to_handlers(
+        "WorkflowTemplateUpdated", {"workflow_id": "wf-2", "name": "wf-2"}
+    )
+    metrics = await manager.dashboard_metrics.get_metrics()
+    assert metrics.total_workflows == 3

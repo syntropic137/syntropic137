@@ -18,7 +18,7 @@ class DashboardMetrics:
     """
 
     total_workflows: int = 0
-    """Total number of workflows."""
+    """Workflow templates that are not archived (matches GET /workflows total)."""
 
     active_workflows: int = 0
     """Number of currently running workflows."""
