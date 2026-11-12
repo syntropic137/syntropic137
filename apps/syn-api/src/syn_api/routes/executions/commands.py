@@ -24,7 +24,11 @@ from syn_api._wiring import (
     get_workflow_repo,
 )
 from syn_api.routes.executions.admission_gate import admit_or_409, refuse_while_paused
-from syn_api.routes.executions.direct_start import queue_direct_start, start_direct_now
+from syn_api.routes.executions.direct_start import (
+    queue_direct_start,
+    start_direct_now,
+    start_failure,
+)
 from syn_api.routes.executions.keyed_start import (
     already_started,
     record_unless_started,
@@ -460,7 +464,7 @@ async def execute(
         return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
     except Exception as e:
         logger.exception("Workflow execution error for %s", workflow_id)
-        return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
+        return start_failure(e)
 
     if result.unrecorded_work_error is not None:
         # #1547: neither store took the cancel's landed refs, so no event will
@@ -778,7 +782,7 @@ def _replayed(workflow_id: str, execution_id: str) -> ExecuteWorkflowResponse:
     return ExecuteWorkflowResponse(
         execution_id=execution_id,
         workflow_id=workflow_id,
-        message=f"Execution {execution_id} was already started with this idempotency_key",
+        message=f"Execution {execution_id} was already started",
         replayed=True,
     )
 
@@ -879,12 +883,9 @@ async def execute_workflow_endpoint(
             # #1310 1.3: admitted into the run queue before the 200, inline.
             # The start has already happened or failed here, so a failure is
             # the caller's answer, not a log line behind a 200.
-            admission = await start_direct_now(admitted, _execute)
-            if isinstance(admission, Err):
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Execution {execution_id} was not admitted: {admission.message}",
-                )
+            # #2259: True when another starter started this request first.
+            if await start_direct_now(admitted, execution_id, _execute):
+                return _replayed(workflow_id, execution_id)
         else:
             queue_direct_start(
                 background_tasks,

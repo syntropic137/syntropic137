@@ -12,9 +12,12 @@ import logging
 import weakref
 from typing import TYPE_CHECKING
 
+from fastapi import HTTPException
+
 from syn_api._wiring_admission import get_execution_budget
 from syn_api.dispatched_start import request_withdrawn
 from syn_api.execution_budget import StartAlreadyClaimedError, StartPath
+from syn_api.types import Err, WorkflowError
 from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.maintenance import carrying, guarantee_settled
 
@@ -23,6 +26,7 @@ if TYPE_CHECKING:
 
     from fastapi import BackgroundTasks
 
+    from syn_api.types import ExecutionSummary, Result
     from syn_domain.contexts._shared import AdmissionTicket
     from syn_domain.contexts.orchestration import RequestExecutionCommand
 
@@ -75,18 +79,48 @@ async def withdraw_execution_request(execution_id: str, reason: str | None) -> b
     return True
 
 
-async def start_direct_now[T](admitted: AdmissionTicket, start: Callable[[], Awaitable[T]]) -> T:
+def start_failure(exc: Exception) -> Err[WorkflowError]:
+    """The `Err` for a start that raised, keeping "already started" typed (#2259).
+
+    `DuplicateExecutionError` means another starter opened this execution's
+    stream first: one execution exists. Flattened into EXECUTION_FAILED, it
+    was indistinguishable from a start that failed.
+    """
+    from syn_domain.contexts.orchestration import DuplicateExecutionError
+
+    if isinstance(exc, DuplicateExecutionError):
+        return Err(WorkflowError.ALREADY_EXISTS, message=str(exc))
+    return Err(WorkflowError.EXECUTION_FAILED, message=str(exc))
+
+
+async def start_direct_now(
+    admitted: AdmissionTicket,
+    execution_id: str,
+    start: Callable[[], Awaitable[Result[ExecutionSummary, WorkflowError]]],
+) -> bool:
     """Run a `POST /execute` start to its admission, inside the caller's gate (#1310 1.3).
 
     The run-queue path (`SYN_EXECUTION_RUN_QUEUE_ENABLED`): the start ends
     once the run is ``admitted`` in the run queue, so it is awaited here, the
     200 follows a durable start, and no task carries the execution. Off, the
-    route uses `queue_direct_start` exactly as before. Returns what `start`
-    returned, so the route can refuse the 200 for a start that failed.
+    route uses `queue_direct_start` exactly as before.
+
+    True when the request ProcessManager started this same request from its
+    durable record first (#2259): one execution exists, so the 200 is still
+    true. Any other failure raises a 500 - the caller's answer, never a log
+    line behind a 200.
     """
     with carrying(admitted):
         await admitted.enter_slot()
-        return await start()
+        admission = await start()
+    if isinstance(admission, Err) and admission.error is WorkflowError.ALREADY_EXISTS:
+        return True
+    if isinstance(admission, Err):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Execution {execution_id} was not admitted: {admission.message}",
+        )
+    return False
 
 
 def queue_direct_start(
