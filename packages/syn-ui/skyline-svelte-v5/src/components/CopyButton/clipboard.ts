@@ -37,7 +37,7 @@ function copyThroughTextarea(text: string): void {
       selection.removeAllRanges()
       selection.addRange(previous)
     }
-    if (focused instanceof HTMLElement && focused.isConnected) focused.focus()
+    if (focused instanceof HTMLElement && focused.isConnected) focused.focus({ preventScroll: true })
   }
 }
 
@@ -45,15 +45,17 @@ function copyThroughTextarea(text: string): void {
  * Where the fallback textarea goes. While a native modal `<dialog>` is open,
  * everything outside it is inert and cannot be selected, and Chromium still
  * returns true from execCommand('copy') with the clipboard unchanged (#742).
- * So the textarea goes inside the open modal; otherwise into the body.
+ * So the textarea goes inside the top-most modal: the one holding focus, else
+ * the last one in document order, since a modal opened later stacks above
+ * (#2263). With no modal open it goes into the body.
  */
 function fallbackHost(): HTMLElement {
   const active = document.activeElement
   const owner = active instanceof Element ? active.closest('dialog[open]') : null
   if (owner instanceof HTMLElement) return owner
   try {
-    const modal = document.querySelector('dialog:modal')
-    if (modal instanceof HTMLElement) return modal
+    const top = [...document.querySelectorAll<HTMLElement>('dialog:modal')].at(-1)
+    if (top) return top
   } catch {
     // `:modal` is not supported by this engine: fall through to the body.
   }
