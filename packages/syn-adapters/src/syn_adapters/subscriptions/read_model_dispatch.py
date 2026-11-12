@@ -18,6 +18,7 @@ only if it is reached in production.
 from __future__ import annotations
 
 import logging
+from functools import cache
 from typing import TYPE_CHECKING
 
 from event_sourcing import (
@@ -28,7 +29,7 @@ from event_sourcing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from event_sourcing import DomainEvent, EventEnvelope
 
@@ -56,13 +57,11 @@ class _NoCheckpoints:
         return []
 
 
-def as_checkpointed(projection: object) -> CheckpointedProjection | None:
-    """The form in which the coordinator delivers events to ``projection``.
+@cache
+def _adapters() -> tuple[tuple[type, Callable[..., CheckpointedProjection]], ...]:
+    """Each plain-class projection the coordinator registers, with its adapter.
 
-    A ``CheckpointedProjection`` is delivered to directly. A plain-class
-    projection the coordinator registers is wrapped in the adapter it is
-    registered with. Anything else is not fed by events (``None``), such as
-    the session timeline, which the write path records into.
+    Imported on first use: the domain projections import this package.
     """
     from syn_adapters.projections.realtime import RealTimeProjection
     from syn_adapters.subscriptions.projection_adapters import (
@@ -97,29 +96,33 @@ def as_checkpointed(projection: object) -> CheckpointedProjection | None:
         RepoCorrelationProjection,
     )
 
-    match projection:
-        case OrganizationProjection():
-            return OrganizationListAdapter(projection)
-        case SystemProjection():
-            return SystemListAdapter(projection)
-        case RepoProjection():
-            return RepoListAdapter(projection)
-        case RepoCorrelationProjection():
-            return RepoCorrelationAdapter(projection)
-        case TriggerHistoryProjection():
-            return TriggerHistoryAdapter(projection)
-        case ToolTimelineProjection():
-            return ToolTimelineAdapter(projection)
-        case ExecutionCostProjection():
-            return ExecutionCostAdapter(projection)
-        case SessionCostProjection():
-            return SessionCostAdapter(projection)
-        case RealTimeProjection():
-            return RealTimeProjectionAdapter(projection)
-        case CheckpointedProjection():
-            return projection
-        case _:
-            return None
+    return (
+        (OrganizationProjection, OrganizationListAdapter),
+        (SystemProjection, SystemListAdapter),
+        (RepoProjection, RepoListAdapter),
+        (RepoCorrelationProjection, RepoCorrelationAdapter),
+        (TriggerHistoryProjection, TriggerHistoryAdapter),
+        (ToolTimelineProjection, ToolTimelineAdapter),
+        (ExecutionCostProjection, ExecutionCostAdapter),
+        (SessionCostProjection, SessionCostAdapter),
+        (RealTimeProjection, RealTimeProjectionAdapter),
+    )
+
+
+def as_checkpointed(projection: object) -> CheckpointedProjection | None:
+    """The form in which the coordinator delivers events to ``projection``.
+
+    A ``CheckpointedProjection`` is delivered to directly. A plain-class
+    projection the coordinator registers is wrapped in the adapter it is
+    registered with. Anything else is not fed by events (``None``), such as
+    the session timeline, which the write path records into.
+    """
+    for projection_type, adapter in _adapters():
+        if isinstance(projection, projection_type):
+            return adapter(projection)
+    if isinstance(projection, CheckpointedProjection):
+        return projection
+    return None
 
 
 async def deliver(
