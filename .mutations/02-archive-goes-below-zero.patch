@@ -1,8 +1,8 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
-index 48ab0ec82..9bcd7ca3c 100644
+index ddee55553..ceac6140b 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py
-@@ -85,7 +85,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
+@@ -93,7 +93,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
              self.PROJECTION_NAME, self._archived_key(workflow_id), {"workflow_id": workflow_id}
          )
          metrics = await self._get_or_create_metrics()
@@ -10,4 +10,4 @@ index 48ab0ec82..9bcd7ca3c 100644
 +        metrics["total_workflows"] = metrics.get("total_workflows", 0) - 1
          await self._save_metrics(metrics)
  
-     async def on_workflow_template_updated(self, event_data: dict) -> None:
+     async def on_workflow_template_updated(self, event_data: WorkflowTemplateUpdatedEvent) -> None:
