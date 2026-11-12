@@ -17,9 +17,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from syn_adapters.advisory_locks import inventory_schedule_lock_key, try_session_advisory_lock
-from syn_domain.contexts.agent_sessions.domain.commands.RequestInventoryReconciliationCommand import (
-    RequestInventoryReconciliationCommand,
-)
+from syn_domain.contexts.agent_sessions import RequestInventoryReconciliationCommand
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

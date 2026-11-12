@@ -34,8 +34,9 @@ from syn_domain.contexts.agent_sessions import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
-    from syn_domain.contexts.agent_sessions import InventoryItem, ItemKind
-    from syn_domain.contexts.agent_sessions.domain.commands.RequestInventoryReconciliationCommand import (
+    from syn_domain.contexts.agent_sessions import (
+        InventoryItem,
+        ItemKind,
         RequestInventoryReconciliationCommand,
     )
 
