@@ -13,6 +13,11 @@ export async function writeClipboard(text: string): Promise<void> {
     }
   }
   if (typeof document.execCommand !== 'function') throw new Error('Clipboard is not available')
+  copyThroughTextarea(text)
+}
+
+/** The execCommand('copy') path: select a hidden textarea, copy, put focus and selection back. */
+function copyThroughTextarea(text: string): void {
   const area = document.createElement('textarea')
   area.value = text
   area.setAttribute('readonly', '')
