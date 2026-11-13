@@ -19,6 +19,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEven
     WorkflowTemplateUpdatedEvent,
 )
 from syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics import (
+    ArtifactCreatedRef,
     DashboardMetrics,
     TemplateCreatedRef,
 )
@@ -37,7 +38,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
 
     PROJECTION_NAME = "dashboard_metrics"
     METRICS_KEY = "global"  # Single record for global metrics
-    VERSION = 6  # Bumped: execution, session and token counters removed (#2272)
+    VERSION = 7  # Bumped: total_artifact_bytes sums ArtifactCreated.size_bytes (#2274)
     LIVE_TEMPLATES_KEY = "live_workflow_ids"  # In the global record; see total_workflows below
 
     def __init__(self, store: ProjectionStore):
@@ -115,10 +116,12 @@ class DashboardMetricsProjection(AutoDispatchProjection):
     # them), so they reach the read model in production and tests alike (#2265).
     on_workflow_created = on_workflow_template_created
 
-    async def on_artifact_created(self, _event_data: dict) -> None:
-        """Handle ArtifactCreated - increment artifact count."""
+    async def on_artifact_created(self, event_data: ArtifactCreatedRef) -> None:
+        """Handle ArtifactCreated - increment artifact count and byte total."""
+        size_bytes = ArtifactCreatedRef.model_validate(event_data).size_bytes
         metrics = await self._get_or_create_metrics()
         metrics["total_artifacts"] = metrics.get("total_artifacts", 0) + 1
+        metrics["total_artifact_bytes"] = metrics.get("total_artifact_bytes", 0) + size_bytes
         await self._save_metrics(metrics)
 
     async def get_metrics(self) -> DashboardMetrics:

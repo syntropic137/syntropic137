@@ -14,6 +14,10 @@ import pytest
 os.environ["APP_ENVIRONMENT"] = "test"
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType, ContentType
+from syn_domain.contexts.artifacts.domain.events.ArtifactCreatedEvent import (
+    ArtifactCreatedEvent,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     PhaseDefinition,
     WorkflowClassification,
@@ -345,3 +349,48 @@ class TestTotalWorkflowsExcludesArchived:
 
         result = await handler.handle(GetDashboardMetricsQuery())
         assert result.total_workflows == 1
+
+
+def _artifact(artifact_id: str, size_bytes: int) -> dict:
+    """An ArtifactCreated payload as the dispatch paths deliver it."""
+    return ArtifactCreatedEvent(
+        artifact_id=artifact_id,
+        workflow_id="wf-1",
+        phase_id="p1",
+        artifact_type=ArtifactType.RESEARCH_SUMMARY,
+        content_type=ContentType.TEXT_PLAIN,
+        content="x",
+        content_hash="h",
+        size_bytes=size_bytes,
+    ).model_dump()
+
+
+class TestTotalArtifactBytes:
+    """#2274: total_artifact_bytes sums ArtifactCreated.size_bytes."""
+
+    @pytest.mark.asyncio
+    async def test_sizes_sum(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        await projection.on_artifact_created(_artifact("a-1", 1200))
+        await projection.on_artifact_created(_artifact("a-2", 34))
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_artifacts == 2
+        assert result.total_artifact_bytes == 1234
+
+    @pytest.mark.asyncio
+    async def test_payload_without_size_counts_the_artifact_and_adds_zero(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        """An older stored payload with no size_bytes key never raises."""
+        await projection.on_artifact_created(_artifact("a-1", 500))
+        await projection.on_artifact_created({"artifact_id": "a-old"})
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_artifacts == 2
+        assert result.total_artifact_bytes == 500
