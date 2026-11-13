@@ -23,6 +23,12 @@ given. Do all four steps, then report.
 If a step fails, say `FAILED` for that step and put the actual error text in
 `TOKEN_SCOPE`. Do not retry a step more than once, and do not work around a
 permission failure by choosing a different repository — a refusal here is the
-result we want to see, because it tells the operator the App is missing a scope.
+result we want REPORTED, because it tells the operator the App is missing a scope.
+
+The writes are this phase's deliverable, not a side effect of it. If any of
+`ISSUE`, `COMMENT` or `CLOSE` is `FAILED`, end with `TASK_RESULT`
+`success: false` and `failure_reason: "platform"`: a missing App permission or
+scope is the deployment's machinery, and the brief is not the problem. Only when
+all three worked is it `success: true`.
 
 Use `gh` for all four steps.

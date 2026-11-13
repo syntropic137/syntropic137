@@ -49,3 +49,9 @@ PUSH: <ok or the exact error text>
 GH_AFTER: <ok or the exact error text>
 CLEANUP: <ok or the error text>
 ```
+
+If any of `GH_BEFORE`, `PUSH`, `GH_AFTER` or `CLEANUP` is not `ok`, end with
+`TASK_RESULT` `success: false` and `failure_reason: "platform"`: an expired or
+under-scoped token is the deployment's machinery, and the brief is not the
+problem. Writing the report file does not make the phase a success; only all
+four `ok` does.
