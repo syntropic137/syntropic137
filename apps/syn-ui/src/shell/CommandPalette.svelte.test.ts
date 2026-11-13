@@ -16,12 +16,23 @@ const settle = async () => {
 
 const copied: string[] = []
 
-// jsdom has no modal dialogs; the palette opens in one.
+// jsdom has no modal dialogs; the palette opens in one. The stubs mark each
+// modal with the order it opened in, so the double below can tell a modal
+// (everything else inert) from a non-modal dialog and find the top one.
+const MODAL = 'data-test-modal'
+let opened = 0
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
   this.setAttribute('open', '')
+  this.setAttribute(MODAL, String(++opened))
 }
 HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
   this.removeAttribute('open')
+  this.removeAttribute(MODAL)
+}
+
+function topModal(): HTMLDialogElement | undefined {
+  const modals = [...document.querySelectorAll<HTMLDialogElement>(`dialog[open][${MODAL}]`)]
+  return modals.sort((a, b) => Number(a.getAttribute(MODAL)) - Number(b.getAttribute(MODAL))).at(-1)
 }
 
 beforeEach(() => {
@@ -34,10 +45,12 @@ beforeEach(() => {
     value: (command: string) => {
       const area = document.querySelector<HTMLTextAreaElement>('textarea[readonly]')
       if (command !== 'copy' || !area) return false
-      // The palette is an open modal dialog and everything outside it is inert:
-      // Chromium returns true and copies nothing, so record nothing (#742).
-      const modal = document.querySelector('dialog[open]')
-      if (!modal || modal.contains(area)) copied.push(area.value)
+      // Chromium returns true even when nothing is selected, or when the
+      // textarea is inert outside the top modal (the open palette); it just
+      // copies nothing (#742, #2263). So record only the selected text of a
+      // live textarea.
+      const top = topModal()
+      if (!top || top.contains(area)) copied.push(area.value.slice(area.selectionStart, area.selectionEnd))
       return true
     },
   })
