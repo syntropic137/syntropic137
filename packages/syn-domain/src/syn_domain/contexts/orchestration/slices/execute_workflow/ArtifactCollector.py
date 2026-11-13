@@ -40,9 +40,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.output_refusals i
     OutputCollectionIncompleteError,
     collect_output_files,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.primary_deliverable import (
-    primary_rank,
-)
+from syn_domain.contexts.orchestration.slices.execute_workflow.primary_deliverable import ranked
 from syn_shared.workspace_paths import (
     WORKSPACE_INPUT_DIR,
     WORKSPACE_OUTPUT_DIR,
@@ -228,12 +226,11 @@ class _Deliverable:
 async def _with_report(
     deliverables: list[_Deliverable],
     *,
-    phase_id: str,
     last_agent_message: str | None,
     title: str,
     describe_work: DescribeWork | None,
 ) -> list[_Deliverable]:
-    """`deliverables`, text first, with the transcript salvaged when none is text.
+    """`deliverables`, with the transcript salvaged when none is text.
 
     Files on disk are not a report when none of them is text. A verify phase
     screenshots before it writes its report (#1648); when the report never
@@ -242,9 +239,9 @@ async def _with_report(
     file at all" are therefore one incident and get one answer here; the
     binaries are kept beside the salvage either way.
 
-    Ranked by `primary_rank`, otherwise in collection order: the head is flagged the
-    Primary Deliverable, and a screenshot or a log the glob happened to list
-    first must not take the flag from the phase's report (#990, #2084).
+    Not ordered here: the caller passes the result through `ranked`, so a
+    screenshot or a log the glob happened to list first cannot take the
+    Primary Deliverable flag from the phase's report (#990, #2084).
     """
     if not any(isinstance(d.content, str) for d in deliverables):
         binaries = tuple(d.source_path for d in deliverables)
@@ -263,9 +260,7 @@ async def _with_report(
                 ", ".join(binaries) or "none",
             )
             deliverables = [*deliverables, _Deliverable.of(recovered)]
-    return sorted(
-        deliverables, key=lambda d: primary_rank(d.source_path, d.content, phase_id=phase_id)
-    )
+    return deliverables
 
 
 #: DIRECTORY names that hold machine-generated build output (issue #919).
@@ -641,10 +636,7 @@ class ArtifactCollector:
             last_agent_message=last_agent_message,
             describe_work=describe_work,
         )
-        if primary_path is not None:
-            # The phase names its primary; stable, so the rest keep their order.
-            # Otherwise `primary_rank` has already put the phase's report first (#2084).
-            deliverables.sort(key=lambda d: d.source_path != primary_path)
+        deliverables = ranked(deliverables, phase_id=phase_id, primary_path=primary_path)
 
         artifact_ids = await self._store(
             deliverables,
@@ -768,7 +760,6 @@ class ArtifactCollector:
             deliverables.append(_Deliverable.of(recovered))
         deliverables = await _with_report(
             deliverables,
-            phase_id=phase_id,
             last_agent_message=last_agent_message,
             title=f"{phase_name}: {RECOVERED_SOURCE_PATH}",
             describe_work=describe_work,
@@ -863,13 +854,12 @@ class ArtifactCollector:
                 )
             kept = await _with_report(
                 kept,
-                phase_id=phase_id,
                 last_agent_message=last_agent_message,
                 title=outcome.title(phase_name=phase_name, source_path=RECOVERED_SOURCE_PATH),
                 describe_work=None,
             )
             stored = await self._store(
-                kept,
+                ranked(kept, phase_id=phase_id),
                 workflow_id=workflow_id,
                 phase_id=phase_id,
                 execution_id=execution_id,
