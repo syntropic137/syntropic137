@@ -53,7 +53,6 @@ only the second needs an image, so only the second is allowed to skip.
 
 from __future__ import annotations
 
-import functools
 import shutil
 import subprocess
 import threading
@@ -256,15 +255,27 @@ def _pull_error(argv: list[str]) -> str | None:
     return f"exit {pulled.returncode}: {stderr or '(no stderr)'}"
 
 
-@functools.cache
+@dataclass
+class _AvailabilityMemo:
+    """Whether the pinned image has already been found in this session."""
+
+    available: bool = False
+
+
+_MEMO = _AvailabilityMemo()
+
+
 def _pinned_image_availability() -> _ImageAvailable | _NoDocker | _PullFailed:
     """Whether the pinned image can be probed, pulling it if it is absent.
 
-    Cached for the session, failure included. A failure is only reached after
-    every attempt has run and been reported, so remembering it hides no retry;
-    NOT remembering it would make each of the parametrized cases spend another
-    ten minutes reaching the same verdict.
+    Only success is remembered for the session. A failure is NOT: running out of
+    attempts says the registry was down for ten minutes, not that it always
+    will be, so the next test that needs the image tries again (#2053). CI runs
+    the integration half with ``-x``, so it stops at the first named failure
+    rather than paying that bound once per parametrized case.
     """
+    if _MEMO.available:
+        return _ImageAvailable()
     if shutil.which("docker") is None:
         return _NoDocker()
     inspected = subprocess.run(  # fixed argv, no shell
@@ -273,6 +284,7 @@ def _pinned_image_availability() -> _ImageAvailable | _NoDocker | _PullFailed:
         check=False,
     )
     if inspected.returncode == 0:
+        _MEMO.available = True
         return _ImageAvailable()
     last_error = ""
     for attempt in range(_PULL_ATTEMPTS):
@@ -280,6 +292,7 @@ def _pinned_image_availability() -> _ImageAvailable | _NoDocker | _PullFailed:
             time.sleep(_PULL_BACKOFF_SECONDS[attempt - 1])
         error = _pull_error(["docker", "pull", "--quiet", DEFAULT_WORKSPACE_IMAGE])
         if error is None:
+            _MEMO.available = True
             return _ImageAvailable()
         last_error = error
     return _PullFailed(attempts=_PULL_ATTEMPTS, last_error=last_error)
@@ -471,12 +484,11 @@ class TestThePinnedImageIsPulledOrNamedAsUnpullable:
 
     @pytest.fixture(autouse=True)
     def _fresh_session(self, monkeypatch: pytest.MonkeyPatch) -> Iterator[list[float]]:
-        _pinned_image_availability.cache_clear()
+        monkeypatch.setattr(_MEMO, "available", False)
         sleeps: list[float] = []
         monkeypatch.setattr(time, "sleep", sleeps.append)
         monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/docker")
         yield sleeps
-        _pinned_image_availability.cache_clear()
 
     def _registry(
         self, monkeypatch: pytest.MonkeyPatch, pulls: list[_CompletedPull | None]
@@ -522,6 +534,31 @@ class TestThePinnedImageIsPulledOrNamedAsUnpullable:
         )
         assert [argv[1] for argv in calls].count("pull") == _PULL_ATTEMPTS
         assert _fresh_session == list(_PULL_BACKOFF_SECONDS)
+
+    @pytest.mark.parametrize(
+        "failure",
+        [None, _CompletedPull(returncode=1, stderr=b"denied: 503 Service Unavailable\n")],
+        ids=["timeouts", "refusals"],
+    )
+    def test_an_exhausted_pull_is_retried_by_the_next_test_that_needs_the_image(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        _fresh_session: list[float],
+        failure: _CompletedPull | None,
+    ) -> None:
+        calls = self._registry(
+            monkeypatch, [failure] * _PULL_ATTEMPTS + [_CompletedPull(returncode=0)]
+        )
+        with pytest.raises(pytest.fail.Exception):
+            _require_pinned_image()
+
+        # Same session, registry recovered: the failure must not be remembered.
+        assert _require_pinned_image() == DEFAULT_WORKSPACE_IMAGE
+        assert [argv[1] for argv in calls].count("pull") == _PULL_ATTEMPTS + 1
+        # ...but the success is, so a third test runs no docker command at all.
+        before = len(calls)
+        assert _require_pinned_image() == DEFAULT_WORKSPACE_IMAGE
+        assert len(calls) == before
 
     def test_a_registry_refusal_fails_with_its_stderr_instead_of_skipping(
         self, monkeypatch: pytest.MonkeyPatch
