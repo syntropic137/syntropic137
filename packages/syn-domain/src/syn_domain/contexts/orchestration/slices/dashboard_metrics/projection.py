@@ -36,7 +36,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
 
     PROJECTION_NAME = "dashboard_metrics"
     METRICS_KEY = "global"  # Single record for global metrics
-    VERSION = 5  # Bumped: total_workflows excludes archived templates (#641)
+    VERSION = 6  # Bumped: total_artifact_bytes sums ArtifactCreated.size_bytes (#2274)
     LIVE_TEMPLATES_KEY = "live_workflow_ids"  # In the global record; see total_workflows below
 
     def __init__(self, store: ProjectionStore):
@@ -169,10 +169,13 @@ class DashboardMetricsProjection(AutoDispatchProjection):
 
         await self._save_metrics(metrics)
 
-    async def on_artifact_created(self, _event_data: dict) -> None:
-        """Handle ArtifactCreated - increment artifact count."""
+    async def on_artifact_created(self, event_data: dict) -> None:
+        """Handle ArtifactCreated - increment artifact count and byte total."""
         metrics = await self._get_or_create_metrics()
         metrics["total_artifacts"] = metrics.get("total_artifacts", 0) + 1
+        metrics["total_artifact_bytes"] = metrics.get("total_artifact_bytes", 0) + event_data.get(
+            "size_bytes", 0
+        )
         await self._save_metrics(metrics)
 
     async def get_metrics(self) -> DashboardMetrics:
