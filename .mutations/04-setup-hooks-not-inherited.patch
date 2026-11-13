@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+index 85a7ec70b..870e3f653 100644
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -423,7 +423,7 @@ class _Module:
+         """Where an xunit setup hook pytest runs before ``owner``'s tests reaches a skip."""
+         hooks = [*_XUNIT_SETUP_HOOKS, *(_UNITTEST_SETUP_HOOKS if self._is_unittest(owner) else ())]
+         for name in hooks:
+-            for hook in self._methods(owner, name):
++            for hook in (f for f in _functions(owner.body) if f.name == name):
+                 if via := self.body_skips(hook, owner):
+                     return f"setup hook {name}() {via}"
+         return None

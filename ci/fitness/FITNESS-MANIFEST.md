@@ -62,7 +62,9 @@ mutation-evidence runner noticed, because a skip voids its baseline.
 A test marked `integration` that can reach a skip - a `skip`/`skipif` marker,
 `pytest.skip`/`importorskip` in its body or in a same-module helper it calls, or
 a fixture that skips, followed through `conftest.py` and through the fixtures
-that fixture requests - must carry
+that fixture requests, or an xunit setup hook of its class that skips
+(`setup_method`/`setup_class` on any class, `setUp`/`setUpClass` only on a
+`unittest.TestCase`, found along the class's MRO) - must carry
 `@pytest.mark.may_skip(reason="...", issue="#N")`. Marks given by
 `pytest.param(..., marks=...)` count per parameter leg, so a declaration on one
 leg does not cover another. The census reads the AST
