@@ -5,17 +5,13 @@ Use process_event_envelope() from EventSubscriptionService, NOT dispatch_event()
 """
 
 import logging
-import warnings
 from functools import lru_cache
 from typing import Any
 
-from event_sourcing import DomainEvent, EventEnvelope
+from event_sourcing import CheckpointedProjection, DomainEvent, EventEnvelope
 
 from syn_adapters.projection_stores import get_projection_store
 from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
-from syn_adapters.projections.manager_event_map import (
-    EVENT_HANDLERS as EVENT_HANDLERS,
-)
 from syn_adapters.projections.manager_event_map import (
     EventProvenance as EventProvenance,
 )
@@ -70,6 +66,7 @@ class ProjectionManager:
         self._store = get_projection_store()
         self._projections: dict[str, Any] = {}  # heterogeneous projection registry
         self._initialized = False
+        self._delivered: list[CheckpointedProjection] | None = None
 
     def _ensure_initialized(self) -> None:
         """Lazily initialize projections."""
@@ -95,63 +92,29 @@ class ProjectionManager:
         return self._projections[name]
 
     async def process_event_envelope(self, envelope: EventEnvelope[DomainEvent]) -> EventProvenance:
-        """Process an event envelope from the event store.
+        """Deliver one stored event to these read models, as the coordinator would.
 
-        This is the ONLY correct way to dispatch events to projections.
-        Events MUST come through the event store subscription, ensuring
-        proper event sourcing guarantees.
-
-        Args:
-            envelope: Event envelope from event store (has metadata, event).
-
-        Returns:
-            EventProvenance with stream/position info for tracking.
+        Each projection receives it through its own ``handle_event``, wrapped
+        exactly as the coordinator registers it (#2265), so test mode and
+        production cannot route an event differently.
 
         Raises:
             ValueError: If envelope is not from event store.
         """
-        from syn_adapters.projections.manager_dispatch import process_event_envelope
+        from syn_adapters.subscriptions.read_model_dispatch import as_checkpointed, deliver
 
-        return await process_event_envelope(self, envelope)
-
-    async def _dispatch_to_handlers(self, event_type: str, event_data: dict) -> None:
-        """Internal: Dispatch event data to projection handlers.
-
-        DO NOT CALL DIRECTLY - use process_event_envelope() instead.
-        """
-        from syn_adapters.projections.manager_dispatch import dispatch_to_handlers
-
-        await dispatch_to_handlers(self, event_type, event_data)
-
-    async def dispatch_event(self, event_type: str, event_data: dict) -> None:
-        """DEPRECATED: Use process_event_envelope() instead.
-
-        This method bypasses event store validation and should not be used.
-        Events MUST flow through aggregates and the event store to maintain
-        event sourcing guarantees.
-
-        Args:
-            event_type: The type of event
-            event_data: The event payload
-        """
-        warnings.warn(
-            "dispatch_event() bypasses event sourcing. "
-            "Use aggregates and event store subscription instead. "
-            "Events should flow: Command → Aggregate → Event Store → Projection",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        await self._dispatch_to_handlers(event_type, event_data)
-
-    async def catch_up_all(self, events: list[dict]) -> None:
-        """Catch up all projections from a list of events.
-
-        Args:
-            events: List of event dictionaries with 'event_type' and payload
-        """
-        for event in events:
-            event_type = event.get("event_type", "")
-            await self.dispatch_event(event_type, event)
+        provenance = EventProvenance.from_envelope(envelope)
+        if envelope.metadata.event_type is None:
+            # The store sets the type on read (ADR-027) and handle_event routes
+            # on it; an envelope taken from the publisher was never read back.
+            metadata = envelope.metadata.model_copy(update={"event_type": provenance.event_type})
+            envelope = envelope.model_copy(update={"metadata": metadata})
+        self._ensure_initialized()
+        if self._delivered is None:
+            adapted = (as_checkpointed(p) for p in self._projections.values())
+            self._delivered = [p for p in adapted if p is not None]
+        await deliver(self._delivered, envelope)
+        return provenance
 
     @property
     def store(self) -> ProjectionStoreProtocol:

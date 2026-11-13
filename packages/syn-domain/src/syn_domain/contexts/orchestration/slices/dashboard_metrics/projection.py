@@ -110,6 +110,10 @@ class DashboardMetricsProjection(AutoDispatchProjection):
         metrics["total_workflows"] = len(live)
         await self._save_metrics(metrics)
 
+    # Events stored before the rename (WorkflowTemplateAggregate still applies
+    # them), so they reach the read model in production and tests alike (#2265).
+    on_workflow_created = on_workflow_template_created
+
     async def on_workflow_execution_started(self, _event_data: dict) -> None:
         """Handle WorkflowExecutionStarted - increment active workflows."""
         metrics = await self._get_or_create_metrics()

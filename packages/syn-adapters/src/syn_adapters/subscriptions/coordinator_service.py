@@ -28,6 +28,7 @@ from event_sourcing import (
 )
 
 from syn_adapters import postgres_pool
+from syn_adapters.subscriptions.read_model_dispatch import as_checkpointed
 from syn_adapters.subscriptions.read_model_lag import (
     CheckpointState,
     ReadModelLag,
@@ -434,8 +435,7 @@ class CoordinatorSubscriptionService:
         # Build projection list (add realtime adapter if configured)
         all_projections = list(self._projections)
         if self._realtime_projection:
-            realtime_adapter = RealTimeProjectionAdapter(self._realtime_projection)
-            all_projections.append(realtime_adapter)
+            all_projections.append(_delivered(self._realtime_projection))
             logger.info("RealTimeProjection adapter added")
 
         # Create coordinator
@@ -550,6 +550,14 @@ class CoordinatorSubscriptionService:
         await stop_coordinator_service(self)
 
 
+def _delivered(projection: object) -> CheckpointedProjection:
+    """Register ``projection`` in the form test-mode sync also delivers to (#2265)."""
+    adapted = as_checkpointed(projection)
+    if adapted is None:
+        raise TypeError(f"{type(projection).__name__} is not a read model events can reach")
+    return adapted
+
+
 def create_coordinator_service(
     event_store: EventStoreClient,
     projection_store: ProjectionStoreProtocol,
@@ -596,26 +604,6 @@ def create_coordinator_service(
     from syn_adapters.projections.manager_registry import create_session_cost_projection
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
     from syn_adapters.storage.repositories import get_workflow_execution_repository
-    from syn_adapters.subscriptions.projection_adapters import (
-        ExecutionCostAdapter,
-        SessionCostAdapter,
-        ToolTimelineAdapter,
-    )
-    from syn_adapters.subscriptions.realtime_adapter import (
-        OrganizationListAdapter as _OrganizationListAdapter,
-    )
-    from syn_adapters.subscriptions.realtime_adapter import (
-        RepoCorrelationAdapter as _RepoCorrelationAdapter,
-    )
-    from syn_adapters.subscriptions.realtime_adapter import (
-        RepoListAdapter as _RepoListAdapter,
-    )
-    from syn_adapters.subscriptions.realtime_adapter import (
-        SystemListAdapter as _SystemListAdapter,
-    )
-    from syn_adapters.subscriptions.realtime_adapter import (
-        TriggerHistoryAdapter as _TriggerHistoryAdapter,
-    )
     from syn_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
     from syn_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
     from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
@@ -734,20 +722,20 @@ def create_coordinator_service(
             # --- Artifacts context ---
             ArtifactListProjection(projection_store),
             # --- Organization context — namespace-qualified events require adapters ---
-            _OrganizationListAdapter(OrganizationProjection(projection_store)),
-            _SystemListAdapter(SystemProjection(projection_store)),
-            _RepoListAdapter(RepoProjection(projection_store)),
+            _delivered(OrganizationProjection(projection_store)),
+            _delivered(SystemProjection(projection_store)),
+            _delivered(RepoProjection(projection_store)),
             # Organization insight projections (AutoDispatchProjection — direct)
             RepoHealthProjection(projection_store),
             RepoCostProjection(projection_store, pool=pool),
             # RepoCorrelation handles mixed namespaces (github.* + unnamespaced)
-            _RepoCorrelationAdapter(RepoCorrelationProjection(projection_store)),
+            _delivered(RepoCorrelationProjection(projection_store)),
             # Trigger history — github.TriggerFired → fire log entries
-            _TriggerHistoryAdapter(TriggerHistoryProjection(projection_store)),
+            _delivered(TriggerHistoryProjection(projection_store)),
             # --- Observability projections — plain classes wrapped via adapters ---
-            ToolTimelineAdapter(ToolTimelineProjection(projection_store)),
-            ExecutionCostAdapter(ExecutionCostProjection(projection_store, pool=pool)),
-            SessionCostAdapter(create_session_cost_projection(projection_store)),
+            _delivered(ToolTimelineProjection(projection_store)),
+            _delivered(ExecutionCostProjection(projection_store, pool=pool)),
+            _delivered(create_session_cost_projection(projection_store)),
             # --- Claude plugin injection (issue #726) ---
             ClaudePluginLockProjection(projection_store),
             GlobalClaudePluginsProjection(projection_store),
