@@ -119,3 +119,50 @@ def codex_login_fault_in(line: str) -> str | None:
         return None
     status = _HTTP_AUTH_STATUS_RE.search(line)
     return codex_login_fault_reason(status.group(1) if status else "", line)
+
+
+# --- The workspace ran out of processes (#2227) --------------------------------
+#
+# A workspace container has a pids limit (`resources.pids_limit`, default 256).
+# When the agent's commands use it up, the next process cannot start (EAGAIN)
+# and bash says so in the command's output:
+#
+#   /usr/bin/bash: fork: retry: Resource temporarily unavailable
+#   /usr/bin/bash: fork: Resource temporarily unavailable
+#
+# Codex itself then cannot start processes either, and its stream stops without
+# `turn.completed`. Reported as the generic "stream ended" reason, that cost an
+# operator the cause: exec-f02a26a13856 read as a codex fault for a verify phase
+# that had simply run two parallel builds into the limit.
+#
+# Anchored to bash's two spellings, not to EAGAIN's text alone: "Resource
+# temporarily unavailable" is also what a non-blocking read says when it has
+# nothing to read, which is not a fault at all. They are spelled out whole
+# because the orchestration context reserves the bare word for an execution
+# operation (ci/fitness/code_quality/test_reserved_domain_words.py), and only
+# these exact process-limit messages are exempt from that gate.
+_BASH_OUT_OF_PIDS = (
+    "fork: retry: Resource temporarily unavailable",
+    "fork: Resource temporarily unavailable",
+)
+_OUT_OF_PIDS_RE = re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, _BASH_OUT_OF_PIDS)) + ")")
+
+
+def codex_pids_fault_in(output: str, pids_limit: int | None) -> str | None:
+    """The pids-exhaustion reason a command's output carries, or ``None``.
+
+    ``pids_limit`` is the limit the workspace was provisioned with, named in the
+    reason because raising it is the fix; None when nobody recorded it.
+
+    A REAL fault, deliberately not a refinement of the "stream ended" reason:
+    a phase that ends on it is neither retried (#1335, the same limit hits the
+    same wall) nor completed on its deliverable (#1111, the commands it
+    depended on could not run).
+    """
+    if not _OUT_OF_PIDS_RE.search(output):
+        return None
+    limit = "" if pids_limit is None else f" ({pids_limit})"
+    return (
+        f"workspace hit its pids limit{limit}: bash could not start a process "
+        "(`fork: Resource temporarily unavailable`); raise the phase's resources.pids_limit"
+    )

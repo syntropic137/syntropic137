@@ -47,9 +47,16 @@ _ALLOWED = {
 #: caught. Line-scoping would have made any line holding one of these a blind
 #: spot, which is the same weakness as exempting a whole file.
 #:
-#: All three name a PROCESS fork under uvloop, which has nothing to do with
-#: this vocabulary.
-_PROCESS_FORK_SPANS = ("GRPC_ENABLE_FORK_SUPPORT", "grpc fork", "fork()")
+#: The first three name a PROCESS fork under uvloop; the last two are bash's
+#: exact words when a workspace runs out of pids, which the codex fault rules
+#: must match and quote (#2227). None has anything to do with this vocabulary.
+_PROCESS_FORK_SPANS = (
+    "GRPC_ENABLE_FORK_SUPPORT",
+    "grpc fork",
+    "fork()",
+    "fork: retry: Resource temporarily unavailable",
+    "fork: Resource temporarily unavailable",
+)
 
 #: The retired name itself, which the compatibility path must be able to say.
 #: A stored `ExecutionForked` still has to be read, so the code that reads it
@@ -152,6 +159,13 @@ def test_an_exempt_span_does_not_exempt_the_rest_of_its_line() -> None:
 def test_an_exempt_span_alone_is_exempt() -> None:
     """The control for the test above: the span itself must still pass."""
     assert _FORK.search(_without_exempt_spans("# GRPC_ENABLE_FORK_SUPPORT=false")) is None
+
+
+def test_bash_out_of_pids_message_does_not_shelter_its_line() -> None:
+    """bash's EAGAIN message is exempt; an execution fork beside it is not (#2227)."""
+    quoted = '"/usr/bin/bash: fork: retry: Resource temporarily unavailable\\n"'
+    assert _FORK.search(_without_exempt_spans(quoted)) is None
+    assert _FORK.search(_without_exempt_spans(quoted + "  # then fork the execution")) is not None
 
 
 def test_an_exempt_identifier_does_not_shelter_a_forbidden_one() -> None:
