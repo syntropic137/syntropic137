@@ -1,5 +1,7 @@
-import { SSE_CONNECT_TIMEOUT_MS, getApiUrl, getAuthHeaders } from "../config.js";
+import { SSE_CONNECT_TIMEOUT_MS, getApiUrl, getAuthHeaders, getCredentials } from "../config.js";
+import { CLIError } from "../framework/errors.js";
 import { API_PREFIX } from "./constants.js";
+import { describeUnauthorized } from "./unauthorized.js";
 /**
  * Valid SSE endpoint paths must start with /sse/.
  * This catches wrong prefixes (e.g. /watch/activity) at compile time
@@ -35,13 +37,18 @@ async function fetchStream(path: string): Promise<ReadableStream<Uint8Array>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SSE_CONNECT_TIMEOUT_MS);
 
+  const credentials = getCredentials();
   const response = await fetch(url.toString(), {
     method: "GET",
-    headers: getAuthHeaders(),
+    headers: getAuthHeaders(credentials),
     signal: controller.signal,
   });
 
   clearTimeout(timer);
+
+  if (response.status === 401) {
+    throw new CLIError(describeUnauthorized(base.origin + basePath, credentials));
+  }
 
   if (!response.body) {
     throw new Error("Response body is null");

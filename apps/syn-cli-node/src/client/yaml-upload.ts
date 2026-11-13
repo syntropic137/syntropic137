@@ -10,8 +10,9 @@
 
 import type { components } from "../generated/api-types.js";
 import { CLIError } from "../framework/errors.js";
-import { getApiUrl, getAuthHeaders } from "../config.js";
+import { getApiUrl, getAuthHeaders, getCredentials } from "../config.js";
 import { API_PREFIX } from "./constants.js";
+import { describeUnauthorized } from "./unauthorized.js";
 
 export type CreateWorkflowResponse = components["schemas"]["CreateWorkflowResponse"];
 
@@ -65,15 +66,19 @@ export async function postYaml(
   if (options.force) url.searchParams.set("force", "true");
   if (options.packageName) url.searchParams.set("package_name", options.packageName);
 
+  const credentials = getCredentials();
   const response = await globalThis.fetch(url.toString(), {
     method: "POST",
     headers: {
-      ...getAuthHeaders(),
+      ...getAuthHeaders(credentials),
       "Content-Type": options.contentType ?? "application/yaml",
     },
     body: new Uint8Array(fileBytes),
   });
 
+  if (response.status === 401) {
+    throw new CLIError(`${options.errorLabel ?? "workflow create --from"} failed: ${describeUnauthorized(baseUrl, credentials)}`);
+  }
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new CLIError(

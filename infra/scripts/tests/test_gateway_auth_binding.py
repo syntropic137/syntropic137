@@ -23,6 +23,7 @@ after the entrypoint decides:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -384,3 +385,91 @@ def test_hashed_assets_get_their_own_rate_limit_zone(tmp_path: Path, ui_mode: st
 
     zones = (_GATEWAY_IMAGE / "rate-limit.conf").read_text()
     assert re.search(r"^limit_req_zone \$binary_remote_addr zone=assets:", zones, flags=re.M)
+
+
+# ---------------------------------------------------------------------------
+# A failed Basic-Auth on the API answers JSON (#1571)
+# ---------------------------------------------------------------------------
+
+#: Could not be a default or appear in the config by accident, so finding it in
+#: the 401 body would mean the body names the real username.
+_UNUSUAL_USER = "operator-7f3a"
+
+
+def _locations(conf: str) -> dict[str, str]:
+    """Every top-level ``location <spec> { ... }`` in ``conf``, body by spec."""
+    return {
+        match.group(1): match.group(2)
+        for match in re.finditer(r"^location\s+(.+?)\s*\{(.*?)^\}", conf, flags=re.M | re.S)
+    }
+
+
+def _api_locations(tmp_path: Path) -> dict[str, str]:
+    result = _run_entrypoint(
+        tmp_path,
+        bind=_EXPOSED_ADDRESS,
+        password=_PASSWORD,
+        extra_env={"SYN_API_USER": _UNUSUAL_USER},
+    )
+    assert result.returncode == 0, result.stderr
+    return _locations(_generated(tmp_path)["locations.conf"])
+
+
+@pytest.mark.unit
+def test_every_authenticated_api_location_answers_401_with_json(tmp_path: Path) -> None:
+    """nginx's own 401 page is HTML: the CLI could not explain it and
+    ``curl | jq`` choked on it. Every API location that asks for credentials
+    must hand its 401 to the JSON one, including the streaming and WebSocket
+    paths, so no API path is left serving HTML."""
+    locations = _api_locations(tmp_path)
+    api = {
+        spec: body
+        for spec, body in locations.items()
+        if re.match(r"(= )?/(api|ws)/", spec) and _AUTH_OFF not in body
+    }
+    assert {"/api/v1/", "/api/v1/stream", "/api/v1/ws", "/ws/"} <= set(api), sorted(locations)
+    for spec, body in api.items():
+        assert "error_page 401 = @api_unauthorized;" in body, f"location {spec} serves HTML on 401"
+
+
+@pytest.mark.unit
+def test_the_json_401_keeps_the_status_and_the_challenge_and_names_no_user(tmp_path: Path) -> None:
+    """The Cloudflare rule and the auth backstop count 401s, so the status must
+    not change; a client must still be told Basic auth is wanted; and a wrong
+    user and a wrong password get the same body, which never names the user."""
+    named = _api_locations(tmp_path)["@api_unauthorized"]
+
+    returned = re.search(r"^\s*return\s+(\d+)\s+'(.*)';\s*$", named, flags=re.M)
+    assert returned, named
+    assert returned.group(1) == "401"
+    body = json.loads(returned.group(2).replace("\\n", "\n"))
+    assert body == {
+        "detail": "unauthorized",
+        "hint": "check SYN_API_USER / SYN_API_PASSWORD for this deployment",
+    }
+    assert _UNUSUAL_USER not in returned.group(2)
+    assert re.search(r"^\s*default_type application/json;", named, flags=re.M)
+    # default_type is only the fallback: an inherited MIME table would still
+    # type /api/v1/x.html as text/html, so the named location must empty it.
+    assert re.search(r"^\s*types\s*\{\s*\}", named, flags=re.M), named
+
+    realm = re.search(r'auth_basic "([^"]+)";', _ENTRYPOINT.read_text())
+    assert realm
+    assert f"add_header WWW-Authenticate 'Basic realm=\"{realm.group(1)}\"' always;" in named
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("ui_mode", ["next", "legacy"])
+def test_dashboard_locations_keep_the_browser_prompt(tmp_path: Path, ui_mode: str) -> None:
+    """A JSON body on ``/`` would replace the browser's credentials dialog with
+    a page of JSON, so the UI locations must keep nginx's own 401."""
+    _run_entrypoint(
+        tmp_path, bind=_EXPOSED_ADDRESS, password=_PASSWORD, extra_env={"SYN_GATEWAY_UI": ui_mode}
+    )
+    locations = _locations(_generated(tmp_path)["locations.conf"])
+    ui = {
+        spec: body for spec, body in locations.items() if not re.match(r"(= )?(/(api|ws)/|@)", spec)
+    }
+    assert "/" in ui, sorted(locations)
+    for spec, body in ui.items():
+        assert "error_page 401" not in body, f"location {spec} would answer the browser with JSON"

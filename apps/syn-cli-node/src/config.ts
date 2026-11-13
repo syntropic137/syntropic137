@@ -22,25 +22,60 @@ export function getApiUrl(): string {
   return url.replace(/\/api\/v1\/*$/, "");
 }
 
+/** The credentials this CLI sends, as read from the environment. */
+export type Credentials =
+  | { kind: "bearer"; token: string }
+  | { kind: "basic"; user: string; password: string }
+  /** `user` is set when SYN_API_USER is but SYN_API_PASSWORD is not, which
+   * sends nothing and is worth saying so. */
+  | { kind: "none"; user?: string };
+
 /**
- * Build auth headers from environment.
+ * Read credentials from environment.
  *
  * Supports:
- *   - Bearer token: SYN_API_TOKEN
+ *   - Bearer token: SYN_API_TOKEN (wins when set)
  *   - Basic auth:   SYN_API_USER + SYN_API_PASSWORD
- *
- * Returns an empty object when no credentials are configured (localhost use).
  */
-export function getAuthHeaders(): Record<string, string> {
+export function getCredentials(): Credentials {
   const token = process.env["SYN_API_TOKEN"];
-  if (token) return { Authorization: `Bearer ${token}` };
+  if (token) return { kind: "bearer", token };
 
   const user = process.env["SYN_API_USER"];
   const password = process.env["SYN_API_PASSWORD"];
-  if (user && password) {
-    const encoded = Buffer.from(`${user}:${password}`).toString("base64");
-    return { Authorization: `Basic ${encoded}` };
-  }
+  if (user && password) return { kind: "basic", user, password };
+  return user ? { kind: "none", user } : { kind: "none" };
+}
 
-  return {};
+/**
+ * Build auth headers from environment.
+ *
+ * Returns an empty object when no credentials are configured (localhost use).
+ */
+export function getAuthHeaders(credentials: Credentials = getCredentials()): Record<string, string> {
+  switch (credentials.kind) {
+    case "bearer":
+      return { Authorization: `Bearer ${credentials.token}` };
+    case "basic": {
+      const encoded = Buffer.from(`${credentials.user}:${credentials.password}`).toString("base64");
+      return { Authorization: `Basic ${encoded}` };
+    }
+    case "none":
+      return {};
+  }
+}
+
+/** What was sent, in words, for an error message. Names the user, never a
+ * password or token. */
+export function describeCredentials(credentials: Credentials): string {
+  switch (credentials.kind) {
+    case "bearer":
+      return "a bearer token from SYN_API_TOKEN";
+    case "basic":
+      return `Basic auth as user ${JSON.stringify(credentials.user)}`;
+    case "none":
+      return credentials.user === undefined
+        ? "no credentials"
+        : `no credentials (SYN_API_USER is ${JSON.stringify(credentials.user)} but SYN_API_PASSWORD is not set)`;
+  }
 }

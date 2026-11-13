@@ -134,8 +134,27 @@ location = /api/v1/webhooks/github {
     limit_req_status 429;
 }
 
+# A failed Basic-Auth on an API path answers JSON, not nginx's HTML page, so
+# the CLI and curl | jq callers can parse it (#1571). Only the body changes:
+# the status stays 401 (the Cloudflare rate-limit rule and the auth backstop in
+# rate-limit.conf count 401s) and the challenge is re-sent so clients still
+# know Basic auth is wanted. One body for a wrong user and a wrong password,
+# and it names no username. The dashboard locations do not use this, so a
+# browser there still gets the native credentials prompt. `types {}` empties
+# the MIME table here: a named location keeps the request URI, so without it
+# /api/v1/x.html would answer this JSON as text/html, and default_type is only
+# the fallback for a suffix the table does not map.
+location @api_unauthorized {
+    types {}
+    default_type application/json;
+    add_header WWW-Authenticate 'Basic realm="Syntropic137"' always;
+    include /etc/nginx/conf.d/security-headers.conf;
+    return 401 '{"detail":"unauthorized","hint":"check SYN_API_USER / SYN_API_PASSWORD for this deployment"}\n';
+}
+
 # API v1 proxy
 location /api/v1/ {
+    error_page 401 = @api_unauthorized;
     client_max_body_size 6M;
     proxy_pass http://api:8000/;
     proxy_http_version 1.1;
@@ -168,6 +187,7 @@ location /api/v1/ {
 
 # WebSocket proxy
 location /ws/ {
+    error_page 401 = @api_unauthorized;
     proxy_pass http://api:8000/ws/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
@@ -180,6 +200,7 @@ location /ws/ {
 
 # Legacy WebSocket path
 location /api/v1/ws {
+    error_page 401 = @api_unauthorized;
     proxy_pass http://api:8000/ws;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
@@ -192,6 +213,7 @@ location /api/v1/ws {
 
 # SSE endpoint
 location /api/v1/stream {
+    error_page 401 = @api_unauthorized;
     proxy_pass http://api:8000/stream;
     proxy_http_version 1.1;
     proxy_set_header Connection '';

@@ -12,8 +12,9 @@
 import createClient, { type Client } from "openapi-fetch";
 import type { paths } from "../generated/api-types.js";
 import { CLIError } from "../framework/errors.js";
-import { getApiUrl, getAuthHeaders } from "../config.js";
+import { getApiUrl, getAuthHeaders, getCredentials } from "../config.js";
 import { API_PREFIX } from "./constants.js";
+import { explainUnauthorized } from "./unauthorized.js";
 
 /**
  * A typed API client that knows, and can be asked, which deployment it sends to.
@@ -35,13 +36,17 @@ export interface TypedClient extends Client<paths> {
 
 export function createTypedClient(): TypedClient {
   const deployment = getApiUrl().replace(/\/+$/, "");
+  const credentials = getCredentials();
   const client = createClient<paths>({
     baseUrl: `${deployment}${API_PREFIX}`,
-    headers: getAuthHeaders(),
+    headers: getAuthHeaders(credentials),
     // Resolve fetch at call time, not at client creation time.
     // This allows tests to stub globalThis.fetch after module import.
     fetch: (...args) => globalThis.fetch(...args),
   });
+  // Installed here, not by the CLI entry point, so no client can answer a 401
+  // with the server's raw page: every command's error goes through it.
+  client.use(explainUnauthorized(deployment, credentials));
   return Object.assign(client, { deployment });
 }
 

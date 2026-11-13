@@ -8,6 +8,7 @@
 
 _skyline_e2e_port := env_var_or_default("SKYLINE_E2E_PORT", "4199")
 _skyline_gw_port := env_var_or_default("SKYLINE_GATEWAY_PORT", "18137")
+_skyline_gw_auth_port := env_var_or_default("SKYLINE_GATEWAY_AUTH_PORT", "18138")
 
 # Mirror of syn-ui.yml `qa`: frozen install, check, test, build with the size budget
 skyline-ci:
@@ -56,12 +57,18 @@ skyline-e2e-root *args:
     cd apps/syn-ui && node node_modules/@playwright/test/cli.js test {{args}}
 
 # Mirror of syn-ui.yml `gateway`: build the gateway image, assert both SYN_GATEWAY_UI modes
+# and, on the tunnel listener (8081, which asks for Basic auth once a password is set),
+# the JSON 401 a bad credential gets on the API (#1571)
 skyline-gateway-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
     image=syn-gateway:skyline-smoke
     docker build -f infra/docker/images/gateway/Dockerfile -t "$image" .
     url="http://127.0.0.1:{{_skyline_gw_port}}"
+    auth_url="http://127.0.0.1:{{_skyline_gw_auth_port}}"
+    # Loopback bind keeps port 80 open for the routing checks; the password
+    # turns auth on for 8081 only. Neither credential is a secret.
+    user=smoke-operator
     name=""
     trap 'rc=$?; [ "$rc" -eq 0 ] || [ -z "$name" ] || docker logs "$name" 2>&1 | tail -20; [ -z "$name" ] || docker stop "$name" > /dev/null 2>&1 || true' EXIT
     for mode in next legacy; do
@@ -69,9 +76,12 @@ skyline-gateway-smoke:
         # The API is not part of this check; `api` only has to resolve for nginx to load.
         docker run -d --rm --name "$name" --add-host api:127.0.0.1 \
             -e SYN_GATEWAY_BIND=127.0.0.1 -e SYN_GATEWAY_UI="$mode" \
-            -p 127.0.0.1:{{_skyline_gw_port}}:80 "$image" > /dev/null
+            -e SYN_API_USER="$user" -e SYN_API_PASSWORD=smoke-password \
+            -p 127.0.0.1:{{_skyline_gw_port}}:80 \
+            -p 127.0.0.1:{{_skyline_gw_auth_port}}:8081 "$image" > /dev/null
         for _ in $(seq 1 30); do curl -sf --noproxy '*' -o /dev/null "$url/health" && break; sleep 1; done
-        python3 infra/scripts/check_gateway_ui.py "$url" --mode "$mode"
+        python3 infra/scripts/check_gateway_ui.py "$url" --mode "$mode" \
+            --auth-base "$auth_url" --auth-user "$user"
         docker stop "$name" > /dev/null
         name=""
     done
