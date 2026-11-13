@@ -6564,17 +6564,20 @@ export interface components {
             total_workflows: number;
             /**
              * Completed Workflows
+             * @description Executions whose status is completed; equals execution_status_counts.completed
              * @default 0
              */
             completed_workflows: number;
             /**
              * Failed Workflows
+             * @description Executions whose status is failed; equals execution_status_counts.failed
              * @default 0
              */
             failed_workflows: number;
             execution_status_counts?: components["schemas"]["ExecutionStatusCounts"];
             /**
              * Total Sessions
+             * @description Sessions in the session list; matches the total of GET /sessions
              * @default 0
              */
             total_sessions: number;
