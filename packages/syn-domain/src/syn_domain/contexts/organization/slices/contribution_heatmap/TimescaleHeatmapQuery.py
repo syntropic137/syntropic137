@@ -198,8 +198,11 @@ ORDER BY day
 #
 # Counted from session_start, which covers EVERY observed session - including
 # one that produced no tokens because it failed during setup. Counting from
-# canonical_usage instead would drop those, reintroducing the split between
-# this number and the metric card's.
+# canonical_usage instead would drop those.
+#
+# This is the OBSERVED-session population, telemetry-only delegates included.
+# It is deliberately not the /metrics `total_sessions` card, which since #1843
+# counts session-list rows (one per SessionStarted), so the two may differ.
 _SESSIONS_QUERY = f"""
 WITH {_WINDOW_STARTS}
 SELECT {_utc_day("started_at")} AS day, COUNT(*) AS sessions

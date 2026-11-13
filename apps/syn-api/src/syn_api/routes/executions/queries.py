@@ -144,6 +144,16 @@ class _MergedExecutionTotals:
     total_tokens: int
 
 
+def _lane2_or(lane2: int | None, domain: int) -> int:
+    """A Lane 2 token count when it measured one, else the domain projection's.
+
+    Lane 2 counts every phase that reported usage, failed ones included, which
+    is also what the cost beside it counts. The domain list row only adds a
+    phase's tokens when it completes (#1843 item 5).
+    """
+    return domain if lane2 is None else lane2
+
+
 def _merge_totals(
     e: ExecutionSummary, enrichment: _ExecutionEnrichment | None
 ) -> _MergedExecutionTotals:
@@ -161,21 +171,13 @@ def _merge_totals(
     return _MergedExecutionTotals(
         cost=enrichment.total_cost_usd,
         unpriced_observation_count=enrichment.unpriced_observation_count,
-        input_tokens=enrichment.input_tokens
-        if enrichment.input_tokens is not None
-        else e.total_input_tokens,
-        output_tokens=enrichment.output_tokens
-        if enrichment.output_tokens is not None
-        else e.total_output_tokens,
-        cache_creation_tokens=enrichment.cache_creation_tokens
-        if enrichment.cache_creation_tokens is not None
-        else e.total_cache_creation_tokens,
-        cache_read_tokens=enrichment.cache_read_tokens
-        if enrichment.cache_read_tokens is not None
-        else e.total_cache_read_tokens,
-        total_tokens=enrichment.total_tokens
-        if enrichment.total_tokens is not None
-        else e.total_tokens,
+        input_tokens=_lane2_or(enrichment.input_tokens, e.total_input_tokens),
+        output_tokens=_lane2_or(enrichment.output_tokens, e.total_output_tokens),
+        cache_creation_tokens=_lane2_or(
+            enrichment.cache_creation_tokens, e.total_cache_creation_tokens
+        ),
+        cache_read_tokens=_lane2_or(enrichment.cache_read_tokens, e.total_cache_read_tokens),
+        total_tokens=_lane2_or(enrichment.total_tokens, e.total_tokens),
     )
 
 
@@ -364,7 +366,12 @@ def _to_execution_summary(
     s: WorkflowExecutionSummary,
     cost_by_execution: dict[str, _ExecutionEnrichment],
 ) -> ExecutionSummary:
-    """Build an ExecutionSummary from a domain summary plus already-loaded enrichment."""
+    """Build an ExecutionSummary from a domain summary plus already-loaded enrichment.
+
+    Tokens and cost come from the same Lane 2 record, so they count the same
+    phases. Every list of runs goes through here, so a run reads the same usage
+    on ``/workflows/{id}/runs`` as on ``/executions/{id}`` (#1843 item 5).
+    """
     enrichment = _enrichment_for(cost_by_execution, s.workflow_execution_id)
     return ExecutionSummary(
         workflow_execution_id=s.workflow_execution_id,
@@ -376,11 +383,13 @@ def _to_execution_summary(
         completed_phases=s.completed_phases,
         total_phases=s.total_phases,
         phase_progress=PhaseProgressInfo.of(s.phase_progress),
-        total_tokens=s.total_tokens,
-        total_input_tokens=s.total_input_tokens,
-        total_output_tokens=s.total_output_tokens,
-        total_cache_creation_tokens=s.total_cache_creation_tokens,
-        total_cache_read_tokens=s.total_cache_read_tokens,
+        total_tokens=_lane2_or(enrichment.total_tokens, s.total_tokens),
+        total_input_tokens=_lane2_or(enrichment.input_tokens, s.total_input_tokens),
+        total_output_tokens=_lane2_or(enrichment.output_tokens, s.total_output_tokens),
+        total_cache_creation_tokens=_lane2_or(
+            enrichment.cache_creation_tokens, s.total_cache_creation_tokens
+        ),
+        total_cache_read_tokens=_lane2_or(enrichment.cache_read_tokens, s.total_cache_read_tokens),
         failure_classification=s.failure_classification,
         reported_failure_reason=s.reported_failure_reason,
         review_verdict=s.review_verdict,
@@ -625,36 +634,7 @@ async def list_active(
     cost_by_execution = await _load_execution_enrichment(
         manager, [s.workflow_execution_id for s in active]
     )
-    return Ok(
-        [
-            ExecutionSummary(
-                workflow_execution_id=s.workflow_execution_id,
-                workflow_id=s.workflow_id,
-                workflow_name=s.workflow_name,
-                status=s.status,
-                started_at=s.started_at,
-                completed_at=s.completed_at,
-                completed_phases=s.completed_phases,
-                total_phases=s.total_phases,
-                phase_progress=PhaseProgressInfo.of(s.phase_progress),
-                total_tokens=s.total_tokens,
-                total_cost_usd=_enrichment_for(
-                    cost_by_execution, s.workflow_execution_id
-                ).total_cost_usd,
-                unpriced_observation_count=_enrichment_for(
-                    cost_by_execution, s.workflow_execution_id
-                ).unpriced_observation_count,
-                error_message=s.error_message,
-                failure_classification=s.failure_classification,
-                reported_failure_reason=s.reported_failure_reason,
-                review_verdict=s.review_verdict,
-                repos=list(s.repos),
-                tags=list(s.tags),
-                task=s.task,
-            )
-            for s in active
-        ]
-    )
+    return Ok([_to_execution_summary(s, cost_by_execution) for s in active])
 
 
 # -- HTTP Endpoints -----------------------------------------------------------
