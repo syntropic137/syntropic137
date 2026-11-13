@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_api.services import health_probes
-from syn_api.types import Ok
+from syn_api.types import Ok, format_bytes
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -21,20 +21,41 @@ pytestmark = pytest.mark.unit
 DAY = 86_400.0
 
 
+def _allocated(path: Path) -> int:
+    """What the probe counts for ``path``: allocated blocks, not its length."""
+    return path.stat().st_blocks * 512
+
+
 def test_growth_rate_and_runway(tmp_path: Path) -> None:
     now = time.time()
     for name, size, age in (("a" * 64, 7 << 20, 0.5), ("b" * 64, 7 << 20, 5), ("c" * 64, 1, 40)):
         (tmp_path / name).write_bytes(b"x" * size)
         os.utime(tmp_path / name, (now - age * DAY, now - age * DAY))
+    a, b = _allocated(tmp_path / ("a" * 64)), _allocated(tmp_path / ("b" * 64))
     health = health_probes._measure_session_store(tmp_path, now)
     assert health is not None
     assert health.object_count == 3
-    assert health.added_bytes_24h == 7 << 20
-    assert health.added_bytes_per_day_7d == (14 << 20) // 7
+    assert health.added_bytes_24h == a
+    assert health.added_bytes_per_day_7d == (a + b) // 7
     assert health.days_until_full == pytest.approx(
         health.filesystem_free_bytes / health.added_bytes_per_day_7d, abs=0.1
     )
-    assert "2.0 MiB/day over 7d" in health.detail and "days at that rate" in health.detail
+    assert f"+{format_bytes((a + b) // 7)}/day over 7d" in health.detail
+    assert "days at that rate" in health.detail
+
+
+def test_sizes_are_allocated_blocks_not_lengths(tmp_path: Path) -> None:
+    """A sparse object is long but occupies almost nothing, and that is what is reported."""
+    path = tmp_path / ("a" * 64)
+    length = 64 << 20
+    with path.open("wb") as f:
+        f.truncate(length)
+    if _allocated(path) >= length:
+        pytest.skip("this filesystem allocates sparse files in full")
+    health = health_probes._measure_session_store(tmp_path, time.time())
+    assert health is not None
+    assert health.stored_bytes == health.added_bytes_24h == _allocated(path)
+    assert health.stored_bytes < length // 2
 
 
 def test_no_recent_growth_has_no_runway(tmp_path: Path) -> None:
@@ -137,4 +158,4 @@ async def test_the_health_payload_carries_the_session_store(
     assert isinstance(result, Ok)
     store = result.value.model_dump(mode="json")["session_store"]
     assert (store["path"], store["object_count"]) == (str(tmp_path), 1)
-    assert store["stored_bytes"] == (tmp_path / ("a" * 64)).stat().st_blocks * 512
+    assert store["stored_bytes"] == _allocated(tmp_path / ("a" * 64))
