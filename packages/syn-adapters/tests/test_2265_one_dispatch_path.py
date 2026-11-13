@@ -232,6 +232,11 @@ async def test_dashboard_total_workflows_follows_archive_and_reinstall_in_test_m
             phases=[PhaseDefinition(phase_id="p1", name="P1", order=1)],
         )
 
+    from syn_adapters.projection_stores import reset_projection_store
+
+    # Fresh store: the in-memory singleton is shared with every test on this
+    # xdist worker, so other tests' templates would otherwise be counted (#2267).
+    reset_projection_store()
     manager = ProjectionManager()
     before = (await manager.dashboard_metrics.get_metrics()).total_workflows
     for workflow_id in ("wf-641-1", "wf-641-2", "wf-641-3"):
