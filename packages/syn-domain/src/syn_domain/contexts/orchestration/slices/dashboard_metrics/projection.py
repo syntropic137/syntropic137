@@ -19,6 +19,7 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEven
     WorkflowTemplateUpdatedEvent,
 )
 from syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics import (
+    ArtifactCreatedRef,
     DashboardMetrics,
     TemplateCreatedRef,
 )
@@ -169,13 +170,12 @@ class DashboardMetricsProjection(AutoDispatchProjection):
 
         await self._save_metrics(metrics)
 
-    async def on_artifact_created(self, event_data: dict) -> None:
+    async def on_artifact_created(self, event_data: ArtifactCreatedRef) -> None:
         """Handle ArtifactCreated - increment artifact count and byte total."""
+        size_bytes = ArtifactCreatedRef.model_validate(event_data).size_bytes
         metrics = await self._get_or_create_metrics()
         metrics["total_artifacts"] = metrics.get("total_artifacts", 0) + 1
-        metrics["total_artifact_bytes"] = metrics.get("total_artifact_bytes", 0) + event_data.get(
-            "size_bytes", 0
-        )
+        metrics["total_artifact_bytes"] = metrics.get("total_artifact_bytes", 0) + size_bytes
         await self._save_metrics(metrics)
 
     async def get_metrics(self) -> DashboardMetrics:

@@ -25,6 +25,19 @@ class TemplateCreatedRef(BaseModel):
     workflow_id: str = ""
 
 
+class ArtifactCreatedRef(BaseModel):
+    """The one field the byte total needs from an ArtifactCreated payload (#2274).
+
+    Not ArtifactCreatedEvent itself: only ``size_bytes`` is read here, so a
+    stored payload that lacks the key counts as 0 bytes instead of failing
+    validation of fields this read model never uses.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    size_bytes: int = 0
+
+
 @dataclass(frozen=True)
 class DashboardMetrics:
     """Read model for dashboard metrics.

@@ -238,7 +238,6 @@ allowed_prefixes = [
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_failed.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_session_started.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_session_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_artifact_created.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection._save_metrics.param:metrics" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
 
 # 7 handler parameter(s)
