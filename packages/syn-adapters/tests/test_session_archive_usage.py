@@ -48,10 +48,10 @@ def test_counts_objects_and_references_and_windows_growth_by_mtime(tmp_path: Pat
 
 
 @pytest.mark.parametrize("temporary_first", [True, False])
-def test_bytes_are_allocated_blocks_and_a_linked_file_counts_once(
+def test_a_linked_file_counts_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, temporary_first: bool
 ) -> None:
-    """A 10-byte reference occupies a block; a capture mid-link is one file, still an object.
+    """A capture mid-link is one file, still an object.
 
     The walk is forced to meet the temporary before, then after, the object.
     """
@@ -70,7 +70,6 @@ def test_bytes_are_allocated_blocks_and_a_linked_file_counts_once(
     monkeypatch.setattr(archive_usage.os, "scandir", ordered)
     usage = measure_archive_usage(tmp_path, NOW)
     assert usage is not None
-    assert ref > 10
     assert usage.stored_bytes == ref + obj
     assert (usage.object_count, usage.added_bytes_24h) == (1, ref + obj)
 
@@ -100,6 +99,20 @@ def test_a_capture_unlinking_its_temporary_mid_walk_still_counts_once(
     assert not (tmp_path / ".capture-tmp").exists()  # the unlink ran between the two names
     assert usage.stored_bytes == obj
     assert usage.object_count == 1
+
+
+def test_bytes_are_allocated_blocks_not_lengths(tmp_path: Path) -> None:
+    """A sparse file is long but occupies almost nothing; any filesystem may round the rest."""
+    path = tmp_path / ("a" * 64)
+    length = 64 << 20
+    with path.open("wb") as f:
+        f.truncate(length)
+    allocated = path.stat().st_blocks * 512
+    if allocated >= length:
+        pytest.skip("this filesystem allocates sparse files in full")
+    usage = measure_archive_usage(tmp_path, NOW)
+    assert usage is not None
+    assert usage.stored_bytes == allocated < length // 2
 
 
 def test_a_missing_archive_is_not_measured(tmp_path: Path) -> None:
