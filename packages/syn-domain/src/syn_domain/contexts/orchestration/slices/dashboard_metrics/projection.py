@@ -27,8 +27,9 @@ from syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics impo
 class DashboardMetricsProjection(AutoDispatchProjection):
     """Builds dashboard metrics read model from events.
 
-    This projection aggregates data from workflow, session, and artifact
-    events to maintain a summary view of system metrics.
+    Counts workflow templates and artifacts. Execution, session and token
+    totals are not kept here: GET /metrics reads them from their own read
+    models (#1843, #932, #2272).
 
     Uses AutoDispatchProjection: define on_<snake_case_event> methods to
     subscribe and handle events — no separate subscription set needed.
@@ -36,7 +37,7 @@ class DashboardMetricsProjection(AutoDispatchProjection):
 
     PROJECTION_NAME = "dashboard_metrics"
     METRICS_KEY = "global"  # Single record for global metrics
-    VERSION = 5  # Bumped: total_workflows excludes archived templates (#641)
+    VERSION = 6  # Bumped: execution, session and token counters removed (#2272)
     LIVE_TEMPLATES_KEY = "live_workflow_ids"  # In the global record; see total_workflows below
 
     def __init__(self, store: ProjectionStore):
@@ -113,61 +114,6 @@ class DashboardMetricsProjection(AutoDispatchProjection):
     # Events stored before the rename (WorkflowTemplateAggregate still applies
     # them), so they reach the read model in production and tests alike (#2265).
     on_workflow_created = on_workflow_template_created
-
-    async def on_workflow_execution_started(self, _event_data: dict) -> None:
-        """Handle WorkflowExecutionStarted - increment active workflows."""
-        metrics = await self._get_or_create_metrics()
-        metrics["active_workflows"] = metrics.get("active_workflows", 0) + 1
-        await self._save_metrics(metrics)
-
-    async def on_phase_started(self, _event_data: dict) -> None:
-        """Handle PhaseStarted - increment active if first phase."""
-        # Only increment if this is the first phase starting
-        # We track this via the workflow status change
-        pass
-
-    async def on_workflow_completed(self, _event_data: dict) -> None:
-        """Handle WorkflowCompleted - update workflow counts."""
-        metrics = await self._get_or_create_metrics()
-        metrics["active_workflows"] = max(0, metrics.get("active_workflows", 0) - 1)
-        metrics["completed_workflows"] = metrics.get("completed_workflows", 0) + 1
-        await self._save_metrics(metrics)
-
-    async def on_workflow_failed(self, _event_data: dict) -> None:
-        """Handle WorkflowFailed - update workflow counts."""
-        metrics = await self._get_or_create_metrics()
-        metrics["active_workflows"] = max(0, metrics.get("active_workflows", 0) - 1)
-        metrics["failed_workflows"] = metrics.get("failed_workflows", 0) + 1
-        await self._save_metrics(metrics)
-
-    async def on_session_started(self, _event_data: dict) -> None:
-        """Handle SessionStarted - increment session count."""
-        metrics = await self._get_or_create_metrics()
-        metrics["total_sessions"] = metrics.get("total_sessions", 0) + 1
-        await self._save_metrics(metrics)
-
-    async def on_session_completed(self, event_data: dict) -> None:
-        """Handle SessionCompleted - update token and cost totals."""
-        metrics = await self._get_or_create_metrics()
-
-        # Add total tokens from this session
-        metrics["total_tokens"] = metrics.get("total_tokens", 0) + event_data.get("total_tokens", 0)
-
-        # Add input/output/cache token breakdown
-        metrics["total_input_tokens"] = metrics.get("total_input_tokens", 0) + event_data.get(
-            "total_input_tokens", 0
-        )
-        metrics["total_output_tokens"] = metrics.get("total_output_tokens", 0) + event_data.get(
-            "total_output_tokens", 0
-        )
-        metrics["total_cache_creation_tokens"] = metrics.get(
-            "total_cache_creation_tokens", 0
-        ) + event_data.get("total_cache_creation_tokens", 0)
-        metrics["total_cache_read_tokens"] = metrics.get(
-            "total_cache_read_tokens", 0
-        ) + event_data.get("total_cache_read_tokens", 0)
-
-        await self._save_metrics(metrics)
 
     async def on_artifact_created(self, _event_data: dict) -> None:
         """Handle ArtifactCreated - increment artifact count."""

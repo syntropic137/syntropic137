@@ -22,9 +22,9 @@ graph LR
         e5[phase_completed]
         e6[workflow_interrupted]
         e7[next_phase_ready]
-        e8[phase_started]
-        e9[trigger_fired]
-        e10[workflow_template_created]
+        e8[trigger_fired]
+        e9[workflow_template_created]
+        e10[workflow_template_updated]
     end
 
     subgraph projections["Projections"]
@@ -48,20 +48,17 @@ graph LR
     e4 --> p6
     e7 --> p6
     e5 --> p6
-    e8 --> p3
-    e9 --> p9
-    e3 --> p3
+    e8 --> p9
     e3 --> p6
     e3 --> p10
     e3 --> p11
-    e1 --> p3
     e1 --> p6
     e1 --> p9
-    e2 --> p3
     e2 --> p6
     e2 --> p10
     e2 --> p11
     e6 --> p6
+    e9 --> p3
     e10 --> p3
 ```
 
@@ -71,7 +68,7 @@ graph LR
 
 - **Events with projections:** 82
 - **Unique projections:** 27
-- **Total event-to-projection mappings:** 134
+- **Total event-to-projection mappings:** 128
 
 ---
 
@@ -79,16 +76,16 @@ graph LR
 
 | Event | Projections | Count |
 |-------|-------------|-------|
-| workflow_execution_started | DashboardMetricsProjection, ExecutionTodoProjection, RepoCorrelationProjection... | 7 |
-| workflow_failed | DashboardMetricsProjection, ExecutionTodoProjection, RepoCostProjection... | 7 |
-| workflow_completed | DashboardMetricsProjection, ExecutionTodoProjection, RepoCostProjection... | 6 |
+| workflow_execution_started | ExecutionTodoProjection, RepoCorrelationProjection, WorkflowDetailProjection... | 6 |
+| workflow_failed | ExecutionTodoProjection, RepoCostProjection, RepoHealthProjection... | 6 |
+| workflow_completed | ExecutionTodoProjection, RepoCostProjection, RepoHealthProjection... | 5 |
 | execution_cancelled | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
 | phase_completed | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
 | workflow_interrupted | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
 | next_phase_ready | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
-| phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection | 3 |
 | trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
 | workflow_template_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
+| workflow_template_updated | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
 
 ---
 
