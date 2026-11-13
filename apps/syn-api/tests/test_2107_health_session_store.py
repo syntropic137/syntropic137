@@ -23,7 +23,7 @@ DAY = 86_400.0
 
 def _allocated(path: Path) -> int:
     """What the probe counts for ``path``: allocated blocks, not its length."""
-    return os.stat(path).st_blocks * 512
+    return path.stat().st_blocks * 512
 
 
 def test_growth_rate_and_runway(tmp_path: Path) -> None:
