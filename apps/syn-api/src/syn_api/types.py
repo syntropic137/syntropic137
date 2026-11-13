@@ -2877,7 +2877,10 @@ class ArtifactDetail(BaseModel):
 class DashboardMetrics(BaseModel):
     """Aggregated dashboard metrics."""
 
-    total_workflows: int = 0
+    total_workflows: int = Field(
+        default=0,
+        description="Workflow templates that are not archived; matches the default total of GET /workflows",
+    )
     completed_workflows: int = 0
     failed_workflows: int = 0
     total_sessions: int = 0

@@ -112,7 +112,10 @@ class ExecutionStatusCounts(BaseModel):
 class MetricsResponse(BaseModel):
     """Aggregated metrics response."""
 
-    total_workflows: int = 0
+    total_workflows: int = Field(
+        default=0,
+        description="Workflow templates that are not archived; matches the default total of GET /workflows",
+    )
     completed_workflows: int = 0
     failed_workflows: int = 0
     execution_status_counts: ExecutionStatusCounts = Field(default_factory=ExecutionStatusCounts)
