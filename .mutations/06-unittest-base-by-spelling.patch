@@ -1,0 +1,13 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -424,7 +424,8 @@
+         the only classes pytest runs ``setUp`` on. A base imported from anywhere
+         else is not followed, whatever it is called."""
+         return any(
+-            self.unittest.refers_to(base, _TEST_CASE)
++            isinstance(base, ast.Name | ast.Attribute)
++            and (base.id if isinstance(base, ast.Name) else base.attr).endswith("TestCase")
+             and not (isinstance(base, ast.Name) and base.id in self.classes)
+             for cls in self.mro(owner)
+             for base in cls.bases

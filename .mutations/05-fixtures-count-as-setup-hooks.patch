@@ -1,0 +1,12 @@
+diff --git a/scripts/check_integration_skips.py b/scripts/check_integration_skips.py
+--- a/scripts/check_integration_skips.py
++++ b/scripts/check_integration_skips.py
+@@ -416,7 +416,7 @@
+         never runs it as an xunit hook. It still hides any base's ``name``."""
+         for cls in self.mro(owner):
+             if found := [f for f in _functions(cls.body) if f.name == name]:
+-                return [f for f in found if not any(map(_fixture_decorator, f.decorator_list))]
++                return found
+         return []
+ 
+     def _is_unittest(self, owner: ast.ClassDef) -> bool:

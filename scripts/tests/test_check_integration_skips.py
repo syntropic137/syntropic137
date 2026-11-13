@@ -1313,6 +1313,145 @@ _PARITY: dict[str, tuple[dict[str, str], str, bool]] = {
         "1 passed",
         False,
     ),
+    "aliased_testcase_setUp_skips": (
+        {
+            "tests/test_x.py": """
+            from unittest import TestCase as Case
+            import pytest
+            @pytest.mark.integration
+            class TestX(Case):
+                def setUp(self):
+                    pytest.skip("no store")
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "aliased_testcase_setUpClass_skips": (
+        {
+            "tests/test_x.py": """
+            import unittest as ut
+            import pytest
+            @pytest.mark.integration
+            class TestX(ut.TestCase):
+                @classmethod
+                def setUpClass(cls):
+                    pytest.skip("no store")
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "a_testcase_suffix_is_not_unittest": (
+        {
+            "tests/support.py": """
+            class StoreTestCase:
+                pass
+            """,
+            "tests/test_x.py": """
+            import pytest
+            from support import StoreTestCase
+            @pytest.mark.integration
+            class TestX(StoreTestCase):
+                def setUp(self):
+                    pytest.skip("no store")
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 passed",
+        False,
+    ),
+    "a_setup_method_fixture_is_not_a_hook": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.integration
+            class TestX:
+                @pytest.fixture
+                def setup_method(self):
+                    pytest.skip("no store")
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 passed",
+        False,
+    ),
+    "a_setup_class_fixture_is_not_a_hook": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.integration
+            class TestX:
+                @pytest.fixture
+                def setup_class(self):
+                    pytest.skip("no store")
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 passed",
+        False,
+    ),
+    "a_fixture_hides_the_base_setup_method": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            class Base:
+                def setup_method(self):
+                    pytest.skip("no store")
+            @pytest.mark.integration
+            class TestX(Base):
+                @pytest.fixture
+                def setup_method(self):
+                    pass
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 passed",
+        False,
+    ),
+    "a_requested_setup_method_fixture_skips": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.integration
+            class TestX:
+                @pytest.fixture
+                def setup_method(self):
+                    pytest.skip("no store")
+                def test_x(self, setup_method):
+                    pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "a_fixture_called_through_self_is_not_a_method": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.integration
+            class TestX:
+                @pytest.fixture
+                def need_store(self):
+                    pytest.skip("no store")
+                def test_x(self):
+                    try:
+                        self.need_store()
+                    except pytest.fail.Exception:
+                        pass
+            """,
+        },
+        "1 passed",
+        False,
+    ),
     "nose_setup_is_not_a_hook": (
         {
             "tests/test_x.py": """

@@ -28,8 +28,10 @@ skip actually travels:
   requests;
 - an xunit setup hook pytest runs before the test, found along its class's
   MRO as ``self.`` calls are and followed the same way: ``setup_method`` and
-  ``setup_class`` on any test class, ``setUp`` and ``setUpClass`` only on a
-  ``unittest.TestCase`` subclass (pytest ignores them elsewhere), and never
+  ``setup_class`` on any test class unless the name is a fixture (pytest then
+  calls no hook of that name), ``setUp`` and ``setUpClass`` only on a subclass
+  of ``unittest.TestCase`` under any import alias (pytest ignores them
+  elsewhere, and a base merely named ``...TestCase`` is not one), and never
   nose's plain ``setup``, which pytest 8 stopped calling;
 - a module-level ``importorskip`` / ``skip(allow_module_level=True)``.
 
@@ -121,20 +123,22 @@ class _PytestNames:
     ``from pytest import mark [as m], skip [as s], param`` binds its members.
 
     Markers, skip calls and ``pytest.param`` are all resolved through this one
-    table, so an alias that works for one works for all of them.
+    table, so an alias that works for one works for all of them. ``of(tree,
+    "unittest")`` builds the same table for ``unittest``, which is how a test
+    class's ``TestCase`` base is recognised under any alias.
     """
 
     modules: frozenset[str]
     members: tuple[tuple[str, str], ...]  # (local name, pytest attribute)
 
     @classmethod
-    def of(cls, tree: ast.Module) -> _PytestNames:
-        modules = {"pytest"}
+    def of(cls, tree: ast.Module, module: str = "pytest") -> _PytestNames:
+        modules = {module}
         members: list[tuple[str, str]] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                modules.update(a.asname or a.name for a in node.names if a.name == "pytest")
-            elif isinstance(node, ast.ImportFrom) and node.module == "pytest":
+                modules.update(a.asname or a.name for a in node.names if a.name == module)
+            elif isinstance(node, ast.ImportFrom) and node.module == module:
                 members.extend((a.asname or a.name, a.name) for a in node.names)
         return cls(modules=frozenset(modules), members=tuple(members))
 
@@ -159,6 +163,7 @@ class _PytestNames:
 
 
 _MARK = frozenset({"mark"})
+_TEST_CASE = frozenset({"TestCase", "IsolatedAsyncioTestCase"})
 _PARAM = frozenset({"param"})
 
 
@@ -335,6 +340,7 @@ class _Module:
     rel: str
     tree: ast.Module
     names: _PytestNames
+    unittest: _PytestNames
     functions: dict[str, list[_Function]] = field(default_factory=dict)
     classes: dict[str, ast.ClassDef] = field(default_factory=dict)
     fixtures: dict[str, _Fixture] = field(default_factory=dict)
@@ -350,7 +356,12 @@ class _Module:
             tree = ast.parse(path.read_text(errors="ignore"), filename=rel)
         except SyntaxError:
             return None
-        module = cls(rel=rel, tree=tree, names=_PytestNames.of(tree))
+        module = cls(
+            rel=rel,
+            tree=tree,
+            names=_PytestNames.of(tree),
+            unittest=_PytestNames.of(tree, "unittest"),
+        )
         for node in _functions(tree.body):
             module.functions.setdefault(node.name, []).append(node)
         for node in tree.body:
@@ -402,18 +413,21 @@ class _Module:
         return self._class_fixtures[id(owner)]
 
     def _methods(self, owner: ast.ClassDef, name: str) -> list[_Function]:
-        """``name`` as ``self.name`` sees it from ``owner``: the first class in its MRO."""
+        """``name`` as ``self.name`` sees it from ``owner``: the first class in its MRO.
+
+        A fixture there is not a method: pytest refuses a direct call to one and
+        never runs it as an xunit hook. It still hides any base's ``name``."""
         for cls in self.mro(owner):
             if found := [f for f in _functions(cls.body) if f.name == name]:
-                return found
+                return [f for f in found if not any(map(_fixture_decorator, f.decorator_list))]
         return []
 
     def _is_unittest(self, owner: ast.ClassDef) -> bool:
-        """Whether ``owner`` derives from a ``TestCase`` defined outside this module,
-        such as ``unittest.TestCase``: the only classes pytest runs ``setUp`` on."""
+        """Whether ``owner`` derives from ``unittest.TestCase`` (under any alias):
+        the only classes pytest runs ``setUp`` on. A base imported from anywhere
+        else is not followed, whatever it is called."""
         return any(
-            isinstance(base, ast.Name | ast.Attribute)
-            and (base.id if isinstance(base, ast.Name) else base.attr).endswith("TestCase")
+            self.unittest.refers_to(base, _TEST_CASE)
             and not (isinstance(base, ast.Name) and base.id in self.classes)
             for cls in self.mro(owner)
             for base in cls.bases
