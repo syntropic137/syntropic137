@@ -40,6 +40,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.output_refusals i
     OutputCollectionIncompleteError,
     collect_output_files,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.primary_deliverable import (
+    primary_rank,
+)
 from syn_shared.workspace_paths import (
     WORKSPACE_INPUT_DIR,
     WORKSPACE_OUTPUT_DIR,
@@ -222,27 +225,6 @@ class _Deliverable:
         )
 
 
-def _report_path(phase_id: str) -> str:
-    """Where a phase's own report lives: ``artifacts/output/<phase-id>.md``."""
-    return f"{_OUTPUT_DIR_REL}/{phase_id}{_FLAT_ALIAS_SUFFIX}"
-
-
-def _rank(deliverable: _Deliverable, *, phase_id: str) -> tuple[bool, bool, bool]:
-    """Sort key for which deliverable stands for the phase; lower is first.
-
-    Binary last (#990), then the phase's own report, then any markdown, then
-    the remaining text (#2084). A verify phase that wrote `fitness-ci.log`
-    before `verify.md` used to hand the next phase a pytest log as its input
-    (exec-269d15483078): disk order is not a statement about which file is the
-    report.
-    """
-    return (
-        isinstance(deliverable.content, bytes),
-        deliverable.source_path != _report_path(phase_id),
-        not deliverable.source_path.endswith(_FLAT_ALIAS_SUFFIX),
-    )
-
-
 async def _with_report(
     deliverables: list[_Deliverable],
     *,
@@ -260,7 +242,7 @@ async def _with_report(
     file at all" are therefore one incident and get one answer here; the
     binaries are kept beside the salvage either way.
 
-    Ranked by `_rank`, otherwise in collection order: the head is flagged the
+    Ranked by `primary_rank`, otherwise in collection order: the head is flagged the
     Primary Deliverable, and a screenshot or a log the glob happened to list
     first must not take the flag from the phase's report (#990, #2084).
     """
@@ -281,7 +263,9 @@ async def _with_report(
                 ", ".join(binaries) or "none",
             )
             deliverables = [*deliverables, _Deliverable.of(recovered)]
-    return sorted(deliverables, key=lambda d: _rank(d, phase_id=phase_id))
+    return sorted(
+        deliverables, key=lambda d: primary_rank(d.source_path, d.content, phase_id=phase_id)
+    )
 
 
 #: DIRECTORY names that hold machine-generated build output (issue #919).
@@ -659,7 +643,7 @@ class ArtifactCollector:
         )
         if primary_path is not None:
             # The phase names its primary; stable, so the rest keep their order.
-            # Otherwise `_rank` has already put the phase's report first (#2084).
+            # Otherwise `primary_rank` has already put the phase's report first (#2084).
             deliverables.sort(key=lambda d: d.source_path != primary_path)
 
         artifact_ids = await self._store(
