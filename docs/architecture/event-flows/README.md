@@ -10,14 +10,13 @@ This table shows the most important event flows in Syn137 (events that feed the 
 
 | Command | Event | Projections | Count |
 |---------|-------|-------------|-------|
-| ? | workflow_execution_started | DashboardMetricsProjection, ExecutionTodoProjection, RepoCorrelationProjection... | 7 |
-| ? | workflow_failed | DashboardMetricsProjection, ExecutionTodoProjection, RepoCostProjection... | 7 |
-| ? | workflow_completed | DashboardMetricsProjection, ExecutionTodoProjection, RepoCostProjection... | 6 |
+| ? | workflow_execution_started | ExecutionTodoProjection, RepoCorrelationProjection, WorkflowDetailProjection... | 6 |
+| ? | workflow_failed | ExecutionTodoProjection, RepoCostProjection, RepoHealthProjection... | 6 |
+| ? | workflow_completed | ExecutionTodoProjection, RepoCostProjection, RepoHealthProjection... | 5 |
 | ? | execution_cancelled | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
 | ? | phase_completed | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
 | ? | workflow_interrupted | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
 | ? | next_phase_ready | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
-| ? | phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection | 3 |
 | ? | trigger_fired | RepoCorrelationProjection, TriggerHistoryProjection, TriggerRuleProjection | 3 |
 | ? | workflow_template_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
 | ? | workflow_template_updated | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
@@ -25,6 +24,7 @@ This table shows the most important event flows in Syn137 (events that feed the 
 | ? | agent_execution_completed | ExecutionTodoProjection, WorkflowExecutionDetailProjection | 2 |
 | ? | agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
 | ? | artifact_created | ArtifactListProjection, DashboardMetricsProjection | 2 |
+| ? | execution_forked | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
 
 ---
 

@@ -2875,21 +2875,15 @@ class ArtifactDetail(BaseModel):
 
 
 class DashboardMetrics(BaseModel):
-    """Aggregated dashboard metrics."""
+    """The dashboard projection's counts that GET /metrics reads (#2272).
+
+    Execution, session, token and cost totals come from their own read models.
+    """
 
     total_workflows: int = Field(
         default=0,
         description="Workflow templates that are not archived; matches the default total of GET /workflows",
     )
-    completed_workflows: int = 0
-    failed_workflows: int = 0
-    total_sessions: int = 0
-    total_input_tokens: int = 0
-    total_output_tokens: int = 0
-    total_cache_creation_tokens: int = 0
-    total_cache_read_tokens: int = 0
-    total_tokens: int = 0
-    total_cost_usd: Decimal = Decimal("0")
     total_artifacts: int = 0
     total_artifact_bytes: int = 0
 

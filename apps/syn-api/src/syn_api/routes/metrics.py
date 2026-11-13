@@ -167,16 +167,6 @@ async def get_dashboard_metrics(
         return Ok(
             DashboardMetrics(
                 total_workflows=data.total_workflows,
-                completed_workflows=data.completed_workflows,
-                failed_workflows=data.failed_workflows,
-                total_sessions=data.total_sessions,
-                total_input_tokens=data.total_input_tokens,
-                total_output_tokens=data.total_output_tokens,
-                total_cache_creation_tokens=data.total_cache_creation_tokens,
-                total_cache_read_tokens=data.total_cache_read_tokens,
-                total_tokens=data.total_tokens,
-                # Lane 2: cost is enriched at the endpoint from execution_cost (#695)
-                total_cost_usd=Decimal("0"),
                 total_artifacts=data.total_artifacts,
                 total_artifact_bytes=data.total_artifact_bytes,
             )

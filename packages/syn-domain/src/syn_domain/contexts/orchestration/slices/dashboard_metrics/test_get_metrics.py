@@ -1,9 +1,11 @@
 """Tests for get_metrics query slice.
 
-Cost is Lane 2 telemetry (#695): the dashboard_metrics projection no longer
-tracks cost. The API enriches responses from the execution_cost projection.
+The projection counts workflow templates and artifacts only. Execution status
+counts, sessions, tokens and cost are read by GET /metrics from their own read
+models (#1843, #932), so the projection no longer keeps copies (#2272).
 """
 
+import dataclasses
 import os
 
 import pytest
@@ -29,6 +31,9 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEven
 )
 from syn_domain.contexts.orchestration.domain.queries.get_dashboard_metrics import (
     GetDashboardMetricsQuery,
+)
+from syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics import (
+    DashboardMetrics,
 )
 from syn_domain.contexts.orchestration.slices.dashboard_metrics.GetDashboardMetricsHandler import (
     GetDashboardMetricsHandler,
@@ -85,10 +90,8 @@ class TestDashboardMetricsProjection:
         """Test that initial metrics are all zero."""
         metrics = await projection.get_metrics()
         assert metrics.total_workflows == 0
-        assert metrics.active_workflows == 0
-        assert metrics.completed_workflows == 0
-        assert metrics.total_sessions == 0
         assert metrics.total_artifacts == 0
+        assert metrics.total_artifact_bytes == 0
 
     @pytest.mark.asyncio
     async def test_workflow_created_increments_total(self, projection: DashboardMetricsProjection):
@@ -100,50 +103,6 @@ class TestDashboardMetricsProjection:
         assert metrics.total_workflows == 2
 
     @pytest.mark.asyncio
-    async def test_workflow_lifecycle(self, projection: DashboardMetricsProjection):
-        """Test full workflow lifecycle updates metrics correctly."""
-        # Create workflow
-        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
-        metrics = await projection.get_metrics()
-        assert metrics.total_workflows == 1
-        assert metrics.active_workflows == 0
-
-        # Start execution
-        await projection.on_workflow_execution_started({"workflow_id": "wf-1"})
-        metrics = await projection.get_metrics()
-        assert metrics.active_workflows == 1
-
-        # Complete workflow
-        await projection.on_workflow_completed({"workflow_id": "wf-1"})
-        metrics = await projection.get_metrics()
-        assert metrics.active_workflows == 0
-        assert metrics.completed_workflows == 1
-
-    @pytest.mark.asyncio
-    async def test_workflow_failed_updates_counts(self, projection: DashboardMetricsProjection):
-        """Test WorkflowFailed updates counts correctly."""
-        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
-        await projection.on_workflow_execution_started({"workflow_id": "wf-1"})
-        await projection.on_workflow_failed(
-            {"workflow_id": "wf-1", "error": "Something went wrong"}
-        )
-
-        metrics = await projection.get_metrics()
-        assert metrics.active_workflows == 0
-        assert metrics.failed_workflows == 1
-
-    @pytest.mark.asyncio
-    async def test_session_events_update_metrics(self, projection: DashboardMetricsProjection):
-        """Test session events update metrics."""
-        await projection.on_session_started({"session_id": "s-1"})
-        metrics = await projection.get_metrics()
-        assert metrics.total_sessions == 1
-
-        await projection.on_session_completed({"session_id": "s-1", "total_tokens": 1000})
-        metrics = await projection.get_metrics()
-        assert metrics.total_tokens == 1000
-
-    @pytest.mark.asyncio
     async def test_artifact_created_increments_count(self, projection: DashboardMetricsProjection):
         """Test ArtifactCreated increments artifact count."""
         await projection.on_artifact_created({"artifact_id": "a-1"})
@@ -151,68 +110,6 @@ class TestDashboardMetricsProjection:
 
         metrics = await projection.get_metrics()
         assert metrics.total_artifacts == 2
-
-    @pytest.mark.asyncio
-    async def test_token_accumulation(self, projection: DashboardMetricsProjection):
-        """Test that tokens accumulate correctly across sessions (cost is Lane 2)."""
-        await projection.on_session_started({"session_id": "s-1"})
-        await projection.on_session_completed({"session_id": "s-1", "total_tokens": 500})
-
-        await projection.on_session_started({"session_id": "s-2"})
-        await projection.on_session_completed({"session_id": "s-2", "total_tokens": 1500})
-
-        metrics = await projection.get_metrics()
-        assert metrics.total_tokens == 2000
-
-    @pytest.mark.asyncio
-    async def test_input_output_token_tracking(self, projection: DashboardMetricsProjection):
-        """Test that input/output tokens are tracked separately."""
-        await projection.on_session_started({"session_id": "s-1"})
-        await projection.on_session_completed(
-            {
-                "session_id": "s-1",
-                "total_tokens": 2500,
-                "total_input_tokens": 1000,
-                "total_output_tokens": 1500,
-                "total_cost_usd": "0.025",
-            }
-        )
-
-        await projection.on_session_started({"session_id": "s-2"})
-        await projection.on_session_completed(
-            {
-                "session_id": "s-2",
-                "total_tokens": 3500,
-                "total_input_tokens": 1500,
-                "total_output_tokens": 2000,
-                "total_cost_usd": "0.035",
-            }
-        )
-
-        metrics = await projection.get_metrics()
-        assert metrics.total_tokens == 6000
-        assert metrics.total_input_tokens == 2500
-        assert metrics.total_output_tokens == 3500
-
-    @pytest.mark.asyncio
-    async def test_input_output_tokens_default_to_zero(
-        self, projection: DashboardMetricsProjection
-    ):
-        """Test that input/output tokens default to zero when not provided."""
-        await projection.on_session_started({"session_id": "s-1"})
-        await projection.on_session_completed(
-            {
-                "session_id": "s-1",
-                "total_tokens": 1000,
-                "total_cost_usd": "0.01",
-                # No input/output breakdown provided
-            }
-        )
-
-        metrics = await projection.get_metrics()
-        assert metrics.total_tokens == 1000
-        assert metrics.total_input_tokens == 0
-        assert metrics.total_output_tokens == 0
 
 
 class TestGetDashboardMetricsHandler:
@@ -227,7 +124,6 @@ class TestGetDashboardMetricsHandler:
         """Test handler returns metrics correctly."""
         # Setup some data
         await projection.on_workflow_template_created({"workflow_id": "wf-1"})
-        await projection.on_session_started({"session_id": "s-1"})
         await projection.on_artifact_created({"artifact_id": "a-1"})
 
         # Execute query
@@ -236,8 +132,70 @@ class TestGetDashboardMetricsHandler:
 
         # Assert
         assert result.total_workflows == 1
-        assert result.total_sessions == 1
         assert result.total_artifacts == 1
+
+
+# Kept by GET /metrics from their own read models since #1843 and #932.
+_REMOVED_COUNTERS = {
+    "active_workflows",
+    "completed_workflows",
+    "failed_workflows",
+    "total_sessions",
+    "total_tokens",
+    "total_input_tokens",
+    "total_output_tokens",
+    "total_cache_creation_tokens",
+    "total_cache_read_tokens",
+}
+
+
+@pytest.mark.unit
+class TestNoCountersGetMetricsDoesNotRead:
+    """The projection keeps only what GET /metrics reads from it (#2272)."""
+
+    def test_read_model_carries_only_the_counts_metrics_reads(self):
+        fields = {f.name for f in dataclasses.fields(DashboardMetrics)}
+        assert fields == {"total_workflows", "total_artifacts", "total_artifact_bytes"}
+        assert set(DashboardMetrics().to_dict()) == fields
+
+    def test_projection_no_longer_subscribes_to_execution_or_session_events(
+        self, projection: DashboardMetricsProjection
+    ):
+        # Each of these took a read-modify-write of the single global row.
+        subscribed = projection.get_subscribed_event_types() or set()
+        assert subscribed.isdisjoint(
+            {
+                "WorkflowExecutionStarted",
+                "PhaseStarted",
+                "WorkflowCompleted",
+                "WorkflowFailed",
+                "SessionStarted",
+                "SessionCompleted",
+            }
+        )
+        assert subscribed == {
+            "WorkflowTemplateCreated",
+            "WorkflowCreated",
+            "WorkflowTemplateArchived",
+            "WorkflowTemplateUpdated",
+            "ArtifactCreated",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_row_stored_before_the_bump_reads_without_the_old_counters(
+        self, memory_store: InMemoryProjectionStore, projection: DashboardMetricsProjection
+    ):
+        """A VERSION 5 row still carries the old keys until the rebuild clears it."""
+        stale = {"total_workflows": 3, "total_artifacts": 4, "total_artifact_bytes": 0}
+        stale.update(dict.fromkeys(_REMOVED_COUNTERS, 7))
+        await memory_store.save(
+            DashboardMetricsProjection.PROJECTION_NAME,
+            DashboardMetricsProjection.METRICS_KEY,
+            stale,
+        )
+
+        metrics = await projection.get_metrics()
+        assert metrics == DashboardMetrics(total_workflows=3, total_artifacts=4)
 
 
 @pytest.mark.unit
