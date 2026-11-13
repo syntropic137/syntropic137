@@ -27,6 +27,10 @@ from syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator impo
     evaluate_conditions,
     extract_inputs,
 )
+from syn_domain.contexts.github.slices.evaluate_webhook.contributor_guard import (
+    CONTRIBUTOR_GUARD_NAME,
+    ContributorPolicy,
+)
 from syn_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
     GuardResult,
     SafetyGuards,
@@ -62,8 +66,10 @@ class EvaluateWebhookHandler:
         on_fire: OnFireCallback | None = None,
         dispatch_rate_limit: int = 10,
         dispatch_rate_window_seconds: float = 60.0,
+        contributor_policy: ContributorPolicy | None = None,
     ) -> None:
         self._store = store
+        self._contributor_policy = contributor_policy or ContributorPolicy()
         self._repository = repository
         self._debouncer = debouncer
         self._on_fire = on_fire
@@ -112,6 +118,21 @@ class EvaluateWebhookHandler:
         """Evaluate a single rule against the payload. Returns None if skipped."""
         if rule.status != "active":
             return None
+        # System-wide, so it runs before the rule's own conditions (#580).
+        refusal = self._contributor_policy.refusal(payload)
+        if refusal is not None:
+            sender = (payload.get("sender") or {}).get("login", "") or "<unknown>"
+            logger.warning(
+                f"Trigger {rule.trigger_id} refused {event} from sender {sender}: {refusal}"
+            )
+            return await self._record_block(
+                rule=rule,
+                guard_name=CONTRIBUTOR_GUARD_NAME,
+                reason=refusal,
+                event=event,
+                repository=repository,
+                payload=payload,
+            )
         if not evaluate_conditions(rule.conditions, payload):
             logger.debug(f"Trigger {rule.trigger_id} conditions not met for {event}")
             return await self._record_block(
@@ -297,6 +318,7 @@ class EvaluateWebhookHandler:
         store = self._store
         repo = self._repository
         on_fire = self._on_fire
+        contributor_policy = self._contributor_policy
 
         async def _on_timer() -> None:
             # Re-evaluate without debouncer to prevent infinite loops
@@ -305,6 +327,7 @@ class EvaluateWebhookHandler:
                 repository=repo,
                 debouncer=None,
                 on_fire=on_fire,
+                contributor_policy=contributor_policy,
             )
             await handler.evaluate(
                 event=event,
@@ -337,11 +360,11 @@ def _build_payload_summary(payload: dict[str, Any], event: str) -> dict[str, obj
     elif "pull_request_review" in event:
         review = payload.get("review", {})
         summary["review_state"] = review.get("state", "")
-        summary["reviewer"] = review.get("user", {}).get("login", "")
+        summary["reviewer"] = (review.get("user") or {}).get("login", "")
     elif "issue_comment" in event:
         comment = payload.get("comment", {})
         summary["comment_id"] = comment.get("id")
-        summary["author"] = comment.get("user", {}).get("login", "")
+        summary["author"] = (comment.get("user") or {}).get("login", "")
         body = comment.get("body", "")
         summary["body_preview"] = body[:200] if body else ""
     return summary

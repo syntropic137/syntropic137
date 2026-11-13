@@ -238,6 +238,41 @@ All GitHub operations are auditable:
 }
 ```
 
+### 6. Contributor Guard (who may start an agent run)
+
+A trigger turns a GitHub event into an agent run holding this deployment's
+credentials. On a public repository the event can come from anyone: an
+external contributor's PR, or the CI failure on it, would otherwise start an
+agent on their code. One system-wide guard decides who may make *any* trigger
+fire, before the trigger's own conditions are looked at (#580):
+
+| `SYN_TRIGGER_CONTRIBUTOR_MODE` | Who fires |
+|---|---|
+| `allow_all` (default) | Everyone. Unchanged behaviour; fine for private repos. |
+| `trusted` | Authors whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`, plus `SYN_TRIGGER_CONTRIBUTOR_ALLOWED_LOGINS`. |
+| `allowlist` | Only `SYN_TRIGGER_CONTRIBUTOR_ALLOWED_LOGINS` (comma-separated). |
+
+What is judged is the **contributor**: the author of the comment, review, pull
+request or issue the event carries, not whoever sent it. A maintainer pushing to
+an external PR does not make that PR's code trusted. Events that carry no
+authored content (`check_run`, `push`) are judged on their sender.
+
+**Bots get no blanket pass.** `github-actions[bot]` sends the `check_run` for an
+external contributor's PR, so exempting bots would reopen the hole. List your
+own bot (e.g. `syn-engineer[bot]`) in `SYN_TRIGGER_CONTRIBUTOR_ALLOWED_LOGINS`
+to let it fire; never list `github-actions[bot]`.
+
+**Known limit of `trusted` for self-healing.** A `check_run` payload names
+neither the PR author nor an `author_association`, and is empty of PRs
+entirely for forks. Under `trusted` a `check_run` from CI is therefore refused
+unless its sender is allowlisted. That fails closed: self-healing on CI
+failures stops rather than running on untrusted code. Resolving the check
+run's PR author would lift it.
+
+A refusal is recorded as a `TriggerBlockedEvent` with
+`guard_name="contributor_guard"`, so `syn triggers history <id>` shows it, and
+logged at WARNING with the trigger, sender and reason.
+
 ## Commit Attribution
 
 Commits made by the agent show clear bot attribution:

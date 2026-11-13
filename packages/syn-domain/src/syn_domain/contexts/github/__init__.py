@@ -54,6 +54,10 @@ from syn_domain.contexts.github.domain.read_models.installation import Installat
 from syn_domain.contexts.github.domain.read_models.trigger_rule import TriggerRule
 
 # Handlers
+from syn_domain.contexts.github.slices.evaluate_webhook.contributor_guard import (
+    ContributorGuardMode,
+    ContributorPolicy,
+)
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,
 )
@@ -99,6 +103,9 @@ from syn_domain.contexts.github.slices.trigger_history.GetTriggerHistoryHandler 
 __all__ = [
     # Events
     "AppInstalledEvent",
+    # Contributor guard (#580)
+    "ContributorGuardMode",
+    "ContributorPolicy",
     # Event pipeline types
     "DedupPort",
     # Commands

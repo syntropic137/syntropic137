@@ -40,6 +40,9 @@ if TYPE_CHECKING:
         _BudgetChecker,
         _ExecutionService,
     )
+    from syn_domain.contexts.github.slices.evaluate_webhook.contributor_guard import (
+        ContributorPolicy,
+    )
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
@@ -426,6 +429,17 @@ def get_trigger_repo():
     return get_trigger_repository()
 
 
+def get_contributor_policy() -> ContributorPolicy:
+    """The system-wide contributor guard every trigger evaluation applies (#580)."""
+    from syn_domain.contexts.github import ContributorGuardMode, ContributorPolicy
+
+    configured = shared_settings.get_settings().trigger_contributors
+    return ContributorPolicy(
+        mode=ContributorGuardMode(configured.mode),
+        allowed_logins=configured.allowed_login_set,
+    )
+
+
 def get_trigger_store():
     """Return the trigger query store."""
     from syn_domain.contexts.github import get_trigger_query_store
@@ -457,6 +471,7 @@ def get_event_pipeline() -> EventPipeline:
         repository=get_trigger_repo(),
         dispatch_rate_limit=settings.polling.dispatch_rate_limit,
         dispatch_rate_window_seconds=settings.polling.dispatch_rate_window_seconds,
+        contributor_policy=get_contributor_policy(),
     )
     pipeline = EventPipeline(
         dedup=dedup,

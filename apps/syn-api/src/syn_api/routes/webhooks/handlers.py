@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from syn_api._wiring import get_trigger_repo, get_trigger_store
+from syn_api._wiring import get_contributor_policy, get_trigger_repo, get_trigger_store
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,7 @@ async def _evaluate_triggers(
         handler = EvaluateWebhookHandler(
             store=get_trigger_store(),
             repository=get_trigger_repo(),
+            contributor_policy=get_contributor_policy(),
         )
         results = await handler.evaluate(
             event=compound_event,

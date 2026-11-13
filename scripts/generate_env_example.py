@@ -45,6 +45,7 @@ from syn_shared.settings.platform_access import PlatformAccessSettings  # noqa: 
 from syn_shared.settings.session_inventory import SessionInventorySettings  # noqa: E402
 from syn_shared.settings.session_store import SessionStoreSettings  # noqa: E402
 from syn_shared.settings.storage import StorageSettings  # noqa: E402
+from syn_shared.settings.trigger_contributors import TriggerContributorSettings  # noqa: E402
 from syn_shared.settings.workspace import (  # noqa: E402
     ContainerLoggingSettings,
     GitIdentitySettings,
@@ -404,6 +405,19 @@ def generate_env_example() -> str:
             prefix="SYN_GITHUB_",
             description="GitHub App for secure API access. See docs/deployment/github-app-setup.md",
             exclude={"installation_id"},
+        )
+    )
+
+    # Add Trigger Contributor Guard Settings (SYN_TRIGGER_CONTRIBUTOR_* prefix)
+    lines.extend(
+        generate_settings_section(
+            TriggerContributorSettings,
+            "TRIGGER CONTRIBUTOR GUARD",
+            prefix="SYN_TRIGGER_CONTRIBUTOR_",
+            description=(
+                "Who may make a trigger spawn an agent run (#580). Set trusted or "
+                "allowlist on public repos. See infra/docs/github-app-security.md"
+            ),
         )
     )
 
