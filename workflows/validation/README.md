@@ -31,3 +31,9 @@ general knowledge, and the run goes green while the mechanism is broken. So each
 phase is asked to REPORT a specific observable fact (a filename, a sentinel
 string, an issue number) that is only available if the capability actually
 worked.
+
+And each phase turns that fact into its outcome. A capability the phase was asked
+to prove that did not work ends the phase with `TASK_RESULT` `success: false`
+and `failure_reason: "platform"`, so the execution fails instead of completing
+green over a `FAILED` line (#1085). See
+[How a Phase Reports Its Outcome](../../apps/syn-docs/content/docs/guide/phase-outcomes.mdx).
