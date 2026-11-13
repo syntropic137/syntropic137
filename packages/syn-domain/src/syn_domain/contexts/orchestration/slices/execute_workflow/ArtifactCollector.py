@@ -789,6 +789,7 @@ class ArtifactCollector:
         agent: AgentIdentity,
         outcome: UnfinishedPhase,
         last_agent_message: str | None = None,
+        primary_path: str | None = None,
     ) -> KeptOutput:
         """Keep whatever a phase that will not complete managed to write. Never raises.
 
@@ -859,7 +860,7 @@ class ArtifactCollector:
                 describe_work=None,
             )
             stored = await self._store(
-                ranked(kept, phase_id=phase_id),
+                ranked(kept, phase_id=phase_id, primary_path=primary_path),
                 workflow_id=workflow_id,
                 phase_id=phase_id,
                 execution_id=execution_id,

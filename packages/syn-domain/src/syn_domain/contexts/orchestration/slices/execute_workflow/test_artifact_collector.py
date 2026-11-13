@@ -672,6 +672,34 @@ class TestThePhaseReportOutranksItsLogs:
             ("artifacts/output/fitness-ci.log", False),
         ]
 
+    @pytest.mark.asyncio
+    async def test_a_cancelled_command_phase_keeps_its_named_primary(self) -> None:
+        """A cancelled COMMAND phase still names `commands.json`, not stray markdown."""
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        await collector.collect_from_unfinished_phase(
+            workspace=MockWorkspace(
+                collected_files=[
+                    ("artifacts/output/commands.json", b'{"success": false}'),
+                    ("artifacts/output/build.md", b"# written by a command"),
+                ]
+            ),
+            workflow_id="w1",
+            phase_id="build",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Build",
+            output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
+            outcome=UnfinishedPhase.INTERRUPTED,
+            primary_path="artifacts/output/commands.json",
+        )
+
+        assert [(a.source_path, a.is_primary_deliverable) for a in repo.saved] == [
+            ("artifacts/output/commands.json", True),
+            ("artifacts/output/build.md", False),
+        ]
+
 
 class TestADeclaredOutputMustBeProduced:
     """#1167 at the collector, where the declaration meets what was written.
