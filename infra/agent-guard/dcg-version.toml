@@ -1,0 +1,22 @@
+# Pinned dcg (destructive command guard) release for agent hosts.
+# Read by infra/scripts/agent_guard.py. Bump all fields together: the version,
+# then every asset's sha256 from the release's SHA256SUMS, verified against
+# its minisign signature with the key below before you commit it.
+
+version = "v0.16.0"
+release_url = "https://github.com/Dicklesworthstone/destructive_command_guard/releases/download"
+
+# Release signing key, as published in the project's README and install.sh.
+minisign_public_key = "RWSoYi6NXJWzaRs1mJmOwwXrZfPWcq6MXnQlNMLBYKzlIQTLwuVQG6uO"
+
+[assets.x86_64-linux]
+name = "dcg-x86_64-unknown-linux-musl.tar.xz"
+sha256 = "e7d860eba7f99cb5d5535b00942196aae3d6ca22ec049491d74c97aab556b642"
+
+[assets.aarch64-linux]
+name = "dcg-aarch64-unknown-linux-gnu.tar.xz"
+sha256 = "ca4f2c4fee3aea774fac3e53a6a4cab1c7f9c6228f4bd9d6941de05fd5ac6308"
+
+[assets.aarch64-darwin]
+name = "dcg-aarch64-apple-darwin.tar.xz"
+sha256 = "06cd609b19b988d267ebfac3e6736e511ba42c7a1746f4ec2af5295a8b300fe0"
