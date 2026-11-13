@@ -17715,11 +17715,13 @@
           "completed_workflows": {
             "type": "integer",
             "title": "Completed Workflows",
+            "description": "Executions whose status is completed; equals execution_status_counts.completed",
             "default": 0
           },
           "failed_workflows": {
             "type": "integer",
             "title": "Failed Workflows",
+            "description": "Executions whose status is failed; equals execution_status_counts.failed",
             "default": 0
           },
           "execution_status_counts": {
@@ -17728,6 +17730,7 @@
           "total_sessions": {
             "type": "integer",
             "title": "Total Sessions",
+            "description": "Sessions in the session list; matches the total of GET /sessions",
             "default": 0
           },
           "total_input_tokens": {
