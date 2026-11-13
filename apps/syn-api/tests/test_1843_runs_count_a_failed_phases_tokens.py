@@ -21,16 +21,19 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
 
-from syn_api.routes.workflows.queries import ExecutionRunSummary
 from syn_api.types import Ok
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
     ExecutionCostsForIds,
 )
+
+if TYPE_CHECKING:
+    from syn_api.routes.workflows.queries import ExecutionRunSummary
 
 pytestmark = pytest.mark.unit
 
