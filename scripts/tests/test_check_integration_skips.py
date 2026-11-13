@@ -1016,7 +1016,8 @@ def test_a_skip_in_a_helper_imported_from_another_module_counts(tmp_path: Path) 
 
 _PYTEST_INI = "[pytest]\nmarkers =\n    integration: i\n    may_skip(reason, issue): m\n"
 
-#: Fixture override chains, imported fixtures and mixed parameter legs, each
+#: Fixture override chains, imported fixtures, mixed parameter legs and xunit
+#: setup hooks (including names pytest does NOT call), each
 #: with the outcome a real ``pytest -m integration`` run gives it.
 _PARITY: dict[str, tuple[dict[str, str], str, bool]] = {
     "conftest_dependency_override": (
@@ -1177,6 +1178,156 @@ _PARITY: dict[str, tuple[dict[str, str], str, bool]] = {
         "1 passed, 1 deselected",
         False,
     ),
+    "setup_method_skips": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.integration
+            class TestX:
+                def setup_method(self, method):
+                    pytest.skip("no store")
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "setup_class_skips_through_a_cls_call": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.integration
+            class TestX:
+                @classmethod
+                def need_store(cls):
+                    pytest.skip("no store")
+                @classmethod
+                def setup_class(cls):
+                    cls.need_store()
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "inherited_setup_method_skips": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            class Base:
+                def setup_method(self):
+                    pytest.skip("no store")
+            @pytest.mark.integration
+            class TestX(Base):
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "overridden_setup_method_no_longer_skips": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            class Base:
+                def setup_method(self):
+                    pytest.skip("no store")
+            @pytest.mark.integration
+            class TestX(Base):
+                def setup_method(self):
+                    self.store = 1
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 passed",
+        False,
+    ),
+    "setup_method_that_does_not_skip": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.integration
+            class TestX:
+                def setup_method(self):
+                    self.store = 1
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 passed",
+        False,
+    ),
+    "testcase_setUp_skips": (
+        {
+            "tests/test_x.py": """
+            import unittest
+            import pytest
+            @pytest.mark.integration
+            class TestX(unittest.TestCase):
+                def setUp(self):
+                    pytest.skip("no store")
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "testcase_setUpClass_skips": (
+        {
+            "tests/test_x.py": """
+            from unittest import TestCase
+            import pytest
+            class Base(TestCase):
+                @classmethod
+                def setUpClass(cls):
+                    pytest.skip("no store")
+            @pytest.mark.integration
+            class TestX(Base):
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 skipped",
+        True,
+    ),
+    "setUp_on_a_plain_class_is_not_a_hook": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.integration
+            class TestX:
+                def setUp(self):
+                    pytest.skip("no store")
+                @classmethod
+                def setUpClass(cls):
+                    pytest.skip("no store")
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 passed",
+        False,
+    ),
+    "nose_setup_is_not_a_hook": (
+        {
+            "tests/test_x.py": """
+            import pytest
+            @pytest.mark.integration
+            class TestX:
+                def setup(self):
+                    pytest.skip("no store")
+                def test_x(self):
+                    pass
+            """,
+        },
+        "1 passed",
+        False,
+    ),
 }
 
 
@@ -1195,4 +1346,4 @@ def test_the_census_agrees_with_pytest(tmp_path: Path, shape: str) -> None:
     )
     assert run.stdout.strip().splitlines()[-1].startswith(outcome), run.stdout
     expected = [("test_x", "undeclared")] if undeclared else []
-    assert _census(tmp_path) == expected
+    assert [(test.rsplit("::", 1)[-1], kind) for test, kind in _census(tmp_path)] == expected

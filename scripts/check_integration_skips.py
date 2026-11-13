@@ -26,6 +26,11 @@ skip actually travels:
   ``autouse``, defined or imported in the module or in any ``conftest.py``
   between the module and the repo root, followed through the fixtures IT
   requests;
+- an xunit setup hook pytest runs before the test, found along its class's
+  MRO as ``self.`` calls are and followed the same way: ``setup_method`` and
+  ``setup_class`` on any test class, ``setUp`` and ``setUpClass`` only on a
+  ``unittest.TestCase`` subclass (pytest ignores them elsewhere), and never
+  nose's plain ``setup``, which pytest 8 stopped calling;
 - a module-level ``importorskip`` / ``skip(allow_module_level=True)``.
 
 Parameter marks count too: ``pytest.param(..., marks=...)`` in a
@@ -74,6 +79,11 @@ _SKIP_MARKERS = frozenset({"skip", "skipif"})
 
 #: ``pytest.<name>(...)`` calls that end the test as skipped.
 _SKIP_CALLS = frozenset({"skip", "importorskip"})
+
+#: xunit hooks pytest runs before each test of any class, and the ones only a
+#: ``unittest.TestCase`` runs. Nose's plain ``setup`` is neither since pytest 8.
+_XUNIT_SETUP_HOOKS = ("setup_class", "setup_method")
+_UNITTEST_SETUP_HOOKS = ("setUpClass", "setUp")
 
 #: The ``issue`` argument of the opt-out. Same shape as ``TODO(#N)``.
 _ISSUE_PATTERN = re.compile(r"#\d+")
@@ -398,6 +408,26 @@ class _Module:
                 return found
         return []
 
+    def _is_unittest(self, owner: ast.ClassDef) -> bool:
+        """Whether ``owner`` derives from a ``TestCase`` defined outside this module,
+        such as ``unittest.TestCase``: the only classes pytest runs ``setUp`` on."""
+        return any(
+            isinstance(base, ast.Name | ast.Attribute)
+            and (base.id if isinstance(base, ast.Name) else base.attr).endswith("TestCase")
+            and not (isinstance(base, ast.Name) and base.id in self.classes)
+            for cls in self.mro(owner)
+            for base in cls.bases
+        )
+
+    def setup_skips(self, owner: ast.ClassDef) -> str | None:
+        """Where an xunit setup hook pytest runs before ``owner``'s tests reaches a skip."""
+        hooks = [*_XUNIT_SETUP_HOOKS, *(_UNITTEST_SETUP_HOOKS if self._is_unittest(owner) else ())]
+        for name in hooks:
+            for hook in self._methods(owner, name):
+                if via := self.body_skips(hook, owner):
+                    return f"setup hook {name}() {via}"
+        return None
+
     def _receiver(self, func: _Function, receiver: ast.ClassDef | None) -> ast.ClassDef | None:
         """The class ``self`` is inside ``func``: the test's class when ``func`` is
         inherited by it, else the class that defines ``func``, else none."""
@@ -721,6 +751,7 @@ class _Census:
                 reachable = (
                     module.module_level_skip()
                     or module.body_skips(test.node, test.owner)
+                    or (module.setup_skips(test.owner) if test.owner else None)
                     or scope.fixture_skips(requests)
                     or ""
                 )
