@@ -231,13 +231,7 @@ allowed_prefixes = [
 # 1 handler parameter(s)
 "packages/syn-domain/src/syn_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py:WorkflowDispatchProjection._write_dispatch_record.param:event_data" = { annotation = "dict[str, _EventValue]", verdict = "string-keyed", issue = "#1268" }
 
-# 9 handler parameter(s)
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_execution_started.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_phase_started.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_completed.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_failed.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_session_started.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_session_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+# 2 handler parameter(s)
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_artifact_created.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection._save_metrics.param:metrics" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
 

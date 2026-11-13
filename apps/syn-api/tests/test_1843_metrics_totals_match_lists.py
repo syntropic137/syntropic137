@@ -95,9 +95,7 @@ async def _start_session(session_id: str, workflow_id: str) -> None:
         "agent_provider": "claude",
         "started_at": STARTED_AT,
     }
-    manager = get_projection_mgr()
-    await manager.session_list.on_session_started(event)
-    await manager.dashboard_metrics.on_session_started(event)
+    await get_projection_mgr().session_list.on_session_started(event)
 
 
 async def _seed_sessions() -> None:
@@ -130,12 +128,11 @@ async def test_total_sessions_narrows_like_the_session_list(client: AsyncClient)
 
 
 async def _execution(execution_id: str, *fates: str) -> None:
-    """Start an execution and deliver its terminal events to every read model."""
+    """Start an execution and deliver its terminal events to the execution list."""
     from syn_api._wiring import get_projection_mgr
 
     manager = get_projection_mgr()
     executions = manager.workflow_execution_list
-    counters = manager.dashboard_metrics
     started = {
         "execution_id": execution_id,
         "workflow_id": "wf-a",
@@ -143,15 +140,12 @@ async def _execution(execution_id: str, *fates: str) -> None:
         "started_at": STARTED_AT,
     }
     await executions.on_workflow_execution_started(started)
-    await counters.on_workflow_execution_started(started)
     for fate in fates:
         event = {"execution_id": execution_id}
         if fate == "failed":
             await executions.on_workflow_failed(event)
-            await counters.on_workflow_failed(event)
         elif fate == "completed":
             await executions.on_workflow_completed(event)
-            await counters.on_workflow_completed(event)
 
 
 async def test_failed_workflows_is_the_execution_list_failed_count(client: AsyncClient) -> None:
