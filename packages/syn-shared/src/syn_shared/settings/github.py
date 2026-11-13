@@ -106,6 +106,17 @@ class GitHubAppSettings(BaseSettings):
     # COMPUTED PROPERTIES
     # =========================================================================
 
+    @classmethod
+    def env_var(cls, field_name: str) -> str:
+        """The environment variable that sets ``field_name`` (ADR-004).
+
+        Raises KeyError for a name that is not a field, so a message naming a
+        setting cannot drift from the setting itself.
+        """
+        if field_name not in cls.model_fields:
+            raise KeyError(field_name)
+        return f"{cls.model_config.get('env_prefix', '')}{field_name}".upper()
+
     @property
     def _has_usable_key_file(self) -> bool:
         """Check if app_private_key_file points to a non-empty PEM file."""

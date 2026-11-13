@@ -1,7 +1,9 @@
 """GitHub App repository access, checked before an execution is accepted (#598).
 
 The execute endpoint calls `_validate_all_repos_access` so a repository the App
-cannot reach is a 422 on the request, not a run that fails in its workspace.
+cannot reach is a 422 on the request, not a run that fails in its workspace. With
+no App configured at all, every repository is unreachable, so that is a 422 too
+(#1948): before it, the run was admitted and died in setup ~30 s later.
 """
 
 from __future__ import annotations
@@ -48,13 +50,16 @@ async def _validate_all_repos_access(repo_urls: list[str]) -> None:
 async def _validate_repo_access(repo_full_name: str) -> None:
     """Pre-validate that the GitHub App can access the target repository.
 
-    Raises HTTPException(422) if the App is not installed. Logs and
-    proceeds on transient errors (network, rate limit).
+    Raises HTTPException(422) if the App is not configured or not installed.
+    Logs and proceeds on transient errors (network, rate limit).
     """
-    from syn_shared.settings.github import GitHubAppSettings
+    # The same settings /health reads for its `github_app` degraded reason.
+    from syn_api._wiring import get_github_settings
 
-    if not GitHubAppSettings().is_configured:
-        return
+    if not get_github_settings().is_configured:
+        from syn_adapters.workspace_backends.service import GitHubAppNotConfiguredError
+
+        raise HTTPException(status_code=422, detail=str(GitHubAppNotConfiguredError()))
 
     from syn_adapters.github.client import GitHubAuthError, get_github_client
 
