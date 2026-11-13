@@ -48,22 +48,12 @@ export function unseenLabel(n: number): string {
 }
 
 /**
- * Which execution stream a session page holds while the session runs, or
- * null when it holds none. The stream carries an OperationRecorded frame per
- * operation (#1853), so a running session in an execution refreshes as its
- * operations land.
- */
-export function sessionStreamId(status: string | null | undefined, executionId: string | null | undefined): string | null {
-  return statusKind(status) === 'running' && executionId ? executionId : null
-}
-
-/**
  * How often a session page re-reads while it runs, ms, or null when it
- * need not. Only a running session outside any execution polls: it has no
- * stream to refresh it (see sessionStreamId), so it re-reads like the React
- * page does (3 s).
+ * need not. The API forwards no per-operation frame for a session (the
+ * OperationRecorded payload carries no execution_id, so realtime.py drops
+ * it), so a running session polls like the React page does (3 s).
  */
 export const RUNNING_SESSION_POLL_MS = 3000
-export function sessionPollMs(status: string | null | undefined, executionId: string | null | undefined): number | null {
-  return statusKind(status) === 'running' && !executionId ? RUNNING_SESSION_POLL_MS : null
+export function sessionPollMs(status: string | null | undefined): number | null {
+  return statusKind(status) === 'running' ? RUNNING_SESSION_POLL_MS : null
 }

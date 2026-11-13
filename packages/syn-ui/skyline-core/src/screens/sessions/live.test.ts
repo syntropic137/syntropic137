@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LIVE_OPS_INITIAL, RUNNING_SESSION_POLL_MS, liveOps, newestFirst, sessionOperations, sessionPollMs, sessionStreamId, unseenLabel, type SessionOperationInput } from './index'
+import { LIVE_OPS_INITIAL, RUNNING_SESSION_POLL_MS, liveOps, newestFirst, sessionOperations, sessionPollMs, unseenLabel, type SessionOperationInput } from './index'
 
 const op = (id: string, ts: string, tool = 'Bash'): SessionOperationInput => ({
   operation_id: id,
@@ -78,26 +78,11 @@ describe('unseenLabel and sessionPollMs', () => {
     expect(unseenLabel(4)).toBe('4 new operations')
   })
 
-  it('polls only while a session with no execution runs', () => {
-    expect(sessionPollMs('running', null)).toBe(RUNNING_SESSION_POLL_MS)
-    expect(sessionPollMs('started', undefined)).toBe(RUNNING_SESSION_POLL_MS)
-    expect(sessionPollMs('completed', null)).toBeNull()
-    expect(sessionPollMs('failed', null)).toBeNull()
-    expect(sessionPollMs(null, null)).toBeNull()
-  })
-
-  it('does not poll a running session its execution stream refreshes (#1853)', () => {
-    expect(sessionPollMs('running', 'ex-1')).toBeNull()
-    expect(sessionPollMs('started', 'ex-1')).toBeNull()
-  })
-})
-
-describe('sessionStreamId', () => {
-  it('holds the execution stream only while the session runs', () => {
-    expect(sessionStreamId('running', 'ex-1')).toBe('ex-1')
-    expect(sessionStreamId('started', 'ex-1')).toBe('ex-1')
-    expect(sessionStreamId('completed', 'ex-1')).toBeNull()
-    expect(sessionStreamId('running', null)).toBeNull()
-    expect(sessionStreamId(null, 'ex-1')).toBeNull()
+  it('polls only while the session runs', () => {
+    expect(sessionPollMs('running')).toBe(RUNNING_SESSION_POLL_MS)
+    expect(sessionPollMs('started')).toBe(RUNNING_SESSION_POLL_MS)
+    expect(sessionPollMs('completed')).toBeNull()
+    expect(sessionPollMs('failed')).toBeNull()
+    expect(sessionPollMs(null)).toBeNull()
   })
 })

@@ -4,8 +4,8 @@
   filter chips, Expand all and Copy all. Long timelines render in chunks as
   the reader scrolls (revealCount), so a 600-operation session stays light.
   Operations read newest first; while the session runs they refresh on the
-  execution's own stream, one OperationRecorded frame per operation (#1853);
-  a session outside any execution polls every 3 s instead. Rows that arrive while the reader is scrolled
+  execution's own stream (and a 3 s poll, since the API forwards no
+  per-operation frame yet). Rows that arrive while the reader is scrolled
   down keep the viewport still and show as "N new" (feedback 18ec6964).
 -->
 <script lang="ts">
@@ -27,7 +27,6 @@
     sessionDurationText,
     sessionOperations,
     sessionPollMs,
-    sessionStreamId,
     sessionTokens,
     transcriptAvailable,
     unseenLabel,
@@ -80,12 +79,12 @@
     return () => io.disconnect()
   })
 
-  // Live: a running session's execution stream invalidates its cached read per operation (#1853); one outside any execution polls.
-  const streamId = $derived(sessionStreamId(s?.status, s?.execution_id))
-  const pollMs = $derived(sessionPollMs(s?.status, s?.execution_id))
+  // Live: the execution's stream invalidates this session's cached read on its frames; a running session also polls.
+  const execId = $derived(s?.execution_id ?? null)
+  const pollMs = $derived(sessionPollMs(s?.status))
   $effect(() => {
-    const ex = streamId
-    if (!ex) return
+    const ex = execId
+    if (!ex || pollMs === null) return
     let stop: (() => void) | null = null
     let gone = false
     void import('@syn137/syn-ui-data/invalidate').then((m) => {
