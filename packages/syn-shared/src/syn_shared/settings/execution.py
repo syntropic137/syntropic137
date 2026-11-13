@@ -40,6 +40,44 @@ DEFAULT_INTERRUPT_BUDGET_SECONDS = 60.0
 EXECUTION_API_MEMORY_MIB = 96
 API_BASELINE_MEMORY_MIB = 128
 
+#: The most file content one phase's artifact collection may read into the API
+#: process, however many times it reads, and so also the largest single file
+#: it reads (#1552). Read as SYN_EXECUTION_COLLECTION_MAX_MB. Files are sized
+#: inside the workspace before they are read, so one over the cap is refused
+#: by name, never loaded.
+#:
+#: The cap is not the memory. Measured through scrub and conversion
+#: (test_1552_collection_fits_api_memory.py), a collection RETAINS up to
+#: COLLECTION_RETAINED_COPIES x what it scrubbed to across its awaits: the
+#: scrubbed bytes, the text decoded from them (up to 4 bytes a character once
+#: one character is outside Latin-1), and that text encoded again for storage.
+#: Scrubbing may grow what it reads (the marker is longer than a short value),
+#: but never past COLLECTION_SCRUB_GROWTH_RATIO plus a 4KiB slack per call; a
+#: file that would is refused by name. Collection scrubs twice (the adapter's
+#: values, then the workspace's), so it holds at most 1.125^2 x 4 = 5.07MiB.
+#:
+#: The scrub itself is synchronous on the event loop, so only one runs at a
+#: time, and its peak above what it returns is counted once per process,
+#: never per run. Its larger part is rewriting one line that holds a value:
+#: up to 71 times the line for JSON of empty containers (parse, rebuild,
+#: dump), so a line longer than COLLECTION_SCRUB_LINE_MAX_CHARS that holds a
+#: value refuses its file, and one rewrite costs at most 80 x 0.25 = 20MiB.
+#: That is inside the COLLECTION_TRANSIENT_COPIES x 4 = 32MiB a line read
+#: and searched costs, which is what is counted.
+#:
+#: So, per run: 55 (#1552's measurement) + 6 x 5.07 = 85.4MiB <= 96. With
+#: every run of the 2g default collecting at once:
+#: 128 + 20 x 85.4 + 8 x 4 = 1868MiB <= 2048. The 200MiB it replaced could not
+#: fit: 20 x 200MiB is twice the whole limit, before any copy.
+COLLECTION_MEMORY_MIB = 4
+COLLECTION_RETAINED_COPIES = 6
+COLLECTION_TRANSIENT_COPIES = 8
+COLLECTION_SCRUB_GROWTH_RATIO = 1.125
+COLLECTION_SCRUB_GROWTH_SLACK_BYTES = 4096
+COLLECTION_SCRUB_LINE_MAX_CHARS = 256 * 1024
+#: What #1552 measured one run holding besides its collection.
+EXECUTION_MEASURED_MEMORY_MIB = 55
+
 
 def executions_that_fit(memory_limit_mib: int) -> int:
     """How many concurrent executions an API memory limit can hold, at least 1."""
@@ -126,6 +164,27 @@ class ExecutionSettings(BaseSettings):
             "SYN_POLLING_MAX_CONCURRENT_DISPATCHES, which is now ignored."
         ),
     )
+
+    collection_max_mb: int = Field(
+        default=COLLECTION_MEMORY_MIB,
+        ge=1,
+        le=EXECUTION_API_MEMORY_MIB // COLLECTION_RETAINED_COPIES,
+        description=(
+            "The most file content, in MiB, one phase's artifact collection reads "
+            "into the API process across all its reads, and so the largest single "
+            "file it reads (#1552). Files are sized inside the workspace first: one "
+            "over the cap, or one that would take the phase past it, is refused by "
+            "name and recorded on the execution, never loaded. Held up to 6 times "
+            "over once scrubbed, decoded and stored, so default 4 fits the ~96MiB "
+            "of API memory each execution is allowed; raise it only with "
+            "API_MEMORY_LIMIT."
+        ),
+    )
+
+    @property
+    def collection_max_bytes(self) -> int:
+        """`collection_max_mb` in bytes."""
+        return self.collection_max_mb * 1024 * 1024
 
     # Sizing the budget from host capacity (#1715). The budget is
     # min(max_concurrent, cpu, memory, disk terms); see
