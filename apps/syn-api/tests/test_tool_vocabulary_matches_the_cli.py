@@ -57,7 +57,10 @@ import functools
 import shutil
 import subprocess
 import threading
+import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict
@@ -70,11 +73,21 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 from syn_shared.tools import ToolName, canonical_tool_name
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 #: No inference must ever happen: the grant is resolved locally, and a model the
 #: API does not know cannot be billed even if a real key is in the environment.
 _UNBILLABLE_MODEL = "definitely-not-a-model"
 
 _PROBE_TIMEOUT_SECONDS = 180
+
+#: Pulling the pinned image is retried, because a registry that is slow once is
+#: not evidence about the vocabulary (#2053). The pauses sit BETWEEN attempts,
+#: so the whole pull is bounded at 3 x 180 s + 15 s + 45 s = 10 minutes. No
+#: jitter: one runner pulls one image, so there is no herd to spread out.
+_PULL_ATTEMPTS = 3
+_PULL_BACKOFF_SECONDS = (15, 45)
 
 _RECORD_PATH = Path(__file__).parent / "tool_vocabulary_record.json"
 
@@ -208,31 +221,99 @@ def _probe_init_line(declared: str) -> _CliInitLine:
     raise AssertionError(msg)
 
 
+@dataclass(frozen=True)
+class _ImageAvailable:
+    """The pinned image is in the local Docker store."""
+
+
+@dataclass(frozen=True)
+class _NoDocker:
+    """There is no ``docker`` binary, so nothing here can be checked."""
+
+
+@dataclass(frozen=True)
+class _PullFailed:
+    """Docker is present and every attempt to pull the pinned image failed."""
+
+    attempts: int
+    last_error: str
+
+
+def _pull_error(argv: list[str]) -> str | None:
+    """Run one pull; ``None`` if it succeeded, otherwise what went wrong."""
+    try:
+        pulled = subprocess.run(  # fixed argv, no shell
+            argv,
+            capture_output=True,
+            check=False,
+            timeout=_PROBE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return f"timed out after {_PROBE_TIMEOUT_SECONDS} s"
+    if pulled.returncode == 0:
+        return None
+    stderr = pulled.stderr.decode(errors="replace").strip()
+    return f"exit {pulled.returncode}: {stderr or '(no stderr)'}"
+
+
 @functools.cache
-def _image_is_available() -> bool:
+def _pinned_image_availability() -> _ImageAvailable | _NoDocker | _PullFailed:
+    """Whether the pinned image can be probed, pulling it if it is absent.
+
+    Cached for the session, failure included. A failure is only reached after
+    every attempt has run and been reported, so remembering it hides no retry;
+    NOT remembering it would make each of the parametrized cases spend another
+    ten minutes reaching the same verdict.
+    """
     if shutil.which("docker") is None:
-        return False
-    pulled = subprocess.run(  # fixed argv, no shell
+        return _NoDocker()
+    inspected = subprocess.run(  # fixed argv, no shell
         ["docker", "image", "inspect", DEFAULT_WORKSPACE_IMAGE],
         capture_output=True,
         check=False,
     )
-    if pulled.returncode == 0:
-        return True
-    return (
-        subprocess.run(  # fixed argv, no shell
-            ["docker", "pull", "--quiet", DEFAULT_WORKSPACE_IMAGE],
-            capture_output=True,
-            check=False,
-            timeout=_PROBE_TIMEOUT_SECONDS,
-        ).returncode
-        == 0
-    )
+    if inspected.returncode == 0:
+        return _ImageAvailable()
+    last_error = ""
+    for attempt in range(_PULL_ATTEMPTS):
+        if attempt:
+            time.sleep(_PULL_BACKOFF_SECONDS[attempt - 1])
+        error = _pull_error(["docker", "pull", "--quiet", DEFAULT_WORKSPACE_IMAGE])
+        if error is None:
+            return _ImageAvailable()
+        last_error = error
+    return _PullFailed(attempts=_PULL_ATTEMPTS, last_error=last_error)
+
+
+def _require_pinned_image() -> str:
+    """The pinned image, or a loud skip when there is no Docker, or a failure.
+
+    Only a missing ``docker`` binary skips. A registry that will not serve the
+    image FAILS, with one named message rather than a subprocess traceback:
+    turning it into a skip would report "unverified" as if nothing were wrong,
+    on exactly the runners that are supposed to verify (#2053).
+    """
+    availability = _pinned_image_availability()
+    match availability:
+        case _ImageAvailable():
+            return DEFAULT_WORKSPACE_IMAGE
+        case _NoDocker():
+            pytest.skip(
+                f"needs Docker and the pinned workspace image {DEFAULT_WORKSPACE_IMAGE}. "
+                "SKIPPED means the vocabulary was NOT checked against the CLI on this "
+                "run - treat it as unverified, not as a pass (#1207)."
+            )
+        case _PullFailed(attempts=attempts, last_error=last_error):
+            pytest.fail(
+                f"pinned image {DEFAULT_WORKSPACE_IMAGE} could not be pulled after "
+                f"{attempts} attempts: {last_error}",
+                pytrace=False,
+            )
 
 
 @pytest.fixture
 def pinned_image() -> str:
-    """The pinned image to probe, or a loud skip.
+    """The pinned image to probe; see ``_require_pinned_image`` for the rest.
 
     A FIXTURE, not a module-level ``skipif``, and that is not a style choice.
     The availability check shells out to ``docker image inspect`` and then to
@@ -242,13 +323,7 @@ def pinned_image() -> str:
     runner, most dev machines) paid for the pull anyway. Deferring it to the
     tests that need it means the unit half touches Docker never.
     """
-    if not _image_is_available():
-        pytest.skip(
-            f"needs Docker and the pinned workspace image {DEFAULT_WORKSPACE_IMAGE}. "
-            "SKIPPED means the vocabulary was NOT checked against the CLI on this "
-            "run - treat it as unverified, not as a pass (#1207)."
-        )
-    return DEFAULT_WORKSPACE_IMAGE
+    return _require_pinned_image()
 
 
 @pytest.mark.unit
@@ -374,3 +449,93 @@ class TestTheVocabularyMatchesThePinnedCli:
             "Re-probe and update the record: its grants were read from a "
             "version this image no longer runs."
         )
+
+
+@dataclass(frozen=True)
+class _CompletedPull:
+    """What a fake ``subprocess.run`` returns: the two fields the helper reads."""
+
+    returncode: int
+    stderr: bytes = b""
+
+
+@pytest.mark.unit
+class TestThePinnedImageIsPulledOrNamedAsUnpullable:
+    """A slow registry is retried, then failed by name - never an ERROR (#2053).
+
+    ``subprocess.run`` is replaced, so no test here talks to Docker. They go
+    through ``_require_pinned_image``, the thing the fixture returns, because
+    the outcome that matters is the skip or failure a reader sees, not the
+    value the helper hands back.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fresh_session(self, monkeypatch: pytest.MonkeyPatch) -> Iterator[list[float]]:
+        _pinned_image_availability.cache_clear()
+        sleeps: list[float] = []
+        monkeypatch.setattr(time, "sleep", sleeps.append)
+        monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/docker")
+        yield sleeps
+        _pinned_image_availability.cache_clear()
+
+    def _registry(
+        self, monkeypatch: pytest.MonkeyPatch, pulls: list[_CompletedPull | None]
+    ) -> list[list[str]]:
+        """Image absent locally; each pull does the next thing in ``pulls``.
+
+        ``None`` is a pull that hits the timeout.
+        """
+        calls: list[list[str]] = []
+
+        def fake_run(argv: list[str], **kwargs: object) -> _CompletedPull:
+            calls.append(argv)
+            if argv[:3] == ["docker", "image", "inspect"]:
+                return _CompletedPull(returncode=1)
+            outcome = pulls.pop(0)
+            if outcome is None:
+                raise subprocess.TimeoutExpired(argv, _PROBE_TIMEOUT_SECONDS)
+            return outcome
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        return calls
+
+    def test_a_timeout_then_a_success_is_available(
+        self, monkeypatch: pytest.MonkeyPatch, _fresh_session: list[float]
+    ) -> None:
+        calls = self._registry(monkeypatch, [None, _CompletedPull(returncode=0)])
+
+        assert _require_pinned_image() == DEFAULT_WORKSPACE_IMAGE
+        assert [argv[1] for argv in calls] == ["image", "pull", "pull"]
+        assert _fresh_session == [_PULL_BACKOFF_SECONDS[0]]
+
+    def test_every_attempt_timing_out_is_one_named_failure(
+        self, monkeypatch: pytest.MonkeyPatch, _fresh_session: list[float]
+    ) -> None:
+        calls = self._registry(monkeypatch, [None] * _PULL_ATTEMPTS)
+
+        with pytest.raises(pytest.fail.Exception) as failed:
+            _require_pinned_image()
+
+        assert str(failed.value) == (
+            f"pinned image {DEFAULT_WORKSPACE_IMAGE} could not be pulled after "
+            f"{_PULL_ATTEMPTS} attempts: timed out after {_PROBE_TIMEOUT_SECONDS} s"
+        )
+        assert [argv[1] for argv in calls].count("pull") == _PULL_ATTEMPTS
+        assert _fresh_session == list(_PULL_BACKOFF_SECONDS)
+
+    def test_a_registry_refusal_fails_with_its_stderr_instead_of_skipping(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        refused = _CompletedPull(returncode=1, stderr=b"denied: 503 Service Unavailable\n")
+        self._registry(monkeypatch, [refused] * _PULL_ATTEMPTS)
+
+        with pytest.raises(pytest.fail.Exception, match="after 3 attempts: exit 1: denied: 503"):
+            _require_pinned_image()
+
+    def test_no_docker_binary_is_the_only_skip(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = self._registry(monkeypatch, [])
+        monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+        with pytest.raises(pytest.skip.Exception, match="SKIPPED means the vocabulary was NOT"):
+            _require_pinned_image()
+        assert calls == []
