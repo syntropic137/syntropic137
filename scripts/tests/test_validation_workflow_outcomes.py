@@ -33,6 +33,11 @@ _FALLIBLE_PLACEHOLDER = re.compile(r"\b([A-Z][A-Z_]+): <[^>]*\b(?:FAILED|MISSING
 #: `KEY: MISSING` written out in prose, as the sentinel lines are.
 _FALLIBLE_LITERAL = re.compile(r"\b([A-Z][A-Z_]+): (?:FAILED|MISSING)\b")
 
+#: Failures a report line states in prose, not as a `KEY: VALUE` the patterns
+#: above can find. `SKILL_SOURCE: searched` means injection lost its mechanism
+#: even when the sentinel is right.
+_PROSE_FAILURES = {"selfhost-skills-injection-v1/report": {"SKILL_SOURCE"}}
+
 #: A missing permission, token scope or injected skill is the deployment's
 #: machinery, never the brief (phase-outcomes.mdx, `failure_reason`).
 _OUTCOME_RULE = ("success: false", 'failure_reason: "platform"')
@@ -64,6 +69,7 @@ def _outcome_paragraphs(prompt: str) -> list[str]:
 
 def test_every_validation_phase_is_collected() -> None:
     # A glob that silently matched nothing would make every test below vacuous.
+    assert set(_PROSE_FAILURES) <= set(_PROMPTS)
     assert set(_PROMPTS) == {
         "selfhost-delegation-v1/build-and-delegate",
         "selfhost-github-ops-v1/exercise",
@@ -76,7 +82,7 @@ def test_every_validation_phase_is_collected() -> None:
 @pytest.mark.parametrize("phase", sorted(_PROMPTS))
 def test_a_failed_capability_is_reported_as_success_false(phase: str) -> None:
     prompt = _PROMPTS[phase]
-    fallible = _fallible_lines(prompt)
+    fallible = _fallible_lines(prompt) | _PROSE_FAILURES.get(phase, set())
     assert fallible, f"{phase} reports no line that can fail; the parser no longer fits it"
 
     rules = _outcome_paragraphs(prompt)

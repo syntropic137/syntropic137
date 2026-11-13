@@ -25,7 +25,8 @@ Answer only from what is actually in your context. A wrong `MISSING` is a useful
 result; a fabricated sentinel is worse than a failure, because it makes a broken
 deployment look healthy.
 
-If `SENTINEL` or `EXTERNAL_SKILL` is `MISSING`, end with `TASK_RESULT`
-`success: false` and `failure_reason: "platform"`: skill injection is the
-deployment's machinery, and the brief is not the problem. Only when both reached
-you is it `success: true`.
+If `SENTINEL` or `EXTERNAL_SKILL` is `MISSING`, or `SKILL_SOURCE` is
+`searched`, end with `TASK_RESULT` `success: false` and
+`failure_reason: "platform"`: skill injection is the deployment's machinery, and
+the brief is not the problem. Only when both skills were already in your context
+is it `success: true`.
