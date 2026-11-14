@@ -104,7 +104,7 @@ async def create_workflow(
 |------|------|---------|-------------|
 | `name` | `str` | required | Workflow name |
 | `workflow_type` | `str` | `"custom"` | Type: research, planning, implementation, review, deployment, custom |
-| `classification` | `str` | `"standard"` | Classification: standard, advanced |
+| `classification` | `str` | `"standard"` | Classification, case-insensitive: simple, standard, complex, epic. Unknown values are refused with 422 |
 | `repository_url` | `str` | `""` | Repository URL (empty = no repo configured; ADR-058) |
 | `repository_ref` | `str` | `"main"` | Git ref/branch |
 | `description` | `str \| None` | `None` | Human-readable description |

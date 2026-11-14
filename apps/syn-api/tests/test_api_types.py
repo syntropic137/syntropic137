@@ -134,7 +134,7 @@ class TestWorkflowDetail:
             id="wf-123",
             name="Multi-Phase",
             workflow_type="implementation",
-            classification="advanced",
+            classification="complex",
             phases=[],
         )
         assert detail.id == "wf-123"

@@ -10551,6 +10551,7 @@
           "classification": {
             "type": "string",
             "title": "Classification",
+            "description": "Workflow classification, case-insensitive: simple, standard, complex, epic. An unknown value is refused with 422 (#2286).",
             "default": "standard"
           },
           "repository_url": {
