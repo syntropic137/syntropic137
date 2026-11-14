@@ -322,6 +322,8 @@ class PhaseWorkspace:
             agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
             outcome=outcome,
             last_agent_message=last_agent_message,
+            # The same named primary as the completed path (ADR-078 D7, #2084).
+            primary_path=COMMANDS_REPORT_PATH if phase.kind is PhaseKind.COMMAND else None,
         )
         kept = output.artifact_ids
         if output.refused:
