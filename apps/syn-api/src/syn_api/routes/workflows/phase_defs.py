@@ -32,18 +32,29 @@ if TYPE_CHECKING:
     )
 
 
+class UnknownWorkflowTypeError(ValueError):
+    """A workflow type outside `WorkflowType`; every entrance answers 422 (#2290)."""
+
+    def __init__(self, workflow_type: object) -> None:
+        from syn_domain.contexts.orchestration import WorkflowType
+
+        allowed = ", ".join(WorkflowType)
+        super().__init__(f"workflow_type must be one of: {allowed}; got {workflow_type!r}")
+
+
 def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
+    """The workflow type named, case-insensitively, or a ValueError naming the choices.
+
+    An unknown value used to become CUSTOM with a 201, so `analysis` (which a
+    shipped workflow declared) was stored as something the caller never asked
+    for (#2290). The allowed values come from the enum, so they cannot drift.
+    """
     from syn_domain.contexts.orchestration import WorkflowType
 
-    type_map: dict[str, WorkflowType] = {
-        "research": WorkflowType.RESEARCH,
-        "planning": WorkflowType.PLANNING,
-        "implementation": WorkflowType.IMPLEMENTATION,
-        "review": WorkflowType.REVIEW,
-        "deployment": WorkflowType.DEPLOYMENT,
-        "custom": WorkflowType.CUSTOM,
-    }
-    return type_map.get(workflow_type.lower(), WorkflowType.CUSTOM)
+    try:
+        return WorkflowType(workflow_type.lower())
+    except ValueError:
+        raise UnknownWorkflowTypeError(workflow_type) from None
 
 
 def _resolve_classification(classification: str) -> WorkflowClassification:

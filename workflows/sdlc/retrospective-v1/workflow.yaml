@@ -5,7 +5,7 @@ description: >
   tests. Five phases: gather the corpus, classify by cause and cost, find what
   changed, work out why every gate passed, and prescribe the specific test that
   would have caught it.
-type: analysis
+type: custom
 classification: standard
 requires_repos: true
 

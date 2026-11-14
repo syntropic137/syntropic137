@@ -53,6 +53,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseDefinition,
     PhaseExecutionType,
     WorkflowClassification,
+    WorkflowType,
     require_consistent_phase_kind,
     require_supported_execution_type,
 )
@@ -839,7 +840,9 @@ class WorkflowDefinition(BaseModel):
     description: str | None = None
 
     # Classification
-    type: str = "custom"
+    # An enum like classification, so an unknown type fails validation here
+    # instead of being stored as CUSTOM by whoever builds the command (#2290).
+    type: WorkflowType = WorkflowType.CUSTOM
     classification: WorkflowClassification = WorkflowClassification.STANDARD
 
     # Repository context
