@@ -64,8 +64,10 @@ async def _validate_repo_access(repo_full_name: str) -> None:
     except ValidationError as exc:
         # A half-configured App (an ID with no readable key) fails settings
         # validation; /health reports it as `github_app` degraded, so refuse
-        # it here the same way instead of answering 500.
-        logger.warning("GitHub App settings are invalid: %s", exc)
+        # it here the same way instead of answering 500. Never log `exc` itself:
+        # its text carries the raw input, secrets included (ADR-004 s4).
+        problems = [(e["loc"], e["type"]) for e in exc.errors(include_input=False)]
+        logger.warning("GitHub App settings are invalid: %s", problems)
         raise HTTPException(status_code=422, detail=str(GitHubAppNotConfiguredError())) from exc
     if not configured:
         raise HTTPException(status_code=422, detail=str(GitHubAppNotConfiguredError()))

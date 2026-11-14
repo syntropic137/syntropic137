@@ -192,3 +192,54 @@ async def test_a_half_configured_app_is_refused_with_the_fix_not_a_500(
     assert response.status_code == 422, response.text
     assert response.json()["detail"] == not_configured_message()
     assert execution.launched == 0
+
+
+SECRET = "REVIEW_CREDENTIAL_1948"
+
+
+@pytest.fixture
+def invalid_app_holding_a_secret(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, request: pytest.FixtureRequest
+) -> Iterator[None]:
+    """Settings that fail validation while a secret sits in the raw input.
+
+    Pydantic's ValidationError text repeats that input before SecretStr can
+    redact it, so logging the error would write the secret to the API log.
+    """
+    from syn_shared.settings.github import GitHubAppSettings, reset_github_settings
+
+    monkeypatch.chdir(tmp_path)  # no stray .env supplies a key
+    for field in GitHubAppSettings.model_fields:
+        monkeypatch.delenv(GitHubAppSettings.env_var(field), raising=False)
+    if request.param == "webhook-secret":
+        monkeypatch.setenv(GitHubAppSettings.env_var("app_id"), "1948")
+        monkeypatch.setenv(GitHubAppSettings.env_var("webhook_secret"), SECRET)
+    else:
+        monkeypatch.setenv(GitHubAppSettings.env_var("private_key"), SECRET)
+    reset_github_settings()
+    yield
+    reset_github_settings()
+
+
+@pytest.mark.parametrize(
+    "invalid_app_holding_a_secret", ["webhook-secret", "private-key"], indirect=True
+)
+@pytest.mark.usefixtures("invalid_app_holding_a_secret")
+async def test_an_invalid_app_refusal_never_logs_its_secrets(
+    client: AsyncClient, execution: _CapturingExecute, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    from syn_shared.settings.github import not_configured_message
+
+    workflow_id = await _create_workflow(requires_repos=True)
+
+    with caplog.at_level(logging.DEBUG):
+        response = await client.post(f"/workflows/{workflow_id}/execute", json={"repos": [REPO]})
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == not_configured_message()
+    assert execution.launched == 0
+    assert "GitHub App settings are invalid" in caplog.text
+    assert SECRET not in caplog.text
+    assert SECRET not in response.text
