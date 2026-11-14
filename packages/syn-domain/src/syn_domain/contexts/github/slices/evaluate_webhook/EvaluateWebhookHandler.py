@@ -23,6 +23,7 @@ from syn_domain.contexts.github.domain.commands.RecordTriggerBlockedCommand impo
 from syn_domain.contexts.github.domain.commands.RecordTriggerFiredCommand import (
     RecordTriggerFiredCommand,
 )
+from syn_domain.contexts.github.ports.PullRequestDraftPort import PullRequestReadiness
 from syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator import (
     evaluate_conditions,
     extract_inputs,
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
         TriggerRuleAggregate,
     )
+    from syn_domain.contexts.github.ports.PullRequestDraftPort import PullRequestDraftPort
     from syn_domain.contexts.github.slices.evaluate_webhook.debouncer import (
         TriggerDebouncer,
     )
@@ -62,11 +64,14 @@ class EvaluateWebhookHandler:
         on_fire: OnFireCallback | None = None,
         dispatch_rate_limit: int = 10,
         dispatch_rate_window_seconds: float = 60.0,
+        draft_reader: PullRequestDraftPort | None = None,
     ) -> None:
         self._store = store
         self._repository = repository
         self._debouncer = debouncer
         self._on_fire = on_fire
+        # Without a reader no draft check runs: unit tests and offline only.
+        self._draft_reader = draft_reader
         self._guards = SafetyGuards(
             dispatch_rate_limit=dispatch_rate_limit,
             dispatch_rate_window_seconds=dispatch_rate_window_seconds,
@@ -123,6 +128,10 @@ class EvaluateWebhookHandler:
                 payload=payload,
             )
 
+        draft_block = await self._draft_block(rule, event, repository, installation_id, payload)
+        if draft_block is not None:
+            return draft_block
+
         # Acquire per-(trigger, pr) lock so the guard check and record_fire
         # are atomic.  Without this, two concurrent webhook handlers could
         # both pass the concurrency guard before either records its fire.
@@ -137,6 +146,44 @@ class EvaluateWebhookHandler:
                 installation_id,
                 payload,
             )
+
+    async def _draft_block(
+        self,
+        rule: IndexedTrigger,
+        event: str,
+        repository: str,
+        installation_id: str,
+        payload: dict[str, Any],
+    ) -> TriggerBlockedResult | None:
+        """Block a ``check_run`` rule whose PR is a draft, or whose draft state is unknown.
+
+        A draft PR is still owned by the workflow that opened it, and a second
+        agent on its branch is the hazard (#2058). The ``check_run`` payload has
+        no draft flag, so it is read live; this path is only reached from live
+        ingestion, never from event-store replay. Fails closed: an unknown state
+        blocks rather than firing blind.
+        """
+        if self._draft_reader is None or not event.startswith("check_run"):
+            return None
+        pr_number = _extract_pr_number(payload)
+        if pr_number is None:
+            return None
+        reading = await self._draft_reader.read_draft_state(repository, pr_number, installation_id)
+        if reading.readiness is PullRequestReadiness.READY:
+            return None
+        if reading.readiness is PullRequestReadiness.DRAFT:
+            guard_name, reason = "draft_pull_request", f"PR #{pr_number} is a draft"
+        else:
+            guard_name = "draft_state_unknown"
+            reason = f"Could not read draft state of PR #{pr_number}: {reading.detail}"
+        return await self._record_block(
+            rule=rule,
+            guard_name=guard_name,
+            reason=reason,
+            event=event,
+            repository=repository,
+            payload=payload,
+        )
 
     async def _guarded_evaluate(
         self,
@@ -297,6 +344,7 @@ class EvaluateWebhookHandler:
         store = self._store
         repo = self._repository
         on_fire = self._on_fire
+        draft_reader = self._draft_reader
 
         async def _on_timer() -> None:
             # Re-evaluate without debouncer to prevent infinite loops
@@ -305,6 +353,7 @@ class EvaluateWebhookHandler:
                 repository=repo,
                 debouncer=None,
                 on_fire=on_fire,
+                draft_reader=draft_reader,
             )
             await handler.evaluate(
                 event=event,
