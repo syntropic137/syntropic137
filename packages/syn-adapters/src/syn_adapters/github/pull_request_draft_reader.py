@@ -58,9 +58,7 @@ class GitHubPullRequestDraftReader(PullRequestDraftPort):
             data = await client.api_get(f"/repos/{repository}/pulls/{pr_number}", installation)
             pull = _Pull.model_validate(data)
         except (GitHubAppError, httpx.HTTPError, ValueError, ValidationError) as exc:
-            logger.warning(
-                "Could not read draft state of %s#%d: %s", repository, pr_number, exc
-            )
+            logger.warning("Could not read draft state of %s#%d: %s", repository, pr_number, exc)
             return PullRequestDraftReading(
                 readiness=PullRequestReadiness.UNKNOWN,
                 detail=f"{type(exc).__name__}: {exc}",

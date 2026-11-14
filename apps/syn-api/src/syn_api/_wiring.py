@@ -35,13 +35,13 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
         SessionObservationPort,
     )
+    from syn_domain.contexts.github.ports import PullRequestDraftPort
     from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
         _ExecutionService,
     )
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
-    from syn_domain.contexts.github.ports import PullRequestDraftPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
     from syn_domain.contexts.orchestration.domain.aggregate_claude_plugin_registration.ClaudePluginRegistrationAggregate import (
