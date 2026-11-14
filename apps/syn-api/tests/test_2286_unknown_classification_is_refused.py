@@ -17,7 +17,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 from typing import TYPE_CHECKING
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, Response
 
 from syn_domain.contexts.orchestration import WorkflowClassification
 
@@ -53,10 +53,9 @@ async def client() -> AsyncIterator[AsyncClient]:
         yield c
 
 
-async def _create(client: AsyncClient, **fields: object) -> tuple[int, dict[str, object]]:
+async def _create(client: AsyncClient, **fields: object) -> Response:
     body = {"name": "Classification #2286", "requires_repos": False, **fields}
-    response = await client.post("/workflows", json=body)
-    return response.status_code, response.json()
+    return await client.post("/workflows", json=body)
 
 
 async def _stored_classification(client: AsyncClient, workflow_id: str) -> tuple[str, str]:
@@ -73,11 +72,11 @@ async def _stored_classification(client: AsyncClient, workflow_id: str) -> tuple
 async def test_every_classification_round_trips(
     client: AsyncClient, classification: WorkflowClassification
 ) -> None:
-    status, created = await _create(client, classification=classification.value)
+    response = await _create(client, classification=classification.value)
 
-    assert status == 201, created
-    assert created["classification"] == classification.value
-    assert await _stored_classification(client, str(created["id"])) == (
+    assert response.status_code == 201, response.text
+    assert response.json()["classification"] == classification.value
+    assert await _stored_classification(client, response.json()["id"]) == (
         classification.value,
         classification.value,
     )
@@ -87,10 +86,10 @@ async def test_every_classification_round_trips(
 async def test_an_unknown_classification_is_refused_naming_the_choices(
     client: AsyncClient, classification: str
 ) -> None:
-    status, body = await _create(client, classification=classification)
+    response = await _create(client, classification=classification)
 
-    assert status == 422, body
-    message = str(body)
+    assert response.status_code == 422, response.text
+    message = response.text
     for allowed in WorkflowClassification:
         assert allowed.value in message
     listed = await client.get("/workflows")
@@ -98,18 +97,18 @@ async def test_an_unknown_classification_is_refused_naming_the_choices(
 
 
 async def test_an_absent_classification_is_standard(client: AsyncClient) -> None:
-    status, created = await _create(client)
+    response = await _create(client)
 
-    assert status == 201, created
-    assert await _stored_classification(client, str(created["id"])) == ("standard", "standard")
+    assert response.status_code == 201, response.text
+    assert await _stored_classification(client, response.json()["id"]) == ("standard", "standard")
 
 
 async def test_mixed_case_is_accepted_and_stored_canonically(client: AsyncClient) -> None:
-    status, created = await _create(client, classification="EpIc")
+    response = await _create(client, classification="EpIc")
 
-    assert status == 201, created
-    assert created["classification"] == "epic"
-    assert await _stored_classification(client, str(created["id"])) == ("epic", "epic")
+    assert response.status_code == 201, response.text
+    assert response.json()["classification"] == "epic"
+    assert await _stored_classification(client, response.json()["id"]) == ("epic", "epic")
 
 
 async def test_the_service_refuses_too() -> None:
