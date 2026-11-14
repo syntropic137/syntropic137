@@ -31,7 +31,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
     WorkflowExecutionResult,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("github_app_configured")]
 
 WORKFLOW_ID = "wf-1547"
 EXECUTION_ID = "exec-1547-unrecorded"

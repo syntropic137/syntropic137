@@ -80,16 +80,27 @@ class TestResolveTargetRepo:
 
 
 @pytest.mark.asyncio
-async def test_validate_skips_when_github_app_not_configured() -> None:
-    """No-op when GitHub App is not configured."""
+async def test_validate_refuses_when_github_app_not_configured() -> None:
+    """422 naming the fix when no GitHub App is configured (#1948).
+
+    This was a no-op until #1948: the run was admitted, then failed in setup.
+    """
+    from fastapi import HTTPException
+
     mock_settings = MagicMock()
     mock_settings.is_configured = False
 
-    with patch(
-        "syn_shared.settings.github.GitHubAppSettings",
-        return_value=mock_settings,
+    with (
+        patch(
+            "syn_api._wiring.get_github_settings",
+            return_value=mock_settings,
+        ),
+        pytest.raises(HTTPException) as exc_info,
     ):
         await _validate_repo_access("owner/repo")
+
+    assert exc_info.value.status_code == 422
+    assert "SYN_GITHUB_APP_ID" in str(exc_info.value.detail)
 
 
 @pytest.mark.asyncio
@@ -109,7 +120,7 @@ async def test_validate_raises_422_when_app_not_installed() -> None:
 
     with (
         patch(
-            "syn_shared.settings.github.GitHubAppSettings",
+            "syn_api._wiring.get_github_settings",
             return_value=mock_settings,
         ),
         patch(
@@ -142,7 +153,7 @@ async def test_validate_raises_422_with_generic_auth_error() -> None:
 
     with (
         patch(
-            "syn_shared.settings.github.GitHubAppSettings",
+            "syn_api._wiring.get_github_settings",
             return_value=mock_settings,
         ),
         patch(
@@ -171,7 +182,7 @@ async def test_validate_proceeds_on_transient_error() -> None:
 
     with (
         patch(
-            "syn_shared.settings.github.GitHubAppSettings",
+            "syn_api._wiring.get_github_settings",
             return_value=mock_settings,
         ),
         patch(
@@ -193,7 +204,7 @@ async def test_validate_succeeds_when_app_installed() -> None:
 
     with (
         patch(
-            "syn_shared.settings.github.GitHubAppSettings",
+            "syn_api._wiring.get_github_settings",
             return_value=mock_settings,
         ),
         patch(
@@ -520,6 +531,7 @@ class TestReservedRepoInputKeyRejection:
         assert "'repos'" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
+    @pytest.mark.usefixtures("github_app_configured")
     async def test_typed_repos_field_is_accepted(self) -> None:
         """The typed `repos: list[str]` field is the canonical channel — no rejection.
 
