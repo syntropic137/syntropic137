@@ -46,6 +46,16 @@ def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
     return type_map.get(workflow_type.lower(), WorkflowType.CUSTOM)
 
 
+class UnknownClassificationError(ValueError):
+    """A classification outside `WorkflowClassification`; every entrance answers 422 (#2286)."""
+
+    def __init__(self, classification: object) -> None:
+        from syn_domain.contexts.orchestration import WorkflowClassification
+
+        allowed = ", ".join(WorkflowClassification)
+        super().__init__(f"classification must be one of: {allowed}; got {classification!r}")
+
+
 def _resolve_classification(classification: str) -> WorkflowClassification:
     """The classification named, case-insensitively, or a ValueError naming the choices.
 
@@ -58,9 +68,7 @@ def _resolve_classification(classification: str) -> WorkflowClassification:
     try:
         return WorkflowClassification(classification.lower())
     except ValueError:
-        allowed = ", ".join(WorkflowClassification)
-        msg = f"classification must be one of: {allowed}; got {classification!r}"
-        raise ValueError(msg) from None
+        raise UnknownClassificationError(classification) from None
 
 
 def _as_bool(value: object, field: str) -> bool:

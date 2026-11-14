@@ -121,3 +121,89 @@ async def test_the_service_refuses_too() -> None:
     assert isinstance(result, Err)
     assert result.error == WorkflowError.INVALID_INPUT
     assert "simple, standard, complex, epic" in (result.message or "")
+
+
+# `syn workflow install` and `syn workflow create --from` POST YAML to a
+# separate entrance that never sees the JSON request validator.
+_YAML = """\
+id: yaml-2286
+name: YAML classification #2286
+type: research
+{classification}
+requires_repos: false
+phases:
+  - id: only
+    name: Only
+    order: 1
+    prompt_template: Say hello.
+"""
+
+
+async def _install(
+    client: AsyncClient, classification: str | None, *, force: bool = False
+) -> Response:
+    line = "" if classification is None else f"classification: {classification}"
+    return await client.post(
+        "/workflows/from-yaml",
+        params={"version": "1.0.0", "package_name": "pkg-2286", "force": force},
+        content=_YAML.format(classification=line),
+        headers={"content-type": "application/yaml"},
+    )
+
+
+@pytest.mark.parametrize("classification", list(WorkflowClassification))
+async def test_every_classification_round_trips_through_yaml_install(
+    client: AsyncClient, classification: WorkflowClassification
+) -> None:
+    response = await _install(client, classification.value)
+
+    assert response.status_code == 201, response.text
+    assert await _stored_classification(client, response.json()["id"]) == (
+        classification.value,
+        classification.value,
+    )
+
+
+async def test_an_absent_classification_is_standard_through_yaml_install(
+    client: AsyncClient,
+) -> None:
+    response = await _install(client, None)
+
+    assert response.status_code == 201, response.text
+    assert await _stored_classification(client, response.json()["id"]) == ("standard", "standard")
+
+
+@pytest.mark.parametrize("classification", ["advanced", "compelx"])
+async def test_yaml_install_refuses_an_unknown_classification_with_422(
+    client: AsyncClient, classification: str
+) -> None:
+    response = await _install(client, classification)
+
+    assert response.status_code == 422, response.text
+    for allowed in WorkflowClassification:
+        assert allowed.value in response.text
+    listed = await client.get("/workflows")
+    assert listed.json()["workflows"] == []
+
+
+@pytest.mark.parametrize("classification", ["advanced", "compelx"])
+async def test_a_refused_reinstall_leaves_the_stored_classification(
+    client: AsyncClient, classification: str
+) -> None:
+    installed = await _install(client, "complex")
+    assert installed.status_code == 201, installed.text
+
+    response = await _install(client, classification, force=True)
+
+    assert response.status_code == 422, response.text
+    assert await _stored_classification(client, installed.json()["id"]) == ("complex", "complex")
+
+
+async def test_other_yaml_schema_errors_keep_their_400(client: AsyncClient) -> None:
+    response = await client.post(
+        "/workflows/from-yaml",
+        content="id: yaml-2286\nname: No phases\nclassification: standard\nphases: nope\n",
+        headers={"content-type": "application/yaml"},
+    )
+
+    assert response.status_code == 400, response.text

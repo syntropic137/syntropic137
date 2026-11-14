@@ -22,6 +22,7 @@ from syn_api._wiring import (
     sync_published_events_to_projections,
 )
 from syn_api.routes.workflows.phase_defs import (
+    UnknownClassificationError,
     _build_input_declarations,
     _build_phase_defs,
     _resolve_classification,
@@ -662,7 +663,8 @@ async def create_workflow_from_yaml(
     ``name`` and ``workflow_id`` when supplied.
 
     Raises ``ValueError`` on malformed YAML or unresolved ``prompt_file:``
-    references (no base_dir is available server-side). Raises
+    references (no base_dir is available server-side), and its subclass
+    ``UnknownClassificationError`` for a classification outside the enum. Raises
     ``ClaudePluginError`` (any subclass) if a referenced claude plugin is
     not yet present in the lock projection -- per the #726 Phase A design
     the API does not fetch; the CLI must register plugins via
@@ -671,6 +673,7 @@ async def create_workflow_from_yaml(
     """
     import yaml
     from event_sourcing.core.errors import ConcurrencyConflictError, StreamAlreadyExistsError
+    from pydantic import ValidationError
 
     from syn_api._wiring import get_claude_plugin_resolution_service
     from syn_domain.contexts.orchestration import (
@@ -684,6 +687,14 @@ async def create_workflow_from_yaml(
         definition = WorkflowDefinition.from_yaml(yaml_content)
     except yaml.YAMLError as e:
         raise ValueError(f"Malformed YAML: {e}") from e
+    except ValidationError as e:
+        # The JSON route refuses an unknown classification with 422; the
+        # package install entrance must not answer the same mistake with 400
+        # (#2286). Other schema errors keep their existing 400.
+        for error in e.errors():
+            if error["loc"] == ("classification",):
+                raise UnknownClassificationError(error["input"]) from e
+        raise
 
     # Implicit fetch: any claude_plugins ref the YAML declares must be
     # present in the lock projection before we register the workflow.
@@ -820,6 +831,8 @@ async def create_workflow_from_yaml_endpoint(
         # Stable error_code (claude_plugin_unreachable, etc.) so CLI/dashboard
         # can render actionable messages without string sniffing.
         raise http_exception_for_claude_plugin_error(e) from e
+    except UnknownClassificationError as e:
+        raise HTTPException(status_code=422, detail=f"Invalid workflow YAML: {e}") from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid workflow YAML: {e}") from e
 
