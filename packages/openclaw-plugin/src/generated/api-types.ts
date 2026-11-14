@@ -10744,7 +10744,10 @@ export interface components {
             /** Package Name */
             package_name?: string | null;
         };
-        /** WorkflowSummaryResponse */
+        /**
+         * WorkflowSummaryResponse
+         * @description One workflow template in the `GET /workflows` list.
+         */
         WorkflowSummaryResponse: {
             /** Id */
             id: string;
@@ -10752,6 +10755,10 @@ export interface components {
             name: string;
             /** Workflow Type */
             workflow_type: string;
+            /** Classification */
+            classification: string;
+            /** Description */
+            description: string | null;
             /** Phase Count */
             phase_count: number;
             /** Created At */

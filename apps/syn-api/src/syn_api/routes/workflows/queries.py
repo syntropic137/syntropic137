@@ -57,12 +57,12 @@ router = APIRouter(prefix="/workflows", tags=["workflows"])
 # -- Response Models ----------------------------------------------------------
 
 
+# The only workflow summary model, built once in `list_workflows()`. A second,
+# service-layer copy used to sit between the domain and this one, so every
+# field had two build sites; the list dropped `classification` and
+# `description` at the second (#975).
 class WorkflowSummaryResponse(BaseModel):
-    """One row of `GET /workflows`, and what `list_workflows()` returns.
-
-    The only summary model: a second, service-layer copy used to sit between
-    the domain and this one, and every field had two build sites. The list
-    dropped `classification` and `description` at the second (#975)."""
+    """One workflow template in the `GET /workflows` list."""
 
     model_config = ConfigDict(from_attributes=True)
     id: str

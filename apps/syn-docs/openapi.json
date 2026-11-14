@@ -26014,6 +26014,21 @@
             "type": "string",
             "title": "Workflow Type"
           },
+          "classification": {
+            "type": "string",
+            "title": "Classification"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "phase_count": {
             "type": "integer",
             "title": "Phase Count"
@@ -26063,10 +26078,13 @@
           "id",
           "name",
           "workflow_type",
+          "classification",
+          "description",
           "phase_count",
           "requires_repos"
         ],
-        "title": "WorkflowSummaryResponse"
+        "title": "WorkflowSummaryResponse",
+        "description": "One workflow template in the `GET /workflows` list."
       },
       "WorkflowTagsResponse": {
         "properties": {
