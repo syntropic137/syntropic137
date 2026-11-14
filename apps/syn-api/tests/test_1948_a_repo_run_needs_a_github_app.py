@@ -25,6 +25,7 @@ from syn_domain.contexts._shared import AdmissionGate
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
+    from pathlib import Path
 
     from syn_domain.contexts._shared import AdmissionTicket
 
@@ -151,3 +152,43 @@ async def test_a_run_naming_no_repo_is_admitted_without_an_app(
 
     assert response.status_code == 200, response.text
     assert execution.launched == 1
+
+
+@pytest.fixture
+def half_configured_app(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, request: pytest.FixtureRequest
+) -> Iterator[None]:
+    """An App ID whose private key is unusable, loaded from the environment for real.
+
+    Settings validation rejects this shape, which /health reports as `github_app`
+    degraded; before the fix the execute route answered it with a 500.
+    """
+    from syn_shared.settings.github import GitHubAppSettings, reset_github_settings
+
+    key_file = tmp_path / "app.pem"
+    if request.param == "empty-pem":
+        key_file.write_text("")
+    monkeypatch.chdir(tmp_path)  # no stray .env supplies a key
+    for field in GitHubAppSettings.model_fields:
+        monkeypatch.delenv(GitHubAppSettings.env_var(field), raising=False)
+    monkeypatch.setenv(GitHubAppSettings.env_var("app_id"), "1948")
+    monkeypatch.setenv(GitHubAppSettings.env_var("app_private_key_file"), str(key_file))
+    reset_github_settings()
+    yield
+    reset_github_settings()
+
+
+@pytest.mark.parametrize("half_configured_app", ["missing-pem", "empty-pem"], indirect=True)
+@pytest.mark.usefixtures("half_configured_app")
+async def test_a_half_configured_app_is_refused_with_the_fix_not_a_500(
+    client: AsyncClient, execution: _CapturingExecute
+) -> None:
+    from syn_shared.settings.github import not_configured_message
+
+    workflow_id = await _create_workflow(requires_repos=True)
+
+    response = await client.post(f"/workflows/{workflow_id}/execute", json={"repos": [REPO]})
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == not_configured_message()
+    assert execution.launched == 0

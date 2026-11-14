@@ -54,11 +54,20 @@ async def _validate_repo_access(repo_full_name: str) -> None:
     Logs and proceeds on transient errors (network, rate limit).
     """
     # The same settings /health reads for its `github_app` degraded reason.
+    from pydantic import ValidationError
+
+    from syn_adapters.workspace_backends.service import GitHubAppNotConfiguredError
     from syn_api._wiring import get_github_settings
 
-    if not get_github_settings().is_configured:
-        from syn_adapters.workspace_backends.service import GitHubAppNotConfiguredError
-
+    try:
+        configured = get_github_settings().is_configured
+    except ValidationError as exc:
+        # A half-configured App (an ID with no readable key) fails settings
+        # validation; /health reports it as `github_app` degraded, so refuse
+        # it here the same way instead of answering 500.
+        logger.warning("GitHub App settings are invalid: %s", exc)
+        raise HTTPException(status_code=422, detail=str(GitHubAppNotConfiguredError())) from exc
+    if not configured:
         raise HTTPException(status_code=422, detail=str(GitHubAppNotConfiguredError()))
 
     from syn_adapters.github.client import GitHubAuthError, get_github_client
