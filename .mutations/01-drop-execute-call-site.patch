@@ -1,12 +1,12 @@
 diff --git a/apps/syn-api/src/syn_api/routes/executions/commands.py b/apps/syn-api/src/syn_api/routes/executions/commands.py
-index 410d09fa6..9c3a1635b 100644
+index 4f5d681fd..2c8db6cad 100644
 --- a/apps/syn-api/src/syn_api/routes/executions/commands.py
 +++ b/apps/syn-api/src/syn_api/routes/executions/commands.py
-@@ -721,7 +721,7 @@ async def _validate_execution_request(
+@@ -719,7 +719,7 @@ async def _validate_execution_request(
+     # headless claude downstream.
+     _check_phase_providers(workflow)
  
-     # #1948: a Claude phase with no Anthropic credential fails mid-run; refuse
-     # it here, on the same predicate /health reports.
--    require_claude_credential(workflow)
+-    require_claude_credential(workflow)  # #1948: the predicate /health reports
 +    pass
  
      # #1039: same shape as the provider check - a stored declaration the
