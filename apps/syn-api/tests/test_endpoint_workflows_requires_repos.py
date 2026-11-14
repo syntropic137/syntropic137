@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from syn_api.routes.workflows.queries import list_workflows_endpoint
+from syn_api.routes.workflows.queries import WorkflowSummaryResponse, list_workflows_endpoint
 from syn_api.types import DeclaredSkillResponse, Ok
 
 pytestmark = pytest.mark.unit
@@ -33,7 +33,7 @@ class _Summary:
     name: str
     requires_repos: bool
     workflow_type: str = "custom"
-    classification: str | None = None
+    classification: str = "standard"
     phase_count: int = 1
     description: str | None = None
     created_at: str | None = None
@@ -43,9 +43,14 @@ class _Summary:
     skills: tuple[DeclaredSkillResponse, ...] = ()
 
 
+def _response(s: _Summary) -> WorkflowSummaryResponse:
+    """What `list_workflows()` returns: the endpoint now serves its rows as they are."""
+    return WorkflowSummaryResponse.model_validate(s, from_attributes=True)
+
+
 async def _list(summaries: list[_Summary]):
     async def fake_list_workflows(*, workflow_type, limit, offset, include_archived, search):
-        return Ok(summaries)
+        return Ok([_response(s) for s in summaries])
 
     mgr = MagicMock()
     mgr.workflow_list.count = AsyncMock(return_value=len(summaries))
@@ -108,6 +113,8 @@ class TestTheFieldCannotBeOmittedAgain:
                 id="wf-1",
                 name="wf",
                 workflow_type="custom",
+                classification="standard",
+                description=None,
                 phase_count=1,
                 created_at=None,
                 runs_count=0,

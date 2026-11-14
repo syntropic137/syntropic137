@@ -1,6 +1,5 @@
 """Tests for syn_api.types — Result type and Pydantic models."""
 
-from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -19,7 +18,6 @@ from syn_api.types import (
     SessionSummary,
     WorkflowDetail,
     WorkflowError,
-    WorkflowSummary,
 )
 from syn_domain.contexts.orchestration import PhaseProgress
 
@@ -128,35 +126,6 @@ class TestErrorEnums:
 # ---------------------------------------------------------------------------
 # Pydantic models serialization
 # ---------------------------------------------------------------------------
-
-
-class TestWorkflowSummary:
-    def test_create_from_dict(self):
-        wf = WorkflowSummary(
-            id="wf-123",
-            name="Research Workflow",
-            workflow_type="research",
-            classification="standard",
-            phase_count=3,
-        )
-        assert wf.id == "wf-123"
-        assert wf.name == "Research Workflow"
-        assert wf.phase_count == 3
-        assert wf.runs_count == 0
-
-    def test_serialization_round_trip(self):
-        wf = WorkflowSummary(
-            id="wf-123",
-            name="Test",
-            workflow_type="custom",
-            classification="standard",
-            phase_count=1,
-            created_at=datetime(2025, 1, 1, tzinfo=UTC),
-            runs_count=5,
-        )
-        data = wf.model_dump()
-        wf2 = WorkflowSummary.model_validate(data)
-        assert wf == wf2
 
 
 class TestWorkflowDetail:

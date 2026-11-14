@@ -14,7 +14,7 @@ async def list_workflows(
     limit: int = 100,
     offset: int = 0,
     auth: AuthContext | None = None,
-) -> Result[list[WorkflowSummary], WorkflowError]
+) -> Result[list[WorkflowSummaryResponse], WorkflowError]
 ```
 
 **Parameters:**
@@ -26,7 +26,7 @@ async def list_workflows(
 | `offset` | `int` | `0` | Pagination offset |
 | `auth` | `AuthContext \| None` | `None` | Optional auth context |
 
-**Returns:** `Ok(list[WorkflowSummary])` on success.
+**Returns:** `Ok(list[WorkflowSummaryResponse])` on success.
 
 **Errors:** None expected under normal operation.
 
