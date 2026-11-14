@@ -218,25 +218,12 @@ def _resolve_codex_credentials() -> str | None:
 
 
 class GitHubAppNotConfiguredError(Exception):
-    """Raised when GitHub App is required but not configured.
-
-    Its text is also the execute endpoint's refusal for a run that names a
-    repository (#1948), so the late error and the early one say the same thing.
-    """
+    """Raised when GitHub App is required but not configured; also execute's 422 (#1948)."""
 
     def __init__(self) -> None:
-        from syn_shared.settings.constants import PUBLIC_DOCS_URL
-        from syn_shared.settings.github import GitHubAppSettings
+        from syn_shared.settings.github import not_configured_message
 
-        app_id = GitHubAppSettings.env_var("app_id")
-        key_file = GitHubAppSettings.env_var("app_private_key_file")
-        super().__init__(
-            "GitHub App is not configured, and a run that names a repository needs it. "
-            f"Set {app_id} and {key_file} (the path to the App's PEM private key), "
-            "then restart the API. On a selfhost install, `npx @syntropic137/setup init` "
-            "creates the App and its key (GitHub App step). "
-            f"See {PUBLIC_DOCS_URL}/docs/guide/github-integration"
-        )
+        super().__init__(not_configured_message())
 
 
 class _MintedToken(Protocol):
