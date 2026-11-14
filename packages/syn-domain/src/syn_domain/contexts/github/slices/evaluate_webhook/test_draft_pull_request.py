@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
 import pytest
 
@@ -72,7 +71,7 @@ class _Dispatches:
     def __init__(self) -> None:
         self.fired: list[TriggerMatchResult] = []
 
-    async def __call__(self, result: TriggerMatchResult, payload: dict[str, Any]) -> None:
+    async def __call__(self, result: TriggerMatchResult, payload: object) -> None:
         del payload
         self.fired.append(result)
 
@@ -100,7 +99,8 @@ async def _self_healing_store() -> InMemoryTriggerQueryStore:
     return store
 
 
-def _failed_check(check_id: int = 1) -> dict[str, Any]:
+def _failed_check(check_id: int = 1, *, on_a_pr: bool = True):
+    pull_requests = [{"number": _PR, "head": {"ref": "feat/x", "sha": _HEAD_SHA}}]
     return {
         "repository": {"full_name": _REPO},
         "check_run": {
@@ -108,9 +108,7 @@ def _failed_check(check_id: int = 1) -> dict[str, Any]:
             "name": f"lint-{check_id}",
             "conclusion": "failure",
             "head_sha": _HEAD_SHA,
-            "pull_requests": [
-                {"number": _PR, "head": {"ref": "feat/x", "sha": _HEAD_SHA}},
-            ],
+            "pull_requests": pull_requests if on_a_pr else [],
         },
         "_delivery_id": f"delivery-{check_id}",
     }
@@ -131,13 +129,15 @@ def _handler(
     )
 
 
-async def _evaluate(handler: EvaluateWebhookHandler, payload: dict[str, Any]) -> list[object]:
+async def _evaluate(
+    handler: EvaluateWebhookHandler, check_id: int = 1, *, on_a_pr: bool = True
+) -> list[object]:
     return list(
         await handler.evaluate(
             event="check_run.completed",
             repository=_REPO,
             installation_id="inst-1",
-            payload=payload,
+            payload=_failed_check(check_id, on_a_pr=on_a_pr),
         )
     )
 
@@ -146,7 +146,7 @@ async def test_a_failed_check_on_a_draft_pr_does_not_dispatch() -> None:
     store, dispatches = await _self_healing_store(), _Dispatches()
     draft_state = _DraftState(_DRAFT)
 
-    [result] = await _evaluate(_handler(store, draft_state, dispatches), _failed_check())
+    [result] = await _evaluate(_handler(store, draft_state, dispatches))
 
     assert dispatches.fired == []
     assert isinstance(result, TriggerBlockedResult)
@@ -158,10 +158,10 @@ async def test_the_same_check_dispatches_once_the_pr_is_ready() -> None:
     store, dispatches = await _self_healing_store(), _Dispatches()
     draft_state = _DraftState(_DRAFT)
     handler = _handler(store, draft_state, dispatches)
-    await _evaluate(handler, _failed_check())
+    await _evaluate(handler)
 
     draft_state.reading = PullRequestDraftReading(readiness=_READY)
-    [result] = await _evaluate(handler, _failed_check())
+    [result] = await _evaluate(handler)
 
     # The draft block spent neither the delivery nor an attempt.
     assert isinstance(result, TriggerMatchResult)
@@ -179,7 +179,7 @@ async def test_an_unknown_draft_state_does_not_dispatch_and_says_why(
     )
 
     with caplog.at_level(logging.INFO):
-        [result] = await _evaluate(_handler(store, draft_state, dispatches), _failed_check())
+        [result] = await _evaluate(_handler(store, draft_state, dispatches))
 
     assert dispatches.fired == []
     assert isinstance(result, TriggerBlockedResult)
@@ -195,8 +195,8 @@ async def test_two_failed_checks_on_one_head_sha_dispatch_once() -> None:
     handler = _handler(store, _DraftState(PullRequestDraftReading(readiness=_READY)), dispatches)
 
     first, second = await asyncio.gather(
-        _evaluate(handler, _failed_check(check_id=1)),
-        _evaluate(handler, _failed_check(check_id=2)),
+        _evaluate(handler, check_id=1),
+        _evaluate(handler, check_id=2),
     )
 
     assert len(dispatches.fired) == 1
@@ -208,7 +208,7 @@ async def test_a_ready_pr_dispatches_as_before() -> None:
     store, dispatches = await _self_healing_store(), _Dispatches()
     draft_state = _DraftState(PullRequestDraftReading(readiness=_READY))
 
-    [result] = await _evaluate(_handler(store, draft_state, dispatches), _failed_check())
+    [result] = await _evaluate(_handler(store, draft_state, dispatches))
 
     assert isinstance(result, TriggerMatchResult)
     assert [f.execution_id for f in dispatches.fired] == [result.execution_id]
@@ -217,10 +217,7 @@ async def test_a_ready_pr_dispatches_as_before() -> None:
 async def test_a_check_with_no_pull_request_is_not_looked_up() -> None:
     store, dispatches = await _self_healing_store(), _Dispatches()
     draft_state = _DraftState(_DRAFT)
-    payload = _failed_check()
-    payload["check_run"]["pull_requests"] = []
-
-    await _evaluate(_handler(store, draft_state, dispatches), payload)
+    await _evaluate(_handler(store, draft_state, dispatches), on_a_pr=False)
 
     assert draft_state.asked == []
 

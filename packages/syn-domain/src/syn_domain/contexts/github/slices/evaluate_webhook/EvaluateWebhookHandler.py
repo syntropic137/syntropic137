@@ -128,14 +128,21 @@ class EvaluateWebhookHandler:
                 payload=payload,
             )
 
-        draft_block = await self._draft_block(rule, event, repository, installation_id, payload)
-        if draft_block is not None:
-            return draft_block
+        pr_number = _extract_pr_number(payload)
+        draft_hold = await self._check_draft(event, repository, installation_id, pr_number)
+        if draft_hold is not None:
+            return await self._record_block(
+                rule=rule,
+                guard_name=draft_hold.guard_name,
+                reason=draft_hold.reason,
+                event=event,
+                repository=repository,
+                payload=payload,
+            )
 
         # Acquire per-(trigger, pr) lock so the guard check and record_fire
         # are atomic.  Without this, two concurrent webhook handlers could
         # both pass the concurrency guard before either records its fire.
-        pr_number = _extract_pr_number(payload)
         lock_key = (rule.trigger_id, pr_number)
         lock = self._fire_locks.setdefault(lock_key, asyncio.Lock())
         async with lock:
@@ -147,15 +154,14 @@ class EvaluateWebhookHandler:
                 payload,
             )
 
-    async def _draft_block(
+    async def _check_draft(
         self,
-        rule: IndexedTrigger,
         event: str,
         repository: str,
         installation_id: str,
-        payload: dict[str, Any],
-    ) -> TriggerBlockedResult | None:
-        """Block a ``check_run`` rule whose PR is a draft, or whose draft state is unknown.
+        pr_number: int | None,
+    ) -> GuardResult | None:
+        """Hold back a ``check_run`` rule whose PR is a draft, or whose draft state is unknown.
 
         A draft PR is still owned by the workflow that opened it, and a second
         agent on its branch is the hazard (#2058). The ``check_run`` payload has
@@ -163,26 +169,19 @@ class EvaluateWebhookHandler:
         ingestion, never from event-store replay. Fails closed: an unknown state
         blocks rather than firing blind.
         """
-        if self._draft_reader is None or not event.startswith("check_run"):
-            return None
-        pr_number = _extract_pr_number(payload)
-        if pr_number is None:
+        if self._draft_reader is None or pr_number is None or not event.startswith("check_run"):
             return None
         reading = await self._draft_reader.read_draft_state(repository, pr_number, installation_id)
         if reading.readiness is PullRequestReadiness.READY:
             return None
         if reading.readiness is PullRequestReadiness.DRAFT:
-            guard_name, reason = "draft_pull_request", f"PR #{pr_number} is a draft"
-        else:
-            guard_name = "draft_state_unknown"
-            reason = f"Could not read draft state of PR #{pr_number}: {reading.detail}"
-        return await self._record_block(
-            rule=rule,
-            guard_name=guard_name,
-            reason=reason,
-            event=event,
-            repository=repository,
-            payload=payload,
+            return GuardResult(
+                False, f"PR #{pr_number} is a draft", guard_name="draft_pull_request"
+            )
+        return GuardResult(
+            False,
+            f"Could not read draft state of PR #{pr_number}: {reading.detail}",
+            guard_name="draft_state_unknown",
         )
 
     async def _guarded_evaluate(
