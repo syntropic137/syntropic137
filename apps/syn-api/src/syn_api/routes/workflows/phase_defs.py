@@ -46,16 +46,29 @@ def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
     return type_map.get(workflow_type.lower(), WorkflowType.CUSTOM)
 
 
+class UnknownClassificationError(ValueError):
+    """A classification outside `WorkflowClassification`; every entrance answers 422 (#2286)."""
+
+    def __init__(self, classification: object) -> None:
+        from syn_domain.contexts.orchestration import WorkflowClassification
+
+        allowed = ", ".join(WorkflowClassification)
+        super().__init__(f"classification must be one of: {allowed}; got {classification!r}")
+
+
 def _resolve_classification(classification: str) -> WorkflowClassification:
+    """The classification named, case-insensitively, or a ValueError naming the choices.
+
+    An unknown value used to become STANDARD with a 201, so `advanced` (which
+    the API docs once listed) was stored as something the caller never asked
+    for (#2286). The allowed values come from the enum, so they cannot drift.
+    """
     from syn_domain.contexts.orchestration import WorkflowClassification
 
-    classification_map: dict[str, WorkflowClassification] = {
-        "simple": WorkflowClassification.SIMPLE,
-        "standard": WorkflowClassification.STANDARD,
-        "complex": WorkflowClassification.COMPLEX,
-        "epic": WorkflowClassification.EPIC,
-    }
-    return classification_map.get(classification.lower(), WorkflowClassification.STANDARD)
+    try:
+        return WorkflowClassification(classification.lower())
+    except ValueError:
+        raise UnknownClassificationError(classification) from None
 
 
 def _as_bool(value: object, field: str) -> bool:
