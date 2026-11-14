@@ -719,9 +719,7 @@ async def _validate_execution_request(
     # headless claude downstream.
     _check_phase_providers(workflow)
 
-    # #1948: a Claude phase with no Anthropic credential fails mid-run; refuse
-    # it here, on the same predicate /health reports.
-    require_claude_credential(workflow)
+    require_claude_credential(workflow)  # #1948: the predicate /health reports
 
     # #1039: same shape as the provider check - a stored declaration the
     # platform cannot honour must be a 422, never a ghost execution.
