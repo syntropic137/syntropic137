@@ -83,3 +83,22 @@ def github_installation_resolves(monkeypatch: pytest.MonkeyPatch) -> _InstalledE
     app = _InstalledEverywhere()
     monkeypatch.setattr("syn_adapters.github.client.get_github_client", lambda: app)
     return app
+
+
+@pytest.fixture
+def github_app_configured(monkeypatch: pytest.MonkeyPatch) -> _InstalledEverywhere:
+    """A server with the GitHub App set up and installed on every repository.
+
+    Without it a test server has no GitHub App, and a run that names a
+    repository is refused at execute (#1948). Tests about execution itself,
+    rather than about that refusal, use this.
+    """
+    from pydantic import SecretStr
+
+    from syn_shared.settings.github import GitHubAppSettings
+
+    settings = GitHubAppSettings.model_construct(app_id="1948", private_key=SecretStr("pem"))
+    monkeypatch.setattr("syn_api._wiring.get_github_settings", lambda: settings)
+    app = _InstalledEverywhere()
+    monkeypatch.setattr("syn_adapters.github.client.get_github_client", lambda: app)
+    return app

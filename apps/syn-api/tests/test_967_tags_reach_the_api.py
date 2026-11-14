@@ -42,7 +42,7 @@ from syn_domain.contexts.orchestration.slices.list_executions.projection import 
     WorkflowExecutionListProjection,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("github_app_configured")]
 
 WORKFLOW_ID = "wf-967"
 NIGHTLY_ID = "exec-nightly-967"

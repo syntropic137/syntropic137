@@ -650,6 +650,21 @@ class TestSetupPhaseSecretsCreate:
                     require_github=True,
                 )
 
+    def test_github_app_not_configured_names_the_settings_that_exist(self) -> None:
+        """The text names real selfhost settings and public docs, not internal paths (#1948)."""
+        from syn_adapters.workspace_backends.service.setup_phase_secrets import (
+            GitHubAppNotConfiguredError,
+        )
+
+        message = str(GitHubAppNotConfiguredError())
+
+        assert "GITHUB_APP_INSTALLATION_ID" not in message
+        assert "docs/deployment" not in message
+        assert "SYN_GITHUB_APP_ID" in message
+        assert "SYN_GITHUB_APP_PRIVATE_KEY_FILE" in message
+        assert "npx @syntropic137/setup init" in message
+        assert "https://docs.syntropic137.com/docs/guide/github-integration" in message
+
 
 # =============================================================================
 # Claude credential resolution

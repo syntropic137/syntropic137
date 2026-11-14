@@ -218,14 +218,12 @@ def _resolve_codex_credentials() -> str | None:
 
 
 class GitHubAppNotConfiguredError(Exception):
-    """Raised when GitHub App is required but not configured."""
+    """Raised when GitHub App is required but not configured; also execute's 422 (#1948)."""
 
     def __init__(self) -> None:
-        super().__init__(
-            "GitHub App is not configured. Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, "
-            "and GITHUB_APP_INSTALLATION_ID environment variables. "
-            "See docs/deployment/github-app-setup.md for details."
-        )
+        from syn_shared.settings.github import not_configured_message
+
+        super().__init__(not_configured_message())
 
 
 class _MintedToken(Protocol):
