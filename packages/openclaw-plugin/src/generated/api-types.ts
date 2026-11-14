@@ -3587,6 +3587,7 @@ export interface components {
             workflow_type: string;
             /**
              * Classification
+             * @description Workflow classification, case-insensitive: simple, standard, complex, epic. An unknown value is refused with 422 (#2286).
              * @default standard
              */
             classification: string;
