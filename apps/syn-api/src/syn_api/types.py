@@ -1052,6 +1052,9 @@ class ArtifactSummary(BaseModel):
     #: as filtered on, because a filter a client cannot verify is what the
     #: silent drop looked like from outside.
     execution_id: str | None = None
+    #: Which agent session produced it (#975). Reported for the same reason as
+    #: execution_id: the list filters on it, so the rows must show it.
+    session_id: str | None = None
     phase_id: str | None = None
     artifact_type: str = ""
     title: str | None = None
