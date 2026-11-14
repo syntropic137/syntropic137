@@ -11,6 +11,7 @@ key produced for the same check_run delivered via webhook.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -102,3 +103,18 @@ def synthesize_check_run_event(
         payload=payload,
         received_at=datetime.now(UTC),
     )
+
+
+READY_FOR_REVIEW_SCOPE = "ready_for_review"
+
+
+def rescope_after_ready_for_review(event: NormalizedEvent) -> NormalizedEvent:
+    """Give a re-checked ``check_run`` its own dedup key once its PR is ready (#2058).
+
+    A failed check on a draft PR is held back, but ingesting it already spent
+    its dedup key, so the same check can never reach the evaluator again. When
+    the PR is marked ready for review its failed checks are re-checked under
+    ``{key}:ready_for_review``: a duplicate re-check is still deduplicated, and
+    the original key is untouched.
+    """
+    return replace(event, dedup_key=f"{event.dedup_key}:{READY_FOR_REVIEW_SCOPE}")

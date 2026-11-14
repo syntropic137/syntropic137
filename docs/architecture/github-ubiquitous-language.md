@@ -91,7 +91,16 @@ not Fire on one: a second agent on that branch is the hazard (#2058). A
 through `PullRequestDraftPort` and records the refusal as Blocked with
 `draft_pull_request`. When the flag cannot be read, the rule is Blocked with
 `draft_state_unknown` and the reason, never fired blind. Neither spends an
-attempt or the delivery: the same check Fires once the PR is ready.
+attempt or the delivery, but ingesting the check did spend its dedup key.
+
+### Ready for review
+
+The moment a Draft PR stops being a draft (`pull_request.ready_for_review`).
+Its head SHA's failed checks are re-checked once, under a dedup key scoped to
+the transition (`{key}:ready_for_review`), so the same check that was Blocked
+as a draft Fires now, and a second delivery of the transition does not Fire it
+again. A re-check that is rate limited is not retried: the held checks wait for
+the next push.
 
 ## Dispatch
 

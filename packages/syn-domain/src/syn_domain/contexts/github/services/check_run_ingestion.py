@@ -23,6 +23,9 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.github import PendingSHA, PollerState, synthesize_check_run_event
+from syn_domain.contexts.github.slices.event_pipeline.check_run_synthesizer import (
+    rescope_after_ready_for_review,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -98,11 +101,13 @@ class CheckRunIngestionService:
         """Pipeline observer callback -- registers pending SHAs for PR events.
 
         Called by EventPipeline after each non-deduplicated event. Only acts
-        on pull_request events with actions that indicate new code to check.
+        on pull_request events with actions that indicate new code to check,
+        or a draft marked ready for review, whose failed checks were held back
+        while it was a draft and are re-checked now (#2058).
         """
         if event.event_type != "pull_request":
             return
-        if event.action not in ("opened", "synchronize", "reopened"):
+        if event.action not in ("opened", "synchronize", "reopened", "ready_for_review"):
             return
 
         pr = event.payload.get("pull_request", {})
@@ -130,6 +135,35 @@ class CheckRunIngestionService:
             event.repository,
             pr_number,
         )
+        if event.action == "ready_for_review" and await self._has_check_run_triggers():
+            await self._recheck_after_ready_for_review(pending)
+
+    async def _recheck_after_ready_for_review(self, pending: PendingSHA) -> None:
+        """Re-ingest the head SHA's completed checks once, now that the PR is not a draft.
+
+        Checks still running are left to the regular poll, which registered
+        them above. A rate-limited fetch is logged and not retried: the held
+        checks then wait for the next push, as before #2058.
+        """
+        if "/" not in pending.repository:
+            logger.warning("Invalid repository format (no '/'): %s", pending.repository)
+            return
+        owner, repo = pending.repository.split("/", 1)
+        result = await self._checks_api.fetch_check_runs(
+            owner=owner,
+            repo=repo,
+            ref=pending.sha,
+            installation_id=pending.installation_id,
+        )
+        if result.rate_limited:
+            logger.warning(
+                "Rate limited re-checking %s@%s after ready_for_review; held checks not re-checked",
+                pending.repository,
+                pending.sha[:8],
+            )
+            return
+        for raw_check_run in result.check_runs:
+            await self._ingest_synthesized_event(raw_check_run, pending, after_ready=True)
 
     async def _poll_loop(self) -> None:
         """Main polling loop -- runs until cancelled."""
@@ -220,12 +254,18 @@ class CheckRunIngestionService:
             )
 
     async def _ingest_synthesized_event(
-        self, raw_check_run: dict[str, object], pending: PendingSHA
+        self,
+        raw_check_run: dict[str, object],
+        pending: PendingSHA,
+        *,
+        after_ready: bool = False,
     ) -> None:
         """Synthesize a check_run event and feed it through the pipeline."""
         event = synthesize_check_run_event(raw_check_run, pending)
         if event is None:
             return
+        if after_ready:
+            event = rescope_after_ready_for_review(event)
         try:
             result = await self._pipeline.ingest(event)
             if result.status == "processed" and result.triggers_fired:
