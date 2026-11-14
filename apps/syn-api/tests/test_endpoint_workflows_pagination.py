@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from syn_api.routes.workflows.queries import list_workflows_endpoint
+from syn_api.routes.workflows.queries import WorkflowSummaryResponse, list_workflows_endpoint
 from syn_api.types import DeclaredSkillResponse, Ok
 
 pytestmark = pytest.mark.unit
@@ -32,7 +32,7 @@ class _Summary:
     id: str
     name: str
     workflow_type: str = "custom"
-    classification: str | None = None
+    classification: str = "standard"
     phase_count: int = 1
     description: str | None = None
     created_at: str | None = None
@@ -55,7 +55,12 @@ async def _call(page: int, page_size: int = PAGE_SIZE):
     """Invoke the endpoint with the projection layer faked out."""
 
     async def fake_list_workflows(*, workflow_type, limit, offset, include_archived, search):
-        return Ok(_page(limit, offset))
+        return Ok(
+            [
+                WorkflowSummaryResponse.model_validate(s, from_attributes=True)
+                for s in _page(limit, offset)
+            ]
+        )
 
     mgr = MagicMock()
     mgr.workflow_list.count = AsyncMock(return_value=TOTAL_WORKFLOWS)

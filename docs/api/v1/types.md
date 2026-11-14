@@ -88,18 +88,24 @@ match result:
 
 ## Response Models
 
-### WorkflowSummary
+### WorkflowSummaryResponse
+
+One row of `GET /workflows`. Defined in `syn_api.routes.workflows.queries`.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | `str` | Workflow template ID |
 | `name` | `str` | Workflow name |
 | `workflow_type` | `str` | Type (research, custom, etc.) |
-| `classification` | `str` | Classification level |
+| `classification` | `str` | Classification (simple, standard, complex, epic) |
+| `description` | `str \| None` | Description, `null` when the workflow has none (always present) |
 | `phase_count` | `int` | Number of phases |
-| `description` | `str \| None` | Description |
-| `created_at` | `datetime \| None` | Creation timestamp |
+| `created_at` | `str \| None` | Creation timestamp (ISO 8601) |
 | `runs_count` | `int` | Number of executions |
+| `is_archived` | `bool` | Whether the template is archived |
+| `requires_repos` | `bool` | Whether execution needs repository access |
+| `tags` | `list[str]` | Tags, normalised and sorted |
+| `skills` | `list[DeclaredSkillResponse]` | Skills the workflow's phases declare |
 
 ### InputDeclarationResponse
 
@@ -129,7 +135,7 @@ Describes an expected workflow input. Used for validation, documentation, and UI
 
 ### WorkflowDetail
 
-Extends WorkflowSummary with:
+`id`, `name`, `description`, `workflow_type`, `classification`, `created_at` (a `datetime`) and `runs_count`, plus:
 - `phases: list[PhaseDefinitionResponse]` — phase definitions
 - `input_declarations: list[InputDeclarationResponse]` — declared workflow inputs (ISS-211)
 
