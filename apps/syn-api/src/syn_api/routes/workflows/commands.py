@@ -23,6 +23,7 @@ from syn_api._wiring import (
 )
 from syn_api.routes.workflows.phase_defs import (
     UnknownClassificationError,
+    UnknownWorkflowTypeError,
     _build_input_declarations,
     _build_phase_defs,
     _resolve_classification,
@@ -35,7 +36,11 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
-from syn_domain.contexts.orchestration import PHASE_ID_PATTERN, WorkflowClassification
+from syn_domain.contexts.orchestration import (
+    PHASE_ID_PATTERN,
+    WorkflowClassification,
+    WorkflowType,
+)
 from syn_shared.agents import AgentProvider
 from syn_shared.settings import get_settings
 
@@ -173,7 +178,7 @@ async def validate_yaml(
             WorkflowValidation(
                 valid=True,
                 name=definition.name,
-                workflow_type=definition.type,
+                workflow_type=definition.type.value,
                 phase_count=len(definition.phases),
             )
         )
@@ -266,7 +271,13 @@ class CreateWorkflowRequest(BaseModel):
         pattern=PHASE_ID_PATTERN,
     )
     name: str
-    workflow_type: str = "custom"
+    workflow_type: str = Field(
+        default=WorkflowType.CUSTOM.value,
+        description=(
+            f"Workflow type, case-insensitive: {', '.join(WorkflowType)}. "
+            "An unknown value is refused with 422 (#2290)."
+        ),
+    )
     classification: str = Field(
         default=WorkflowClassification.STANDARD.value,
         description=(
@@ -322,6 +333,12 @@ class CreateWorkflowRequest(BaseModel):
     def _validate_classification(cls, value: str) -> str:
         """Refuse an unknown classification at the boundary; store the canonical spelling."""
         return _resolve_classification(value).value
+
+    @field_validator("workflow_type")
+    @classmethod
+    def _validate_workflow_type(cls, value: str) -> str:
+        """Refuse an unknown workflow type at the boundary; store the canonical spelling."""
+        return _resolve_workflow_type(value).value
 
 
 class ValidateYamlRequest(BaseModel):
@@ -664,7 +681,8 @@ async def create_workflow_from_yaml(
 
     Raises ``ValueError`` on malformed YAML or unresolved ``prompt_file:``
     references (no base_dir is available server-side), and its subclass
-    ``UnknownClassificationError`` for a classification outside the enum. Raises
+    ``UnknownClassificationError`` for a classification outside the enum, and
+    ``UnknownWorkflowTypeError`` for a ``type`` outside the enum. Raises
     ``ClaudePluginError`` (any subclass) if a referenced claude plugin is
     not yet present in the lock projection -- per the #726 Phase A design
     the API does not fetch; the CLI must register plugins via
@@ -688,12 +706,15 @@ async def create_workflow_from_yaml(
     except yaml.YAMLError as e:
         raise ValueError(f"Malformed YAML: {e}") from e
     except ValidationError as e:
-        # The JSON route refuses an unknown classification with 422; the
-        # package install entrance must not answer the same mistake with 400
-        # (#2286). Other schema errors keep their existing 400.
+        # The JSON route refuses an unknown classification (#2286) or
+        # workflow type (#2290) with 422; the package install entrance must
+        # not answer the same mistake with 400. Other schema errors keep
+        # their existing 400.
         for error in e.errors():
             if error["loc"] == ("classification",):
                 raise UnknownClassificationError(error["input"]) from e
+            if error["loc"] == ("type",):
+                raise UnknownWorkflowTypeError(error["input"]) from e
         raise
 
     # Implicit fetch: any claude_plugins ref the YAML declares must be
@@ -831,7 +852,7 @@ async def create_workflow_from_yaml_endpoint(
         # Stable error_code (claude_plugin_unreachable, etc.) so CLI/dashboard
         # can render actionable messages without string sniffing.
         raise http_exception_for_claude_plugin_error(e) from e
-    except UnknownClassificationError as e:
+    except (UnknownClassificationError, UnknownWorkflowTypeError) as e:
         raise HTTPException(status_code=422, detail=f"Invalid workflow YAML: {e}") from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid workflow YAML: {e}") from e

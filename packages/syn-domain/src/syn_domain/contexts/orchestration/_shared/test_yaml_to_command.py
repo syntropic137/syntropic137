@@ -69,9 +69,15 @@ class TestBuildCommandFromDefinition:
         # require -R at runtime. Research/no-repo workflows must opt out.
         assert cmd.requires_repos is True
 
-    def test_unknown_type_falls_back_to_custom(self) -> None:
-        definition = _minimal_definition(type="not-a-real-type")
-        cmd = build_command_from_definition(definition)
+    def test_unknown_type_is_refused_not_stored_as_custom(self) -> None:
+        # It used to fall back to CUSTOM here, silently (#2290).
+        with pytest.raises(ValidationError) as excinfo:
+            _minimal_definition(type="analysis")
+        [error] = excinfo.value.errors()
+        assert error["loc"] == ("type",)
+
+    def test_absent_type_is_custom(self) -> None:
+        cmd = build_command_from_definition(_minimal_definition())
         assert cmd.workflow_type == WorkflowType.CUSTOM
 
     def test_overrides_apply_over_yaml_identity(self) -> None:

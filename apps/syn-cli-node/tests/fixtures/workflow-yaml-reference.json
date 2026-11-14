@@ -1032,7 +1032,7 @@
           "prompt_file": "phases/file.md"
         }
       ],
-      "document_sha256": "1796f9be153216abc60862f8eaf888e64f05608b159fe08268d540f92d60b0ee"
+      "document_sha256": "ccebff119d587b57ad6fc008c89d5fb7ffa2a95a73007cea35525ee3e6f118fa"
     },
     "workflows/sdlc/reverify-pr/workflow.yaml": {
       "phases": [

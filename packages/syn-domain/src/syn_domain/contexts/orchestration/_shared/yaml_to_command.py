@@ -4,17 +4,14 @@ Single source of truth for the mapping between YAML workflow definitions
 and the create-template command. Used by both the seeder
 (``SeedWorkflowService``) and the HTTP YAML-upload endpoint
 (``POST /workflows/from-yaml``) so installation via either path applies
-the same ADR-058 ``requires_repos`` inference and ``WorkflowType``
-fallback rules.
+the same ADR-058 ``requires_repos`` inference. ``WorkflowDefinition``
+has already refused an unknown ``type`` (#2290), so there is no fallback.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
-    WorkflowType,
-)
 from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
     CreateWorkflowTemplateCommand,
 )
@@ -61,10 +58,6 @@ def build_command_from_definition(
     Returns:
         Command ready to dispatch through ``CreateWorkflowTemplateHandler``.
     """
-    try:
-        workflow_type = WorkflowType(definition.type)
-    except ValueError:
-        workflow_type = WorkflowType.CUSTOM
     return CreateWorkflowTemplateCommand(
         version=version,
         source_digest=source_digest,
@@ -72,7 +65,7 @@ def build_command_from_definition(
         force=force,
         aggregate_id=workflow_id_override or definition.id,
         name=name_override or definition.name,
-        workflow_type=workflow_type,
+        workflow_type=definition.type,
         classification=definition.classification,
         repository_url=(definition.repository.url if definition.repository else ""),
         repository_ref=(definition.repository.ref if definition.repository else "main"),

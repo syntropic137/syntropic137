@@ -62,6 +62,38 @@ describe("workflow crud commands", () => {
       expect(out).toContain("wf-new-001");
     });
 
+    it("an unknown --type prints the API's 422 message, naming the choices (#2290)", async () => {
+      // The body POST /workflows returns for workflow_type "bogus", verbatim.
+      mockFetch.mockResolvedValue(
+        jsonResponse(
+          {
+            detail: [
+              {
+                type: "value_error",
+                loc: ["body", "workflow_type"],
+                msg: "Value error, workflow_type must be one of: research, planning, implementation, review, deployment, custom; got 'bogus'",
+                input: "bogus",
+                ctx: { error: {} },
+              },
+            ],
+          },
+          422,
+        ),
+      );
+
+      const run = createCommand.handler({
+        positionals: ["My Workflow"],
+        values: { type: "bogus" },
+      });
+
+      await expect(run).rejects.toThrow(CLIError);
+      await expect(run).rejects.toThrow(
+        "Failed to create workflow: Value error, workflow_type must be one of: research, planning, implementation, review, deployment, custom; got 'bogus'",
+      );
+      const request = mockFetch.mock.calls[0]![0] as Request;
+      expect(((await request.json()) as { workflow_type: string }).workflow_type).toBe("bogus");
+    });
+
     it("throws CLIError when name is missing", async () => {
       await expect(
         createCommand.handler({ positionals: [], values: {} }),

@@ -3859,7 +3859,7 @@
     "id": "sdlc-retrospective-v1",
     "name": "SDLC: Retrospective - classify failures, autopsy the gates, prescribe the tests",
     "description": "Turn a window of failed executions into filed issues and named regression tests. Five phases: gather the corpus, classify by cause and cost, find what changed, work out why every gate passed, and prescribe the specific test that would have caught it.\n",
-    "type": "analysis",
+    "type": "custom",
     "classification": "standard",
     "requires_repos": true,
     "phases": [
