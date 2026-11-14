@@ -34,7 +34,7 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
-from syn_domain.contexts.orchestration import PHASE_ID_PATTERN
+from syn_domain.contexts.orchestration import PHASE_ID_PATTERN, WorkflowClassification
 from syn_shared.agents import AgentProvider
 from syn_shared.settings import get_settings
 
@@ -70,7 +70,7 @@ async def create_workflow(
     Args:
         name: Workflow name.
         workflow_type: Type (research, planning, implementation, review, deployment, custom).
-        classification: Classification (standard, advanced).
+        classification: Classification (simple, standard, complex, epic).
         repository_url: Repository URL for the workflow.
         repository_ref: Repository ref/branch.
         description: Optional description.
@@ -266,7 +266,13 @@ class CreateWorkflowRequest(BaseModel):
     )
     name: str
     workflow_type: str = "custom"
-    classification: str = "standard"
+    classification: str = Field(
+        default=WorkflowClassification.STANDARD.value,
+        description=(
+            f"Workflow classification, case-insensitive: {', '.join(WorkflowClassification)}. "
+            "An unknown value is refused with 422 (#2286)."
+        ),
+    )
     repository_url: str = ""
     repository_ref: str = "main"
     description: str | None = None
@@ -309,6 +315,12 @@ class CreateWorkflowRequest(BaseModel):
         default=False,
         description="Overwrite an already-installed matching version.",
     )
+
+    @field_validator("classification")
+    @classmethod
+    def _validate_classification(cls, value: str) -> str:
+        """Refuse an unknown classification at the boundary; store the canonical spelling."""
+        return _resolve_classification(value).value
 
 
 class ValidateYamlRequest(BaseModel):
