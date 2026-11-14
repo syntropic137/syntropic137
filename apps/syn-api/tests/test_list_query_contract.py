@@ -156,6 +156,7 @@ async def _seed_artifact(
     created_at: str | None,
     workflow_id: str = "wf-1",
     execution_id: str = "ex-1",
+    session_id: str | None = None,
     phase_id: str | None = "phase-1",
     name: str = "Deliverable",
 ) -> None:
@@ -176,7 +177,7 @@ async def _seed_artifact(
             "id": row_id,
             "workflow_id": workflow_id,
             "execution_id": execution_id,
-            "session_id": None,
+            "session_id": session_id,
             "phase_id": phase_id,
             "artifact_type": artifact_type,
             "name": name,
@@ -243,7 +244,8 @@ class _ArtifactPage(NamedTuple):
     A ``Mapping[str, Any]`` would type nothing and spend the untyped-dicts
     budget to say less than this does. The page has four numbers and a facet
     tally, and every assertion below is about one of them; the rows are asked
-    for their id and the execution that produced them, so that is what is kept.
+    for their id and the execution and session that produced them, so that is
+    what is kept.
     """
 
     ids: list[str]
@@ -253,6 +255,12 @@ class _ArtifactPage(NamedTuple):
     Kept because ``?execution_id=`` cannot be verified from ids alone: a page
     of the right length says nothing about which run it came from, which is
     precisely how the ignored filter passed for an answer (#1306).
+    """
+    session_ids: list[str | None]
+    """Each row's ``session_id``, in row order.
+
+    Kept for the same reason as ``execution_ids``: ``?session_id=`` is only
+    verifiable if the rows say which session produced them (#975).
     """
     total: int
     page: int
@@ -268,6 +276,9 @@ async def _artifacts(**params: QueryValue) -> _ArtifactPage:
         # By key, not `.get`: a row that stopped carrying its execution fails
         # here instead of reading as an artifact no run produced (#1306).
         execution_ids=[a["execution_id"] for a in body["artifacts"]],
+        # By key for the same reason: a dropped session_id must fail, not read
+        # as an artifact no session produced (#975).
+        session_ids=[a["session_id"] for a in body["artifacts"]],
         total=body["total"],
         page=body["page"],
         page_size=body["page_size"],
@@ -1324,3 +1335,49 @@ async def test_artifacts_rows_say_which_execution_produced_them() -> None:
         "a-x1": "ex-x",
         "a-y1": "ex-y",
     }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_artifacts_rows_say_which_session_produced_them() -> None:
+    """Each row reports its `session_id`, so a client can check the filter (#975).
+
+    The list accepted `?session_id=` and its rows carried no session, so a
+    client could not tell an honoured filter from an ignored one, and an agent
+    needed one detail call per row to learn which session wrote what. The
+    domain row always had it; the two DTO hops above it dropped it.
+
+    `sess-a` and `sess-b` are seeded distinctly and asserted per row, so a
+    response model that declares the field and a conversion that never fills
+    it fails here rather than answering `None`. The third row has no session
+    and must list as `None`, not as a neighbour's value or a missing key.
+    """
+    await _seed_artifact("a-sa", created_at=_at(1), session_id="sess-a")
+    await _seed_artifact("a-sb", created_at=_at(2), session_id="sess-b")
+    await _seed_artifact("a-none", created_at=_at(3))
+
+    page = await _artifacts()
+
+    assert dict(zip(page.ids, page.session_ids, strict=True)) == {
+        "a-sa": "sess-a",
+        "a-sb": "sess-b",
+        "a-none": None,
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_artifacts_session_id_filter_is_visible_in_the_rows() -> None:
+    """`?session_id=` returns only rows whose own `session_id` equals it (#975).
+
+    The point of reporting the field: the answer to a filtered request can be
+    checked against the filter on the client side, row by row.
+    """
+    await _seed_artifact("a-sa1", created_at=_at(1), session_id="sess-a")
+    await _seed_artifact("a-sa2", created_at=_at(2), session_id="sess-a")
+    await _seed_artifact("a-sb", created_at=_at(3), session_id="sess-b")
+
+    only_a = await _artifacts(session_id="sess-a")
+
+    assert set(only_a.ids) == {"a-sa1", "a-sa2"}
+    assert only_a.session_ids == ["sess-a", "sess-a"]
