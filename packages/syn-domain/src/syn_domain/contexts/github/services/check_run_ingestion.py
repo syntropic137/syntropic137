@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.github import PendingSHA, PollerState, synthesize_check_run_event
+from syn_domain.contexts.github.ports import PullRequestReadiness
 from syn_domain.contexts.github.slices.event_pipeline.check_run_synthesizer import (
     rescope_after_ready_for_review,
 )
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
     from syn_domain.contexts.github._shared.trigger_query_store import TriggerQueryStore
-    from syn_domain.contexts.github.ports import GitHubChecksAPIPort
+    from syn_domain.contexts.github.ports import GitHubChecksAPIPort, PullRequestDraftPort
     from syn_domain.contexts.github.services.webhook_health import WebhookHealthTracker
     from syn_domain.contexts.github.slices.event_pipeline.normalized_event import NormalizedEvent
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import PendingSHAStore
@@ -59,9 +60,11 @@ class CheckRunIngestionService:
         health_tracker: WebhookHealthTracker,
         trigger_store: TriggerQueryStore,
         settings: PollingSettings,
+        draft_state: PullRequestDraftPort,
         sleep: Callable[[float], Coroutine[object, object, None]] | None = None,
     ) -> None:
         self._checks_api = checks_api
+        self._draft_state = draft_state
         self._pipeline = pipeline
         self._sha_store = sha_store
         self._health = health_tracker
@@ -142,11 +145,16 @@ class CheckRunIngestionService:
         """Re-ingest the head SHA's completed checks once, now that the PR is not a draft.
 
         Checks still running are left to the regular poll, which registered
-        them above. A rate-limited fetch is logged and not retried: the held
-        checks then wait for the next push, as before #2058.
+        them above, and so is everything while the lookup does not yet say
+        READY. A check the poll never ingested goes in under its own key; only
+        one whose key a webhook spent while the PR was a draft is re-checked
+        under the readiness-scoped key. A rate-limited fetch is logged and not
+        retried: the regular poll still has the SHA.
         """
         if "/" not in pending.repository:
             logger.warning("Invalid repository format (no '/'): %s", pending.repository)
+            return
+        if not await self._is_ready(pending):
             return
         owner, repo = pending.repository.split("/", 1)
         result = await self._checks_api.fetch_check_runs(
@@ -164,8 +172,27 @@ class CheckRunIngestionService:
             return
         for raw_check_run in result.check_runs:
             event = synthesize_check_run_event(raw_check_run, pending)
-            if event is not None:
+            if event is None:
+                continue
+            if await self._ingest_checks_api_event(event, pending) == "deduplicated":
                 await self._ingest_checks_api_event(rescope_after_ready_for_review(event), pending)
+
+    async def _is_ready(self, pending: PendingSHA) -> bool:
+        """Whether ``pending``'s PR reads READY; DRAFT or UNKNOWN is logged and held (#2058)."""
+        reading = await self._draft_state.read_draft_state(
+            pending.repository, pending.pr_number, pending.installation_id
+        )
+        if reading.readiness is PullRequestReadiness.READY:
+            return True
+        logger.info(
+            "Holding completed checks of %s@%s: PR #%d is %s%s; kept pending",
+            pending.repository,
+            pending.sha[:8],
+            pending.pr_number,
+            reading.readiness.value,
+            f" ({reading.detail})" if reading.detail else "",
+        )
+        return False
 
     async def _poll_loop(self) -> None:
         """Main polling loop -- runs until cancelled."""
@@ -240,11 +267,16 @@ class CheckRunIngestionService:
             )
             return
 
-        all_completed = True
-        for raw_check_run in result.check_runs:
-            if raw_check_run.get("status") != "completed":
-                all_completed = False
-                continue
+        # A completed check is not ingested while its PR is a draft or its
+        # draft state is unknown: ingesting would spend its dedup key on a
+        # held evaluation, and a poll-only install never sees ready_for_review
+        # to re-check it. The SHA stays pending until the lookup says READY.
+        completed = [c for c in result.check_runs if c.get("status") == "completed"]
+        if completed and not await self._is_ready(pending):
+            return
+
+        all_completed = len(completed) == len(result.check_runs)
+        for raw_check_run in completed:
             await self._ingest_synthesized_event(raw_check_run, pending)
 
         if all_completed and result.check_runs:
@@ -264,8 +296,13 @@ class CheckRunIngestionService:
             return
         await self._ingest_checks_api_event(event, pending)
 
-    async def _ingest_checks_api_event(self, event: NormalizedEvent, pending: PendingSHA) -> None:
-        """Feed a synthesized check_run event through the pipeline, logging failures."""
+    async def _ingest_checks_api_event(
+        self, event: NormalizedEvent, pending: PendingSHA
+    ) -> str | None:
+        """Feed a synthesized check_run event through the pipeline, logging failures.
+
+        Returns the pipeline status, or None when ingestion raised.
+        """
         try:
             result = await self._pipeline.ingest(event)
             if result.status == "processed" and result.triggers_fired:
@@ -281,6 +318,8 @@ class CheckRunIngestionService:
                 pending.repository,
                 pending.sha[:8],
             )
+            return None
+        return result.status
 
     async def _cleanup_stale_shas(self) -> None:
         """Remove SHAs that have exceeded the TTL (e.g., abandoned PRs)."""
