@@ -141,6 +141,7 @@ async def init_check_run_poller(state: PollerState) -> None:
     from syn_api._wiring import (
         get_event_pipeline,
         get_pending_sha_store,
+        get_pull_request_draft_reader,
         get_trigger_store,
         get_webhook_health_tracker,
     )
@@ -153,6 +154,7 @@ async def init_check_run_poller(state: PollerState) -> None:
         health_tracker=get_webhook_health_tracker(),
         trigger_store=get_trigger_store(),
         settings=settings.polling,
+        draft_state=get_pull_request_draft_reader(),
     )
     get_event_pipeline().add_observer(poller.on_pr_event)
     await poller.start()

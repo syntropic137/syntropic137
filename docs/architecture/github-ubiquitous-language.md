@@ -82,6 +82,32 @@ guards that stop a rule firing in a loop.
 
 Blocked instead of fired when a guard refuses it (`TriggerBlocked`).
 
+### Draft PR
+
+A pull request GitHub marks `draft`. A draft is still owned by the workflow
+that opened it, which handles its own CI, so a `check_run` Trigger Rule does
+not Fire on one: a second agent on that branch is the hazard (#2058). A
+`check_run` payload carries no draft flag, so the evaluator reads it live
+through `PullRequestDraftPort` and records the refusal as Blocked with
+`draft_pull_request`. When the flag cannot be read, the rule is Blocked with
+`draft_state_unknown` and the reason, never fired blind. Neither spends an
+attempt or the delivery, but ingesting the check did spend its dedup key. The
+Checks API poll therefore does not ingest a draft's (or unknown's) completed
+checks at all: it keeps the head SHA pending and ingests them on the first poll
+that reads the PR ready. That is the only way a poll-only install learns of
+readiness, because the Events API never emits `ready_for_review`.
+
+### Ready for review
+
+The moment a Draft PR stops being a draft (`pull_request.ready_for_review`,
+delivered by webhook only). Once the live lookup reads the PR ready, its head
+SHA's completed checks are re-checked: a check nothing has ingested goes in
+under its own key, and one a webhook `check_run` Blocked as a draft (its key
+spent) under a key scoped to the transition (`{key}:ready_for_review`), so it
+Fires now and a second delivery of the transition does not Fire it again. A
+re-check that is rate limited, or still reads draft, is not retried; the
+Checks API poll, which keeps the SHA pending, picks up what it can.
+
 ## Dispatch
 
 The act of starting a Workflow because a Trigger Rule fired, completed by
