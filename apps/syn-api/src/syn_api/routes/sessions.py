@@ -11,7 +11,7 @@ from datetime import (
     datetime,  # noqa: TC003 — Pydantic needs datetime at runtime for model validation
 )
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, computed_field
@@ -726,6 +726,41 @@ async def _load_cost_data(session: DomainSessionSummary) -> _CostData:
     )
 
 
+class _SessionTimes(Protocol):
+    """What a duration is derived from; both the Lane 1 row and the API summary have it."""
+
+    @property
+    def status(self) -> str: ...
+    @property
+    def started_at(self) -> datetime | None: ...
+    @property
+    def completed_at(self) -> datetime | None: ...
+
+
+def _session_duration_seconds(session: _SessionTimes, *, recorded: float | None) -> float | None:
+    """How long a session ran, or has been running so far; None when unknowable.
+
+    The one rule for the list and the detail endpoint, which previously
+    disagreed about the same session.
+
+    - Running: measured against the wall clock. Lane 2's duration is only set
+      on completion, so reading it reported None for the whole run.
+    - Otherwise: what Lane 2 ``recorded`` when it has a value, else
+      ``completed_at - started_at`` from Lane 1. Lane 2 is enrichment and can
+      have no row for a session (#975); the timestamps are domain truth and
+      were being ignored, so a finished session read as having no duration.
+    """
+    if session.status == "running":
+        return compute_duration_seconds(session.started_at)
+    if recorded is not None:
+        return recorded
+    if session.completed_at is None:
+        # Without this guard `now` defaults to the wall clock, and a session
+        # that never completed would report a duration that keeps growing.
+        return None
+    return compute_duration_seconds(session.started_at, now=session.completed_at)
+
+
 async def get_session(
     session_id: str,
 ) -> Result[SessionDetail, SessionError]:
@@ -752,14 +787,7 @@ async def get_session(
     # Lane 2: session cost from TimescaleDB; falls back to the Lane 1 token
     # counts (never to zero) when there is no cost row (#695, #1034)
     cd = await _load_cost_data(session)
-    # A running session has no completed_at, so Lane 2's duration_ms is unset
-    # and this reported None for the whole run. Computed against the wall clock
-    # instead. Terminal sessions keep whatever Lane 2 recorded.
-    duration_seconds = (
-        compute_duration_seconds(session.started_at)
-        if session.status == "running"
-        else cd.duration_seconds
-    )
+    duration_seconds = _session_duration_seconds(session, recorded=cd.duration_seconds)
 
     # Resolve workflow name with a targeted store lookup (avoids loading all workflows)
     wf_name: str | None = None
@@ -833,11 +861,7 @@ def _build_session_summary_response(
         info.cache_read_tokens if info.cache_read_tokens is not None else s.cache_read_tokens
     )
     total_tokens = info.total_tokens if info.total_tokens is not None else s.total_tokens
-    # Same rule as get_session above. Applied here too because the LIST and the
-    # DETAIL of one running session previously disagreed with each other.
-    duration_seconds = (
-        compute_duration_seconds(s.started_at) if s.status == "running" else info.duration_seconds
-    )
+    duration_seconds = _session_duration_seconds(s, recorded=info.duration_seconds)
     return SessionSummaryResponse(
         id=s.id,
         workflow_id=s.workflow_id,
