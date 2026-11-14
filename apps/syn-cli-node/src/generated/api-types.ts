@@ -3582,6 +3582,7 @@ export interface components {
             name: string;
             /**
              * Workflow Type
+             * @description Workflow type, case-insensitive: research, planning, implementation, review, deployment, custom. An unknown value is refused with 422 (#2290).
              * @default custom
              */
             workflow_type: string;
