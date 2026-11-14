@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
         SessionObservationPort,
     )
+    from syn_domain.contexts.github.ports import PullRequestDraftPort
     from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
@@ -457,6 +458,7 @@ def get_event_pipeline() -> EventPipeline:
         repository=get_trigger_repo(),
         dispatch_rate_limit=settings.polling.dispatch_rate_limit,
         dispatch_rate_window_seconds=settings.polling.dispatch_rate_window_seconds,
+        draft_reader=get_pull_request_draft_reader(),
     )
     pipeline = EventPipeline(
         dedup=dedup,
@@ -464,6 +466,14 @@ def get_event_pipeline() -> EventPipeline:
     )
     _event_pipeline_singleton = pipeline
     return pipeline
+
+
+def get_pull_request_draft_reader() -> PullRequestDraftPort:
+    """The live draft lookup ``check_run`` trigger rules are held back by (#2058)."""
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.pull_request_draft_reader import GitHubPullRequestDraftReader
+
+    return GitHubPullRequestDraftReader(get_github_client)
 
 
 def _create_dedup_adapter() -> DedupPort:

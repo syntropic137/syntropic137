@@ -16,6 +16,11 @@ from syn_domain.contexts.github.ports.EventsApiPort import (
     EventsAPIResult,
     GitHubEventsAPIPort,
 )
+from syn_domain.contexts.github.ports.PullRequestDraftPort import (
+    PullRequestDraftPort,
+    PullRequestDraftReading,
+    PullRequestReadiness,
+)
 from syn_domain.contexts.github.ports.RepoNamePort import RepoNamePort
 
 __all__ = [
@@ -23,5 +28,8 @@ __all__ = [
     "EventsAPIResult",
     "GitHubChecksAPIPort",
     "GitHubEventsAPIPort",
+    "PullRequestDraftPort",
+    "PullRequestDraftReading",
+    "PullRequestReadiness",
     "RepoNamePort",
 ]

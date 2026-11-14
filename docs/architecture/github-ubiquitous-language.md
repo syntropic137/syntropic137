@@ -82,6 +82,17 @@ guards that stop a rule firing in a loop.
 
 Blocked instead of fired when a guard refuses it (`TriggerBlocked`).
 
+### Draft PR
+
+A pull request GitHub marks `draft`. A draft is still owned by the workflow
+that opened it, which handles its own CI, so a `check_run` Trigger Rule does
+not Fire on one: a second agent on that branch is the hazard (#2058). A
+`check_run` payload carries no draft flag, so the evaluator reads it live
+through `PullRequestDraftPort` and records the refusal as Blocked with
+`draft_pull_request`. When the flag cannot be read, the rule is Blocked with
+`draft_state_unknown` and the reason, never fired blind. Neither spends an
+attempt or the delivery: the same check Fires once the PR is ready.
+
 ## Dispatch
 
 The act of starting a Workflow because a Trigger Rule fired, completed by
