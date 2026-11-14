@@ -41,5 +41,8 @@ def require_claude_credential(workflow: WorkflowTemplateAggregate) -> None:
     settings = get_settings()
     if settings.is_test or has_claude_credential(settings):
         return
-    if any((phase.provider or AgentProvider.CLAUDE) == AgentProvider.CLAUDE for phase in workflow.phases):
+    if any(
+        (phase.provider or AgentProvider.CLAUDE) == AgentProvider.CLAUDE
+        for phase in workflow.phases
+    ):
         raise HTTPException(status_code=422, detail=MISSING_CLAUDE_CREDENTIAL_DETAIL)
