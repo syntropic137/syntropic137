@@ -97,7 +97,10 @@ def _configure(
     from syn_api.routes.executions import credential_access
 
     # validate_credentials exports the API key; keep that out of other tests.
-    monkeypatch.delenv(ENV_ANTHROPIC_API_KEY, raising=False)
+    # delenv alone records no undo when the variable is absent, so setenv
+    # first: teardown then restores the original value, or its absence.
+    monkeypatch.setenv(ENV_ANTHROPIC_API_KEY, "")
+    monkeypatch.delenv(ENV_ANTHROPIC_API_KEY)
 
     def apply(api_key: str | None, oauth_token: str | None) -> None:
         deployed = get_settings().model_copy(
@@ -220,6 +223,38 @@ async def test_a_codex_only_workflow_needs_no_anthropic_credential(
     assert execution.launched == 1
     # /health still reports it: a Claude run on this deployment would be refused.
     assert _health_says_claude_credential_missing()
+
+
+_COMMAND_PHASE = {
+    "name": "Build",
+    "kind": "command",
+    "commands": [{"name": "build", "run": "true"}],
+}
+_CODEX_AGENT_PHASE = {"name": "Code", "agent": {"provider": "codex"}, "prompt_template": "do it"}
+
+
+@pytest.mark.parametrize("after_codex", [False, True], ids=["command-only", "codex-then-command"])
+async def test_a_command_phase_needs_no_anthropic_credential(
+    client: AsyncClient,
+    execution: _CapturingExecute,
+    credentials: Callable[[str | None, str | None], None],
+    after_codex: bool,
+) -> None:
+    """A command phase runs no agent (ADR-078), so its unset provider is not Claude."""
+    from syn_api.routes.workflows import create_workflow
+    from syn_api.types import Ok
+
+    phases = [_CODEX_AGENT_PHASE, _COMMAND_PHASE] if after_codex else [_COMMAND_PHASE]
+    created = await create_workflow(
+        name="Command #1948", workflow_type="research", requires_repos=False, phases=phases
+    )
+    assert isinstance(created, Ok), created
+    credentials(None, None)
+
+    response = await client.post(f"/workflows/{created.value.workflow_id}/execute", json={})
+
+    assert response.status_code == 200, response.text
+    assert execution.launched == 1
 
 
 async def test_test_settings_admit_as_health_stays_quiet(

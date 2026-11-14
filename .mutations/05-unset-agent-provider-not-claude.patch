@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/executions/credential_access.py b/apps/syn-api/src/syn_api/routes/executions/credential_access.py
+index c0a0256d3..76ad28289 100644
+--- a/apps/syn-api/src/syn_api/routes/executions/credential_access.py
++++ b/apps/syn-api/src/syn_api/routes/executions/credential_access.py
+@@ -45,7 +45,7 @@ def require_claude_credential(workflow: WorkflowTemplateAggregate) -> None:
+         return
+     if any(
+         phase.kind is PhaseKind.AGENT
+-        and (phase.provider or AgentProvider.CLAUDE) == AgentProvider.CLAUDE
++        and phase.provider == AgentProvider.CLAUDE
+         for phase in workflow.phases
+     ):
+         raise HTTPException(status_code=422, detail=MISSING_CLAUDE_CREDENTIAL_DETAIL)
