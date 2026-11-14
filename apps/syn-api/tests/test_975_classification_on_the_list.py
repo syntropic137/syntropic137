@@ -19,6 +19,11 @@ from pydantic import ValidationError
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from syn_api.routes.workflows.commands import create_workflow_from_yaml
+from syn_api.routes.workflows.queries import (
+    WorkflowListResponse,
+    WorkflowResponse,
+    WorkflowSummaryResponse,
+)
 from syn_api.types import Ok
 
 pytestmark = pytest.mark.unit
@@ -58,7 +63,7 @@ def _reset_storage():
     reset_projection_manager()
 
 
-async def _get(path: str) -> dict[str, object]:
+async def _get(path: str) -> bytes:
     """A response body exactly as a caller receives it."""
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
@@ -70,7 +75,7 @@ async def _get(path: str) -> dict[str, object]:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(path)
     assert response.status_code == 200, response.text
-    return response.json()
+    return response.content
 
 
 async def _install(workflow_id: str, classification: str, description: str | None) -> None:
@@ -78,11 +83,15 @@ async def _install(workflow_id: str, classification: str, description: str | Non
     assert isinstance(result, Ok)
 
 
-async def _rows() -> dict[object, dict[str, object]]:
-    body = await _get("/workflows")
-    workflows = body["workflows"]
-    assert isinstance(workflows, list)
-    return {row["id"]: row for row in workflows}
+async def _rows() -> dict[str, WorkflowSummaryResponse]:
+    """Parsed strictly: `description` has no default, so a row that left the
+    key out of the JSON would fail here rather than read as None."""
+    listing = WorkflowListResponse.model_validate_json(await _get("/workflows"))
+    return {row.id: row for row in listing.workflows}
+
+
+async def _detail(workflow_id: str) -> WorkflowResponse:
+    return WorkflowResponse.model_validate_json(await _get(f"/workflows/{workflow_id}"))
 
 
 async def test_a_listed_workflow_carries_what_it_was_created_with() -> None:
@@ -90,14 +99,11 @@ async def test_a_listed_workflow_carries_what_it_was_created_with() -> None:
     await _install("triage", "complex", "Sorts incoming issues by area")
 
     row = (await _rows())["triage"]
-    detail = await _get("/workflows/triage")
+    detail = await _detail("triage")
 
-    assert row["classification"] == "complex"
-    assert row["description"] == "Sorts incoming issues by area"
-    assert (row["classification"], row["description"]) == (
-        detail["classification"],
-        detail["description"],
-    )
+    assert row.classification == "complex"
+    assert row.description == "Sorts incoming issues by area"
+    assert (row.classification, row.description) == (detail.classification, detail.description)
 
 
 async def test_two_workflows_keep_their_own_values() -> None:
@@ -107,8 +113,8 @@ async def test_two_workflows_keep_their_own_values() -> None:
 
     rows = await _rows()
 
-    assert (rows["one"]["classification"], rows["one"]["description"]) == ("epic", "first")
-    assert (rows["two"]["classification"], rows["two"]["description"]) == ("simple", "second")
+    assert (rows["one"].classification, rows["one"].description) == ("epic", "first")
+    assert (rows["two"].classification, rows["two"].description) == ("simple", "second")
 
 
 async def test_no_description_is_listed_as_null() -> None:
@@ -116,17 +122,14 @@ async def test_no_description_is_listed_as_null() -> None:
     await _install("bare", "complex", None)
 
     row = (await _rows())["bare"]
-    detail = await _get("/workflows/bare")
+    detail = await _detail("bare")
 
-    assert "description" in row
-    assert row["description"] is None
-    assert detail["description"] is None
+    assert row.description is None
+    assert detail.description is None
 
 
 def test_constructing_a_row_without_classification_raises() -> None:
     """The domain always has one, so a builder that forgets it must fail (#955 rule)."""
-    from syn_api.routes.workflows.queries import WorkflowSummaryResponse
-
     with pytest.raises(ValidationError, match="classification"):
         WorkflowSummaryResponse(
             id="wf-1",
