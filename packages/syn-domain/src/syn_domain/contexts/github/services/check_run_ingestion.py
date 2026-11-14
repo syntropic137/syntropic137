@@ -163,7 +163,9 @@ class CheckRunIngestionService:
             )
             return
         for raw_check_run in result.check_runs:
-            await self._ingest_synthesized_event(raw_check_run, pending, after_ready=True)
+            event = synthesize_check_run_event(raw_check_run, pending)
+            if event is not None:
+                await self._ingest_checks_api_event(rescope_after_ready_for_review(event), pending)
 
     async def _poll_loop(self) -> None:
         """Main polling loop -- runs until cancelled."""
@@ -254,18 +256,16 @@ class CheckRunIngestionService:
             )
 
     async def _ingest_synthesized_event(
-        self,
-        raw_check_run: dict[str, object],
-        pending: PendingSHA,
-        *,
-        after_ready: bool = False,
+        self, raw_check_run: dict[str, object], pending: PendingSHA
     ) -> None:
         """Synthesize a check_run event and feed it through the pipeline."""
         event = synthesize_check_run_event(raw_check_run, pending)
         if event is None:
             return
-        if after_ready:
-            event = rescope_after_ready_for_review(event)
+        await self._ingest_checks_api_event(event, pending)
+
+    async def _ingest_checks_api_event(self, event: NormalizedEvent, pending: PendingSHA) -> None:
+        """Feed a synthesized check_run event through the pipeline, logging failures."""
         try:
             result = await self._pipeline.ingest(event)
             if result.status == "processed" and result.triggers_fired:
