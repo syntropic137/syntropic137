@@ -4,12 +4,29 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING
 
 from syn_api._wiring import get_github_settings
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY
 
+if TYPE_CHECKING:
+    from syn_shared.settings import Settings
+
 logger = logging.getLogger(__name__)
+
+
+def has_claude_credential(settings: Settings) -> bool:
+    """True when a Claude phase has something to authenticate with (#1948).
+
+    Either ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is enough. `/health`
+    (the `anthropic_api_key` degraded reason) and execute admission both ask
+    this, so they cannot disagree about whether a Claude run can start.
+    """
+    return any(
+        secret is not None and secret.get_secret_value()
+        for secret in (settings.anthropic_api_key, settings.claude_code_oauth_token)
+    )
 
 
 def validate_credentials(degraded_reasons: list[DegradedReason]) -> None:
@@ -28,14 +45,9 @@ def validate_credentials(degraded_reasons: list[DegradedReason]) -> None:
     # Export Anthropic API key if available (needed for agent execution, not dashboard)
     api_key = settings.anthropic_api_key
     api_key_value = api_key.get_secret_value() if api_key else ""
-    oauth_value = (
-        settings.claude_code_oauth_token.get_secret_value()
-        if settings.claude_code_oauth_token
-        else ""
-    )
     if api_key_value:
         os.environ[ENV_ANTHROPIC_API_KEY] = api_key_value
-    elif oauth_value:
+    elif has_claude_credential(settings):
         logger.info("Using CLAUDE_CODE_OAUTH_TOKEN for agent execution (no ANTHROPIC_API_KEY)")
     elif not settings.is_test:
         logger.warning(

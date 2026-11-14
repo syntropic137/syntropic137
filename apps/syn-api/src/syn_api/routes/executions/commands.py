@@ -24,6 +24,7 @@ from syn_api._wiring import (
     get_workflow_repo,
 )
 from syn_api.routes.executions.admission_gate import admit_or_409, refuse_while_paused
+from syn_api.routes.executions.credential_access import require_claude_credential
 from syn_api.routes.executions.direct_start import (
     queue_direct_start,
     start_direct_now,
@@ -717,6 +718,8 @@ async def _validate_execution_request(
     # with its historical provider. Reject it here rather than remapping it to
     # headless claude downstream.
     _check_phase_providers(workflow)
+
+    require_claude_credential(workflow)  # #1948: the predicate /health reports
 
     # #1039: same shape as the provider check - a stored declaration the
     # platform cannot honour must be a 422, never a ghost execution.
