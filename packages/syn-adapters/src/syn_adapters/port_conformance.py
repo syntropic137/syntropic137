@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
     from syn_adapters.github.postgres_pending_sha_store import PostgresPendingSHAStore
+    from syn_adapters.github.pull_request_draft_reader import GitHubPullRequestDraftReader
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.github.revision_resolver import GitHubRevisionResolver
     from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
@@ -223,6 +224,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.feedback.ports import NonceLedgerPort, ScreeningPort
     from syn_domain.contexts.github.ports.ChecksApiPort import GitHubChecksAPIPort
     from syn_domain.contexts.github.ports.EventsApiPort import GitHubEventsAPIPort
+    from syn_domain.contexts.github.ports.PullRequestDraftPort import PullRequestDraftPort
     from syn_domain.contexts.github.ports.RepoNamePort import RepoNamePort
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import (
@@ -404,6 +406,7 @@ if TYPE_CHECKING:
         memory_pending: InMemoryPendingSHAStore,
         source_commits: GitHubSourceCommitResolver,
         remote_branches: GitHubRemoteBranchReader,
+        draft_reader: GitHubPullRequestDraftReader,
         revisions: GitHubRevisionResolver,
         repo_names: OrganizationRepoNames,
     ) -> None:
@@ -417,6 +420,7 @@ if TYPE_CHECKING:
         _checks: GitHubChecksAPIPort = checks_client
         _source_commits: SourceCommitResolverPort = source_commits
         _remote_branches: RemoteBranchPort = remote_branches
+        _draft_reader: PullRequestDraftPort = draft_reader
         _revisions: RevisionResolverPort = revisions
         _repo_names: RepoNamePort = repo_names
         _redis_dedup: DedupPort = redis_dedup

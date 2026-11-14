@@ -11,6 +11,7 @@ import pytest
 
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
+from syn_domain.contexts.github.ports import PullRequestDraftReading, PullRequestReadiness
 from syn_domain.contexts.github.services import (
     CheckRunIngestionService as CheckRunPoller,
 )
@@ -42,6 +43,16 @@ class FakeClock:
 
     def advance(self, seconds: float) -> None:
         self._now += seconds
+
+
+class ReadyPullRequests:
+    """``PullRequestDraftPort`` double: every PR is ready for review."""
+
+    async def read_draft_state(
+        self, repository: str, pr_number: int, installation_id: str
+    ) -> PullRequestDraftReading:
+        del repository, pr_number, installation_id
+        return PullRequestDraftReading(readiness=PullRequestReadiness.READY)
 
 
 class InMemoryDedup:
@@ -196,6 +207,7 @@ class TestOnPrEvent:
             health_tracker=WebhookHealthTracker(),
             trigger_store=InMemoryTriggerQueryStore(),
             settings=MockPollingSettings(),
+            draft_state=ReadyPullRequests(),
             sleep=_instant_sleep,
         )
 
@@ -220,6 +232,7 @@ class TestOnPrEvent:
             health_tracker=WebhookHealthTracker(),
             trigger_store=InMemoryTriggerQueryStore(),
             settings=MockPollingSettings(),
+            draft_state=ReadyPullRequests(),
             sleep=_instant_sleep,
         )
 
@@ -242,6 +255,7 @@ class TestOnPrEvent:
             health_tracker=WebhookHealthTracker(),
             trigger_store=InMemoryTriggerQueryStore(),
             settings=MockPollingSettings(),
+            draft_state=ReadyPullRequests(),
             sleep=_instant_sleep,
         )
 
@@ -264,6 +278,7 @@ class TestOnPrEvent:
             health_tracker=WebhookHealthTracker(),
             trigger_store=InMemoryTriggerQueryStore(),
             settings=MockPollingSettings(),
+            draft_state=ReadyPullRequests(),
             sleep=_instant_sleep,
         )
 
@@ -322,6 +337,7 @@ class TestPollLoop:
             health_tracker=WebhookHealthTracker(),
             trigger_store=store,
             settings=MockPollingSettings(),
+            draft_state=ReadyPullRequests(),
             sleep=_instant_sleep,
         )
 
@@ -377,6 +393,7 @@ class TestPollLoop:
             health_tracker=WebhookHealthTracker(),
             trigger_store=store,
             settings=MockPollingSettings(),
+            draft_state=ReadyPullRequests(),
             sleep=_instant_sleep,
         )
 
@@ -450,6 +467,7 @@ class TestRateLimit:
             health_tracker=WebhookHealthTracker(),
             trigger_store=store,
             settings=MockPollingSettings(),
+            draft_state=ReadyPullRequests(),
             sleep=_recording_sleep,
         )
 
