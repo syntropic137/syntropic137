@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/sessions.py b/apps/syn-api/src/syn_api/routes/sessions.py
+index d49f20848..6cd11c923 100644
+--- a/apps/syn-api/src/syn_api/routes/sessions.py
++++ b/apps/syn-api/src/syn_api/routes/sessions.py
+@@ -750,7 +750,7 @@ def _session_duration_seconds(session: _SessionTimes, *, recorded: float | None)
+       have no row for a session (#975); the timestamps are domain truth and
+       were being ignored, so a finished session read as having no duration.
+     """
+-    if session.status == "running":
++    if session.status == "running" and recorded is None:
+         return compute_duration_seconds(session.started_at)
+     if recorded is not None:
+         return recorded
