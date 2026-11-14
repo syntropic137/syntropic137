@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
@@ -27,7 +28,6 @@ from syn_api.types import (
     Result,
     WorkflowDetail,
     WorkflowError,
-    WorkflowSummary,
     WorkflowTrendResponse,
     WorkflowTrendsResponse,
 )
@@ -58,10 +58,22 @@ router = APIRouter(prefix="/workflows", tags=["workflows"])
 
 
 class WorkflowSummaryResponse(BaseModel):
+    """One row of `GET /workflows`, and what `list_workflows()` returns.
+
+    The only summary model: a second, service-layer copy used to sit between
+    the domain and this one, and every field had two build sites. The list
+    dropped `classification` and `description` at the second (#975)."""
+
     model_config = ConfigDict(from_attributes=True)
     id: str
     name: str
     workflow_type: str
+    # No default, for the reason `requires_repos` has none (#955): the domain
+    # always has a classification, so omitting it must fail construction.
+    classification: str
+    description: str | None
+    """Nullable but required: a workflow may have no description, and the
+    list says so with null rather than by leaving the key out (#975)."""
     phase_count: int
     created_at: str | None = None
     runs_count: int = 0
@@ -299,7 +311,7 @@ async def list_workflows(
     offset: int = 0,
     include_archived: bool = False,
     search: str | None = None,
-) -> Result[list[WorkflowSummary], WorkflowError]:
+) -> Result[list[WorkflowSummaryResponse], WorkflowError]:
     """List all workflow templates."""
     await ensure_connected()
     domain_summaries = await get_projection_mgr().workflow_list.query(
@@ -311,16 +323,23 @@ async def list_workflows(
     )
     return Ok(
         [
-            WorkflowSummary(
+            WorkflowSummaryResponse(
                 id=s.id,
                 name=s.name,
                 workflow_type=s.workflow_type,
                 classification=s.classification,
-                phase_count=s.phase_count,
                 description=s.description,
-                created_at=s.created_at,
+                phase_count=s.phase_count,
+                created_at=_iso_timestamp(s.created_at),
                 runs_count=s.runs_count,
                 is_archived=s.is_archived,
+                # WHY (#955): omitting this let the model's old `= True`
+                # default answer for every workflow. Measured on a live
+                # deployment: the list reported requires_repos=True for all 36
+                # while the detail endpoint reported False for 20 of them, and
+                # the stored rows agreed with detail. An agent that lists
+                # workflows, sees True, and passes -R is then told repos are
+                # supported when they are not.
                 requires_repos=s.requires_repos,
                 tags=list(s.tags),
                 skills=[_skill_response(skill) for skill in s.skills],
@@ -328,6 +347,14 @@ async def list_workflows(
             for s in domain_summaries
         ]
     )
+
+
+def _iso_timestamp(value: datetime | str | None) -> str | None:
+    """`WorkflowSummary.from_dict` passes a stored timestamp through as the
+    ISO string it was saved as, so either form can arrive here."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 async def get_workflow(
@@ -799,27 +826,7 @@ async def list_workflows_endpoint(
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    summaries = [
-        WorkflowSummaryResponse(
-            id=s.id,
-            name=s.name,
-            workflow_type=s.workflow_type,
-            phase_count=s.phase_count,
-            created_at=s.created_at.isoformat() if s.created_at else None,
-            runs_count=s.runs_count,
-            is_archived=s.is_archived,
-            # WHY (#955): omitting this let WorkflowSummaryResponse's `= True`
-            # default answer for every workflow. Measured on a live deployment:
-            # the list reported requires_repos=True for all 36 while the detail
-            # endpoint reported False for 20 of them, and the stored rows agreed
-            # with detail. An agent that lists workflows, sees True, and passes
-            # -R is then told repos are supported when they are not.
-            requires_repos=s.requires_repos,
-            tags=list(s.tags),
-            skills=list(s.skills),
-        )
-        for s in result.value
-    ]
+    summaries = list(result.value)
 
     # KNOWN LIMITATION: this sorts the current PAGE, not the collection, so
     # `order_by` with more than one page does not give a global ordering.

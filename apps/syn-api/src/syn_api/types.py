@@ -526,28 +526,6 @@ class UpdateTriggerRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class WorkflowSummary(BaseModel):
-    """Summary of a workflow template for list views."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    name: str
-    workflow_type: str
-    classification: str
-    phase_count: int
-    description: str | None = None
-    created_at: datetime | None = None
-    runs_count: int = 0
-    is_archived: bool = False
-    requires_repos: bool = True
-    tags: list[str] = Field(default_factory=list)
-    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
-    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
-    skills: list[DeclaredSkillResponse] = Field(default_factory=list)
-    """Every distinct skill the workflow's phases declare, first-declared first."""
-
-
 class InputDeclarationResponse(BaseModel):
     """Input declaration within a workflow template."""
 
