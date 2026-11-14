@@ -8897,6 +8897,17 @@
             ],
             "title": "Execution Id"
           },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
           "phase_id": {
             "anyOf": [
               {

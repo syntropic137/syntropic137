@@ -2861,6 +2861,8 @@ export interface components {
             workflow_id: string | null;
             /** Execution Id */
             execution_id?: string | null;
+            /** Session Id */
+            session_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
             /** Artifact Type */
