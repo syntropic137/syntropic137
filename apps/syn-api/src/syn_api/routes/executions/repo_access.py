@@ -1,7 +1,9 @@
 """GitHub App repository access, checked before an execution is accepted (#598).
 
 The execute endpoint calls `_validate_all_repos_access` so a repository the App
-cannot reach is a 422 on the request, not a run that fails in its workspace.
+cannot reach is a 422 on the request, not a run that fails in its workspace. With
+no App configured at all, every repository is unreachable, so that is a 422 too
+(#1948): before it, the run was admitted and died in setup ~30 s later.
 """
 
 from __future__ import annotations
@@ -48,13 +50,27 @@ async def _validate_all_repos_access(repo_urls: list[str]) -> None:
 async def _validate_repo_access(repo_full_name: str) -> None:
     """Pre-validate that the GitHub App can access the target repository.
 
-    Raises HTTPException(422) if the App is not installed. Logs and
-    proceeds on transient errors (network, rate limit).
+    Raises HTTPException(422) if the App is not configured or not installed.
+    Logs and proceeds on transient errors (network, rate limit).
     """
-    from syn_shared.settings.github import GitHubAppSettings
+    # The same settings /health reads for its `github_app` degraded reason.
+    from pydantic import ValidationError
 
-    if not GitHubAppSettings().is_configured:
-        return
+    from syn_adapters.workspace_backends.service import GitHubAppNotConfiguredError
+    from syn_api._wiring import get_github_settings
+
+    try:
+        configured = get_github_settings().is_configured
+    except ValidationError as exc:
+        # A half-configured App (an ID with no readable key) fails settings
+        # validation; /health reports it as `github_app` degraded, so refuse
+        # it here the same way instead of answering 500. Never log `exc` itself:
+        # its text carries the raw input, secrets included (ADR-004 s4).
+        problems = [(e["loc"], e["type"]) for e in exc.errors(include_input=False)]
+        logger.warning("GitHub App settings are invalid: %s", problems)
+        raise HTTPException(status_code=422, detail=str(GitHubAppNotConfiguredError())) from exc
+    if not configured:
+        raise HTTPException(status_code=422, detail=str(GitHubAppNotConfiguredError()))
 
     from syn_adapters.github.client import GitHubAuthError, get_github_client
 

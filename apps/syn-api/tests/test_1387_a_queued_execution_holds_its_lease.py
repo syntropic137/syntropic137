@@ -63,7 +63,7 @@ from syn_domain.contexts.orchestration.slices.list_executions.projection import 
     WorkflowExecutionListProjection,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("github_app_configured")]
 
 #: Long enough that a loaded machine never trips it, short enough that a
 #: mutation which deadlocks fails here instead of hanging CI forever.

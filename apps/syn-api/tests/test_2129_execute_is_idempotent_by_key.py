@@ -46,7 +46,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution_request import
 if TYPE_CHECKING:
     from syn_domain.contexts._shared import AdmissionTicket
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("github_app_configured")]
 
 WORKFLOW_ID = "wf-2129"
 KEY = "trial:b2129/1"

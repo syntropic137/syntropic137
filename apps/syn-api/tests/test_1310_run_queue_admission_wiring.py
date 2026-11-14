@@ -27,7 +27,7 @@ from syn_shared.settings import get_settings
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+pytestmark = [pytest.mark.unit, pytest.mark.anyio, pytest.mark.usefixtures("github_app_configured")]
 
 
 @pytest.fixture

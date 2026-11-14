@@ -49,7 +49,7 @@ from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection im
 )
 from syn_domain.contexts.orchestration import TagSet, WorkflowTemplateAggregate
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("github_app_configured")]
 
 _PROJECTION = WorkflowDispatchProjection.PROJECTION_NAME
 

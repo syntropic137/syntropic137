@@ -106,6 +106,17 @@ class GitHubAppSettings(BaseSettings):
     # COMPUTED PROPERTIES
     # =========================================================================
 
+    @classmethod
+    def env_var(cls, field_name: str) -> str:
+        """The environment variable that sets ``field_name`` (ADR-004).
+
+        Raises KeyError for a name that is not a field, so a message naming a
+        setting cannot drift from the setting itself.
+        """
+        if field_name not in cls.model_fields:
+            raise KeyError(field_name)
+        return f"{cls.model_config.get('env_prefix', '')}{field_name}".upper()
+
     @property
     def _has_usable_key_file(self) -> bool:
         """Check if app_private_key_file points to a non-empty PEM file."""
@@ -180,6 +191,24 @@ class GitHubAppSettings(BaseSettings):
             raise ValueError(msg)
 
         return self
+
+
+def not_configured_message() -> str:
+    """What to do when a run names a repository and no GitHub App is configured (#1948).
+
+    One text for the execute endpoint's 422 and the late setup-phase error.
+    """
+    from syn_shared.settings.constants import PUBLIC_DOCS_URL
+
+    app_id = GitHubAppSettings.env_var("app_id")
+    key_file = GitHubAppSettings.env_var("app_private_key_file")
+    return (
+        "GitHub App is not configured, and a run that names a repository needs it. "
+        f"Set {app_id} and {key_file} (the path to the App's PEM private key), "
+        "then restart the API. On a selfhost install, `npx @syntropic137/setup init` "
+        "creates the App and its key (GitHub App step). "
+        f"See {PUBLIC_DOCS_URL}/docs/guide/github-integration"
+    )
 
 
 @lru_cache

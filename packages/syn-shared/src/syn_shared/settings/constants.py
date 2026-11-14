@@ -31,6 +31,9 @@ DEFAULT_DEV_API_URL = f"http://localhost:{DEV_API_HOST_PORT}"
 DEFAULT_SELFHOST_API_URL = f"http://localhost:{SELFHOST_GATEWAY_PORT}"
 """Default API URL for selfhost users (CLI, browser)."""
 
+PUBLIC_DOCS_URL = "https://docs.syntropic137.com"
+"""The public documentation site (apps/syn-docs), for links in user-facing messages."""
+
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 """Anthropic Messages API endpoint (the eval suite's LLM judge, scripts/eval_suite.py,
 and the feedback AnthropicScreener)."""

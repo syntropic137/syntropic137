@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts.orchestration import ExecuteWorkflowCommand
 
-pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+pytestmark = [pytest.mark.unit, pytest.mark.anyio, pytest.mark.usefixtures("github_app_configured")]
 
 
 @pytest.fixture
