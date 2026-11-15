@@ -224,23 +224,58 @@ def read_manifest(repo_root: Path, config: Path) -> ArchitectureManifest:
     ).canonical()
 
 
+class _ConfigPart(BaseModel):
+    # vsa.yaml carries validation, exceptions and more; only these keys steer discovery.
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+
+class _PathConfig(_ConfigPart):
+    path: str
+
+
+class _VersioningConfig(_ConfigPart):
+    enabled: bool = True
+    versioned_path: str = "_versioned"
+
+
+class _EventsConfig(_ConfigPart):
+    path: str = "events"
+    versioning: _VersioningConfig = _VersioningConfig()
+
+
+class _DomainConfig(_ConfigPart):
+    path: str = "domain"
+    commands: _PathConfig = _PathConfig(path="commands")
+    events: _EventsConfig = _EventsConfig()
+
+
+class _PatternsConfig(_ConfigPart):
+    filename_convention: str = "pascal_case"
+
+
+class _VsaConfig(_ConfigPart):
+    root: str
+    domain: _DomainConfig | None = None
+    patterns: _PatternsConfig = _PatternsConfig()
+
+
 def _read_layout(repo_root: Path, config: Path) -> _Layout:
-    raw = yaml.safe_load((repo_root / config).read_text(encoding="utf-8"))
-    convention = raw.get("patterns", {}).get("filename_convention", "pascal_case")
+    vsa = _VsaConfig.model_validate(
+        yaml.safe_load((repo_root / config).read_text(encoding="utf-8"))
+    )
+    convention = vsa.patterns.filename_convention
     if convention != "pascal_case":
         raise UnsupportedLayoutError(f"patterns.filename_convention: {convention} is not ported")
-    domain = raw.get("domain")
+    domain = vsa.domain
     if domain is None:
         raise UnsupportedLayoutError("vsa.yaml has no domain: section; nothing to scan")
-    versioning = domain.get("events", {}).get("versioning", {})
+    versioning = domain.events.versioning
     return _Layout(
-        root=(repo_root / config).parent / raw["root"],
-        domain=domain.get("path", "domain"),
-        commands=domain.get("commands", {}).get("path", "commands"),
-        events=domain.get("events", {}).get("path", "events"),
-        versioned=versioning.get("versioned_path", "_versioned")
-        if versioning.get("enabled", True)
-        else None,
+        root=(repo_root / config).parent / vsa.root,
+        domain=domain.path,
+        commands=domain.commands.path,
+        events=domain.events.path,
+        versioned=versioning.versioned_path if versioning.enabled else None,
     )
 
 
