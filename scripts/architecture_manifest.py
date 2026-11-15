@@ -53,11 +53,14 @@ from __future__ import annotations
 
 import argparse
 import re
-from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
 
 
 class UnsupportedLayoutError(ValueError):
@@ -129,7 +132,9 @@ class ArchitectureManifest(_ManifestPart):
                 commands=tuple(
                     sorted(
                         (
-                            c.model_copy(update={"file_path": PurePosixPath(c.file_path).as_posix()})
+                            c.model_copy(
+                                update={"file_path": PurePosixPath(c.file_path).as_posix()}
+                            )
                             for c in domain.commands
                         ),
                         key=lambda c: (c.context, c.file_path),
@@ -186,11 +191,15 @@ def read_manifest(repo_root: Path, config: Path) -> ArchitectureManifest:
             raise UnsupportedLayoutError(f"{domain_path}: domain path is not a directory")
         aggregates += [Aggregate(name=n, context=context) for n in _aggregates(domain_path)]
         commands += [
-            Command(name=_strip(p.name, _COMMAND_EXTS), context=context, file_path=_rel(p, repo_root))
-            for p in _walk(domain_path / layout.commands, skip=lambda d: False)
+            Command(
+                name=_strip(p.name, _COMMAND_EXTS), context=context, file_path=_rel(p, repo_root)
+            )
+            for p in _walk(domain_path / layout.commands, skip=lambda _: False)
             if _strip(p.name, _COMMAND_EXTS).endswith("Command")
         ]
-        events += [Event(name=n, context=context) for n in _events(domain_path / layout.events, layout)]
+        events += [
+            Event(name=n, context=context) for n in _events(domain_path / layout.events, layout)
+        ]
         projections += [
             (Projection(name=name, context=context), subscribed)
             for name, subscribed in _projections(context_path)
@@ -379,9 +388,7 @@ def subscribed_events(content: str) -> tuple[str, ...]:
             events.add(f"{name}Event")
     for match in _HANDLE.finditer(content):
         name = match.group(1)
-        if name.endswith("Event"):
-            events.add(name)
-        elif "_" in name and _is_snake_case_event(name):
+        if name.endswith("Event") or ("_" in name and _is_snake_case_event(name)):
             events.add(name)
         elif _is_pascal_case_event(name):
             events.add(f"{name}Event")
@@ -406,11 +413,7 @@ def _is_snake_case_event(name: str) -> bool:
 
 
 def _is_pascal_case_event(name: str) -> bool:
-    return (
-        name[:1].isupper()
-        and len(name.encode()) > 3
-        and name.lower() not in _NON_EVENT_METHODS
-    )
+    return name[:1].isupper() and len(name.encode()) > 3 and name.lower() not in _NON_EVENT_METHODS
 
 
 def main() -> None:
