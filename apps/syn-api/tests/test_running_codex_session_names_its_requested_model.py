@@ -38,6 +38,7 @@ from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
     SessionCostProjection,
 )
+from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutReading
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     CodexStreamProcessor,
 )
@@ -50,7 +51,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_announced_model_is_not_the_requested_one import (
     CODEX_ANNOUNCED,
     REQUESTED_BY_A_CODEX_PHASE,
-    _real_rollout,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_codex_model_reaches_the_sessions_read_model import (
     _RECORDING,
@@ -207,7 +207,7 @@ async def test_a_running_codex_session_shows_its_request_then_what_ran(
         phase_id="p1",
         session_id=SESSION_ID,
         agent_model=REQUESTED_BY_A_CODEX_PHASE,
-        rollout=_RolloutForTheAnnouncedThread(_real_rollout()),
+        rollout=_RolloutForTheAnnouncedThread(CodexRolloutReading(model=CODEX_ANNOUNCED)),
     )
     release = asyncio.Event()
     run = asyncio.create_task(

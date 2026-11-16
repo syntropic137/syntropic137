@@ -15,7 +15,7 @@ money, and reporting it as free is the failure this issue exists to remove.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
     QualifiedSessionIdentity,
@@ -26,8 +26,12 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
     StoredTranscript,
     UnpricedUsage,
     UsageResult,
-    extract_usage,
 )
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+        TranscriptUsageReader,
+    )
 
 
 @dataclass(frozen=True)
@@ -59,7 +63,11 @@ class SessionStorePort(Protocol):
 
 
 async def resolve_delegate_usage(
-    store: SessionStorePort, session_id: str, *, identity: QualifiedSessionIdentity | None = None
+    store: SessionStorePort,
+    session_id: str,
+    *,
+    reader: TranscriptUsageReader,
+    identity: QualifiedSessionIdentity | None = None,
 ) -> UsageResult:
     """Fetch a delegated session and recover what it used.
 
@@ -122,4 +130,4 @@ async def resolve_delegate_usage(
             retry=RetryDisposition.PERMANENT,
         )
 
-    return extract_usage(session.source_format, session.raw)
+    return reader.read_usage(session.source_format, session.raw)

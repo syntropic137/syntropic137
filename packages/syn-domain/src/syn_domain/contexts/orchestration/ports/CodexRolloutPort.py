@@ -1,4 +1,4 @@
-"""Port for recovering the transcript codex persisted for one of its sessions.
+"""Port for recovering what codex's persisted transcript says about a session.
 
 WHY THIS IS A PORT (issue #1284). Codex names the model it ran on disk and
 nowhere on its stdout stream, so the rollout is the only observation of a codex
@@ -9,28 +9,38 @@ about a CLI and a transport, not about the domain, so per the boundary rule in
 AGENTS.md they belong on the far side of an interface - the workspace adapter
 already owns the transport and agentic-workspace already owns the layout.
 
-WHAT DELIBERATELY STAYS ON THIS SIDE: what a rollout MEANS. The records come
-back as they were written and ``model_from_rollout`` reads them, so the field
-that names a model has exactly one reader in this system and the domain can be
-tested against a real captured rollout without a container anywhere near it.
-Putting the parse behind the port instead would buy a narrower signature and
-pay for it with a second reader and a test that can only assert a value it
-made up itself.
+HOW a rollout spells its model (``turn_context.payload.model``) is the same
+kind of knowledge: it changes when codex ships, not when we decide what a model
+is. So the reader of that field lives in the adapter too (#1424), and this port
+hands back what the rollout SAYS rather than the records it says it in. What
+stays on this side is the meaning: which model is reported, and the difference
+between a rollout that could not be read and one that names nothing.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass
+from typing import Protocol
 
-if TYPE_CHECKING:
-    from syn_domain.contexts.agent_sessions import RolloutDocument
+
+@dataclass(frozen=True)
+class CodexRolloutReading:
+    """A rollout that WAS read, and the one model it names.
+
+    ``model`` is None when the rollout names no model AND when it names
+    several: a session that spanned models cannot be attributed to one of them,
+    and naming whichever came first would read as evidence. Never ``""``: a
+    blank model names nothing.
+    """
+
+    model: str | None
 
 
 class CodexRolloutPort(Protocol):
-    """Hands back the rollout codex wrote for a session, if it can be read."""
+    """Reads the rollout codex wrote for a session, if it can be read."""
 
-    async def codex_rollout(self, native_session_id: str) -> RolloutDocument | None:
-        """The records codex persisted under ``native_session_id``.
+    async def codex_rollout_model(self, native_session_id: str) -> CodexRolloutReading | None:
+        """What the rollout codex persisted under ``native_session_id`` says.
 
         ``native_session_id`` is the id CODEX chose and announced on
         ``thread.started`` - the namespace its own rollout files are filed
@@ -39,9 +49,10 @@ class CodexRolloutPort(Protocol):
         it is not a promise that a rollout it cannot match is unreachable.
 
         Returns ``None``, and only ``None``, when the rollout COULD NOT BE
-        READ: nothing was persisted, the workspace was gone, the read failed. An empty document means the opposite - the rollout was
-        read and says nothing. The caller reports a model of ``None`` either
-        way, but only one of the two is an operational fault, and an
+        READ: nothing was persisted, the workspace was gone, the read failed.
+        A reading whose ``model`` is None means the opposite - the rollout was
+        read and names no single model. The caller reports a model of ``None``
+        either way, but only one of the two is an operational fault, and an
         implementation that collapses them makes an unreachable workspace look
         like a silent codex.
 
