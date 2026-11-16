@@ -115,8 +115,17 @@ How many Executions of one Workflow have failed in a row, classified
 completion resets it to zero. `task`, `correct_refusal` and Gate Failure
 neither extend nor reset it: the platform worked and the answer was no.
 Cancelled and interrupted Executions do neither: they ended before they could
-succeed or fail. A read model only (`failure_streak`); nothing pauses on it
-yet.
+succeed or fail. Read model: `failure_streak`.
+
+## Failure Streak Threshold
+
+The Failure Streak length at which a trigger may no longer dispatch that
+Workflow (`SYN_POLLING_FAILURE_STREAK_THRESHOLD`, default 5, 0 turns it off;
+#1569). Such a dispatch is a **refused dispatch**, recorded on the trigger's
+dispatch record as `failed` with a reason starting `failure_streak` that names
+the streak length, the threshold and the last failed Executions. Only automatic
+(trigger-fired) dispatch is refused. A manual run is never refused: a completed
+Execution is the only thing that resets the streak, so it is the way out.
 
 ## Phase Deadline
 
