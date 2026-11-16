@@ -261,9 +261,13 @@ def test_the_api_passes_the_configured_threshold_to_the_coordinator(
     from syn_api import _wiring
     from syn_shared.settings import reset_settings
 
-    passed: dict[str, object] = {}
+    passed: list[object] = []
+
+    def capture(*, failure_streak_threshold: int = -1, **_: object) -> None:
+        passed.append(failure_streak_threshold)
+
     monkeypatch.setenv("SYN_POLLING_FAILURE_STREAK_THRESHOLD", "7")
-    monkeypatch.setattr(subscriptions, "create_coordinator_service", lambda **kw: passed.update(kw))
+    monkeypatch.setattr(subscriptions, "create_coordinator_service", capture)
     monkeypatch.setattr(_wiring, "get_event_store_client", lambda: None)
     monkeypatch.setattr(_wiring, "_get_budget_checker", lambda: None)
     reset_settings()
@@ -273,4 +277,4 @@ def test_the_api_passes_the_configured_threshold_to_the_coordinator(
         monkeypatch.delenv("SYN_POLLING_FAILURE_STREAK_THRESHOLD")
         reset_settings()
 
-    assert passed["failure_streak_threshold"] == 7
+    assert passed == [7]
