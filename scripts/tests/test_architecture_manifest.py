@@ -310,8 +310,6 @@ def test_a_symlinked_context_directory_is_not_a_context(tmp_path: Path) -> None:
     assert [a.name for a in manifest.domain.aggregates] == ["InvoiceAggregate"]
 
 
-
-
 def test_unicode_identifiers_read_as_vsa_reads_them(tmp_path: Path) -> None:
     """Pinned from `vsa manifest` 0.22.0 on this tree (the parity fitness test
     re-checks it against vsa wherever vsa is installed). A mark mid-name stays in
