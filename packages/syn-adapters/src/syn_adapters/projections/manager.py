@@ -29,6 +29,7 @@ from syn_domain.contexts.orchestration.slices.dashboard_metrics import Dashboard
 from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
     ExecutionCostProjection,
 )
+from syn_domain.contexts.orchestration.slices.failure_streak import FailureStreakProjection
 from syn_domain.contexts.orchestration.slices.get_execution_detail import (
     WorkflowExecutionDetailProjection,
 )
@@ -185,6 +186,12 @@ class ProjectionManager:
         """Get the workflow phase metrics projection."""
         self._ensure_initialized()
         return self._projections["workflow_phase_metrics"]
+
+    @property
+    def failure_streak(self) -> FailureStreakProjection:
+        """Get the failure streak projection (#1569)."""
+        self._ensure_initialized()
+        return self._projections["failure_streak"]
 
     # Observability projections (Pattern 2: Event Log + CQRS)
     @property

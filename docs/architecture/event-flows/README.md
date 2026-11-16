@@ -10,9 +10,9 @@ This table shows the most important event flows in Syn137 (events that feed the 
 
 | Command | Event | Projections | Count |
 |---------|-------|-------------|-------|
+| ? | workflow_failed | ExecutionTodoProjection, FailureStreakProjection, RepoCostProjection... | 7 |
+| ? | workflow_completed | ExecutionTodoProjection, FailureStreakProjection, RepoCostProjection... | 6 |
 | ? | workflow_execution_started | ExecutionTodoProjection, RepoCorrelationProjection, WorkflowDetailProjection... | 6 |
-| ? | workflow_failed | ExecutionTodoProjection, RepoCostProjection, RepoHealthProjection... | 6 |
-| ? | workflow_completed | ExecutionTodoProjection, RepoCostProjection, RepoHealthProjection... | 5 |
 | ? | execution_cancelled | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
 | ? | phase_completed | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
 | ? | workflow_interrupted | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
