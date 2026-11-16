@@ -253,10 +253,43 @@ def make_symlinked_context_repo(root: Path) -> Path:
     return root
 
 
+MARK = "́"  # COMBINING ACUTE ACCENT: a Rust `\w` character, not a Python `re` one
+# Every shape the second review of #2292 reproduced against vsa 0.22.0, one
+# projection file each. Class-name cases are `projection.py` (named from the
+# class); subscription cases are named files, so each contributes its events.
+UNICODE_PROJECTIONS = {
+    "class_backtrack/projection.py": f"class FooProjectionX{MARK}ProjectionExtra:\n    pass\n",
+    "class_in_comment/projection.py": (
+        "class TestProjection:\n    # Former class CaféProjection was renamed.\n    pass\n"
+    ),
+    "class_in_docstring/projection.py": (
+        'class TestProjection:\n    """Replaces class CaféProjection from v1."""\n    pass\n'
+    ),
+    "prose/projection.py": (
+        'class ProseProjection:\n    """Résumé, café, 日本語."""\n    # Crème brûlée.\n    pass\n'
+    ),
+    "decorator/DecoratorProjection.py": f"@Handles(Cafe{MARK}Event)\ndef apply(self, e): pass\n",
+    "typed_event/TypedEventProjection.py": f"# handle(event: Cafe{MARK}Event)\n",
+    "typed_arg/TypedArgProjection.py": f"# handle(e{MARK}: OrderPlacedEvent)\n",
+    "quoted/QuotedProjection.py": f'subscribed_events = ["Cafe{MARK}Event"]\n',
+    "ts_on/TsOnProjection.py": f"# on_Cafe{MARK}Created(event)\n",
+    "def_on/DefOnProjection.py": f"def on_Cafe{MARK}Created(self, event): ...\n",
+    "mark_before_on/MarkBeforeProjection.py": f"x{MARK}on_OrderShipped(event)\n",
+}
+
+
+def make_unicode_identifiers_repo(root: Path) -> Path:
+    """Rust regex `\\w` is Unicode word (marks included); Python `re` `\\w` is not."""
+    make_repo(root)
+    _write(root, {f"src/contexts/billing/slices/{k}": v for k, v in UNICODE_PROJECTIONS.items()})
+    return root
+
+
 DIVERGENCE_TREES = {
     "disabled_versioning": make_disabled_versioning_repo,
     "nested_domain": make_nested_domain_repo,
     "symlinked_context": make_symlinked_context_repo,
+    "unicode_identifiers": make_unicode_identifiers_repo,
 }
 
 
@@ -277,24 +310,20 @@ def test_a_symlinked_context_directory_is_not_a_context(tmp_path: Path) -> None:
     assert [a.name for a in manifest.domain.aggregates] == ["InvoiceAggregate"]
 
 
-@pytest.mark.parametrize(
-    "source",
-    [
-        "def on_CaféCreated(self, event): ...\n",
-        "class CaféProjection:\n    pass\n",
-    ],
-    ids=["handler", "class"],
-)
-def test_non_ascii_identifiers_are_refused_not_guessed(tmp_path: Path, source: str) -> None:
-    """Rust regex and Python `re` disagree on `\\w` for combining marks."""
-    ctx = "src/contexts"
-    _write(
-        tmp_path,
-        {
-            "vsa.yaml": VSA_YAML,
-            f"{ctx}/billing/domain/commands/IssueInvoiceCommand.py": "",
-            f"{ctx}/billing/slices/cafe/projection.py": source,
-        },
-    )
-    with pytest.raises(UnsupportedLayoutError, match="non-ASCII"):
-        read_manifest(tmp_path, Path("vsa.yaml"))
+
+
+def test_unicode_identifiers_read_as_vsa_reads_them(tmp_path: Path) -> None:
+    """Pinned from `vsa manifest` 0.22.0 on this tree (the parity fitness test
+    re-checks it against vsa wherever vsa is installed). A mark mid-name stays in
+    the name; a mark before `on_` is a word character, so Rust `\\b` does not match."""
+    manifest = read_manifest(make_unicode_identifiers_repo(tmp_path), Path("vsa.yaml"))
+    names = sorted(p.name for p in manifest.domain.projections)
+    assert f"FooProjectionX{MARK}Projection" in names
+    assert names.count("TestProjection") == 2  # prose about other classes changes nothing
+    assert "ProseProjection" in names
+    assert dict(manifest.domain.relationships.event_to_projections) == {
+        f"Cafe{MARK}CreatedEvent": ("DefOnProjection", "TsOnProjection"),
+        f"Cafe{MARK}Event": ("DecoratorProjection", "QuotedProjection", "TypedEventProjection"),
+        "OrderPlacedEvent": ("TypedArgProjection",),
+        "invoice_issued": ("InvoiceListProjection",),
+    }

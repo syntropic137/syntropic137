@@ -395,23 +395,57 @@ def _projections(context_path: Path) -> Iterator[tuple[str, tuple[str, ...]]]:
         yield _projection_name(stem, content), subscribed_events(content)
 
 
-_CLASS_PROJECTION = re.compile(r"(?:class|export\s+class)\s+(\w+Projection)")
-_ANY_CLASS = re.compile(r"(?:class|export\s+class)\s+([^\s(:{<]+)")
+def _rust_word_class() -> str:
+    """Rust regex's Unicode `\\w` as a Python character class (UTS#18 Annex C).
+
+    Python `re` `\\w` is `str.isalnum()` plus `_`. Rust's is Alphabetic, every
+    Mark, `Nd`, `Pc` and the join controls. They differ on combining marks, `No`
+    digits and Other_Alphabetic symbols, so a pattern written with Python `\\w`
+    reads some identifiers differently from vsa (review of #2292). Built from
+    `unicodedata`; Alphabetic is approximated as `L*`, `Nl` and the
+    Other_Alphabetic letter-like symbol blocks. The parity fitness test runs vsa
+    itself on the cases that review found.
+    """
+    import unicodedata
+
+    def is_word(cp: int) -> bool:
+        cat = unicodedata.category(chr(cp))
+        return (
+            cat[0] in "LM"
+            or cat in ("Nd", "Nl", "Pc")
+            or cp in (0x200C, 0x200D)
+            or 0x24B6 <= cp <= 0x24E9
+            or 0x1F130 <= cp <= 0x1F149
+            or 0x1F150 <= cp <= 0x1F169
+            or 0x1F170 <= cp <= 0x1F189
+        )
+
+    ranges: list[str] = []
+    start: int | None = None
+    for cp in range(0x110001):
+        inside = cp <= 0x10FFFF and not 0xD800 <= cp <= 0xDFFF and is_word(cp)
+        if inside and start is None:
+            start = cp
+        elif not inside and start is not None:
+            first, last = re.escape(chr(start)), re.escape(chr(cp - 1))
+            ranges.append(first if start == cp - 1 else f"{first}-{last}")
+            start = None
+    return "[" + "".join(ranges) + "]"
+
+
+_W = _rust_word_class()
+"""Rust `\\w`. Every pattern below uses it where the Rust source has `\\w`."""
+_NOT_W_BEHIND = f"(?<!{_W})"
+"""Rust `\\b` before a word character: the previous character is not a Rust word character."""
+
+_CLASS_PROJECTION = re.compile(rf"(?:class|export\s+class)\s+({_W}+Projection)")
 
 
 def _projection_name(stem: str, content: str) -> str:
     if stem != "projection":
         return stem
-    # Python `\w+Projection` can miss a name Rust's Unicode `\w` matches (a
-    # combining mark mid-name), so first read every declared class name whole.
-    for declared in _ANY_CLASS.finditer(content):
-        if declared.group(1).endswith("Projection") and not declared.group(1).isascii():
-            raise UnsupportedLayoutError(
-                f"projection class {declared.group(1)!r} has non-ASCII characters; Rust and Python"
-                " regex word classes differ there, so this reader does not port it"
-            )
     match = _CLASS_PROJECTION.search(content)
-    return _ascii_name(match, 1, content) if match else "Projection"
+    return match.group(1) if match else "Projection"
 
 
 _METHOD_VERB_PREFIXES = frozenset({"get", "set", "load", "save", "create", "update", "delete"})
@@ -422,62 +456,42 @@ _NON_EVENT_METHODS = frozenset(
         "update", "delete", "get", "set", "load", "save",
     }
 )  # fmt: skip
-_ON = re.compile(r"(?:async\s+)?def\s+on_(\w+)|\bon_(\w+)\s*[:\(]")
-_HANDLE = re.compile(r"def\s+handle_(\w+)")
-_DECORATOR = re.compile(r"@(?:Handles|Subscribe|EventHandler)\s*\(\s*(\w+Event)\s*\)")
-_TYPED_HANDLE = re.compile(r"handle\s*\(\s*\w+:\s*(\w+Event)\s*\)")
+_ON = re.compile(rf"(?:async\s+)?def\s+on_({_W}+)|{_NOT_W_BEHIND}on_({_W}+)\s*[:\(]")
+_HANDLE = re.compile(rf"def\s+handle_({_W}+)")
+_DECORATOR = re.compile(rf"@(?:Handles|Subscribe|EventHandler)\s*\(\s*({_W}+Event)\s*\)")
+_TYPED_HANDLE = re.compile(rf"handle\s*\(\s*{_W}+:\s*({_W}+Event)\s*\)")
 _SUBSCRIBED_LIST = re.compile(r"subscribed_events\s*=\s*\[([^\]]+)\]")
-_QUOTED = re.compile(r"[\"'](\w+)[\"']")
+_QUOTED = re.compile(rf"[\"']({_W}+)[\"']")
 
 
 def subscribed_events(content: str) -> tuple[str, ...]:
     """`extract_subscribed_events`: the event names a projection file handles.
 
-    Every captured name goes through `_ascii_name`, which refuses non-ASCII
-    identifiers instead of guessing at them (see there).
+    The patterns use Rust's word class (`_W`), not Python's, so a name with a
+    combining mark or a non-ASCII letter reads as vsa reads it.
     """
     events: set[str] = set()
     for match in _ON.finditer(content):
-        name = _ascii_name(match, 1 if match.group(1) else 2, content)
+        name = match.group(1) or match.group(2)
         if "_" in name and _is_snake_case_event(name):
             events.add(name)
         elif _is_pascal_case_event(name):
             events.add(f"{name}Event")
     for match in _HANDLE.finditer(content):
-        name = _ascii_name(match, 1, content)
+        name = match.group(1)
         if name.endswith("Event") or ("_" in name and _is_snake_case_event(name)):
             events.add(name)
         elif _is_pascal_case_event(name):
             events.add(f"{name}Event")
-    events.update(_ascii_name(m, 1, content) for m in _DECORATOR.finditer(content))
-    events.update(_ascii_name(m, 1, content) for m in _TYPED_HANDLE.finditer(content))
+    events.update(m.group(1) for m in _DECORATOR.finditer(content))
+    events.update(m.group(1) for m in _TYPED_HANDLE.finditer(content))
     listed = _SUBSCRIBED_LIST.search(content)
     if listed:
         for match in _QUOTED.finditer(listed.group(1)):
-            name = _ascii_name(match, 1, listed.group(1))
+            name = match.group(1)
             if name.endswith("Event") or ("_" in name and _is_snake_case_event(name)):
                 events.add(name)
     return tuple(sorted(events))
-
-
-def _ascii_name(match: re.Match[str], group: int, text: str) -> str:
-    """A captured identifier, or a refusal when Rust and Python would read it differently.
-
-    Rust regex `\\w` is Unicode word (letters, marks, Nd, Pc); Python `re` `\\w`
-    is `str.isalnum()` plus `_`. They disagree on combining marks, `No` digits
-    and more, at the end of a name as well as inside it. An ASCII name followed
-    by an ASCII character reads the same in both, so anything else is refused:
-    the reader fails closed rather than guess (review of #2292).
-    """
-    name = match.group(group)
-    end = match.end(group)
-    following = text[end : end + 1]
-    if not name.isascii() or not following.isascii():
-        raise UnsupportedLayoutError(
-            f"identifier {name!r} touches non-ASCII characters; Rust and Python regex"
-            " word classes differ there, so this reader does not port it"
-        )
-    return name
 
 
 def _is_snake_case_event(name: str) -> bool:
