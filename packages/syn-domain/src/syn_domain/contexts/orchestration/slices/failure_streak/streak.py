@@ -39,8 +39,10 @@ class FailureStreak(BaseModel):
         lengthen the streak. An execution fails at most once, so this is the
         only way the same id can arrive twice. The check reads the kept ids, so
         a duplicate older than the last ``RECENT_EXECUTIONS_KEPT`` failures
-        would count again; at-least-once redelivery replays from the
-        checkpoint, which is the tail of the stream, never that far back.
+        would count again. That cannot happen: the aggregate fails only a
+        RUNNING execution and never returns it to RUNNING, the store rejects a
+        stale append, and the coordinator skips events at or before a
+        projection's checkpoint position, so a redelivery never reaches here.
         """
         if execution_id in self.execution_ids:
             return self
