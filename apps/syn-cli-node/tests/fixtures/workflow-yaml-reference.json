@@ -664,7 +664,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "b4cef3ed8b99ffb9dae414b233b426a0f96e4f5fe204f7f09031cc50fb98e001"
+      "document_sha256": "4b6c1b1bacdff1d9ac827dec0bf344b19700e8ccd07b12e112bd694406b9435d"
     },
     "workflows/sdlc/implement-v4-precheck/workflow.yaml": {
       "phases": [
@@ -717,7 +717,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "bfc4e057fbc453d9078c095c57e060881c959c9d1d25163d8dbe1e93a353ca62"
+      "document_sha256": "ab8fb00a8750d2d971c947236d82d095b14b40e1584945d59489502499d9dba3"
     },
     "workflows/sdlc/implement-v4-precheck-sonnet-fix/workflow.yaml": {
       "phases": [
@@ -770,7 +770,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "636c2bf1dca4f1306b4d14b93b340b7f87b08f02056a24d561a34dd69a11f608"
+      "document_sha256": "66a39720496ed5ffcc280a8c0fe48df912da1bdf20c5522167d635026337f53f"
     },
     "workflows/sdlc/implement-v7/workflow.yaml": {
       "phases": [
@@ -823,7 +823,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "51395ee065898011ed7a0f034467ea05360e106c000191dc8560b9524d32920a"
+      "document_sha256": "fd733f5697270cbe7625be3a358b953e48300ae6f314db0a7c9e1f2c13127487"
     },
     "workflows/sdlc/pr-review/workflow.yaml": {
       "phases": [
@@ -1079,7 +1079,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "c064bc041f7d92e3b88ab1291a3addbcdd7c756ed9c3bff915c65b9aaafb689f"
+      "document_sha256": "9b93cc97269f4a5aa5572297fea58eebd00731cb5b4964b329b9fbb01ff7e28a"
     },
     "workflows/triggers/ci-fix.yaml": {
       "phases": [

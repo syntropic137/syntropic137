@@ -10,6 +10,8 @@ fails if the declaration is lost anywhere between the YAML and
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_1308_the_declaration_survives_to_execution import (
@@ -17,7 +19,23 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.test_1308_the_dec
     _executable_phases,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]
+
+
+@pytest.fixture(autouse=True)
+def _pids_ceiling_the_shipped_workflows_need(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """SYN_WORKSPACE_PIDS_MAX=1024: the sdlc gate phases request 1024 pids (#2227)."""
+    from syn_shared.settings import reset_settings
+
+    monkeypatch.setenv("SYN_WORKSPACE_PIDS_MAX", "1024")
+    reset_settings()
+    yield
+    monkeypatch.undo()
+    reset_settings()
+
 
 _ROUNDS = ("verify", "reverify", "reverify_2")
 _REVIEWS = [

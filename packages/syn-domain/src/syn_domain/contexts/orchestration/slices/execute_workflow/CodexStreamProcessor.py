@@ -50,7 +50,6 @@ which assumed ``item.item.id``): ``item`` fields live directly under the
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import time
@@ -68,6 +67,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPolle
 from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults import (
     codex_fault_reason,
     codex_login_fault_in,
+    codex_pids_fault_in,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     InterruptibleWorkspace,
@@ -349,8 +349,11 @@ class CodexStreamProcessor:
         agent_model: str | None,
         rollout: CodexRolloutPort | None,
         cost_limit: PhaseCostLimit | None = None,
+        pids_limit: int | None = None,
     ) -> None:
         self._tokens = tokens
+        #: The workspace's pids limit, named when the stream dies of it (#2227).
+        self._pids_limit = pids_limit
         self._cost_limit = cost_limit
         self._cost_limit_reason: str | None = None
         #: Where the model comes from when the stream does not name one, which
@@ -403,6 +406,11 @@ class CodexStreamProcessor:
         #: candidate is informative at all it is because the stream was cut
         #: off - which is the last such line, not the first.
         self._parse_fault_candidate: str | None = None
+        #: An out-of-pids failure in the LAST completed command's output, held
+        #: until end-of-stream (#2227). Each command overwrites it: one followed
+        #: by commands that ran is pressure that passed, not
+        #: why the stream stopped.
+        self._pids_fault_candidate: str | None = None
 
         # #894: A codex phase delegates to `claude -p`.
         self._delegation_tool_use_ids: set[str] = set()
@@ -463,17 +471,10 @@ class CodexStreamProcessor:
     ) -> StreamResult:
         """Process the JSONL event stream from ``codex exec --json``."""
         started_at = time.monotonic()
-        conversation_lines: list[str] = []
-
         read = StreamRead(self._cancel_poller, workspace)
-        async with contextlib.aclosing(read.lines(stream)) as lines:
-            async for line in lines:
-                if line.strip():
-                    conversation_lines.append(line)
-                stop, reason = await self._step(line, read.line_count, workspace)
-                if stop:
-                    read.stop(reason)
-                    break
+        conversation_lines = await read.drive(
+            stream, lambda line, count: self._step(line, count, workspace)
+        )
 
         if not self._totals.saw_terminal_turn:
             # THE single place `_error_reason` is decided. Nothing mid-stream
@@ -482,7 +483,8 @@ class CodexStreamProcessor:
             # `turn.completed` cannot be failed by something it recovered from.
             #
             # Order is deliberate, most specific first: a fault codex itself
-            # reported beats an inferred auth fault, which beats an unparseable
+            # reported beats an inferred auth fault, which beats running out of
+            # pids in the last command's output, which beats an unparseable
             # `{`-leading line, which beats the generic "it just stopped".
             #
             # The parse fault ranks LAST of the three because it is the weakest
@@ -494,6 +496,7 @@ class CodexStreamProcessor:
             self._error_reason = (
                 self._turn_fault_candidate
                 or self._auth_fault_candidate
+                or self._pids_fault_candidate
                 or self._parse_fault_candidate
                 or MISSING_TERMINAL_TURN_REASON
             )
@@ -912,6 +915,7 @@ class CodexStreamProcessor:
         exit_code = item.get("exit_code")
         success = exit_code == 0
         output = str(item.get("aggregated_output") or "")
+        self._pids_fault_candidate = codex_pids_fault_in(output, self._pids_limit)
         # item.completed repeats the command, so a delegation is still counted
         # if the matching item.started never arrived (truncated stream).
         self._note_delegation_attempt(tool_use_id, str(item.get("command", "")))

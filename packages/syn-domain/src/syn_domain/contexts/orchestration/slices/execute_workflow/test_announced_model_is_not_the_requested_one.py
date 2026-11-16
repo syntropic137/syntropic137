@@ -480,6 +480,8 @@ class _CodexWorkspace:
     still reach it once that container is gone.
     """
 
+    pids_limit = None
+
     def __init__(self, *lines: str, document: RolloutDocument | None) -> None:
         self._lines = lines
         self._document = document

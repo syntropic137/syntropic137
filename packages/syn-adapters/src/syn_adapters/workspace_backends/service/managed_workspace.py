@@ -94,6 +94,10 @@ class ManagedWorkspace:
     #: carried onto the phase's persisted provisioning event. None only for a
     #: workspace built without provisioning one, as tests do.
     image_manifest: ImageManifestReading | None = None
+    #: The pids limit this workspace was provisioned with, so a phase that dies
+    #: of it can say which limit it hit (#2227). None only for a workspace built
+    #: without provisioning one, as tests do.
+    pids_limit: int | None = None
     _tokens_injected: bool = False
     #: How this workspace's git credential was minted, recorded by the setup
     #: phase so it can be minted AGAIN later (#1393). None until the setup

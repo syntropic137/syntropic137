@@ -15,7 +15,7 @@ a grant that was then dropped on the way to the CLI.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -26,7 +26,23 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHa
 )
 from syn_shared.agents import AgentProvider
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _pids_ceiling_the_shipped_workflows_need(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """SYN_WORKSPACE_PIDS_MAX=1024: the sdlc gate phases request 1024 pids (#2227)."""
+    from syn_shared.settings import reset_settings
+
+    monkeypatch.setenv("SYN_WORKSPACE_PIDS_MAX", "1024")
+    reset_settings()
+    yield
+    monkeypatch.undo()
+    reset_settings()
+
 
 _REPO = Path(__file__).resolve().parents[3]
 _IMPLEMENT_V3 = _REPO / "workflows" / "sdlc" / "implement-v3" / "workflow.yaml"

@@ -23,11 +23,14 @@ from typing import TYPE_CHECKING, Protocol
 from syn_shared.control import ControlSignalType
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator
+    from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 
     from syn_adapters.control import ExecutionController
 
 logger = logging.getLogger(__name__)
+
+#: One line and the count so far in, ``(stop, reason)`` out (see ``StreamRead.drive``).
+type _Step = Callable[[str, int], Awaitable[tuple[bool, str | None]]]
 
 #: Longest a CANCEL waits to be seen, chatty agent or silent (#918).
 CANCEL_POLL_SECONDS = 2.0
@@ -159,3 +162,20 @@ class StreamRead:
                     await self._workspace.interrupt()
                     self.stop(poll.reason)
                     return
+
+    async def drive(self, stream: AsyncIterator[str], step: _Step) -> list[str]:
+        """Feed each line to ``step`` until the stream ends or ``step`` stops it.
+
+        Returns the non-blank lines read. ``step`` gets the line and the count
+        so far, and answers ``(stop, reason)``.
+        """
+        kept: list[str] = []
+        async with contextlib.aclosing(self.lines(stream)) as lines:
+            async for line in lines:
+                if line.strip():
+                    kept.append(line)
+                stop, reason = await step(line, self.line_count)
+                if stop:
+                    self.stop(reason)
+                    break
+        return kept

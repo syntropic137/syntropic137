@@ -56,6 +56,8 @@ async def test_the_request_is_the_container_pids_limit_and_is_recorded() -> None
     ) as workspace:
         assert _container_pids(service, workspace.isolation_handle.isolation_id) == 2048
         assert _recorded_pids(workspace) == 2048
+        # What the phase's error names when it dies of the limit (#2227).
+        assert workspace.pids_limit == 2048
 
 
 async def test_no_request_is_the_configured_default() -> None:
@@ -64,6 +66,7 @@ async def test_no_request_is_the_configured_default() -> None:
     async with service.create_workspace(execution_id="exec-1", with_sidecar=False) as workspace:
         assert _container_pids(service, workspace.isolation_handle.isolation_id) == 512
         assert _recorded_pids(workspace) == 512
+        assert workspace.pids_limit == 512
 
 
 async def test_a_memory_only_request_keeps_the_default_pids_limit() -> None:
