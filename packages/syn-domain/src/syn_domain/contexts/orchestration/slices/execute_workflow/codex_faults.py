@@ -156,7 +156,9 @@ _SHELL_OUT_OF_PROCESSES = (
 #: a script, which names the script and always gives the line.
 _SHELL_PREFIX = r"(?:(?:\S*/)?(?:ba|da|a|z|k)?sh(?:: (?:line )?\d+)?|\S+: line \d+)"
 _OUT_OF_PROCESSES_RE = re.compile(
-    r"^[^\S\n]*" + _SHELL_PREFIX + r": (?:"
+    r"^[^\S\n]*"
+    + _SHELL_PREFIX
+    + r": (?:"
     + "|".join(map(re.escape, _SHELL_OUT_OF_PROCESSES))
     + r")(?:: Resource temporarily unavailable)?[^\S\n]*$",
     re.MULTILINE,

@@ -1,12 +1,14 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py
-index 802d6132d..331f60c44 100644
+index a32093534..331f60c44 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py
-@@ -156,9 +156,7 @@ _SHELL_OUT_OF_PROCESSES = (
+@@ -156,11 +156,7 @@ _SHELL_OUT_OF_PROCESSES = (
  #: a script, which names the script and always gives the line.
  _SHELL_PREFIX = r"(?:(?:\S*/)?(?:ba|da|a|z|k)?sh(?:: (?:line )?\d+)?|\S+: line \d+)"
  _OUT_OF_PROCESSES_RE = re.compile(
--    r"^[^\S\n]*" + _SHELL_PREFIX + r": (?:"
+-    r"^[^\S\n]*"
+-    + _SHELL_PREFIX
+-    + r": (?:"
 -    + "|".join(map(re.escape, _SHELL_OUT_OF_PROCESSES))
 -    + r")(?:: Resource temporarily unavailable)?[^\S\n]*$",
 +    r"^.*?:\s(?:" + "|".join(map(re.escape, _SHELL_OUT_OF_PROCESSES)) + r")(?=:|\s*$).*$",
