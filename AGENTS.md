@@ -652,6 +652,9 @@ uv run pytest -m unit -q
 - It runs all of fitness. The first run installs Rust and builds `aps` (~6
   minutes). A `FITNESS NOT RUN:` line is not a pass; a test listed as `NOT RUN`
   (docker-backed) is settled by CI on the same head SHA.
+- It checks the generated architecture markdown (`check-architecture-docs`);
+  run `just docs-regen` if it is stale. `NOT RUN: vsa-overview.svg` is not a
+  pass either: that file needs `vsa`, and CI checks it (#1782).
 - New Python test modules need the `unit` marker (`architecture` under
   `ci/fitness/`), or the second gate collects zero tests and goes green.
 - Mutation evidence (do the new tests kill the bug?) is not a workspace gate:
