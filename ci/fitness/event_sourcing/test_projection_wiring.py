@@ -76,6 +76,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
     )
+    from syn_domain.contexts.orchestration.slices.failure_streak import FailureStreakProjection
     from syn_domain.contexts.orchestration.slices.get_execution_detail import (
         WorkflowExecutionDetailProjection,
     )
@@ -137,6 +138,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
         DashboardMetricsProjection(dummy),
         # Orchestration — phase metrics and execution todo
         WorkflowPhaseMetricsProjection(dummy),
+        FailureStreakProjection(dummy),
         ExecutionTodoProjection(store=dummy),
         # Agent sessions
         SessionListProjection(dummy),
@@ -181,7 +183,7 @@ def _get_coordinator_projections() -> list[CheckpointedProjection]:
 # Expected count — update when adding/removing projections from the coordinator.
 # If this fails, you added or removed a projection. Update _EXPECTED_COUNT
 # and the list in _get_coordinator_projections() above.
-_EXPECTED_COUNT = 31  # +WorkspaceOwnershipProjection (PC-130)
+_EXPECTED_COUNT = 32  # +FailureStreakProjection (#1569)
 
 
 # ---------------------------------------------------------------------------
