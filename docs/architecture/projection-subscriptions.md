@@ -10,14 +10,14 @@
 
 This diagram shows which events feed which projections in the Syn137 system.
 
-**Total Relationships:** 82 events → 27 projections
+**Total Relationships:** 82 events → 28 projections
 
 ```mermaid
 graph LR
     subgraph events["Key Events"]
-        e1[workflow_execution_started]
-        e2[workflow_failed]
-        e3[workflow_completed]
+        e1[workflow_failed]
+        e2[workflow_completed]
+        e3[workflow_execution_started]
         e4[execution_cancelled]
         e5[phase_completed]
         e6[workflow_interrupted]
@@ -34,29 +34,31 @@ graph LR
         p4[EvalListProjection]
         p5[ExecutionCostProjection]
         p6[ExecutionTodoProjection]
-        p7[GlobalClaudePluginsProjection]
-        p8[InstallationProjection]
-        p9[RepoCorrelationProjection]
-        p10[RepoCostProjection]
-        p11[RepoHealthProjection]
-        p12[RepoProjection]
-        p13[SessionCostProjection]
-        p14[SessionListProjection]
-        p15[SkillLockProjection]
+        p7[FailureStreakProjection]
+        p8[GlobalClaudePluginsProjection]
+        p9[InstallationProjection]
+        p10[RepoCorrelationProjection]
+        p11[RepoCostProjection]
+        p12[RepoHealthProjection]
+        p13[RepoProjection]
+        p14[SessionCostProjection]
+        p15[SessionListProjection]
     end
 
     e4 --> p6
     e7 --> p6
     e5 --> p6
-    e8 --> p9
+    e8 --> p10
+    e2 --> p6
+    e2 --> p7
+    e2 --> p11
+    e2 --> p12
     e3 --> p6
     e3 --> p10
-    e3 --> p11
     e1 --> p6
-    e1 --> p9
-    e2 --> p6
-    e2 --> p10
-    e2 --> p11
+    e1 --> p7
+    e1 --> p11
+    e1 --> p12
     e6 --> p6
     e9 --> p3
     e10 --> p3
@@ -67,8 +69,8 @@ graph LR
 ## Statistics
 
 - **Events with projections:** 82
-- **Unique projections:** 27
-- **Total event-to-projection mappings:** 128
+- **Unique projections:** 28
+- **Total event-to-projection mappings:** 130
 
 ---
 
@@ -76,9 +78,9 @@ graph LR
 
 | Event | Projections | Count |
 |-------|-------------|-------|
+| workflow_failed | ExecutionTodoProjection, FailureStreakProjection, RepoCostProjection... | 7 |
+| workflow_completed | ExecutionTodoProjection, FailureStreakProjection, RepoCostProjection... | 6 |
 | workflow_execution_started | ExecutionTodoProjection, RepoCorrelationProjection, WorkflowDetailProjection... | 6 |
-| workflow_failed | ExecutionTodoProjection, RepoCostProjection, RepoHealthProjection... | 6 |
-| workflow_completed | ExecutionTodoProjection, RepoCostProjection, RepoHealthProjection... | 5 |
 | execution_cancelled | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
 | phase_completed | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
 | workflow_interrupted | ExecutionTodoProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
