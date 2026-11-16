@@ -624,6 +624,7 @@ def create_coordinator_service(
         QuarantineNoticeProcessManager,
         ResumeStarter,
         ResumeStartProcessManager,
+        TriggerDispatchStreakCheck,
     )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
@@ -634,10 +635,7 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
     )
-    from syn_domain.contexts.orchestration.slices.failure_streak import (
-        FailureStreakProjection,
-        TriggerDispatchStreakCheck,
-    )
+    from syn_domain.contexts.orchestration.slices.failure_streak import FailureStreakProjection
     from syn_domain.contexts.orchestration.slices.get_execution_detail import (
         WorkflowExecutionDetailProjection,
     )
