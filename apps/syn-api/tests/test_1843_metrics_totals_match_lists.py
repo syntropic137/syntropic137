@@ -7,6 +7,8 @@ definitions: each read model was internally right.
 - Sessions: /metrics counted every session id the observability lane saw emit
   an event, delegates included; /sessions lists the sessions the domain
   started, including ones that failed before the agent emitted anything.
+- Artifacts (item 2): /metrics added one per ``ArtifactCreated`` to a running
+  counter on one global row; /artifacts counts the rows of the artifact list.
 - Failed executions: /metrics added one per ``WorkflowFailed`` event to a
   running counter; /executions tallies each execution once by its current
   status.
@@ -188,3 +190,51 @@ async def test_a_failure_the_counter_never_applied_is_still_counted(
 
     assert listed["status_counts"]["failed"] == 2
     assert metrics["failed_workflows"] == listed["status_counts"]["failed"]
+
+
+async def _create_artifact(artifact_id: str, workflow_id: str) -> None:
+    from syn_api._wiring import get_projection_mgr
+
+    event = {
+        "artifact_id": artifact_id,
+        "workflow_id": workflow_id,
+        "artifact_type": "code",
+        "title": artifact_id,
+        "size_bytes": 10,
+        "created_at": STARTED_AT,
+    }
+    await get_projection_mgr().artifact_list.on_artifact_created(event)
+
+
+async def test_total_artifacts_is_the_artifact_list_total(client: AsyncClient) -> None:
+    """The live direction (28907 beside 28914): artifacts the counter never applied.
+
+    The dashboard counter is given one increment it kept, the list three rows,
+    so the two read models disagree and the test says which one /metrics reads.
+    """
+    from syn_api._wiring import get_projection_mgr
+
+    await get_projection_mgr().dashboard_metrics.on_artifact_created(
+        {"artifact_id": "art-a", "size_bytes": 10}
+    )
+    await _create_artifact("art-a", "wf-a")
+    await _create_artifact("art-b", "wf-a")
+    await _create_artifact("art-c", "wf-b")
+
+    metrics = (await client.get("/metrics")).json()
+    artifacts = (await client.get("/artifacts", params={"page_size": 1})).json()
+
+    assert artifacts["total"] == 3
+    assert metrics["total_artifacts"] == artifacts["total"]
+
+
+async def test_total_artifacts_narrows_like_the_artifact_list(client: AsyncClient) -> None:
+    await _create_artifact("art-a", "wf-a")
+    await _create_artifact("art-b", "wf-a")
+    await _create_artifact("art-c", "wf-b")
+
+    metrics = (await client.get("/metrics", params={"workflow_id": "wf-a"})).json()
+    artifacts = (await client.get("/artifacts", params={"workflow_id": "wf-a"})).json()
+
+    assert artifacts["total"] == 2
+    assert metrics["total_artifacts"] == artifacts["total"]

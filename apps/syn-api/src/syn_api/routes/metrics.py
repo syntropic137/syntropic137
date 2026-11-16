@@ -167,7 +167,6 @@ async def get_dashboard_metrics(
         return Ok(
             DashboardMetrics(
                 total_workflows=data.total_workflows,
-                total_artifacts=data.total_artifacts,
                 total_artifact_bytes=data.total_artifact_bytes,
             )
         )
@@ -345,6 +344,27 @@ async def _session_count(workflow_id: str | None) -> int:
         ) from exc
 
 
+async def _artifact_count(workflow_id: str | None) -> int:
+    """Artifacts, counted exactly as GET /artifacts counts its ``total`` (#1843).
+
+    This was the dashboard projection's running counter: one per
+    ArtifactCreated, on a single global row, so an increment lost in its
+    read-modify-write was never recovered and the card read 7 fewer than the
+    list (28907 beside 28914). The counter also ignored ``workflow_id``.
+
+    Raises:
+        MetricsUnavailableError: the artifact list could not be read.
+    """
+    try:
+        page = await get_projection_mgr().artifact_list.page(workflow_id=workflow_id, limit=0)
+        return page.total
+    except Exception as exc:
+        logger.warning("Failed to count artifacts", exc_info=True)
+        raise MetricsUnavailableError(
+            "the artifact count is unavailable: the artifact list could not be read"
+        ) from exc
+
+
 async def _canonical_totals(execution_ids: set[str] | None) -> CanonicalTotals:
     """Canonical token/cost totals, narrowed to a set of executions when given.
 
@@ -385,10 +405,12 @@ async def get_metrics_endpoint(
     # the two cards quoted 9,151,116 tokens beside 10,002,629 for the same
     # reality. Counts of things a list endpoint pages through are read from
     # that list's own read model, so the card and the list's total cannot
-    # disagree (#1843). Template/artifact counts stay on the projection.
+    # disagree (#1843). Template and artifact-byte counts stay on the
+    # projection: the artifact list has no byte sum to read instead.
     try:
         status_counts = await _execution_status_counts(workflow_id)
         total_sessions = await _session_count(workflow_id)
+        total_artifacts = await _artifact_count(workflow_id)
         if workflow_id:
             execution_ids = await _workflow_execution_ids(workflow_id)
             totals = await _canonical_totals(execution_ids)
@@ -416,7 +438,7 @@ async def get_metrics_endpoint(
         total_cache_read_tokens=totals.cache_read_tokens,
         total_tokens=totals.total_tokens,
         total_cost_usd=totals.cost_usd,
-        total_artifacts=m.total_artifacts,
+        total_artifacts=total_artifacts,
         total_artifact_bytes=m.total_artifact_bytes,
         phases=phases,
     )

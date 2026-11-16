@@ -2865,7 +2865,6 @@ class DashboardMetrics(BaseModel):
         default=0,
         description="Workflow templates that are not archived; matches the default total of GET /workflows",
     )
-    total_artifacts: int = 0
     total_artifact_bytes: int = 0
 
 
