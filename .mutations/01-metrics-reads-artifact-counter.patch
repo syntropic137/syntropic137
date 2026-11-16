@@ -1,0 +1,41 @@
+diff --git a/apps/syn-api/src/syn_api/routes/metrics.py b/apps/syn-api/src/syn_api/routes/metrics.py
+index ec16728e3..efb4de3de 100644
+--- a/apps/syn-api/src/syn_api/routes/metrics.py
++++ b/apps/syn-api/src/syn_api/routes/metrics.py
+@@ -167,6 +167,7 @@ async def get_dashboard_metrics(
+         return Ok(
+             DashboardMetrics(
+                 total_workflows=data.total_workflows,
++                total_artifacts=data.total_artifacts,
+                 total_artifact_bytes=data.total_artifact_bytes,
+             )
+         )
+@@ -410,7 +411,6 @@ async def get_metrics_endpoint(
+     try:
+         status_counts = await _execution_status_counts(workflow_id)
+         total_sessions = await _session_count(workflow_id)
+-        total_artifacts = await _artifact_count(workflow_id)
+         if workflow_id:
+             execution_ids = await _workflow_execution_ids(workflow_id)
+             totals = await _canonical_totals(execution_ids)
+@@ -438,7 +438,7 @@ async def get_metrics_endpoint(
+         total_cache_read_tokens=totals.cache_read_tokens,
+         total_tokens=totals.total_tokens,
+         total_cost_usd=totals.cost_usd,
+-        total_artifacts=total_artifacts,
++        total_artifacts=m.total_artifacts,
+         total_artifact_bytes=m.total_artifact_bytes,
+         phases=phases,
+     )
+diff --git a/apps/syn-api/src/syn_api/types.py b/apps/syn-api/src/syn_api/types.py
+index 4b9a3f783..c965554d4 100644
+--- a/apps/syn-api/src/syn_api/types.py
++++ b/apps/syn-api/src/syn_api/types.py
+@@ -2865,6 +2865,7 @@ class DashboardMetrics(BaseModel):
+         default=0,
+         description="Workflow templates that are not archived; matches the default total of GET /workflows",
+     )
++    total_artifacts: int = 0
+     total_artifact_bytes: int = 0
+ 
+ 
