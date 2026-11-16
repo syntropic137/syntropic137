@@ -50,6 +50,7 @@ from pydantic import (
     field_validator,
 )
 
+from syn_adapters.session_store.codex_rollout_model import rollout_record_model
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     NoUsage,
     PricedUsage,
@@ -58,7 +59,6 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
     StoredTranscript,
     UnpricedUsage,
     UsageResult,
-    rollout_record_model,
 )
 
 

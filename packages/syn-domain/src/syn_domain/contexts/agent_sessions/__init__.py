@@ -249,7 +249,6 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
     RolloutDocument,
     RolloutRecord,
     StoredTranscript,
-    model_from_rollout,
 )
 
 from .domain.read_models.transcript_body_state import (
@@ -421,7 +420,6 @@ __all__ = [
     "UnsupportedEvidenceIssue",
     "import_phase_delegates",
     "inventory_counts",
-    "model_from_rollout",
     "namespace_counts",
     "pick_primary_model",
     "price_canonical_row",

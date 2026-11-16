@@ -57,7 +57,6 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypedDict
 
-from syn_domain.contexts.agent_sessions import model_from_rollout
 from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model import (
     announced_model_from,
 )
@@ -621,8 +620,8 @@ class CodexStreamProcessor:
             )
             return
 
-        document = await self._rollout.codex_rollout(self._leader_native_session_id)
-        if document is None:
+        reading = await self._rollout.codex_rollout_model(self._leader_native_session_id)
+        if reading is None:
             logger.warning(
                 "Could not read the codex rollout for session %s (phase=%s) - "
                 "the model it ran goes unrecorded",
@@ -631,7 +630,7 @@ class CodexStreamProcessor:
             )
             return
 
-        self._announced_model = model_from_rollout(document)
+        self._announced_model = reading.model
         if self._announced_model is None:
             logger.info(
                 "Codex rollout for session %s (phase=%s) names no single model",

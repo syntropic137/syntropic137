@@ -457,13 +457,6 @@ allowed_prefixes = [
 # path = { violations = N, issue = "#NNN" }. Counts are EXACT: one more fails,
 # one fewer fails as stale. Zero tolerance for any file not listed here.
 
-# TODO(#1424): the usage parser moved to syn_adapters.session_store behind
-# TranscriptUsageReader (part 1). One marker remains: the codex "turn_context"
-# model reader (rollout_record_model), because orchestration's
-# CodexStreamProcessor reads a codex phase's model through it (#1284). It goes
-# when CodexRolloutPort returns the model instead of the records (part 2).
-"packages/syn-domain/src/syn_domain/contexts/agent_sessions/transcript_usage.py" = { violations = 1, issue = "#1424" }
-
 # TODO(#1424): the API conversation log parses Claude message content and Codex
 # stream items (imports syn_shared.codex_stream). Predates #1398.
 "apps/syn-api/src/syn_api/routes/conversations.py" = { violations = 1, issue = "#1424" }
