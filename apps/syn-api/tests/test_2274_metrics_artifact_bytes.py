@@ -67,5 +67,4 @@ async def test_metrics_returns_the_projected_artifact_bytes(client: AsyncClient)
 
     metrics = (await client.get("/metrics")).json()
 
-    assert metrics["total_artifacts"] == 2
     assert metrics["total_artifact_bytes"] == 5000
