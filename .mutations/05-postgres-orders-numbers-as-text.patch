@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/projection_stores/postgres_query_builder.py b/packages/syn-adapters/src/syn_adapters/projection_stores/postgres_query_builder.py
+index 950d6b217..29693b2f0 100644
+--- a/packages/syn-adapters/src/syn_adapters/projection_stores/postgres_query_builder.py
++++ b/packages/syn-adapters/src/syn_adapters/projection_stores/postgres_query_builder.py
+@@ -85,7 +85,7 @@ def _build_order_clause(order_by: str | None) -> str:
+         f"CASE WHEN jsonb_typeof(data->'{field}') = 'number' THEN (data->>'{field}')::numeric END"
+     )
+     return (
+-        f" ORDER BY {numeric} {direction} NULLS LAST, data->>'{field}' {direction} NULLS LAST, id"
++        f" ORDER BY data->>'{field}' {direction} NULLS LAST, id"
+     )
+ 
+ 

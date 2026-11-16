@@ -1,0 +1,20 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py
+index a6f04e3e5..2c9cc77d8 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py
+@@ -223,10 +223,11 @@ class WorkflowListProjection(RecordedTimeProjection):
+         Returns:
+             List of matching WorkflowSummary objects
+         """
+-        matching = await self._matching(
+-            workflow_type_filter, include_archived, search, _store_order(order_by)
+-        )
+-        return matching[offset : offset + limit]
++        matching = await self._matching(workflow_type_filter, include_archived, search, DEFAULT_ORDER)
++        page = matching[offset : offset + limit]
++        order = _store_order(order_by)
++        field = order.removeprefix("-")
++        return sorted(page, key=lambda s: getattr(s, field), reverse=order.startswith("-"))
+ 
+     async def count(
+         self,

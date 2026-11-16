@@ -141,6 +141,15 @@ class TestInMemoryProjectionStore:
         assert results[0]["name"] == "Zebra"
 
     @pytest.mark.asyncio
+    async def test_query_order_ties_break_by_key(self, memory_store: InMemoryProjectionStore):
+        """Equal sort keys come back in key order, as Postgres's ``ORDER BY ..., id`` (#1843)."""
+        for key, runs in [("wf-3", 9), ("wf-1", 9), ("wf-0", 10), ("wf-2", 9)]:
+            await memory_store.save("workflows", key, {"id": key, "runs_count": runs})
+
+        results = await memory_store.query("workflows", order_by="-runs_count")
+        assert [r["id"] for r in results] == ["wf-0", "wf-1", "wf-2", "wf-3"]
+
+    @pytest.mark.asyncio
     async def test_query_with_pagination(self, memory_store: InMemoryProjectionStore):
         """Test querying with limit and offset."""
         for i in range(10):
