@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
+index 7626b9072..7cd70388b 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
+@@ -480,6 +480,7 @@ class CodexStreamProcessor:
+                     read.stop(reason)
+                     break
+ 
++        self._error_reason = self._pids_fault_reason()
+         if not self._totals.saw_terminal_turn:
+             # THE single place `_error_reason` is decided. Nothing mid-stream
+             # writes it: every fault the parser can see is held as a candidate
