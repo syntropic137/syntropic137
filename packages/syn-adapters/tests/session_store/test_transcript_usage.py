@@ -574,3 +574,23 @@ class TestClaudeRepeatsOneResponseAcrossContentBlocks:
         usage = extract_usage("claude-code-jsonl", anonymous + "\n" + anonymous)
         assert isinstance(usage, PricedUsage)
         assert usage.output_tokens == 20
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("source_format", "document"),
+    [
+        ("codex-rollout-jsonl", 42),
+        ("codex-rollout-jsonl", "[" * 20000 + "0" + "]" * 20000),
+        ("claude-code-jsonl", "[" * 20000 + "0" + "]" * 20000),
+    ],
+    ids=["codex-wrong-type", "codex-deep-nesting", "claude-deep-nesting"],
+)
+def test_reader_never_raises_on_a_malformed_stored_document(
+    source_format: str, document: object
+) -> None:
+    """The port says MUST NOT raise: one unreadable session is that session's gap."""
+    from syn_adapters.session_store.transcript_usage import StoredTranscriptUsageReader
+
+    usage = StoredTranscriptUsageReader().read_usage(source_format, document)  # type: ignore[arg-type]
+    assert isinstance(usage, UnpricedUsage)

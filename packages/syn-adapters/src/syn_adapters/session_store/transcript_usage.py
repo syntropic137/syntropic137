@@ -538,4 +538,17 @@ class StoredTranscriptUsageReader:
     """``TranscriptUsageReader`` over the formats a conforming store records."""
 
     def read_usage(self, source_format: str, document: StoredTranscript) -> UsageResult:
-        return extract_usage(source_format, document)
+        """``extract_usage``, held to the port's must-not-raise contract.
+
+        The parser degrades every malformed shape it anticipates, but the
+        document arrives from a store: a non-text, non-list value raises
+        TypeError in the JSON decode, and pathologically nested JSON raises
+        RecursionError. Either would abort the import of every session beside
+        this one, so both become this session's ``UnpricedUsage``.
+        """
+        try:
+            return extract_usage(source_format, document)
+        except (TypeError, ValueError, RecursionError) as exc:
+            return UnpricedUsage(
+                f"{source_format!r} transcript could not be read: {type(exc).__name__}"
+            )
