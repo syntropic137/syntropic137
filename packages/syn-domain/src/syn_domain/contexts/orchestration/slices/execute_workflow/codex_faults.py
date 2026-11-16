@@ -119,3 +119,60 @@ def codex_login_fault_in(line: str) -> str | None:
         return None
     status = _HTTP_AUTH_STATUS_RE.search(line)
     return codex_login_fault_reason(status.group(1) if status else "", line)
+
+
+# --- The workspace ran out of processes (#2227) --------------------------------
+#
+# A workspace has a pids limit (`resources.pids_limit`). When the agent's
+# commands use it up, the next process cannot start (EAGAIN) and the shell
+# says so in that command's output. exec-f02a26a13856's last command printed:
+#
+#   /usr/bin/bash: fork: retry: Resource temporarily unavailable   (x4)
+#   /usr/bin/bash: fork: Resource temporarily unavailable
+#
+# Codex then exited 1 without `turn.completed`, and the phase was reported
+# under the generic "stream ended" reason: a codex symptom, for a workspace
+# that had run two parallel builds into its limit.
+#
+# Each spelling must FOLLOW a shell's `: ` prefix and END its line or its
+# clause (`can't fork: ...`), so prose that only mentions the operation - "fatal:
+# Cannot fork the repository" - does not match. "Resource temporarily
+# unavailable" alone is not enough either: a non-blocking read that has
+# nothing to read says the same, and that is no fault at all.
+#
+# Spelled out whole because the orchestration context reserves the bare word
+# for an execution operation; only these exact shell messages are exempt
+# (ci/fitness/code_quality/test_reserved_domain_words.py).
+_SHELL_OUT_OF_PROCESSES = (
+    "fork: retry: Resource temporarily unavailable",  # bash, still retrying
+    "fork: Resource temporarily unavailable",  # bash, gave up
+    "Cannot fork",  # dash
+    "can't fork",  # busybox ash
+)
+_OUT_OF_PROCESSES_RE = re.compile(
+    r"^.*?:\s(?:" + "|".join(map(re.escape, _SHELL_OUT_OF_PROCESSES)) + r")(?=:|\s*$).*$",
+    re.MULTILINE,
+)
+
+
+def workspace_out_of_processes_in(output: str) -> str | None:
+    """The cause a command's output shows the workspace out of processes, or ``None``.
+
+    The stream processor reports it ahead of its own "stream ended" text, which
+    stays true and stays in the reason.
+
+    A REAL fault, deliberately not the "stream ended" reason refined: a phase
+    that ends on it is neither retried (#1335 - the same limit hits the same
+    wall) nor completed on its deliverable (#1111 - the commands the
+    deliverable depended on could not run). It names no codex or claude fault,
+    so the upstream failure reader reads it as `unknown`: not `auth`, and not
+    a busy provider to be waited out.
+    """
+    found = _OUT_OF_PROCESSES_RE.search(output)
+    if found is None:
+        return None
+    return (
+        "workspace ran out of processes (pids_limit): a command could not start "
+        f"a process ({found.group(0).strip()[:_MAX_FAULT_LINE_LEN]}); raise "
+        "resources.pids_limit for this phase or run fewer gates at once (#2227)"
+    )

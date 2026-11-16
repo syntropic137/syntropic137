@@ -68,6 +68,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPolle
 from syn_domain.contexts.orchestration.slices.execute_workflow.codex_faults import (
     codex_fault_reason,
     codex_login_fault_in,
+    workspace_out_of_processes_in,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
     InterruptibleWorkspace,
@@ -403,6 +404,10 @@ class CodexStreamProcessor:
         #: candidate is informative at all it is because the stream was cut
         #: off - which is the last such line, not the first.
         self._parse_fault_candidate: str | None = None
+        #: Whether the LATEST command's output shows the workspace out of
+        #: processes (#2227). Latest, not first: once the pids are gone no
+        #: later command can run cleanly, so a clean one means they came back.
+        self._pids_fault_candidate: str | None = None
 
         # #894: A codex phase delegates to `claude -p`.
         self._delegation_tool_use_ids: set[str] = set()
@@ -482,8 +487,9 @@ class CodexStreamProcessor:
             # `turn.completed` cannot be failed by something it recovered from.
             #
             # Order is deliberate, most specific first: a fault codex itself
-            # reported beats an inferred auth fault, which beats an unparseable
-            # `{`-leading line, which beats the generic "it just stopped".
+            # reported beats an inferred auth fault, which beats a workspace
+            # out of processes (#2227), which beats an unparseable `{`-leading
+            # line, which beats the generic "it just stopped".
             #
             # The parse fault ranks LAST of the three because it is the weakest
             # evidence - the line may be output the agent echoed, wholly
@@ -494,6 +500,7 @@ class CodexStreamProcessor:
             self._error_reason = (
                 self._turn_fault_candidate
                 or self._auth_fault_candidate
+                or self._pids_fault_reason()
                 or self._parse_fault_candidate
                 or MISSING_TERMINAL_TURN_REASON
             )
@@ -709,6 +716,12 @@ class CodexStreamProcessor:
         if self._auth_fault_candidate is not None:
             logger.warning("Codex auth fault seen on stdout: %s", self._auth_fault_candidate)
 
+    def _pids_fault_reason(self) -> str | None:
+        """The cut-off reason naming pids exhaustion, keeping the usage gap it also is."""
+        if self._pids_fault_candidate is None:
+            return None
+        return f"{self._pids_fault_candidate} - {MISSING_TERMINAL_TURN_REASON}"
+
     def _note_delegation_attempt(self, tool_use_id: str, command: str) -> None:
         """Record a codex command_execution that invokes `claude -p` (#894)."""
         if tool_use_id in self._delegation_tool_use_ids:
@@ -912,6 +925,8 @@ class CodexStreamProcessor:
         exit_code = item.get("exit_code")
         success = exit_code == 0
         output = str(item.get("aggregated_output") or "")
+        # Held, never decided here: see `_pids_fault_candidate`.
+        self._pids_fault_candidate = workspace_out_of_processes_in(output)
         # item.completed repeats the command, so a delegation is still counted
         # if the matching item.started never arrived (truncated stream).
         self._note_delegation_attempt(tool_use_id, str(item.get("command", "")))
