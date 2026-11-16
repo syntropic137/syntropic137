@@ -362,6 +362,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt 
 from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
     ExecutionCostQueryService,
 )
+from syn_domain.contexts.orchestration.slices.failure_streak import TriggerDispatchStreakCheck
 from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
     GlobalClaudePluginEntry,
     GlobalClaudePluginNotFoundError,
@@ -629,6 +630,7 @@ __all__ = [
     "TokenAccumulator",
     "TrialExclusion",
     "TrialOutcome",
+    "TriggerDispatchStreakCheck",
     "UnsupportedExecutionTypeError",
     "UnsupportedToolPolicyForProviderError",
     "UpdateEvalHandler",

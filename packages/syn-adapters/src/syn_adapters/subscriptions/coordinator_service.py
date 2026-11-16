@@ -567,6 +567,7 @@ def create_coordinator_service(
     pool: asyncpg.Pool | None = None,
     budget_checker: _BudgetChecker | None = None,
     max_dispatches_per_hour: int = 50,
+    failure_streak_threshold: int = 0,
     inventory_process_manager: InventoryReconciliationProcessManager | None = None,
     inventory_replication_manager: InventoryReplicationProcessManager | None = None,
 ) -> CoordinatorSubscriptionService:
@@ -594,6 +595,8 @@ def create_coordinator_service(
             and read from the actual observability data source (Lane 2).
         budget_checker: Optional budget checker for pre-dispatch cost validation.
         max_dispatches_per_hour: Maximum dispatches per hour (0 to disable).
+        failure_streak_threshold: Failure streak at which trigger dispatch of a
+            workflow is refused (#1569; 0 to disable).
 
     Returns:
         Configured CoordinatorSubscriptionService
@@ -621,6 +624,7 @@ def create_coordinator_service(
         QuarantineNoticeProcessManager,
         ResumeStarter,
         ResumeStartProcessManager,
+        TriggerDispatchStreakCheck,
     )
     from syn_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
@@ -670,6 +674,8 @@ def create_coordinator_service(
     from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
     from syn_domain.tool_call_counts import ToolCallCountsProjection
 
+    failure_streak = FailureStreakProjection(projection_store)
+
     # Create all checkpointed projections (27 total - bumped for #1557)
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
@@ -682,13 +688,16 @@ def create_coordinator_service(
             EvalListProjection(projection_store),
             DashboardMetricsProjection(projection_store),
             WorkflowPhaseMetricsProjection(projection_store),
-            FailureStreakProjection(projection_store),
+            failure_streak,
             ExecutionTodoProjection(store=projection_store),
             WorkflowDispatchProjection(
                 execution_service=cast("_ExecutionService | None", execution_service),
                 store=projection_store,
                 budget_checker=cast("_BudgetChecker | None", budget_checker),
                 max_dispatches_per_hour=max_dispatches_per_hour,
+                dispatch_refusals=TriggerDispatchStreakCheck(
+                    failure_streak, failure_streak_threshold
+                ),
             ),
             # ADR-014 s7: starts the child of each admitted resume. The same
             # dispatcher as above, through its gated `start_resume`.

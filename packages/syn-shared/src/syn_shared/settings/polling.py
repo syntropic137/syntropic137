@@ -106,6 +106,16 @@ class PollingSettings(BaseSettings):
         ),
     )
 
+    failure_streak_threshold: int = Field(
+        default=5,
+        ge=0,
+        description=(
+            "Refuse trigger-fired dispatch of a workflow whose failure streak (consecutive "
+            "platform or unclassified failures) has reached this length (#1569). Manual runs "
+            "are never refused; a completed run resets the streak. 0 to disable. Default: 5."
+        ),
+    )
+
     @property
     def enabled(self) -> bool:
         """Whether polling is enabled (inverse of ``disabled``)."""

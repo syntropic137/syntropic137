@@ -274,10 +274,10 @@
   <text x="750" y="1727" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• get_execution_detail</text>
   <text x="750" y="1745" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• workflow_phase_metrics</text>
   <text x="750" y="1763" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• workspace_hooks</text>
-  <text x="750" y="1781" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• list_executions</text>
-  <text x="750" y="1799" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• list_evals</text>
-  <text x="750" y="1817" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• workspace_metrics</text>
-  <text x="750" y="1835" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• failure_streak</text>
+  <text x="750" y="1781" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• failure_streak</text>
+  <text x="750" y="1799" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• list_executions</text>
+  <text x="750" y="1817" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• list_evals</text>
+  <text x="750" y="1835" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• workspace_metrics</text>
   <text x="750" y="1853" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• execution_todo</text>
   <text x="750" y="1871" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• workspace_ownership</text>
   <text x="750" y="1889" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• shipped_metrics</text>
