@@ -164,6 +164,9 @@ from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort impor
     TranscriptDeletedError,
     TranscriptIntegrityError,
 )
+from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+    TranscriptUsageReader,
+)
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     HAS_REQUESTED_MODEL_COLUMN,
     REQUESTED_MODEL_COLUMN,
@@ -242,11 +245,13 @@ from syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler
     StartSessionHandler,
 )
 from syn_domain.contexts.agent_sessions.transcript_usage import (
+    NoUsage,
     PricedUsage,
     RolloutDocument,
     RolloutRecord,
     StoredTranscript,
-    model_from_rollout,
+    UnpricedUsage,
+    UsageResult,
 )
 
 from .domain.read_models.transcript_body_state import (
@@ -355,6 +360,7 @@ __all__ = [
     "NativeRelationshipFact",
     "NativeSessionEvidencePort",
     "NativeTranscriptFacts",
+    "NoUsage",
     "NodeEvidence",
     "ObservationType",
     "ObserveInventoryClockCommand",
@@ -414,10 +420,12 @@ __all__ = [
     "TranscriptDeletionReplica",
     "TranscriptIntegrityError",
     "TranscriptMessage",
+    "TranscriptUsageReader",
+    "UnpricedUsage",
     "UnsupportedEvidenceIssue",
+    "UsageResult",
     "import_phase_delegates",
     "inventory_counts",
-    "model_from_rollout",
     "namespace_counts",
     "pick_primary_model",
     "price_canonical_row",

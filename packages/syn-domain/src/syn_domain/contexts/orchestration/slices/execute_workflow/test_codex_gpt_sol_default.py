@@ -14,17 +14,16 @@ follow, and each gets its own evidence:
 
 from __future__ import annotations
 
-import copy
 import json
 from decimal import Decimal
 
 import pytest
 
+from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutReading
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_announced_model_is_not_the_requested_one import (
     CODEX_THREAD_ID,
     _codex_thread_started,
     _codex_turn_completed,
-    _real_rollout,
     _RolloutOnDisk,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_codex_stream_processor import (
@@ -44,17 +43,13 @@ pytestmark = pytest.mark.unit
 
 
 def _rollout_naming(model: str) -> _RolloutOnDisk:
-    """The real captured rollout with its turn_context model set to ``model``.
+    """A rollout read whose turn_context names ``model``.
 
-    Only the model VALUE changes. The probe of codex 0.156.1 in the bumped
-    omni-agent image (2026-09-24) recorded ``"model": "gpt-6-sol"`` in exactly
-    this field, so the shape is real and so is the value.
+    The probe of codex 0.156.1 in the bumped omni-agent image (2026-09-24)
+    recorded ``"model": "gpt-6-sol"`` in that field, so the value is real. The
+    field itself is read in the workspace adapter (#1424).
     """
-    document = copy.deepcopy(_real_rollout())
-    for record in document:
-        if record.get("type") == "turn_context":
-            record["payload"]["model"] = model
-    return _RolloutOnDisk(document)
+    return _RolloutOnDisk(CodexRolloutReading(model=model))
 
 
 class TestTheDefaultIsPriced:

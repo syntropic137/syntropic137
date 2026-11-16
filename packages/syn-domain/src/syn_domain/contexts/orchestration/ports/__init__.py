@@ -43,6 +43,7 @@ from syn_domain.contexts.orchestration.ports.ClaudePluginStoragePort import (
 )
 from syn_domain.contexts.orchestration.ports.CodexRolloutPort import (
     CodexRolloutPort,
+    CodexRolloutReading,
 )
 from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
     DelegationAttempt,
@@ -112,6 +113,7 @@ __all__ = [
     "ClaudePluginRegistrationRepositoryPort",
     "ClaudePluginStoragePort",
     "CodexRolloutPort",
+    "CodexRolloutReading",
     "DelegationAttempt",
     "DelegationEvidencePort",
     "DelegationEvidenceUnavailableError",

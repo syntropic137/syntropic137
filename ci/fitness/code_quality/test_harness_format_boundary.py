@@ -544,8 +544,10 @@ def test_exemption_is_exact_and_ratchets(tmp_path: Path) -> None:
     root = repo_root()
     _copy_tree(root, tmp_path)
     budgets = _budgets(root)
-    exempt = f"{_AGENT_SESSIONS}/transcript_usage.py"
-    assert exempt in budgets, "transcript_usage.py exemption (#1424) expected"
+    # transcript_usage.py's exemption went with part 1 of #1424; the one
+    # remaining file still exercises the exact-count rule.
+    exempt = "apps/syn-api/src/syn_api/routes/conversations.py"
+    assert exempt in budgets, "conversations.py exemption (#1424) expected"
     # One more marker in the exempt file exceeds its exact budget.
     _plant(tmp_path / exempt, '\n\n_PLANTED = "session_meta"\n')
     assert any("exceed exemption" in f for f in evaluate(tmp_path, budgets))

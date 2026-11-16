@@ -87,7 +87,7 @@ from syn_adapters.projections.session_timeline_memory import get_in_memory_sessi
 from syn_adapters.projections.sync import (
     sync_published_events_to_projections as sync_published_events_to_projections,
 )
-from syn_adapters.session_store import HttpSessionStore
+from syn_adapters.session_store import HttpSessionStore, StoredTranscriptUsageReader
 from syn_adapters.storage import (
     connect_event_store,
     disconnect_event_store,
@@ -309,6 +309,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         skill_materializer=skill_materializer,
         session_capture=session_capture,
         session_store=_build_session_store(_settings),
+        transcript_reader=StoredTranscriptUsageReader(),
         import_ledger=get_import_ledger(),
         # #1513: records which PR is open from each branch a failing phase
         # left, so a resume continues that PR and never one opened since.

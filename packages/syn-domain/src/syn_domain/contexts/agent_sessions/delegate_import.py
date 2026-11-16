@@ -55,6 +55,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
         QualifiedSessionIdentity,
     )
+    from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+        TranscriptUsageReader,
+    )
     from syn_domain.contexts.agent_sessions.transcript_usage import UsageResult
 
 __all__ = [
@@ -292,15 +295,16 @@ def _refusal_if_leader_unknown(
 
 async def _resolve_captured_usage(
     store: SessionStorePort,
+    reader: TranscriptUsageReader,
     harness_id: str,
     identities: Sequence[QualifiedSessionIdentity] | None,
 ) -> UsageResult:
     """Use explicit capture identity when supplied; ambiguity must never fall back."""
     if identities is None:
-        return await resolve_delegate_usage(store, harness_id)
+        return await resolve_delegate_usage(store, harness_id, reader=reader)
     matches = tuple(identity for identity in identities if identity.local_id == harness_id)
     if matches and all(identity == matches[0] for identity in matches):
-        return await resolve_delegate_usage(store, harness_id, identity=matches[0])
+        return await resolve_delegate_usage(store, harness_id, reader=reader, identity=matches[0])
     return UnpricedUsage(
         "capture has missing or ambiguous qualified identity",
         retry=RetryDisposition.PERMANENT,
@@ -311,6 +315,7 @@ async def import_phase_delegates(
     store: SessionStorePort,
     recorder: DelegateUsageRecorder,
     *,
+    reader: TranscriptUsageReader,
     leader_native_session_id: str | None,
     captured_session_ids: Sequence[str],
     execution_id: str,
@@ -324,6 +329,7 @@ async def import_phase_delegates(
 
     Args:
         store: Where delegated transcripts are read back from.
+        reader: What turns a stored transcript into usage.
         recorder: Where a recovered delegate cost is recorded.
         leader_native_session_id: The id the phase's own harness announced on
             its stream. ``None`` when the stream never announced one, in which
@@ -344,7 +350,9 @@ async def import_phase_delegates(
         if harness_id == leader_native_session_id:
             continue
 
-        usage = await _resolve_captured_usage(store, harness_id, qualified_session_identities)
+        usage = await _resolve_captured_usage(
+            store, reader, harness_id, qualified_session_identities
+        )
         if _is_retryable(usage) and attempts_remaining > 0:
             # Held back rather than written as a zero. Writing it now would
             # finalise a delegate the very next attempt could have priced.

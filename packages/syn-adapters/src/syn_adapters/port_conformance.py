@@ -106,6 +106,7 @@ if TYPE_CHECKING:
         AgenticTranscriptConversation,
     )
     from syn_adapters.session_store.http_store import HttpSessionStore
+    from syn_adapters.session_store.transcript_usage import StoredTranscriptUsageReader
     from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
     from syn_adapters.storage.repositories import (
@@ -210,6 +211,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.agent_sessions.ports.TranscriptConversationPort import (
         TranscriptConversationPort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+        TranscriptUsageReader,
     )
     from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.projection import (
         InventoryWorkPort,
@@ -377,6 +381,7 @@ if TYPE_CHECKING:
         query: ArtifactQueryService,
         capture: SessionCaptureService,
         session_store: HttpSessionStore,
+        transcript_usage: StoredTranscriptUsageReader,
         observations: SessionObservationPort,
         ledger: ImportLedgerPort,
     ) -> None:
@@ -391,6 +396,7 @@ if TYPE_CHECKING:
         _query: ArtifactQueryServicePort = query
         _capture: SessionCapturePort = capture
         _sessions: SessionStorePort = session_store
+        _transcript_usage: TranscriptUsageReader = transcript_usage
         _observations: SessionObservationPort = observations
         _ledger: ImportLedgerPort = ledger
 
