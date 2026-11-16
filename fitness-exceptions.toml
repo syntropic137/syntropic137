@@ -106,7 +106,9 @@ issue = "#185"
 path = "packages/syn-domain"
 # 439 -> 401 (#2124): hand-rolled projection-store doubles replaced by
 # InMemoryProjectionStore.
-value = 401
+# 401 -> 393 (#1424): the stored-transcript usage parser moved to
+# syn_adapters.session_store; its Mapping[str, object] helpers moved with it.
+value = 393
 issue = "#673"
 
 [untyped-dicts.syn-adapters]
