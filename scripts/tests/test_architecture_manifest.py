@@ -211,3 +211,90 @@ def test_two_aggregate_roots_in_one_folder_are_refused(repo: Path) -> None:
     _write(repo, {"src/contexts/billing/domain/aggregate_invoice/OtherAggregate.py": ""})
     with pytest.raises(UnsupportedLayoutError, match="more than one aggregate root"):
         read_manifest(repo, Path("vsa.yaml"))
+
+
+# Divergences from vsa found by independent review of #2292. Each tree below
+# is also run through `vsa manifest` by the parity fitness test, so the vsa side
+# is checked by vsa itself, not by this file's reading of its source.
+
+
+def make_disabled_versioning_repo(root: Path) -> Path:
+    """event_scanner.rs excludes `_versioned/` from the main scan whether or not
+    versioning is enabled; only the separate versioned scan depends on it."""
+    make_repo(root)
+    (root / "vsa.yaml").write_text(
+        VSA_YAML.replace(
+            '    path: "events"\n', '    path: "events"\n    versioning:\n      enabled: false\n'
+        )
+    )
+    return root
+
+
+def make_nested_domain_repo(root: Path) -> Path:
+    """domain_scanner.rs scans projections under `domain_path.parent()`: with
+    `domain/model`, a projection in the context's `slices/` is out of scope."""
+    ctx = "src/contexts"
+    _write(
+        root,
+        {
+            "vsa.yaml": VSA_YAML.replace("  path: domain\n", "  path: domain/model\n"),
+            f"{ctx}/billing/domain/model/commands/IssueInvoiceCommand.py": "",
+            f"{ctx}/billing/slices/list_invoices/projection.py": PROJECTION,
+            f"{ctx}/billing/domain/InvoiceListProjection.py": PROJECTION,
+        },
+    )
+    return root
+
+
+def make_symlinked_context_repo(root: Path) -> Path:
+    """WalkDir's entry type does not follow symlinks (scanner.rs)."""
+    make_repo(root)
+    (root / "src/contexts/alias").symlink_to(root / "src/contexts/billing")
+    return root
+
+
+DIVERGENCE_TREES = {
+    "disabled_versioning": make_disabled_versioning_repo,
+    "nested_domain": make_nested_domain_repo,
+    "symlinked_context": make_symlinked_context_repo,
+}
+
+
+def test_disabled_versioning_still_excludes_the_versioned_tree(tmp_path: Path) -> None:
+    manifest = read_manifest(make_disabled_versioning_repo(tmp_path), Path("vsa.yaml"))
+    assert [e.name for e in manifest.domain.events] == ["InvoiceIssuedEvent"] * 2
+
+
+def test_a_nested_domain_path_scans_projections_under_its_parent(tmp_path: Path) -> None:
+    manifest = read_manifest(make_nested_domain_repo(tmp_path), Path("vsa.yaml"))
+    assert [p.name for p in manifest.domain.projections] == ["InvoiceListProjection"]
+    assert [c.name for c in manifest.domain.commands] == ["IssueInvoiceCommand"]
+
+
+def test_a_symlinked_context_directory_is_not_a_context(tmp_path: Path) -> None:
+    manifest = read_manifest(make_symlinked_context_repo(tmp_path), Path("vsa.yaml"))
+    assert [c.name for c in manifest.bounded_contexts] == ["billing", "reporting"]
+    assert [a.name for a in manifest.domain.aggregates] == ["InvoiceAggregate"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def on_CaféCreated(self, event): ...\n",
+        "class CaféProjection:\n    pass\n",
+    ],
+    ids=["handler", "class"],
+)
+def test_non_ascii_identifiers_are_refused_not_guessed(tmp_path: Path, source: str) -> None:
+    """Rust regex and Python `re` disagree on `\\w` for combining marks."""
+    ctx = "src/contexts"
+    _write(
+        tmp_path,
+        {
+            "vsa.yaml": VSA_YAML,
+            f"{ctx}/billing/domain/commands/IssueInvoiceCommand.py": "",
+            f"{ctx}/billing/slices/cafe/projection.py": source,
+        },
+    )
+    with pytest.raises(UnsupportedLayoutError, match="non-ASCII"):
+        read_manifest(tmp_path, Path("vsa.yaml"))

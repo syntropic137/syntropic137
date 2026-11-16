@@ -164,13 +164,19 @@ class _Layout(BaseModel):
     commands: str
     events: str
     versioned: str | None
+    """The versioned tree to SCAN: set only when versioning is enabled."""
+    versioned_dir: str
+    """The versioned tree to EXCLUDE from the main scan, enabled or not (event_scanner.rs)."""
 
 
 def read_manifest(repo_root: Path, config: Path) -> ArchitectureManifest:
     """Discover every context, aggregate, command, event and projection."""
     layout = _read_layout(repo_root, config)
     contexts = sorted(
-        p.name for p in layout.root.iterdir() if p.is_dir() and not p.name.startswith("_")
+        # WalkDir's entry type does not follow symlinks (scanner.rs), so neither do we.
+        p.name
+        for p in layout.root.iterdir()
+        if p.is_dir() and not p.is_symlink() and not p.name.startswith("_")
     )
     if (layout.root / layout.domain).is_dir():
         raise UnsupportedLayoutError(
@@ -202,7 +208,9 @@ def read_manifest(repo_root: Path, config: Path) -> ArchitectureManifest:
         ]
         projections += [
             (Projection(name=name, context=context), subscribed)
-            for name, subscribed in _projections(context_path)
+            # domain_scanner.rs scans projections under domain_path.parent(): the
+            # context root for `domain`, a subdirectory for a nested `domain/model`.
+            for name, subscribed in _projections(domain_path.parent)
         ]
 
     event_to_projections: dict[str, list[str]] = {}
@@ -276,6 +284,7 @@ def _read_layout(repo_root: Path, config: Path) -> _Layout:
         commands=domain.commands.path,
         events=domain.events.path,
         versioned=versioning.versioned_path if versioning.enabled else None,
+        versioned_dir=versioning.versioned_path,
     )
 
 
@@ -345,7 +354,7 @@ def _is_test_file(file_name: str) -> bool:
 
 def _events(events_path: Path, layout: _Layout) -> Iterator[str]:
     """event_scanner.rs: the main tree, then the versioned tree if enabled."""
-    skipped = {"_upcasters", layout.versioned}
+    skipped = {"_upcasters", layout.versioned_dir}
     roots = [events_path]
     if layout.versioned is not None and (events_path / layout.versioned).exists():
         roots.append(events_path / layout.versioned)
@@ -387,13 +396,22 @@ def _projections(context_path: Path) -> Iterator[tuple[str, tuple[str, ...]]]:
 
 
 _CLASS_PROJECTION = re.compile(r"(?:class|export\s+class)\s+(\w+Projection)")
+_ANY_CLASS = re.compile(r"(?:class|export\s+class)\s+([^\s(:{<]+)")
 
 
 def _projection_name(stem: str, content: str) -> str:
     if stem != "projection":
         return stem
+    # Python `\w+Projection` can miss a name Rust's Unicode `\w` matches (a
+    # combining mark mid-name), so first read every declared class name whole.
+    for declared in _ANY_CLASS.finditer(content):
+        if declared.group(1).endswith("Projection") and not declared.group(1).isascii():
+            raise UnsupportedLayoutError(
+                f"projection class {declared.group(1)!r} has non-ASCII characters; Rust and Python"
+                " regex word classes differ there, so this reader does not port it"
+            )
     match = _CLASS_PROJECTION.search(content)
-    return match.group(1) if match else "Projection"
+    return _ascii_name(match, 1, content) if match else "Projection"
 
 
 _METHOD_VERB_PREFIXES = frozenset({"get", "set", "load", "save", "create", "update", "delete"})
@@ -413,29 +431,53 @@ _QUOTED = re.compile(r"[\"'](\w+)[\"']")
 
 
 def subscribed_events(content: str) -> tuple[str, ...]:
-    """`extract_subscribed_events`: the event names a projection file handles."""
+    """`extract_subscribed_events`: the event names a projection file handles.
+
+    Every captured name goes through `_ascii_name`, which refuses non-ASCII
+    identifiers instead of guessing at them (see there).
+    """
     events: set[str] = set()
     for match in _ON.finditer(content):
-        name = match.group(1) or match.group(2)
+        name = _ascii_name(match, 1 if match.group(1) else 2, content)
         if "_" in name and _is_snake_case_event(name):
             events.add(name)
         elif _is_pascal_case_event(name):
             events.add(f"{name}Event")
     for match in _HANDLE.finditer(content):
-        name = match.group(1)
+        name = _ascii_name(match, 1, content)
         if name.endswith("Event") or ("_" in name and _is_snake_case_event(name)):
             events.add(name)
         elif _is_pascal_case_event(name):
             events.add(f"{name}Event")
-    events.update(m.group(1) for m in _DECORATOR.finditer(content))
-    events.update(m.group(1) for m in _TYPED_HANDLE.finditer(content))
+    events.update(_ascii_name(m, 1, content) for m in _DECORATOR.finditer(content))
+    events.update(_ascii_name(m, 1, content) for m in _TYPED_HANDLE.finditer(content))
     listed = _SUBSCRIBED_LIST.search(content)
     if listed:
         for match in _QUOTED.finditer(listed.group(1)):
-            name = match.group(1)
+            name = _ascii_name(match, 1, listed.group(1))
             if name.endswith("Event") or ("_" in name and _is_snake_case_event(name)):
                 events.add(name)
     return tuple(sorted(events))
+
+
+def _ascii_name(match: re.Match[str], group: int, text: str) -> str:
+    """A captured identifier, or a refusal when Rust and Python would read it differently.
+
+    Rust regex `\\w` is Unicode word (letters, marks, Nd, Pc); Python `re` `\\w`
+    is `str.isalnum()` plus `_`. They disagree on combining marks, `No` digits
+    and more, at the end of a name as well as inside it. An ASCII name followed
+    by an ASCII character reads the same in both, so anything else is refused:
+    the reader fails closed rather than guess (review of #2292).
+    """
+    name = match.group(group)
+    end = match.end(group)
+    following = text[end : end + 1]
+    if not name.isascii() or not following.isascii():
+        raise UnsupportedLayoutError(
+            f"identifier {name!r} touches non-ASCII characters; Rust and Python regex"
+            " word classes differ there, so this reader does not port it"
+        )
+    return name
 
 
 def _is_snake_case_event(name: str) -> bool:

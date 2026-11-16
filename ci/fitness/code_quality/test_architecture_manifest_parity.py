@@ -27,7 +27,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SCRIPTS / "tests"))
 
 from architecture_manifest import ArchitectureManifest, read_manifest  # noqa: E402
-from test_architecture_manifest import make_repo  # noqa: E402
+from test_architecture_manifest import DIVERGENCE_TREES, make_repo  # noqa: E402
 
 pytestmark = [pytest.mark.architecture, pytest.mark.host_tool("vsa")]
 
@@ -83,5 +83,15 @@ def test_generator_writes_the_same_docs_from_either_manifest(tmp_path: Path) -> 
 
 def test_reader_matches_vsa_on_the_unit_fixture(tmp_path: Path) -> None:
     repo = make_repo(tmp_path / "repo")
+    vsa = _vsa_manifest(repo, tmp_path / "vsa.json")
+    assert read_manifest(repo, Path("vsa.yaml")) == vsa.canonical()
+
+
+@pytest.mark.parametrize("tree", sorted(DIVERGENCE_TREES))
+def test_reader_matches_vsa_where_review_found_divergences(tmp_path: Path, tree: str) -> None:
+    """Layouts the repo does not use today, each one a divergence independent
+    review reproduced (#2292): disabled versioning, a nested domain path, a
+    symlinked context directory. vsa itself is the oracle here."""
+    repo = DIVERGENCE_TREES[tree](tmp_path / "repo")
     vsa = _vsa_manifest(repo, tmp_path / "vsa.json")
     assert read_manifest(repo, Path("vsa.yaml")) == vsa.canonical()
