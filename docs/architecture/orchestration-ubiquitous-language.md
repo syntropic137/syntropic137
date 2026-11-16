@@ -108,6 +108,16 @@ a non-zero exit, its own timeout or the Phase Deadline. The platform worked as
 designed, so it is kept out of `platform`; a step the platform could not start
 is `platform`. Counted as a Trial fail, not an Infra Error.
 
+## Failure Streak
+
+How many Executions of one Workflow have failed in a row, classified
+`platform` or `unclassified`, since its last completed Execution (#1569). A
+completion resets it to zero. `task`, `correct_refusal` and Gate Failure
+neither extend nor reset it: the platform worked and the answer was no.
+Cancelled and interrupted Executions do neither: they ended before they could
+succeed or fail. A read model only (`failure_streak`); nothing pauses on it
+yet.
+
 ## Phase Deadline
 
 When a Phase's agent is killed on its timeout (#1546). The clock starts when

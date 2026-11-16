@@ -631,6 +631,7 @@ def create_coordinator_service(
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
     )
+    from syn_domain.contexts.orchestration.slices.failure_streak import FailureStreakProjection
     from syn_domain.contexts.orchestration.slices.get_execution_detail import (
         WorkflowExecutionDetailProjection,
     )
@@ -681,6 +682,7 @@ def create_coordinator_service(
             EvalListProjection(projection_store),
             DashboardMetricsProjection(projection_store),
             WorkflowPhaseMetricsProjection(projection_store),
+            FailureStreakProjection(projection_store),
             ExecutionTodoProjection(store=projection_store),
             WorkflowDispatchProjection(
                 execution_service=cast("_ExecutionService | None", execution_service),
