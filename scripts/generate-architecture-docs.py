@@ -378,7 +378,15 @@ def main() -> None:
         default=Path(),
         help="Directory standing in for the repo root; README.md is updated in place there",
     )
+    parser.add_argument(
+        "--canonicalize-only",
+        action="store_true",
+        help="Rewrite the manifest in canonical order and exit; the SVG renderer reads it",
+    )
     args = parser.parse_args()
+    if args.canonicalize_only:
+        load_manifest(args.manifest)
+        return
     out_root: Path = args.out_root
 
     print("🤖 Generating Architecture Documentation...")
