@@ -66,11 +66,17 @@ class TestBuildQuery:
 
     def test_order_by_ascending(self):
         query, _ = build_query("workflows", order_by="name")
-        assert "ORDER BY data->>'name' ASC" in query
+        assert "data->>'name' ASC NULLS LAST, id" in query
 
     def test_order_by_descending(self):
         query, _ = build_query("workflows", order_by="-created_at")
-        assert "ORDER BY data->>'created_at' DESC" in query
+        assert "data->>'created_at' DESC NULLS LAST, id" in query
+
+    def test_order_by_json_numbers_numerically_first(self):
+        """``data->>`` is text, so 10 sorted before 9 without the numeric key (#1843)."""
+        query, _ = build_query("workflows", order_by="-runs_count")
+        numeric = "(data->>'runs_count')::numeric END DESC NULLS LAST"
+        assert query.index(numeric) < query.index("data->>'runs_count' DESC NULLS LAST, id")
 
     def test_limit_and_offset(self):
         query, _ = build_query("workflows", limit=10, offset=20)

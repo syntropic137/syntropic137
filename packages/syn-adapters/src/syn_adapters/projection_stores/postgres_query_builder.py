@@ -62,6 +62,12 @@ def _build_order_clause(order_by: str | None) -> str:
     on a page could differ between two reads of the same data - including the
     full read and the field scan (syn_domain.projection_scan), which must agree
     row for row. The id is the primary key, so the order is now total.
+
+    JSON NUMBERS ORDER AS NUMBERS. ``data->>'field'`` is text, so a count of
+    10 sorted before 9 here while the in-memory store, comparing the Python
+    ints, put it after (#1843). The numeric key comes first and is NULL for
+    every non-number, so a field holding only strings orders exactly as the
+    text key alone did.
     """
     if not order_by:
         return " ORDER BY updated_at DESC, id"
@@ -75,7 +81,25 @@ def _build_order_clause(order_by: str | None) -> str:
         msg = f"unsafe order_by field {field!r}: expected a plain identifier"
         raise ValueError(msg)
     direction = "DESC" if descending else "ASC"
-    return f" ORDER BY data->>'{field}' {direction} NULLS LAST, id"
+    return " ORDER BY " + field_order(numeric_key("data", field), f"data->>'{field}'", direction)
+
+
+def numeric_key(document: str, field: str) -> str:
+    """The numeric sort key of ``document->field``: the number, or NULL for any non-number."""
+    return (
+        f"CASE WHEN jsonb_typeof({document}->'{field}') = 'number' "
+        f"THEN ({document}->>'{field}')::numeric END"
+    )
+
+
+def field_order(numeric: str, text: str, direction: str) -> str:
+    """THE order of a store read by one JSON field (see :func:`_build_order_clause`).
+
+    Every SQL that must reproduce a store read's order builds it here, so the
+    two cannot drift: ``postgres_page`` breaks its ties with this exact order
+    because ``paginate``'s stable sort over the full read does (#1843).
+    """
+    return f"{numeric} {direction} NULLS LAST, {text} {direction} NULLS LAST, id"
 
 
 def build_query(
