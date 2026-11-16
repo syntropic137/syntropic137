@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/subscriptions/realtime_adapter.py b/packages/syn-adapters/src/syn_adapters/subscriptions/realtime_adapter.py
+index ee19b4dbc..1f36b594d 100644
+--- a/packages/syn-adapters/src/syn_adapters/subscriptions/realtime_adapter.py
++++ b/packages/syn-adapters/src/syn_adapters/subscriptions/realtime_adapter.py
+@@ -192,7 +192,6 @@ class SystemListAdapter(_NamespacedProjectionAdapter):
+         "organization.RepoRegistered",
+         "organization.RepoAssignedToSystem",
+         "organization.RepoUnassignedFromSystem",
+-        "organization.RepoDeregistered",
+     }
+ 
+ 
