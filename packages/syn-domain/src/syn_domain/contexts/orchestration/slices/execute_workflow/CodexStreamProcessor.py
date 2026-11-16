@@ -497,13 +497,7 @@ class CodexStreamProcessor:
             # `MISSING_TERMINAL_TURN_REASON` because when a stream IS cut off
             # mid-event, quoting the truncated line names the cause and the
             # generic reason does not.
-            self._error_reason = (
-                self._turn_fault_candidate
-                or self._auth_fault_candidate
-                or self._pids_fault_reason()
-                or self._parse_fault_candidate
-                or MISSING_TERMINAL_TURN_REASON
-            )
+            self._error_reason = self._cut_off_reason()
 
         await self._name_the_model_from_disk()
         await self._held_rows.flush(self._announced_model, raise_errors=True)
@@ -716,11 +710,17 @@ class CodexStreamProcessor:
         if self._auth_fault_candidate is not None:
             logger.warning("Codex auth fault seen on stdout: %s", self._auth_fault_candidate)
 
-    def _pids_fault_reason(self) -> str | None:
-        """The cut-off reason naming pids exhaustion, keeping the usage gap it also is."""
-        if self._pids_fault_candidate is None:
-            return None
-        return f"{self._pids_fault_candidate} - {MISSING_TERMINAL_TURN_REASON}"
+    def _cut_off_reason(self) -> str:
+        """The reason a stream that never reached `turn.completed` ended, most specific first."""
+        pids = self._pids_fault_candidate
+        return (
+            self._turn_fault_candidate
+            or self._auth_fault_candidate
+            # Still a usage gap as well as a workspace fault, so it says both.
+            or (pids and f"{pids} - {MISSING_TERMINAL_TURN_REASON}")
+            or self._parse_fault_candidate
+            or MISSING_TERMINAL_TURN_REASON
+        )
 
     def _note_delegation_attempt(self, tool_use_id: str, command: str) -> None:
         """Record a codex command_execution that invokes `claude -p` (#894)."""
