@@ -192,7 +192,7 @@ def test_each_shell_spelling_is_recognised(line: str) -> None:
         "we Cannot fork here, the policy forbids it",
         "fork: Resource temporarily unavailable",  # no shell prefix: quoted, not reported
         "GitHub: Cannot fork: policy forbids it",  # a colon, then prose
-        "Documentation:\nCannot fork\n",  # a heading, then the words on the next line
+        "\n".join(("Documentation:", "Cannot fork", "")),  # a heading, then the words below it
         "sh: Cannot fork the repository",  # a shell prefix, then prose
     ],
 )
