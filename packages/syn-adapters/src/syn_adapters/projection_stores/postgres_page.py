@@ -12,7 +12,7 @@ differ:
 ``paginate`` reads        SQL writes                                      exact when
 ========================  ==============================================  ==========================================
 ``str(ts or "")`` order   ``COALESCE(doc->>ts, '') COLLATE "C" DESC``     ts is a JSON string or null/absent
-stable sort tie-break     ``raw_ts DESC NULLS LAST, id`` (the old read)   always: the old read's own ORDER BY
+stable sort tie-break     ``field_order(raw_num, raw_ts, DESC)``          always: the old read's own ORDER BY
 ``str(facet or "")``      ``COALESCE(doc->>facet, '')``                   facet is a JSON string or null/absent
 ``casefold`` substring    ``strpos(lower(x COLLATE "C"), needle)``        every searched string is ASCII
 ``fromisoformat``         :data:`_INSTANT` (a strict ISO 8601 subset)     the string matches that subset
@@ -39,7 +39,12 @@ from typing import TYPE_CHECKING, cast
 
 from syn_adapters.projection_stores.lean_documents import lean_source
 from syn_adapters.projection_stores.postgres_page_keys import instant_sql
-from syn_adapters.projection_stores.postgres_query_builder import _SAFE_FIELD, _build_where_clause
+from syn_adapters.projection_stores.postgres_query_builder import (
+    _SAFE_FIELD,
+    _build_where_clause,
+    field_order,
+    numeric_key,
+)
 from syn_domain.projection_scan import SqlPage, UnjudgedRow, WindowPlacement
 
 logger = logging.getLogger(__name__)
@@ -149,7 +154,8 @@ def _plan(table_name: str, request: SqlPageRequest, *, lean_ready: bool) -> _Pla
 
     instant_column = f", {_instant(f"(doc->>'{ts}')")} AS inst" if windowed else ""
     src = (
-        f"WITH src AS (SELECT id, doc, doc->>'{ts}' AS raw_ts{instant_column} FROM ("
+        f"WITH src AS (SELECT id, doc, doc->>'{ts}' AS raw_ts, "
+        f"{numeric_key('doc', ts)} AS raw_num{instant_column} FROM ("
         f"SELECT id, {lean_source(lean_ready=lean_ready)} AS doc FROM {table_name}{where_sql}"
         ") AS d)"
     )
@@ -216,11 +222,11 @@ def build_page_query(
     outside = WindowPlacement.OUTSIDE.value
     undated = WindowPlacement.UNDATED.value
 
-    # ``raw_ts DESC NULLS LAST, id`` is the order the old read handed
-    # ``paginate``, whose sort is stable: it is what breaks ties between equal
-    # sort keys, so it has to be this exact expression, in the database
-    # collation, not the C one.
-    input_order = "raw_ts DESC NULLS LAST, id"
+    # The order the old read (``query(order_by="-<ts>")``) handed ``paginate``,
+    # whose sort is stable: it is what breaks ties between equal sort keys, so
+    # it has to be the store's own expression (``field_order``), in the
+    # database collation, not the C one.
+    input_order = field_order("raw_num", "raw_ts", "DESC")
     page_order = f'sort_key COLLATE "C" DESC, {input_order}'
     query = f"""{plan.src},
 decided AS (
@@ -229,7 +235,7 @@ decided AS (
         AS o(id, matched, facet, placement, sort_key)
 ),
 judged AS (
-    SELECT s.id, s.raw_ts,
+    SELECT s.id, s.raw_ts, s.raw_num,
         (o.id IS NULL AND ({plan.unresolved})) AS unresolved,
         COALESCE(o.matched, {matched}) AS matched,
         COALESCE(o.facet, doc->>'{facet}', '') AS facet,
@@ -244,7 +250,7 @@ kept AS (
 ),
 dated AS (SELECT * FROM kept WHERE placement = {inside}),
 page AS (
-    SELECT id, sort_key, raw_ts FROM dated WHERE selected
+    SELECT id, sort_key, raw_ts, raw_num FROM dated WHERE selected
     ORDER BY {page_order} LIMIT {limit} OFFSET {offset}
 )
 SELECT

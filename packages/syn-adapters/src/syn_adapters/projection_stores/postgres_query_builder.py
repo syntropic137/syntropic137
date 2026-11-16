@@ -81,12 +81,25 @@ def _build_order_clause(order_by: str | None) -> str:
         msg = f"unsafe order_by field {field!r}: expected a plain identifier"
         raise ValueError(msg)
     direction = "DESC" if descending else "ASC"
-    numeric = (
-        f"CASE WHEN jsonb_typeof(data->'{field}') = 'number' THEN (data->>'{field}')::numeric END"
-    )
+    return " ORDER BY " + field_order(numeric_key("data", field), f"data->>'{field}'", direction)
+
+
+def numeric_key(document: str, field: str) -> str:
+    """The numeric sort key of ``document->field``: the number, or NULL for any non-number."""
     return (
-        f" ORDER BY {numeric} {direction} NULLS LAST, data->>'{field}' {direction} NULLS LAST, id"
+        f"CASE WHEN jsonb_typeof({document}->'{field}') = 'number' "
+        f"THEN ({document}->>'{field}')::numeric END"
     )
+
+
+def field_order(numeric: str, text: str, direction: str) -> str:
+    """THE order of a store read by one JSON field (see :func:`_build_order_clause`).
+
+    Every SQL that must reproduce a store read's order builds it here, so the
+    two cannot drift: ``postgres_page`` breaks its ties with this exact order
+    because ``paginate``'s stable sort over the full read does (#1843).
+    """
+    return f"{numeric} {direction} NULLS LAST, {text} {direction} NULLS LAST, id"
 
 
 def build_query(
