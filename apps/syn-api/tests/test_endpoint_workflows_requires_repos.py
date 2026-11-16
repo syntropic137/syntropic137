@@ -49,7 +49,9 @@ def _response(s: _Summary) -> WorkflowSummaryResponse:
 
 
 async def _list(summaries: list[_Summary]):
-    async def fake_list_workflows(*, workflow_type, limit, offset, include_archived, search):
+    async def fake_list_workflows(
+        *, workflow_type, limit, offset, include_archived, search, order_by
+    ):
         return Ok([_response(s) for s in summaries])
 
     mgr = MagicMock()
