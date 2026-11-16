@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 import pytest
 
+from syn_adapters.session_store import StoredTranscriptUsageReader
 from syn_domain.contexts.agent_sessions.delegate_usage import (
     StoredSession,
     resolve_delegate_usage,
@@ -31,6 +33,9 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
 )
 
 pytestmark = pytest.mark.unit
+
+#: The production reader, so these resolve real stored records end to end.
+_resolve = partial(resolve_delegate_usage, reader=StoredTranscriptUsageReader())
 
 _FIXTURES = Path(__file__).parents[2] / "fixtures" / "delegation"
 
@@ -76,7 +81,7 @@ class TestTheRoundTrip:
         session = _stored("Codex", _codex_raw())
         store = _FakeStore({session.session_id: session})
 
-        result = await resolve_delegate_usage(store, session.session_id)
+        result = await _resolve(store, session.session_id)
 
         assert isinstance(result, PricedUsage)
         assert result.uncached_input_tokens == 49250 - 45056
@@ -91,12 +96,8 @@ class TestTheRoundTrip:
         as_list = _stored("Codex", _codex_raw())
         as_text = _stored("Codex", json.dumps(_codex_raw()))
 
-        from_list = await resolve_delegate_usage(
-            _FakeStore({as_list.session_id: as_list}), as_list.session_id
-        )
-        from_text = await resolve_delegate_usage(
-            _FakeStore({as_text.session_id: as_text}), as_text.session_id
-        )
+        from_list = await _resolve(_FakeStore({as_list.session_id: as_list}), as_list.session_id)
+        from_text = await _resolve(_FakeStore({as_text.session_id: as_text}), as_text.session_id)
 
         assert from_list == from_text
         assert isinstance(from_list, PricedUsage)
@@ -106,7 +107,7 @@ class TestTheRoundTrip:
         session = _stored("ClaudeCode", _claude_raw())
         store = _FakeStore({session.session_id: session})
 
-        result = await resolve_delegate_usage(store, session.session_id)
+        result = await _resolve(store, session.session_id)
 
         assert isinstance(result, PricedUsage)
         # Every field as a LITERAL from the recorded fixture. Asserting one
@@ -140,7 +141,7 @@ class TestAMissingSessionIsNotAFreeOne:
         money as costing nothing, which is the failure this issue exists to
         remove.
         """
-        result = await resolve_delegate_usage(_FakeStore({}), "never-uploaded")
+        result = await _resolve(_FakeStore({}), "never-uploaded")
 
         assert isinstance(result, UnpricedUsage)
         assert "never-uploaded" in result.reason
@@ -158,7 +159,7 @@ class TestAMissingSessionIsNotAFreeOne:
                 msg = "connection reset"
                 raise ConnectionError(msg)
 
-        result = await resolve_delegate_usage(_BrokenStore(), "some-id")
+        result = await _resolve(_BrokenStore(), "some-id")
 
         assert isinstance(result, UnpricedUsage)
         assert "connection reset" in result.reason
@@ -184,7 +185,7 @@ class TestTheStoreIsNotTrustedToAnswerTheRightQuestion:
             async def fetch_session(self, session_id: str) -> StoredSession | None:
                 return wrong_answer
 
-        result = await resolve_delegate_usage(_ConfusedStore(), "the-delegate")
+        result = await _resolve(_ConfusedStore(), "the-delegate")
 
         assert isinstance(result, UnpricedUsage)
         assert "the-leader" in result.reason
@@ -201,7 +202,7 @@ class TestTheStoreIsNotTrustedToAnswerTheRightQuestion:
             async def fetch_session(self, session_id: str) -> StoredSession | None:
                 return replace(leader, session_id="the-leader")
 
-        result = await resolve_delegate_usage(_ConfusedStore(), "the-delegate")
+        result = await _resolve(_ConfusedStore(), "the-delegate")
 
         assert not isinstance(result, PricedUsage)
 
@@ -216,7 +217,7 @@ class TestTheStoreIsNotTrustedToAnswerTheRightQuestion:
             async def fetch_session(self, session_id: str) -> StoredSession | None:
                 return replace(leader, session_id="the-leader")
 
-        result = await resolve_delegate_usage(_ConfusedStore(), "the-delegate")
+        result = await _resolve(_ConfusedStore(), "the-delegate")
 
         assert isinstance(result, UnpricedUsage)
         assert result.retry is RetryDisposition.PERMANENT
@@ -233,7 +234,7 @@ async def test_a_failed_lookup_is_transient_not_permanent() -> None:
         async def fetch_session(self, session_id: str) -> StoredSession | None:
             raise ConnectionError("connection reset by peer")
 
-    result = await resolve_delegate_usage(_BrokenStore(), "s-a")
+    result = await _resolve(_BrokenStore(), "s-a")
 
     assert isinstance(result, UnpricedUsage)
     assert result.retry is RetryDisposition.TRANSIENT
@@ -254,13 +255,13 @@ async def test_qualified_usage_never_falls_back_to_bare_identity() -> None:
     store = AsyncMock(spec=QualifiedSessionStorePort)
     store.fetch_session = AsyncMock()
     store.fetch_qualified_session.return_value = None
-    result = await resolve_delegate_usage(store, "native", identity=identity)
+    result = await _resolve(store, "native", identity=identity)
     assert isinstance(result, UnpricedUsage)
     assert result.retry == RetryDisposition.MISSING
     store.fetch_qualified_session.assert_awaited_once_with(identity)
     store.fetch_session.assert_not_called()
     store.reset_mock()
-    result = await resolve_delegate_usage(store, "another", identity=identity)
+    result = await _resolve(store, "another", identity=identity)
     assert isinstance(result, UnpricedUsage)
     assert result.retry == RetryDisposition.PERMANENT
     store.fetch_qualified_session.assert_not_called()

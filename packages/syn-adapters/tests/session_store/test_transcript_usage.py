@@ -1,5 +1,9 @@
 """Usage extraction from a stored transcript (#895).
 
+Moved unchanged from syn-domain with the parser (#1424); only the imports and
+the fixture path differ. The fixtures stay with the domain tests that also
+read them.
+
 Every assertion encodes a trap that yields a WRONG BUT PLAUSIBLE number if
 inverted, which is the failure that matters: a cost that looks reasonable and
 is not.
@@ -20,20 +24,19 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.session_store.transcript_usage import SourceFormat, extract_usage
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     NoUsage,
     PricedUsage,
     RolloutDocument,
     RolloutRecord,
-    SourceFormat,
     UnpricedUsage,
-    extract_usage,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, MutableMapping
 
-_FIXTURES = Path(__file__).parents[2] / "fixtures" / "delegation"
+_FIXTURES = Path(__file__).parents[3] / "syn-domain" / "tests" / "fixtures" / "delegation"
 
 
 def _codex_document() -> RolloutDocument:

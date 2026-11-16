@@ -74,6 +74,9 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
+    from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+        TranscriptUsageReader,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
@@ -189,11 +192,13 @@ class PhaseRuntimes:
         *,
         capture_port: SessionCapturePort | None,
         session_store: SessionStorePort | None,
+        transcript_reader: TranscriptUsageReader | None = None,
         writer: ObservabilityRecorder | None,
         ledger: ImportLedgerPort | None,
     ) -> None:
         self._capture_port = capture_port
         self._session_store = session_store
+        self._transcript_reader = transcript_reader
         self._writer = writer
         self._ledger = ledger
         self._by_execution: dict[str, PhaseRuntime] = {}
@@ -213,6 +218,7 @@ class PhaseRuntimes:
             runtime = PhaseRuntime(
                 capture_port=self._capture_port,
                 session_store=self._session_store,
+                transcript_reader=self._transcript_reader,
                 writer=self._writer,
                 ledger=self._ledger,
             )
@@ -254,6 +260,7 @@ class PhaseRuntime:
         *,
         capture_port: SessionCapturePort | None,
         session_store: SessionStorePort | None,
+        transcript_reader: TranscriptUsageReader | None = None,
         writer: ObservabilityRecorder | None,
         ledger: ImportLedgerPort | None,
         starting_points: PhaseStartingPoints | None = None,
@@ -265,6 +272,7 @@ class PhaseRuntime:
         # deployment without a session store simply imports no delegates; it
         # must never be a reason a phase fails.
         self._session_store = session_store
+        self._transcript_reader = transcript_reader
         self._writer = writer
         self._ledger = ledger
 
@@ -614,6 +622,7 @@ class PhaseRuntime:
             self._capture_port,
             workspace,
             session_store=self._session_store,
+            transcript_reader=self._transcript_reader,
             writer=self._writer,
             leader_native_ids=self._leader_native_ids,
             session_id=session_id,
@@ -649,6 +658,7 @@ class PhaseRuntime:
             self._capture_port,
             workspace,
             session_store=self._session_store,
+            transcript_reader=self._transcript_reader,
             writer=self._writer,
             leader_native_ids=self._leader_native_ids,
             session_id=session_id,
@@ -775,6 +785,7 @@ class PhaseRuntime:
             leader_native_ids=self._leader_native_ids,
             capture_port=self._capture_port,
             session_store=self._session_store,
+            transcript_reader=self._transcript_reader,
             writer=self._writer,
             ledger=self._ledger,
         )

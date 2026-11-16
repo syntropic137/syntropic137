@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
-from syn_domain.contexts.agent_sessions.transcript_usage import PricedUsage
+from syn_domain.contexts.agent_sessions.transcript_usage import NoUsage, PricedUsage
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     DelegateUsageRecorder,
 )
@@ -118,9 +118,14 @@ class TestARefusalLeavesADurableSignal:
             async def fetch_session(self, session_id: str) -> None:
                 return None
 
+        class _Reader:
+            def read_usage(self, source_format: str, document: object) -> NoUsage:
+                return NoUsage()
+
         await import_delegates_for_phase(
             _Capture(),
             session_store=_Store(),
+            transcript_reader=_Reader(),
             writer=writer,
             leader_native_session_id=None,  # never announced -> refusal path
             phase_id="phase-1",

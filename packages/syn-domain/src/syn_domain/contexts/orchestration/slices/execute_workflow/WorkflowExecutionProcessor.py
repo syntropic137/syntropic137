@@ -117,6 +117,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
+    from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+        TranscriptUsageReader,
+    )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
@@ -224,6 +227,7 @@ class WorkflowExecutionProcessor:
         skill_materializer: SkillMaterializerProtocol | None = None,
         session_capture: SessionCapturePort | None = None,
         session_store: SessionStorePort | None = None,
+        transcript_reader: TranscriptUsageReader | None = None,
         import_ledger: ImportLedgerPort | None = None,
         retry_policy: UpstreamRetryPolicy | None = None,
         remote_branches: RemoteBranchPort | None = None,
@@ -307,6 +311,7 @@ class WorkflowExecutionProcessor:
         self._runtimes = PhaseRuntimes(
             capture_port=session_capture,
             session_store=session_store,
+            transcript_reader=transcript_reader,
             writer=observability_writer,
             ledger=import_ledger,
         )

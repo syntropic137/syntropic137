@@ -11,6 +11,7 @@ import pytest
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.transcript_usage import PricedUsage
 
+from syn_adapters.session_store import StoredTranscriptUsageReader
 from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
 from syn_domain.contexts.agent_sessions.delegate_usage import StoredSession
 from syn_domain.contexts.agent_sessions.import_identity import platform_session_id_for
@@ -68,6 +69,7 @@ async def _run(
     return await import_phase_delegates(
         store,
         writer,
+        reader=StoredTranscriptUsageReader(),
         leader_native_session_id=leader,
         captured_session_ids=captured,
         execution_id="exec-1",
@@ -230,6 +232,7 @@ async def test_qualified_import_never_uses_bare_lookup_or_prices_ambiguous_mappi
     result = await import_phase_delegates(
         store,
         writer,
+        reader=StoredTranscriptUsageReader(),
         leader_native_session_id="leader",
         captured_session_ids=("leader", "delegate"),
         execution_id="execution",

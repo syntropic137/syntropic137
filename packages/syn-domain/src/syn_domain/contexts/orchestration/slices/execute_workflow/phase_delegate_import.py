@@ -44,6 +44,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.agent_sessions import PricedUsage, SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
+    from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+        TranscriptUsageReader,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
         StreamResult,
@@ -242,6 +245,7 @@ async def import_delegates_for_phase(
     capture: AuthoritativeCapture | None,
     *,
     session_store: SessionStorePort | None,
+    transcript_reader: TranscriptUsageReader | None = None,
     writer: ObservabilityRecorder | None,
     leader_native_session_id: str | None,
     phase_id: str,
@@ -261,11 +265,21 @@ async def import_delegates_for_phase(
     own cost intact and unchanged. It must never turn agent work that
     succeeded into a phase that failed.
     """
-    # Both are optional on the processor, so they are checked rather than
-    # assumed: with no store there is nothing to read and with no writer there
-    # is nowhere to record it, and calling through would raise inside a
-    # teardown path that must not fail a phase.
+    # All are optional on the processor, so they are checked rather than
+    # assumed: with no store there is nothing to read, with no reader nothing
+    # can be made of it, and with no writer there is nowhere to record it.
+    # Calling through would raise inside a teardown path that must not fail a
+    # phase.
     if session_store is None or writer is None or capture is None:
+        return ImportDisposition.SKIPPED
+    if transcript_reader is None:
+        # A store with no reader is a wiring mistake, not a deployment choice,
+        # so it is said out loud rather than skipped as quietly as "no store".
+        logger.warning(
+            "Session store configured without a transcript reader (phase=%s) - "
+            "delegate usage is not imported",
+            phase_id,
+        )
         return ImportDisposition.SKIPPED
 
     captured_ids = capture.agent_session_ids or ()
@@ -276,6 +290,7 @@ async def import_delegates_for_phase(
         outcome = await import_phase_delegates(
             session_store,
             DelegateUsageRecorder(writer),
+            reader=transcript_reader,
             leader_native_session_id=leader_native_session_id,
             captured_session_ids=captured_ids,
             qualified_session_identities=capture.qualified_session_identities,
@@ -362,6 +377,7 @@ async def capture_and_import_phase(
     workspace: ManagedWorkspace | None,
     *,
     session_store: SessionStorePort | None,
+    transcript_reader: TranscriptUsageReader | None = None,
     writer: ObservabilityRecorder | None,
     leader_native_ids: dict[tuple[str, str], str],
     session_id: str,
@@ -396,6 +412,7 @@ async def capture_and_import_phase(
     disposition = await import_delegates_for_phase(
         capture,
         session_store=session_store,
+        transcript_reader=transcript_reader,
         writer=writer,
         leader_native_session_id=leader_native_session_id,
         phase_id=phase_id,
@@ -538,6 +555,7 @@ async def close_phase_workspaces(
     leader_native_ids: dict[tuple[str, str], str],
     capture_port: SessionCapturePort | None,
     session_store: SessionStorePort | None,
+    transcript_reader: TranscriptUsageReader | None = None,
     writer: ObservabilityRecorder | None,
     ledger: ImportLedgerPort | None = None,
 ) -> None:
@@ -553,6 +571,7 @@ async def close_phase_workspaces(
             capture_port,
             workspaces.get(phase_id),
             session_store=session_store,
+            transcript_reader=transcript_reader,
             writer=writer,
             leader_native_ids=leader_native_ids,
             session_id=session_ids.get(phase_id, ""),

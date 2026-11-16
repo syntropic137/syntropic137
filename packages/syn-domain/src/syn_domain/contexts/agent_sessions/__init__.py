@@ -164,6 +164,9 @@ from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort impor
     TranscriptDeletedError,
     TranscriptIntegrityError,
 )
+from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+    TranscriptUsageReader,
+)
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     HAS_REQUESTED_MODEL_COLUMN,
     REQUESTED_MODEL_COLUMN,
@@ -414,6 +417,7 @@ __all__ = [
     "TranscriptDeletionReplica",
     "TranscriptIntegrityError",
     "TranscriptMessage",
+    "TranscriptUsageReader",
     "UnsupportedEvidenceIssue",
     "import_phase_delegates",
     "inventory_counts",
