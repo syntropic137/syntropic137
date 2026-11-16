@@ -62,6 +62,12 @@ def _build_order_clause(order_by: str | None) -> str:
     on a page could differ between two reads of the same data - including the
     full read and the field scan (syn_domain.projection_scan), which must agree
     row for row. The id is the primary key, so the order is now total.
+
+    JSON NUMBERS ORDER AS NUMBERS. ``data->>'field'`` is text, so a count of
+    10 sorted before 9 here while the in-memory store, comparing the Python
+    ints, put it after (#1843). The numeric key comes first and is NULL for
+    every non-number, so a field holding only strings orders exactly as the
+    text key alone did.
     """
     if not order_by:
         return " ORDER BY updated_at DESC, id"
@@ -75,7 +81,12 @@ def _build_order_clause(order_by: str | None) -> str:
         msg = f"unsafe order_by field {field!r}: expected a plain identifier"
         raise ValueError(msg)
     direction = "DESC" if descending else "ASC"
-    return f" ORDER BY data->>'{field}' {direction} NULLS LAST, id"
+    numeric = (
+        f"CASE WHEN jsonb_typeof(data->'{field}') = 'number' THEN (data->>'{field}')::numeric END"
+    )
+    return (
+        f" ORDER BY {numeric} {direction} NULLS LAST, data->>'{field}' {direction} NULLS LAST, id"
+    )
 
 
 def build_query(

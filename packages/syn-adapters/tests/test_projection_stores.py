@@ -311,9 +311,11 @@ class TestNullOrderingIsLast:
         """The two stores must agree, or a green test hides a production bug."""
         from syn_adapters.projection_stores.postgres_query_builder import _build_order_clause
 
+        numeric = "CASE WHEN jsonb_typeof(data->'created_at') = 'number'"
+        numeric += " THEN (data->>'created_at')::numeric END"
         assert _build_order_clause("-created_at") == (
-            " ORDER BY data->>'created_at' DESC NULLS LAST, id"
+            f" ORDER BY {numeric} DESC NULLS LAST, data->>'created_at' DESC NULLS LAST, id"
         )
         assert _build_order_clause("created_at") == (
-            " ORDER BY data->>'created_at' ASC NULLS LAST, id"
+            f" ORDER BY {numeric} ASC NULLS LAST, data->>'created_at' ASC NULLS LAST, id"
         )

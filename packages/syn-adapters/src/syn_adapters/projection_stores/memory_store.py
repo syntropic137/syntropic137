@@ -156,7 +156,11 @@ class InMemoryProjectionStore:
         if projection not in self._data:
             return []
 
-        results = list(self._data[projection].values())
+        # Key order first, so the stable sort below breaks ties by id as the
+        # Postgres store's ``ORDER BY ..., id`` does: equal sort keys must not
+        # move a row across a page boundary between two reads.
+        rows = self._data[projection]
+        results = [rows[key] for key in sorted(rows)] if order_by else list(rows.values())
         results = apply_filters(results, filters)
         results = apply_sorting(results, order_by)
         return [_detached(record) for record in apply_pagination(results, offset, limit)]
