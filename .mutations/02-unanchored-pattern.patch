@@ -1,12 +1,14 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py
-index 341d98d09..7144f0539 100644
+index 802d6132d..18059b091 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py
-@@ -150,7 +150,7 @@ _SHELL_OUT_OF_PROCESSES = (
-     "can't fork",  # busybox ash
- )
+@@ -156,9 +156,7 @@ _SHELL_OUT_OF_PROCESSES = (
+ #: a script, which names the script and always gives the line.
+ _SHELL_PREFIX = r"(?:(?:\S*/)?(?:ba|da|a|z|k)?sh(?:: (?:line )?\d+)?|\S+: line \d+)"
  _OUT_OF_PROCESSES_RE = re.compile(
--    r"^.*?:\s(?:" + "|".join(map(re.escape, _SHELL_OUT_OF_PROCESSES)) + r")(?=:|\s*$).*$",
+-    r"^[^\S\n]*" + _SHELL_PREFIX + r": (?:"
+-    + "|".join(map(re.escape, _SHELL_OUT_OF_PROCESSES))
+-    + r")(?:: Resource temporarily unavailable)?[^\S\n]*$",
 +    r"(?:" + "|".join(map(re.escape, _SHELL_OUT_OF_PROCESSES)) + r").*$",
      re.MULTILINE,
  )

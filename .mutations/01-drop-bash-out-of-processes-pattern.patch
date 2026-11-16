@@ -1,8 +1,8 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py
-index 341d98d09..6b1392b42 100644
+index 802d6132d..52a1ce426 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/codex_faults.py
-@@ -144,8 +144,6 @@ def codex_login_fault_in(line: str) -> str | None:
+@@ -147,8 +147,6 @@ def codex_login_fault_in(line: str) -> str | None:
  # for an execution operation; only these exact shell messages are exempt
  # (ci/fitness/code_quality/test_reserved_domain_words.py).
  _SHELL_OUT_OF_PROCESSES = (

@@ -72,15 +72,31 @@ _TURN_COMPLETED = json.dumps(
 )
 
 
+_PREAMBLE = [
+    json.dumps({"type": "thread.started", "thread_id": "t-1"}),
+    json.dumps({"type": "turn.started"}),
+]
+
+
+def _started(command_id: str) -> str:
+    item = {"id": command_id, "type": "command_execution", "command": "just qa-ci"}
+    return json.dumps({"type": "item.started", "item": item})
+
+
+def _completed(command_id: str, output: str, exit_code: int) -> str:
+    item = {
+        "id": command_id,
+        "type": "command_execution",
+        "command": "just qa-ci",
+        "aggregated_output": output,
+        "exit_code": exit_code,
+        "status": "completed" if exit_code == 0 else "failed",
+    }
+    return json.dumps({"type": "item.completed", "item": item})
+
+
 def _command(output: str, exit_code: int) -> list[str]:
-    item = {"id": "cmd-1", "type": "command_execution", "command": "just qa-ci"}
-    done = {**item, "aggregated_output": output, "exit_code": exit_code, "status": "failed"}
-    return [
-        json.dumps({"type": "thread.started", "thread_id": "t-1"}),
-        json.dumps({"type": "turn.started"}),
-        json.dumps({"type": "item.started", "item": item}),
-        json.dumps({"type": "item.completed", "item": done}),
-    ]
+    return [*_PREAMBLE, _started("cmd-1"), _completed("cmd-1", output, exit_code)]
 
 
 async def _reason(lines: list[str]) -> str | None:
@@ -111,12 +127,37 @@ async def test_a_stream_that_completes_gains_no_reason_from_the_same_output() ->
     assert await _reason([*_command(_OUT_OF_PROCESSES, exit_code=254), _TURN_COMPLETED]) is None
 
 
-@pytest.mark.asyncio
-async def test_a_later_clean_command_clears_it() -> None:
-    """Once a command runs cleanly the processes came back; the cut-off was something else."""
-    lines = [*_command(_OUT_OF_PROCESSES, exit_code=254), *_command("ok\n", exit_code=0)[2:]]
+#: Two commands running at once; the one that hit the limit finishes before,
+#: or after, the one that was already running and needs no new process.
+_OVERLAPPING = {
+    "limit hit first": [
+        *_PREAMBLE,
+        _started("cmd-1"),
+        _started("cmd-2"),
+        _completed("cmd-2", _OUT_OF_PROCESSES, 254),
+        _completed("cmd-1", "ok\n", 0),
+    ],
+    "limit hit last": [
+        *_PREAMBLE,
+        _started("cmd-1"),
+        _started("cmd-2"),
+        _completed("cmd-1", "ok\n", 0),
+        _completed("cmd-2", _OUT_OF_PROCESSES, 254),
+    ],
+    "unrelated failure after": [
+        *_command(_OUT_OF_PROCESSES, 254),
+        _started("cmd-2"),
+        _completed("cmd-2", "error: tests failed\n", 1),
+    ],
+}
 
-    assert await _reason(lines) == MISSING_TERMINAL_TURN_REASON
+
+@pytest.mark.parametrize("lines", list(_OVERLAPPING.values()), ids=list(_OVERLAPPING))
+@pytest.mark.asyncio
+async def test_a_later_completion_does_not_clear_what_was_seen(lines: list[str]) -> None:
+    """A clean or unrelated completion is no evidence the processes came back."""
+    assert await _reason(lines) == await _named_reason()
+    assert await _reason([*lines, _TURN_COMPLETED]) is None
 
 
 @pytest.mark.asyncio
@@ -133,6 +174,8 @@ async def test_prose_about_the_operation_keeps_the_generic_reason() -> None:
         "bash: line 3: fork: retry: Resource temporarily unavailable",
         "sh: 1: Cannot fork",
         "sh: can't fork: Resource temporarily unavailable",
+        "/bin/sh: can't fork",
+        "./scripts/gate.sh: line 12: fork: retry: Resource temporarily unavailable",
     ],
 )
 def test_each_shell_spelling_is_recognised(line: str) -> None:
@@ -148,6 +191,9 @@ def test_each_shell_spelling_is_recognised(line: str) -> None:
         "read: Resource temporarily unavailable",
         "we Cannot fork here, the policy forbids it",
         "fork: Resource temporarily unavailable",  # no shell prefix: quoted, not reported
+        "GitHub: Cannot fork: policy forbids it",  # a colon, then prose
+        "Documentation:\nCannot fork\n",  # a heading, then the words on the next line
+        "sh: Cannot fork the repository",  # a shell prefix, then prose
     ],
 )
 def test_anything_else_is_not(output: str) -> None:

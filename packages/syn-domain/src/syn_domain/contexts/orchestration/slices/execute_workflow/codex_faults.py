@@ -134,11 +134,14 @@ def codex_login_fault_in(line: str) -> str | None:
 # under the generic "stream ended" reason: a codex symptom, for a workspace
 # that had run two parallel builds into its limit.
 #
-# Each spelling must FOLLOW a shell's `: ` prefix and END its line or its
-# clause (`can't fork: ...`), so prose that only mentions the operation - "fatal:
-# Cannot fork the repository" - does not match. "Resource temporarily
-# unavailable" alone is not enough either: a non-blocking read that has
-# nothing to read says the same, and that is no fault at all.
+# Each spelling must be the whole of one line a SHELL wrote: after the shell's
+# own prefix (`/usr/bin/bash:`, `sh: 1:`, `./gate.sh: line 3:`), and followed
+# by nothing but busybox's `: Resource temporarily unavailable`. So prose that
+# only mentions the operation - "fatal: Cannot fork the repository", "GitHub:
+# Cannot fork: policy forbids it", a heading on the line above - does not
+# match. "Resource temporarily unavailable" alone is not enough either: a
+# non-blocking read that has nothing to read says the same, and that is no
+# fault at all.
 #
 # Spelled out whole because the orchestration context reserves the bare word
 # for an execution operation; only these exact shell messages are exempt
@@ -149,8 +152,13 @@ _SHELL_OUT_OF_PROCESSES = (
     "Cannot fork",  # dash
     "can't fork",  # busybox ash
 )
+#: The shell, by path or name, with dash's/bash's line number; or bash running
+#: a script, which names the script and always gives the line.
+_SHELL_PREFIX = r"(?:(?:\S*/)?(?:ba|da|a|z|k)?sh(?:: (?:line )?\d+)?|\S+: line \d+)"
 _OUT_OF_PROCESSES_RE = re.compile(
-    r"^.*?:\s(?:" + "|".join(map(re.escape, _SHELL_OUT_OF_PROCESSES)) + r")(?=:|\s*$).*$",
+    r"^[^\S\n]*" + _SHELL_PREFIX + r": (?:"
+    + "|".join(map(re.escape, _SHELL_OUT_OF_PROCESSES))
+    + r")(?:: Resource temporarily unavailable)?[^\S\n]*$",
     re.MULTILINE,
 )
 

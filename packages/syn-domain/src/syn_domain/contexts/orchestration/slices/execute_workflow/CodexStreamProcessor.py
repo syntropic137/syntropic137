@@ -404,9 +404,10 @@ class CodexStreamProcessor:
         #: candidate is informative at all it is because the stream was cut
         #: off - which is the last such line, not the first.
         self._parse_fault_candidate: str | None = None
-        #: Whether the LATEST command's output shows the workspace out of
-        #: processes (#2227). Latest, not first: once the pids are gone no
-        #: later command can run cleanly, so a clean one means they came back.
+        #: The latest command output that showed the workspace out of
+        #: processes (#2227). Kept until the stream settles: a command that
+        #: was already running can still finish cleanly, and a later one can
+        #: fail for its own reasons, and neither shows the pids came back.
         self._pids_fault_candidate: str | None = None
 
         # #894: A codex phase delegates to `claude -p`.
@@ -926,7 +927,9 @@ class CodexStreamProcessor:
         success = exit_code == 0
         output = str(item.get("aggregated_output") or "")
         # Held, never decided here: see `_pids_fault_candidate`.
-        self._pids_fault_candidate = workspace_out_of_processes_in(output)
+        self._pids_fault_candidate = (
+            workspace_out_of_processes_in(output) or self._pids_fault_candidate
+        )
         # item.completed repeats the command, so a delegation is still counted
         # if the matching item.started never arrived (truncated stream).
         self._note_delegation_attempt(tool_use_id, str(item.get("command", "")))
