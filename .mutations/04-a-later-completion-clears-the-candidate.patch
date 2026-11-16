@@ -1,14 +1,13 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
-index 097b0c581..6cdcdefe1 100644
+index d2283e3ce..6cdcdefe1 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/CodexStreamProcessor.py
-@@ -927,9 +927,7 @@ class CodexStreamProcessor:
+@@ -927,8 +927,7 @@ class CodexStreamProcessor:
          success = exit_code == 0
          output = str(item.get("aggregated_output") or "")
          # Held, never decided here: see `_pids_fault_candidate`.
--        self._pids_fault_candidate = (
--            workspace_out_of_processes_in(output) or self._pids_fault_candidate
--        )
+-        if pids_fault := workspace_out_of_processes_in(output):
+-            self._pids_fault_candidate = pids_fault
 +        self._pids_fault_candidate = workspace_out_of_processes_in(output)
          # item.completed repeats the command, so a delegation is still counted
          # if the matching item.started never arrived (truncated stream).

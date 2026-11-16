@@ -927,9 +927,8 @@ class CodexStreamProcessor:
         success = exit_code == 0
         output = str(item.get("aggregated_output") or "")
         # Held, never decided here: see `_pids_fault_candidate`.
-        self._pids_fault_candidate = (
-            workspace_out_of_processes_in(output) or self._pids_fault_candidate
-        )
+        if pids_fault := workspace_out_of_processes_in(output):
+            self._pids_fault_candidate = pids_fault
         # item.completed repeats the command, so a delegation is still counted
         # if the matching item.started never arrived (truncated stream).
         self._note_delegation_attempt(tool_use_id, str(item.get("command", "")))
