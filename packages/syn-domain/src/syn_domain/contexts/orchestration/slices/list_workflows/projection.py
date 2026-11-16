@@ -10,6 +10,8 @@ Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -25,7 +27,38 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTagsRemovedEvent im
 )
 from syn_domain.contexts.orchestration.domain.read_models import WorkflowSummary
 from syn_domain.contexts.orchestration.domain.read_models.workflow_summary import declared_skills
-from syn_domain.pagination import matches_search
+from syn_domain.pagination import coerce_datetime, matches_search
+
+DEFAULT_ORDER = "-created_at"
+
+# How each sortable field compares. The store cannot be trusted with this:
+# Postgres orders on data->>'field', which is text, so runs_count "10" would
+# sort before "9" there and after it in memory (#1843).
+_SORT_KEYS: Mapping[str, Callable[[WorkflowSummary], int | str | datetime | None]] = {
+    "runs_count": lambda s: s.runs_count,
+    "phase_count": lambda s: s.phase_count,
+    "name": lambda s: s.name,
+    "workflow_type": lambda s: s.workflow_type,
+    "created_at": lambda s: coerce_datetime(s.created_at),
+}
+
+
+def _ordered(summaries: list[WorkflowSummary], order_by: str) -> list[WorkflowSummary]:
+    """``summaries`` ordered by ``order_by`` (``-`` prefix = descending).
+
+    An unknown field falls back to ``DEFAULT_ORDER``. Rows with no value go
+    last in either direction, as Postgres ``NULLS LAST`` does, and ties are
+    broken by id ascending, so consecutive pages never overlap or skip a row.
+    """
+    field = order_by.removeprefix("-")
+    if field not in _SORT_KEYS:
+        return _ordered(summaries, DEFAULT_ORDER)
+    key = _SORT_KEYS[field]
+    keyed = [(key(s), s) for s in sorted(summaries, key=lambda s: s.id)]
+    present = [(k, s) for k, s in keyed if k is not None]
+    # Stable, including with reverse=True: equal keys keep the id order.
+    present.sort(key=lambda pair: pair[0], reverse=order_by.startswith("-"))
+    return [s for _, s in present] + [s for k, s in keyed if k is None]
 
 
 class WorkflowListProjection(RecordedTimeProjection):
@@ -188,7 +221,7 @@ class WorkflowListProjection(RecordedTimeProjection):
         workflow_type_filter: str | None = None,
         limit: int = 100,
         offset: int = 0,
-        order_by: str = "-created_at",
+        order_by: str | None = None,
         include_archived: bool = False,
         search: str | None = None,
     ) -> list[WorkflowSummary]:
@@ -198,15 +231,17 @@ class WorkflowListProjection(RecordedTimeProjection):
             workflow_type_filter: Filter by workflow type
             limit: Maximum results
             offset: Pagination offset
-            order_by: Sort field (prefix with - for descending)
+            order_by: Sort field (prefix with - for descending). Applied to
+                the whole filtered collection before the page is cut; an
+                unknown field or None means ``DEFAULT_ORDER``.
             include_archived: If True, include archived templates. Defaults to False.
             search: Case-insensitive substring matched against name and id.
 
         Returns:
             List of matching WorkflowSummary objects
         """
-        matching = await self._matching(workflow_type_filter, include_archived, search, order_by)
-        return matching[offset : offset + limit]
+        matching = await self._matching(workflow_type_filter, include_archived, search)
+        return _ordered(matching, order_by or DEFAULT_ORDER)[offset : offset + limit]
 
     async def count(
         self,
@@ -222,7 +257,6 @@ class WorkflowListProjection(RecordedTimeProjection):
         workflow_type_filter: str | None,
         include_archived: bool,
         search: str | None,
-        order_by: str | None = None,
     ) -> list[WorkflowSummary]:
         """Every template matching the filters, before pagination.
 
@@ -247,7 +281,6 @@ class WorkflowListProjection(RecordedTimeProjection):
         rows = await self._store.query(
             self.PROJECTION_NAME,
             filters=filters or None,
-            order_by=order_by,
             limit=None,
             offset=0,
         )
