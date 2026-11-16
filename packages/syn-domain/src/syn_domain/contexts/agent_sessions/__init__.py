@@ -245,10 +245,13 @@ from syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler
     StartSessionHandler,
 )
 from syn_domain.contexts.agent_sessions.transcript_usage import (
+    NoUsage,
     PricedUsage,
     RolloutDocument,
     RolloutRecord,
     StoredTranscript,
+    UnpricedUsage,
+    UsageResult,
 )
 
 from .domain.read_models.transcript_body_state import (
@@ -357,6 +360,7 @@ __all__ = [
     "NativeRelationshipFact",
     "NativeSessionEvidencePort",
     "NativeTranscriptFacts",
+    "NoUsage",
     "NodeEvidence",
     "ObservationType",
     "ObserveInventoryClockCommand",
@@ -417,7 +421,9 @@ __all__ = [
     "TranscriptIntegrityError",
     "TranscriptMessage",
     "TranscriptUsageReader",
+    "UnpricedUsage",
     "UnsupportedEvidenceIssue",
+    "UsageResult",
     "import_phase_delegates",
     "inventory_counts",
     "namespace_counts",

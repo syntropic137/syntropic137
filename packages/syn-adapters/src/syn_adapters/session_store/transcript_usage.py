@@ -51,7 +51,7 @@ from pydantic import (
 )
 
 from syn_adapters.session_store.codex_rollout_model import rollout_record_model
-from syn_domain.contexts.agent_sessions.transcript_usage import (
+from syn_domain.contexts.agent_sessions import (
     NoUsage,
     PricedUsage,
     RolloutDocument,
