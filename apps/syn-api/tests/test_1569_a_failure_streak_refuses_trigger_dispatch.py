@@ -9,20 +9,22 @@ it: that a refusal reaches the trigger's dispatch record and stops the start.
 
 from __future__ import annotations
 
-import ast
 import os
 from datetime import UTC, datetime
 from itertools import count
-from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
 from event_sourcing.core.event import EventEnvelope, EventMetadata
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 from event_sourcing.stores.memory_projection import MemoryProjectionStore
+from fastapi import BackgroundTasks
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent
+
+    from syn_domain.contexts.orchestration import ExecuteWorkflowCommand
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -30,6 +32,7 @@ from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFi
 from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
     WorkflowDispatchProjection,
 )
+from syn_domain.contexts.orchestration import WorkflowTemplateAggregate
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
@@ -201,27 +204,91 @@ async def test_a_completion_lets_triggers_dispatch_again() -> None:
     assert fx.service.started == ["t2"]
 
 
-def test_manual_start_paths_never_consult_the_streak_check() -> None:
-    """A manual run at the threshold proceeds because nothing on its path refuses it.
+async def test_a_manual_start_at_the_threshold_proceeds_and_its_completion_lets_triggers_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A manual run at the threshold proceeds: it is the way out.
 
     Refusing it too would leave the template refused forever: a completion is
-    the only thing that resets a streak. So the check is wired into the trigger
-    dispatcher and nowhere else, and this pins that.
+    the only thing that resets a streak. So the person's ``POST /execute`` goes
+    through the real route and admission gate with the threshold configured and
+    the streak at it, and must reach the handler; its completion then lets the
+    next trigger dispatch.
     """
-    repo = Path(__file__).resolve().parents[3]
-    users: list[str] = []
-    for root in ("apps/syn-api/src", "packages/syn-adapters/src", "packages/syn-domain/src"):
-        for path in (repo / root).rglob("*.py"):
-            if path.name.startswith("test_") or "failure_streak" in path.parts:
-                continue
-            tree = ast.parse(path.read_text())
-            if any(
-                isinstance(node, ast.Name) and node.id == "TriggerDispatchStreakCheck"
-                for node in ast.walk(tree)
-            ):
-                users.append(path.relative_to(repo).as_posix())
+    import syn_api._wiring_admission as wiring
+    from syn_adapters.maintenance import InMemoryMaintenanceAdapter
+    from syn_api import _wiring
+    from syn_api.routes.executions import commands
+    from syn_domain.contexts._shared import AdmissionGate
+    from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
+        WorkflowExecutionResult,
+    )
+    from syn_shared.settings import reset_settings
 
-    assert users == ["packages/syn-adapters/src/syn_adapters/subscriptions/coordinator_service.py"]
+    fx = _Fixture(threshold=2)
+    await fx.failures("e1", "e2")
+    await fx.a_trigger_fires("t1")
+    assert fx.service.started == [], "the trigger is refused at the threshold"
+
+    started: list[str] = []
+
+    class _Handler:
+        async def handle(
+            self, cmd: ExecuteWorkflowCommand, *, admitted: object = None
+        ) -> WorkflowExecutionResult:
+            del admitted
+            assert cmd.execution_id is not None
+            started.append(cmd.execution_id)
+            return WorkflowExecutionResult(
+                workflow_id=_WORKFLOW,
+                execution_id=cmd.execution_id,
+                status="completed",
+                started_at=_T0,
+            )
+
+    async def get_handler() -> _Handler:
+        return _Handler()
+
+    async def nothing_to_connect() -> None:
+        return None
+
+    class _WorkflowRepo:
+        async def get_by_id(self, aggregate_id: str) -> WorkflowTemplateAggregate:
+            del aggregate_id
+            return WorkflowTemplateAggregate()
+
+    class _NoDetail:
+        async def get_by_id(self, workflow_id: str) -> None:
+            del workflow_id
+
+    # The streak the trigger was refused on, where a manual path would read it.
+    manager = MagicMock(workflow_detail=_NoDetail(), failure_streak=fx.streaks)
+    gate = AdmissionGate(InMemoryMaintenanceAdapter(), drain_timeout=0.5)
+    monkeypatch.setattr(wiring, "_admission_gate_singleton", gate, raising=False)
+    monkeypatch.setattr(commands, "ensure_connected", nothing_to_connect)
+    monkeypatch.setattr(commands, "get_workflow_repo", _WorkflowRepo)
+    monkeypatch.setattr(commands, "get_projection_mgr", lambda: manager)
+    monkeypatch.setattr(_wiring, "get_execute_workflow_handler", get_handler)
+    monkeypatch.setenv("SYN_POLLING_FAILURE_STREAK_THRESHOLD", "2")
+    monkeypatch.setenv("SYN_EXECUTION_RUN_QUEUE_ENABLED", "true")
+    reset_settings()
+    try:
+        response = await commands.execute_workflow_endpoint(
+            _WORKFLOW,
+            commands.ExecuteWorkflowRequest(repos=["https://github.com/syntropic137/syntropic137"]),
+            BackgroundTasks(),
+        )
+    finally:
+        monkeypatch.delenv("SYN_POLLING_FAILURE_STREAK_THRESHOLD")
+        monkeypatch.delenv("SYN_EXECUTION_RUN_QUEUE_ENABLED")
+        reset_settings()
+
+    assert started == [response.execution_id], "the manual start reached the handler"
+
+    await fx.a_completion(response.execution_id)
+    await fx.a_trigger_fires("t2")
+
+    assert fx.service.started == ["t2"]
 
 
 async def test_the_registered_dispatcher_reads_the_registered_streak_at_its_threshold() -> None:
