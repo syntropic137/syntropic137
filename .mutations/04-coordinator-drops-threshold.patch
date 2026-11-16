@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/subscriptions/coordinator_service.py b/packages/syn-adapters/src/syn_adapters/subscriptions/coordinator_service.py
+index 04cee8740..73001817a 100644
+--- a/packages/syn-adapters/src/syn_adapters/subscriptions/coordinator_service.py
++++ b/packages/syn-adapters/src/syn_adapters/subscriptions/coordinator_service.py
+@@ -698,7 +698,7 @@ def create_coordinator_service(
+                 budget_checker=cast("_BudgetChecker | None", budget_checker),
+                 max_dispatches_per_hour=max_dispatches_per_hour,
+                 dispatch_refusals=TriggerDispatchStreakCheck(
+-                    failure_streak, failure_streak_threshold
++                    failure_streak, 0
+                 ),
+             ),
+             # ADR-014 s7: starts the child of each admitted resume. The same

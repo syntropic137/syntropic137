@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/_wiring.py b/apps/syn-api/src/syn_api/_wiring.py
+index 8e5efe938..8c790920c 100644
+--- a/apps/syn-api/src/syn_api/_wiring.py
++++ b/apps/syn-api/src/syn_api/_wiring.py
+@@ -875,7 +875,6 @@ def get_subscription_coordinator(
+         pool=timescale_pool,
+         budget_checker=_get_budget_checker(),
+         max_dispatches_per_hour=settings.polling.max_dispatches_per_hour,
+-        failure_streak_threshold=settings.polling.failure_streak_threshold,
+         inventory_replication_manager=(
+             None if settings.uses_in_memory_stores else get_inventory_runtime().replication
+         ),

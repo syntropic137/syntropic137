@@ -14,12 +14,15 @@ import os
 from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-from event_sourcing import DomainEvent
 from event_sourcing.core.event import EventEnvelope, EventMetadata
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 from event_sourcing.stores.memory_projection import MemoryProjectionStore
+
+if TYPE_CHECKING:
+    from event_sourcing import DomainEvent
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -219,3 +222,55 @@ def test_manual_start_paths_never_consult_the_streak_check() -> None:
                 users.append(path.relative_to(repo).as_posix())
 
     assert users == ["packages/syn-adapters/src/syn_adapters/subscriptions/coordinator_service.py"]
+
+
+async def test_the_registered_dispatcher_reads_the_registered_streak_at_its_threshold() -> None:
+    """The coordinator hands the dispatcher the threshold and the streaks it feeds.
+
+    A dispatcher built without the threshold would pass every test above and
+    refuse nothing in production.
+    """
+    from syn_adapters.subscriptions import create_coordinator_service
+
+    store = MemoryProjectionStore()
+    service = create_coordinator_service(
+        event_store=object(),  # type: ignore[arg-type]  # never touched before start()
+        projection_store=store,  # type: ignore[arg-type]  # the in-memory store
+        execution_service=_RecordingExecutionService(),  # type: ignore[arg-type]
+        failure_streak_threshold=2,
+    )
+    projections = service._projections
+    (streaks,) = [p for p in projections if isinstance(p, FailureStreakProjection)]
+    (dispatch,) = [p for p in projections if isinstance(p, WorkflowDispatchProjection)]
+    fx = _Fixture(threshold=0)
+    fx.store, fx.streaks, fx.dispatch = store, streaks, dispatch
+    fx.service = dispatch._execution_service  # type: ignore[assignment]  # the double above
+
+    await fx.failures("e1", "e2")
+    await fx.a_trigger_fires("t1")
+
+    assert fx.service.started == []
+    assert (await fx.record("t1"))[1].startswith("failure_streak: ")
+
+
+def test_the_api_passes_the_configured_threshold_to_the_coordinator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``SYN_POLLING_FAILURE_STREAK_THRESHOLD`` reaches ``create_coordinator_service``."""
+    import syn_adapters.subscriptions as subscriptions
+    from syn_api import _wiring
+    from syn_shared.settings import reset_settings
+
+    passed: dict[str, object] = {}
+    monkeypatch.setenv("SYN_POLLING_FAILURE_STREAK_THRESHOLD", "7")
+    monkeypatch.setattr(subscriptions, "create_coordinator_service", lambda **kw: passed.update(kw))
+    monkeypatch.setattr(_wiring, "get_event_store_client", lambda: None)
+    monkeypatch.setattr(_wiring, "_get_budget_checker", lambda: None)
+    reset_settings()
+    try:
+        _wiring.get_subscription_coordinator()
+    finally:
+        monkeypatch.delenv("SYN_POLLING_FAILURE_STREAK_THRESHOLD")
+        reset_settings()
+
+    assert passed["failure_streak_threshold"] == 7
