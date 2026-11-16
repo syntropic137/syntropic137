@@ -54,7 +54,9 @@ def _page(limit: int, offset: int) -> list[_Summary]:
 async def _call(page: int, page_size: int = PAGE_SIZE):
     """Invoke the endpoint with the projection layer faked out."""
 
-    async def fake_list_workflows(*, workflow_type, limit, offset, include_archived, search):
+    async def fake_list_workflows(
+        *, workflow_type, limit, offset, include_archived, search, order_by
+    ):
         return Ok(
             [
                 WorkflowSummaryResponse.model_validate(s, from_attributes=True)
