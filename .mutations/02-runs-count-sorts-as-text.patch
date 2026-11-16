@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py
+index 2876ebb19..535a19bac 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py
+@@ -35,7 +35,7 @@ DEFAULT_ORDER = "-created_at"
+ # Postgres orders on data->>'field', which is text, so runs_count "10" would
+ # sort before "9" there and after it in memory (#1843).
+ _SORT_KEYS: Mapping[str, Callable[[WorkflowSummary], int | str | datetime | None]] = {
+-    "runs_count": lambda s: s.runs_count,
++    "runs_count": lambda s: str(s.runs_count),
+     "phase_count": lambda s: s.phase_count,
+     "name": lambda s: s.name,
+     "workflow_type": lambda s: s.workflow_type,
