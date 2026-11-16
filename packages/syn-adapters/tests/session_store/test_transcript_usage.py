@@ -34,7 +34,7 @@ from syn_domain.contexts.agent_sessions.transcript_usage import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, MutableMapping
+    from collections.abc import Mapping
 
 _FIXTURES = Path(__file__).parents[3] / "syn-domain" / "tests" / "fixtures" / "delegation"
 
@@ -368,9 +368,9 @@ def _codex_event(
     cached: int,
     total: int,
     delta: int | None = None,
-    extra: Mapping[str, object] | None = None,
+    extra: Mapping[str, int | str] | None = None,
 ) -> RolloutRecord:
-    usage: MutableMapping[str, object] = {
+    usage: dict[str, int | str] = {
         "input_tokens": inp,
         "output_tokens": out,
         "cached_input_tokens": cached,
@@ -378,7 +378,7 @@ def _codex_event(
     }
     if extra:
         usage.update(extra)
-    info: MutableMapping[str, object] = {"total_token_usage": usage}
+    info: dict[str, dict[str, int | str]] = {"total_token_usage": usage}
     if delta is not None:
         info["last_token_usage"] = {"total_tokens": delta}
     return {"type": "event_msg", "payload": {"info": info}}

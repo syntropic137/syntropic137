@@ -41,6 +41,15 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum, auto
 from itertools import pairwise
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    NonNegativeInt,
+    ValidationError,
+    field_validator,
+)
+
 from syn_domain.contexts.agent_sessions.transcript_usage import (
     NoUsage,
     PricedUsage,
@@ -68,44 +77,60 @@ class SourceFormat(StrEnum):
     CODEX_ROLLOUT = "codex-rollout-jsonl"
 
 
-def _as_count(value: object) -> int | None:
-    """A non-negative token count, or None if this is not one.
+class _UsageCounts(BaseModel):
+    """A usage object's counts, refined once where the transcript is read.
 
-    Returns None rather than 0 for anything unexpected. Collapsing a moved or
-    renamed field into zero is what makes a broken parse look cheap instead of
-    broken.
+    STRICT, and every count a non-negative int. A bool, a float, a string or a
+    negative number is not a count, and a REQUIRED count that is missing is not
+    a zero: defaulting it to zero is what let an empty usage object read as a
+    free delegation. Any of those fails validation, and the callers turn that
+    failure into a refusal, never into a smaller number.
+
+    Extra fields are ignored rather than forbidden: these are the harness's
+    records, not ours, and a CLI adding a field must not unprice a session.
     """
-    if isinstance(value, bool) or not isinstance(value, int):
-        return None
-    return value if value >= 0 else None
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="ignore")
 
 
-def _counts(source: Mapping[str, object], fields: Sequence[str]) -> list[int] | None:
-    """Read every named count, or None if any is MISSING or malformed.
+class _CodexTotalUsage(_UsageCounts):
+    """``total_token_usage`` on a codex ``event_msg``: running totals."""
 
-    A missing field is not a zero. Defaulting it to zero is what let an empty
-    usage object read as a free delegation: every count came back 0, the
-    arithmetic reconciled trivially, and the result looked priceable. Absence
-    of a field we require means the shape is not what we think it is.
+    input_tokens: NonNegativeInt
+    output_tokens: NonNegativeInt
+    cached_input_tokens: NonNegativeInt
+    total_tokens: NonNegativeInt
+    cache_write_input_tokens: NonNegativeInt = 0
+    """May be absent (the CLI bump that added it is recent). Absent is 0;
+    present and malformed fails, rather than collapsing into a silent 0."""
+    reasoning_output_tokens: NonNegativeInt = 0
+
+
+class _CodexTurnUsage(_UsageCounts):
+    """``last_token_usage``: this turn's own total, when it carries one.
+
+    A present-but-null ``total_tokens`` fails like any other malformed count:
+    the field is ``NonNegativeInt``, and the ``None`` default is only ever the
+    ABSENT case, because Pydantic does not validate defaults.
     """
-    out: list[int] = []
-    for name in fields:
-        if name not in source:
-            return None
-        count = _as_count(source[name])
-        if count is None:
-            return None
-        out.append(count)
-    return out
+
+    total_tokens: NonNegativeInt | None = Field(default=None, validate_default=False)
+
+    @field_validator("total_tokens", mode="before")
+    @classmethod
+    def _null_is_not_absent(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("total_tokens is present and null")
+        return value
 
 
-_CODEX_FIELDS = ("input_tokens", "output_tokens", "cached_input_tokens", "total_tokens")
-_CLAUDE_FIELDS = (
-    "input_tokens",
-    "output_tokens",
-    "cache_creation_input_tokens",
-    "cache_read_input_tokens",
-)
+class _ClaudeUsage(_UsageCounts):
+    """``message.usage`` on a claude-code line: per-message deltas."""
+
+    input_tokens: NonNegativeInt
+    output_tokens: NonNegativeInt
+    cache_creation_input_tokens: NonNegativeInt
+    cache_read_input_tokens: NonNegativeInt
 
 
 #: Any of these appearing on an event's ``info`` means the record is in the
@@ -114,10 +139,6 @@ _CLAUDE_FIELDS = (
 #: than skipped: skipping returns the preceding cumulative total as if it were
 #: current, which reports a long session at an early turn's cost.
 _USAGE_MARKERS = ("total_token_usage", "last_token_usage", "token_usage", "usage")
-
-
-def _looks_like_usage(info: Mapping[str, object]) -> bool:
-    return any(marker in info for marker in _USAGE_MARKERS)
 
 
 @dataclass(frozen=True)
@@ -139,40 +160,6 @@ class _CodexSnapshot:
     """
 
 
-def _optional_count(source: Mapping[str, object], name: str) -> int | None | _Unreadable:
-    """A count that may legitimately be absent.
-
-    Three outcomes, and collapsing any two of them is how a number goes wrong:
-    absent (None, fine), readable (the value), or PRESENT AND MALFORMED
-    (_Unreadable). ``_as_count(...) or 0`` collapsed the third into zero, which
-    silently underprices, and cache_write is exactly the field the CLI bump
-    just added.
-    """
-    if name not in source:
-        return None
-    count = _as_count(source[name])
-    return _UNREADABLE if count is None else count
-
-
-def _optional_counts(source: Mapping[str, object], names: Sequence[str]) -> list[int] | _Unreadable:
-    """Read counts that may be absent, refusing any that are present but bad."""
-    out: list[int] = []
-    for name in names:
-        read = _optional_count(source, name)
-        if isinstance(read, _Unreadable):
-            return _UNREADABLE
-        out.append(read or 0)
-    return out
-
-
-def _delta_total(info: Mapping[str, object]) -> int | None | _Unreadable:
-    """This turn's own total, for the independent sum(deltas) check."""
-    delta = info.get("last_token_usage")
-    if not isinstance(delta, Mapping):
-        return None
-    return _optional_count(delta, "total_tokens")
-
-
 def _codex_snapshot(record: RolloutRecord) -> _CodexSnapshot | None | _Unreadable:
     """This record's cumulative reading.
 
@@ -189,30 +176,25 @@ def _codex_snapshot(record: RolloutRecord) -> _CodexSnapshot | None | _Unreadabl
     info = payload.get("info")
     if not isinstance(info, Mapping):
         return None
-    if not _looks_like_usage(info):
+    if not any(marker in info for marker in _USAGE_MARKERS):
         return None
 
     usage = info.get("total_token_usage")
-    if not isinstance(usage, Mapping):
+    delta = info.get("last_token_usage")
+    try:
+        total = _CodexTotalUsage.model_validate(usage)
+        turn = _CodexTurnUsage.model_validate(delta) if isinstance(delta, Mapping) else None
+    except ValidationError:
         return _UNREADABLE
-    counts = _counts(usage, _CODEX_FIELDS)
-    if counts is None:
-        return _UNREADABLE
-
-    optional = _optional_counts(usage, ("cache_write_input_tokens", "reasoning_output_tokens"))
-    delta_total = _delta_total(info)
-    if isinstance(optional, _Unreadable) or isinstance(delta_total, _Unreadable):
-        return _UNREADABLE
-    cache_write, reasoning = optional
 
     return _CodexSnapshot(
-        input_tokens=counts[0],
-        output_tokens=counts[1],
-        cached_input_tokens=counts[2],
-        reasoning_output_tokens=reasoning,
-        total_tokens=counts[3],
-        cache_write_tokens=cache_write,
-        delta_total_tokens=delta_total,
+        input_tokens=total.input_tokens,
+        output_tokens=total.output_tokens,
+        cached_input_tokens=total.cached_input_tokens,
+        reasoning_output_tokens=total.reasoning_output_tokens,
+        total_tokens=total.total_tokens,
+        cache_write_tokens=total.cache_write_input_tokens,
+        delta_total_tokens=None if turn is None else turn.total_tokens,
     )
 
 
@@ -360,9 +342,16 @@ def _claude_entry(
     usage = message.get("usage")
     if not isinstance(usage, Mapping):
         return None
-    counts = _counts(usage, _CLAUDE_FIELDS)
-    if counts is None:
+    try:
+        read = _ClaudeUsage.model_validate(usage)
+    except ValidationError:
         return _UNREADABLE
+    counts = [
+        read.input_tokens,
+        read.output_tokens,
+        read.cache_creation_input_tokens,
+        read.cache_read_input_tokens,
+    ]
     model = message.get("model")
     message_id = message.get("id")
     return (
