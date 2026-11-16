@@ -875,6 +875,7 @@ def get_subscription_coordinator(
         pool=timescale_pool,
         budget_checker=_get_budget_checker(),
         max_dispatches_per_hour=settings.polling.max_dispatches_per_hour,
+        failure_streak_threshold=settings.polling.failure_streak_threshold,
         inventory_replication_manager=(
             None if settings.uses_in_memory_stores else get_inventory_runtime().replication
         ),
