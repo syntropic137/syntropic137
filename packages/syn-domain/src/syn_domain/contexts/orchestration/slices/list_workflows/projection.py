@@ -10,11 +10,12 @@ Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+    from datetime import datetime
+
     from event_sourcing import ProjectionStore
 
 from syn_domain.contexts.orchestration._shared.recorded_time import RecordedTimeProjection
