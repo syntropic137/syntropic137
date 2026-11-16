@@ -471,6 +471,7 @@ class TestTheDeferredCrashWindowStaysNarrow:
             await pdi.import_delegates_for_phase(
                 _Capture(),
                 session_store=object(),
+                transcript_reader=StoredTranscriptUsageReader(),
                 writer=object(),
                 leader_native_session_id=LEADER,
                 phase_id="phase-1",
@@ -522,6 +523,7 @@ class TestAFailedImportKeepsTheLeaderIdentity:
                 object(),
                 _Workspace(),
                 session_store=object(),
+                transcript_reader=StoredTranscriptUsageReader(),
                 writer=object(),
                 leader_native_ids=leader_ids,
                 session_id="sess-1",
