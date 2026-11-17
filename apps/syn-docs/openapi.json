@@ -1861,6 +1861,49 @@
         }
       }
     },
+    "/executions/{execution_id}/pushes": {
+      "get": {
+        "tags": [
+          "executions"
+        ],
+        "summary": "Get Execution Pushes Endpoint",
+        "description": "Every `PhaseCommitPushed` recorded on the execution: phase, repository, branch, SHA.",
+        "operationId": "get_execution_pushes_endpoint_executions__execution_id__pushes_get",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionPushesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/executions/{execution_id}/session-transcripts/{archive_hash}": {
       "get": {
         "tags": [
@@ -14292,6 +14335,29 @@
         ],
         "title": "ExecutionListResponse"
       },
+      "ExecutionPushesResponse": {
+        "properties": {
+          "execution_id": {
+            "type": "string",
+            "title": "Execution Id"
+          },
+          "pushes": {
+            "items": {
+              "$ref": "#/components/schemas/RecordedPush"
+            },
+            "type": "array",
+            "title": "Pushes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "execution_id",
+          "pushes"
+        ],
+        "title": "ExecutionPushesResponse",
+        "description": "Every push this execution's phases recorded, read from the aggregate, not a projection.\n\nIn the order they were recorded. Empty means no `PhaseCommitPushed` event\nexists for the execution, which is not the same as \"nothing was pushed\":\na push the hook did not report is not here."
+      },
       "ExecutionRunListResponse": {
         "properties": {
           "runs": {
@@ -19730,6 +19796,36 @@
         ],
         "title": "ReadModelStatus",
         "description": "Whether one read model is rebuilding, and how far it has got.\n\nCarried on the list and detail responses a read model serves, so a page can\nsay \"this list is incomplete because it is being rebuilt\" instead of\nlooking broken, and listed on ``/health`` for every read model that is\nrebuilding. Judged by ``services.read_model_status``; every number is\nexact (checkpoint position against store head), never estimated."
+      },
+      "RecordedPush": {
+        "properties": {
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch"
+          },
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phase_id",
+          "repository",
+          "branch",
+          "sha"
+        ],
+        "title": "RecordedPush",
+        "description": "One push a phase's own workspace made, as `PhaseCommitPushed` recorded it (#1544)."
       },
       "RegisterClaudePluginRequest": {
         "properties": {

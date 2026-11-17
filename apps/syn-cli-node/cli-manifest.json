@@ -651,6 +651,19 @@
           ]
         },
         {
+          "name": "pushes",
+          "args": [
+            "execution-id"
+          ],
+          "options": [
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
+            }
+          ]
+        },
+        {
           "name": "resume",
           "args": [
             "execution-id"
