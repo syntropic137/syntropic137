@@ -1,0 +1,13 @@
+diff --git a/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py b/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
+index d7c6a7268..74aa29f4b 100644
+--- a/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
++++ b/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
+@@ -81,7 +81,7 @@ class OtlpResource(_OtlpView):
+         """The first ``session.id`` attribute's ``stringValue``, stringified, or ``"unknown"``."""
+         for attr in self.attributes:
+             if attr.key == "session.id":
+-                return str(attr.value.string_value("unknown"))
++                return attr.value.string_value("unknown") or "unknown"
+         return "unknown"
+ 
+ 

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py b/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
+index d7c6a7268..688429d6e 100644
+--- a/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
++++ b/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
+@@ -93,7 +93,7 @@ class OtlpNumberDataPoint(_OtlpView):
+     @property
+     def value(self) -> int | float | str:
+         raw = self.raw
+-        return raw.get("asDouble", raw.get("asInt", raw.get("as_double", raw.get("as_int", 0))))  # type: ignore[no-any-return]
++        return float(raw.get("asDouble", raw.get("asInt", raw.get("as_double", raw.get("as_int", 0)))))
+ 
+     @property
+     def attributes(self) -> list[OtlpAttribute]:
