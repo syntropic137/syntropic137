@@ -28,13 +28,7 @@ from syn_adapters.projections.session_tools_helpers import (
 )
 from syn_shared.events import (
     COST_RECORDED,
-    GIT_BRANCH_CHANGED,
-    GIT_CHECKOUT,
-    GIT_COMMIT,
-    GIT_MERGE,
-    GIT_OPERATION,
-    GIT_PUSH,
-    GIT_REWRITE,
+    GIT_HOOK_EVENT_TYPES,
     SESSION_SUMMARY,
     TOKEN_USAGE,
     TOOL_EXECUTION_COMPLETED,
@@ -57,15 +51,7 @@ logger = logging.getLogger(__name__)
 TIMELINE_EXCLUDE = (TOKEN_USAGE, COST_RECORDED, SESSION_SUMMARY)
 
 SUBAGENT_TOOL_NAMES = {str(ClaudeToolName.SUBAGENT), str(ClaudeToolName.SUBAGENT_LEGACY)}
-GIT_EVENT_TYPES = (
-    GIT_COMMIT,
-    GIT_PUSH,
-    GIT_BRANCH_CHANGED,
-    GIT_OPERATION,
-    GIT_MERGE,
-    GIT_REWRITE,
-    GIT_CHECKOUT,
-)
+GIT_EVENT_TYPES = GIT_HOOK_EVENT_TYPES
 
 
 @dataclass

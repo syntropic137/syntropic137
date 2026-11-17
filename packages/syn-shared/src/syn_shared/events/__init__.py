@@ -147,6 +147,20 @@ EventType = Literal[
 # Runtime validation set (auto-generated from Literal)
 VALID_EVENT_TYPES: set[str] = set(get_args(EventType))
 
+#: What the git hooks inside a workspace print to tool output (ADR-043), and
+#: so the only types EmbeddedEventScanner accepts from it. Narrower than
+#: VALID_EVENT_TYPES on purpose: a cost observation in tool output is not
+#: the leader's spend, and a delegate is priced from its transcript (#935).
+GIT_HOOK_EVENT_TYPES: tuple[str, ...] = (
+    GIT_COMMIT,
+    GIT_PUSH,
+    GIT_BRANCH_CHANGED,
+    GIT_OPERATION,
+    GIT_MERGE,
+    GIT_REWRITE,
+    GIT_CHECKOUT,
+)
+
 
 def is_valid_event_type(event_type: str) -> bool:
     """Check if event type is valid."""
@@ -162,6 +176,7 @@ __all__ = [
     "GIT_CHECKOUT",
     "GIT_COMMIT",
     "GIT_CREDENTIAL_LAPSED",
+    "GIT_HOOK_EVENT_TYPES",
     "GIT_MERGE",
     "GIT_OPERATION",
     "GIT_PUSH",
