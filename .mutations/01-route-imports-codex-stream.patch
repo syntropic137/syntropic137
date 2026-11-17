@@ -1,11 +1,11 @@
 diff --git a/apps/syn-api/src/syn_api/routes/conversations.py b/apps/syn-api/src/syn_api/routes/conversations.py
-index f3d4b4bf6..a8b81df7e 100644
+index 6a7c8b081..0e217fb0c 100644
 --- a/apps/syn-api/src/syn_api/routes/conversations.py
 +++ b/apps/syn-api/src/syn_api/routes/conversations.py
-@@ -31,6 +31,7 @@ from syn_api.types import (
-     Result,
+@@ -35,6 +35,7 @@ from syn_domain.contexts.agent_sessions import (
+     NonStringEventTypeError,
+     UnreadableConversationLine,
  )
- from syn_domain.contexts.agent_sessions import AgentLaunch
 +from syn_shared.codex_stream import CodexStreamType  # noqa: F401
  from syn_shared.observed_model import format_observed_model
  
