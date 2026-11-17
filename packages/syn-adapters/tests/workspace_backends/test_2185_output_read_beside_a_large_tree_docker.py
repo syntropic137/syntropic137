@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 import pytest
 from agentic_isolation.providers.docker_capabilities import read_files
 
-from syn_adapters.workspace_backends.agentic.adapter import collection_read_limits
+from syn_adapters.workspace_backends.agentic.adapter_copy import collection_read_limits
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     _OUTPUT_GLOB,
 )
