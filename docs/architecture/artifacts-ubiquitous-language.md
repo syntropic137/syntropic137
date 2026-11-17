@@ -47,6 +47,16 @@ Artifact has no text form, so it is never a Primary Deliverable's text and is
 read through `GET /artifacts/{id}/raw`. Before issue #990 there was no such
 thing: every file was decoded as text, and a screenshot was stored as U+FFFD.
 
+## Inline Text
+
+Text content small enough to be embedded in the `ArtifactCreated` event:
+at most `MAX_INLINE_TEXT_BYTES` (512 KiB) of UTF-8. Larger text is still text,
+and is still a Primary Deliverable candidate, but it is stored the way Binary
+Content is: an empty `content` in the event (v8) and the text at `storage_uri`
+only. The bound exists because one append to the event store is capped at
+4 MiB once serialized, and JSON escaping can make one byte six (issue #2042).
+A large text Artifact with no `storage_uri` is refused rather than written.
+
 ## Primary Deliverable
 
 The one Artifact of a Phase that represents its result, flagged
