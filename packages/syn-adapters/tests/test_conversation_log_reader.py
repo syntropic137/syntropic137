@@ -15,6 +15,7 @@ from syn_adapters.conversations import StoredConversationLogReader
 from syn_domain.contexts.agent_sessions import (
     ConversationLogReader,
     ConversationLogRow,
+    NonStringEventTypeError,
     UnreadableConversationLine,
 )
 
@@ -145,7 +146,7 @@ def test_malformed_line_is_a_log_row_not_an_error(raw: str, preview: str | None)
         ('{"type": []}', TypeError),
         ('{"type": "item.completed", "item": {"type": []}}', TypeError),
         ('{"message": {"content": [{"text": 3}]}}', TypeError),
-        ('{"type": 3}', TypeError),
+        ('{"type": 3}', NonStringEventTypeError),
         ("[" * 20000 + "0" + "]" * 20000, RecursionError),
     ],
     ids=[
@@ -162,3 +163,21 @@ def test_unreadable_line_is_returned_with_its_cause_not_raised(
     result = StoredConversationLogReader().read_row(raw)
     assert isinstance(result, UnreadableConversationLine)
     assert type(result.cause) is cause
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
+        ('{"type": 3}', 3),
+        ('{"type": 1.5}', 1.5),
+        ('{"type": true}', True),
+        ('{"event_type": ["x"]}', ["x"]),
+    ],
+)
+def test_non_string_event_type_carries_the_value_it_read(raw: str, value: object) -> None:
+    result = StoredConversationLogReader().read_row(raw)
+    assert isinstance(result, UnreadableConversationLine)
+    assert isinstance(result.cause, NonStringEventTypeError)
+    assert result.cause.value == value
+    assert type(result.cause.value) is type(value)

@@ -16,7 +16,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
-from syn_domain.contexts.agent_sessions import ConversationLogRow, UnreadableConversationLine
+from syn_domain.contexts.agent_sessions import (
+    ConversationLogRow,
+    NonStringEventTypeError,
+    UnreadableConversationLine,
+)
 from syn_shared.codex_stream import (
     CODEX_TOOL_NAME_COMMAND,
     CODEX_TOOL_NAME_FILE_CHANGE,
@@ -554,8 +558,7 @@ def _extract_line_fields(
         # unreadable rather than handing on a row that breaks its own type.
         # Checked last, so a line the content read already fails on keeps
         # that failure as its cause.
-        msg = f"event_type must be a string, got {type(event_type).__name__}: {event_type!r}"
-        raise TypeError(msg)
+        raise NonStringEventTypeError(event_type)
     return event_type, [entry]
 
 

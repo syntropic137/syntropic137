@@ -56,6 +56,9 @@ An **Unreadable Conversation Line** (`UnreadableConversationLine`) is a stored
 line the reader could not read as a row: a field of the wrong type, or JSON
 nested past the decoder's limit. The reader returns it with its cause rather
 than raising; the API fails the whole log request with it, as it always has.
+When the wrong-typed field is the event type, the cause is a
+`NonStringEventTypeError` carrying the value, so the API can report it as the
+same response-model validation failure it always did.
 
 Not a **Transcript Conversation** (`TranscriptConversationPort`): that is a
 bounded user/assistant excerpt of a whole inventory document. A Conversation

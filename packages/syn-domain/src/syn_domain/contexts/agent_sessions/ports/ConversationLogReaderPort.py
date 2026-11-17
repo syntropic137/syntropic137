@@ -34,6 +34,19 @@ class ConversationLogRow:
     content_preview: str | None
 
 
+class NonStringEventTypeError(TypeError):
+    """A line names an event type that is not a string.
+
+    Carries the ``value`` the line held, so a caller that reports unreadable
+    lines in its own terms (the API validates its response model against it)
+    can do so without parsing this message.
+    """
+
+    def __init__(self, value: object) -> None:
+        self.value = value
+        super().__init__(f"event_type must be a string, got {type(value).__name__}: {value!r}")
+
+
 @dataclass(frozen=True)
 class UnreadableConversationLine:
     """A stored line the reader could not turn into a row.
@@ -64,7 +77,8 @@ class ConversationLogReader(Protocol):
         line of an unknown shape is still a row (a ``log`` line or the generic
         reading). A line whose fields cannot be read as a row's (a non-string
         ``type``, a non-string text block, JSON nested past the decoder's
-        limit) is an ``UnreadableConversationLine``; every field of a returned
+        limit) is an ``UnreadableConversationLine``, whose cause is a
+        ``NonStringEventTypeError`` for the first of those; every field of a returned
         ``ConversationLogRow`` is a ``str`` or None.
         """
         ...

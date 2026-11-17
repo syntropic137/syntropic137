@@ -115,6 +115,7 @@ from syn_domain.contexts.agent_sessions.ports.BackfillReceiptPort import Backfil
 from syn_domain.contexts.agent_sessions.ports.ConversationLogReaderPort import (
     ConversationLogReader,
     ConversationLogRow,
+    NonStringEventTypeError,
     UnreadableConversationLine,
 )
 from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort import (
@@ -369,6 +370,7 @@ __all__ = [
     "NativeTranscriptFacts",
     "NoUsage",
     "NodeEvidence",
+    "NonStringEventTypeError",
     "ObservationType",
     "ObserveInventoryClockCommand",
     "OperationRecord",

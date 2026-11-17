@@ -9,7 +9,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, ValidationError, computed_field
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions import ConversationLogReader
@@ -30,7 +30,11 @@ from syn_api.types import (
     Ok,
     Result,
 )
-from syn_domain.contexts.agent_sessions import AgentLaunch, UnreadableConversationLine
+from syn_domain.contexts.agent_sessions import (
+    AgentLaunch,
+    NonStringEventTypeError,
+    UnreadableConversationLine,
+)
 from syn_shared.observed_model import format_observed_model
 
 logger = logging.getLogger(__name__)
@@ -115,6 +119,25 @@ def _conversation_line(
         tool_name=row.tool_name,
         content_preview=row.content_preview,
     )
+
+
+def _unreadable_line_message(line_number: int, raw: str, line: UnreadableConversationLine) -> str:
+    """The QUERY_FAILED message for an unreadable line, as the API has always worded it.
+
+    A non-string event type used to reach ``ConversationLine`` and fail its
+    validation, so that failure's text is what callers saw. It is reproduced
+    by validating the model against the value the reader reports, rather than
+    by the reader knowing this response model. Every other cause is its own
+    message, as before.
+    """
+    if isinstance(line.cause, NonStringEventTypeError):
+        try:
+            ConversationLine.model_validate(
+                {"line_number": line_number, "raw": raw, "event_type": line.cause.value}
+            )
+        except ValidationError as exc:
+            return str(exc)
+    return str(line.cause)
 
 
 async def _classify_missing_conversation(session_id: str) -> ObservabilityError:
@@ -212,7 +235,10 @@ async def get_conversation_log(
             line = _conversation_line(reader, i, raw)
             if isinstance(line, UnreadableConversationLine):
                 # One unreadable line fails the whole page, as it always has.
-                return Err(ObservabilityError.QUERY_FAILED, message=str(line.cause))
+                return Err(
+                    ObservabilityError.QUERY_FAILED,
+                    message=_unreadable_line_message(i, raw, line),
+                )
             lines.append(line)
 
         return Ok(
