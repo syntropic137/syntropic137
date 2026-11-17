@@ -1077,6 +1077,8 @@ class ExecutionTagsResponse(BaseModel):
 class RecordedPush(BaseModel):
     """One push a phase's own workspace made, as `PhaseCommitPushed` recorded it (#1544)."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     phase_id: str
     repository: str
     """The clone's directory name, as the workspace's push hook reported it."""
@@ -1091,6 +1093,8 @@ class ExecutionPushesResponse(BaseModel):
     exists for the execution, which is not the same as "nothing was pushed":
     a push the hook did not report is not here.
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     execution_id: str
     pushes: list[RecordedPush]

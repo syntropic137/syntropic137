@@ -14349,6 +14349,7 @@
             "title": "Pushes"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "execution_id",
@@ -19815,6 +19816,7 @@
             "title": "Sha"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "phase_id",
