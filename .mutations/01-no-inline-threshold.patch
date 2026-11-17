@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/artifacts/domain/aggregate_artifact/ArtifactAggregate.py b/packages/syn-domain/src/syn_domain/contexts/artifacts/domain/aggregate_artifact/ArtifactAggregate.py
+index fed8d7a6a..22f57ca24 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/artifacts/domain/aggregate_artifact/ArtifactAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/artifacts/domain/aggregate_artifact/ArtifactAggregate.py
+@@ -72,7 +72,7 @@ def _measured(command: CreateArtifactCommand) -> tuple[ContentType, str, str, in
+         msg = f"Content of type {content_type} must be {kind}"
+         raise ValueError(msg)
+     size_bytes = len(content.encode("utf-8")) if isinstance(content, str) else len(content)
+-    if isinstance(content, str) and size_bytes <= MAX_INLINE_TEXT_BYTES:
++    if isinstance(content, str):
+         return content_type, content, compute_content_hash(content), size_bytes
+     if command.storage_uri is None:
+         what = (
