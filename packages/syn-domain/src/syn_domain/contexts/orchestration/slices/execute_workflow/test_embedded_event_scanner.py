@@ -88,7 +88,8 @@ class TestEmbeddedEventScanner:
 class _Observation:
     session_id: str
     observation_type: str
-    data: dict[str, Any]
+    #: The observation's payload, as the collector built it.
+    data: object
     execution_id: str | None
 
 
@@ -102,7 +103,7 @@ class _RecordingWriter:
         self,
         session_id: str,
         observation_type: str,
-        data: dict[str, Any],
+        data: object,
         execution_id: str | None = None,
         phase_id: str | None = None,
         workspace_id: str | None = None,
