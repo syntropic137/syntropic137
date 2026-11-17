@@ -109,7 +109,11 @@ def signals(monkeypatch: pytest.MonkeyPatch) -> InMemorySignalQueueAdapter:
     queue = InMemorySignalQueueAdapter()
     controller = ExecutionController(wiring.get_workflow_execution_repository(), queue)
     monkeypatch.setattr(control, "get_controller", lambda: controller)
-    monkeypatch.setattr(wiring, "get_artifact_query", _NoArtifacts)
+
+    async def _query() -> _NoArtifacts:
+        return _NoArtifacts()
+
+    monkeypatch.setattr(wiring, "get_artifact_query", _query)
     return queue
 
 
