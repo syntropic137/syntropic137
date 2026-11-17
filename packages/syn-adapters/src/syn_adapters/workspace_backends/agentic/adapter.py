@@ -304,6 +304,11 @@ class AgenticIsolationAdapter:
         # workspace serves one phase, so this is the phase's collection
         # budget spent, however many times the phase reads (#1552).
         self._collected_bytes: dict[str, int] = {}
+        # One read at a time per workspace, from reading what is left of the
+        # budget to recording what was spent: two reads in flight would each
+        # be handed the whole remainder, and the later write would drop the
+        # earlier's count.
+        self._collection_locks: dict[str, asyncio.Lock] = {}
 
     @property
     def credential_policy(self) -> WorkspaceCredentialPolicy:
@@ -614,6 +619,7 @@ class AgenticIsolationAdapter:
             raise WorkspaceTeardownError(failure, usage)
         self._workspaces.pop(handle.isolation_id, None)
         self._collected_bytes.pop(handle.isolation_id, None)
+        self._collection_locks.pop(handle.isolation_id, None)
         return usage
 
     async def execute(
@@ -767,18 +773,23 @@ class AgenticIsolationAdapter:
             msg = f"cannot read files from {base_path!r}: not a transfer root"
             raise ValueError(msg)
         root = cast("TransferRoot", base_path)
-        spent = self._collected_bytes.get(handle.isolation_id, 0)
-        limits = remaining_read_limits(spent)
-        if limits is None:
-            # The phase has read its whole budget: nothing more is read, and
-            # every pattern asked for is refused by name rather than missing.
-            return (), tuple(FileRefusal(path=p, reason="total_bytes_exceeded") for p in patterns)
-        result: ReadFilesResult = await self._provider.read_files(
-            workspace, patterns, base_path=root, limits=limits
-        )
-        self._collected_bytes[handle.isolation_id] = spent + sum(
-            len(content) for _, content in result.files
-        )
+        lock = self._collection_locks.setdefault(handle.isolation_id, asyncio.Lock())
+        async with lock:
+            spent = self._collected_bytes.get(handle.isolation_id, 0)
+            limits = remaining_read_limits(spent)
+            if limits is None:
+                # The phase has read its whole budget: nothing more is read, and
+                # every pattern asked for is refused by name rather than missing.
+                refusals = tuple(
+                    FileRefusal(path=p, reason="total_bytes_exceeded") for p in patterns
+                )
+                return (), refusals
+            result: ReadFilesResult = await self._provider.read_files(
+                workspace, patterns, base_path=root, limits=limits
+            )
+            self._collected_bytes[handle.isolation_id] = spent + sum(
+                len(content) for _, content in result.files
+            )
         refused = tuple(FileRefusal(path=r.path, reason=r.reason) for r in result.refused)
         return result.files, refused
 

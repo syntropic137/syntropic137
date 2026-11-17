@@ -15,6 +15,7 @@ the old 200MiB / 50MiB caps would have read whole.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tracemalloc
 from typing import TYPE_CHECKING, ClassVar
@@ -247,6 +248,34 @@ async def test_a_spent_budget_reads_nothing_and_names_what_was_asked(
     assert [(r.path, r.reason) for r in refused.value.refused] == [
         (f"{_OUTPUT}/**/*", "total_bytes_exceeded")
     ]
+
+
+async def test_concurrent_reads_of_one_phase_share_its_budget(
+    e2b: AgenticIsolationAdapter,
+) -> None:
+    """Two reads in flight at once must not each be handed the whole budget.
+
+    Verifier finding (local Codex, re-verification after the main merge): the
+    counter was read before the provider await and overwritten after it, so two
+    concurrent reads each got the full 1MiB and the counter kept only one of
+    them (1,228,800 bytes read, 614,400 recorded).
+    """
+    files = [(f"{_OUTPUT}/{n}.bin", b"x" * (600 * 1024)) for n in ("a", "b")]
+    handle = await _workspace(e2b, files)
+
+    results = await asyncio.gather(
+        e2b.copy_from(handle, [f"{_OUTPUT}/a.bin"]),
+        e2b.copy_from(handle, [f"{_OUTPUT}/b.bin"]),
+        return_exceptions=True,
+    )
+
+    read = sum(
+        len(content)
+        for result in results
+        for _, content in (result.files if isinstance(result, FilesRefusedError) else result)
+    )
+    assert read <= _MIB, f"concurrent reads brought {read} bytes past a 1MiB budget"
+    assert e2b._collected_bytes[handle.isolation_id] == read  # pyright: ignore[reportPrivateUsage]
 
 
 async def test_each_phase_has_its_own_budget(e2b: AgenticIsolationAdapter) -> None:
