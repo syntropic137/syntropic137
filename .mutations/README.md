@@ -6,18 +6,18 @@ Run every patch against `packages/syn-collector/tests/test_otlp_envelope.py`
 
 | Patch | Bug it re-introduces | Killed locally by |
 |---|---|---|
-| `01-rename-int-value-alias.patch` | wire-name rename: `intValue` read as `int_value`, so int attributes become `""` | `test_datapoint_event_shape`, `test_known_event_shape`, `test_logs_row` |
+| `01-rename-int-value-alias.patch` | wire-name rename: `intValue` read as `int_value`, so int attributes become `""` | `test_datapoint_event_shape`, `test_known_event_shape`, `test_logs_row`, `test_log_attribute_value[present-null-is-null]`, `[present-null-beats-later-kind]` |
 | `02-camel-case-timestamp-wins.patch` | data point `timeUnixNano` beats `time_unix_nano` (precedence flipped) | `test_snake_case_key_wins_over_camel_case` |
-| `03-empty-section-not-absent.patch` | `"gauge": {}` no longer falls through to `sum` | `test_empty_section_falls_through_to_next` |
-| `04-rename-severity-field.patch` | field rename `severity_text` -> `severity` | the three `TestLogsEnvelope` tests, `test_logs_row` |
+| `03-empty-section-not-absent.patch` | `"gauge": {}` no longer falls through to `sum` (`if section is not None`) | `test_empty_section_falls_through_to_next` |
+| `04-rename-severity-field.patch` | accessor rename `severity_text` -> `severity` | the three `TestLogsEnvelope` tests, `test_logs_row`, every log case in `TestAcceptanceMatchesDictParser` |
 
 ## Round 1 fix: lazy read-only views (`aa2371067`)
 
 Verification found the Pydantic envelope above changed accepted input, so
 `otlp_envelope.py` is now frozen dataclass views that read the raw JSON
-lazily. Patches 01-04 target the superseded Pydantic file and no longer apply;
-they are left in place because this phase does not edit evidence. Run 05-08
-against the same test file:
+lazily. Round 2 regenerated patches 01-04 against the views, keeping the
+attack each one documents above, so all eight patches apply to this head. Run
+05-08 against the same test file too:
 
 | Patch | Bug it re-introduces | Killed locally by |
 |---|---|---|

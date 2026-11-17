@@ -1,13 +1,13 @@
 diff --git a/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py b/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
-index d792910c5..4d36ed141 100644
+index a67c0864c..930f38cb1 100644
 --- a/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
 +++ b/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
-@@ -80,7 +80,7 @@ class OtlpResource(_OtlpModel):
+@@ -91,7 +91,7 @@ class OtlpResource(_OtlpView):
+ class OtlpNumberDataPoint(_OtlpView):
+     @property
+     def time_unix_nano(self) -> int | str:
+-        return self._snake_or_camel("time_unix_nano", "timeUnixNano", 0)  # type: ignore[no-any-return]
++        return self._snake_or_camel("timeUnixNano", "time_unix_nano", 0)  # type: ignore[no-any-return]
  
- class OtlpNumberDataPoint(_OtlpModel):
-     time_unix_nano: StrictInt | StrictStr = Field(
--        default=0, validation_alias=AliasChoices("time_unix_nano", "timeUnixNano")
-+        default=0, validation_alias=AliasChoices("timeUnixNano", "time_unix_nano")
-     )
-     value: StrictInt | StrictFloat | StrictStr = Field(
-         default=0, validation_alias=AliasChoices("asDouble", "asInt", "as_double", "as_int")
+     @property
+     def value(self) -> int | float | str:
