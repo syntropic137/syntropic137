@@ -172,6 +172,19 @@ Rebuilding one run's session inventory snapshot from host evidence, one durable
   stream is absent is not free: its save may still commit, so the next holder
   retries that same request rather than scheduling a successor.
 
+## Replica Body
+
+What a remote store holds for one transcript revision, read back behind
+`ReplicaBodyEvidencePort` (#946).
+
+- **Capture receipt:** a store's acknowledgement of one revision. It proves
+  acceptance of the original-content hash, not that a body was stored: a row
+  emptied by the store echoes the same hash.
+- **Replica body reading:** the stored row's sizes (`raw`, search text,
+  message count) for that revision. Remote PRESENT needs one with a non-empty
+  `raw` body whenever the archive has bytes. Search text and message count
+  never stand in for the body.
+
 ## Capture Spool
 
 Staged transcript and child-journal bytes a workspace wrote before they reached

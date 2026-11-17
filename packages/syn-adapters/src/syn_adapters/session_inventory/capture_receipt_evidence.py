@@ -30,7 +30,14 @@ async def publish_capture_receipt(
     capture: CataloguedCapture,
     destination_id: str,
     receipt: ExporterCaptureReceipt,
+    content_hash: str,
 ) -> int:
+    """Record a receipt that acknowledges the archived bytes as a present replica.
+
+    ``content_hash`` is the APSS original-content hash of the archived capture.
+    A receipt for another identity or another revision (#946) acknowledges a
+    body syn137 did not archive, so it is refused, never recorded as present.
+    """
     if capture.native_id is None:
         raise ValueError("remote receipt requires a native transcript identity")
     identity = QualifiedTranscript(
@@ -40,6 +47,8 @@ async def publish_capture_receipt(
     )
     if receipt.storage_key != identity.storage_key():
         raise ValueError("remote receipt belongs to another transcript")
+    if not receipt.validates_capture(identity, content_hash):
+        raise ValueError("remote receipt acknowledges another revision of the transcript")
     # Duplicate HTTP acknowledgements are equivalent evidence. Do not include
     # the duplicate flag or receipt lookup time in the immutable batch identity.
     digest = hashlib.sha256()
