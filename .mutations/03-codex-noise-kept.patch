@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/conversations/conversation_log_reader.py b/packages/syn-adapters/src/syn_adapters/conversations/conversation_log_reader.py
+index acaed4d05..1d3636cb1 100644
+--- a/packages/syn-adapters/src/syn_adapters/conversations/conversation_log_reader.py
++++ b/packages/syn-adapters/src/syn_adapters/conversations/conversation_log_reader.py
+@@ -556,7 +556,7 @@ class StoredConversationLogReader:
+ 
+     def belongs_in_log(self, raw: str) -> bool:
+         """False only for a codex plain-text banner line."""
+-        return not _is_codex_cli_noise(raw)
++        return True
+ 
+     def read_row(self, raw: str) -> ConversationLogRow:
+         """The row one stored line renders as; never raises."""

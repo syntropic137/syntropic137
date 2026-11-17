@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/conversations/conversation_log_reader.py b/packages/syn-adapters/src/syn_adapters/conversations/conversation_log_reader.py
+index acaed4d05..1cfae35ee 100644
+--- a/packages/syn-adapters/src/syn_adapters/conversations/conversation_log_reader.py
++++ b/packages/syn-adapters/src/syn_adapters/conversations/conversation_log_reader.py
+@@ -206,7 +206,7 @@ def _claude_tool_result_preview(item: Mapping[str, JsonValue]) -> str | None:
+     """Preview for a ``tool_result`` block: its first output line, error-flagged."""
+     text = _claude_tool_result_text(item.get("content"))
+     first_line = next((line for line in text.splitlines() if line.strip()), "")
+-    if item.get("is_error") is True:
++    if item.get("is_error") is True and False:
+         return f"[error] {first_line}"[:_TOOL_PREVIEW_LEN] if first_line else "[error]"
+     return first_line[:_TOOL_PREVIEW_LEN] if first_line else None
+ 
