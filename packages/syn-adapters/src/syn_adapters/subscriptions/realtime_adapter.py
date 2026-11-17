@@ -170,7 +170,8 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
 
 class OrganizationListAdapter(_NamespacedProjectionAdapter):
     PROJECTION_NAME: ClassVar[str] = "organization_list"
-    VERSION: ClassVar[int] = 1
+    # v2 (#2303): RepoDeregistered decrements repo_count; rebuild to drop stale counts.
+    VERSION: ClassVar[int] = 2
     _SUBSCRIBED: ClassVar[set[str]] = {
         "organization.OrganizationCreated",
         "organization.OrganizationUpdated",
@@ -178,6 +179,7 @@ class OrganizationListAdapter(_NamespacedProjectionAdapter):
         "organization.SystemCreated",
         "organization.SystemDeleted",
         "organization.RepoRegistered",
+        "organization.RepoDeregistered",
     }
 
 
