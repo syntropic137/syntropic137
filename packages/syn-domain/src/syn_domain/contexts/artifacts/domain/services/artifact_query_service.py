@@ -76,6 +76,12 @@ def _has_content(artifact: ArtifactSummary) -> bool:
     return bool(artifact.content) or _in_storage_only(artifact)
 
 
+def _is_prompt_text(artifact: ArtifactSummary) -> bool:
+    """Whether the row can be substituted into a prompt: text with content,
+    inline or, when too large to embed (#2042), in object storage only."""
+    return not _is_binary(artifact) and _has_content(artifact)
+
+
 def _injection_rank(artifact: ArtifactSummary) -> tuple[int, int, datetime, str]:
     """Rank candidates for a phase's flat alias. Lower wins.
 
@@ -285,9 +291,7 @@ class ArtifactQueryService:
             # rejects it (min_length=1), the live cache skips it, and the
             # multi-file path skips it -- so the alias must too, or a
             # legacy/corrupt row could win here and appear nowhere else.
-            # Binary is not prompt text; large text is, though its content is
-            # in object storage only (#2042).
-            if _is_binary(artifact) or not _has_content(artifact):
+            if not _is_prompt_text(artifact):
                 continue
             incumbent = best.get(phase_id)
             if incumbent is None or _injection_rank(artifact) < _injection_rank(incumbent):
@@ -296,7 +300,7 @@ class ArtifactQueryService:
         contents: dict[str, str] = {}
         for phase_id, artifact in best.items():
             content = await self._content_of(artifact)
-            if isinstance(content, str) and content:
+            if isinstance(content, str):
                 contents[phase_id] = content
         return contents
 
