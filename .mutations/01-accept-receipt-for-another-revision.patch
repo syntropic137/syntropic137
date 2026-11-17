@@ -1,0 +1,19 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/capture_receipt_evidence.py b/packages/syn-adapters/src/syn_adapters/session_inventory/capture_receipt_evidence.py
+index 2a4eb523d..1879ff711 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/capture_receipt_evidence.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/capture_receipt_evidence.py
+@@ -30,7 +30,14 @@ async def publish_capture_receipt(
+     capture: CataloguedCapture,
+     destination_id: str,
+     receipt: ExporterCaptureReceipt,
++    content_hash: str,
+ ) -> int:
++    """Record a receipt that acknowledges the archived bytes as a present replica.
++
++    ``content_hash`` is the APSS original-content hash of the archived capture.
++    A receipt for another identity or another revision (#946) acknowledges a
++    body syn137 did not archive, so it is refused, never recorded as present.
++    """
+     if capture.native_id is None:
+         raise ValueError("remote receipt requires a native transcript identity")
+     identity = QualifiedTranscript(

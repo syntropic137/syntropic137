@@ -34,14 +34,18 @@ async def test_duplicate_acknowledgements_replay_identically_and_reject_wrong_id
     )
     journal = AsyncMock()
     journal.append.return_value = 42
-    assert await publish_capture_receipt(journal, capture, "destination", receipt) == 42
+    assert await publish_capture_receipt(journal, capture, "destination", receipt, receipt.content_hash) == 42
     first = journal.append.await_args.args[0]
     await publish_capture_receipt(
-        journal, capture, "destination", receipt.model_copy(update={"duplicate": True})
+        journal,
+        capture,
+        "destination",
+        receipt.model_copy(update={"duplicate": True}),
+        receipt.content_hash,
     )
     assert journal.append.await_args.args[0] == first
     assert first.evidence.captures[0].destination == "remote"
-    await publish_capture_receipt(journal, capture, "another-destination", receipt)
+    await publish_capture_receipt(journal, capture, "another-destination", receipt, receipt.content_hash)
     assert journal.append.await_args.args[0].batch_id != first.batch_id
     journal.reset_mock()
     with pytest.raises(ValueError, match="another transcript"):
@@ -50,5 +54,10 @@ async def test_duplicate_acknowledgements_replay_identically_and_reject_wrong_id
             capture,
             "destination",
             receipt.model_copy(update={"storage_key": "qts1:" + "d" * 64}),
+            receipt.content_hash,
+        )
+    with pytest.raises(ValueError, match="another revision"):
+        await publish_capture_receipt(
+            journal, capture, "destination", receipt, "sha256:" + "e" * 64
         )
     journal.append.assert_not_called()
