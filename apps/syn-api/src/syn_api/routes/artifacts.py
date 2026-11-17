@@ -455,13 +455,11 @@ async def create_artifact(
     await ensure_connected()
     try:
         from syn_domain.contexts.artifacts import (
+            MAX_INLINE_TEXT_BYTES,
             ArtifactAggregate,
             ArtifactType,
             ContentType,
             CreateArtifactCommand,
-        )
-        from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
-            MAX_INLINE_TEXT_BYTES,
         )
 
         try:
