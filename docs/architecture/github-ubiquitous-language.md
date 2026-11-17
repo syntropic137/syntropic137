@@ -43,6 +43,27 @@ Statuses include `ACTIVE` and `PAUSED`. A Trigger Rule fires only while
 `ACTIVE`: `can_fire()` returns `status == ACTIVE`, so pausing genuinely stops
 it.
 
+A Trigger Rule on a repository also fires only through an Installation that
+covers that repository; dispatch skips a rule with none. So registering one is
+refused (409) when no Installation resolves: no GitHub App on the server, no
+Installation on the repository, or a repository that names nothing (#1864).
+Rules stored before that refusal existed can still be `ACTIVE` with no
+Installation and never fire. Such a rule is **Unable to fire**.
+
+## Unable to fire
+
+A Trigger Rule that names a repository but has no Installation, so no event
+can ever make it Fire, whatever its status. It is a property of the stored rule,
+derived on the read path and never recorded as an event: `GET /triggers` and
+`GET /triggers/{id}` carry the reason in `unable_to_fire_reason` (None for any
+other rule), `syn triggers list` and `show` print it, and the poller warns once
+per rule as it skips it (#2202). A rule with no repository needs no
+Installation and is never Unable to fire.
+
+**Not Blocked.** Blocked is one Fire that a safety guard refused
+(`TriggerBlocked`, `block_reason`). Unable to fire means no Fire can happen at
+all. A rule that is Unable to fire never reaches the guards.
+
 ## Pause and Resume
 
 Pausing a Trigger Rule stops it firing (`TriggerPaused`); resuming returns it to
@@ -60,6 +81,32 @@ recorded by `TriggerFired`. Counting matters because the count feeds the safety
 guards that stop a rule firing in a loop.
 
 Blocked instead of fired when a guard refuses it (`TriggerBlocked`).
+
+### Draft PR
+
+A pull request GitHub marks `draft`. A draft is still owned by the workflow
+that opened it, which handles its own CI, so a `check_run` Trigger Rule does
+not Fire on one: a second agent on that branch is the hazard (#2058). A
+`check_run` payload carries no draft flag, so the evaluator reads it live
+through `PullRequestDraftPort` and records the refusal as Blocked with
+`draft_pull_request`. When the flag cannot be read, the rule is Blocked with
+`draft_state_unknown` and the reason, never fired blind. Neither spends an
+attempt or the delivery, but ingesting the check did spend its dedup key. The
+Checks API poll therefore does not ingest a draft's (or unknown's) completed
+checks at all: it keeps the head SHA pending and ingests them on the first poll
+that reads the PR ready. That is the only way a poll-only install learns of
+readiness, because the Events API never emits `ready_for_review`.
+
+### Ready for review
+
+The moment a Draft PR stops being a draft (`pull_request.ready_for_review`,
+delivered by webhook only). Once the live lookup reads the PR ready, its head
+SHA's completed checks are re-checked: a check nothing has ingested goes in
+under its own key, and one a webhook `check_run` Blocked as a draft (its key
+spent) under a key scoped to the transition (`{key}:ready_for_review`), so it
+Fires now and a second delivery of the transition does not Fire it again. A
+re-check that is rate limited, or still reads draft, is not retried; the
+Checks API poll, which keeps the SHA pending, picks up what it can.
 
 ## Dispatch
 

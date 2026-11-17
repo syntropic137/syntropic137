@@ -29,7 +29,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     SourceCommit,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
-    TASK_INPUT_KEY,
+    dispatched_task,
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_plan import (
     DeclaredPhase,
@@ -444,7 +444,7 @@ class WorkflowExecutionDetail:
         workflow whose phases take no ``$ARGUMENTS`` is dispatched without a
         task, and that is different from a task nobody recorded.
         """
-        return self.inputs.get(TASK_INPUT_KEY)
+        return dispatched_task(self.inputs)
 
     @property
     def phase_progress(self) -> PhaseProgress:

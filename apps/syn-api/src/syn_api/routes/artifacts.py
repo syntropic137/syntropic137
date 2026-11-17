@@ -62,6 +62,10 @@ class ArtifactSummaryResponse(BaseModel):
     #: ignored filter and a matching one return the same shape, and the rows
     #: were the one thing that could have told them apart.
     execution_id: str | None = None
+    #: Which agent session produced it (#975). Same reason as execution_id:
+    #: ``?session_id=`` is a filter, and only the rows can show it was honoured.
+    #: None means the artifact was recorded without a session.
+    session_id: str | None = None
     phase_id: str | None
     artifact_type: str
     title: str | None = None
@@ -159,6 +163,7 @@ def _summary_from_domain(a: DomainArtifactSummary) -> ArtifactSummary:
         id=a.id,
         workflow_id=a.workflow_id,
         execution_id=a.execution_id,
+        session_id=a.session_id,
         phase_id=a.phase_id,
         artifact_type=a.artifact_type,
         title=a.name,
@@ -450,8 +455,10 @@ async def create_artifact(
     await ensure_connected()
     try:
         from syn_domain.contexts.artifacts import (
+            MAX_INLINE_TEXT_BYTES,
             ArtifactAggregate,
             ArtifactType,
+            ContentType,
             CreateArtifactCommand,
         )
 
@@ -473,6 +480,21 @@ async def create_artifact(
             content=content,
             title=title,
         )
+        # Text over the inline limit lives at storage_uri only (#2042), so it is
+        # uploaded first, as ArtifactCollector does. Small text stays inline and
+        # needs no storage, exactly as before.
+        if len(content.encode("utf-8")) > MAX_INLINE_TEXT_BYTES:
+            from syn_adapters.storage.artifact_storage import get_artifact_storage
+
+            storage = await get_artifact_storage()
+            uploaded = await storage.upload(
+                artifact_id=artifact_id,
+                content=content.encode("utf-8"),
+                workflow_id=workflow_id,
+                phase_id=phase_id or "",
+                content_type=(command.content_type or ContentType.TEXT_MARKDOWN).value,
+            )
+            command = command.model_copy(update={"storage_uri": uploaded.storage_uri})
 
         repo = get_artifact_repo()
         aggregate = ArtifactAggregate()
@@ -642,6 +664,7 @@ def to_artifact_summary_response(a: ArtifactSummary) -> ArtifactSummaryResponse:
         id=a.id,
         workflow_id=a.workflow_id,
         execution_id=a.execution_id,
+        session_id=a.session_id,
         phase_id=a.phase_id,
         artifact_type=a.artifact_type,
         title=a.title,

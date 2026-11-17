@@ -43,12 +43,25 @@ if TYPE_CHECKING:
     )
 
 
+#: The most text an ArtifactCreated event carries inline (#2042). Larger text
+#: is stored like binary content: at ``storage_uri`` only, ``content`` "".
+#: The event store's gRPC append is capped at 4 MiB, and the cap applies to the
+#: SERIALIZED event, where JSON escaping can turn one byte into six (a control
+#: character such as an ANSI colour code in a CI log becomes ``\u001b``). 512
+#: KiB is therefore at most 3 MiB on the wire, whatever the text, which leaves
+#: 1 MiB for the rest of the event. A bound on the bytes rather than on the
+#: serializer's output, so the rule does not depend on how ESP encodes JSON.
+MAX_INLINE_TEXT_BYTES = 512 * 1024
+
+
 def _measured(command: CreateArtifactCommand) -> tuple[ContentType, str, str, int]:
     """The command's content as the event records it: type, inline text, hash, size.
 
     Binary bytes live in object storage only (ADR-012, #990): Lane 1 records
     that the file exists, its hash and its size, never the file - so binary
     content without a storage_uri is refused, and its inline content is "".
+    Text over ``MAX_INLINE_TEXT_BYTES`` is treated the same way (#2042), because
+    an event carrying it cannot be appended at all.
     Hash and size are of the BYTES; for text that is its UTF-8 encoding,
     exactly as before, so existing hashes still verify.
     """
@@ -58,12 +71,16 @@ def _measured(command: CreateArtifactCommand) -> tuple[ContentType, str, str, in
         kind = "bytes" if content_type.is_binary else "str"
         msg = f"Content of type {content_type} must be {kind}"
         raise ValueError(msg)
-    if isinstance(content, str):
-        return content_type, content, compute_content_hash(content), len(content.encode("utf-8"))
+    size_bytes = len(content.encode("utf-8")) if isinstance(content, str) else len(content)
+    if isinstance(content, str) and size_bytes <= MAX_INLINE_TEXT_BYTES:
+        return content_type, content, compute_content_hash(content), size_bytes
     if command.storage_uri is None:
-        msg = "Binary artifact content must be in object storage (storage_uri)"
+        what = (
+            "Binary" if isinstance(content, bytes) else f"Text over {MAX_INLINE_TEXT_BYTES} bytes"
+        )
+        msg = f"{what} artifact content must be in object storage (storage_uri)"
         raise ValueError(msg)
-    return content_type, "", compute_content_hash(content), len(content)
+    return content_type, "", compute_content_hash(content), size_bytes
 
 
 @aggregate("Artifact")

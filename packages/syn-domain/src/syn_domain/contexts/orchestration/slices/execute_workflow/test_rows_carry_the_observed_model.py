@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_domain.contexts.agent_sessions import ObservationType
+from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutReading
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     CodexStreamProcessor,
 )
@@ -50,8 +51,6 @@ from syn_shared.observed_model import OBSERVED_MODEL_KEY, REQUESTED_MODEL_KEY
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-    from syn_domain.contexts.agent_sessions import RolloutDocument
 
 pytestmark = pytest.mark.unit
 
@@ -154,13 +153,13 @@ class _Rollout:
         self._model = model
         self._raises = raises
 
-    async def codex_rollout(self, native_session_id: str) -> RolloutDocument | None:
+    async def codex_rollout_model(self, native_session_id: str) -> CodexRolloutReading | None:
         if self._raises:
             msg = "docker exec failed"
             raise RuntimeError(msg)
         if self._model is None:
             return None
-        return [{"type": "turn_context", "payload": {"model": self._model}}]
+        return CodexRolloutReading(model=self._model)
 
 
 def _collector(writer: _RecordingWriter, requested: str | None) -> ObservabilityCollector:

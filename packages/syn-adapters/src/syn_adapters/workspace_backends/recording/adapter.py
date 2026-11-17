@@ -171,11 +171,12 @@ class RecordingEventStreamAdapter:
         self._player = _resolve_player(recording)
         self._realtime = realtime
         self._speed = speed
-        self._last_exit_code: int | None = None
+        # isolation_id -> the exit code its last replay ended with.
+        self._exit_codes: dict[str, int | None] = {}
 
     async def stream(
         self,
-        handle: IsolationHandle,  # noqa: ARG002
+        handle: IsolationHandle,
         command: list[str],  # noqa: ARG002
         *,
         timeout_seconds: int | None = None,  # noqa: ARG002
@@ -191,7 +192,8 @@ class RecordingEventStreamAdapter:
         replaying a pre-recorded session.
 
         Args:
-            handle: Isolation handle (ignored - using recorded session)
+            handle: Isolation handle (keys the exit code only - the recording is
+                replayed whatever the workspace)
             command: Command to execute (ignored)
             timeout_seconds: Timeout (ignored)
             working_directory: Working directory (ignored)
@@ -211,7 +213,7 @@ class RecordingEventStreamAdapter:
             # Instant replay - yield all events immediately
             for event in self._player:
                 yield json.dumps(event)
-        self._last_exit_code = 0
+        self._exit_codes[handle.isolation_id] = 0
 
     async def run_bounded(
         self,
@@ -235,10 +237,9 @@ class RecordingEventStreamAdapter:
         """Nothing to cancel: replaying a recording creates no process."""
         return False
 
-    @property
-    def last_exit_code(self) -> int | None:
-        """Exit code from the most recent stream() call. Always 0 for recordings."""
-        return self._last_exit_code
+    def exit_code_of(self, handle: IsolationHandle) -> int | None:
+        """Exit code from ``handle``'s most recent stream() call. Always 0 for recordings."""
+        return self._exit_codes.get(handle.isolation_id)
 
     @property
     def metadata(self) -> RecordingMetadata | None:

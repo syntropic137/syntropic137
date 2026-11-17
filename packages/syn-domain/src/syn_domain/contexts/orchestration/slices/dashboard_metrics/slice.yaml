@@ -3,10 +3,5 @@ type: query
 projection: DashboardMetricsProjection
 subscribes_to:
   - WorkflowTemplateCreatedEvent
-  - WorkflowExecutionStartedEvent
-  - WorkflowCompletedEvent
-  - WorkflowFailedEvent
-  - SessionStartedEvent
-  - SessionCompletedEvent
   - ArtifactCreatedEvent
 returns: DashboardMetrics

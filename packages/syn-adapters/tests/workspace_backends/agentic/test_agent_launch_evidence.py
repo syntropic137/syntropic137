@@ -96,6 +96,9 @@ async def local_launch(tmp_path: Path) -> AsyncIterator[Callable[[], _Launch]]:
     await provider.destroy(workspace)
 
 
+_HANDLE = IsolationHandle(isolation_id="container-abc123", isolation_type="docker")
+
+
 async def _launches_and_lines(
     adapter: AgenticEventStreamAdapter, command: list[str]
 ) -> tuple[int, list[str]]:
@@ -114,16 +117,15 @@ async def _launches_and_lines(
         nonlocal launches
         launches += 1
 
-    handle = IsolationHandle(isolation_id="container-abc123", isolation_type="docker")
     evidence = AgentLaunchEvidence(observer)
     lines = [
         line
         async for line in evidence.observing(
-            adapter.stream(handle, command, wrapper_name=evidence.wrapper_name),
+            adapter.stream(_HANDLE, command, wrapper_name=evidence.wrapper_name),
         )
     ]
-    await evidence.settle(adapter.last_exit_code)
-    await evidence.settle(adapter.last_exit_code)
+    await evidence.settle(adapter.exit_code_of(_HANDLE))
+    await evidence.settle(adapter.exit_code_of(_HANDLE))
     return launches, lines
 
 
@@ -148,7 +150,7 @@ async def test_a_process_in_the_container_is_evidence_and_its_output_is_untouche
     )
 
     assert launches == 1, "recorded once, and not once per settle"
-    assert docker.adapter.last_exit_code == 0, "the agent must really have exited normally"
+    assert docker.adapter.exit_code_of(_HANDLE) == 0, "the agent must really have exited normally"
     assert lines == ['{"type":"result"}']
     assert AGENT_LAUNCH_MARKER not in lines
 
@@ -173,7 +175,7 @@ async def test_an_agent_that_dies_before_printing_anything_still_counts(
 
     assert launches == 1
     assert lines == []
-    assert docker.adapter.last_exit_code == exit_code, (
+    assert docker.adapter.exit_code_of(_HANDLE) == exit_code, (
         "an agent choosing its own non-zero status is not a shell reporting a failed exec"
     )
 
@@ -274,7 +276,7 @@ async def test_an_agent_whose_interpreter_is_missing_is_not_evidence(
         "the file must really resolve and really be executable, or this test is "
         "not the case that defeats a pre-exec guard"
     )
-    assert docker.adapter.last_exit_code == 127, (
+    assert docker.adapter.exit_code_of(_HANDLE) == 127, (
         "the real status must reach the observer; a cleanup path that reaped the "
         "child early would substitute 255 and this retraction would not fire"
     )
@@ -340,7 +342,7 @@ async def test_an_agent_that_spoke_and_then_exited_127_is_still_launched(
         ["python3", "-c", 'print("{\\"type\\":\\"result\\"}"); raise SystemExit(127)'],
     )
 
-    assert docker.adapter.last_exit_code == 127, (
+    assert docker.adapter.exit_code_of(_HANDLE) == 127, (
         "the agent must really have chosen 127 itself, or this is not the case"
     )
     assert lines == ['{"type":"result"}'], (
@@ -373,7 +375,7 @@ async def test_an_agent_that_impersonates_the_wrapper_is_still_launched(
     )
 
     assert lines == [forged], "the agent must really have forged the line, or this cannot fail"
-    assert docker.adapter.last_exit_code == 127
+    assert docker.adapter.exit_code_of(_HANDLE) == 127
     assert launches == 1
 
 
@@ -413,7 +415,7 @@ async def test_an_agent_that_announces_a_wrapper_name_of_its_own_is_still_launch
         ],
     )
 
-    assert docker.adapter.last_exit_code == 127, (
+    assert docker.adapter.exit_code_of(_HANDLE) == 127, (
         "the retraction must really be armed, or the launch would survive for the wrong reason"
     )
     assert launches == 1, (

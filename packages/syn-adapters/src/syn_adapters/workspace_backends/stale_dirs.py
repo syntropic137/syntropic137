@@ -49,6 +49,12 @@ from syn_adapters.workspace_backends.reclaim_delete import (
     DELETE_PREFIX,
     is_being_deleted,
 )
+from syn_shared.pytest_temp import (
+    PYTEST_TEMP_PREFIX,
+    EntryKind,
+    TempTreeEntry,
+    is_pytest_temp_root,
+)
 
 __all__ = ["CLAIM_PREFIX", "DELETE_PREFIX", "is_being_deleted"]
 
@@ -71,23 +77,6 @@ SESSION_STORE_DIRNAME = ".agentic-session-store"
 #: the bind of the workspace directory. It is the ONE place the platform
 #: itself puts a temp tree, so it is the only place one is recognised.
 WORKSPACE_TMPDIR = ".tmp"
-
-#: pytest's per-user temp root under TMPDIR, ``<tmp>/pytest-of-<user>``
-#: (``_pytest/tmpdir.py``, ``TempPathFactory.getbasetemp``). Agents run test
-#: suites in their workspace, and the reclaimer's own tests create session
-#: stores as fixtures there (#2095).
-PYTEST_TEMP_PREFIX = "pytest-of-"
-
-#: What pytest writes directly inside ``pytest-of-<user>`` and nothing else
-#: (``_pytest/pathlib.py``): numbered run dirs ``pytest-<N>``
-#: (``make_numbered_dir``), a ``pytest-current`` symlink to the newest
-#: (``_force_symlink``), and ``garbage-<uuid4>`` dirs it is part way through
-#: deleting (``maybe_delete_a_numbered_dir``).
-_PYTEST_RUN_DIR = re.compile(r"pytest-[0-9]+")
-_PYTEST_GARBAGE_DIR = re.compile(
-    r"garbage-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-)
-_PYTEST_CURRENT_LINK = "pytest-current"
 
 
 def pytest_temp_roots(directory: Path) -> frozenset[Path]:
@@ -114,17 +103,16 @@ def pytest_temp_roots(directory: Path) -> frozenset[Path]:
 
 
 def _is_pytest_shaped(root: Path) -> bool:
+    """`is_pytest_temp_root`, asked of a real directory on this filesystem."""
     if root.is_symlink() or not root.is_dir():
         return False
-    for child in root.iterdir():
-        if child.is_symlink():
-            if child.name != _PYTEST_CURRENT_LINK:
-                return False
-        elif not child.is_dir() or not (
-            _PYTEST_RUN_DIR.fullmatch(child.name) or _PYTEST_GARBAGE_DIR.fullmatch(child.name)
-        ):
-            return False
-    return True
+    return is_pytest_temp_root(root.name, (_entry(child) for child in root.iterdir()))
+
+
+def _entry(child: Path) -> TempTreeEntry:
+    if child.is_symlink():
+        return TempTreeEntry(child.name, EntryKind.SYMLINK)
+    return TempTreeEntry(child.name, EntryKind.DIRECTORY if child.is_dir() else EntryKind.OTHER)
 
 
 def _inside_any(path: Path, roots: frozenset[Path]) -> bool:
@@ -223,12 +211,17 @@ class UnsafeRepositoryError(HostGitError):
     """
 
 
+_BLOCK = 512
+"""POSIX ``st_blocks`` unit, whatever the filesystem's block size."""
+
+
 @dataclass(frozen=True)
 class WorkspaceDirListing:
     """One directory under the workspace base, measured in a single walk."""
 
     workspace_id: str
     host_dir: str
+    #: Allocated bytes of its files, each inode once: see `measure_workspace_dir`.
     size_bytes: int
     #: ``(st_dev, st_ino)`` of the directory itself: a rename keeps it, a
     #: replacement does not.
@@ -259,26 +252,31 @@ class ContainerMounts:
         return f"{self.name or 'unnamed'} ({self.container_id[:12]})"
 
     def blocks(self, workspace_id: str, host_base: str) -> bool:
-        """Whether any source can reach the workspace directory under any of its names.
+        """Whether any source is the workspace directory, under any of its names, or inside it.
 
         Compared as canonical host paths: a source that is the directory (as
-        itself, claimed or being deleted), anything inside it, or any
-        ANCESTOR of it - the base, its parent, ``/`` - reaches it. Only the
-        caller's own container is exempt, and the caller decides that
-        (`own_container_id`), not this method.
+        itself, claimed or being deleted) or anything inside it blocks, rw or
+        ro. Only the caller's own container is exempt, and the caller decides
+        that (`own_container_id`), not this method.
 
-        Read-only binds block like any other: read-only does not mean unused,
-        and ``RW: false`` alone does not keep submounts read-only. The one
-        other exemption is an operator-listed observer that passes every
-        observer condition, and the reclaimer decides that (`_bound`).
+        A bind of the base or of any ANCESTOR of it - the base's parent, ``/``
+        - does NOT block, rw or ro (#2215). Permanent platform containers hold
+        such binds (the executor writes the whole base; the docker-create guard
+        and node-exporter read it), so counting them kept every directory.
+        Such a container reaches the directory only through paths it was given
+        for an Execution; the reclaimer's proof that the directory's owner
+        Execution is terminal and settled, with its capture proven
+        (`_judge_owner`), is what rules out a live writer there. A bind naming
+        the directory itself carries no such proof, so it still blocks.
+
+        The one other exemption is an operator-listed observer that passes
+        every observer condition, and the reclaimer decides that (`_bound`).
         """
         base = PurePosixPath(posixpath.normpath(host_base))
         names = (workspace_id, CLAIM_PREFIX + workspace_id, DELETE_PREFIX + workspace_id)
         dirs = [base / name for name in names]
         for raw in self.sources:
             source = PurePosixPath(posixpath.normpath(raw))
-            if base == source or base.is_relative_to(source):
-                return True
             if any(source == d or source.is_relative_to(d) for d in dirs):
                 return True
         return False
@@ -351,9 +349,28 @@ def scan_workspace_dirs(base: str) -> list[WorkspaceDirListing]:
 
 
 def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
-    """One directory, sized in a single walk that fails closed. Blocking."""
+    """One directory, sized in a single walk that fails closed. Blocking.
+
+    ``size_bytes`` is the bytes the walk saw allocated to files
+    (``st_blocks * 512``), each inode once (#2216). A length overstates a
+    sparse file, and the uv and pnpm caches under ``seeds/`` hard-link one
+    inode under many names, so summing ``st_size`` per name read about 14x
+    the disk the directories occupy.
+
+    It is not exactly what a delete frees: an inode that also has links
+    outside the directory stays allocated after it goes. That is left
+    counted, not subtracted by ``st_nlink``: a link outside may itself be in
+    a directory this pass deletes, so no one directory can tell, and the
+    fix belongs to whoever sums across directories. Directory entries
+    themselves are not counted.
+
+    Every inode is remembered, whatever its link count: a live cache links
+    and unlinks while the walk runs, so a count read at one name says
+    nothing about a name already passed or still to come.
+    """
     stat = directory.lstat()
     size = 0
+    seen: set[tuple[int, int]] = set()
     session_store = False
     unreadable: str | None = None
     try:
@@ -365,7 +382,12 @@ def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
             ) and not _inside_any(here, fixtures):
                 session_store = True
             for name in filenames:
-                size += (here / name).lstat().st_size
+                found = (here / name).lstat()
+                inode = (found.st_dev, found.st_ino)
+                if inode in seen:
+                    continue
+                seen.add(inode)
+                size += found.st_blocks * _BLOCK
     except OSError as exc:
         unreadable = f"{type(exc).__name__}: {exc}"
     return WorkspaceDirListing(

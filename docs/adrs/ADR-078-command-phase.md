@@ -203,7 +203,7 @@ and the new fields default to `agent`.
 
 ### D6. A lost workspace, and a restart
 
-Two different losses, and v1 recovers only the first.
+Two different losses, and both keep a recorded verdict.
 
 **The processor holds no workspace for the Phase at collection** (its runtime
 handle is gone while the processor lives). A handle that is still held over a
@@ -219,13 +219,19 @@ the Phase fails, as an agent Phase would.
 The exit codes and timing are the gate's result and are in the event, so a
 lost workspace loses only the output tails, never the verdict.
 
-**The processor restarts.** Unchanged from agent Phases (ADR-072: mid-phase
-crash survival is not provided). Boot reconciliation fails the RUNNING
-execution as `OrphanedByRestart`, and a resume re-provisions the Phase and
-re-runs every step. Reconciliation's stranded salvage reads a finished agent
-run's `last_agent_message`, so it does not reach a command Phase, and a
-verdict recorded before the restart is kept in the stream but not collected.
-Collecting it at reconciliation is #2169, not v1.
+**The processor restarts.** Mid-phase crash survival is not provided (ADR-072):
+a step that was running is not re-attached, and a resume re-provisions the Phase
+and re-runs every step. What boot reconciliation does with the stranded command
+Phase depends on whether its verdict was recorded (#2169):
+
+| point | recovery at boot |
+|---|---|
+| before `PhaseCommandsCompleted` | the Execution fails as `OrphanedByRestart` (`platform`), as an agent Phase's does |
+| after `PhaseCommandsCompleted`, before collection | collected from the event exactly as the lost-workspace row above, through the same function: `commands.json` with `tails_lost: true`, then D5 rules. A red gate fails the Execution as `CommandPhaseFailed` (`gate`) and nothing is written over it. A green one completes the Phase and the Execution goes on: reconciliation hands it to the processor (`run_recovered`, the drain `run_claimed` uses), whose to-do list, folded from the stream, dispatches the next Phase or completes the Execution. The drain starts from what the stream already holds, not from nothing: every Phase it completed and every artifact it collected count in the Execution's totals, and the next Phase is handed their outputs. The steps are not re-run |
+
+`recorded_commands_for` holds a verdict only until it is collected or the Phase
+starts again, so an earlier attempt's verdict is never collected for a later
+one.
 
 ### D7. Output, credentials and cost
 

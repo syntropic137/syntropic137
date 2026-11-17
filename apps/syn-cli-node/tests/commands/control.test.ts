@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { controlGroup } from "../../src/commands/control.js";
 import { CLIError } from "../../src/framework/errors.js";
+import type { components } from "../../src/generated/api-types.js";
+
+type ControlResponse = components["schemas"]["ControlResponse"];
 
 describe("control commands", () => {
   const mockFetch = vi.fn();
@@ -53,6 +56,80 @@ describe("control commands", () => {
   it("inject requires --message", async () => {
     const handler = controlGroup.getCommand("inject")!.handler;
     await expect(handler({ positionals: ["exec-1"], values: {} })).rejects.toThrow(CLIError);
+  });
+
+  it("inject prints the API's refusal and exits non-zero (#1530)", async () => {
+    const refusal =
+      "Injecting a message into a running agent is not supported; cancel the execution and start again with a corrected task (#1530).";
+    mockFetch.mockResolvedValue(jsonResponse({ detail: refusal }, 501));
+    const handler = controlGroup.getCommand("inject")!.handler;
+
+    const error = await handler({ positionals: ["exec-1"], values: { message: "m" } }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(CLIError);
+    expect((error as CLIError).exitCode).not.toBe(0);
+    expect((error as CLIError).message).toContain(refusal);
+    expect(stdout()).not.toContain("injected");
+  });
+
+  it("inject refuses non-zero when an old server answers 200 queued (#1530)", async () => {
+    // The response every server before #1530 gave: it queued, and nothing delivers.
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        success: true,
+        execution_id: "exec-1",
+        state: "running",
+        message: "Context injection queued",
+      }),
+    );
+    const handler = controlGroup.getCommand("inject")!.handler;
+
+    const error = await handler({ positionals: ["exec-1"], values: { message: "m" } }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(CLIError);
+    expect((error as CLIError).exitCode).not.toBe(0);
+    expect((error as CLIError).message).toContain("not supported");
+    expect((error as CLIError).message).toContain("start again with a corrected task");
+    expect(stdout()).toBe("");
+  });
+
+  // #1062: a cancel of a started execution is queued; its `state` is still the old one.
+  const queuedCancel: ControlResponse = {
+    success: true,
+    execution_id: "exec-1",
+    state: "running",
+    applied: false,
+    message: "Cancel signal queued",
+  };
+  const withdrawnStart: ControlResponse = {
+    success: true,
+    execution_id: "exec-1",
+    state: "cancelled",
+    applied: true,
+    message: "Withdrawn before it started: it will not run",
+  };
+
+  it.each(["cancel", "stop"])("%s says a queued cancel is not yet applied and how to confirm it", async (name) => {
+    mockFetch.mockResolvedValue(jsonResponse(queuedCancel));
+    const handler = controlGroup.getCommand(name)!.handler;
+    await handler({ positionals: ["exec-1"], values: { force: true } });
+    expect(stdout()).toContain("Queued, not yet applied");
+    expect(stdout()).toContain("syn execution show exec-1");
+  });
+
+  it.each(["cancel", "stop"])("%s prints no queued line once the cancel has applied", async (name) => {
+    mockFetch.mockResolvedValue(jsonResponse(withdrawnStart));
+    const handler = controlGroup.getCommand(name)!.handler;
+    await handler({ positionals: ["exec-1"], values: { force: true } });
+    expect(stdout()).toContain("cancelled");
+    expect(stdout()).not.toContain("Queued, not yet applied");
+    expect(stdout()).not.toContain("syn execution show");
   });
 
   it("stop requires --force", async () => {

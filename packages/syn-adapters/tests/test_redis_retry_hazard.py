@@ -226,3 +226,34 @@ async def test_unacknowledged_signal_is_delivered_again(fake: tuple[FakeRedis, R
     server.refuse = set()
     assert await signals.dequeue("exec-3") == _cancel("exec-3")
     assert await signals.dequeue("exec-3") is None
+
+
+async def test_a_pending_cancel_is_never_overwritten_by_another_signal(
+    fake: tuple[FakeRedis, Redis],
+) -> None:
+    """#1530: one slot per execution, and an INJECT written into it erased a cancel."""
+    _, client = fake
+    signals = RedisSignalQueueAdapter(client)
+    await signals.enqueue("exec-4", _cancel("exec-4"))
+
+    await signals.enqueue(
+        "exec-4",
+        ControlSignal(
+            signal_type=ControlSignalType.INJECT, execution_id="exec-4", inject_message="m"
+        ),
+    )
+
+    assert await signals.dequeue("exec-4") == _cancel("exec-4")
+
+
+async def test_a_cancel_replaces_any_other_pending_signal(fake: tuple[FakeRedis, Redis]) -> None:
+    """The control: the slot is not simply first-write-wins; a cancel always lands."""
+    _, client = fake
+    signals = RedisSignalQueueAdapter(client)
+    await signals.enqueue(
+        "exec-5", ControlSignal(signal_type=ControlSignalType.INJECT, execution_id="exec-5")
+    )
+
+    await signals.enqueue("exec-5", _cancel("exec-5"))
+
+    assert await signals.dequeue("exec-5") == _cancel("exec-5")

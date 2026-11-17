@@ -34,6 +34,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membershi
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
 )
 from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
     ExecutionAttachedToEvalEvent,
@@ -49,6 +50,10 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent i
 )
 from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
     NextPhaseReadyEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    dispatched_task,
+    recorded_inputs,
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import (
     inherited_phase_count,
@@ -81,7 +86,9 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
     # v10: workflow_version, the installed version a run launched from.
     # v11: resumed_from and resumed_as, so every resume already in the store
     # links both ways, not only new ones (#1881).
-    VERSION = 11
+    # v12: review_verdict, so runs completed before it are filterable too (#1630).
+    # v13: task, so rows started before it can be told apart too (#1075).
+    VERSION = 13
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -115,8 +122,10 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
         if not execution_id:
             raise UnappliableStartError(self.PROJECTION_NAME)
 
-        # Extract repos from inputs field (ADR-058: stored as comma-separated string)
-        repos_raw = event_data.get("inputs", {}).get("repos", "")
+        inputs = event_data.get("inputs") or {}
+        # Extract repos from inputs field (ADR-058: stored as comma-separated string).
+        # Read raw: an unset repos (None, False, 0) lists no repository, not "None".
+        repos_raw = inputs.get("repos", "")
         repos = (
             tuple(u.strip() for u in str(repos_raw).split(",") if u.strip()) if repos_raw else ()
         )
@@ -148,6 +157,7 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
             association_kind=AssociationKind.LAUNCHED.value if eval_id else None,
             workflow_version=event_data.get("workflow_version"),
             resumed_from=ResumedFrom.of_started(event_data.get("resumed_from")),
+            task=dispatched_task(recorded_inputs(inputs)),
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 
@@ -221,6 +231,8 @@ class WorkflowExecutionListProjection(ExecutionListReads, AutoDispatchProjection
         if existing:
             existing["status"] = "completed"
             existing["completed_at"] = event_data.get("completed_at")
+            verdict = ReviewVerdict.from_stored(event_data.get("review_verdict"))
+            existing["review_verdict"] = None if verdict is None else verdict.value
             existing["completed_phases"] = event_data.get(
                 "completed_phases", existing.get("completed_phases", 0)
             )

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import asyncpg
 
+from syn_domain import agent_event_span
 from syn_domain.contexts.agent_sessions import (
     HAS_REQUESTED_MODEL_COLUMN,
     REQUESTED_MODEL_COLUMN,
@@ -197,8 +198,11 @@ ORDER BY day
 #
 # Counted from session_start, which covers EVERY observed session - including
 # one that produced no tokens because it failed during setup. Counting from
-# canonical_usage instead would drop those, reintroducing the split between
-# this number and the metric card's.
+# canonical_usage instead would drop those.
+#
+# This is the OBSERVED-session population, telemetry-only delegates included.
+# It is deliberately not the /metrics `total_sessions` card, which since #1843
+# counts session-list rows (one per SessionStarted), so the two may differ.
 _SESSIONS_QUERY = f"""
 WITH {_WINDOW_STARTS}
 SELECT {_utc_day("started_at")} AS day, COUNT(*) AS sessions
@@ -425,16 +429,17 @@ class TimescaleHeatmapQuery:
         Returns:
             List of HeatmapDayBucket, one per day (zero-filled).
         """
-        async with self._pool.acquire() as conn, conn.transaction():
-            # Plan every statement for THESE dates (E1). asyncpg prepares and
-            # caches each query, and after five runs PostgreSQL may switch to
-            # a generic plan that cannot see the window: it estimated ~10
-            # rollup rows for a year that held 2,000 sessions, picked a nested
-            # loop over session_start x canonical_usage, and turned a 35ms
-            # read into 640ms on every dashboard load from the sixth on.
-            # SET LOCAL ends with this transaction, so the pooled connection
-            # goes back as it came.
-            await conn.execute("SET LOCAL plan_cache_mode = force_custom_plan")
+        # One snapshot for all four reads (#983): at READ COMMITTED each took
+        # its own, so a session committed between them could add its tokens
+        # to a day whose session count did not include it.
+        #
+        # And every statement planned for THESE dates (E1). asyncpg prepares
+        # and caches each query, and after five runs PostgreSQL may switch to
+        # a generic plan that cannot see the window: it estimated ~10 rollup
+        # rows for a year that held 2,000 sessions, picked a nested loop over
+        # session_start x canonical_usage, and turned a 35ms read into 640ms
+        # on every dashboard load from the sixth on.
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             execution_rows = await self._fetch(conn, _EXECUTIONS_QUERY, start, end, execution_ids)
             commit_rows = await self._fetch(conn, _COMMITS_QUERY, start, end, execution_ids)
             session_rows = await self._fetch(conn, _SESSIONS_QUERY, start, end, execution_ids)

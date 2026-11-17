@@ -1,5 +1,9 @@
 /**
  * Execution control commands - cancel, status, inject, stop.
+ *
+ * `inject` is refused by the API (501, #1530): nothing delivers a message into
+ * a running agent. The command still asks, so the server's refusal is what the
+ * operator reads, and the CLI exits non-zero with it.
  * Port of apps/syn-cli/src/syn_cli/commands/control.py
  */
 
@@ -14,6 +18,25 @@ import { formatStatus } from "../output/format.js";
 type ControlResponse = components["schemas"]["ControlResponse"];
 type StateResponse = components["schemas"]["StateResponse"];
 
+/**
+ * A cancel of a started execution is queued, and the executor acts on it
+ * later: until then `state` is the state before the cancel (#1062).
+ */
+const CANCEL_NOTES =
+  "Cancelling a started execution is asynchronous: the signal is queued and the " +
+  "executor acts on it shortly after. Until then the response's state, and any " +
+  "re-read, still shows the state before the cancel (usually running), and the " +
+  "command says the cancel is queued. Run `syn execution show <execution-id>` " +
+  "until it reads cancelled. Cancelling a start that is still queued withdraws it " +
+  "at once and it never runs: the response reads cancelled straight away, but " +
+  "`syn execution show` can still read queued for a moment until the withdrawal " +
+  "reaches the read model, so re-read it the same way.";
+
+function printIfQueued(data: ControlResponse, id: string): void {
+  if (data.applied !== false) return;
+  printDim(`  Queued, not yet applied: run \`syn execution show ${id}\` until it reads cancelled.`);
+}
+
 function reqId(parsed: ParsedArgs): string {
   const id = parsed.positionals[0];
   if (!id) {
@@ -27,6 +50,7 @@ function reqId(parsed: ParsedArgs): string {
 const cancelCommand: CommandDef = {
   name: "cancel",
   description: "Cancel a running execution",
+  notes: CANCEL_NOTES,
   args: [{ name: "execution-id", description: "Execution ID to cancel", required: true }],
   options: {
     reason: { type: "string", short: "r", description: "Reason for cancelling" },
@@ -50,6 +74,7 @@ const cancelCommand: CommandDef = {
     print(`  State: ${data.state}`);
     // #1650: a queued start is withdrawn, not signalled; the message says which.
     if (data.message) print(`  Message: ${data.message}`);
+    printIfQueued(data, id);
   },
 };
 
@@ -72,7 +97,8 @@ const statusCommand: CommandDef = {
 
 const injectCommand: CommandDef = {
   name: "inject",
-  description: "Inject a message into a running execution",
+  description:
+    "Not supported: the API refuses it. Cancel the execution and start again with a corrected task",
   args: [{ name: "execution-id", description: "Execution ID", required: true }],
   options: {
     message: { type: "string", short: "m", description: "Message to inject" },
@@ -88,13 +114,20 @@ const injectCommand: CommandDef = {
       }),
       "Inject message",
     );
-    print(style(`Message injected into execution ${id}`, GREEN));
+    // Only a server from before #1530 says yes, and it delivers nothing either:
+    // its "queued" is still a refusal, so exit non-zero as the 501 path does.
+    throw new CLIError(
+      `Inject message: injecting a message into a running agent is not supported (#1530); ` +
+        `nothing was delivered to execution ${id}. Cancel it and start again with a corrected task.`,
+      1,
+    );
   },
 };
 
 const stopCommand: CommandDef = {
   name: "stop",
   description: "Forcefully stop a running execution via SIGINT",
+  notes: CANCEL_NOTES,
   args: [{ name: "execution-id", description: "Execution ID to stop", required: true }],
   options: {
     reason: { type: "string", short: "r", description: "Reason for stopping" },
@@ -117,6 +150,7 @@ const stopCommand: CommandDef = {
     print(style(`Stop signal sent for execution ${id}`, YELLOW));
     print(`  State: ${data.state}`);
     if (data.message) print(`  Message: ${data.message}`);
+    printIfQueued(data, id);
   },
 };
 

@@ -29,9 +29,12 @@ from syn_domain.contexts.orchestration import (
 from .models import ExecutionDetailResponse, ExecutionStartQueueInfo, ExecutionSummaryResponse
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.manager import ProjectionManager
     from syn_api.execution_budget import StartClaim, StartPosition
+    from syn_domain.contexts.orchestration import ReviewVerdict, TagSet
 
 
 def start_queue_info(
@@ -349,3 +352,40 @@ async def withdraw_queued_resume(execution_id: str, reason: str | None) -> bool:
     )
     await executions.save(parent)
     return True
+
+
+def filter_queued(
+    starts: list[QueuedStart],
+    *,
+    tags: TagSet,
+    review_verdict: ReviewVerdict | None,
+    eval_id: str | None,
+    in_eval: bool | None,
+    search: str | None,
+    after: datetime | None,
+    before: datetime | None,
+) -> list[QueuedStart]:
+    """The queued starts the list's filters keep.
+
+    A queued start has no read model, so no tags, eval or review verdict to
+    judge: a request filtering on any of them is not shown one, and it is in no eval, so
+    ``in_eval=true`` excludes it while ``in_eval=false`` keeps it. It has not started, so a time
+    window judges when it was accepted - the dashboard's default 24h window
+    would otherwise hide every queued start.
+    """
+    if tags or eval_id or in_eval or review_verdict is not None:
+        return []
+    return [qs for qs in starts if _matches(qs, search=search, after=after, before=before)]
+
+
+def _matches(
+    start: QueuedStart, *, search: str | None, after: datetime | None, before: datetime | None
+) -> bool:
+    """The list's search and window, as they apply to a start that has not started."""
+    queued_at = start.queue.queued_at
+    if (after is not None and queued_at < after) or (before is not None and queued_at > before):
+        return False
+    if not search:
+        return True
+    needle = search.lower()
+    return needle in start.execution_id.lower() or needle in start.workflow_id.lower()

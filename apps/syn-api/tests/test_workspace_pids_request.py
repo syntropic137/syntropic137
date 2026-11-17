@@ -62,6 +62,7 @@ async def test_api_create_stores_the_pids_request_and_reads_it_back() -> None:
             {
                 "phase_id": "build",
                 "name": "Build",
+                "prompt_template": "Do the work.",
                 "order": 1,
                 "resources": {"memory_mb": 2048, "pids_limit": 128},
             }
@@ -124,6 +125,9 @@ def test_the_export_writes_every_request_back_so_a_reinstall_keeps_it(
     assert line in lines
 
     # And it reads back as the request it was: the export/reinstall round trip.
-    yaml = "id: rt\nname: rt\nphases:\n  - id: build\n    name: Build\n    order: 1\n"
+    yaml = (
+        "id: rt\nname: rt\nphases:\n  - id: build\n    name: Build\n    order: 1\n"
+        "    prompt_template: Build it.\n"
+    )
     (reread,) = WorkflowDefinition.from_yaml(yaml + line + "\n").phases
     assert reread.resources == WorkspaceResourceRequest(**resources)

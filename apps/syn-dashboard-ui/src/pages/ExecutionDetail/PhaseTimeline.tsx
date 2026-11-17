@@ -15,7 +15,21 @@ import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 import { PlannedPhaseCard } from './PlannedPhaseCard'
 import './SessionInventory.css'
 
-function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, string> }) {
+/**
+ * A phase's cost split, plus the models it ran that nothing priced (#1743).
+ *
+ * An unpriced model has no cost to put in the split, so it is listed after it
+ * with the backend's label instead of a fabricated $0.
+ */
+function PhaseModelBreakdown({
+  costByModel,
+  unpricedModels,
+  unpricedLabel,
+}: {
+  costByModel: Record<string, string>
+  unpricedModels: string[]
+  unpricedLabel: string
+}) {
   const entries = Object.entries(costByModel)
     .map(([model, cost]) => ({ model, cost: parseFloat(cost) }))
     .sort((a, b) => b.cost - a.cost)
@@ -39,6 +53,12 @@ function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, stri
           </div>
         )
       })}
+      {unpricedModels.map((model) => (
+        <div key={model} className="flex items-center justify-between text-[10px]">
+          <span className="font-mono text-[var(--color-text-muted)]">{costByModelKeyLabel(model)}</span>
+          <span className="text-[var(--color-text-secondary)]">{unpricedLabel}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -113,8 +133,13 @@ function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: 
         requested={phase.requested_model}
         className="mt-1 text-[10px] text-[var(--color-text-secondary)]"
       />
-      {phase.cost_by_model && Object.keys(phase.cost_by_model).length > 0 && (
-        <PhaseModelBreakdown costByModel={phase.cost_by_model} />
+      {(Object.keys(phase.cost_by_model ?? {}).length > 0 ||
+        (phase.unpriced_models ?? []).length > 0) && (
+        <PhaseModelBreakdown
+          costByModel={phase.cost_by_model ?? {}}
+          unpricedModels={phase.unpriced_models ?? []}
+          unpricedLabel={phase.unpriced_model_cost_display ?? ''}
+        />
       )}
       <div className="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
         {/*

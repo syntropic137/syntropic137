@@ -132,7 +132,11 @@ export const observabilityRoutes: FixtureRoute[] = [
       ],
       top_sessions: allPhaseRuns()
         .slice(0, 5)
-        .map((p) => ({ session_id: p.sessionId!, cost_usd: p.cost.toFixed(6), tokens: p.tokens.input + p.tokens.output })),
+        .map((p) => ({
+          session_id: p.sessionId!,
+          total_cost_usd: p.cost.toFixed(6),
+          total_tokens: p.tokens.input + p.tokens.output + p.tokens.cacheWrite + p.tokens.cacheRead,
+        })),
     }
   }),
   route('GET', '/costs/sessions', ({ query }) => {

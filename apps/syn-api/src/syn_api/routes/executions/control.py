@@ -1,6 +1,7 @@
 """Execution control endpoints and service functions.
 
-Cancel, inject, and state inspection for running executions.
+Cancel and state inspection for running executions. Inject is refused: nothing
+delivers a message into a running agent yet (#1530).
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import get_controller
 from syn_api.types import (
@@ -106,9 +107,45 @@ class ControlResponse(BaseModel):
 
     success: bool
     execution_id: str
-    state: str
+    state: str = Field(
+        description=(
+            "The execution's state when the command was accepted. For a queued "
+            "signal (`applied` is false) this is the state BEFORE the command takes "
+            "effect: re-read `GET /executions/{execution_id}` until it reads "
+            "`cancelled` (#1062)."
+        )
+    )
+    applied: bool = Field(
+        description=(
+            "Whether the command has already taken effect. False when a signal was "
+            "queued for the executor to act on, as for a cancel of a running "
+            "execution; true when nothing is left to happen, as for a queued start "
+            "that was withdrawn and will not run. A later `GET /executions/{execution_id}` "
+            "can still read `queued` until the withdrawal is projected."
+        )
+    )
     message: str | None = None
     error: str | None = None
+
+
+#: Why inject is refused. One sentence, because it is what `syn control inject`
+#: prints and what an operator acts on.
+INJECT_NOT_SUPPORTED = (
+    "Injecting a message into a running agent is not supported; cancel the "
+    "execution and start again with a corrected task (#1530)."
+)
+
+
+class ControlNotSupportedResponse(BaseModel):
+    """501: a control the API names but nothing in the system can carry out.
+
+    Shaped as FastAPI's own error body (`detail`), so a client that reads
+    errors already reads this one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    detail: str
 
 
 class StateResponse(BaseModel):
@@ -134,32 +171,6 @@ async def cancel(
         controller = get_controller()
         domain_result = await controller.handle_command(
             CancelExecution(execution_id=execution_id, reason=reason)
-        )
-        return Ok(
-            ControlResult(
-                success=domain_result.success,
-                execution_id=domain_result.execution_id,
-                new_state=domain_result.new_state,
-                message=domain_result.message,
-                error=domain_result.error,
-            )
-        )
-    except Exception as e:
-        return Err(ExecutionError.SIGNAL_FAILED, message=str(e))
-
-
-async def inject(
-    execution_id: str,
-    message: str,
-    role: Literal["user", "system"] = "user",
-) -> Result[ControlResult, ExecutionError]:
-    """Inject a message into an execution's agent context."""
-    from syn_adapters.control.commands import InjectContext
-
-    try:
-        controller = get_controller()
-        domain_result = await controller.handle_command(
-            InjectContext(execution_id=execution_id, message=message, role=role)
         )
         return Ok(
             ControlResult(
@@ -232,10 +243,13 @@ async def _handle_control_result(
     if not ctrl.success:
         raise HTTPException(status_code=400, detail=ctrl.error)
 
+    # The controller only ever queues a signal; the executor acts on it later,
+    # so the state read on admission is not yet the state that results (#1062).
     return ControlResponse(
         success=ctrl.success,
         execution_id=ctrl.execution_id,
         state=ctrl.new_state,
+        applied=False,
         message=ctrl.message,
     )
 
@@ -245,7 +259,15 @@ async def cancel_execution_endpoint(
     execution_id: str,
     request: CancelRequest | None = None,
 ) -> ControlResponse:
-    """Cancel an execution, or withdraw a start still queued for one (#1650)."""
+    """Cancel an execution, or withdraw a start still queued for one (#1650).
+
+    Cancelling a started execution is asynchronous: the signal is queued and the
+    executor acts on it later, so the response has `applied: false` and `state`
+    is still the pre-cancel state. Re-read `GET /executions/{execution_id}` until
+    it reads `cancelled` (#1062). A withdrawn queued start is final at once
+    (`applied: true`), though a re-read can still show `queued` until the
+    withdrawal is projected.
+    """
     reason = request.reason if request else None
     try:
         resolved = await _resolve_execution_id(execution_id)
@@ -296,19 +318,29 @@ async def _withdraw_queued(execution_id: str, reason: str | None) -> ControlResp
         success=True,
         execution_id=full_id,
         state="cancelled",
+        applied=True,
         message="Withdrawn before it started: it will not run",
     )
 
 
-@router.post("/executions/{execution_id}/inject", response_model=ControlResponse)
+@router.post(
+    "/executions/{execution_id}/inject",
+    status_code=501,
+    response_model=ControlNotSupportedResponse,
+)
 async def inject_context_endpoint(
     execution_id: str,
     request: InjectRequest,
-) -> ControlResponse:
-    """Inject a message into the execution context."""
-    execution_id = await _resolve_execution_id(execution_id)
-    result = await inject(execution_id, message=request.message, role=request.role)
-    return await _handle_control_result(result, "inject")
+) -> ControlNotSupportedResponse:
+    """Refused, always: no execution path reads an injected message (#1530).
+
+    It used to answer 200 "Context injection queued" for a message nothing
+    would ever deliver, and the queued signal could replace a pending cancel.
+    Nothing is resolved or queued now. The route stays so clients keep a
+    stable contract and get this answer instead of a 404.
+    """
+    del execution_id, request
+    return ControlNotSupportedResponse(detail=INJECT_NOT_SUPPORTED)
 
 
 @router.get("/executions/{execution_id}/state", response_model=StateResponse)

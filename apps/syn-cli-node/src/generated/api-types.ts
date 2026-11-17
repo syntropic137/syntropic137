@@ -378,6 +378,13 @@ export interface paths {
         /**
          * Cancel Execution Endpoint
          * @description Cancel an execution, or withdraw a start still queued for one (#1650).
+         *
+         *     Cancelling a started execution is asynchronous: the signal is queued and the
+         *     executor acts on it later, so the response has `applied: false` and `state`
+         *     is still the pre-cancel state. Re-read `GET /executions/{execution_id}` until
+         *     it reads `cancelled` (#1062). A withdrawn queued start is final at once
+         *     (`applied: true`), though a re-read can still show `queued` until the
+         *     withdrawal is projected.
          */
         post: operations["cancel_execution_endpoint_executions__execution_id__cancel_post"];
         delete?: never;
@@ -397,7 +404,12 @@ export interface paths {
         put?: never;
         /**
          * Inject Context Endpoint
-         * @description Inject a message into the execution context.
+         * @description Refused, always: no execution path reads an injected message (#1530).
+         *
+         *     It used to answer 200 "Context injection queued" for a message nothing
+         *     would ever deliver, and the queued signal could replace a pending cancel.
+         *     Nothing is resolved or queued now. The route stays so clients keep a
+         *     stable contract and get this answer instead of a 404.
          */
         post: operations["inject_context_endpoint_executions__execution_id__inject_post"];
         delete?: never;
@@ -2849,6 +2861,8 @@ export interface components {
             workflow_id: string | null;
             /** Execution Id */
             execution_id?: string | null;
+            /** Session Id */
+            session_id?: string | null;
             /** Phase Id */
             phase_id: string | null;
             /** Artifact Type */
@@ -3274,6 +3288,17 @@ export interface components {
             };
         };
         /**
+         * ControlNotSupportedResponse
+         * @description 501: a control the API names but nothing in the system can carry out.
+         *
+         *     Shaped as FastAPI's own error body (`detail`), so a client that reads
+         *     errors already reads this one.
+         */
+        ControlNotSupportedResponse: {
+            /** Detail */
+            detail: string;
+        };
+        /**
          * ControlResponse
          * @description Response from a control command.
          */
@@ -3282,8 +3307,16 @@ export interface components {
             success: boolean;
             /** Execution Id */
             execution_id: string;
-            /** State */
+            /**
+             * State
+             * @description The execution's state when the command was accepted. For a queued signal (`applied` is false) this is the state BEFORE the command takes effect: re-read `GET /executions/{execution_id}` until it reads `cancelled` (#1062).
+             */
             state: string;
+            /**
+             * Applied
+             * @description Whether the command has already taken effect. False when a signal was queued for the executor to act on, as for a cancel of a running execution; true when nothing is left to happen, as for a queued start that was withdrawn and will not run. A later `GET /executions/{execution_id}` can still read `queued` until the withdrawal is projected.
+             */
+            applied: boolean;
             /** Message */
             message?: string | null;
             /** Error */
@@ -3549,11 +3582,13 @@ export interface components {
             name: string;
             /**
              * Workflow Type
+             * @description Workflow type, case-insensitive: research, planning, implementation, review, deployment, custom. An unknown value is refused with 422 (#2290).
              * @default custom
              */
             workflow_type: string;
             /**
              * Classification
+             * @description Workflow classification, case-insensitive: simple, standard, complex, epic. An unknown value is refused with 422 (#2286).
              * @default standard
              */
             classification: string;
@@ -4532,6 +4567,17 @@ export interface components {
             has_more: boolean;
         };
         /**
+         * EventPollerHealth
+         * @description What the GitHub Events API poller could not poll, as /health reports it (#1870).
+         */
+        EventPollerHealth: {
+            /**
+             * Unresolved Triggers
+             * @description Active triggers the last poll cycle skipped because their repository resolves to no GitHub owner/name, e.g. a syn137 repo id with no Repo record. Each is logged once, with its trigger id, when first seen; this is the only signal after.
+             */
+            unresolved_triggers: number;
+        };
+        /**
          * EventResponse
          * @description Single event response.
          */
@@ -4798,6 +4844,13 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Unpriced Models */
+            unpriced_models?: string[];
+            /**
+             * Unpriced Model Cost Display
+             * @default unpriced
+             */
+            unpriced_model_cost_display: string;
             /** Cost By Tool */
             cost_by_tool?: {
                 [key: string]: string;
@@ -5276,6 +5329,7 @@ export interface components {
             /** @default unclassified */
             failure_classification: components["schemas"]["FailureClassification"];
             reported_failure_reason?: components["schemas"]["ReportedFailureReason"] | null;
+            review_verdict?: components["schemas"]["ReviewVerdict"] | null;
             /** Repos */
             repos?: string[];
             /** Tags */
@@ -5285,6 +5339,10 @@ export interface components {
             resumed_as?: string | null;
             /** Repos Display */
             repos_display?: string | null;
+            /** Task */
+            task?: string | null;
+            /** Task Display */
+            task_display?: string | null;
             eval?: components["schemas"]["ExecutionEvalRunResponse"] | null;
             start_queue?: components["schemas"]["ExecutionStartQueueInfo"] | null;
         };
@@ -6076,6 +6134,8 @@ export interface components {
             execution_budget?: components["schemas"]["ExecutionBudgetHealth"] | null;
             /** @description Size and growth of the session archive (#2107). Omitted when the archive directory does not exist or could not be measured, and until the first background measurement completes. */
             session_store?: components["schemas"]["SessionStoreHealth"] | null;
+            /** @description The GitHub Events API poller (#1870). Omitted when it is not running, e.g. with no GitHub App configured or polling disabled. */
+            event_poller?: components["schemas"]["EventPollerHealth"] | null;
         };
         /**
          * HeatmapDayBucketResponse
@@ -6530,22 +6590,26 @@ export interface components {
         MetricsResponse: {
             /**
              * Total Workflows
+             * @description Workflow templates that are not archived; matches the default total of GET /workflows
              * @default 0
              */
             total_workflows: number;
             /**
              * Completed Workflows
+             * @description Executions whose status is completed; equals execution_status_counts.completed
              * @default 0
              */
             completed_workflows: number;
             /**
              * Failed Workflows
+             * @description Executions whose status is failed; equals execution_status_counts.failed
              * @default 0
              */
             failed_workflows: number;
             execution_status_counts?: components["schemas"]["ExecutionStatusCounts"];
             /**
              * Total Sessions
+             * @description Sessions in the session list; matches the total of GET /sessions
              * @default 0
              */
             total_sessions: number;
@@ -6956,6 +7020,13 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Unpriced Models */
+            unpriced_models?: string[];
+            /**
+             * Unpriced Model Cost Display
+             * @default unpriced
+             */
+            unpriced_model_cost_display: string;
             /** Agent Session Ids */
             agent_session_ids?: string[] | null;
             /** Exit Code */
@@ -8285,6 +8356,26 @@ export interface components {
             active_connections?: number | null;
         };
         /**
+         * SessionCostEntry
+         * @description One session's share of a cost total.
+         *
+         *     Field names are the ones ``SessionCostResponse`` uses for the same values.
+         */
+        SessionCostEntry: {
+            /** Session Id */
+            session_id: string;
+            /**
+             * Total Cost Usd
+             * @default 0
+             */
+            total_cost_usd: string;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+        };
+        /**
          * SessionCostResponse
          * @description Cost for a single session.
          */
@@ -8669,6 +8760,11 @@ export interface components {
             parent_session_id?: string | null;
             /** Root Session Id */
             root_session_id?: string | null;
+            /**
+             * Phase Name
+             * @description The phase's name as the execution recorded it, or null when it recorded none (older rows). phase_display is this when known.
+             */
+            phase_name?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Milestone Id */
@@ -8877,6 +8973,11 @@ export interface components {
             parent_session_id?: string | null;
             /** Root Session Id */
             root_session_id?: string | null;
+            /**
+             * Phase Name
+             * @description The phase's name as the execution recorded it, or null when it recorded none (older rows). phase_display is this when known.
+             */
+            phase_name?: string | null;
             /** Phase Display */
             phase_display?: string | null;
             /** Status */
@@ -10171,6 +10272,30 @@ export interface components {
             created_by: string;
             /** Last Fired At */
             last_fired_at?: string | null;
+            /** Unable To Fire Reason */
+            unable_to_fire_reason?: string | null;
+        };
+        /**
+         * TriggerError
+         * @description Errors returned by trigger operations.
+         * @enum {string}
+         */
+        TriggerError: "not_found" | "invalid_input" | "already_paused" | "already_active" | "already_deleted" | "preset_not_found" | "workflow_not_found" | "workflow_ambiguous" | "store_unavailable" | "github_not_configured" | "no_installation" | "repository_unresolved" | "github_unavailable";
+        /**
+         * TriggerErrorResponse
+         * @description Why a trigger was not created. Nothing is stored when this is returned.
+         *
+         *     `detail` stays a plain string, as FastAPI's own errors are, so every client
+         *     that prints `detail` prints the server's words (#1864).
+         */
+        TriggerErrorResponse: {
+            /**
+             * Detail
+             * @description Human-readable reason, with the next step.
+             */
+            detail: string;
+            /** @description Machine-readable reason. */
+            code: components["schemas"]["TriggerError"];
         };
         /**
          * TriggerHistoryEntryResponse
@@ -10310,6 +10435,8 @@ export interface components {
             fire_count: number;
             /** Created At */
             created_at?: string | null;
+            /** Unable To Fire Reason */
+            unable_to_fire_reason?: string | null;
         };
         /**
          * TypeCount
@@ -10649,7 +10776,10 @@ export interface components {
             /** Package Name */
             package_name?: string | null;
         };
-        /** WorkflowSummaryResponse */
+        /**
+         * WorkflowSummaryResponse
+         * @description One workflow template in the `GET /workflows` list.
+         */
         WorkflowSummaryResponse: {
             /** Id */
             id: string;
@@ -10657,6 +10787,10 @@ export interface components {
             name: string;
             /** Workflow Type */
             workflow_type: string;
+            /** Classification */
+            classification: string;
+            /** Description */
+            description: string | null;
             /** Phase Count */
             phase_count: number;
             /** Created At */
@@ -10835,10 +10969,11 @@ export interface components {
             total_tool_calls: number;
             /** Top Models */
             top_models?: components["schemas"]["ModelCostEntry"][];
-            /** Top Sessions */
-            top_sessions?: {
-                [key: string]: unknown;
-            }[];
+            /**
+             * Top Sessions
+             * @description The most expensive completed sessions with a reported cost, most expensive first. Sessions still in progress, and completed sessions whose summary reports no cost, are not ranked.
+             */
+            top_sessions?: components["schemas"]["SessionCostEntry"][];
         };
         /**
          * CostSummaryResponse
@@ -11361,6 +11496,8 @@ export interface operations {
                 eval_id?: string | null;
                 /** @description true keeps only executions that are currently a run of some eval; false keeps only executions in no eval. Omit for both. */
                 in_eval?: boolean | null;
+                /** @description Keep only executions that completed on this review verdict (#1630). A queued start or a run that reviewed nothing has none, so is never kept. */
+                review_verdict?: components["schemas"]["ReviewVerdict"] | null;
                 /** @description Page number */
                 page?: number;
                 /** @description Items per page */
@@ -11571,15 +11708,6 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ControlResponse"];
-                };
-            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -11587,6 +11715,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Successful Response */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlNotSupportedResponse"];
                 };
             };
         };
@@ -14174,6 +14311,24 @@ export interface operations {
                     "application/json": components["schemas"]["TriggerActionResponse"];
                 };
             };
+            /** @description Invalid request; nothing stored */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
+                };
+            };
+            /** @description Refused; nothing stored. Either the trigger could never fire (no GitHub App is configured, no installation covers the repository, or the repository is unknown), or the workflow ID prefix matches more than one workflow. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -14181,6 +14336,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description GitHub could not be asked for the installation; nothing stored */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
                 };
             };
         };
@@ -14374,6 +14538,24 @@ export interface operations {
                     "application/json": components["schemas"]["TriggerActionResponse"];
                 };
             };
+            /** @description Invalid request; nothing stored */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
+                };
+            };
+            /** @description Refused; nothing stored. Either the trigger could never fire (no GitHub App is configured, no installation covers the repository, or the repository is unknown), or the workflow ID prefix matches more than one workflow. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -14381,6 +14563,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description GitHub could not be asked for the installation; nothing stored */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerErrorResponse"];
                 };
             };
         };

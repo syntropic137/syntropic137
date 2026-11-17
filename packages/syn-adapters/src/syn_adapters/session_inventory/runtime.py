@@ -50,6 +50,7 @@ from .replication_runtime import (
     capture_outboxes,
     create_replication_manager,
 )
+from .scheduling_guard import PostgresInventorySchedulingGuard
 from .spool_drain import LocalSpoolDrain
 from .spool_release import CaptureSpoolRetention, SpoolVolumePort
 from .transcript_access import InstallationTranscriptAccess
@@ -264,7 +265,9 @@ async def create_inventory_runtime(
         )
         if recovery
         else None,
-        scheduler=SchedulePendingInventoryHandler(evidence, inventory, repository, jobs),
+        scheduler=SchedulePendingInventoryHandler(
+            evidence, inventory, repository, jobs, PostgresInventorySchedulingGuard(pool)
+        ),
         step=InventoryStepHandler(
             repository, jobs, builder, evidence, lease_seconds=settings.lease_seconds
         ),

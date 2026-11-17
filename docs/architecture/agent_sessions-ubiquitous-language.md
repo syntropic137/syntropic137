@@ -42,6 +42,28 @@ Started by `SessionStarted`, ended by `SessionCompleted`. A Session that never
 completed is not an error in itself - the run may have been killed - but it has
 no final totals.
 
+## Conversation Log and Conversation Log Row
+
+The **Conversation Log** is a Session's raw agent stdout, stored line by line
+and served under `GET /conversations/{session_id}`. A **Conversation Log Row**
+(`ConversationLogRow`) is what one stored line shows a reader: an event type,
+the tools the line names and a short preview, with nothing harness-specific
+left in it. `ConversationLogReader` is the port that reads one line into one
+row and says whether a line is CLI chrome that does not belong in the log at
+all; how Claude Code or Codex spells a line is the adapter's business (#1424).
+
+An **Unreadable Conversation Line** (`UnreadableConversationLine`) is a stored
+line the reader could not read as a row: a field of the wrong type, or JSON
+nested past the decoder's limit. The reader returns it with its cause rather
+than raising; the API fails the whole log request with it, as it always has.
+When the wrong-typed field is the event type, the cause is a
+`NonStringEventTypeError` carrying the value, so the API can report it as the
+same response-model validation failure it always did.
+
+Not a **Transcript Conversation** (`TranscriptConversationPort`): that is a
+bounded user/assistant excerpt of a whole inventory document. A Conversation
+Log Row is per line, and every line that belongs in the log keeps its row.
+
 ## Requested Model and Observed Model
 
 Two different facts about which model a Session used, never conflated
@@ -138,6 +160,17 @@ Rebuilding one run's session inventory snapshot from host evidence, one durable
 - **Coalesce:** while a run has an open job, new evidence for that run waits.
   The next job picks up the latest watermark, so one job is minted per
   catch-up and not one per watermark.
+- **Scheduling guard:** held for one run across "is a job open?" and
+  "schedule one", so two inventory managers cannot both find the run free
+  and open two jobs (#1534). It is asked for once and never waited on: a
+  manager that does not get it skips the run this tick and the wakeup stays
+  pending, as with coalesce.
+- **Held schedule:** what holding the scheduling guard gives a manager: the
+  run's last scheduled request, recorded durably under the guard before it is
+  saved. "Is a job open?" reads that job's own stream, so a job the projection
+  has not caught up with still holds its run (#2254). A recorded job whose
+  stream is absent is not free: its save may still commit, so the next holder
+  retries that same request rather than scheduling a successor.
 
 ## Capture Spool
 

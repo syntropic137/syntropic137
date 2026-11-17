@@ -5,6 +5,10 @@ Reads ``GET /repos/{slug}/branches/{branch}`` for where the branch is now and
 it, through the App installation that covers the repository. Total, as the
 port requires: a 404 on the branch is the one answer read as "gone"; every
 other failure is logged and becomes ``readable=False``, never "gone".
+
+A name git cannot give a ref, such as the ``(detached HEAD)`` stand-in the
+orchestration context persists where a branch goes, is answered "not on
+origin" without a request: none can exist, and asking 404'd forever (#1870).
 """
 
 from __future__ import annotations
@@ -26,6 +30,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _NOT_FOUND = "GitHub API error 404"
+
+#: Characters `git check-ref-format` refuses anywhere in a ref name.
+_NOT_IN_A_REF = frozenset(" ~^:?*[\\\x7f")
 
 
 class _Commit(BaseModel):
@@ -61,6 +68,8 @@ class GitHubRemoteBranchReader(RemoteBranchPort):
         """Where ``branch`` is on origin and which PR is open from it."""
         from syn_adapters.github.client import GitHubAppError
 
+        if not _is_ref_name(branch):
+            return RemoteBranchReading(repository=repository, branch=branch, readable=True)
         unreadable = RemoteBranchReading(repository=repository, branch=branch, readable=False)
         try:
             client = self._client_factory()
@@ -82,6 +91,15 @@ class GitHubRemoteBranchReader(RemoteBranchPort):
             open_pull_request=max(open_prs, default=None),
             closed_pull_request=max(closed_prs, default=None),
         )
+
+
+def _is_ref_name(branch: str) -> bool:
+    """Whether git could have a branch by this name (the cheap half of its rules)."""
+    return (
+        bool(branch)
+        and ".." not in branch
+        and not any(c in _NOT_IN_A_REF or c < " " for c in branch)
+    )
 
 
 async def _head(

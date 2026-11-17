@@ -195,18 +195,33 @@ async def gate_database(test_infrastructure) -> AsyncIterator[str]:
 
 
 async def _seed_projections() -> None:
-    """Executions in the read model, so /metrics?workflow_id= resolves real ids."""
+    """Executions and their sessions in the read models.
+
+    Executions so /metrics?workflow_id= resolves real ids; sessions because the
+    session card counts the session list, as GET /sessions does (#1843). Each
+    seeded observation session gets the SessionStarted row production writes.
+    """
     from syn_api._wiring import get_projection_mgr
 
-    executions = get_projection_mgr().workflow_execution_list
+    manager = get_projection_mgr()
     for n in range(EXECUTIONS):
-        await executions.on_workflow_execution_started(
+        await manager.workflow_execution_list.on_workflow_execution_started(
             {
                 "execution_id": _execution(n),
                 "workflow_id": _workflow(n),
                 "workflow_name": _workflow(n),
                 "started_at": "2026-09-25T00:00:00+00:00",
                 "total_phases": 1,
+            }
+        )
+        await manager.session_list.on_session_started(
+            {
+                "session_id": f"sess-{n}",
+                "workflow_id": _workflow(n),
+                "execution_id": _execution(n),
+                "phase_id": "p1",
+                "agent_provider": "claude",
+                "started_at": "2026-09-25T00:00:00+00:00",
             }
         )
 

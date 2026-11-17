@@ -47,6 +47,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_names import DETACHED_HEAD
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -305,7 +307,7 @@ def _observation(raw: object) -> BranchObservation | None:
     except ValidationError:
         logger.warning("Unreadable observed branch on a replayed failure; ignoring it")
         return None
-    if obs.remote != _ORIGIN or obs.remote_commit is None or obs.branch == "(detached HEAD)":
+    if obs.remote != _ORIGIN or obs.remote_commit is None or obs.branch == DETACHED_HEAD:
         return None
     return obs
 

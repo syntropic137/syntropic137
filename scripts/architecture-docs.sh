@@ -1,23 +1,31 @@
 #!/usr/bin/env bash
-# Regenerate every architecture artifact derived from the VSA manifest, or
-# fail when the committed copies are stale.
+# Regenerate every architecture artifact derived from the source tree, or fail
+# when the committed copies are stale.
 #
 #   scripts/architecture-docs.sh          # write into the repo
 #   scripts/architecture-docs.sh --check  # regenerate into a temp dir and diff
 #
-# Pipeline: source tree -> `vsa manifest` -> canonical manifest
-#   -> vsa-visualizer (vsa-overview.svg) + generate-architecture-docs.py (md).
-# The manifest itself is gitignored (#297), so it is always rebuilt from
-# source first; a check that read a stale local manifest would prove nothing.
+# Two pipelines, because the two outputs need different manifests (#1782):
 #
-# Needs `vsa` (setup-vsa in CI), node and pnpm. Not part of preflight-agent:
-# the agent image has no vsa.
+#   markdown  source tree -> scripts/architecture_manifest.py
+#               -> generate-architecture-docs.py (5 md/mdx files)
+#             Needs only uv, so it runs everywhere, agent workspaces included.
+#   svg       source tree -> `vsa manifest` (canonicalised)
+#               -> ESP's vsa-visualizer -> vsa-overview.svg
+#             Needs `vsa` (setup-vsa in CI), node and pnpm. Without vsa or pnpm
+#             it prints `NOT RUN: vsa-overview.svg` and neither writes nor
+#             checks the svg; CI's preflight job has both, so CI checks all 6.
+#
+# ci/fitness/code_quality/test_architecture_manifest_parity.py proves the two
+# manifests agree on every field the markdown generator reads. Manifests are
+# gitignored (#297) and always rebuilt from source first; a check that read a
+# stale local manifest would prove nothing.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-GENERATED=(
-    docs/architecture/vsa-overview.svg
+SVG=docs/architecture/vsa-overview.svg
+MARKDOWN=(
     docs/architecture/projection-subscriptions.md
     docs/architecture/event-flows/README.md
     README.md
@@ -30,23 +38,9 @@ if [[ "${1:-}" == "--check" ]]; then
     mode=check
 fi
 
-if ! command -v vsa >/dev/null 2>&1; then
-    echo "❌ vsa CLI not found. Install it from the submodule:" >&2
-    echo "   (cd lib/event-sourcing-platform/vsa && cargo install --path vsa-cli --locked)" >&2
-    exit 127
-fi
-
 ESP=lib/event-sourcing-platform
 VISUALIZER="$ESP/vsa/vsa-visualizer"
-MANIFEST=.topology/syn-manifest.json
-
-# The visualizer belongs to ESP's pnpm workspace; install only its closure.
-# Output is kept so a failed build names itself instead of the next step.
-(cd "$ESP" && pnpm install --frozen-lockfile --ignore-scripts --filter @vsa/visualizer... >/dev/null)
-(cd "$ESP" && pnpm --filter @vsa/visualizer run build >/dev/null)
-
-mkdir -p "$(dirname "$MANIFEST")"
-vsa manifest --config vsa.yaml --output "$MANIFEST" --include-domain >/dev/null
+MANIFEST_DIR=.topology
 
 if [[ "$mode" == write ]]; then
     out_root=.
@@ -61,20 +55,38 @@ else
         cp "$page" "$out_root/$page"
     done
 fi
+mkdir -p "$MANIFEST_DIR"
 
-# Canonicalises $MANIFEST in place, so it must run before the visualizer.
+docs_manifest="$MANIFEST_DIR/syn-manifest.json"
+uv run python scripts/architecture_manifest.py --output "$docs_manifest" >/dev/null
 uv run python scripts/generate-architecture-docs.py \
-    --manifest "$MANIFEST" --out-root "$out_root" >/dev/null
-node "$VISUALIZER/dist/index.js" "$MANIFEST" \
-    --format svg --type architecture --output "$out_root/docs/architecture" >/dev/null
+    --manifest "$docs_manifest" --out-root "$out_root" >/dev/null
+generated=("${MARKDOWN[@]}")
+
+if command -v vsa >/dev/null 2>&1 && command -v pnpm >/dev/null 2>&1; then
+    svg_manifest="$MANIFEST_DIR/syn-vsa-manifest.json"
+    # The visualizer belongs to ESP's pnpm workspace; install only its closure.
+    # Output is kept so a failed build names itself instead of the next step.
+    (cd "$ESP" && pnpm install --frozen-lockfile --ignore-scripts --filter @vsa/visualizer... >/dev/null)
+    (cd "$ESP" && pnpm --filter @vsa/visualizer run build >/dev/null)
+    vsa manifest --config vsa.yaml --output "$svg_manifest" --include-domain >/dev/null
+    # The renderer prints arrays in the order given; vsa's order varies by run.
+    uv run python scripts/generate-architecture-docs.py \
+        --manifest "$svg_manifest" --canonicalize-only >/dev/null
+    node "$VISUALIZER/dist/index.js" "$svg_manifest" \
+        --format svg --type architecture --output "$out_root/docs/architecture" >/dev/null
+    generated+=("$SVG")
+else
+    echo "⚠️  NOT RUN: $SVG (needs vsa + pnpm; CI checks it)" >&2
+fi
 
 if [[ "$mode" == write ]]; then
-    echo "✅ Regenerated: ${GENERATED[*]}"
+    echo "✅ Regenerated: ${generated[*]}"
     exit 0
 fi
 
 stale=()
-for file in "${GENERATED[@]}"; do
+for file in "${generated[@]}"; do
     if ! cmp -s "$file" "$out_root/$file"; then
         stale+=("$file")
         diff -u "$file" "$out_root/$file" | head -40 >&2 || true
@@ -86,4 +98,4 @@ if ((${#stale[@]})); then
     echo "   Run 'just docs-regen' and commit the result." >&2
     exit 1
 fi
-echo "✅ Architecture docs match the source tree"
+echo "✅ Architecture docs match the source tree: ${generated[*]}"

@@ -580,6 +580,19 @@
       "title": "WorkflowClassification",
       "type": "string"
     },
+    "WorkflowType": {
+      "description": "Type of workflow execution.",
+      "enum": [
+        "research",
+        "planning",
+        "implementation",
+        "review",
+        "deployment",
+        "custom"
+      ],
+      "title": "WorkflowType",
+      "type": "string"
+    },
     "WorkspaceResourceRequest": {
       "additionalProperties": false,
       "description": "What one phase's workspace asks for beyond the deployment default.\n\nEvery field is optional and None means \"the deployment default\". It is\na REQUEST: the deployment decides whether it fits (``require_memory_within_cap``,\n``require_pids_within_cap``).",
@@ -643,9 +656,8 @@
       "title": "Description"
     },
     "type": {
-      "default": "custom",
-      "title": "Type",
-      "type": "string"
+      "$ref": "#/$defs/WorkflowType",
+      "default": "custom"
     },
     "classification": {
       "$ref": "#/$defs/WorkflowClassification",

@@ -82,6 +82,7 @@ Environment variables take precedence. When no credentials are set, requests are
 ```bash
 syn workflow list                    # List all workflows
 syn workflow show <id>               # Show workflow details
+syn workflow show <id> --full        # ...plus each phase's prompt and allowed tools
 syn workflow create <name>           # Create a new workflow
 syn workflow run <id> -i key=value   # Execute a workflow
 syn workflow status <id>             # Show execution history
@@ -121,7 +122,7 @@ syn execution show <id>              # Show execution detail
 
 syn control cancel <id> --force      # Cancel execution
 syn control status <id>              # Check execution state
-syn control inject <id> -m "msg"     # Inject a message
+syn control inject <id> -m "msg"     # Not supported (#1530): refused; cancel and start again
 ```
 
 ### Sessions & Observability

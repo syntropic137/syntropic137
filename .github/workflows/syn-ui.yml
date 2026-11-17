@@ -147,7 +147,10 @@ jobs:
 
   e2e:
     name: Skyline E2E (fixtures)
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, where Playwright 1.59.0 refuses to
+    # install Chromium ("does not support chromium on ubuntu26.04-x64"). Move back
+    # to ubuntu-latest with the Playwright bump that supports 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -206,7 +209,10 @@ jobs:
 
   screenshots:
     name: Skyline screenshots
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, where Playwright 1.59.0 refuses to
+    # install Chromium ("does not support chromium on ubuntu26.04-x64"). Move back
+    # to ubuntu-latest with the Playwright bump that supports 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4

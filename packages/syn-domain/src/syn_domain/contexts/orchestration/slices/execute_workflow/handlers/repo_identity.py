@@ -8,9 +8,10 @@ of the repositories a phase clones.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from syn_shared.env_constants import ENV_GH_REPO
+from syn_shared.repo_names import owner_repo
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -18,10 +19,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         SourceCommit,
     )
-
-#: `owner` and `repo`: the two trailing path segments every accepted repo shape
-#: ends with, whatever prefix it carries.
-_OWNER_REPO_SEGMENTS: Final[int] = 2
 
 
 def repo_full_names(repos: Sequence[str]) -> list[str]:
@@ -32,15 +29,9 @@ def repo_full_names(repos: Sequence[str]) -> list[str]:
     """
     names: list[str] = []
     for repo in repos:
-        text = repo.strip().removesuffix(".git")
-        if "github.com" in text:
-            _, _, tail = text.partition("github.com")
-            text = tail.lstrip(":/")
-        parts = [part for part in text.split("/") if part]
-        if len(parts) >= _OWNER_REPO_SEGMENTS:
-            name = f"{parts[-2]}/{parts[-1]}"
-            if name not in names:
-                names.append(name)
+        name = owner_repo(repo)
+        if name is not None and name not in names:
+            names.append(name)
     return names
 
 

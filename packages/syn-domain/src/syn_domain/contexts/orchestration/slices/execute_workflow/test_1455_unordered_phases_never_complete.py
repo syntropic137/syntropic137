@@ -43,6 +43,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_workspace i
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
     PhaseOutputCache,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_progress import RunProgress
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
     _DispatchContext,
@@ -125,8 +126,8 @@ async def _drain(processor: WorkflowExecutionProcessor, aggregate: WorkflowExecu
         aggregate.start_pins.pinned_phases,
         _DispatchContext(),
         None,
-        None,
         PhaseOutputCache(),
+        RunProgress.starting(None),
         datetime.now(UTC),
     )
 

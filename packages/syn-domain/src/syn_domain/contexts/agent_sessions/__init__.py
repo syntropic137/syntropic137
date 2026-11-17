@@ -71,6 +71,9 @@ from syn_domain.contexts.agent_sessions.delegate_usage import (
 from syn_domain.contexts.agent_sessions.domain.aggregate_inventory_reconciliation.InventoryReconciliationAggregate import (
     InventoryReconciliationAggregate,
 )
+from syn_domain.contexts.agent_sessions.domain.commands.RequestInventoryReconciliationCommand import (
+    RequestInventoryReconciliationCommand,
+)
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
@@ -109,12 +112,22 @@ from syn_domain.contexts.agent_sessions.import_ledger import (
     ImportLedgerPort,
 )
 from syn_domain.contexts.agent_sessions.ports.BackfillReceiptPort import BackfillReceiptConflict
+from syn_domain.contexts.agent_sessions.ports.ConversationLogReaderPort import (
+    ConversationLogReader,
+    ConversationLogRow,
+    NonStringEventTypeError,
+    UnreadableConversationLine,
+)
 from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort import (
     HistoricalAcquisitionQuotaExceeded,
 )
 from syn_domain.contexts.agent_sessions.ports.HistoryBackfillQueuePort import (
     HistoryBackfillItem,
     HistoryBackfillLease,
+)
+from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
+    HeldInventorySchedule,
+    InventorySchedulingGuardPort,
 )
 from syn_domain.contexts.agent_sessions.ports.SessionEvidenceReadPort import (
     EvidenceBatch,
@@ -156,6 +169,9 @@ from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort impor
     SessionTranscriptArchivePort,
     TranscriptDeletedError,
     TranscriptIntegrityError,
+)
+from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+    TranscriptUsageReader,
 )
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     HAS_REQUESTED_MODEL_COLUMN,
@@ -235,11 +251,13 @@ from syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler
     StartSessionHandler,
 )
 from syn_domain.contexts.agent_sessions.transcript_usage import (
+    NoUsage,
     PricedUsage,
     RolloutDocument,
     RolloutRecord,
     StoredTranscript,
-    model_from_rollout,
+    UnpricedUsage,
+    UsageResult,
 )
 
 from .domain.read_models.transcript_body_state import (
@@ -286,6 +304,8 @@ __all__ = [
     "CataloguedCapture",
     "CompleteSessionCommand",
     "CompleteSessionHandler",
+    "ConversationLogReader",
+    "ConversationLogRow",
     "CostCalculator",
     "CoverageState",
     "DelegationOutcome",
@@ -294,6 +314,7 @@ __all__ = [
     "EvidencePage",
     "EvidenceReference",
     "EvidenceRetraction",
+    "HeldInventorySchedule",
     "HistoricalAcquisition",
     "HistoricalAcquisitionQuotaExceeded",
     "HistoryBackfillItem",
@@ -324,6 +345,7 @@ __all__ = [
     "InventoryReconciliationProcessManager",
     "InventoryReconciliationSweepEvent",
     "InventoryReplicationProcessManager",
+    "InventorySchedulingGuardPort",
     "InventorySnapshot",
     "InventoryStepHandler",
     "InventoryStepOutcome",
@@ -346,7 +368,9 @@ __all__ = [
     "NativeRelationshipFact",
     "NativeSessionEvidencePort",
     "NativeTranscriptFacts",
+    "NoUsage",
     "NodeEvidence",
+    "NonStringEventTypeError",
     "ObservationType",
     "ObserveInventoryClockCommand",
     "OperationRecord",
@@ -364,6 +388,7 @@ __all__ = [
     "RecordOperationHandler",
     "RecordSessionInvocationCommand",
     "RefreshSessionInventoryHandler",
+    "RequestInventoryReconciliationCommand",
     "ResolvedInventory",
     "RolloutDocument",
     "RolloutRecord",
@@ -404,10 +429,13 @@ __all__ = [
     "TranscriptDeletionReplica",
     "TranscriptIntegrityError",
     "TranscriptMessage",
+    "TranscriptUsageReader",
+    "UnpricedUsage",
+    "UnreadableConversationLine",
     "UnsupportedEvidenceIssue",
+    "UsageResult",
     "import_phase_delegates",
     "inventory_counts",
-    "model_from_rollout",
     "namespace_counts",
     "pick_primary_model",
     "price_canonical_row",

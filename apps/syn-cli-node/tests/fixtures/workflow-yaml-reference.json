@@ -348,7 +348,7 @@
           "prompt_file": null
         }
       ],
-      "document_sha256": "71672b09c2d1123cb9affb2c2f7d27532d44e0c138fc3b64c73b194c0df69c78"
+      "document_sha256": "91256895fe02da79841185ee06432f92e3ffd5985a79e2630629ff3f2e6f86e5"
     },
     "workflows/examples/multi-agent-programmatic.yaml": {
       "phases": [
@@ -1032,7 +1032,7 @@
           "prompt_file": "phases/file.md"
         }
       ],
-      "document_sha256": "1796f9be153216abc60862f8eaf888e64f05608b159fe08268d540f92d60b0ee"
+      "document_sha256": "ccebff119d587b57ad6fc008c89d5fb7ffa2a95a73007cea35525ee3e6f118fa"
     },
     "workflows/sdlc/reverify-pr/workflow.yaml": {
       "phases": [

@@ -1,4 +1,4 @@
-"""Advisory lock keys shared by every schema step that runs at startup.
+"""Advisory lock keys shared by every schema step that runs at startup, and per run.
 
 Postgres advisory locks are database-wide integers, so two keys that collide
 would serialise unrelated steps, or worse, let one step release another's lock.
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import struct
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
@@ -31,6 +32,20 @@ ROLLUP_STARTUP_LOCK_KEY: int = advisory_lock_key("agent_event_day_rollup:startup
 USAGE_ROLLUP_SCHEMA_LOCK_KEY: int = advisory_lock_key("agent_usage_rollup:schema")
 # The Run Queue's schema.sql, applied by the api and every executor at once (#1965).
 RUN_QUEUE_SCHEMA_LOCK_KEY: int = advisory_lock_key("execution_run_queue:schema")
+
+
+def inventory_schedule_lock_key(source_instance_id: str, execution_id: str) -> int:
+    """The key one run's inventory scheduling holds across check + schedule (#1534).
+
+    One key per run, not one for all scheduling, so managers working on
+    different runs never skip each other. Derived from an encoding that cannot
+    be mistaken for a startup name, so no input aliases one of the keys above;
+    the 64-bit hash can still collide, with negligible probability.
+    """
+    return advisory_lock_key(
+        json.dumps(("session_inventory:schedule", source_instance_id, execution_id))
+    )
+
 
 TRY_SESSION_LOCK_SQL = "SELECT pg_try_advisory_lock($1)"
 SESSION_UNLOCK_SQL = "SELECT pg_advisory_unlock($1)"
@@ -66,3 +81,19 @@ async def session_advisory_lock(
         # If this cannot run (cancelled mid-acquire, broken connection), the
         # pool's reset (pg_advisory_unlock_all) or the session ending frees it.
         await conn.execute(SESSION_UNLOCK_SQL, key)
+
+
+@asynccontextmanager
+async def try_session_advisory_lock(conn: LockConnection, key: int) -> AsyncIterator[bool]:
+    """Ask ONCE for the session-level advisory lock ``key``; yield whether it is held.
+
+    For per-tick work that skips what someone else is doing rather than
+    waiting on it (#1534), unlike ``session_advisory_lock``, which retries.
+    Released on exit only if it was taken.
+    """
+    held = bool(await conn.fetchval(TRY_SESSION_LOCK_SQL, key))
+    try:
+        yield held
+    finally:
+        if held:
+            await conn.execute(SESSION_UNLOCK_SQL, key)

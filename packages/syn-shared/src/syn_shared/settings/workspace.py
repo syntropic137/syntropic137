@@ -46,6 +46,28 @@ submodule's default does."""
 MIN_WORKSPACE_PIDS_LIMIT = 64
 """Below this an agent CLI and its shell tools cannot start."""
 
+DEFAULT_WORKSPACE_PIDS_MAX = 1024
+"""The highest pids limit a phase may request when ``SYN_WORKSPACE_PIDS_MAX`` is unset.
+
+The shipped SDLC workflows ask for 1024 on the phases that run the full gates
+(#2227): a verifier running the preflight gates and a docs build together ran a
+256 workspace out of pids. Without this default every deployment that never set
+the ceiling, every self-host install among them, would refuse those phases at
+install and at start. A ``SYN_WORKSPACE_PIDS_LIMIT`` above it raises the
+ceiling with it, so a deployment's own default is never refused."""
+
+
+def effective_pids_ceiling(pids_limit: int, pids_max: int | None) -> int:
+    """The highest pids limit a phase may request: ``pids_max`` when set.
+
+    Unset, ``DEFAULT_WORKSPACE_PIDS_MAX`` or the deployment's default limit,
+    whichever is higher. The one rule install, start, resume and provisioning
+    share.
+    """
+    if pids_max is not None:
+        return pids_max
+    return max(pids_limit, DEFAULT_WORKSPACE_PIDS_MAX)
+
 
 #: What `WorkspaceSettings.runtime` reads (env_prefix + field name). Named so
 #: the doctor reports the same variable the settings parse.
@@ -172,9 +194,9 @@ class WorkspaceSettings(BaseSettings):
         ge=MIN_WORKSPACE_PIDS_LIMIT,
         description=(
             "The highest pids limit one phase may request for its workspace with "
-            "resources.pids_limit (okrs-51p.30). Unset means no phase may ask for "
-            "more than SYN_WORKSPACE_PIDS_LIMIT. A request above it is refused at "
-            "install and at start, never clamped. Must be at least "
+            "resources.pids_limit (okrs-51p.30). Unset means 1024, or "
+            "SYN_WORKSPACE_PIDS_LIMIT if that is higher. A request above it is "
+            "refused at install and at start, never clamped. Must be at least "
             "SYN_WORKSPACE_PIDS_LIMIT."
         ),
     )
@@ -193,8 +215,8 @@ class WorkspaceSettings(BaseSettings):
 
     @property
     def pids_ceiling(self) -> int:
-        """The highest pids limit a phase may request: the ceiling, or the default when unset."""
-        return self.pids_limit if self.pids_max is None else self.pids_max
+        """The highest pids limit a phase may request (``effective_pids_ceiling``)."""
+        return effective_pids_ceiling(self.pids_limit, self.pids_max)
 
     cpu_limit: float = Field(
         default=DEFAULT_WORKSPACE_CPU_LIMIT,

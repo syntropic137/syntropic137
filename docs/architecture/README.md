@@ -84,7 +84,7 @@ claude generate-architecture-docs
 #### Real-time Communication
 
 - **[Real-time Communication](./realtime-communication.md)** 📝 Manual
-  - **What:** SSE streams for observation, HTTP routes for control (cancel, inject)
+  - **What:** SSE streams for observation, HTTP routes for control (cancel; inject is refused, #1530)
   - **Why:** How the dashboard, syn-ui and CLI get real-time updates
   - **When to update:** When an SSE route, frame or event type, or a control route changes
   - **Reference:** [ADR-049](../adrs/ADR-049-sse-over-websocket-for-execution-streams.md)

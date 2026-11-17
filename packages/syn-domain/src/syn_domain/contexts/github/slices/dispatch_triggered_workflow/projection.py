@@ -95,6 +95,16 @@ class _BudgetChecker(Protocol):
     ) -> object: ...
 
 
+class _DispatchRefusal(Protocol):
+    def describe(self) -> str: ...
+
+
+class _DispatchRefusals(Protocol):
+    """Why a trigger may not dispatch a workflow now, or None (#1569: a failure streak)."""
+
+    async def refusal_for(self, workflow_id: str) -> _DispatchRefusal | None: ...
+
+
 logger = logging.getLogger(__name__)
 
 #: The announcement that admission is open again (#1387). Read from the event
@@ -240,10 +250,12 @@ class WorkflowDispatchProjection(ProcessManager):
         store: ProjectionStore | None = None,
         budget_checker: _BudgetChecker | None = None,
         max_dispatches_per_hour: int = 50,
+        dispatch_refusals: _DispatchRefusals | None = None,
     ) -> None:
         self._execution_service = execution_service
         self._store = store
         self._budget_checker = budget_checker
+        self._dispatch_refusals = dispatch_refusals
         self._max_dispatches_per_hour = max_dispatches_per_hour
         self._dispatch_timestamps: list[float] = []
 
@@ -368,6 +380,15 @@ class WorkflowDispatchProjection(ProcessManager):
         if not workflow_id:
             logger.warning("Pending dispatch %s has no workflow_id, marking failed", trigger_id)
             await self._save_record_status(execution_id, record, "failed", "no_workflow_id")
+            return False
+
+        # #1569: terminal, like budget_exceeded. Only a manual run, which never
+        # passes here, can complete and so clear the refusal.
+        refusals = self._dispatch_refusals
+        refused = None if refusals is None else await refusals.refusal_for(workflow_id)
+        if refused is not None:
+            logger.warning("Dispatch for trigger %s refused: %s", trigger_id, refused.describe())
+            await self._save_record_status(execution_id, record, "failed", refused.describe())
             return False
 
         budget_ok = await self._check_budget(execution_id)

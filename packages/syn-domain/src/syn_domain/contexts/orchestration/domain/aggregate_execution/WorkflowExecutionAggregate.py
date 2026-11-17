@@ -408,16 +408,15 @@ class WorkflowExecutionAggregate(
         """
         if self.id is None:
             return False
-        match signal:
-            case ControlSignalType.CANCEL | ControlSignalType.INJECT:
-                return self._status is ExecutionStatus.RUNNING
+        # INJECT is never admitted: nothing delivers it to the agent (#1530).
+        return signal is ControlSignalType.CANCEL and self._status is ExecutionStatus.RUNNING
 
     def attempts_for(self, phase_id: str) -> int:
         """How many times this phase has been attempted, 0 if never started."""
         return self._phase_attempts.get(phase_id, 0)
 
     def recorded_commands_for(self, phase_id: str) -> RecordedCommands | None:
-        """What this command phase's steps recorded, from the event stream (ADR-078 D6)."""
+        """What this attempt's steps recorded, until it is collected (ADR-078 D6, #2169)."""
         return self._command_gates.recorded(phase_id)
 
     def last_agent_message_for(self, phase_id: str) -> str | None:
@@ -945,6 +944,7 @@ class WorkflowExecutionAggregate(
         self._running_phase_id = phase_id
         if phase_id:
             self._phase_names[phase_id] = evt(event, "phase_name") or phase_id
+            self._command_gates.started(phase_id, self._phase_names[phase_id])
             # Counted HERE, on the event that says an attempt began, rather
             # than on PhaseRetryScheduled which only says one was asked for.
             # A retry that is scheduled and then never starts - the process
@@ -1045,6 +1045,7 @@ class WorkflowExecutionAggregate(
         # is also what makes `stranded_deliverable` answer None once the
         # output is safely stored.
         self._finished_agent_runs.pop(phase_id, None)
+        self._command_gates.collected(phase_id)
         self._reviews.collect(phase_id)
         self._evidence.observe(phase_id, read_observed_heads(evt(event, "observed_heads")))
 

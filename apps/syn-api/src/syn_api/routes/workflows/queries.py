@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
@@ -27,7 +28,6 @@ from syn_api.types import (
     Result,
     WorkflowDetail,
     WorkflowError,
-    WorkflowSummary,
     WorkflowTrendResponse,
     WorkflowTrendsResponse,
 )
@@ -57,11 +57,23 @@ router = APIRouter(prefix="/workflows", tags=["workflows"])
 # -- Response Models ----------------------------------------------------------
 
 
+# The only workflow summary model, built once in `list_workflows()`. A second,
+# service-layer copy used to sit between the domain and this one, so every
+# field had two build sites; the list dropped `classification` and
+# `description` at the second (#975).
 class WorkflowSummaryResponse(BaseModel):
+    """One workflow template in the `GET /workflows` list."""
+
     model_config = ConfigDict(from_attributes=True)
     id: str
     name: str
     workflow_type: str
+    # No default, for the reason `requires_repos` has none (#955): the domain
+    # always has a classification, so omitting it must fail construction.
+    classification: str
+    description: str | None
+    """Nullable but required: a workflow may have no description, and the
+    list says so with null rather than by leaving the key out (#975)."""
     phase_count: int
     created_at: str | None = None
     runs_count: int = 0
@@ -299,8 +311,9 @@ async def list_workflows(
     offset: int = 0,
     include_archived: bool = False,
     search: str | None = None,
-) -> Result[list[WorkflowSummary], WorkflowError]:
-    """List all workflow templates."""
+    order_by: str | None = None,
+) -> Result[list[WorkflowSummaryResponse], WorkflowError]:
+    """List workflow templates, ordered across the whole collection before paging."""
     await ensure_connected()
     domain_summaries = await get_projection_mgr().workflow_list.query(
         workflow_type_filter=workflow_type,
@@ -308,19 +321,27 @@ async def list_workflows(
         offset=offset,
         include_archived=include_archived,
         search=search,
+        order_by=order_by,
     )
     return Ok(
         [
-            WorkflowSummary(
+            WorkflowSummaryResponse(
                 id=s.id,
                 name=s.name,
                 workflow_type=s.workflow_type,
                 classification=s.classification,
-                phase_count=s.phase_count,
                 description=s.description,
-                created_at=s.created_at,
+                phase_count=s.phase_count,
+                created_at=_iso_timestamp(s.created_at),
                 runs_count=s.runs_count,
                 is_archived=s.is_archived,
+                # WHY (#955): omitting this let the model's old `= True`
+                # default answer for every workflow. Measured on a live
+                # deployment: the list reported requires_repos=True for all 36
+                # while the detail endpoint reported False for 20 of them, and
+                # the stored rows agreed with detail. An agent that lists
+                # workflows, sees True, and passes -R is then told repos are
+                # supported when they are not.
                 requires_repos=s.requires_repos,
                 tags=list(s.tags),
                 skills=[_skill_response(skill) for skill in s.skills],
@@ -328,6 +349,14 @@ async def list_workflows(
             for s in domain_summaries
         ]
     )
+
+
+def _iso_timestamp(value: datetime | str | None) -> str | None:
+    """`WorkflowSummary.from_dict` passes a stored timestamp through as the
+    ISO string it was saved as, so either form can arrive here."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 async def get_workflow(
@@ -770,11 +799,6 @@ def _build_plugin_files(
 # -- HTTP Endpoints -----------------------------------------------------------
 
 
-_SORTABLE_SUMMARY_FIELDS: frozenset[str] = frozenset(
-    {"runs_count", "name", "workflow_type", "phase_count", "created_at"}
-)
-
-
 @router.get("", response_model=WorkflowListResponse)
 async def list_workflows_endpoint(
     workflow_type: str | None = Query(None, description="Filter by workflow type"),
@@ -795,41 +819,10 @@ async def list_workflows_endpoint(
         offset=offset,
         include_archived=include_archived,
         search=search,
+        order_by=order_by,
     )
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
-
-    summaries = [
-        WorkflowSummaryResponse(
-            id=s.id,
-            name=s.name,
-            workflow_type=s.workflow_type,
-            phase_count=s.phase_count,
-            created_at=s.created_at.isoformat() if s.created_at else None,
-            runs_count=s.runs_count,
-            is_archived=s.is_archived,
-            # WHY (#955): omitting this let WorkflowSummaryResponse's `= True`
-            # default answer for every workflow. Measured on a live deployment:
-            # the list reported requires_repos=True for all 36 while the detail
-            # endpoint reported False for 20 of them, and the stored rows agreed
-            # with detail. An agent that lists workflows, sees True, and passes
-            # -R is then told repos are supported when they are not.
-            requires_repos=s.requires_repos,
-            tags=list(s.tags),
-            skills=list(s.skills),
-        )
-        for s in result.value
-    ]
-
-    # KNOWN LIMITATION: this sorts the current PAGE, not the collection, so
-    # `order_by` with more than one page does not give a global ordering.
-    # Deliberately not pushed into the store yet: it orders on data->>'field',
-    # which is text, so runs_count and phase_count would sort lexically
-    # ("10" < "9"). Fixing it needs numeric casts in the query builder.
-    if order_by:
-        desc, field = order_by.startswith("-"), order_by.lstrip("-")
-        if field in _SORTABLE_SUMMARY_FIELDS:
-            summaries.sort(key=lambda s: getattr(s, field) or 0, reverse=desc)
 
     # `total` is the size of the whole filtered collection, NOT of this page.
     # It was previously `len(summaries)`, which reported the page size and told
@@ -844,7 +837,7 @@ async def list_workflows_endpoint(
         # No slice here: `list_workflows` already applied limit/offset. Slicing
         # again applied the offset twice, so page 2 sliced [20:40] of a 12-row
         # page and returned nothing.
-        workflows=summaries,
+        workflows=result.value,
         total=total,
         page=page,
         page_size=page_size,

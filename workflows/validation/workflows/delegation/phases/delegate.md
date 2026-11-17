@@ -25,3 +25,7 @@ can hand work to a different harness and that BOTH legs appear in the
 execution's cost breakdown afterwards. A run where the delegation silently does
 not happen still produces a working palindrome, so report `FAILED` honestly if
 the command did not run.
+
+If `DELEGATE_RAN` is `FAILED`, end with `TASK_RESULT` `success: false` and
+`failure_reason: "platform"`, even though the palindrome works: the delegation is
+what this phase was asked to prove. Only when it ran is it `success: true`.

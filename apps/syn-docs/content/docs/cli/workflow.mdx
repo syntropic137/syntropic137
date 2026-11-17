@@ -230,7 +230,7 @@ syn workflow search <query> [options]
 Show details of a workflow
 
 ```bash
-syn workflow show <workflow-id>
+syn workflow show <workflow-id> [options]
 ```
 
 **Arguments:**
@@ -238,6 +238,12 @@ syn workflow show <workflow-id>
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | `workflow-id` | `text` | Yes | Workflow ID (partial match supported) |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--full` | `boolean` | `false` | Also print each phase's prompt_template, allowed_tools, timeout_seconds, max_cost_usd and argument_hint |
 
 ---
 

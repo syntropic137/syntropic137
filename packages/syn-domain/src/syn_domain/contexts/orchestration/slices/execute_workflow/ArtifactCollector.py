@@ -40,6 +40,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.output_refusals i
     OutputCollectionIncompleteError,
     collect_output_files,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.primary_deliverable import ranked
 from syn_shared.workspace_paths import (
     WORKSPACE_INPUT_DIR,
     WORKSPACE_OUTPUT_DIR,
@@ -229,7 +230,7 @@ async def _with_report(
     title: str,
     describe_work: DescribeWork | None,
 ) -> list[_Deliverable]:
-    """`deliverables`, text first, with the transcript salvaged when none is text.
+    """`deliverables`, with the transcript salvaged when none is text.
 
     Files on disk are not a report when none of them is text. A verify phase
     screenshots before it writes its report (#1648); when the report never
@@ -238,9 +239,9 @@ async def _with_report(
     file at all" are therefore one incident and get one answer here; the
     binaries are kept beside the salvage either way.
 
-    Text before binary, otherwise in collection order: the head is flagged the
-    Primary Deliverable, and a screenshot the glob happened to list first must
-    not take the flag from the phase's report (#990).
+    Not ordered here: the caller passes the result through `ranked`, so a
+    screenshot or a log the glob happened to list first cannot take the
+    Primary Deliverable flag from the phase's report (#990, #2084).
     """
     if not any(isinstance(d.content, str) for d in deliverables):
         binaries = tuple(d.source_path for d in deliverables)
@@ -259,7 +260,7 @@ async def _with_report(
                 ", ".join(binaries) or "none",
             )
             deliverables = [*deliverables, _Deliverable.of(recovered)]
-    return sorted(deliverables, key=lambda d: isinstance(d.content, bytes))
+    return deliverables
 
 
 #: DIRECTORY names that hold machine-generated build output (issue #919).
@@ -635,9 +636,7 @@ class ArtifactCollector:
             last_agent_message=last_agent_message,
             describe_work=describe_work,
         )
-        if primary_path is not None:
-            # The phase names its primary; stable, so the rest keep their order.
-            deliverables.sort(key=lambda d: d.source_path != primary_path)
+        deliverables = ranked(deliverables, phase_id=phase_id, primary_path=primary_path)
 
         artifact_ids = await self._store(
             deliverables,
@@ -790,6 +789,7 @@ class ArtifactCollector:
         agent: AgentIdentity,
         outcome: UnfinishedPhase,
         last_agent_message: str | None = None,
+        primary_path: str | None = None,
     ) -> KeptOutput:
         """Keep whatever a phase that will not complete managed to write. Never raises.
 
@@ -860,7 +860,7 @@ class ArtifactCollector:
                 describe_work=None,
             )
             stored = await self._store(
-                kept,
+                ranked(kept, phase_id=phase_id, primary_path=primary_path),
                 workflow_id=workflow_id,
                 phase_id=phase_id,
                 execution_id=execution_id,
@@ -927,11 +927,11 @@ class ArtifactCollector:
         # know how a backend establishes readability, only that a returned URI
         # can be read. A backend that cannot confirm it raises
         # ArtifactStorageError, and we leave storage_uri None - the artifact is
-        # still whole, because the event embeds TEXT content either way.
+        # still whole, because the event embeds small TEXT content either way.
         #
-        # BINARY content is not embedded (#990): its bytes are in object
-        # storage or nowhere, so a binary artifact with no readable upload is
-        # refused by the aggregate rather than stored as a hash of nothing.
+        # BINARY content is not embedded (#990), nor is text over
+        # MAX_INLINE_TEXT_BYTES (#2042): in storage or nowhere, so with no
+        # readable upload the aggregate refuses it, not a hash of nothing.
         #
         # ONLY that exception. A bare `except Exception` here would swallow our
         # own bugs - a bad keyword argument to upload() would read as a backend

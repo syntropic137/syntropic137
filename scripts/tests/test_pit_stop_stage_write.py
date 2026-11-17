@@ -11,6 +11,12 @@ These run the stage block exactly as it is written in pit_stop.sh, against a
 local directory standing in for the host and a `remote` stub that runs each
 command with bash instead of ssh. One stub hands the write its whole input,
 the other only the first 100 bytes.
+
+The short stub cuts only the transfer, the one call whose stdin is
+$TMP/compose.staged, and runs every other call unchanged: with `head` on every
+call, the plain read of the deployed compose sometimes failed on CI before the
+transfer was reached, with nothing on stderr to say why (#2207). A stub call
+that fails now says so.
 """
 
 from __future__ import annotations
@@ -36,7 +42,12 @@ _START = (
 _END = 'if [ "$MODE" = "stage" ]; then'
 
 _FULL = 'remote() { bash -c "$*"; }'
-_SHORT = 'remote() { head -c 100 | bash -c "$*"; }'
+_SHORT = """remote() {
+    if [ /dev/stdin -ef "$TMP/compose.staged" ]; then head -c 100 | bash -c "$*"; else bash -c "$*"; fi
+    local rc=$?
+    [ "$rc" = 0 ] || printf 'remote stub: exit %s from: %s\\n' "$rc" "$*" >&2
+    return "$rc"
+}"""
 
 
 def _stage_block() -> str:
@@ -218,10 +229,35 @@ def test_a_short_transfer_leaves_the_deployed_compose_untouched(
 
     assert (host / _COMPOSE).read_bytes() == original
     assert proc.returncode != 0
-    assert "did not arrive intact" in proc.stderr
+    assert "did not arrive intact" in proc.stderr, proc.stdout + proc.stderr
+    # The transfer is the one call that failed: nothing else was cut short.
+    assert proc.stderr.count("remote stub: exit") == 1, proc.stderr
     assert not (host / f"{_COMPOSE}.pit-stop").exists()
     assert not (host / _STAGED).exists()
     assert not list(host.glob(f"{_COMPOSE}.bak-*"))
+
+
+@pytest.mark.parametrize("fixture", ["compose-digest.yaml", "compose-tag.yaml"])
+def test_the_short_stub_cuts_only_the_transfer(fixture: str, dirs: tuple[Path, Path]) -> None:
+    """#2207: `head` in the short stub sees one stdin, $TMP/compose.staged.
+    Any other call routed through it (the read of the deployed compose, on
+    /dev/null) is refused here, so the stub cannot drift back to cutting them."""
+    host, tmp = dirs
+    calls = tmp / "head.calls"
+    guard = f"""head() {{
+    if ! [ /dev/stdin -ef "$TMP/compose.staged" ]; then
+        printf 'head on a stdin that is not the transfer\\n' >&2; return 93
+    fi
+    echo transfer >> {calls}
+    command head "$@"
+}}
+"""
+    proc = _run_stage(fixture, host, tmp, guard + _SHORT)
+
+    assert "head on a stdin" not in proc.stderr, proc.stdout + proc.stderr
+    assert calls.read_text() == "transfer\n", proc.stderr
+    assert "did not arrive intact" in proc.stderr, proc.stdout + proc.stderr
+    assert (host / _COMPOSE).read_bytes() == (_FIXTURES / fixture).read_bytes()
 
 
 def test_a_gateway_only_stage_repoints_one_pin_and_passes_its_own_count(

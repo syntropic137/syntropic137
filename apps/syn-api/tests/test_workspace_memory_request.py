@@ -75,7 +75,13 @@ async def test_api_create_refuses_a_request_above_the_ceiling_and_stores_nothing
         name="Big build",
         workflow_id="big-build-dicts",
         phases=[
-            {"phase_id": "build", "name": "Build", "order": 1, "resources": {"memory_mb": 12288}}
+            {
+                "phase_id": "build",
+                "name": "Build",
+                "order": 1,
+                "prompt_template": "Do the work.",
+                "resources": {"memory_mb": 12288},
+            }
         ],
     )
 

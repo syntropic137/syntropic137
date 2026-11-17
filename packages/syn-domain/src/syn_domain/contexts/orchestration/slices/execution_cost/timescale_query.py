@@ -429,7 +429,7 @@ class _RowPricing:
 
     cost: Decimal | None
     model: RecordedModel | None
-    """The row's classified model; None only when the row went unpriced."""
+    """The row's classified model, kept on the unpriced path too (#1743)."""
     unpriced_count: int
     turns_cost_by_model: dict[str, Decimal] | None = None
     """Set when the cost is its session's turns' (#1420): their own breakdown."""
@@ -444,6 +444,18 @@ class _RowPricing:
         # bucket, so the breakdown sums to the total it decomposes (#812).
         key = self.model.cost_key if self.model is not None else UNATTRIBUTED_MODEL
         return {key: self.cost}
+
+    def observed_models(self) -> set[str]:
+        """Every reported model id this row ran, priced or not (#1743).
+
+        Identity, not money: a model with no rate still ran, so it is named
+        here while contributing nothing to ``cost_by_model``. The unknown
+        bucket is not a model and never appears.
+        """
+        observed = {key for key in self.cost_by_model() if key != UNATTRIBUTED_MODEL}
+        if self.model is not None and self.model.observed:
+            observed.add(self.model.observed)
+        return observed
 
 
 class UnreportedSessionCosts:
@@ -523,7 +535,7 @@ def _price_session_summary_row(
     pricing_model = model.pricing_model
     pricing = cost_calculator.resolve_pricing(pricing_model)
     if pricing is None or pricing_model is None:
-        return _RowPricing(cost=None, model=None, unpriced_count=_row_observation_count(row))
+        return _RowPricing(cost=None, model=model, unpriced_count=_row_observation_count(row))
 
     group_cost = pricing.calculate_cost(
         group.input_tokens, group.output_tokens, group.cache_creation, group.cache_read
@@ -556,6 +568,15 @@ class PhaseCosts:
     second is the one that says whether more fan-out is affordable.
     """
 
+    observed_models_by_phase: dict[str, list[str]] = field(default_factory=dict)
+    """Every reported model each phase ran, sorted, whether or not it priced.
+
+    ``models_by_phase`` is a decomposition of money, so a model with no rate
+    and no SDK cost cannot appear in it without a fabricated $0. This carries
+    the identity separately: a delegate that ran an unpriced model is still a
+    model the phase ran (#1743).
+    """
+
 
 def price_phase_rows(
     rows: Sequence[asyncpg.Record],
@@ -585,11 +606,14 @@ def price_phase_rows(
     costs: dict[str, Decimal] = {}
     unpriced: dict[str, int] = {}
     by_model: dict[str, dict[str, Decimal]] = {}
+    observed: dict[str, set[str]] = {}
     for row in rows:
         phase_id = row["phase_id"] or UNATTRIBUTED_PHASE_ID
         priced = _price_session_summary_row(
             row, _extract_group_tokens(row), cost_calculator, unreported
         )
+        if row_models := priced.observed_models():
+            observed.setdefault(phase_id, set()).update(row_models)
         if priced.unpriced_count:
             unpriced[phase_id] = unpriced.get(phase_id, 0) + priced.unpriced_count
         if priced.cost is None:
@@ -602,7 +626,12 @@ def price_phase_rows(
         phase_models = by_model.setdefault(phase_id, {})
         for model, cost in priced.cost_by_model().items():
             phase_models[model] = phase_models.get(model, Decimal("0")) + cost
-    return PhaseCosts(cost_by_phase=costs, unpriced_by_phase=unpriced, models_by_phase=by_model)
+    return PhaseCosts(
+        cost_by_phase=costs,
+        unpriced_by_phase=unpriced,
+        models_by_phase=by_model,
+        observed_models_by_phase={phase: sorted(ms) for phase, ms in observed.items()},
+    )
 
 
 def price_grouped_session_summary(
@@ -849,6 +878,7 @@ class TimescaleExecutionCostQuery:
             duration_ms=duration_ms,
             cost_by_phase=phase_costs.cost_by_phase,
             models_by_phase=phase_costs.models_by_phase,
+            observed_models_by_phase=phase_costs.observed_models_by_phase,
             unpriced_by_phase=phase_costs.unpriced_by_phase,
             cost_by_model=cost_by_model,
             unpriced_observation_count=unpriced_observation_count,

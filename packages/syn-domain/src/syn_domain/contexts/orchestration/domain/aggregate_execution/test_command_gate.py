@@ -95,7 +95,7 @@ class _Store:
 
 
 def _collect_after(
-    steps: list[CommandStepResult], *, success: bool, timed_out: bool = False
+    steps: list[CommandStepResult], *, success: bool, timed_out: bool = False, collect: bool = True
 ) -> _Store:
     """Run phase `build` as a command Phase, restart, and collect it."""
     store = _Store()
@@ -130,6 +130,8 @@ def _collect_after(
         )
     )
     store.save(aggregate)
+    if not collect:
+        return store
     aggregate = store.load()  # a restart between the steps and collection
     aggregate.artifacts_collected(
         ArtifactsCollectedCommand(execution_id=EXECUTION, phase_id="build", artifact_ids=["a-1"])
@@ -169,7 +171,7 @@ class TestTheAggregateDecidesAtCollection:
 
     def test_the_recorded_steps_survive_a_restart_for_a_lost_workspace(self) -> None:
         """D6: the verdict is in the event, so collection can rebuild it."""
-        store = _collect_after([PASSED, FAILED, SKIPPED], success=False)
+        store = _collect_after([PASSED, FAILED, SKIPPED], success=False, collect=False)
 
         recorded = store.load().recorded_commands_for("build")
 
@@ -177,6 +179,12 @@ class TestTheAggregateDecidesAtCollection:
         assert recorded.steps == (PASSED, FAILED, SKIPPED)
         assert (recorded.success, recorded.timed_out) == (False, False)
         assert store.load().recorded_commands_for("review") is None
+
+    def test_a_collected_verdict_is_no_longer_held_for_collection(self) -> None:
+        """#2169: a restart salvage must never collect a phase twice."""
+        store = _collect_after([PASSED, FAILED], success=False)
+
+        assert store.load().recorded_commands_for("build") is None
 
     def test_a_step_that_could_not_start_is_the_platforms_failure(self) -> None:
         lost = _step("cargo-build", CommandStepOutcome.FAILED_TO_START)

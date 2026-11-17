@@ -64,6 +64,20 @@ async def test_reads_the_head_and_the_open_pr() -> None:
     assert "head=acme:feat%2F1513-x" in client.paths[1]
 
 
+@pytest.mark.parametrize("name", ["(detached HEAD)", "(no commits)", "a..b", ""])
+async def test_a_name_git_cannot_give_a_ref_is_not_asked_about(name: str) -> None:
+    # #1870: `(detached HEAD)` is persisted where a branch goes; asking for it
+    # 404'd once a minute. No branch by such a name can be on origin.
+    client = _Client({_BRANCH_PATH: {"commit": {"sha": _SHA}}, _PULLS_PATH: []})
+
+    reading = await _reader(client).read_branch(_REPO, name)
+
+    assert client.paths == []
+    assert reading.readable
+    assert reading.head_sha is None
+    assert reading.open_pull_request is None
+
+
 async def test_a_404_is_a_branch_that_is_gone() -> None:
     client = _Client({_BRANCH_PATH: GitHubAppError("GitHub API error 404: Branch not found")})
 

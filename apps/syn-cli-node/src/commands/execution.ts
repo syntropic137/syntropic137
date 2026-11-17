@@ -13,6 +13,7 @@ import { formatCostWithCoverage, formatStatus, formatTimestamp, formatTokens } f
 import { executionSessionsCommand } from "./execution-sessions.js";
 import { executionTranscriptCommand } from "./execution-transcript.js";
 import { executionTagCommand } from "./execution-tags.js";
+import { watchExecutionCommand } from "./watch.js";
 import { Table } from "../output/table.js";
 
 type ExecutionList = components["schemas"]["ExecutionListResponse"];
@@ -23,18 +24,21 @@ type StartQueue = components["schemas"]["ExecutionStartQueueInfo"];
 type SideEffectStatus = components["schemas"]["SideEffectStatus"];
 type FailureClassification = components["schemas"]["FailureClassification"];
 type ReportedFailureReason = components["schemas"]["ReportedFailureReason"];
+type ReviewVerdict = components["schemas"]["ReviewVerdict"];
 
 const listCommand: CommandDef = {
   name: "list",
   description: "List all workflow executions",
   options: {
     status: { type: "string", short: "s", description: "Filter by status" },
+    verdict: { type: "string", description: "Only runs that completed on this review verdict (certified, blocked)" },
     tag: { type: "string", description: "Only executions carrying this tag (repeatable; all must match)", multiple: true },
     page: { type: "string", description: "Page number", default: "1" },
     "page-size": { type: "string", description: "Items per page (max 100)", default: "50" },
   },
   handler: async (parsed: ParsedArgs) => {
     const status = parsed.values["status"] as string | undefined;
+    const verdict = parsed.values["verdict"] as ReviewVerdict | undefined;
     const tagValues = parsed.values["tag"];
     const tags: string[] = Array.isArray(tagValues) ? tagValues as string[] : tagValues ? [tagValues as string] : [];
     const pageStr = (parsed.values["page"] as string | undefined) ?? "1";
@@ -44,6 +48,8 @@ const listCommand: CommandDef = {
       params: {
         query: {
           status: status ?? null,
+          // Passed as typed; the API refuses a word it does not know (422).
+          ...(verdict ? { review_verdict: verdict } : {}),
           ...(tags.length > 0 ? { tag: tags } : {}),
           page: parseInt(pageStr, 10),
           page_size: parseInt(pageSizeStr, 10),
@@ -60,7 +66,9 @@ const listCommand: CommandDef = {
     const table = new Table({ title: `Executions (page ${page}, ${total} total)` });
     table.addColumn("ID", { style: CYAN });
     table.addColumn("Workflow");
+    table.addColumn("Task");
     table.addColumn("Status");
+    table.addColumn("Verdict");
     table.addColumn("Started");
     table.addColumn("Phases", { align: "right" });
     table.addColumn("Tokens", { align: "right" });
@@ -77,7 +85,12 @@ const listCommand: CommandDef = {
       table.addRow(
         ex.workflow_execution_id,
         ex.workflow_name,
+        // What tells two runs of one workflow apart (#1075): the API's
+        // one-line summary, made server-side; a run asked nothing has none.
+        ex.task_display ?? "-",
         formatStatus(ex.status),
+        // The API's word as-is (#1630); a run that reviewed nothing has none.
+        ex.review_verdict ?? "-",
         // A queued start has not started: where it waits, and why (PC-124).
         ex.start_queue
           ? `${ex.start_queue.position_display}: ${ex.start_queue.reason_display}`
@@ -316,4 +329,6 @@ executionGroup
   .command(resumeCommand)
   .command(executionTagCommand)
   .command(executionSessionsCommand)
-  .command(executionTranscriptCommand);
+  .command(executionTranscriptCommand)
+  // Noun-verb form of `syn watch execution` (#1633): same definition, renamed.
+  .command({ ...watchExecutionCommand, name: "watch" });

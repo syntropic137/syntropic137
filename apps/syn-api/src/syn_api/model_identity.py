@@ -25,7 +25,7 @@ from syn_shared.observed_model import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
 
 def _reject_alias(value: str) -> str:
@@ -74,6 +74,16 @@ def cost_by_observed_model(costs: Mapping[str, object]) -> dict[str, Decimal]:
         bucket = UNKNOWN_MODEL_KEY if is_model_alias(key) else key
         folded[bucket] = folded.get(bucket, Decimal("0")) + Decimal(str(value))
     return folded
+
+
+def observed_model_ids(models: Iterable[str]) -> list[str]:
+    """The reported model ids among ``models``, sorted and deduplicated.
+
+    The read side of an observed-model list (#1743): an alias from a legacy
+    read model was never what ran, and the unknown bucket is not a model, so
+    neither survives - the same rule ``cost_by_observed_model`` applies to keys.
+    """
+    return sorted({m for m in models if m != UNKNOWN_MODEL_KEY and not is_model_alias(m)})
 
 
 def cost_by_observed_model_text(costs: object) -> dict[str, str]:

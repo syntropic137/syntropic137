@@ -18,6 +18,7 @@ syn execution list [options]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--status`, `-s` | `text` | --- | Filter by status |
+| `--verdict` | `text` | --- | Only runs that completed on this review verdict (certified, blocked) |
 | `--tag` | `text` | --- | Only executions carrying this tag (repeatable; all must match) |
 | `--page` | `text` | `1` | Page number |
 | `--page-size` | `text` | `50` | Items per page (max 100) |
@@ -169,5 +170,21 @@ syn execution sessions <execution-id> --kind capture --all   # find harness, nat
 syn execution transcript <execution-id> claude <native-id> <sha256>          # format, size and revision
 syn execution transcript <execution-id> claude <native-id> <sha256> --raw > transcript.raw  # exact archived bytes
 ```
+
+---
+
+## `syn execution watch`
+
+Stream live events for a specific execution
+
+```bash
+syn execution watch <execution-id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution-id` | `text` | Yes | Execution ID to watch |
 
 ---

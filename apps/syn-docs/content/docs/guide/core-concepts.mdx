@@ -106,7 +106,7 @@ An **execution** is a running instance of a workflow. It progresses through a st
   </div>
 </div>
 
-You can **cancel** a running execution via the REST API or the CLI. The platform checks for a cancel every few lines of agent output and interrupts the agent. Inject is accepted by the API but not yet delivered to the agent.
+You can **cancel** a running execution via the REST API or the CLI. The platform checks for a cancel every few lines of agent output and interrupts the agent. Injecting a message into a running agent is not supported: the API refuses it (HTTP 501) and queues nothing, so cancel and start again with a corrected task.
 
 A failed or interrupted run can be **resumed**: that creates a new execution which inherits the phases that completed and restarts at the first one that did not. See [Resuming Failed Executions](/docs/guide/resuming-executions).
 

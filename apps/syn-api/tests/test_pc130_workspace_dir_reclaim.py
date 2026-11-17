@@ -32,6 +32,7 @@ from syn_api.services.workspace_dir_reclaim import (
     WorkspaceDirReclaimer,
     reclaim_on_a_clock,
 )
+from syn_api.services.workspace_reclaim_status import ReclaimStatus
 from syn_domain.contexts.orchestration import OwnerExecution, RetainedReason
 
 pytestmark = pytest.mark.unit
@@ -281,25 +282,62 @@ async def test_any_container_binding_the_dir_or_below_keeps_it(
     assert ws.exists()
 
 
-async def test_only_this_process_own_bind_of_the_base_is_exempt(base: Path, tmp_path: Path) -> None:
-    """The API binds the whole base; its own container, and only it, may."""
-    _workspace(base, "ws-base-bound", tmp_path)
-    own = ContainerMounts("api0000000001ffff", ("/srv/workspaces", "/var/run/docker.sock"))
+async def test_only_this_process_own_bind_of_the_dir_is_exempt(base: Path, tmp_path: Path) -> None:
+    """Its own container, and only it, may bind the directory itself."""
+    _workspace(base, "ws-own-bound", tmp_path)
+    own = ContainerMounts(
+        "api0000000001ffff", ("/srv/workspaces/ws-own-bound", "/var/run/docker.sock")
+    )
     result = await _reclaimer(base, containers=[own]).run_once()
-    assert result.reclaimed == ("ws-base-bound",)
+    assert result.reclaimed == ("ws-own-bound",)
+
+
+#: The three permanent containers on the VPS that held every directory (#2215):
+#: the executor writes the whole base, the guard reads it, node-exporter reads ``/``.
+_PLATFORM_BINDS = [
+    ContainerMounts("e0e0e0e0e0e0", ("/srv/workspaces",), True, "syn137-executor"),
+    ContainerMounts("9a9a9a9a9a9a", ("/srv/workspaces",), True, "syn137-docker-create-guard"),
+    ContainerMounts("0e0e0e0e0e0e", ("/",), True, "flywheel-observability-node-exporter"),
+]
+
+
+async def test_platform_binds_of_the_base_or_an_ancestor_do_not_keep_a_dir(
+    base: Path, tmp_path: Path
+) -> None:
+    """#2215: binds of the base or above it reach every directory, so counting them
+    retained all of them. The owner being terminal and settled is the proof."""
+    ws = _workspace(base, "ws-platform", tmp_path)
+    result = await _reclaimer(base, containers=_PLATFORM_BINDS).run_once()
+    assert result.reclaimed == ("ws-platform",)
+    assert not ws.exists()
+
+
+async def test_platform_binds_leave_a_running_owner_dir_to_the_owner_check(
+    base: Path, tmp_path: Path
+) -> None:
+    """With the ancestor rule gone, the owner check is what keeps a live directory."""
+    ws = _workspace(base, "ws-live", tmp_path)
+    result = await _reclaimer(base, containers=_PLATFORM_BINDS, status="running").run_once()
+    assert _reason(result, "ws-live") is RetainedReason.NOT_TERMINAL
+    assert ws.exists()
 
 
 @pytest.mark.parametrize("source", ["/srv/workspaces", "/srv/workspaces/", "/srv", "/"])
-async def test_another_container_binding_the_base_or_an_ancestor_keeps_every_dir(
-    base: Path, tmp_path: Path, source: str
+def test_a_bind_of_the_base_or_an_ancestor_does_not_block(source: str) -> None:
+    assert not ContainerMounts("tool0000000002", (source,)).blocks("ws-a", HOST_BASE)
+
+
+async def test_a_bind_of_another_workspace_does_not_keep_this_one(
+    base: Path, tmp_path: Path
 ) -> None:
-    """Codex r1 finding 5: through an ancestor bind a container reaches every workspace,
-    under any name, so it blocks deletion like a direct bind."""
-    ws = _workspace(base, "ws-ancestor", tmp_path)
-    other = ContainerMounts("tool0000000002", (source,), running=True)
+    ws = _workspace(base, "ws-free", tmp_path)
+    other = ContainerMounts(
+        "sidecar01",
+        ("/srv/workspaces/ws-other", "/srv/workspaces/ws-free-other", "/srv/workspaces/ws-fre"),
+    )
     result = await _reclaimer(base, containers=[other]).run_once()
-    assert _reason(result, "ws-ancestor") is RetainedReason.MOUNTED
-    assert ws.exists()
+    assert result.reclaimed == ("ws-free",)
+    assert not ws.exists()
 
 
 async def test_an_unknown_host_base_keeps_every_dir(base: Path, tmp_path: Path) -> None:
@@ -338,6 +376,22 @@ async def test_unreadable_docker_skips_the_whole_pass(base: Path, tmp_path: Path
     result = await reclaimer.run_once()
     assert result.skipped is not None
     assert ws.exists()
+
+
+async def test_health_tallies_a_hard_linked_cache_once(base: Path, tmp_path: Path) -> None:
+    """#2216: /health's retained bytes are the disk the directory holds, not its names."""
+    ws = _workspace(base, "ws-seeded", tmp_path)
+    cache = ws / "seeds" / "pnpm"
+    cache.mkdir(parents=True)
+    (cache / "blob").write_bytes(os.urandom(4 * 1024 * 1024))
+    for n in range(9):
+        os.link(cache / "blob", cache / f"link-{n}")
+    blob = (cache / "blob").lstat().st_blocks * 512
+    status = ReclaimStatus()
+    status.record(await _reclaimer(base).run_once(), at=0.0)
+    [tally] = status.snapshot(0.0).retained
+    assert tally.reason is RetainedReason.UNVERSIONED
+    assert blob <= tally.size_bytes < 2 * blob  # once, where ten links read 40 MiB
 
 
 # --- fully readable ---
@@ -601,7 +655,8 @@ def test_a_session_store_inside_a_pytest_temp_tree_is_not_capture(
     [listing] = scan_workspace_dirs(str(base))
     assert listing.session_store is False
     assert listing.unreadable is None
-    assert listing.size_bytes - before.size_bytes == len("{}\n")  # still walked and sized
+    allocated = (store / "envelope.jsonl").lstat().st_blocks * 512
+    assert listing.size_bytes - before.size_bytes == allocated  # still walked and sized
 
 
 def test_a_pytest_temp_tree_does_not_hide_a_store_beside_it(base: Path, tmp_path: Path) -> None:

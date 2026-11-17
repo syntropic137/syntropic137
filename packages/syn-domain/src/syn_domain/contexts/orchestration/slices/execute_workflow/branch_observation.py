@@ -47,6 +47,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_names import DETACHED_HEAD
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     BranchObservation,
 )
@@ -464,4 +465,4 @@ def _displayed(branch: str) -> str:
     display is changed: the matching above uses the raw name, which matches no
     remote ref because `*/HEAD` is dropped when they are read.
     """
-    return "(detached HEAD)" if branch == "HEAD" else branch
+    return DETACHED_HEAD if branch == "HEAD" else branch

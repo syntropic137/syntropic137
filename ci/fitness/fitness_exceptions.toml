@@ -231,15 +231,7 @@ allowed_prefixes = [
 # 1 handler parameter(s)
 "packages/syn-domain/src/syn_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py:WorkflowDispatchProjection._write_dispatch_record.param:event_data" = { annotation = "dict[str, _EventValue]", verdict = "string-keyed", issue = "#1268" }
 
-# 9 handler parameter(s)
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_template_created.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_execution_started.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_phase_started.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_completed.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_workflow_failed.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_session_started.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_session_completed.param:event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection.on_artifact_created.param:_event_data" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
+# 1 handler parameter(s)
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/dashboard_metrics/projection.py:DashboardMetricsProjection._save_metrics.param:metrics" = { annotation = "dict", verdict = "string-keyed", issue = "#1268" }
 
 # 7 handler parameter(s)
@@ -464,15 +456,6 @@ allowed_prefixes = [
 # relationship inference, and harness-name branches in inventory modules.
 # path = { violations = N, issue = "#NNN" }. Counts are EXACT: one more fails,
 # one fewer fails as stale. Zero tolerance for any file not listed here.
-
-# TODO(#1424): transcript_usage.py parses stored Claude/Codex transcripts in the
-# domain (SourceFormat literals, lines ~58-59; codex event_msg/turn_context readers,
-# lines ~260-345). Move the parsers behind the agentic-workspace extraction port.
-"packages/syn-domain/src/syn_domain/contexts/agent_sessions/transcript_usage.py" = { violations = 4, issue = "#1424" }
-
-# TODO(#1424): the API conversation log parses Claude message content and Codex
-# stream items (imports syn_shared.codex_stream). Predates #1398.
-"apps/syn-api/src/syn_api/routes/conversations.py" = { violations = 1, issue = "#1424" }
 
 [linux_only_constructs]
 # Modules declared Linux-only by design: each uses a /proc or /sys path or a

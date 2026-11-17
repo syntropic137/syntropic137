@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { triggersGroup } from "../../src/commands/triggers.js";
 import { CLIError } from "../../src/framework/errors.js";
+import type { components } from "../../src/generated/api-types.js";
 
 describe("triggers commands", () => {
   const mockFetch = vi.fn();
@@ -62,6 +63,31 @@ describe("triggers commands", () => {
       values: { repo: "r1", workflow: "w1", event: "check_run.completed" },
     });
     expect(stdout()).toContain("Trigger registered");
+  });
+
+  it("register prints the server's refusal and exits non-zero when no GitHub App is configured (#1864)", async () => {
+    // Before #1864 the server stored this trigger and it never fired; now it
+    // refuses with 409. The operator has to see why, in the server's words.
+    const notConfigured =
+      "GitHub App not configured. Set SYN_GITHUB_APP_ID and either " +
+      "SYN_GITHUB_APP_PRIVATE_KEY_FILE or SYN_GITHUB_PRIVATE_KEY.";
+    mockFetch.mockResolvedValue(
+      jsonResponse({ detail: notConfigured, code: "github_not_configured" }, 409),
+    );
+    const handler = triggersGroup.getCommand("register")!.handler;
+
+    const refused = await handler({
+      positionals: [],
+      values: { repo: "org/repo", workflow: "w1", event: "check_run.completed" },
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(refused).toBeInstanceOf(CLIError);
+    expect((refused as CLIError).message).toContain(notConfigured);
+    expect((refused as CLIError).exitCode).not.toBe(0);
+    expect(stdout()).not.toContain("Trigger registered");
   });
 
   it("register names the deployment the trigger will fire workflows on (issue #1264)", async () => {
@@ -137,6 +163,81 @@ describe("triggers commands", () => {
     );
     await triggersGroup.getCommand("list")!.handler({ positionals: [], values: {} });
     expect(stdout()).toContain("trig-1");
+  });
+
+  function stderr(): string {
+    return (process.stderr.write as ReturnType<typeof vi.fn>).mock.calls
+      .map((c: unknown[]) => String(c[0]))
+      .join("");
+  }
+
+  // Typed by the generated schema, so a renamed API field fails to compile.
+  const unableToFire: components["schemas"]["TriggerSummary"] = {
+    trigger_id: "trig-dead",
+    name: "dead",
+    event: "push",
+    repository: "acme/widgets",
+    workflow_id: "w1",
+    workflow_name: "Build",
+    status: "active",
+    fire_count: 0,
+    created_at: "2026-11-01T00:00:00Z",
+    unable_to_fire_reason: "no GitHub installation: install the GitHub App on acme/widgets",
+  };
+
+  const canFire: components["schemas"]["TriggerSummary"] = {
+    trigger_id: "trig-live",
+    name: "live",
+    event: "push",
+    repository: "acme/gadgets",
+    workflow_id: "w1",
+    workflow_name: "Build",
+    status: "active",
+    fire_count: 2,
+    created_at: "2026-11-01T00:00:00Z",
+    unable_to_fire_reason: null,
+  };
+
+  // A rule stored before #2201 refused it: no installation recorded.
+  const unableToFireDetail: components["schemas"]["TriggerDetail"] = {
+    ...unableToFire,
+    conditions: [],
+    installation_id: "",
+    created_by: "cli",
+  };
+
+  const canFireDetail: components["schemas"]["TriggerDetail"] = {
+    ...canFire,
+    conditions: [],
+    installation_id: "12345",
+    created_by: "cli",
+  };
+
+  it("list flags a trigger that is unable to fire, with the server's reason (#2202)", async () => {
+    const listResponse: components["schemas"]["TriggerListResponse"] = {
+      triggers: [unableToFire, canFire],
+      total: 2,
+    };
+    mockFetch.mockResolvedValue(jsonResponse(listResponse));
+    await triggersGroup.getCommand("list")!.handler({ positionals: [], values: {} });
+    expect(stdout()).toContain("unable to fire");
+    const warnings = stderr();
+    expect(warnings).toContain("trig-dead");
+    expect(warnings).toContain("install the GitHub App on acme/widgets");
+    expect(warnings).not.toContain("trig-live");
+  });
+
+  it("show prints why a trigger is unable to fire (#2202)", async () => {
+    mockFetch.mockResolvedValue(jsonResponse(unableToFireDetail));
+    await triggersGroup.getCommand("show")!.handler({ positionals: ["trig-dead"], values: {} });
+    expect(stdout()).toContain("Unable to fire:");
+    expect(stdout()).toContain("install the GitHub App on acme/widgets");
+  });
+
+  it("show prints no unable-to-fire line for a trigger that can fire", async () => {
+    mockFetch.mockResolvedValue(jsonResponse(canFireDetail));
+    await triggersGroup.getCommand("show")!.handler({ positionals: ["trig-live"], values: {} });
+    expect(stdout()).not.toContain("Unable to fire");
   });
 
   it("show displays trigger details", async () => {

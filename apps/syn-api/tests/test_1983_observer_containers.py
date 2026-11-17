@@ -1,11 +1,13 @@
 """#1983, first live pass: node-exporter's ``/`` bind held every workspace.
 
-A container binding an ancestor of the workspace base reaches every
-workspace, and it keeps blocking reclaim whether its bind is read-only or not:
-read-only does not mean unused, and ``RW: false`` alone does not keep
-submounts read-only. The one exemption is EXPLICIT: a container the operator
-lists in ``SYN_DISK_RECLAIM_OBSERVER_CONTAINERS`` is skipped only while its own
-inspect shows every observer condition, re-read on every pass.
+Since #2215 a bind of the workspace base or of an ancestor of it (``/``) does
+not block at all: the owner being terminal and settled is the proof. What
+still blocks is a bind of a workspace directory itself or of a path inside it,
+read-only or not: read-only does not mean unused, and ``RW: false`` alone does
+not keep submounts read-only. The one exemption from that is EXPLICIT: a
+container the operator lists in ``SYN_DISK_RECLAIM_OBSERVER_CONTAINERS`` is
+skipped only while its own inspect shows every observer condition, re-read on
+every pass. So every observer here binds the directory itself.
 
 Every case runs through the real ``docker inspect`` parser and
 ``list_containers`` with docker's document shape (verified against Engine
@@ -42,7 +44,7 @@ _ID = "5c0ffee1234567890abcdef0"
 class _Mount:
     """One ``Mounts`` record as docker writes it. ``rw`` is written verbatim, or omitted."""
 
-    source: str = "/"
+    source: str = f"{HOST_BASE}/ws-observed"
     destination: str = "/host"
     rw: object = False
     propagation: str | None = "rprivate"
@@ -67,7 +69,7 @@ _FORCED = ("/host", '{"Propagation": "rprivate", "ReadOnlyForceRecursive": true}
 
 @dataclass(frozen=True)
 class _Container:
-    """One ``docker inspect`` document; defaults are the VPS node-exporter shape."""
+    """One ``docker inspect`` document; defaults are a pure observer of the directory."""
 
     name: str = _NODE_EXPORTER
     mounts: tuple[_Mount, ...] = (_Mount(),)
@@ -179,12 +181,32 @@ async def test_the_same_shape_unlisted_blocks_and_names_the_container(
     assert (base / "ws-observed").exists()
 
 
-async def test_an_active_read_only_reader_of_the_base_that_is_not_listed_blocks(
+@pytest.mark.parametrize(
+    "mount",
+    [
+        _Mount(source="/", propagation="rslave"),
+        _Mount(source=HOST_BASE, destination="/workspaces", rw=True),
+        _Mount(source=HOST_BASE, destination="/workspaces"),
+    ],
+    ids=["vps-node-exporter-root-rslave", "executor-base-rw", "guard-base-ro"],
+)
+async def test_an_unlisted_bind_of_the_base_or_an_ancestor_does_not_block(
+    base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mount: _Mount
+) -> None:
+    """#2215: the three VPS shapes, through the real parser, unlisted and unsafe as observers."""
+    container = _Container(name="platform", mounts=(mount,), host_mounts=())
+    result = await _pass(base, tmp_path, monkeypatch, container, listed=frozenset())
+    assert result.reclaimed == ("ws-observed",)
+    assert not (base / "ws-observed").exists()
+
+
+async def test_an_active_read_only_reader_of_the_dir_that_is_not_listed_blocks(
     base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Codex r1: read-only does not mean unused; a terminal owner proves nothing about it."""
     reader = _Container(
-        name="report-builder", mounts=(_Mount(source=HOST_BASE, destination="/in"),)
+        name="report-builder",
+        mounts=(_Mount(source=f"{HOST_BASE}/ws-observed/repos", destination="/in"),),
     )
     result = await _pass(base, tmp_path, monkeypatch, reader, listed=_LISTED)
     assert _reason(result, "ws-observed") is RetainedReason.MOUNTED

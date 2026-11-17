@@ -16,6 +16,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
     ClaudePluginError,
     ClaudePluginInvalidName,
     ClaudePluginInvalidPath,
+    ClaudePluginLockedHashMismatch,
     ClaudePluginManifestInvalid,
     ClaudePluginManifestMissing,
     ClaudePluginNotRegistered,
@@ -32,6 +33,7 @@ from syn_domain.contexts.orchestration._shared.command_phase import (
     InconsistentPhaseKindError,
     PhaseKind,
 )
+from syn_domain.contexts.orchestration._shared.content_pin import content_pin_is_satisfied
 from syn_domain.contexts.orchestration._shared.eval_admission import (
     EvalUnavailableError,
     launch_eval_for,
@@ -64,6 +66,7 @@ from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
 from syn_domain.contexts.orchestration._shared.skill_errors import (
     SkillError,
     SkillInvalidName,
+    SkillLockedHashMismatch,
     SkillNotRegistered,
 )
 from syn_domain.contexts.orchestration._shared.skill_ref import (
@@ -263,6 +266,9 @@ from syn_domain.contexts.orchestration.domain.read_models.phase_progress import 
 from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
     DefinitionChangeKind,
 )
+from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
+    PhaseExecutionDetail,
+)
 from syn_domain.contexts.orchestration.slices.archive_eval.ArchiveEvalHandler import (
     ArchiveEvalHandler,
 )
@@ -338,6 +344,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     inherited_outputs,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
+    SalvagedPhase,
     salvage_stranded_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
@@ -355,6 +362,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt 
 from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
     ExecutionCostQueryService,
 )
+from syn_domain.contexts.orchestration.slices.failure_streak import TriggerDispatchStreakCheck
 from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
     GlobalClaudePluginEntry,
     GlobalClaudePluginNotFoundError,
@@ -469,6 +477,7 @@ __all__ = [
     "ClaudePluginError",
     "ClaudePluginInvalidName",
     "ClaudePluginInvalidPath",
+    "ClaudePluginLockedHashMismatch",
     "ClaudePluginManifestInvalid",
     "ClaudePluginManifestMissing",
     "ClaudePluginNotFoundError",
@@ -555,6 +564,7 @@ __all__ = [
     "OwnerExecution",
     "Percentiles",
     "PhaseDefinition",
+    "PhaseExecutionDetail",
     "PhaseExecutionType",
     "PhaseKind",
     "PhaseProfileQueryService",
@@ -591,6 +601,7 @@ __all__ = [
     "Retained",
     "RetainedReason",
     "ReviewVerdict",
+    "SalvagedPhase",
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
     "SetWorkflowDefaultEvalHandler",
@@ -604,6 +615,7 @@ __all__ = [
     "SidecarConfig",
     "SkillError",
     "SkillInvalidName",
+    "SkillLockedHashMismatch",
     "SkillNotRegistered",
     "SkillRef",
     "StaleWorkspaceDir",
@@ -618,6 +630,7 @@ __all__ = [
     "TokenAccumulator",
     "TrialExclusion",
     "TrialOutcome",
+    "TriggerDispatchStreakCheck",
     "UnsupportedExecutionTypeError",
     "UnsupportedToolPolicyForProviderError",
     "UpdateEvalHandler",
@@ -652,6 +665,7 @@ __all__ = [
     "build_command_from_definition",
     "classify_trial",
     "compare_pair",
+    "content_pin_is_satisfied",
     "created_pull_requests",
     "declared_model_tags",
     "declared_models_of",

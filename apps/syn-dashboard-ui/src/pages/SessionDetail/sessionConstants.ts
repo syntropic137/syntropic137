@@ -76,7 +76,7 @@ export const operationColors: Record<string, string> = {
 }
 
 // Keep the keys in sync with TranscriptEventType in the API
-// (apps/syn-api/src/syn_api/routes/conversations.py).
+// (packages/syn-adapters/src/syn_adapters/conversations/conversation_log_reader.py).
 export const conversationEventColors: Record<string, string> = {
   system: 'text-gray-400 bg-gray-500/10',
   assistant: 'text-blue-400 bg-blue-500/10',

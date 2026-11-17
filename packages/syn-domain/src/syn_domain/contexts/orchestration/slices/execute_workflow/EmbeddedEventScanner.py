@@ -19,7 +19,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_push import
     observe_push,
     push_operation,
 )
-from syn_shared.events import VALID_EVENT_TYPES
+from syn_shared.events import GIT_HOOK_EVENT_TYPES
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
@@ -54,7 +54,7 @@ class EmbeddedEventScanner:
         self._on_push = on_push
 
     async def scan_and_record(self, tool_content: str, tool_name: str) -> None:
-        """Scan tool output for embedded JSONL and record valid events."""
+        """Scan tool output for embedded JSONL and record the git hook events in it."""
         lines = tool_content.splitlines()
         for index, tl in enumerate(lines):
             tl = tl.strip()
@@ -64,8 +64,8 @@ class EmbeddedEventScanner:
             if not embedded:
                 continue
             et = embedded.get("event_type")
-            if et not in VALID_EVENT_TYPES:
-                logger.debug("Unknown event_type in tool output: %s", et)
+            if et not in GIT_HOOK_EVENT_TYPES:
+                logger.debug("Ignoring non-hook event_type in tool output: %s", et)
                 continue
             enriched = enrich_event(
                 embedded,

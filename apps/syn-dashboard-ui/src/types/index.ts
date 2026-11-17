@@ -389,6 +389,10 @@ export interface ExecutionListItem {
   /** Full GitHub URLs of repositories cloned for this execution (ADR-058) */
   repos: string[]
   repos_display: string | null
+  /** What this run was asked to do, in full; null when it was asked nothing (#1075). */
+  task: string | null
+  /** `task` as one server-made line (at most 80 chars, ellipsised); what a row shows. */
+  task_display: string | null
   /** The eval this run is a current data point of, with its verdict; null in none. */
   eval: components['schemas']['ExecutionEvalRunResponse'] | null
   /** Set exactly when `status` is `queued`: where the start waits, and why (PC-124). */
@@ -451,6 +455,10 @@ export interface PhaseExecutionDetail {
   model_display: string
   /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
   cost_by_model: Record<string, string>
+  /** Models the phase ran that nothing priced, so absent from cost_by_model (#1743). */
+  unpriced_models?: string[]
+  /** What to show in place of a cost for each of unpriced_models. Render verbatim. */
+  unpriced_model_cost_display?: string
   /**
    * The tools, skills and model this phase had when its execution STARTED,
    * read from the run's own start event (#1454) - never the current template.
@@ -809,5 +817,5 @@ export interface CostSummary {
   total_tokens: number
   total_tool_calls: number
   top_models: Array<{ model: string; cost_usd: string }>
-  top_sessions: Array<{ session_id: string; cost_usd: string; tokens: number }>
+  top_sessions: Array<{ session_id: string; total_cost_usd: string; total_tokens: number }>
 }

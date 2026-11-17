@@ -62,6 +62,7 @@ def test_unparseable_input_yields_no_repo_rather_than_a_wrong_one() -> None:
     """A half-parsed name would be looked up and 404, which is worse than not asking."""
     assert repo_full_names([]) == []
     assert repo_full_names(["", "not-a-repo", "https://github.com/"]) == []
+    assert repo_full_names(["not:a-repo", "C:\\Users\\acme\\widgets"]) == []
 
 
 @pytest.mark.unit

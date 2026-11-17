@@ -14,6 +14,7 @@ import pytest
 if TYPE_CHECKING:
     from event_sourcing.core.historical_poller import CursorData
 
+from syn_adapters.repo_names import OrganizationRepoNames
 from syn_domain.contexts.github._shared.trigger_query_store import InMemoryTriggerQueryStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import TriggerConfig
 from syn_domain.contexts.github.services import (
@@ -122,6 +123,7 @@ def _make_poller(
         repo_service=repo_service,
         health_tracker=tracker,
         trigger_store=store,
+        repo_names=OrganizationRepoNames(),
         settings=MockPollingSettings(),  # type: ignore[arg-type]
         sleep=_instant_sleep,
     )
@@ -399,6 +401,7 @@ class TestPollIntervalHintHonored:
             repo_service=repo_service,
             health_tracker=tracker,
             trigger_store=store,
+            repo_names=OrganizationRepoNames(),
             settings=MockPollingSettings(),  # type: ignore[arg-type]
             sleep=_recording_sleep,
         )

@@ -116,7 +116,11 @@ async def _create_workflow() -> str:
     from syn_api.types import Ok
 
     result = await create_workflow(
-        name="Eval workflow", workflow_type="research", requires_repos=False
+        name="Eval workflow",
+        workflow_type="research",
+        requires_repos=False,
+        # An agent phase needs a prompt or execute refuses it (#963).
+        phases=[{"name": "Research", "prompt_template": "Summarise the repository."}],
     )
     assert isinstance(result, Ok)
     return result.value.workflow_id

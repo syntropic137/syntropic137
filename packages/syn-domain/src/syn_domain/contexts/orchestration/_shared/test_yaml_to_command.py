@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -36,7 +37,7 @@ def _minimal_definition(**overrides: object) -> WorkflowDefinition:
     data: Mapping[str, object] = {
         "id": "wf-1",
         "name": "Test",
-        "phases": [{"id": "p-1", "name": "Phase 1", "order": 1}],
+        "phases": [{"id": "p-1", "name": "Phase 1", "order": 1, "prompt_template": "Do the work."}],
         **overrides,
     }
     return WorkflowDefinition.model_validate(data)
@@ -68,9 +69,15 @@ class TestBuildCommandFromDefinition:
         # require -R at runtime. Research/no-repo workflows must opt out.
         assert cmd.requires_repos is True
 
-    def test_unknown_type_falls_back_to_custom(self) -> None:
-        definition = _minimal_definition(type="not-a-real-type")
-        cmd = build_command_from_definition(definition)
+    def test_unknown_type_is_refused_not_stored_as_custom(self) -> None:
+        # It used to fall back to CUSTOM here, silently (#2290).
+        with pytest.raises(ValidationError) as excinfo:
+            _minimal_definition(type="analysis")
+        [error] = excinfo.value.errors()
+        assert error["loc"] == ("type",)
+
+    def test_absent_type_is_custom(self) -> None:
+        cmd = build_command_from_definition(_minimal_definition())
         assert cmd.workflow_type == WorkflowType.CUSTOM
 
     def test_overrides_apply_over_yaml_identity(self) -> None:
@@ -161,3 +168,29 @@ class TestInferRequiresRepos:
             repository={"url": "https://github.com/test/repo", "ref": "main"},
         )
         assert infer_requires_repos(definition) is True
+
+    # The CLI mirrors this exact table in resolver.test.ts
+    # ("requires_repos coercion parity"). Change both or neither (#1050).
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("false", False),
+            ("0", False),
+            ("no", False),
+            ("off", False),
+            ("FALSE", False),
+            (0, False),
+            ("true", True),
+            ("1", True),
+            ("yes", True),
+            ("on", True),
+            (1, True),
+        ],
+    )
+    def test_coerced_values_match_cli(self, raw: object, expected: bool) -> None:
+        assert infer_requires_repos(_minimal_definition(requires_repos=raw)) is expected
+
+    @pytest.mark.parametrize("raw", ["", "maybe", 2, [], {}])
+    def test_rejected_values_match_cli(self, raw: object) -> None:
+        with pytest.raises(ValidationError):
+            _minimal_definition(requires_repos=raw)

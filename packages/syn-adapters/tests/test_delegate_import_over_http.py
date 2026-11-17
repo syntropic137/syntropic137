@@ -19,6 +19,7 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+from syn_adapters.session_store import StoredTranscriptUsageReader
 from syn_adapters.session_store.http_store import HttpSessionStore
 from syn_domain.contexts.agent_sessions.delegate_import import import_phase_delegates
 
@@ -80,6 +81,7 @@ async def test_a_delegate_is_priced_from_a_record_the_store_really_serves() -> N
     result = await import_phase_delegates(
         _serving({DELEGATE: claude}),
         recorder,
+        reader=StoredTranscriptUsageReader(),
         leader_native_session_id=LEADER,
         captured_session_ids=[LEADER, DELEGATE],
         execution_id="exec-http",
@@ -120,6 +122,7 @@ async def test_the_leader_is_never_fetched_even_when_the_store_has_it() -> None:
     await import_phase_delegates(
         store,
         _Recorder(),
+        reader=StoredTranscriptUsageReader(),
         leader_native_session_id=LEADER,
         captured_session_ids=[LEADER, DELEGATE],
         execution_id="exec-http",
@@ -138,6 +141,7 @@ async def test_a_store_that_does_not_have_it_yet_becomes_a_named_gap() -> None:
     await import_phase_delegates(
         _serving({}),
         recorder,
+        reader=StoredTranscriptUsageReader(),
         leader_native_session_id=LEADER,
         captured_session_ids=[LEADER, DELEGATE],
         execution_id="exec-http",
@@ -173,6 +177,7 @@ async def test_a_server_fault_is_reported_differently_from_an_absence() -> None:
     await import_phase_delegates(
         store,
         recorder,
+        reader=StoredTranscriptUsageReader(),
         leader_native_session_id=LEADER,
         captured_session_ids=[LEADER, DELEGATE],
         execution_id="exec-http",
@@ -220,6 +225,7 @@ async def test_qualified_import_prices_native_fixture_and_rejects_misrouted_body
         result = await import_phase_delegates(
             store,
             recorder,
+            reader=StoredTranscriptUsageReader(),
             leader_native_session_id=LEADER,
             captured_session_ids=(LEADER, DELEGATE),
             execution_id="qualified-execution",

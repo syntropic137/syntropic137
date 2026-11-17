@@ -17,6 +17,7 @@ from syn_domain.contexts.agent_sessions import InventoryReconciliationSweepEvent
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     RemoteBranchReading,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_names import NOT_A_BRANCH
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     CancelExecutionCommand,
     FailExecutionCommand,
@@ -83,14 +84,22 @@ class _Commenter:
 @dataclass
 class _Forge:
     open_pr: int | None = None
+    reads: list[str] = field(default_factory=list)
 
     async def read_branch(self, repository: str, branch: str) -> RemoteBranchReading:
+        self.reads.append(branch)
         return RemoteBranchReading(
             repository=repository, branch=branch, readable=True, open_pull_request=self.open_pr
         )
 
 
-def _failed(*, commit: str = SHA, pull_request: int | None = 42, nonce: int = 1) -> EventEnvelope:
+def _failed(
+    *,
+    commit: str = SHA,
+    pull_request: int | None = 42,
+    nonce: int = 1,
+    branch: str = "feat/thing",
+) -> EventEnvelope:
     """The event as the aggregate builds it, so a hop that drops the refs fails here."""
     command = FailExecutionCommand(
         execution_id="exec-q1",
@@ -103,7 +112,7 @@ def _failed(*, commit: str = SHA, pull_request: int | None = 42, nonce: int = 1)
         quarantined=(
             QuarantinedRef(
                 repository="acme/widget",
-                branch="feat/thing",
+                branch=branch,
                 ref=REF,
                 commit=commit,
                 commit_count=2,
@@ -182,6 +191,21 @@ async def test_with_no_pr_yet_it_posts_once_one_opens() -> None:
     forge.open_pr = 42
     assert await manager.process_pending() == 1
     assert commenter.posts == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stand_in", sorted(NOT_A_BRANCH))
+async def test_a_stand_in_branch_is_never_looked_up(stand_in: str) -> None:
+    # #1870: the stand-in is persisted on the event where a branch goes. Asked
+    # for, GitHub 404'd on every clock tick; a forge that WOULD answer with a PR
+    # proves the lookup is skipped, not merely unanswered.
+    forge = _Forge(open_pr=42)
+    manager, commenter = _manager(forge)
+    await manager.handle_event(_failed(pull_request=None, branch=stand_in), MemoryCheckpointStore())
+    for _ in range(3):
+        assert await manager.process_pending() == 0
+    assert forge.reads == []
+    assert commenter.posts == 0
 
 
 @pytest.mark.asyncio

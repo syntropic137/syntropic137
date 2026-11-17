@@ -10,6 +10,7 @@ from datetime import datetime
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
     ReportedFailureReason,
+    ReviewVerdict,
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
 from syn_domain.contexts.orchestration.domain.read_models.resume_lineage import ResumedFrom
@@ -100,6 +101,14 @@ class WorkflowExecutionSummary:
     it.
     """
 
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported, recorded on completion (PC-63).
+
+    The same value the detail carries, from the same `WorkflowCompleted`, so a
+    list can be filtered on it (#1630). None for a run that reviewed nothing,
+    one that has not completed, and every completion predating the field.
+    """
+
     repos: tuple[str, ...] = field(default_factory=tuple)
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
 
@@ -124,6 +133,14 @@ class WorkflowExecutionSummary:
 
     resumed_as: str | None = None
     """The execution that resumed this one, if any. At most one (#1881)."""
+
+    task: str | None = None
+    """What this run was asked to do (#1075), or ``None`` if it was asked nothing.
+
+    The same value the detail derives, by the same ``dispatched_task``, from
+    the same ``WorkflowExecutionStarted`` inputs. Only the task is kept: the
+    list carries no ``inputs``, which are author-controlled and unbounded.
+    """
 
     @property
     def phase_progress(self) -> PhaseProgress:
@@ -173,6 +190,7 @@ class WorkflowExecutionSummary:
             reported_failure_reason=ReportedFailureReason.from_stored(
                 data.get("reported_failure_reason")
             ),
+            review_verdict=ReviewVerdict.from_stored(data.get("review_verdict")),
             repos=tuple(data.get("repos", [])),
             tags=tuple(data.get("tags") or ()),
             inherited_tags=tuple(data.get("inherited_tags") or ()),
@@ -181,6 +199,7 @@ class WorkflowExecutionSummary:
             workflow_version=data.get("workflow_version"),
             resumed_from=ResumedFrom.from_stored(data.get("resumed_from")),
             resumed_as=data.get("resumed_as"),
+            task=data.get("task"),
         )
 
     @staticmethod
@@ -216,6 +235,7 @@ class WorkflowExecutionSummary:
             "reported_failure_reason": (
                 None if self.reported_failure_reason is None else self.reported_failure_reason.value
             ),
+            "review_verdict": None if self.review_verdict is None else self.review_verdict.value,
             "repos": list(self.repos),
             "tags": list(self.tags),
             "inherited_tags": list(self.inherited_tags),
@@ -224,4 +244,5 @@ class WorkflowExecutionSummary:
             "workflow_version": self.workflow_version,
             "resumed_from": None if self.resumed_from is None else self.resumed_from.to_stored(),
             "resumed_as": self.resumed_as,
+            "task": self.task,
         }

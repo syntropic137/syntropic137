@@ -20,6 +20,7 @@ from decimal import Decimal
 import pytest
 
 from syn_adapters.import_ledger import InMemoryImportLedger
+from syn_adapters.session_store import StoredTranscriptUsageReader
 from syn_domain.contexts.agent_sessions import import_phase_delegates
 from syn_domain.contexts.agent_sessions.delegate_import import DelegateImport
 from syn_domain.contexts.agent_sessions.delegate_usage import StoredSession
@@ -106,6 +107,7 @@ async def _import(
     await import_phase_delegates(
         store,
         recorder,
+        reader=StoredTranscriptUsageReader(),
         leader_native_session_id=LEADER,
         captured_session_ids=[LEADER, DELEGATE],
         execution_id="exec-1",
@@ -207,6 +209,7 @@ class TestTheSameDelegateIsBilledOncePerExecution:
             await import_phase_delegates(
                 store,
                 recorder,
+                reader=StoredTranscriptUsageReader(),
                 leader_native_session_id=LEADER,
                 captured_session_ids=[LEADER, DELEGATE],
                 execution_id="exec-1",
@@ -468,6 +471,7 @@ class TestTheDeferredCrashWindowStaysNarrow:
             await pdi.import_delegates_for_phase(
                 _Capture(),
                 session_store=object(),
+                transcript_reader=StoredTranscriptUsageReader(),
                 writer=object(),
                 leader_native_session_id=LEADER,
                 phase_id="phase-1",
@@ -519,6 +523,7 @@ class TestAFailedImportKeepsTheLeaderIdentity:
                 object(),
                 _Workspace(),
                 session_store=object(),
+                transcript_reader=StoredTranscriptUsageReader(),
                 writer=object(),
                 leader_native_ids=leader_ids,
                 session_id="sess-1",

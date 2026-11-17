@@ -65,7 +65,9 @@ export function SessionHeader({
                   {session.workflow_name ? `Workflow: ${session.workflow_name}` : `wf:${session.workflow_id.slice(0, 8)}`}
                 </Link>
               )}
-              {session.phase_id && <span>Phase: {session.phase_id}</span>}
+              {session.phase_id && (
+                <span title={session.phase_id}>Phase: {session.phase_display || session.phase_id}</span>
+              )}
             </div>
             <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
               <AgentProviderBadge provider={session.agent_provider} />

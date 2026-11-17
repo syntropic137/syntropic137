@@ -91,7 +91,7 @@ def _pids_yaml(pids_limit: int) -> WorkflowDefinition:
 
 
 async def test_yaml_install_refuses_a_pids_request_above_the_ceiling() -> None:
-    """2048 under the unset SYN_WORKSPACE_PIDS_MAX (= the 256 default)."""
+    """2048 under the unset SYN_WORKSPACE_PIDS_MAX (= 1024)."""
     repository = InMemoryWorkflowRepository()
 
     with pytest.raises(WorkspacePidsOverCapError, match="build"):

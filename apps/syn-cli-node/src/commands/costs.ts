@@ -39,14 +39,14 @@ const summaryCommand: CommandDef = {
       table.print();
     }
 
-    const topSessions = (d.top_sessions ?? []) as Record<string, string>[];
+    const topSessions = d.top_sessions ?? [];
     if (topSessions.length > 0) {
       const table = new Table({ title: "Top Sessions" });
       table.addColumn("Session", { style: DIM });
       table.addColumn("Cost", { align: "right" });
       for (const e of topSessions) {
-        const sid = e["session_id"] ?? "unknown";
-        table.addRow(sid.length > 12 ? sid.slice(0, 12) + "..." : sid, e["cost"] ?? "$0");
+        const sid = e.session_id;
+        table.addRow(sid.length > 12 ? sid.slice(0, 12) + "..." : sid, formatCost(e.total_cost_usd));
       }
       table.print();
     }
@@ -175,7 +175,11 @@ const executionDetailCommand: CommandDef = {
     print(`  ${style("Started:", BOLD)} ${formatTimestamp(e.started_at)}`);
 
     if (e.cost_by_phase && Object.keys(e.cost_by_phase).length > 0) print(formatBreakdown(e.cost_by_phase, "Cost by Phase", safeCost));
-    if (e.cost_by_model && Object.keys(e.cost_by_model).length > 0) print(formatBreakdown(e.cost_by_model, "Cost by Model", safeCost, formatCostModelKey));
+    // A model that ran with no rate is listed by the backend's display text,
+    // never as $0, beside the priced split (#1743).
+    const unpriced = Object.fromEntries((e.unpriced_models ?? []).map((m) => [m, e.unpriced_model_cost_display]));
+    const byModel = { ...Object.fromEntries(Object.entries(e.cost_by_model ?? {}).map(([k, v]) => [k, safeCost(v)])), ...unpriced };
+    if (Object.keys(byModel).length > 0) print(formatBreakdown(byModel, "Cost by Model", undefined, formatCostModelKey));
     if (e.cost_by_tool && Object.keys(e.cost_by_tool).length > 0) print(formatBreakdown(e.cost_by_tool, "Cost by Tool", safeCost));
   },
 };

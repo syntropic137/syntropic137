@@ -133,6 +133,14 @@ class ExecutionCost:
     which is the number that decides whether more fan-out is affordable.
     """
 
+    observed_models_by_phase: dict[str, list[str]] = field(default_factory=dict)
+    """Every reported model each phase ran, sorted, priced or not (#1743).
+
+    ``models_by_phase`` decomposes money, so it can only name a model that
+    priced. A delegate whose model has no rate still ran, and this is where it
+    is named - never as a $0 entry in the cost split.
+    """
+
     unpriced_by_phase: dict[str, int] = field(default_factory=dict)
     """Per-phase count of observations that could not be priced.
 
@@ -243,6 +251,10 @@ class ExecutionCost:
                 phase: _coerce_decimal_dict(models)
                 for phase, models in (data.get("models_by_phase") or {}).items()
             },
+            observed_models_by_phase={
+                phase: list(models)
+                for phase, models in (data.get("observed_models_by_phase") or {}).items()
+            },
             unpriced_by_phase=dict(data.get("unpriced_by_phase") or {}),
             cost_by_model=_coerce_decimal_dict(data.get("cost_by_model")),
             cost_by_tool=_coerce_decimal_dict(data.get("cost_by_tool")),
@@ -274,6 +286,9 @@ class ExecutionCost:
             "models_by_phase": {
                 phase: {m: str(c) for m, c in models.items()}
                 for phase, models in self.models_by_phase.items()
+            },
+            "observed_models_by_phase": {
+                phase: list(models) for phase, models in self.observed_models_by_phase.items()
             },
             "unpriced_by_phase": dict(self.unpriced_by_phase),
             "cost_by_model": {k: str(v) for k, v in self.cost_by_model.items()},

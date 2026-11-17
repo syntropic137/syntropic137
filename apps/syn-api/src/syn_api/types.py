@@ -302,6 +302,9 @@ class TriggerError(StrEnum):
     ALREADY_DELETED = "already_deleted"
     PRESET_NOT_FOUND = "preset_not_found"
     WORKFLOW_NOT_FOUND = "workflow_not_found"
+    WORKFLOW_AMBIGUOUS = "workflow_ambiguous"
+    """The workflow ID is a prefix of more than one workflow (#642). Refused
+    rather than guessed at: the trigger would fire the wrong one later."""
     STORE_UNAVAILABLE = "store_unavailable"
     """The event store could not be read, so existence is UNKNOWN.
 
@@ -310,6 +313,31 @@ class TriggerError(StrEnum):
     workflow does not exist" - a confident wrong answer a caller would act on.
     The store now raises instead, and this code carries the difference through
     to the caller rather than collapsing it back into not-found."""
+    GITHUB_NOT_CONFIGURED = "github_not_configured"
+    """No GitHub App on this server, so a trigger on a repository could never
+    fire. Registration is refused rather than stored silently dead (#1864)."""
+    NO_INSTALLATION = "no_installation"
+    """The GitHub App is configured but no installation covers the repository
+    (#1864). Same consequence as GITHUB_NOT_CONFIGURED; a different fix."""
+    REPOSITORY_UNRESOLVED = "repository_unresolved"
+    """The repository is neither a known `repo-*` ID nor `owner/name`, so no
+    installation can even be looked up for it (#1864)."""
+    GITHUB_UNAVAILABLE = "github_unavailable"
+    """GitHub could not be asked which installation covers the repository
+    (outage, rate limit). Transient: the same request may succeed later."""
+
+
+class TriggerErrorResponse(BaseModel):
+    """Why a trigger was not created. Nothing is stored when this is returned.
+
+    `detail` stays a plain string, as FastAPI's own errors are, so every client
+    that prints `detail` prints the server's words (#1864).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    detail: str = Field(description="Human-readable reason, with the next step.")
+    code: TriggerError = Field(description="Machine-readable reason.")
 
 
 class OrganizationError(StrEnum):
@@ -496,28 +524,6 @@ class UpdateTriggerRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Response models — Pydantic schemas for API consumers
 # ---------------------------------------------------------------------------
-
-
-class WorkflowSummary(BaseModel):
-    """Summary of a workflow template for list views."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    name: str
-    workflow_type: str
-    classification: str
-    phase_count: int
-    description: str | None = None
-    created_at: datetime | None = None
-    runs_count: int = 0
-    is_archived: bool = False
-    requires_repos: bool = True
-    tags: list[str] = Field(default_factory=list)
-    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
-    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
-    skills: list[DeclaredSkillResponse] = Field(default_factory=list)
-    """Every distinct skill the workflow's phases declare, first-declared first."""
 
 
 class InputDeclarationResponse(BaseModel):
@@ -834,6 +840,9 @@ class ExecutionSummary(BaseModel):
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63), as on `ExecutionDetail`.
+    On the summary so a list can be filtered certified from blocked (#1630)."""
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
     tags: list[str] = Field(default_factory=list)
@@ -842,6 +851,8 @@ class ExecutionSummary(BaseModel):
     """The execution this run resumed, or None for a fresh run (#1881)."""
     resumed_as: str | None = None
     """The execution that resumed this one, or None. At most one (#1881)."""
+    task: str | None = None
+    """What this run was asked to do, or None if it was asked nothing (#1075)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -1019,6 +1030,9 @@ class ArtifactSummary(BaseModel):
     #: as filtered on, because a filter a client cannot verify is what the
     #: silent drop looked like from outside.
     execution_id: str | None = None
+    #: Which agent session produced it (#975). Reported for the same reason as
+    #: execution_id: the list filters on it, so the rows must show it.
+    session_id: str | None = None
     phase_id: str | None = None
     artifact_type: str = ""
     title: str | None = None
@@ -1863,6 +1877,7 @@ class TriggerSummary(BaseModel):
     status: str
     fire_count: int = 0
     created_at: datetime | None = None
+    unable_to_fire_reason: str | None = None
 
 
 class TriggerDetail(BaseModel):
@@ -1883,6 +1898,7 @@ class TriggerDetail(BaseModel):
     installation_id: str = ""
     created_by: str = ""
     last_fired_at: datetime | None = None
+    unable_to_fire_reason: str | None = None
 
 
 class TriggerHistoryEntry(BaseModel):
@@ -2484,6 +2500,8 @@ class PhaseExecution(BaseModel):
     ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
     fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models the phase ran that nothing priced, so absent from ``cost_by_model`` (#1743)."""
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
     the store reported them.
@@ -2692,7 +2710,7 @@ class ExecutionDetailFull(BaseModel):
 
 
 class ControlResult(BaseModel):
-    """Result of a control command (pause/resume/cancel/inject)."""
+    """Result of a control command (cancel)."""
 
     success: bool
     execution_id: str
@@ -2838,19 +2856,15 @@ class ArtifactDetail(BaseModel):
 
 
 class DashboardMetrics(BaseModel):
-    """Aggregated dashboard metrics."""
+    """The dashboard projection's counts that GET /metrics reads (#2272).
 
-    total_workflows: int = 0
-    completed_workflows: int = 0
-    failed_workflows: int = 0
-    total_sessions: int = 0
-    total_input_tokens: int = 0
-    total_output_tokens: int = 0
-    total_cache_creation_tokens: int = 0
-    total_cache_read_tokens: int = 0
-    total_tokens: int = 0
-    total_cost_usd: Decimal = Decimal("0")
-    total_artifacts: int = 0
+    Execution, session, token and cost totals come from their own read models.
+    """
+
+    total_workflows: int = Field(
+        default=0,
+        description="Workflow templates that are not archived; matches the default total of GET /workflows",
+    )
     total_artifact_bytes: int = 0
 
 
@@ -2942,6 +2956,8 @@ class ExecutionCostData(BaseModel):
     amount; a phase in neither genuinely had no spend (#890).
     """
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models the execution ran that nothing priced, so absent from ``cost_by_model`` (#1743)."""
     cost_by_tool: dict = Field(default_factory=dict)
     is_complete: bool = False
     unpriced_observation_count: int = 0
@@ -2962,6 +2978,20 @@ class ModelCostEntry(BaseModel):
     cost_usd: Decimal = Decimal("0")
 
 
+class SessionCostEntry(BaseModel):
+    """One session's share of a cost total.
+
+    Field names are the ones ``SessionCostResponse`` uses for the same values.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    session_id: str
+    total_cost_usd: Decimal = Decimal("0")
+    total_tokens: int = 0
+    """All four token components (issue #873)."""
+
+
 class CostSummary(BaseModel):
     """Overall cost summary across all executions."""
 
@@ -2972,7 +3002,12 @@ class CostSummary(BaseModel):
     """Sum of all four token components across executions (issue #873)."""
     total_tool_calls: int = 0
     top_models: list[ModelCostEntry] = Field(default_factory=list)
-    top_sessions: list[dict] = Field(default_factory=list)
+    top_sessions: list[SessionCostEntry] = Field(default_factory=list)
+    """Completed sessions with a reported cost, most expensive first (#2228).
+
+    In-progress sessions and summaries without ``total_cost_usd`` are not
+    ranked: their cost is priced from token rows, which SQL cannot order by.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -3449,6 +3484,18 @@ class DiskSpaceHealth(BaseModel):
     )
 
 
+class EventPollerHealth(BaseModel):
+    """What the GitHub Events API poller could not poll, as /health reports it (#1870)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    unresolved_triggers: int = Field(
+        description="Active triggers the last poll cycle skipped because their repository "
+        "resolves to no GitHub owner/name, e.g. a syn137 repo id with no Repo record. Each "
+        "is logged once, with its trigger id, when first seen; this is the only signal after."
+    )
+
+
 class SessionStoreHealth(BaseModel):
     """Size and growth of the host session archive, as /health reports it (#2107).
 
@@ -3586,6 +3633,11 @@ class HealthResponse(_OmitsAbsentFields):
         description="Size and growth of the session archive (#2107). Omitted when the "
         "archive directory does not exist or could not be measured, and until the "
         "first background measurement completes.",
+    )
+    event_poller: EventPollerHealth | None = Field(
+        default=None,
+        description="The GitHub Events API poller (#1870). Omitted when it is not running, "
+        "e.g. with no GitHub App configured or polling disabled.",
     )
 
 

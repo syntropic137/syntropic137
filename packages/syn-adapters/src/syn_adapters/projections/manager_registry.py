@@ -21,6 +21,7 @@ from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
+from syn_domain.contexts.orchestration.slices.failure_streak import FailureStreakProjection
 from syn_domain.contexts.orchestration.slices.get_execution_detail import (
     WorkflowExecutionDetailProjection,
 )
@@ -161,6 +162,7 @@ def build_projection_registry(store: ProjectionStoreProtocol) -> dict[str, Any]:
         "artifact_list": ArtifactListProjection(store),
         "dashboard_metrics": DashboardMetricsProjection(store),
         "workflow_phase_metrics": WorkflowPhaseMetricsProjection(store),
+        "failure_streak": FailureStreakProjection(store),
         # Observability projections (Pattern 2: Event Log + CQRS)
         "tool_timeline": ToolTimelineProjection(store),
         # Cost tracking projections (now query TimescaleDB directly)

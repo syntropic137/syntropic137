@@ -32,9 +32,11 @@ if TYPE_CHECKING:
     from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
     from syn_api.services.skill_materializer import SkillMaterializer
     from syn_api.services.skill_resolution_service import SkillResolutionService
+    from syn_domain.contexts.agent_sessions import ConversationLogReader
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
         SessionObservationPort,
     )
+    from syn_domain.contexts.github.ports import PullRequestDraftPort
     from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
@@ -75,7 +77,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.config import Settings
     from syn_shared.settings.github import GitHubAppSettings
 
-from syn_adapters.conversations import get_conversation_storage
+from syn_adapters.conversations import StoredConversationLogReader, get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
 from syn_adapters.projections.session_timeline_memory import get_in_memory_session_timeline
@@ -86,7 +88,7 @@ from syn_adapters.projections.session_timeline_memory import get_in_memory_sessi
 from syn_adapters.projections.sync import (
     sync_published_events_to_projections as sync_published_events_to_projections,
 )
-from syn_adapters.session_store import HttpSessionStore
+from syn_adapters.session_store import HttpSessionStore, StoredTranscriptUsageReader
 from syn_adapters.storage import (
     connect_event_store,
     disconnect_event_store,
@@ -139,15 +141,20 @@ def get_projection_mgr() -> ProjectionManager:
     return get_projection_manager()
 
 
-def get_artifact_query() -> ArtifactQueryService:
+async def get_artifact_query() -> ArtifactQueryService:
     """The artifact read service, on its own.
 
     Narrower than `get_execution_processor()` on purpose: a caller that only
     needs to READ artifacts - resolving a resume's inheritance before admitting it,
     for instance - should not drag the execution processor and therefore the
     observability event store into a request that writes nothing through them.
+    It does need object storage: binary files (#990) and large text (#2042)
+    are there and not in the read model, and without it a resume of a phase
+    that produced one is refused as if its artifacts were gone.
     """
-    return ArtifactQueryService(get_projection_manager().artifact_list)
+    return ArtifactQueryService(
+        get_projection_manager().artifact_list, content_storage=await get_artifact_storage()
+    )
 
 
 def _build_session_store(settings: Settings) -> HttpSessionStore | None:
@@ -308,6 +315,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         skill_materializer=skill_materializer,
         session_capture=session_capture,
         session_store=_build_session_store(_settings),
+        transcript_reader=StoredTranscriptUsageReader(),
         import_ledger=get_import_ledger(),
         # #1513: records which PR is open from each branch a failing phase
         # left, so a resume continues that PR and never one opened since.
@@ -457,6 +465,7 @@ def get_event_pipeline() -> EventPipeline:
         repository=get_trigger_repo(),
         dispatch_rate_limit=settings.polling.dispatch_rate_limit,
         dispatch_rate_window_seconds=settings.polling.dispatch_rate_window_seconds,
+        draft_reader=get_pull_request_draft_reader(),
     )
     pipeline = EventPipeline(
         dedup=dedup,
@@ -464,6 +473,14 @@ def get_event_pipeline() -> EventPipeline:
     )
     _event_pipeline_singleton = pipeline
     return pipeline
+
+
+def get_pull_request_draft_reader() -> PullRequestDraftPort:
+    """The live draft lookup ``check_run`` trigger rules are held back by (#2058)."""
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.pull_request_draft_reader import GitHubPullRequestDraftReader
+
+    return GitHubPullRequestDraftReader(get_github_client)
 
 
 def _create_dedup_adapter() -> DedupPort:
@@ -629,7 +646,7 @@ _controller_singleton: ExecutionController | None = None
 
 
 def get_controller() -> ExecutionController:
-    """Return a singleton ExecutionController for pause/resume/cancel/inject.
+    """Return a singleton ExecutionController for cancel.
 
     Returns the same instance on every call so the execution engine and API
     endpoints share the same signal queue; signals enqueued by an HTTP
@@ -820,6 +837,11 @@ async def get_conversation_store() -> MinioConversationStorage:
     return await get_conversation_storage()
 
 
+def get_conversation_log_reader() -> ConversationLogReader:
+    """Return the reader for stored conversation-log lines (#1424)."""
+    return StoredConversationLogReader()
+
+
 def get_realtime() -> RealTimeProjection:
     """Return the RealTimeProjection singleton."""
     from syn_adapters.projections.realtime import get_realtime_projection
@@ -865,6 +887,7 @@ def get_subscription_coordinator(
         pool=timescale_pool,
         budget_checker=_get_budget_checker(),
         max_dispatches_per_hour=settings.polling.max_dispatches_per_hour,
+        failure_streak_threshold=settings.polling.failure_streak_threshold,
         inventory_replication_manager=(
             None if settings.uses_in_memory_stores else get_inventory_runtime().replication
         ),

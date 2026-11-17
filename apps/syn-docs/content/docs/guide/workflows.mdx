@@ -449,8 +449,9 @@ phases:
 - Unset means the deployment default, `SYN_WORKSPACE_PIDS_LIMIT` (256). The
   minimum is 64.
 - Per phase, like memory: only this phase's workspace gets it.
-- The deployment's ceiling is `SYN_WORKSPACE_PIDS_MAX`. Unset, nothing above the
-  default is allowed. A request above the ceiling is **refused**, never clamped,
+- The deployment's ceiling is `SYN_WORKSPACE_PIDS_MAX`. Unset, it is 1024, or
+  `SYN_WORKSPACE_PIDS_LIMIT` if that is higher, so the shipped SDLC workflows'
+  gate phases (which ask for 1024) run on a default install. A request above the ceiling is **refused**, never clamped,
   at the same points as memory: install, start (422), resume (422) and
   provisioning. A build given fewer pids than it needs fails late with EAGAIN,
   which reads like a bug in the code under test.

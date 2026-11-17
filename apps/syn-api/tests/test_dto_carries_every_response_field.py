@@ -157,6 +157,7 @@ _EXECUTION = ExecutionCost(
     cost_by_model={"claude-opus-5": Decimal("2.269134")},
     cost_by_tool={"Bash": Decimal("0.1")},
     models_by_phase={"implement": {"claude-opus-5": Decimal("2.269134")}},
+    observed_models_by_phase={"implement": ["claude-opus-5", "acme-reasoner-7b"]},
     unpriced_by_phase={"implement": 3},
     unpriced_observation_count=3,
     is_complete=True,
@@ -181,6 +182,12 @@ _CHAINS: tuple[_Chain, ...] = (
         to_api=_execution_cost_to_api,
         dto=ExecutionCostData,
         response=ExecutionCostResponse,
+        exempt={
+            "unpriced_model_cost_display": (
+                "display text the response owns (#1743), a constant with no source "
+                "value for the DTO to carry"
+            ),
+        },
     ),
 )
 

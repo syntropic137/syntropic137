@@ -40,6 +40,7 @@ from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
     SessionCostProjection,
 )
+from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutReading
 from syn_domain.contexts.orchestration.slices.execute_workflow.CodexStreamProcessor import (
     CodexStreamProcessor,
 )
@@ -49,7 +50,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityColl
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_announced_model_is_not_the_requested_one import (
     CODEX_ANNOUNCED,
     REQUESTED_BY_A_CODEX_PHASE,
-    _real_rollout,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.test_codex_stream_processor import (
     _FIXTURES_DIR,
@@ -72,7 +72,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
         ObservationType,
     )
-    from syn_domain.contexts.orchestration.ports.CodexRolloutPort import RolloutDocument
 
 pytestmark = pytest.mark.unit
 
@@ -99,13 +98,13 @@ NATIVE_ID = _announced_thread_id()
 class _RolloutForTheAnnouncedThread:
     """A `CodexRolloutPort` holding one rollout, filed under `NATIVE_ID` only."""
 
-    def __init__(self, document: RolloutDocument | None) -> None:
-        self._document = document
+    def __init__(self, reading: CodexRolloutReading | None) -> None:
+        self._reading = reading
         self.asked_for: list[str] = []
 
-    async def codex_rollout(self, native_session_id: str) -> RolloutDocument | None:
+    async def codex_rollout_model(self, native_session_id: str) -> CodexRolloutReading | None:
         self.asked_for.append(native_session_id)
-        return self._document if native_session_id == NATIVE_ID else None
+        return self._reading if native_session_id == NATIVE_ID else None
 
 
 @dataclass(frozen=True)
@@ -200,7 +199,7 @@ class TestTheSessionsReadModelNamesTheModelCodexRan:
         all the way through.
         """
         projection, writer = await _run_the_recording(
-            _RolloutForTheAnnouncedThread(_real_rollout())
+            _RolloutForTheAnnouncedThread(CodexRolloutReading(model=CODEX_ANNOUNCED))
         )
 
         cost = await projection.get_session_cost(SESSION_ID)

@@ -215,6 +215,20 @@ describe('detail', () => {
     expect(costRowsByModel([phase()])).toEqual([])
   })
 
+  it('lists a model that ran unpriced with the backend text, never as $0 (#1743)', () => {
+    const phases = [
+      phase({
+        cost_by_model: { 'gpt-5.6-sol': '0.19' },
+        unpriced_models: ['acme-reasoner-7b', 'gpt-5.6-sol'],
+        unpriced_model_cost_display: 'unpriced',
+      }),
+    ]
+    expect(costRowsByModel(phases)).toEqual([
+      { label: 'gpt-5.6-sol', value: 0.19 },
+      { label: 'acme-reasoner-7b', value: null, display: 'unpriced' },
+    ])
+  })
+
   it('notes an unknown model', () => {
     expect(usageNote([phase(), phase(), phase()])).toBe('Model unknown: all three phases requested haiku, and the cost is not attributed to a model.')
     expect(usageNote([phase({ model: 'claude-haiku-4-5' })])).toBeUndefined()

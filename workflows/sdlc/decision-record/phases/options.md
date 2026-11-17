@@ -9,6 +9,12 @@ better option does not.
 
 $ARGUMENTS
 
+The task above says WHAT to decide. This phase's instructions say WHAT THIS
+PHASE PRODUCES, and where the two disagree, these instructions win. A choice, a
+recommendation or an output format the task asks for is meant for a later
+phase: record the request in your output under **Requested of later phases**,
+so those phases see it, and do not act on it here.
+
 ## Part 1: frame the problem
 
 Before any option exists, write down what a good answer must do:

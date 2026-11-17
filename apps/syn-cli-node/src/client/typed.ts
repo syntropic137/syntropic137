@@ -74,9 +74,22 @@ export function unwrap<T>(
 }
 
 /** The server's own words for an error body: FastAPI's `detail` when there is
- * one, else the body as a string. */
+ * one, else the body as a string. A request-model 422 carries `detail` as a
+ * list of validation errors; each one's `msg` is the server's sentence, where
+ * `String()` of the list printed `[object Object]` (#2290). */
 export function errorDetail(error: unknown): string {
-  return typeof error === "object" && error !== null && "detail" in error
-    ? String((error as { detail: unknown }).detail)
-    : String(error);
+  if (typeof error !== "object" || error === null || !("detail" in error)) {
+    return String(error);
+  }
+  const detail = (error as { detail: unknown }).detail;
+  if (!Array.isArray(detail)) {
+    return String(detail);
+  }
+  return detail.map(validationMessage).join("; ");
+}
+
+function validationMessage(item: unknown): string {
+  return typeof item === "object" && item !== null && "msg" in item
+    ? String((item as { msg: unknown }).msg)
+    : String(item);
 }

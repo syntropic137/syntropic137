@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     )
     from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
     from syn_adapters.control.ports import SignalQueuePort
+    from syn_adapters.conversations.conversation_log_reader import StoredConversationLogReader
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.conversations.protocol import (
         ConversationStoragePort as AdapterConversationStoragePort,
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
     from syn_adapters.github.events_api_client import GitHubEventsAPIClient
     from syn_adapters.github.pending_sha_store import InMemoryPendingSHAStore
     from syn_adapters.github.postgres_pending_sha_store import PostgresPendingSHAStore
+    from syn_adapters.github.pull_request_draft_reader import GitHubPullRequestDraftReader
     from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
     from syn_adapters.github.revision_resolver import GitHubRevisionResolver
     from syn_adapters.github.source_commit_resolver import GitHubSourceCommitResolver
@@ -63,6 +65,7 @@ if TYPE_CHECKING:
         PostgresMaintenanceAdapter,
         RedisMaintenanceAdapter,
     )
+    from syn_adapters.repo_names import OrganizationRepoNames
     from syn_adapters.session_inventory.capture_catalog import PostgresCaptureCatalog
     from syn_adapters.session_inventory.capture_delivery_worker import CaptureDeliveryWorker
     from syn_adapters.session_inventory.capture_outboxes import (
@@ -91,6 +94,10 @@ if TYPE_CHECKING:
     from syn_adapters.session_inventory.replication_worker import InventoryReplicationWorker
     from syn_adapters.session_inventory.runtime import InventoryWork
     from syn_adapters.session_inventory.sandbox_recovery import SandboxSpoolRecovery
+    from syn_adapters.session_inventory.scheduling_guard import (
+        PostgresHeldInventorySchedule,
+        PostgresInventorySchedulingGuard,
+    )
     from syn_adapters.session_inventory.spool_release import (
         CaptureSpoolRetention,
         SpoolVolumePort,
@@ -100,6 +107,7 @@ if TYPE_CHECKING:
         AgenticTranscriptConversation,
     )
     from syn_adapters.session_store.http_store import HttpSessionStore
+    from syn_adapters.session_store.transcript_usage import StoredTranscriptUsageReader
     from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
     from syn_adapters.storage.repositories import (
@@ -155,11 +163,18 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.agent_sessions.ports.BackfillReceiptPort import BackfillReceiptPort
+    from syn_domain.contexts.agent_sessions.ports.ConversationLogReaderPort import (
+        ConversationLogReader,
+    )
     from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort import (
         HistoricalEvidenceSourcePort,
     )
     from syn_domain.contexts.agent_sessions.ports.HistoryBackfillQueuePort import (
         HistoryBackfillQueuePort,
+    )
+    from syn_domain.contexts.agent_sessions.ports.InventorySchedulingGuardPort import (
+        HeldInventorySchedule,
+        InventorySchedulingGuardPort,
     )
     from syn_domain.contexts.agent_sessions.ports.NativeSessionEvidencePort import (
         NativeSessionEvidencePort,
@@ -201,6 +216,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.ports.TranscriptConversationPort import (
         TranscriptConversationPort,
     )
+    from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+        TranscriptUsageReader,
+    )
     from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.projection import (
         InventoryWorkPort,
     )
@@ -214,6 +232,8 @@ if TYPE_CHECKING:
     from syn_domain.contexts.feedback.ports import NonceLedgerPort, ScreeningPort
     from syn_domain.contexts.github.ports.ChecksApiPort import GitHubChecksAPIPort
     from syn_domain.contexts.github.ports.EventsApiPort import GitHubEventsAPIPort
+    from syn_domain.contexts.github.ports.PullRequestDraftPort import PullRequestDraftPort
+    from syn_domain.contexts.github.ports.RepoNamePort import RepoNamePort
     from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pending_sha_port import (
         PendingSHAStore,
@@ -365,6 +385,8 @@ if TYPE_CHECKING:
         query: ArtifactQueryService,
         capture: SessionCaptureService,
         session_store: HttpSessionStore,
+        transcript_usage: StoredTranscriptUsageReader,
+        conversation_log: StoredConversationLogReader,
         observations: SessionObservationPort,
         ledger: ImportLedgerPort,
     ) -> None:
@@ -379,6 +401,8 @@ if TYPE_CHECKING:
         _query: ArtifactQueryServicePort = query
         _capture: SessionCapturePort = capture
         _sessions: SessionStorePort = session_store
+        _transcript_usage: TranscriptUsageReader = transcript_usage
+        _conversation_log: ConversationLogReader = conversation_log
         _observations: SessionObservationPort = observations
         _ledger: ImportLedgerPort = ledger
 
@@ -394,7 +418,9 @@ if TYPE_CHECKING:
         memory_pending: InMemoryPendingSHAStore,
         source_commits: GitHubSourceCommitResolver,
         remote_branches: GitHubRemoteBranchReader,
+        draft_reader: GitHubPullRequestDraftReader,
         revisions: GitHubRevisionResolver,
+        repo_names: OrganizationRepoNames,
     ) -> None:
         """GitHub ingestion and execution control.
 
@@ -406,7 +432,9 @@ if TYPE_CHECKING:
         _checks: GitHubChecksAPIPort = checks_client
         _source_commits: SourceCommitResolverPort = source_commits
         _remote_branches: RemoteBranchPort = remote_branches
+        _draft_reader: PullRequestDraftPort = draft_reader
         _revisions: RevisionResolverPort = revisions
+        _repo_names: RepoNamePort = repo_names
         _redis_dedup: DedupPort = redis_dedup
         _postgres_dedup: DedupPort = postgres_dedup
         _memory_dedup: DedupPort = memory_dedup
@@ -443,6 +471,8 @@ if TYPE_CHECKING:
         evidence: PostgresSessionEvidence,
         inventory: PostgresSessionInventory,
         jobs: PostgresSessionInventoryJobs,
+        scheduling_guard: PostgresInventorySchedulingGuard,
+        held_schedule: PostgresHeldInventorySchedule,
         archive: LocalSessionTranscriptArchive,
         native: AgenticNativeSessionEvidence,
         conversation: AgenticTranscriptConversation,
@@ -475,6 +505,8 @@ if TYPE_CHECKING:
         _inventory_read: SessionInventoryReadPort = inventory
         _inventory_write: SessionInventoryWritePort = inventory
         _jobs: SessionInventoryJobPort = jobs
+        _scheduling_guard: InventorySchedulingGuardPort = scheduling_guard
+        _held_schedule: HeldInventorySchedule = held_schedule
         _archive: SessionTranscriptArchivePort = archive
         _native: NativeSessionEvidencePort = native
         _conversation: TranscriptConversationPort = conversation

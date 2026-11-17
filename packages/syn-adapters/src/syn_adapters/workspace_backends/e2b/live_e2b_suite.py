@@ -123,7 +123,7 @@ async def test_an_agent_launches_on_real_e2b(live_client: tuple[SdkE2BClient, st
             )
         ]
         assert "delivered" in lines
-        assert stream.last_exit_code == 7
+        assert stream.exit_code_of(handle) == 7
         assert handle.isolation_type == "e2b"
     finally:
         await isolation.destroy(handle)

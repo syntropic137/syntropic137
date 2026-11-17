@@ -102,13 +102,17 @@ describe("costs commands", () => {
           { model: "gpt-6-sol", cost_usd: "4.00" },
           { model: "unattributed-model", cost_usd: "1.00" },
         ],
-        top_sessions: [],
+        top_sessions: [
+          { session_id: "sess-expensive-1", total_cost_usd: "3.25", total_tokens: 42000 },
+        ],
       }),
     );
     await costsGroup.getCommand("summary")!.handler({ positionals: [], values: {} });
     const out = stdout();
     expect(out).toContain("gpt-6-sol");
     expect(out).toContain("$4.00");
+    expect(out).toContain("sess-expensi...");
+    expect(out).toContain("$3.25");
     expect(out).toContain("unknown");
     expect(out).not.toContain("unattributed-model");
   });
@@ -127,5 +131,33 @@ describe("costs commands", () => {
     );
     await costsGroup.getCommand("sessions")!.handler({ positionals: [], values: {} });
     expect(stdout()).toContain("sess-1");
+  });
+  // #1743: a model that ran with no rate is named beside the priced split by
+  // the backend's display text (a distinct string here to prove it is read),
+  // never as $0, and the priced total is untouched.
+  function executionCost(cost_by_model: Record<string, string>, total: string) {
+    return {
+      execution_id: "exec-1", session_count: 1, total_cost_usd: total, total_tokens: 100,
+      input_tokens: 50, output_tokens: 50, duration_ms: 1000, started_at: "2026-01-01T00:00:00Z",
+      unpriced_observation_count: 1, cost_by_model,
+      unpriced_models: ["acme-reasoner-7b"], unpriced_model_cost_display: "no rate",
+    };
+  }
+
+  it("execution detail lists an unpriced model beside the priced ones", async () => {
+    mockFetch.mockResolvedValue(jsonResponse(executionCost({ "gpt-5.6-sol": "0.19" }, "0.19")));
+    await costsGroup.getCommand("execution")!.handler({ positionals: ["exec-1"], values: {} });
+    const out = stdout();
+    expect(out).toContain("gpt-5.6-sol: $0.19");
+    expect(out).toContain("acme-reasoner-7b: no rate");
+    expect(out).not.toContain("acme-reasoner-7b: $");
+  });
+
+  it("execution detail lists an unpriced model when nothing priced", async () => {
+    mockFetch.mockResolvedValue(jsonResponse(executionCost({}, "0")));
+    await costsGroup.getCommand("execution")!.handler({ positionals: ["exec-1"], values: {} });
+    const out = stdout();
+    expect(out).toContain("Cost by Model");
+    expect(out).toContain("acme-reasoner-7b: no rate");
   });
 });

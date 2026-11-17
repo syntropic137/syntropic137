@@ -178,7 +178,7 @@ async def resume(execution_id: str, request: ResumeRequest) -> ResumeResponse:
         raise HTTPException(status_code=409, detail=start_refusal)
     _refuse_over_todays_ceiling(command)
     try:
-        await inherited_outputs(get_artifact_query(), command.resumed_from)
+        await inherited_outputs(await get_artifact_query(), command.resumed_from)
     except InheritanceUnavailableError as exc:
         # The artifacts the resumed phase would read cannot be handed over. A
         # conflict with recorded state, like every other refusal here.

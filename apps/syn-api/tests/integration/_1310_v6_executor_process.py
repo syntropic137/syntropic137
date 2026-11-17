@@ -135,7 +135,7 @@ class _SleepingAgent(MemoryEventStreamAdapter):
         _report(self._out, event="agent_started", execution_id=execution_id, pid=os.getpid())
         async for raw in proc.stdout:
             yield raw.decode().rstrip("\n")
-        self._last_exit_code = await proc.wait()
+        self._exit_codes[handle.isolation_id] = await proc.wait()
 
     async def cancel_running(self, handle: IsolationHandle) -> bool:
         execution_id = self._isolation.execution_ids[handle.isolation_id]

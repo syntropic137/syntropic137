@@ -16,6 +16,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
 from syn_domain.contexts.orchestration._shared.phase_order import phase_order_conflict
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     continuation_candidates,
@@ -100,7 +101,28 @@ def refuse_resume_start(command: StartResumeCommand) -> str | None:
             f"Cannot start resume {resume_execution_id}: inherited phases {inherited_ids} are "
             f"not the pinned phases before {resume!r}, {before_resume}"
         )
-    return None
+    return _refuse_promptless_agent_phase(command)
+
+
+def _refuse_promptless_agent_phase(command: StartResumeCommand) -> str | None:
+    """An agent phase the child would run with no prompt (#963).
+
+    A parent pinned before the prompt rule can carry one. Its resume would
+    dispatch an agent with an empty prompt, which runs and bills, so it is
+    refused here, where admission and the child's start both look. Inherited
+    phases never run again, and a command phase carries no prompt by design.
+    """
+    blank = [
+        p.phase_id
+        for p in phases_the_resume_runs(command)
+        if p.kind is PhaseKind.AGENT and not p.prompt_template.strip()
+    ]
+    if not blank:
+        return None
+    return (
+        f"Cannot start resume {command.aggregate_id}: agent phase(s) {blank} have no "
+        "prompt in the pinned phase config, so they would run an agent with nothing to do (#963)"
+    )
 
 
 def phases_the_resume_runs(command: StartResumeCommand) -> list[ExecutablePhase]:

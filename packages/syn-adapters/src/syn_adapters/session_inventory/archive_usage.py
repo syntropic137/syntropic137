@@ -51,9 +51,11 @@ def _files(root: Path) -> Iterator[tuple[str, os.stat_result, bool]]:
 
     Every name is yielded, so an object linked to a capture temporary is still
     classified whichever name comes first; only its bytes are counted once.
-    One removed mid-walk is skipped.
+    Every inode is remembered, whatever its link count: a capture unlinks its
+    temporary mid-walk, so the object's name may report one link after the
+    temporary was already counted (#2216). One removed mid-walk is skipped.
     """
-    linked: set[tuple[int, int]] = set()
+    seen: set[tuple[int, int]] = set()
     with os.scandir(root) as entries:
         for entry in entries:
             try:
@@ -63,9 +65,8 @@ def _files(root: Path) -> Iterator[tuple[str, os.stat_result, bool]]:
             except FileNotFoundError:
                 continue
             inode = (stat.st_dev, stat.st_ino)
-            first = stat.st_nlink == 1 or inode not in linked
-            if stat.st_nlink > 1:
-                linked.add(inode)
+            first = inode not in seen
+            seen.add(inode)
             yield entry.name, stat, first
 
 

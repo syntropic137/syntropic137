@@ -35,6 +35,7 @@ phases:
   - id: phase-1
     name: First Phase
     order: 1
+    prompt_template: Do the work.
     execution_type: sequential
     description: First phase description
     input_artifacts: []
@@ -45,6 +46,7 @@ phases:
   - id: phase-2
     name: Second Phase
     order: 2
+    prompt_template: Do the work.
     execution_type: sequential
     input_artifacts:
       - output_1
@@ -136,6 +138,7 @@ def test_parse_minimal_workflow() -> None:
       - id: p1
         name: Phase 1
         order: 1
+        prompt_template: Do the work.
     """
     definition = WorkflowDefinition.from_yaml(minimal_yaml)
     assert definition.id == "minimal"
@@ -153,9 +156,11 @@ def test_duplicate_phase_ids_rejected() -> None:
       - id: same-id
         name: Phase 1
         order: 1
+        prompt_template: Do the work.
       - id: same-id
         name: Phase 2
         order: 2
+        prompt_template: Do the work.
     """
     with pytest.raises(ValueError, match="Phase IDs must be unique"):
         WorkflowDefinition.from_yaml(invalid_yaml)
@@ -171,9 +176,11 @@ def test_duplicate_phase_orders_rejected() -> None:
       - id: p1
         name: Phase 1
         order: 1
+        prompt_template: Do the work.
       - id: p2
         name: Phase 2
         order: 1
+        prompt_template: Do the work.
     """
     with pytest.raises(ValueError, match="Phase orders must be unique"):
         WorkflowDefinition.from_yaml(invalid_yaml)
@@ -208,6 +215,7 @@ phases:
   - id: p1
     name: Phase 1
     order: 1
+    prompt_template: Do the work.
 """)
         (dir_path / "workflow2.yml").write_text("""
 id: workflow-2
@@ -216,6 +224,7 @@ phases:
   - id: p1
     name: Phase 1
     order: 1
+    prompt_template: Do the work.
 """)
 
         definitions = load_workflow_definitions(dir_path)

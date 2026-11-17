@@ -87,6 +87,11 @@ export function renderCommandHelp(
     renderOptions(lines, command.options);
   }
 
+  if (command.notes) {
+    lines.push("");
+    lines.push(command.notes);
+  }
+
   if (command.examples && command.examples.length > 0) {
     lines.push("");
     lines.push(style("Examples:", BOLD));

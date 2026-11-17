@@ -227,11 +227,35 @@ class _StubConnection:
             _TALLY: tool_rows,
             _STARTED_AT_BY_SESSION_QUERY: started_rows,
         }
+        #: Every read, and whether a read-only REPEATABLE READ snapshot was open for it.
+        self.reads_in_snapshot: list[bool] = []
+        self._in_snapshot = False
+
+    def transaction(self, *, isolation: str, readonly: bool) -> _StubTransaction:
+        return _StubTransaction(self, isolation == "repeatable_read" and readonly)
+
+    async def execute(self, query: str, *_args: object) -> str:
+        assert "plan_cache_mode" in query, query
+        return "SET"
 
     async def fetch(self, query: str, *_args: object) -> list[_FakeRow]:
+        self.reads_in_snapshot.append(self._in_snapshot)
         # The tally is matched by the table it reads, not by its text: how
         # ``tool_call_counts`` spells that read is its own business (#1322).
         return self._by_query[_TALLY if tool_call_counts.TABLE in query else query]
+
+
+class _StubTransaction:
+    def __init__(self, conn: _StubConnection, snapshot: bool) -> None:
+        self._conn = conn
+        self._snapshot = snapshot
+
+    async def __aenter__(self) -> None:
+        self._conn._in_snapshot = self._snapshot
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        self._conn._in_snapshot = False
+        return False
 
 
 class _StubAcquire:
@@ -326,6 +350,17 @@ class TestListAllRegroupsRowsPerSession:
             started_rows=[],
         )
         return SessionCostQueryService(pool=_StubPool(conn))  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    async def test_every_read_shares_one_read_only_snapshot(self) -> None:
+        """Four reads, one snapshot (#983): a session finishing between them
+        would otherwise be priced from its placeholder turns, not its summary."""
+        service = self._service()
+        conn = service._pool._conn  # type: ignore[attr-defined]  # the stub pool
+
+        await service.list_all()
+
+        assert conn.reads_in_snapshot == [True, True, True, True]
 
     @pytest.mark.asyncio
     async def test_emits_exactly_one_record_per_session(self) -> None:
