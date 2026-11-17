@@ -112,6 +112,10 @@ from syn_domain.contexts.agent_sessions.import_ledger import (
     ImportLedgerPort,
 )
 from syn_domain.contexts.agent_sessions.ports.BackfillReceiptPort import BackfillReceiptConflict
+from syn_domain.contexts.agent_sessions.ports.ConversationLogReaderPort import (
+    ConversationLogReader,
+    ConversationLogRow,
+)
 from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort import (
     HistoricalAcquisitionQuotaExceeded,
 )
@@ -163,10 +167,6 @@ from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort impor
     SessionTranscriptArchivePort,
     TranscriptDeletedError,
     TranscriptIntegrityError,
-)
-from syn_domain.contexts.agent_sessions.ports.ConversationLogReaderPort import (
-    ConversationLogReader,
-    ConversationLogRow,
 )
 from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
     TranscriptUsageReader,

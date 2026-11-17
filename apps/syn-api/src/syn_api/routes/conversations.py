@@ -101,7 +101,9 @@ class ConversationMetadataResponse(BaseModel):
 # =============================================================================
 
 
-def _conversation_line(reader: ConversationLogReader, line_number: int, raw: str) -> ConversationLine:
+def _conversation_line(
+    reader: ConversationLogReader, line_number: int, raw: str
+) -> ConversationLine:
     """One stored line as a numbered ``ConversationLine``, read through the port."""
     row = reader.read_row(raw)
     return ConversationLine(
@@ -203,9 +205,7 @@ async def get_conversation_log(
 
         total = len(raw_lines)
         page = raw_lines[offset : offset + limit]
-        lines = [
-            _conversation_line(reader, i, raw) for i, raw in enumerate(page, start=offset + 1)
-        ]
+        lines = [_conversation_line(reader, i, raw) for i, raw in enumerate(page, start=offset + 1)]
 
         return Ok(
             ConversationLog(

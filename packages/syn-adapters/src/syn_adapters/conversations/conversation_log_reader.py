@@ -55,11 +55,7 @@ def _get_message_content(data: Mapping[str, JsonValue]) -> str:
         return msg_content
     if isinstance(msg_content, list):
         return next(
-            (
-                cast("str", p["text"])
-                for p in msg_content
-                if isinstance(p, dict) and p.get("text")
-            ),
+            (cast("str", p["text"]) for p in msg_content if isinstance(p, dict) and p.get("text")),
             "",
         )
     return ""
