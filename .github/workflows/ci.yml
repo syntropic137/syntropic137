@@ -675,75 +675,56 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs
+        # Allow-list, not deny-list (#1623). The old check failed only on the
+        # results it named: a `cancelled` Submodule Check or a `failure` of
+        # Default Workspace Image passed, and so did any job that came back
+        # `skipped`. Every needed job must now be `success`, and `skipped` is
+        # accepted only for a job whose own `if:` deliberately skips it in this
+        # trigger context. Anything else (failure, cancelled, an unexpected
+        # skip, or a result GitHub adds later) blocks.
+        #
+        # Inputs arrive through env, not `${{ }}` in the script, so
+        # scripts/tests/test_ci_success_gate.py can run this exact script.
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          # Check for failures (integration tests are optional on non-PR)
-          if [[ "${{ needs.python-qa.result }}" == "failure" ]] || \
-             [[ "${{ needs.architectural-fitness.result }}" == "failure" ]] || \
-             [[ "${{ needs.python-unit-tests.result }}" == "failure" ]] || \
-             [[ "${{ needs.dashboard-ui.result }}" == "failure" ]] || \
-             [[ "${{ needs.cli-node.result }}" == "failure" ]] || \
-             [[ "${{ needs.docs-site.result }}" == "failure" ]] || \
-             [[ "${{ needs.submodule-check.result }}" == "failure" ]] || \
-             [[ "${{ needs.osv-scan.result }}" == "failure" ]] || \
-             [[ "${{ needs.pip-audit.result }}" == "failure" ]] || \
-             [[ "${{ needs.mutations-not-merged.result }}" == "failure" ]]; then
-            echo "❌ CI checks failed"
+          set -euo pipefail
+          # Mirrors each job's `if:`; true means skipping it here is intended.
+          may_skip() {
+            case "$1" in
+              python-integration-tests)
+                ! { [[ "$EVENT" == schedule || "$EVENT" == workflow_dispatch ]] ||
+                    [[ "$EVENT" == push && "$REF" == refs/heads/main ]] ||
+                    [[ "$EVENT" == pull_request && "$BASE_REF" == release ]]; } ;;
+              dependency-review) [[ "$EVENT" != pull_request ]] ;;
+              mutations-not-merged) ! [[ "$EVENT" == pull_request && "$BASE_REF" == main ]] ;;
+              *) return 1 ;;
+            esac
+          }
+          # Extract synchronously: a jq error inside a process substitution
+          # would not trip `set -e` and would read as "nothing failed". Here it
+          # exits the step. A missing or null result reads as "" and fails below.
+          rows=$(jq -er 'if type == "object" and length > 0
+            then to_entries[] | [.key, .value.result] | @tsv
+            else error("no job results") end' <<<"$NEEDS")
+          bad=0
+          while IFS=$'\t' read -r job result; do
+            if [[ "$result" == success ]]; then
+              echo "✅ $job"
+            elif [[ "$result" == skipped ]] && may_skip "$job"; then
+              echo "➖ $job skipped (by design for $EVENT)"
+            else
+              echo "❌ $job: $result"
+              bad=1
+            fi
+          done <<<"$rows"
+          if [[ "$bad" != 0 ]]; then
+            echo "❌ CI checks did not all pass"
             exit 1
           fi
-
-          # Integration tests: whenever they RAN, they must have passed.
-          #
-          # This used to read `event_name == 'pull_request' && result == failure`,
-          # which was the exact inverse of the job's own `if:` - the job never ran
-          # on a PR, so the check could never fire, and on the runs where it DID
-          # execute (weekly cron, main, dispatch) nothing required it. A failing
-          # integration test could not fail any gate. See
-          # docs/retrospectives/2026-08-17-green-checks-that-check-nothing.md
-          #
-          # Keyed on the result, not the trigger: `skipped` is a deliberate tier
-          # choice on feature-branch PRs, `failure` is never acceptable.
-          if [[ "${{ needs.python-integration-tests.result }}" == "failure" ]]; then
-            echo "❌ Integration tests failed"
-            exit 1
-          fi
-
-          # A release PR must not ship on unit tests alone. If integration did
-          # not actually run here, that is a misconfiguration, not a pass.
-          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.base_ref }}" == "release" ]] && \
-             [[ "${{ needs.python-integration-tests.result }}" != "success" ]]; then
-            echo "❌ Release PR requires integration tests to RUN and pass"
-            echo "   (result: ${{ needs.python-integration-tests.result }})"
-            exit 1
-          fi
-
-          # .mutations/ must be PROVEN absent on a PR into main: a cancelled or
-          # skipped check proves nothing (#1941).
-          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.base_ref }}" == "main" ]] && \
-             [[ "${{ needs.mutations-not-merged.result }}" != "success" ]]; then
-            echo "❌ Mutation Patches Not Merged did not pass (result: ${{ needs.mutations-not-merged.result }})"
-            exit 1
-          fi
-
-          # Dependency review only runs on PRs (requires base/head comparison)
-          if [[ "${{ github.event_name }}" == "pull_request" ]] && \
-             [[ "${{ needs.dependency-review.result }}" == "failure" ]]; then
-            echo "❌ Dependency review failed"
-            exit 1
-          fi
-
-          # Check for cancellations
-          if [[ "${{ needs.python-qa.result }}" == "cancelled" ]] || \
-             [[ "${{ needs.architectural-fitness.result }}" == "cancelled" ]] || \
-             [[ "${{ needs.python-unit-tests.result }}" == "cancelled" ]] || \
-             [[ "${{ needs.dashboard-ui.result }}" == "cancelled" ]] || \
-             [[ "${{ needs.cli-node.result }}" == "cancelled" ]] || \
-             [[ "${{ needs.docs-site.result }}" == "cancelled" ]] || \
-             [[ "${{ needs.osv-scan.result }}" == "cancelled" ]] || \
-             [[ "${{ needs.pip-audit.result }}" == "cancelled" ]]; then
-            echo "⚠️ CI checks were cancelled"
-            exit 1
-          fi
-
           echo "✅ All CI checks passed!"
 
       - name: Write summary
