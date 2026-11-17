@@ -930,10 +930,8 @@ class ArtifactCollector:
         # still whole, because the event embeds small TEXT content either way.
         #
         # BINARY content is not embedded (#990), nor is text over
-        # MAX_INLINE_TEXT_BYTES (#2042), whose event the store could not append:
-        # those bytes are in object storage or nowhere, so such an artifact with
-        # no readable upload is refused by the aggregate rather than stored as
-        # a hash of nothing.
+        # MAX_INLINE_TEXT_BYTES (#2042): in storage or nowhere, so with no
+        # readable upload the aggregate refuses it, not a hash of nothing.
         #
         # ONLY that exception. A bare `except Exception` here would swallow our
         # own bugs - a bad keyword argument to upload() would read as a backend
