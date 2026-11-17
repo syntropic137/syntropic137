@@ -704,10 +704,12 @@ jobs:
               *) return 1 ;;
             esac
           }
-          # A parse failure inside the process substitution below would not trip
-          # `set -e` and would read as "nothing failed", so count first.
-          n=$(jq 'length' <<<"$NEEDS")
-          if [[ "$n" -lt 1 ]]; then echo "❌ no job results to check"; exit 1; fi
+          # Extract synchronously: a jq error inside a process substitution
+          # would not trip `set -e` and would read as "nothing failed". Here it
+          # exits the step. A missing or null result reads as "" and fails below.
+          rows=$(jq -er 'if type == "object" and length > 0
+            then to_entries[] | [.key, .value.result] | @tsv
+            else error("no job results") end' <<<"$NEEDS")
           bad=0
           while IFS=$'\t' read -r job result; do
             if [[ "$result" == success ]]; then
@@ -718,7 +720,7 @@ jobs:
               echo "❌ $job: $result"
               bad=1
             fi
-          done < <(jq -r 'to_entries[] | [.key, .value.result] | @tsv' <<<"$NEEDS")
+          done <<<"$rows"
           if [[ "$bad" != 0 ]]; then
             echo "❌ CI checks did not all pass"
             exit 1

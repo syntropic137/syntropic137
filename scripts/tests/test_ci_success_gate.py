@@ -135,11 +135,26 @@ def test_skip_allowed_only_where_the_jobs_own_if_skips_it(
     assert _gate(results, **ctx) == (0 if allowed else 1)
 
 
-def test_empty_needs_fails() -> None:
+@pytest.mark.parametrize(
+    "needs",
+    [
+        "",
+        "{}",
+        "[]",
+        "not json",
+        '{"python-qa": 1}',
+        '{"python-qa": {}}',
+        '{"python-qa": {"result": null}}',
+        '{"python-qa": {"result": "success"}, "cli-node": 1}',
+        '{"python-qa": {"result": "success"}, "cli-node": {"outputs": {}}}',
+    ],
+)
+def test_malformed_needs_fails(needs: str) -> None:
+    """A jq error must never read as "no job failed" (Codex review on #2307)."""
     if shutil.which("jq") is None:
         pytest.skip("jq not installed (CI runners have it)")
     env = {
-        "NEEDS": "{}",
+        "NEEDS": needs,
         "EVENT": "push",
         "REF": "refs/heads/main",
         "BASE_REF": "",
@@ -148,4 +163,4 @@ def test_empty_needs_fails() -> None:
     proc = subprocess.run(
         ["bash", "-c", _script()], env=env, capture_output=True, text=True, check=False
     )
-    assert proc.returncode == 1
+    assert proc.returncode != 0, proc.stdout
