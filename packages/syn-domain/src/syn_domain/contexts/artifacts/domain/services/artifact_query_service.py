@@ -285,13 +285,20 @@ class ArtifactQueryService:
             # rejects it (min_length=1), the live cache skips it, and the
             # multi-file path skips it -- so the alias must too, or a
             # legacy/corrupt row could win here and appear nowhere else.
-            if not artifact.content:
+            # Binary is not prompt text; large text is, though its content is
+            # in object storage only (#2042).
+            if _is_binary(artifact) or not _has_content(artifact):
                 continue
             incumbent = best.get(phase_id)
             if incumbent is None or _injection_rank(artifact) < _injection_rank(incumbent):
                 best[phase_id] = artifact
 
-        return {phase_id: a.content for phase_id, a in best.items() if a.content}
+        contents: dict[str, str] = {}
+        for phase_id, artifact in best.items():
+            content = await self._content_of(artifact)
+            if isinstance(content, str) and content:
+                contents[phase_id] = content
+        return contents
 
     async def get_files_for_phase_injection(
         self,

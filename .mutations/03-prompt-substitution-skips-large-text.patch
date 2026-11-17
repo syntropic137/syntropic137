@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/artifacts/domain/services/artifact_query_service.py b/packages/syn-domain/src/syn_domain/contexts/artifacts/domain/services/artifact_query_service.py
+index 1376d7704..321a56fcc 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/artifacts/domain/services/artifact_query_service.py
++++ b/packages/syn-domain/src/syn_domain/contexts/artifacts/domain/services/artifact_query_service.py
+@@ -287,7 +287,7 @@ class ArtifactQueryService:
+             # legacy/corrupt row could win here and appear nowhere else.
+             # Binary is not prompt text; large text is, though its content is
+             # in object storage only (#2042).
+-            if _is_binary(artifact) or not _has_content(artifact):
++            if not artifact.content:
+                 continue
+             incumbent = best.get(phase_id)
+             if incumbent is None or _injection_rank(artifact) < _injection_rank(incumbent):

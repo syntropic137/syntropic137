@@ -50,7 +50,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
 pytestmark = pytest.mark.unit
 
@@ -98,13 +98,18 @@ class _World:
     collector: ArtifactCollector
 
 
-async def _collect() -> _World:
-    """Run the real collector and project what it emitted, as the subscription does."""
+async def _collect(
+    collected: Sequence[tuple[str, bytes]] = ((SMALL_PATH, SMALL), (LOG_PATH, CI_LOG)),
+) -> _World:
+    """Run the real collector and project what it emitted, as the subscription does.
+
+    The collector marks the first file collected as the primary deliverable.
+    """
     storage = InMemoryArtifactStorage()
     repo = _Repo()
     collector = ArtifactCollector(repo, storage, None)  # type: ignore[arg-type]
     await collector.collect_from_workspace(
-        workspace=_Workspace(collected=[(SMALL_PATH, SMALL), (LOG_PATH, CI_LOG)]),  # type: ignore[arg-type]
+        workspace=_Workspace(collected=list(collected)),  # type: ignore[arg-type]
         workflow_id="wf-2042",
         phase_id="verify",
         execution_id="exec-2042",
@@ -230,3 +235,25 @@ class TestEveryReaderGetsTheWholeText:
         injected = dict(consumer.injected)
         assert _sha(injected["artifacts/input/verify/ci.log"]) == _sha(CI_LOG)
         assert injected["artifacts/input/verify/findings.md"] == SMALL
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "collected",
+        [
+            pytest.param([(LOG_PATH, CI_LOG)], id="sole-large"),
+            pytest.param(
+                [(LOG_PATH, CI_LOG), ("artifacts/output/notes.log", SMALL)],
+                id="large-primary-small-second",
+            ),
+        ],
+    )
+    async def test_prompt_substitution_gets_the_full_text_of_a_large_primary(
+        self, collected: list[tuple[str, bytes]]
+    ) -> None:
+        world = await _collect(collected)
+        assert world.events[LOG_PATH].is_primary_deliverable
+        assert world.events[LOG_PATH].content == ""
+        query = ArtifactQueryService(world.projection, content_storage=world.storage)
+        outputs = await query.get_for_phase_injection("exec-2042", ["verify"])
+        assert list(outputs) == ["verify"]
+        assert _sha(outputs["verify"].encode()) == _sha(CI_LOG)
