@@ -24,3 +24,16 @@
 id = "GHSA-gcqx-w48m-w2h4"
 ignoreUntil = 2026-11-27T00:00:00Z
 reason = "deepmerge has no fixed release; build-time dependency of @sveltejs/vite-plugin-svelte, merges trusted plugin options only (#2157)"
+
+# GHSA-fc5q-39xc-vjpf: picomatch ReDoS through single-branch repeated extglobs.
+# No fix: osv.dev marks introduced 0 .. last_affected 4.0.7 with no fixed event,
+# and 4.0.7 is the latest picomatch on npm. Paths (lockfile has 4.0.4 and 4.0.7):
+# build/test tooling only - vite 6/7/8, vitest, tinyglobby, fdir, svelte-check,
+# @rollup/pluginutils, unplugin. The one production-dependency path is syn-docs ->
+# fumadocs-core/mdx -> tinyglobby, called only by remark-mdx-files at MDX build
+# time with glob patterns from our own docs; no untrusted input reaches it.
+# Revisit when picomatch ships a fix: add a pnpm override floor, drop this (#2313).
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-01T00:00:00Z
+reason = "picomatch has no fixed release (last_affected 4.0.7 = latest); build/test tooling only, globs are repo-authored (#2313)"
