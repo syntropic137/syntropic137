@@ -23,6 +23,7 @@ Usage:
     )
 """
 
+from syn_adapters.conversations.conversation_log_reader import StoredConversationLogReader
 from syn_adapters.conversations.minio import (
     MinioConversationStorage,
     get_conversation_storage,
@@ -38,5 +39,6 @@ __all__ = [
     "ConversationStoreUnavailable",
     "MinioConversationStorage",
     "SessionContext",
+    "StoredConversationLogReader",
     "get_conversation_storage",
 ]

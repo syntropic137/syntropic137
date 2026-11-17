@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
     from syn_api.services.skill_materializer import SkillMaterializer
     from syn_api.services.skill_resolution_service import SkillResolutionService
+    from syn_domain.contexts.agent_sessions import ConversationLogReader
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
         SessionObservationPort,
     )
@@ -76,7 +77,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.config import Settings
     from syn_shared.settings.github import GitHubAppSettings
 
-from syn_adapters.conversations import get_conversation_storage
+from syn_adapters.conversations import StoredConversationLogReader, get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
 from syn_adapters.projections.session_timeline_memory import get_in_memory_session_timeline
@@ -834,6 +835,11 @@ def get_phase_profile_query():
 async def get_conversation_store() -> MinioConversationStorage:
     """Return the conversation storage (MinIO-backed)."""
     return await get_conversation_storage()
+
+
+def get_conversation_log_reader() -> ConversationLogReader:
+    """Return the reader for stored conversation-log lines (#1424)."""
+    return StoredConversationLogReader()
 
 
 def get_realtime() -> RealTimeProjection:

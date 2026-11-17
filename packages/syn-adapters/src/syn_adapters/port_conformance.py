@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     )
     from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
     from syn_adapters.control.ports import SignalQueuePort
+    from syn_adapters.conversations.conversation_log_reader import StoredConversationLogReader
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.conversations.protocol import (
         ConversationStoragePort as AdapterConversationStoragePort,
@@ -162,6 +163,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
     from syn_domain.contexts.agent_sessions.ports.BackfillReceiptPort import BackfillReceiptPort
+    from syn_domain.contexts.agent_sessions.ports.ConversationLogReaderPort import (
+        ConversationLogReader,
+    )
     from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort import (
         HistoricalEvidenceSourcePort,
     )
@@ -382,6 +386,7 @@ if TYPE_CHECKING:
         capture: SessionCaptureService,
         session_store: HttpSessionStore,
         transcript_usage: StoredTranscriptUsageReader,
+        conversation_log: StoredConversationLogReader,
         observations: SessionObservationPort,
         ledger: ImportLedgerPort,
     ) -> None:
@@ -397,6 +402,7 @@ if TYPE_CHECKING:
         _capture: SessionCapturePort = capture
         _sessions: SessionStorePort = session_store
         _transcript_usage: TranscriptUsageReader = transcript_usage
+        _conversation_log: ConversationLogReader = conversation_log
         _observations: SessionObservationPort = observations
         _ledger: ImportLedgerPort = ledger
 

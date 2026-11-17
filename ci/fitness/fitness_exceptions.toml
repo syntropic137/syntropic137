@@ -457,10 +457,6 @@ allowed_prefixes = [
 # path = { violations = N, issue = "#NNN" }. Counts are EXACT: one more fails,
 # one fewer fails as stale. Zero tolerance for any file not listed here.
 
-# TODO(#1424): the API conversation log parses Claude message content and Codex
-# stream items (imports syn_shared.codex_stream). Predates #1398.
-"apps/syn-api/src/syn_api/routes/conversations.py" = { violations = 1, issue = "#1424" }
-
 [linux_only_constructs]
 # Modules declared Linux-only by design: each uses a /proc or /sys path or a
 # Linux-only syscall/flag on purpose (PC-145). Gate:
