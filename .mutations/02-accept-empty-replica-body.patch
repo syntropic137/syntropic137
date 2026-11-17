@@ -1,0 +1,11 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/ports/ReplicaBodyEvidencePort.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/ports/ReplicaBodyEvidencePort.py
+index 3cbdfeb10..6e72ed6d4 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/ports/ReplicaBodyEvidencePort.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/ports/ReplicaBodyEvidencePort.py
+@@ -58,6 +58,4 @@ def replica_body_availability(
+         return BodyAvailability.MISSING
+     if reading.identity != identity or reading.revision != revision:
+         raise ValueError("replica body reading belongs to another transcript revision")
+-    if archived_bytes > 0 and reading.raw_bytes == 0:
+-        return BodyAvailability.MISSING
+     return BodyAvailability.PRESENT
