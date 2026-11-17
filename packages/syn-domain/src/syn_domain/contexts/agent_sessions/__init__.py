@@ -164,6 +164,10 @@ from syn_domain.contexts.agent_sessions.ports.SessionTranscriptArchivePort impor
     TranscriptDeletedError,
     TranscriptIntegrityError,
 )
+from syn_domain.contexts.agent_sessions.ports.ConversationLogReaderPort import (
+    ConversationLogReader,
+    ConversationLogRow,
+)
 from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
     TranscriptUsageReader,
 )
@@ -298,6 +302,8 @@ __all__ = [
     "CataloguedCapture",
     "CompleteSessionCommand",
     "CompleteSessionHandler",
+    "ConversationLogReader",
+    "ConversationLogRow",
     "CostCalculator",
     "CoverageState",
     "DelegationOutcome",

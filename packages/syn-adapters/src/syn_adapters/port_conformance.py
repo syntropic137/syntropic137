@@ -107,6 +107,7 @@ if TYPE_CHECKING:
     )
     from syn_adapters.session_store.http_store import HttpSessionStore
     from syn_adapters.session_store.transcript_usage import StoredTranscriptUsageReader
+    from syn_adapters.conversations.conversation_log_reader import StoredConversationLogReader
     from syn_adapters.storage.artifact_storage.minio import MinioArtifactStorage
     from syn_adapters.storage.claude_plugin_storage.minio import MinioClaudePluginStorage
     from syn_adapters.storage.repositories import (
@@ -214,6 +215,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
         TranscriptUsageReader,
+    )
+    from syn_domain.contexts.agent_sessions.ports.ConversationLogReaderPort import (
+        ConversationLogReader,
     )
     from syn_domain.contexts.agent_sessions.slices.reconcile_session_inventory.projection import (
         InventoryWorkPort,
@@ -382,6 +386,7 @@ if TYPE_CHECKING:
         capture: SessionCaptureService,
         session_store: HttpSessionStore,
         transcript_usage: StoredTranscriptUsageReader,
+        conversation_log: StoredConversationLogReader,
         observations: SessionObservationPort,
         ledger: ImportLedgerPort,
     ) -> None:
@@ -397,6 +402,7 @@ if TYPE_CHECKING:
         _capture: SessionCapturePort = capture
         _sessions: SessionStorePort = session_store
         _transcript_usage: TranscriptUsageReader = transcript_usage
+        _conversation_log: ConversationLogReader = conversation_log
         _observations: SessionObservationPort = observations
         _ledger: ImportLedgerPort = ledger
 
