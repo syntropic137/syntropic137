@@ -927,11 +927,11 @@ class ArtifactCollector:
         # know how a backend establishes readability, only that a returned URI
         # can be read. A backend that cannot confirm it raises
         # ArtifactStorageError, and we leave storage_uri None - the artifact is
-        # still whole, because the event embeds TEXT content either way.
+        # still whole, because the event embeds small TEXT content either way.
         #
-        # BINARY content is not embedded (#990): its bytes are in object
-        # storage or nowhere, so a binary artifact with no readable upload is
-        # refused by the aggregate rather than stored as a hash of nothing.
+        # BINARY content is not embedded (#990), nor is text over
+        # MAX_INLINE_TEXT_BYTES (#2042): in storage or nowhere, so with no
+        # readable upload the aggregate refuses it, not a hash of nothing.
         #
         # ONLY that exception. A bare `except Exception` here would swallow our
         # own bugs - a bad keyword argument to upload() would read as a backend

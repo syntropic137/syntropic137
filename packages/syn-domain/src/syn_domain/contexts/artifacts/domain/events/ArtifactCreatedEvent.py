@@ -13,7 +13,7 @@ from syn_domain.contexts.artifacts._shared.value_objects import (  # noqa: TC001
 )
 
 
-@event("ArtifactCreated", "v7")
+@event("ArtifactCreated", "v8")
 class ArtifactCreatedEvent(DomainEvent):
     """Event emitted when an artifact is created.
 
@@ -50,6 +50,17 @@ class ArtifactCreatedEvent(DomainEvent):
     through the ESP client's deserializer, the aggregate and the projection. Binary files collected BEFORE v7 were decoded with
     ``errors="replace"`` and stored as text; those bytes are gone, the stored
     hash matches the mangled text, and no upcaster can restore them.
+    v8: Large text (issue #2042). TEXT content over
+    ``MAX_INLINE_TEXT_BYTES`` (512 KiB, see ArtifactAggregate) is stored the way
+    v7 stores binary: ``content`` is ``""`` and the text is at ``storage_uri``
+    only. One CI log embedded inline made a 4.5 MB event that the event store's
+    4 MiB gRPC limit refused, failing a phase that had already completed. The
+    new meaning is that a TEXT payload may have ``content == ""`` with a
+    ``storage_uri``; ``size_bytes`` and ``content_hash`` are of the UTF-8 bytes
+    as before, so ``size_bytes > 0`` with empty content says "read storage".
+    Every v7 payload is a valid v8 payload with its old meaning (no v7 text
+    event was empty, because the aggregate rejects empty content), so the
+    upcast from v7 is the identity and none is written, for v7's reason.
     NOTE the version string here is
     decorator metadata only - it does not set ``DomainEvent.schema_version``,
     and the gRPC serializer writes ``event_version=1`` regardless. Deserialization
@@ -103,8 +114,9 @@ class ArtifactCreatedEvent(DomainEvent):
     artifact_type: ArtifactType
     content_type: ContentType
 
-    # Content. Inline for text; "" for a binary content_type (v7, #990),
-    # whose bytes are at storage_uri only.
+    # Content. Inline for text; "" for a binary content_type (v7, #990) and
+    # for text over MAX_INLINE_TEXT_BYTES (v8, #2042), whose bytes are at
+    # storage_uri only.
     content: str
     content_hash: str
     size_bytes: int

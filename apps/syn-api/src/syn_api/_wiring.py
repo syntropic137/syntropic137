@@ -141,15 +141,20 @@ def get_projection_mgr() -> ProjectionManager:
     return get_projection_manager()
 
 
-def get_artifact_query() -> ArtifactQueryService:
+async def get_artifact_query() -> ArtifactQueryService:
     """The artifact read service, on its own.
 
     Narrower than `get_execution_processor()` on purpose: a caller that only
     needs to READ artifacts - resolving a resume's inheritance before admitting it,
     for instance - should not drag the execution processor and therefore the
     observability event store into a request that writes nothing through them.
+    It does need object storage: binary files (#990) and large text (#2042)
+    are there and not in the read model, and without it a resume of a phase
+    that produced one is refused as if its artifacts were gone.
     """
-    return ArtifactQueryService(get_projection_manager().artifact_list)
+    return ArtifactQueryService(
+        get_projection_manager().artifact_list, content_storage=await get_artifact_storage()
+    )
 
 
 def _build_session_store(settings: Settings) -> HttpSessionStore | None:
