@@ -131,8 +131,8 @@ issue = "#673"
 
 [untyped-dicts.syn-collector]
 path = "packages/syn-collector"
-# 22 -> 14 (#673): typed the OTLP/JSON envelope (collector/otlp_envelope.py)
-value = 14
+# 22 -> 15 (#673): typed read-only views over the OTLP/JSON envelope (collector/otlp_envelope.py)
+value = 15
 issue = "#673"
 
 [untyped-dicts.syn-shared]

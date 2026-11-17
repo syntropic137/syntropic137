@@ -145,7 +145,7 @@ def parse_otlp_metrics(payload: dict[str, Any]) -> list[CollectedEvent]:
 
     Args:
         payload: OTLP JSON metrics payload (ExportMetricsServiceRequest),
-            raw from the request body; parsed into the typed envelope here.
+            raw from the request body; wrapped in the typed envelope views here.
 
     Returns:
         List of CollectedEvent instances for known metrics.
@@ -153,7 +153,7 @@ def parse_otlp_metrics(payload: dict[str, Any]) -> list[CollectedEvent]:
     events: list[CollectedEvent] = []
     dp_index = 0
 
-    request = OtlpMetricsRequest.model_validate(payload)
+    request = OtlpMetricsRequest(payload)
     for resource_metrics in request.resource_metrics:
         session_id = resource_metrics.resource.session_id()
         batch = _collect_known_datapoints(resource_metrics.scope_metrics, session_id, dp_index)
@@ -188,7 +188,7 @@ def _parse_log_record(
     if event_type != EventType.OTLP_LOG:
         data: dict[str, Any] = {"source": "otlp", **log_attrs}
     else:
-        body = log_record.body.string_value or ""
+        body = log_record.body.string_value("")
         bounded_attrs: dict[str, str | int | float | bool] = {}
         for k, v in list(log_attrs.items())[:50]:
             bounded_attrs[k] = v[:500] if isinstance(v, str) else v
@@ -217,7 +217,7 @@ def parse_otlp_logs(payload: dict[str, Any]) -> list[CollectedEvent]:
 
     Args:
         payload: OTLP JSON logs payload (ExportLogsServiceRequest),
-            raw from the request body; parsed into the typed envelope here.
+            raw from the request body; wrapped in the typed envelope views here.
 
     Returns:
         List of CollectedEvent instances.
@@ -225,7 +225,7 @@ def parse_otlp_logs(payload: dict[str, Any]) -> list[CollectedEvent]:
     events: list[CollectedEvent] = []
     log_index = 0
 
-    request = OtlpLogsRequest.model_validate(payload)
+    request = OtlpLogsRequest(payload)
     for resource_logs in request.resource_logs:
         session_id = resource_logs.resource.session_id()
 

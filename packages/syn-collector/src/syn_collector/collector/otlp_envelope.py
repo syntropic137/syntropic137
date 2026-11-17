@@ -1,65 +1,70 @@
-"""Typed OTLP/JSON envelope for the metrics and logs export requests.
+"""Typed read-only views over the OTLP/JSON metrics and logs export requests.
 
-The raw request body is parsed into these models once, at the edge
-(``parse_otlp_metrics`` / ``parse_otlp_logs`` in ``otlp.py``); everything
-after that reads attributes instead of string keys.
+Each view is a frozen dataclass wrapping ONE object of the raw request body,
+so everything in ``otlp.py`` reads attributes instead of string keys and the
+OTLP wire names live only here.
 
-These model an EXTERNAL payload, so they ignore unknown fields rather than
-forbidding them: real exporters send ``unit``, ``description``,
-``startTimeUnixNano``, ``traceId`` and more that the parser never reads, and
-rejecting those would stop ingestion.
-
-Every field accepts both the snake_case and the camelCase spelling, snake_case
-first, which is the precedence the dict-based parser had. Leaf values use
-strict types so nothing is coerced: OTLP/JSON encodes int64 as a string, and
-``"5"`` must reach ``CollectedEvent.data`` as ``"5"``, not ``5``.
+The views are deliberately lazy and validate nothing. A field is read only
+when the parser asks for it, with the exact lookup, default and precedence the
+dict-based parser used, so the collector accepts and stores precisely what it
+did before (#673): fields it never reads (unknown metrics, an unselected
+``sum``, the body of a known log event) cannot fail a request, an explicit
+``null`` stays ``null``, and a leaf value reaches ``CollectedEvent.data``
+unconverted (OTLP/JSON sends int64 and special doubles as strings).
 """
 
 from __future__ import annotations
 
-from pydantic import (
-    AliasChoices,
-    BaseModel,
-    ConfigDict,
-    Field,
-    StrictBool,
-    StrictFloat,
-    StrictInt,
-    StrictStr,
-    field_validator,
-)
+from dataclasses import dataclass
+from typing import Any
 
 type OtlpScalar = str | int | float | bool
 """A scalar attribute value, exactly as it appeared in the payload."""
 
 
-class _OtlpModel(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="ignore")
+@dataclass(frozen=True)
+class _OtlpView:
+    # The raw OTLP/JSON object this view reads; nothing outside this module
+    # indexes it.
+    raw: dict[str, Any]
+
+    def _snake_or_camel(self, snake: str, camel: str, default: Any) -> Any:  # noqa: ANN401
+        """Read ``snake``, falling back to ``camel``, then ``default``."""
+        return self.raw.get(snake, self.raw.get(camel, default))
 
 
-class OtlpAnyValue(_OtlpModel):
+class OtlpAnyValue(_OtlpView):
     """OTel ``AnyValue``: one of string, int, double or bool."""
 
-    string_value: StrictStr | None = Field(default=None, validation_alias="stringValue")
-    int_value: StrictStr | StrictInt | None = Field(default=None, validation_alias="intValue")
-    double_value: StrictInt | StrictFloat | None = Field(
-        default=None, validation_alias="doubleValue"
-    )
-    bool_value: StrictBool | None = Field(default=None, validation_alias="boolValue")
-
     def scalar(self) -> OtlpScalar:
-        """The first value set, in string/int/double/bool order, else ``""``."""
-        for value in (self.string_value, self.int_value, self.double_value, self.bool_value):
-            if value is not None:
-                return value
+        """The first kind PRESENT, in string/int/double/bool order, else ``""``.
+
+        Presence, not non-null: ``{"intValue": null}`` is ``None``.
+        """
+        for key in ("stringValue", "intValue", "doubleValue", "boolValue"):
+            if key in self.raw:
+                return self.raw[key]  # type: ignore[no-any-return]
         return ""
 
+    def string_value(self, default: str) -> str:
+        """``stringValue`` as sent (including ``null``), or ``default`` when absent."""
+        return self.raw.get("stringValue", default)  # type: ignore[no-any-return]
 
-class OtlpAttribute(_OtlpModel):
+
+class OtlpAttribute(_OtlpView):
     """OTel ``KeyValue``."""
 
-    key: StrictStr = ""
-    value: OtlpAnyValue = OtlpAnyValue()
+    @property
+    def key(self) -> str:
+        return self.raw.get("key", "")  # type: ignore[no-any-return]
+
+    @property
+    def value(self) -> OtlpAnyValue:
+        return OtlpAnyValue(self.raw.get("value", {}))
+
+
+def _attributes(view: _OtlpView) -> list[OtlpAttribute]:
+    return [OtlpAttribute(attr) for attr in view.raw.get("attributes", [])]
 
 
 def attributes_to_dict(attributes: list[OtlpAttribute]) -> dict[str, OtlpScalar]:
@@ -67,101 +72,115 @@ def attributes_to_dict(attributes: list[OtlpAttribute]) -> dict[str, OtlpScalar]
     return {attr.key: attr.value.scalar() for attr in attributes}
 
 
-class OtlpResource(_OtlpModel):
-    attributes: list[OtlpAttribute] = []
+class OtlpResource(_OtlpView):
+    @property
+    def attributes(self) -> list[OtlpAttribute]:
+        return _attributes(self)
 
     def session_id(self) -> str:
-        """The ``session.id`` attribute's string value, or ``"unknown"``."""
+        """The first ``session.id`` attribute's ``stringValue``, stringified, or ``"unknown"``."""
         for attr in self.attributes:
             if attr.key == "session.id":
-                return attr.value.string_value if attr.value.string_value is not None else "unknown"
+                return str(attr.value.string_value("unknown"))
         return "unknown"
 
 
-class OtlpNumberDataPoint(_OtlpModel):
-    time_unix_nano: StrictInt | StrictStr = Field(
-        default=0, validation_alias=AliasChoices("time_unix_nano", "timeUnixNano")
-    )
-    value: StrictInt | StrictFloat | StrictStr = Field(
-        default=0, validation_alias=AliasChoices("asDouble", "asInt", "as_double", "as_int")
-    )
-    attributes: list[OtlpAttribute] = []
+class OtlpNumberDataPoint(_OtlpView):
+    @property
+    def time_unix_nano(self) -> int | str:
+        return self._snake_or_camel("time_unix_nano", "timeUnixNano", 0)  # type: ignore[no-any-return]
+
+    @property
+    def value(self) -> int | float | str:
+        raw = self.raw
+        return raw.get("asDouble", raw.get("asInt", raw.get("as_double", raw.get("as_int", 0))))  # type: ignore[no-any-return]
+
+    @property
+    def attributes(self) -> list[OtlpAttribute]:
+        return _attributes(self)
 
 
-class OtlpMetricSection(_OtlpModel):
-    """The body of a ``gauge``, ``sum`` or ``histogram`` metric."""
-
-    data_points: list[OtlpNumberDataPoint] = Field(
-        default=[], validation_alias=AliasChoices("data_points", "dataPoints")
-    )
-
-
-class OtlpMetric(_OtlpModel):
-    name: StrictStr = ""
-    gauge: OtlpMetricSection | None = None
-    sum: OtlpMetricSection | None = None
-    histogram: OtlpMetricSection | None = None
-
-    @field_validator("gauge", "sum", "histogram", mode="before")
-    @classmethod
-    def _empty_section_is_absent(cls, value: object) -> object:
-        # An empty section (``"gauge": {}``) falls through to the next type.
-        return value or None
+class OtlpMetric(_OtlpView):
+    @property
+    def name(self) -> str:
+        return self.raw.get("name", "")  # type: ignore[no-any-return]
 
     def data_points(self) -> list[OtlpNumberDataPoint]:
-        """Data points of the first present section: gauge, then sum, then histogram."""
-        for section in (self.gauge, self.sum, self.histogram):
-            if section is not None:
-                return section.data_points
+        """Data points of the first non-empty section: gauge, then sum, then histogram."""
+        for key in ("gauge", "sum", "histogram"):
+            section = self.raw.get(key)
+            if section:
+                points = section.get("data_points", section.get("dataPoints", []))
+                return [OtlpNumberDataPoint(point) for point in points]
         return []
 
 
-class OtlpScopeMetrics(_OtlpModel):
-    metrics: list[OtlpMetric] = []
+class OtlpScopeMetrics(_OtlpView):
+    @property
+    def metrics(self) -> list[OtlpMetric]:
+        return [OtlpMetric(metric) for metric in self.raw.get("metrics", [])]
 
 
-class OtlpResourceMetrics(_OtlpModel):
-    resource: OtlpResource = OtlpResource()
-    scope_metrics: list[OtlpScopeMetrics] = Field(
-        default=[], validation_alias=AliasChoices("scope_metrics", "scopeMetrics")
-    )
+class OtlpResourceMetrics(_OtlpView):
+    @property
+    def resource(self) -> OtlpResource:
+        return OtlpResource(self.raw.get("resource", {}))
+
+    @property
+    def scope_metrics(self) -> list[OtlpScopeMetrics]:
+        scopes = self._snake_or_camel("scope_metrics", "scopeMetrics", [])
+        return [OtlpScopeMetrics(scope) for scope in scopes]
 
 
-class OtlpMetricsRequest(_OtlpModel):
+class OtlpMetricsRequest(_OtlpView):
     """``ExportMetricsServiceRequest``."""
 
-    resource_metrics: list[OtlpResourceMetrics] = Field(
-        default=[], validation_alias=AliasChoices("resource_metrics", "resourceMetrics")
-    )
+    @property
+    def resource_metrics(self) -> list[OtlpResourceMetrics]:
+        resources = self._snake_or_camel("resource_metrics", "resourceMetrics", [])
+        return [OtlpResourceMetrics(resource) for resource in resources]
 
 
-class OtlpLogRecord(_OtlpModel):
-    time_unix_nano: StrictInt | StrictStr = Field(
-        default=0, validation_alias=AliasChoices("time_unix_nano", "timeUnixNano")
-    )
-    severity_text: StrictStr = Field(
-        default="INFO", validation_alias=AliasChoices("severity_text", "severityText")
-    )
-    body: OtlpAnyValue = OtlpAnyValue()
-    attributes: list[OtlpAttribute] = []
+class OtlpLogRecord(_OtlpView):
+    @property
+    def time_unix_nano(self) -> int | str:
+        return self._snake_or_camel("time_unix_nano", "timeUnixNano", 0)  # type: ignore[no-any-return]
+
+    @property
+    def severity_text(self) -> str:
+        return self._snake_or_camel("severity_text", "severityText", "INFO")  # type: ignore[no-any-return]
+
+    @property
+    def body(self) -> OtlpAnyValue:
+        return OtlpAnyValue(self.raw.get("body", {}))
+
+    @property
+    def attributes(self) -> list[OtlpAttribute]:
+        return _attributes(self)
 
 
-class OtlpScopeLogs(_OtlpModel):
-    log_records: list[OtlpLogRecord] = Field(
-        default=[], validation_alias=AliasChoices("log_records", "logRecords")
-    )
+class OtlpScopeLogs(_OtlpView):
+    @property
+    def log_records(self) -> list[OtlpLogRecord]:
+        records = self._snake_or_camel("log_records", "logRecords", [])
+        return [OtlpLogRecord(record) for record in records]
 
 
-class OtlpResourceLogs(_OtlpModel):
-    resource: OtlpResource = OtlpResource()
-    scope_logs: list[OtlpScopeLogs] = Field(
-        default=[], validation_alias=AliasChoices("scope_logs", "scopeLogs")
-    )
+class OtlpResourceLogs(_OtlpView):
+    @property
+    def resource(self) -> OtlpResource:
+        return OtlpResource(self.raw.get("resource", {}))
+
+    @property
+    def scope_logs(self) -> list[OtlpScopeLogs]:
+        scopes = self._snake_or_camel("scope_logs", "scopeLogs", [])
+        return [OtlpScopeLogs(scope) for scope in scopes]
 
 
-class OtlpLogsRequest(_OtlpModel):
+class OtlpLogsRequest(_OtlpView):
     """``ExportLogsServiceRequest``."""
 
-    resource_logs: list[OtlpResourceLogs] = Field(
-        default=[], validation_alias=AliasChoices("resource_logs", "resourceLogs")
-    )
+    @property
+    def resource_logs(self) -> list[OtlpResourceLogs]:
+        resources = self._snake_or_camel("resource_logs", "resourceLogs", [])
+        return [OtlpResourceLogs(resource) for resource in resources]

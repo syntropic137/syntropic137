@@ -293,3 +293,186 @@ class TestStoredRows:
                 "event_id": _event_id("sess-env", "log", "1712250002000000000", 0),
             }
         ]
+
+
+STAMP = "1712250000000000000"
+STAMP_ISO = "2024-04-04T17:00:00+00:00"
+TOKEN_USAGE = "claude_code.token.usage"
+API_REQUEST = [{"key": "event.name", "value": {"stringValue": "claude_code.api_request"}}]
+
+
+def _bare_metrics(*metrics: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    return {"resourceMetrics": [{"scopeMetrics": [{"metrics": list(metrics)}]}]}
+
+
+def _token_metric(point: dict[str, JsonValue], **sections: JsonValue) -> dict[str, JsonValue]:
+    return {"name": TOKEN_USAGE, "gauge": {"dataPoints": [point]}, **sections}
+
+
+def _metric_row(value: JsonValue, **attrs: JsonValue) -> dict[str, JsonValue]:
+    return {
+        "source": "otlp",
+        "metric_name": TOKEN_USAGE,
+        "value": value,
+        **attrs,
+        "event_type": "token_usage",
+        "session_id": "unknown",
+        "timestamp": STAMP_ISO,
+        "event_id": _event_id("unknown", TOKEN_USAGE, STAMP, 0),
+    }
+
+
+def _log_row(session_id: str, **log_attrs: JsonValue) -> dict[str, JsonValue]:
+    return {
+        "source": "otlp",
+        "severity": "INFO",
+        "body": "",
+        "event_name": "",
+        "log_attrs": log_attrs,
+        "event_type": "otlp_log",
+        "session_id": session_id,
+        "timestamp": STAMP_ISO,
+        "event_id": _event_id(session_id, "log", STAMP, 0),
+    }
+
+
+@pytest.mark.unit
+class TestAcceptanceMatchesDictParser:
+    """Inputs the dict-based parser accepted, and the exact rows it stored (#673).
+
+    The envelope reads lazily and validates nothing, so a field the parser
+    never reads cannot fail a request, presence (not non-null) selects an
+    AnyValue kind, and leaf values are stored as sent.
+    """
+
+    @pytest.fixture
+    def store(self) -> InMemoryObservabilityStore:
+        return InMemoryObservabilityStore()
+
+    @pytest.fixture
+    def client(self, store: InMemoryObservabilityStore) -> TestClient:
+        return TestClient(create_app(store=store))
+
+    @pytest.mark.parametrize(
+        ("payload", "accepted", "rows"),
+        [
+            pytest.param(
+                _bare_metrics(_token_metric({"timeUnixNano": STAMP, "asDouble": None})),
+                1,
+                [_metric_row(None)],
+                id="null-metric-value-stored-as-null",
+            ),
+            pytest.param(
+                _bare_metrics(
+                    {"name": "other.metric", "gauge": {"dataPoints": [{"asDouble": None}]}}
+                ),
+                0,
+                [],
+                id="unknown-metric-is-never-read",
+            ),
+            pytest.param(
+                _bare_metrics(
+                    _token_metric({"timeUnixNano": STAMP, "asInt": "9"}),
+                    {"name": "other.metric", "gauge": {"dataPoints": [{"asDouble": None}]}},
+                ),
+                1,
+                [_metric_row("9")],
+                id="known-metric-kept-beside-ignored-unknown",
+            ),
+            pytest.param(
+                _bare_metrics(
+                    _token_metric(
+                        {"timeUnixNano": STAMP, "asInt": "1"},
+                        sum={"dataPoints": [{"asDouble": None}]},
+                    )
+                ),
+                1,
+                [_metric_row("1")],
+                id="unselected-section-is-never-read",
+            ),
+            pytest.param(
+                _bare_metrics(
+                    _token_metric(
+                        {
+                            "timeUnixNano": STAMP,
+                            "asDouble": "NaN",
+                            "attributes": [{"key": "n", "value": {"doubleValue": "NaN"}}],
+                        }
+                    )
+                ),
+                1,
+                [_metric_row("NaN", n="NaN")],
+                id="protojson-double-strings-kept",
+            ),
+        ],
+    )
+    def test_metrics(
+        self,
+        client: TestClient,
+        store: InMemoryObservabilityStore,
+        payload: dict[str, JsonValue],
+        accepted: int,
+        rows: list[dict[str, JsonValue]],
+    ) -> None:
+        response = client.post("/v1/metrics", json=payload)
+        assert (response.status_code, response.json()) == (200, {"accepted": accepted})
+        assert store.events == rows
+
+    @pytest.mark.parametrize(
+        ("value", "stored"),
+        [
+            pytest.param({"intValue": None}, None, id="present-null-is-null"),
+            pytest.param(
+                {"intValue": None, "doubleValue": 5}, None, id="present-null-beats-later-kind"
+            ),
+            pytest.param({"doubleValue": "1.25"}, "1.25", id="finite-double-string"),
+            pytest.param({"doubleValue": "NaN"}, "NaN", id="nonfinite-double-string"),
+        ],
+    )
+    def test_log_attribute_value(
+        self,
+        client: TestClient,
+        store: InMemoryObservabilityStore,
+        value: dict[str, JsonValue],
+        stored: JsonValue,
+    ) -> None:
+        payload = _bare_logs({"timeUnixNano": STAMP, "attributes": [{"key": "n", "value": value}]})
+        [event] = parse_otlp_logs(payload)
+        assert event.data["log_attrs"] == {"n": stored}
+        assert client.post("/v1/logs", json=payload).json() == {"accepted": 1}
+        assert store.events == [_log_row("unknown", n=stored)]
+
+    def test_null_session_string_is_stringified(
+        self, client: TestClient, store: InMemoryObservabilityStore
+    ) -> None:
+        resource = {"attributes": [{"key": "session.id", "value": {"stringValue": None}}]}
+        payload = _bare_logs({"timeUnixNano": STAMP}, resource)
+        [event] = parse_otlp_logs(payload)
+        assert event.session_id == "None"
+        assert event.event_id == "10ae116a645c49099070b67974b2220c"
+        assert client.post("/v1/logs", json=payload).json() == {"accepted": 1}
+        assert store.events == [_log_row("None")]
+
+    def test_known_log_body_is_never_read(
+        self, client: TestClient, store: InMemoryObservabilityStore
+    ) -> None:
+        payload = _bare_logs(
+            {"timeUnixNano": STAMP, "body": {"stringValue": 5}, "attributes": API_REQUEST}
+        )
+        assert client.post("/v1/logs", json=payload).json() == {"accepted": 1}
+        assert store.events == [
+            {
+                "source": "otlp",
+                "event.name": "claude_code.api_request",
+                "event_type": "api_request",
+                "session_id": "unknown",
+                "timestamp": STAMP_ISO,
+                "event_id": _event_id("unknown", "claude_code.api_request", STAMP, 0),
+            }
+        ]
+
+
+def _bare_logs(
+    record: dict[str, JsonValue], resource: dict[str, JsonValue] | None = None
+) -> dict[str, JsonValue]:
+    return {"resourceLogs": [{"resource": resource or {}, "scopeLogs": [{"logRecords": [record]}]}]}
