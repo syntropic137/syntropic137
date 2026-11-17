@@ -1,0 +1,13 @@
+diff --git a/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py b/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
+index d792910c5..68dc2adfd 100644
+--- a/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
++++ b/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
+@@ -139,7 +139,7 @@ class OtlpLogRecord(_OtlpModel):
+     time_unix_nano: StrictInt | StrictStr = Field(
+         default=0, validation_alias=AliasChoices("time_unix_nano", "timeUnixNano")
+     )
+-    severity_text: StrictStr = Field(
++    severity: StrictStr = Field(
+         default="INFO", validation_alias=AliasChoices("severity_text", "severityText")
+     )
+     body: OtlpAnyValue = OtlpAnyValue()

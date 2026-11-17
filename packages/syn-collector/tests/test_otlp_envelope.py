@@ -10,6 +10,7 @@ stored observability data.
 from __future__ import annotations
 
 import hashlib
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +19,9 @@ from syn_collector.collector.otlp import parse_otlp_logs, parse_otlp_metrics
 from syn_collector.collector.service import create_app
 from syn_collector.collector.store import InMemoryObservabilityStore
 from syn_collector.events.types import EventType
+
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 SESSION = {"attributes": [{"key": "session.id", "value": {"stringValue": "sess-env"}}]}
 
@@ -38,11 +42,11 @@ def _event_id(session_id: str, name: str, timestamp: str, index: int) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:32]
 
 
-def _metrics(metric: dict[str, object]) -> dict[str, object]:
+def _metrics(metric: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return {"resourceMetrics": [{"resource": SESSION, "scopeMetrics": [{"metrics": [metric]}]}]}
 
 
-def _logs(record: dict[str, object]) -> dict[str, object]:
+def _logs(record: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return {"resourceLogs": [{"resource": SESSION, "scopeLogs": [{"logRecords": [record]}]}]}
 
 
@@ -96,7 +100,7 @@ class TestMetricsEnvelope:
             ({}, 0),
         ],
     )
-    def test_value_precedence(self, point: dict[str, object], expected: object) -> None:
+    def test_value_precedence(self, point: dict[str, JsonValue], expected: JsonValue) -> None:
         payload = _metrics({"name": "claude_code.cost.usage", "gauge": {"dataPoints": [point]}})
         [event] = parse_otlp_metrics(payload)
         assert event.data["value"] == expected

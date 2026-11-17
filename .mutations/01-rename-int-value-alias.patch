@@ -1,0 +1,13 @@
+diff --git a/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py b/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
+index d792910c5..beb988502 100644
+--- a/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
++++ b/packages/syn-collector/src/syn_collector/collector/otlp_envelope.py
+@@ -41,7 +41,7 @@ class OtlpAnyValue(_OtlpModel):
+     """OTel ``AnyValue``: one of string, int, double or bool."""
+ 
+     string_value: StrictStr | None = Field(default=None, validation_alias="stringValue")
+-    int_value: StrictStr | StrictInt | None = Field(default=None, validation_alias="intValue")
++    int_value: StrictStr | StrictInt | None = Field(default=None, validation_alias="int_value")
+     double_value: StrictInt | StrictFloat | None = Field(
+         default=None, validation_alias="doubleValue"
+     )
