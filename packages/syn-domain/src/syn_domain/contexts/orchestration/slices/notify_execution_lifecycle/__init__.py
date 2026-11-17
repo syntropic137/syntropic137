@@ -1,8 +1,5 @@
 """Tell the outside world when an execution ends (#1661)."""
 
-from syn_domain.contexts.orchestration.slices.notify_execution_lifecycle.ExecutionLifecycleSinkPort import (
-    ExecutionLifecycleSinkPort,
-)
 from syn_domain.contexts.orchestration.slices.notify_execution_lifecycle.value_objects import (
     ExecutionLifecycleNotice,
     ExecutionOutcome,
@@ -11,7 +8,6 @@ from syn_domain.contexts.orchestration.slices.notify_execution_lifecycle.value_o
 
 __all__ = [
     "ExecutionLifecycleNotice",
-    "ExecutionLifecycleSinkPort",
     "ExecutionOutcome",
     "lifecycle_notice",
 ]
