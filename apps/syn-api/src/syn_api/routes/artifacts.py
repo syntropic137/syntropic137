@@ -457,7 +457,11 @@ async def create_artifact(
         from syn_domain.contexts.artifacts import (
             ArtifactAggregate,
             ArtifactType,
+            ContentType,
             CreateArtifactCommand,
+        )
+        from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+            MAX_INLINE_TEXT_BYTES,
         )
 
         try:
@@ -478,6 +482,21 @@ async def create_artifact(
             content=content,
             title=title,
         )
+        # Text over the inline limit lives at storage_uri only (#2042), so it is
+        # uploaded first, as ArtifactCollector does. Small text stays inline and
+        # needs no storage, exactly as before.
+        if len(content.encode("utf-8")) > MAX_INLINE_TEXT_BYTES:
+            from syn_adapters.storage.artifact_storage import get_artifact_storage
+
+            storage = await get_artifact_storage()
+            uploaded = await storage.upload(
+                artifact_id=artifact_id,
+                content=content.encode("utf-8"),
+                workflow_id=workflow_id,
+                phase_id=phase_id or "",
+                content_type=(command.content_type or ContentType.TEXT_MARKDOWN).value,
+            )
+            command = command.model_copy(update={"storage_uri": uploaded.storage_uri})
 
         repo = get_artifact_repo()
         aggregate = ArtifactAggregate()

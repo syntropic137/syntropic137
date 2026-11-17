@@ -25,7 +25,8 @@ import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.artifact_storage.memory import InMemoryArtifactStorage
-from syn_api.routes.artifacts import get_artifact_content_endpoint
+from syn_api.routes.artifacts import create_artifact, get_artifact_content_endpoint
+from syn_api.types import Ok
 from syn_domain.contexts.artifacts import (
     UNREPORTED_AGENT,
     ArtifactType,
@@ -257,3 +258,45 @@ class TestEveryReaderGetsTheWholeText:
         outputs = await query.get_for_phase_injection("exec-2042", ["verify"])
         assert list(outputs) == ["verify"]
         assert _sha(outputs["verify"].encode()) == _sha(CI_LOG)
+
+
+class TestTheCreateRouteStoresLargeText:
+    """`POST /artifacts` is a writer too: it must upload large text, not refuse it.
+
+    Before, the route built the command with no `storage_uri`, so the aggregate
+    refused any text over `MAX_INLINE_TEXT_BYTES` that main accepted (verifier
+    finding on #2306: 524,289 bytes -> 400).
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("text", "inline"),
+        [
+            pytest.param("x" * (MAX_INLINE_TEXT_BYTES + 1), False, id="one-byte-over"),
+            pytest.param(CI_LOG.decode(), False, id="ci-log"),
+            pytest.param(SMALL.decode(), True, id="small-stays-inline"),
+        ],
+    )
+    async def test_created_text_round_trips_through_the_content_route(
+        self, api_wired_to: list[_World], text: str, inline: bool
+    ) -> None:
+        world = await _collect(((SMALL_PATH, SMALL),))  # storage + read model to write into
+        api_wired_to.append(world)
+        repo = _Repo()
+        with (
+            patch("syn_api.routes.artifacts.get_artifact_repo", return_value=repo),
+            patch("syn_api.routes.artifacts.sync_published_events_to_projections", new=AsyncMock()),
+        ):
+            result = await create_artifact("wf-2042", "other", "log", text, phase_id="api")
+        assert isinstance(result, Ok), result
+        (aggregate,) = repo.saved
+        (envelope,) = aggregate.get_uncommitted_events()
+        event = envelope.event
+        assert isinstance(event, ArtifactCreatedEvent)
+        assert _wire_bytes(event) < GRPC_LIMIT
+        assert (event.content == text) is inline
+        assert event.content_hash == _sha(text.encode())
+        await world.projection.on_artifact_created(event.model_dump())
+        response = await get_artifact_content_endpoint(event.artifact_id)
+        assert response.content is not None
+        assert _sha(response.content.encode()) == _sha(text.encode())
