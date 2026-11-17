@@ -112,6 +112,12 @@ from syn_domain.contexts.agent_sessions.import_ledger import (
     ImportLedgerPort,
 )
 from syn_domain.contexts.agent_sessions.ports.BackfillReceiptPort import BackfillReceiptConflict
+from syn_domain.contexts.agent_sessions.ports.ConversationLogReaderPort import (
+    ConversationLogReader,
+    ConversationLogRow,
+    NonStringEventTypeError,
+    UnreadableConversationLine,
+)
 from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort import (
     HistoricalAcquisitionQuotaExceeded,
 )
@@ -298,6 +304,8 @@ __all__ = [
     "CataloguedCapture",
     "CompleteSessionCommand",
     "CompleteSessionHandler",
+    "ConversationLogReader",
+    "ConversationLogRow",
     "CostCalculator",
     "CoverageState",
     "DelegationOutcome",
@@ -362,6 +370,7 @@ __all__ = [
     "NativeTranscriptFacts",
     "NoUsage",
     "NodeEvidence",
+    "NonStringEventTypeError",
     "ObservationType",
     "ObserveInventoryClockCommand",
     "OperationRecord",
@@ -422,6 +431,7 @@ __all__ = [
     "TranscriptMessage",
     "TranscriptUsageReader",
     "UnpricedUsage",
+    "UnreadableConversationLine",
     "UnsupportedEvidenceIssue",
     "UsageResult",
     "import_phase_delegates",

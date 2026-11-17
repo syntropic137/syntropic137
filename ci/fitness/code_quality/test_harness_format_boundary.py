@@ -543,14 +543,15 @@ def test_marker_in_a_comment_is_not_a_violation(name: str, tmp_path: Path) -> No
 def test_exemption_is_exact_and_ratchets(tmp_path: Path) -> None:
     root = repo_root()
     _copy_tree(root, tmp_path)
-    budgets = _budgets(root)
-    # transcript_usage.py's exemption went with part 1 of #1424; the one
-    # remaining file still exercises the exact-count rule.
-    exempt = "apps/syn-api/src/syn_api/routes/conversations.py"
-    assert exempt in budgets, "conversations.py exemption (#1424) expected"
-    # One more marker in the exempt file exceeds its exact budget.
+    # #1424 removed the last real exemption, so the budget is synthetic: the
+    # exact-count rule must still hold for whatever file is listed next.
+    exempt = _INVENTORY_ROUTE
     _plant(tmp_path / exempt, '\n\n_PLANTED = "session_meta"\n')
+    budgets = {**_budgets(root), exempt: 1}
+    assert evaluate(tmp_path, budgets) == [], "a budget equal to the count must pass"
+    # One more marker in the exempt file exceeds its exact budget.
+    _plant(tmp_path / exempt, '\n_PLANTED_TOO = "session_meta"\n')
     assert any("exceed exemption" in f for f in evaluate(tmp_path, budgets))
     # A budget above the real count is stale and must be lowered.
-    stale = {**budgets, exempt: budgets[exempt] + 5}
-    assert any("lower the budget" in f for f in evaluate(root, stale))
+    stale = {**budgets, exempt: 5}
+    assert any("lower the budget" in f for f in evaluate(tmp_path, stale))

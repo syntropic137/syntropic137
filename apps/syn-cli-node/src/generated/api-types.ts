@@ -573,6 +573,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/executions/{execution_id}/pushes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Execution Pushes Endpoint
+         * @description Every `PhaseCommitPushed` recorded on the execution: phase, repository, branch, SHA.
+         */
+        get: operations["get_execution_pushes_endpoint_executions__execution_id__pushes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/executions/{execution_id}/session-transcripts/{archive_hash}": {
         parameters: {
             query?: never;
@@ -5054,6 +5074,20 @@ export interface components {
             };
             read_model_status?: components["schemas"]["ReadModelStatus"] | null;
         };
+        /**
+         * ExecutionPushesResponse
+         * @description Every push this execution's phases recorded, read from the aggregate, not a projection.
+         *
+         *     In the order they were recorded. Empty means no `PhaseCommitPushed` event
+         *     exists for the execution, which is not the same as "nothing was pushed":
+         *     a push the hook did not report is not here.
+         */
+        ExecutionPushesResponse: {
+            /** Execution Id */
+            execution_id: string;
+            /** Pushes */
+            pushes: components["schemas"]["RecordedPush"][];
+        };
         /** ExecutionRunListResponse */
         ExecutionRunListResponse: {
             /** Runs */
@@ -7492,6 +7526,20 @@ export interface components {
              * @description One sentence for a banner, e.g. 'Rebuilding execution history - 72% (29,476 events behind).' Null when not rebuilding.
              */
             summary_display?: string | null;
+        };
+        /**
+         * RecordedPush
+         * @description One push a phase's own workspace made, as `PhaseCommitPushed` recorded it (#1544).
+         */
+        RecordedPush: {
+            /** Phase Id */
+            phase_id: string;
+            /** Repository */
+            repository: string;
+            /** Branch */
+            branch: string;
+            /** Sha */
+            sha: string;
         };
         /**
          * RegisterClaudePluginRequest
@@ -12000,6 +12048,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionInventoryJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_execution_pushes_endpoint_executions__execution_id__pushes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionPushesResponse"];
                 };
             };
             /** @description Validation Error */

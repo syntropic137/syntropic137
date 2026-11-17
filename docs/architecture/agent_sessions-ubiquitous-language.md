@@ -42,6 +42,28 @@ Started by `SessionStarted`, ended by `SessionCompleted`. A Session that never
 completed is not an error in itself - the run may have been killed - but it has
 no final totals.
 
+## Conversation Log and Conversation Log Row
+
+The **Conversation Log** is a Session's raw agent stdout, stored line by line
+and served under `GET /conversations/{session_id}`. A **Conversation Log Row**
+(`ConversationLogRow`) is what one stored line shows a reader: an event type,
+the tools the line names and a short preview, with nothing harness-specific
+left in it. `ConversationLogReader` is the port that reads one line into one
+row and says whether a line is CLI chrome that does not belong in the log at
+all; how Claude Code or Codex spells a line is the adapter's business (#1424).
+
+An **Unreadable Conversation Line** (`UnreadableConversationLine`) is a stored
+line the reader could not read as a row: a field of the wrong type, or JSON
+nested past the decoder's limit. The reader returns it with its cause rather
+than raising; the API fails the whole log request with it, as it always has.
+When the wrong-typed field is the event type, the cause is a
+`NonStringEventTypeError` carrying the value, so the API can report it as the
+same response-model validation failure it always did.
+
+Not a **Transcript Conversation** (`TranscriptConversationPort`): that is a
+bounded user/assistant excerpt of a whole inventory document. A Conversation
+Log Row is per line, and every line that belongs in the log keeps its row.
+
 ## Requested Model and Observed Model
 
 Two different facts about which model a Session used, never conflated

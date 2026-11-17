@@ -25,6 +25,35 @@ syn execution list [options]
 
 ---
 
+## `syn execution pushes`
+
+List the pushes an execution's phases recorded (PhaseCommitPushed): phase, repository, branch, SHA
+
+```bash
+syn execution pushes <execution-id> [options]
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution-id` | `text` | Yes | Execution ID or unique prefix |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--json` | `boolean` | --- | Print the response as JSON |
+
+**Examples:**
+
+```bash
+syn execution pushes <execution-id>          # one line per push, in recorded order
+syn execution pushes <execution-id> --json   # for scripts and agents
+```
+
+---
+
 ## `syn execution resume`
 
 Resume a failed execution so it restarts at the first phase that did not finish
