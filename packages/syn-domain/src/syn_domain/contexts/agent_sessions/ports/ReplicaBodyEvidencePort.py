@@ -21,7 +21,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_inventory imp
     InventoryModel,
 )
 from syn_domain.contexts.agent_sessions.ports.QualifiedSessionStorePort import (
-    QualifiedSessionIdentity,
+    QualifiedSessionIdentity,  # noqa: TC001 - needed at runtime for Pydantic field validation
 )
 
 
