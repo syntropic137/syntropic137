@@ -816,6 +816,33 @@ rather than repeated when the Phase quarantines again. Owed until a PR exists
 to receive it; with none yet, it is asked again on every live pass, and the
 platform's clock tick guarantees a pass comes. (#1547.)
 
+## Execution Lifecycle Notice
+
+What the outside world is told when an Execution ends:
+`ExecutionLifecycleNotice`. Exactly one is derived from each terminal event,
+by `lifecycle_notice`, and none from any other event. It names the Execution,
+its Workflow, its Execution Outcome and when it ended. A `failed` notice also
+carries the Failure Classification and the error message. A `cancelled` one
+carries the cancel reason, when one was given. No notice carries fields that
+belong to another outcome. (#1661.)
+
+**Unclear:** `interrupted` is terminal but owes no notice yet. The Execution can
+be resumed, and whether to tell anyone about it is decided in #1661.
+
+## Execution Outcome
+
+How an Execution ended, from a notice's point of view: `completed`, `failed`
+or `cancelled`. It is narrower than the Execution's status on purpose. It names
+only the endings a notice is owed for.
+
+## Execution Lifecycle Sink
+
+Something outside the platform that is told an Execution ended, such as a
+webhook or an ntfy topic. Its port is `ExecutionLifecycleSinkPort`. Delivery
+MUST be idempotent per (execution, outcome), and it happens live only, never
+while events are replayed: rebuilding a read model tells nobody anything.
+There is no adapter yet; adapters arrive in #1661's second slice.
+
 ## Owed Cancelled Work
 
 A cancelled Execution's landed Quarantine Refs that the event store refused to
