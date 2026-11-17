@@ -12,12 +12,16 @@ import json
 import pytest
 
 from syn_adapters.conversations import StoredConversationLogReader
-from syn_domain.contexts.agent_sessions import ConversationLogReader, ConversationLogRow
+from syn_domain.contexts.agent_sessions import (
+    ConversationLogReader,
+    ConversationLogRow,
+    UnreadableConversationLine,
+)
 
 _SEP = " ¦ "
 
 
-def _row(record: object) -> ConversationLogRow:
+def _row(record: object) -> ConversationLogRow | UnreadableConversationLine:
     return StoredConversationLogReader().read_row(json.dumps(record))
 
 
@@ -132,3 +136,29 @@ def test_malformed_line_is_a_log_row_not_an_error(raw: str, preview: str | None)
     assert StoredConversationLogReader().read_row(raw) == ConversationLogRow(
         event_type="log", tool_name=None, content_preview=preview
     )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("raw", "cause"),
+    [
+        ('{"type": []}', TypeError),
+        ('{"type": "item.completed", "item": {"type": []}}', TypeError),
+        ('{"message": {"content": [{"text": 3}]}}', TypeError),
+        ('{"type": 3}', TypeError),
+        ("[" * 20000 + "0" + "]" * 20000, RecursionError),
+    ],
+    ids=[
+        "unhashable-type",
+        "unhashable-codex-item-type",
+        "non-string-text-block",
+        "non-string-event-type",
+        "json-nested-past-decoder-limit",
+    ],
+)
+def test_unreadable_line_is_returned_with_its_cause_not_raised(
+    raw: str, cause: type[Exception]
+) -> None:
+    result = StoredConversationLogReader().read_row(raw)
+    assert isinstance(result, UnreadableConversationLine)
+    assert type(result.cause) is cause

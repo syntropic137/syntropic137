@@ -30,7 +30,7 @@ from syn_api.types import (
     Ok,
     Result,
 )
-from syn_domain.contexts.agent_sessions import AgentLaunch
+from syn_domain.contexts.agent_sessions import AgentLaunch, UnreadableConversationLine
 from syn_shared.observed_model import format_observed_model
 
 logger = logging.getLogger(__name__)
@@ -103,9 +103,11 @@ class ConversationMetadataResponse(BaseModel):
 
 def _conversation_line(
     reader: ConversationLogReader, line_number: int, raw: str
-) -> ConversationLine:
+) -> ConversationLine | UnreadableConversationLine:
     """One stored line as a numbered ``ConversationLine``, read through the port."""
     row = reader.read_row(raw)
+    if isinstance(row, UnreadableConversationLine):
+        return row
     return ConversationLine(
         line_number=line_number,
         raw=raw,
@@ -205,7 +207,13 @@ async def get_conversation_log(
 
         total = len(raw_lines)
         page = raw_lines[offset : offset + limit]
-        lines = [_conversation_line(reader, i, raw) for i, raw in enumerate(page, start=offset + 1)]
+        lines: list[ConversationLine] = []
+        for i, raw in enumerate(page, start=offset + 1):
+            line = _conversation_line(reader, i, raw)
+            if isinstance(line, UnreadableConversationLine):
+                # One unreadable line fails the whole page, as it always has.
+                return Err(ObservabilityError.QUERY_FAILED, message=str(line.cause))
+            lines.append(line)
 
         return Ok(
             ConversationLog(

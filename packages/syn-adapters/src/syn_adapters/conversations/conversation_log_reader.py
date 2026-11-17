@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
-from syn_domain.contexts.agent_sessions import ConversationLogRow
+from syn_domain.contexts.agent_sessions import ConversationLogRow, UnreadableConversationLine
 from syn_shared.codex_stream import (
     CODEX_TOOL_NAME_COMMAND,
     CODEX_TOOL_NAME_FILE_CHANGE,
@@ -542,12 +542,20 @@ def _extract_line_fields(
     if claude_tool is not None:
         return claude_tool
 
-    event_type = cast("str | None", data.get("type") or data.get("event_type"))
+    event_type = data.get("type") or data.get("event_type")
     content = _extract_content_preview(data)
     entry = _ColumnEntry.of(
         name=data.get("tool_name") or data.get("name"),
         preview=content[:_PREVIEW_LEN] if content else None,
     )
+    if event_type is not None and not isinstance(event_type, str):
+        # Read straight out of the line, so not ours to trust: a row's event
+        # type is a string or nothing, and ``read_row`` reports the line as
+        # unreadable rather than handing on a row that breaks its own type.
+        # Checked last, so a line the content read already fails on keeps
+        # that failure as its cause.
+        msg = f"event_type must be a string, got {type(event_type).__name__}: {event_type!r}"
+        raise TypeError(msg)
     return event_type, [entry]
 
 
@@ -558,10 +566,19 @@ class StoredConversationLogReader:
         """False only for a codex plain-text banner line."""
         return not _is_codex_cli_noise(raw)
 
-    def read_row(self, raw: str) -> ConversationLogRow:
-        """The row one stored line renders as; never raises."""
-        event_type, entries = _extract_line_fields(raw)
-        tool_name, preview = _render_tool_columns(entries)
+    def read_row(self, raw: str) -> ConversationLogRow | UnreadableConversationLine:
+        """The row one stored line renders as, or why it has none; never raises.
+
+        The extractors read arbitrary JSON, so a field of the wrong shape can
+        still fail inside them (an unhashable ``type``, a non-string text
+        block, a decoder recursion limit, a non-string event type). That
+        failure is returned as the line's cause rather than raised.
+        """
+        try:
+            event_type, entries = _extract_line_fields(raw)
+            tool_name, preview = _render_tool_columns(entries)
+        except Exception as exc:  # the port contract: an odd line never raises
+            return UnreadableConversationLine(cause=exc)
         return ConversationLogRow(
             event_type=event_type,
             tool_name=tool_name,

@@ -52,6 +52,11 @@ left in it. `ConversationLogReader` is the port that reads one line into one
 row and says whether a line is CLI chrome that does not belong in the log at
 all; how Claude Code or Codex spells a line is the adapter's business (#1424).
 
+An **Unreadable Conversation Line** (`UnreadableConversationLine`) is a stored
+line the reader could not read as a row: a field of the wrong type, or JSON
+nested past the decoder's limit. The reader returns it with its cause rather
+than raising; the API fails the whole log request with it, as it always has.
+
 Not a **Transcript Conversation** (`TranscriptConversationPort`): that is a
 bounded user/assistant excerpt of a whole inventory document. A Conversation
 Log Row is per line, and every line that belongs in the log keeps its row.

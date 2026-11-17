@@ -115,6 +115,7 @@ from syn_domain.contexts.agent_sessions.ports.BackfillReceiptPort import Backfil
 from syn_domain.contexts.agent_sessions.ports.ConversationLogReaderPort import (
     ConversationLogReader,
     ConversationLogRow,
+    UnreadableConversationLine,
 )
 from syn_domain.contexts.agent_sessions.ports.HistoricalEvidenceSourcePort import (
     HistoricalAcquisitionQuotaExceeded,
@@ -428,6 +429,7 @@ __all__ = [
     "TranscriptMessage",
     "TranscriptUsageReader",
     "UnpricedUsage",
+    "UnreadableConversationLine",
     "UnsupportedEvidenceIssue",
     "UsageResult",
     "import_phase_delegates",

@@ -34,6 +34,18 @@ class ConversationLogRow:
     content_preview: str | None
 
 
+@dataclass(frozen=True)
+class UnreadableConversationLine:
+    """A stored line the reader could not turn into a row.
+
+    Returned, never raised, so the port's no-raise contract holds for every
+    input. ``cause`` is the failure the reading hit; the caller decides what
+    an unreadable line means for the whole log.
+    """
+
+    cause: Exception
+
+
 class ConversationLogReader(Protocol):
     """Reads stored conversation-log lines into harness-neutral rows."""
 
@@ -45,11 +57,14 @@ class ConversationLogReader(Protocol):
         """
         ...
 
-    def read_row(self, raw: str) -> ConversationLogRow:
-        """The row ``raw`` renders as.
+    def read_row(self, raw: str) -> ConversationLogRow | UnreadableConversationLine:
+        """The row ``raw`` renders as, or why it has none.
 
         Implementations MUST NOT raise. A non-JSON line, a JSON scalar or a
         line of an unknown shape is still a row (a ``log`` line or the generic
-        reading): one odd line never fails the whole conversation log.
+        reading). A line whose fields cannot be read as a row's (a non-string
+        ``type``, a non-string text block, JSON nested past the decoder's
+        limit) is an ``UnreadableConversationLine``; every field of a returned
+        ``ConversationLogRow`` is a ``str`` or None.
         """
         ...
