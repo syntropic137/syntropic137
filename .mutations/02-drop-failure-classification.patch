@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/value_objects.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/value_objects.py
+index f93762bd2..f23bcf4f3 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/value_objects.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/value_objects.py
+@@ -98,7 +98,7 @@ def lifecycle_notice(event: DomainEvent) -> ExecutionLifecycleNotice | None:
+             workflow_id=event.workflow_id,
+             outcome=ExecutionOutcome.FAILED,
+             occurred_at=event.failed_at,
+-            failure_classification=event.failure_classification,
++            failure_classification=FailureClassification.UNCLASSIFIED,
+             error_message=event.error_message,
+         )
+     if isinstance(event, ExecutionCancelledEvent):
