@@ -25,7 +25,10 @@ type OtlpScalar = str | int | float | bool
 @dataclass(frozen=True)
 class _OtlpView:
     # The raw OTLP/JSON object this view reads; nothing outside this module
-    # indexes it.
+    # indexes it. Accessors return leaves as sent, unvalidated, because the
+    # collector must keep accepting and storing exactly what it did (module
+    # docstring); each ``type: ignore[no-any-return]`` below is that choice,
+    # with the declared return type naming what OTLP/JSON specifies there.
     raw: dict[str, Any]
 
     def _snake_or_camel(self, snake: str, camel: str, default: Any) -> Any:  # noqa: ANN401
