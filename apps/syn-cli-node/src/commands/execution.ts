@@ -13,6 +13,7 @@ import { formatCostWithCoverage, formatStatus, formatTimestamp, formatTokens } f
 import { executionSessionsCommand } from "./execution-sessions.js";
 import { executionTranscriptCommand } from "./execution-transcript.js";
 import { executionTagCommand } from "./execution-tags.js";
+import { executionPushesCommand } from "./execution-pushes.js";
 import { watchExecutionCommand } from "./watch.js";
 import { Table } from "../output/table.js";
 
@@ -328,6 +329,7 @@ executionGroup
   .command(showCommand)
   .command(resumeCommand)
   .command(executionTagCommand)
+  .command(executionPushesCommand)
   .command(executionSessionsCommand)
   .command(executionTranscriptCommand)
   // Noun-verb form of `syn watch execution` (#1633): same definition, renamed.

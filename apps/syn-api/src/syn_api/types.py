@@ -1074,6 +1074,28 @@ class ExecutionTagsResponse(BaseModel):
     """The tags it launched with. A record of the launch: no edit ever changes it."""
 
 
+class RecordedPush(BaseModel):
+    """One push a phase's own workspace made, as `PhaseCommitPushed` recorded it (#1544)."""
+
+    phase_id: str
+    repository: str
+    """The clone's directory name, as the workspace's push hook reported it."""
+    branch: str
+    sha: str
+
+
+class ExecutionPushesResponse(BaseModel):
+    """Every push this execution's phases recorded, read from the aggregate, not a projection.
+
+    In the order they were recorded. Empty means no `PhaseCommitPushed` event
+    exists for the execution, which is not the same as "nothing was pushed":
+    a push the hook did not report is not here.
+    """
+
+    execution_id: str
+    pushes: list[RecordedPush]
+
+
 class WorkflowTagsResponse(BaseModel):
     """A workflow's tags after an edit, read from the aggregate, not a projection."""
 
