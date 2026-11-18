@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py
+index b82e12863..52bdd3697 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py
+@@ -123,7 +123,6 @@ class ExecutionLifecycleNoticeProcessManager(ProcessManager):
+                 # offers it again. The sink is idempotent per key, so a
+                 # delivery that landed before this raised is not doubled.
+                 logger.exception("Could not deliver the execution lifecycle notice %s", record.key)
+-                continue
+             await self._save(record.model_copy(update={"delivery": NoticeDelivery.DELIVERED}))
+             delivered += 1
+         return delivered
