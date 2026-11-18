@@ -49,10 +49,6 @@ _UNIMPLEMENTED: dict[str, str] = {
         "item 1.3), which reads the event store. Exercised against a test "
         "double in packages/syn-adapters/tests/test_execution_run_queue_postgres.py."
     ),
-    "ExecutionLifecycleSinkPort": (
-        "The contract half of #1661. ExecutionLifecycleNoticeProcessManager "
-        "consumes it; the webhook and ntfy adapters land in slice 2b."
-    ),
     "ForgeReadsPort": (
         "feedback's forge reads (ADR-076-feedback-ticketing). The GitHub adapter "
         "lands with FixResolver in plan PR 12 (#2010); nothing consumes it before then."

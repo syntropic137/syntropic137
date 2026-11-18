@@ -48,6 +48,7 @@ if TYPE_CHECKING:
         InMemoryEvidenceRunner,
         InMemoryRemoteBranchWriter,
     )
+    from syn_adapters.execution_lifecycle import WebhookExecutionLifecycleSink
     from syn_adapters.execution_runs import PostgresExecutionRunQueue
     from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
     from syn_adapters.feedback_screening import AnthropicScreener, HeuristicScreener
@@ -267,6 +268,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.ports.EvidenceFilingPort import EvidenceFilingPort
     from syn_domain.contexts.orchestration.ports.EvidenceRunnerPort import EvidenceRunnerPort
+    from syn_domain.contexts.orchestration.ports.ExecutionLifecycleSinkPort import (
+        ExecutionLifecycleSinkPort,
+    )
     from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
         ExecutionRunQueue,
     )
@@ -551,3 +555,7 @@ if TYPE_CHECKING:
         """feedback's classifiers (ADR-076-feedback-ticketing): the floor and the model."""
         _heuristic: ScreeningPort = heuristic
         _anthropic: ScreeningPort = anthropic
+
+    def _execution_lifecycle_sink(webhook: WebhookExecutionLifecycleSink) -> None:
+        """Where an execution's end is told (#1661). The ntfy sink lands in a later slice."""
+        _webhook: ExecutionLifecycleSinkPort = webhook
