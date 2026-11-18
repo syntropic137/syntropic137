@@ -93,7 +93,7 @@ async def test_capture_checkpoint_follows_durable_enqueue(failure: str | None) -
     transport.drain.assert_not_awaited()
 
 
-@pytest.mark.parametrize("failure", ["missing", "journal", "checkpoint", None])
+@pytest.mark.parametrize("failure", ["missing", "revision", "journal", "checkpoint", None])
 async def test_receipt_publication_precedes_checkpoint_and_retries_identically(
     failure: str | None, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -124,6 +124,10 @@ async def test_receipt_publication_precedes_checkpoint_and_retries_identically(
         duplicate=False,
     )
     transport.receipt.return_value = None if failure == "missing" else receipt
+    # The archived bytes hash to "e..." when the store acknowledged another revision.
+    transport.content_hash.return_value = (
+        "sha256:" + "e" * 64 if failure == "revision" else receipt.content_hash
+    )
     if failure == "journal":
         journal.append.side_effect = RuntimeError("private-token")
     if failure == "checkpoint":
@@ -134,7 +138,7 @@ async def test_receipt_publication_precedes_checkpoint_and_retries_identically(
     if failure is None:
         jobs.finish_receipt.assert_awaited_once_with(lease, recorded=True, retry_seconds=10)
         journal.append.assert_awaited_once()
-    elif failure == "missing":
+    elif failure in ("missing", "revision"):
         journal.append.assert_not_called()
         jobs.finish_receipt.assert_awaited_once_with(lease, recorded=False, retry_seconds=10)
     else:

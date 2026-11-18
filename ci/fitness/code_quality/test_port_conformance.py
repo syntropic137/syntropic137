@@ -71,6 +71,12 @@ _UNIMPLEMENTED: dict[str, str] = {
         "and no call site asks for it. Kept here rather than deleted because "
         "removing a published port is a separate decision from #1305."
     ),
+    "ReplicaBodyEvidencePort": (
+        "Reading back a stored transcript row is a store-format concern that "
+        "lands with the external APSS exporter/store (#946). Contract-tested in "
+        "packages/syn-domain/tests/contexts/agent_sessions/"
+        "test_replica_body_evidence_port.py."
+    ),
     "RemoteTreePort": (
         "The forge adapter lands in PR 6 of "
         "docs/plans/20261015_platform-dispatched-evidence.md (A.15). Until then "
