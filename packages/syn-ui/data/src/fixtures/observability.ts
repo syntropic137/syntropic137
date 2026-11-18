@@ -1,4 +1,5 @@
-import type { ConversationLogResponse, ToolTimelineResponse, TokenMetricsResponse } from '../resources/observability'
+import type { ConversationLogResponse, Health, ToolTimelineResponse, TokenMetricsResponse } from '../resources/observability'
+import type { components } from '../generated/api-types'
 import type { CostSummary, ExecutionCost, MetricsResponse, SessionCost } from '../types'
 import { RUNS, phaseRuns, runOf } from './catalog'
 import { executionDetail, findRun } from './executions'
@@ -197,13 +198,22 @@ export const observabilityRoutes: FixtureRoute[] = [
   }),
   route('GET', '/sse/health', () => ({ status: 'ok', active_executions: 1, active_connections: 0 })),
   route('GET', '/features', () => ({ ui_feedback: true })),
-  // Shaped like a real beta deploy: PEP 440 version, semver image tag, a full sha, live 2h13m before FIXTURE_NOW.
-  route('GET', '/version', () => ({
-    version: '0.33.2b23',
-    image_tag: 'v0.33.2-beta.23',
-    commit: '4f2a9c81d03e6b57a1c9e0f4b8d27365ce1a90b4',
-    started_at: new Date(FIXTURE_NOW - (2 * 60 + 13) * 60_000).toISOString(),
-    version_status: 'installed',
-    started_at_display: '2026-10-08 06:47 UTC',
-  })),
+  route('GET', '/version', () => BUILD),
+  route('GET', '/health', () => HEALTH_FULL),
 ]
+
+// Shaped like a real beta deploy: PEP 440 version, semver image tag, a full sha, live 2h13m before FIXTURE_NOW.
+const BUILD: components['schemas']['BuildInfo'] = {
+  version: '0.33.2b23',
+  image_tag: 'v0.33.2-beta.23',
+  commit: '4f2a9c81d03e6b57a1c9e0f4b8d27365ce1a90b4',
+  started_at: new Date(FIXTURE_NOW - (2 * 60 + 13) * 60_000).toISOString(),
+  version_status: 'installed',
+  started_at_display: '2026-10-08 06:47 UTC',
+}
+
+/** What /health answers here: fully serving, so no reasons at all. */
+export const HEALTH_FULL: Health = { status: 'healthy', mode: 'full', build: BUILD }
+
+/** A degraded instance, for tests that serve it in place of HEALTH_FULL (no route serves it). */
+export const HEALTH_DEGRADED: Health = { ...HEALTH_FULL, mode: 'degraded', degraded_reasons: ['event_poller', 'disk_space'] }
