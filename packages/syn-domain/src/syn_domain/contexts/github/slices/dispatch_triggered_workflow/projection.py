@@ -39,6 +39,7 @@ from event_sourcing import (
 from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts._shared.start_refusal import WorkflowNotStartableError
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 
 
@@ -411,6 +412,14 @@ class WorkflowDispatchProjection(ProcessManager):
                 "Dispatch of workflow %s for trigger %s held: %s", workflow_id, trigger_id, exc
             )
             await self._save_record_status(execution_id, record, _PAUSED, exc.hold_reason)
+            return False
+        except WorkflowNotStartableError as exc:
+            # #1003: refused before any task exists, and it will not clear on
+            # its own. The message is the reason: it names what to fix.
+            logger.warning(
+                "Dispatch of workflow %s for trigger %s refused: %s", workflow_id, trigger_id, exc
+            )
+            await self._save_record_status(execution_id, record, "failed", str(exc))
             return False
         except Exception:
             logger.exception(

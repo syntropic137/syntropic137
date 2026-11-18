@@ -33,6 +33,7 @@ from syn_domain.contexts._shared.maintenance import (
     refuse_if_paused,
 )
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts._shared.start_refusal import WorkflowNotStartableError
 
 __all__ = [
     "AdmissionAnnouncementFailedError",
@@ -58,6 +59,7 @@ __all__ = [
     "MaintenancePort",
     "RepositoryRef",
     "RunDemand",
+    "WorkflowNotStartableError",
     "carrying",
     "guarantee_settled",
     "refuse_if_paused",

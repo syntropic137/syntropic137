@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     import asyncpg
 
     from syn_adapters.control import ExecutionController
-    from syn_adapters.control.commands import ControlSignal
     from syn_adapters.control.ports import SignalQueuePort
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.events.store import AgentEventStore
@@ -116,7 +115,9 @@ from syn_api._wiring_admission import (
 from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
 from syn_api._wiring_import_ledger import get_import_ledger
 from syn_api._wiring_launch import _build_resume_handler, get_execute_workflow_handler
+from syn_api._wiring_signal import _NullSignalQueueAdapter
 from syn_api._wiring_workspace_memory import get_workspace_memory_ledger, ledger_applies
+from syn_api.services.skill_preflight import require_resolvable_skills_for
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
 from syn_shared import settings as shared_settings
@@ -723,22 +724,12 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         # deployment, resuming or not.
         resume_handler=_build_resume_handler,
         launch_eval_for_workflow=admitted_launch_eval,
+        # #1003: the same skill preflight `POST /execute` runs, so a trigger
+        # whose skill cannot resolve fails with the resolver's message.
+        skill_preflight=require_resolvable_skills_for,
         # #1310 1.3: starts end at `admitted` in the run queue, awaited inline.
         admits_to_run_queue=shared_settings.get_settings().execution.run_queue_enabled,
     )
-
-
-class _NullSignalQueueAdapter:
-    """No-op signal adapter when Redis is not available."""
-
-    async def enqueue(self, execution_id: str, signal: ControlSignal) -> None:
-        pass
-
-    async def dequeue(self, execution_id: str) -> ControlSignal | None:  # noqa: ARG002
-        return None
-
-    async def get_signal(self, execution_id: str) -> ControlSignal | None:  # noqa: ARG002
-        return None
 
 
 def get_event_store_instance() -> AgentEventStore:
