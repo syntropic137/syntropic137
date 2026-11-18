@@ -104,6 +104,25 @@ async def test_a_non_2xx_leaves_the_notice_owed(status: int) -> None:
     assert len(seen) == 1
 
 
+@pytest.mark.parametrize("status", [302, 307, 308])
+async def test_a_redirect_is_not_followed_even_by_a_client_that_would(status: int) -> None:
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.host == "other.example":
+            return httpx.Response(200)
+        return httpx.Response(status, headers={"Location": "https://other.example/redirected"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handle), follow_redirects=True)
+    sink = WebhookExecutionLifecycleSink(_URL, SecretStr(_SECRET), client=client)
+    async with client:
+        with pytest.raises(LifecycleNoticeUndeliveredError, match=f"HTTP {status}"):
+            await sink.deliver(_NOTICE)
+    # The signed body went to the configured receiver only, never the redirect target.
+    assert [str(request.url) for request in seen] == [_URL]
+
+
 @pytest.mark.parametrize(
     "fault",
     [httpx.ReadTimeout("timed out"), httpx.ConnectError("connection refused")],

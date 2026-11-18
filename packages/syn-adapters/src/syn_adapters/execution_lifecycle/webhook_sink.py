@@ -13,7 +13,9 @@ what the receiver needs and the body does not:
 
 There is no retry loop. Any answer but a 2xx, a timeout or a transport error
 raises ``LifecycleNoticeUndeliveredError``; the notice then stays owed and the
-process manager's next pass is the retry. Neither the secret nor the signature
+process manager's next pass is the retry. Redirects are never followed, even
+by an injected client that would: a 3xx is a non-2xx, and following one would
+hand the signed body to a host nobody configured. Neither the secret nor the signature
 is ever logged or put in an error message.
 """
 
@@ -86,12 +88,19 @@ class WebhookExecutionLifecycleSink:
         }
         try:
             if self._client is not None:
+                # follow_redirects=False per request overrides an injected client's own setting.
                 response = await self._client.post(
-                    self._url, content=body, headers=headers, timeout=self._timeout
+                    self._url,
+                    content=body,
+                    headers=headers,
+                    timeout=self._timeout,
+                    follow_redirects=False,
                 )
             else:
                 async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    response = await client.post(self._url, content=body, headers=headers)
+                    response = await client.post(
+                        self._url, content=body, headers=headers, follow_redirects=False
+                    )
         # RequestError covers timeouts, refused connections and undecodable replies.
         except httpx.RequestError as exc:
             raise LifecycleNoticeUndeliveredError(
