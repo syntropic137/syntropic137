@@ -6,7 +6,7 @@ how each execution ended, using the Processor To-Do List pattern.
 PROJECTION SIDE (handle_event): writes one owed record per (execution_id,
   outcome) from `lifecycle_notice`. Pure, replay-safe: a replayed event whose
   record already exists, owed or delivered, writes nothing, so a delivered
-  notice is never reopened.
+  notice is never reopened. A row that cannot be read is replaced as owed.
 
 PROCESSOR SIDE (process_pending): delivers each owed record through the sink
   and marks it delivered. Called ONLY for live events, never during catch-up
@@ -88,8 +88,10 @@ class ExecutionLifecycleNoticeProcessManager(ProcessManager):
             notice = lifecycle_notice(envelope.event)
             if notice is not None:
                 record = LifecycleNoticeRecord(notice=notice)
-                # Present, owed or delivered: a replay, so write nothing.
-                if await self._store.get(self.PROJECTION_NAME, record.key) is None:
+                # Readable, owed or delivered: a replay, so write nothing. An
+                # unreadable row is no record at all, so it is owed afresh.
+                row = await self._store.get(self.PROJECTION_NAME, record.key)
+                if row is None or read_record(row) is None:
                     await self._save(record)
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(
@@ -132,8 +134,8 @@ class ExecutionLifecycleNoticeProcessManager(ProcessManager):
         await self._store.save(self.PROJECTION_NAME, record.key, record.model_dump(mode="json"))
 
     def get_idempotency_key(self, todo_item: dict[str, str | int | float | bool | None]) -> str:
-        """One notice per (execution_id, outcome)."""
-        return str(todo_item.get("key", ""))
+        """One notice per (execution_id, outcome): the `key` every stored row carries."""
+        return str(todo_item["key"])
 
     async def clear_all_data(self) -> None:
         await self._store.delete_all(self.PROJECTION_NAME)
