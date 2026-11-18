@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime  # noqa: TC003 - runtime for Pydantic
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ModelWrapValidatorHandler,
+    ValidationError,
+    computed_field,
+    model_validator,
+)
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (  # noqa: TC001 - runtime for Pydantic
     QuarantinedRef,
@@ -41,9 +48,26 @@ class QuarantineNotice(BaseModel):
     #: The forge's id for the comment, so a retry edits it instead of adding one.
     comment_id: int | None = None
 
+    @computed_field
     @property
     def key(self) -> str:
+        """The store key, dumped into the stored row for `get_idempotency_key`."""
         return f"{self.execution_id}:{self.phase_id}:{self.quarantined.repository}"
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _stored_key_matches(cls, data: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        """Read a stored row back: its `key` is derived, so it must agree, never set.
+
+        Rows saved before the key was dumped carry none, and still read.
+        """
+        if not isinstance(data, dict) or "key" not in data:
+            return handler(data)
+        fields = {name: value for name, value in data.items() if name != "key"}
+        notice = handler(fields)
+        if data["key"] != notice.key:
+            raise ValueError(f"stored key {data['key']!r} is not the derived key {notice.key!r}")
+        return notice
 
     @property
     def marker(self) -> str:

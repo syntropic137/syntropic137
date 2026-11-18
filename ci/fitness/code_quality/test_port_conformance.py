@@ -50,9 +50,8 @@ _UNIMPLEMENTED: dict[str, str] = {
         "double in packages/syn-adapters/tests/test_execution_run_queue_postgres.py."
     ),
     "ExecutionLifecycleSinkPort": (
-        "The contract half of #1661. The webhook and ntfy adapters, and the "
-        "ProcessManager that calls them live only, land in its second slice; "
-        "nothing consumes the port before then."
+        "The contract half of #1661. ExecutionLifecycleNoticeProcessManager "
+        "consumes it; the webhook and ntfy adapters land in slice 2b."
     ),
     "ForgeReadsPort": (
         "feedback's forge reads (ADR-076-feedback-ticketing). The GitHub adapter "

@@ -7,11 +7,19 @@ module's business: see `ExecutionLifecycleSinkPort`.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime  # noqa: TC003 - runtime for Pydantic
 from enum import StrEnum
 from typing import TYPE_CHECKING, Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ModelWrapValidatorHandler,
+    ValidationError,
+    computed_field,
+    model_validator,
+)
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (  # noqa: TC001 - runtime for Pydantic
     FailureClassification,
@@ -28,6 +36,8 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import 
 
 if TYPE_CHECKING:
     from event_sourcing import DomainEvent
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionOutcome(StrEnum):
@@ -110,3 +120,49 @@ def lifecycle_notice(event: DomainEvent) -> ExecutionLifecycleNotice | None:
             cancel_reason=event.reason,
         )
     return None
+
+
+class NoticeDelivery(StrEnum):
+    """Whether a sink has been told yet. `delivered` is final: nothing reopens it."""
+
+    OWED = "owed"
+    DELIVERED = "delivered"
+
+
+class LifecycleNoticeRecord(BaseModel):
+    """One notice on the to-do list, and whether it has been delivered."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    notice: ExecutionLifecycleNotice
+    delivery: NoticeDelivery = NoticeDelivery.OWED
+
+    @computed_field
+    @property
+    def key(self) -> str:
+        """The store key: one record per (execution_id, outcome), as the sink dedups.
+
+        Dumped into the stored row, so `get_idempotency_key` can read it there.
+        """
+        return f"{self.notice.execution_id}:{self.notice.outcome}"
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _stored_key_matches(cls, data: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        """Read a stored row back: its `key` is derived, so it must agree, never set."""
+        if not isinstance(data, dict) or "key" not in data:
+            return handler(data)
+        fields = {name: value for name, value in data.items() if name != "key"}
+        record = handler(fields)
+        if data["key"] != record.key:
+            raise ValueError(f"stored key {data['key']!r} is not the derived key {record.key!r}")
+        return record
+
+
+def read_record(row: object) -> LifecycleNoticeRecord | None:
+    """A stored row as a record, or None - logged - when it cannot be read."""
+    try:
+        return LifecycleNoticeRecord.model_validate(row)
+    except ValidationError:
+        logger.warning("Unreadable execution lifecycle notice skipped: %r", row)
+        return None

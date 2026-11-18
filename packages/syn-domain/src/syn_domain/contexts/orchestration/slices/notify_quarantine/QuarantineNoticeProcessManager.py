@@ -279,8 +279,8 @@ class QuarantineNoticeProcessManager(ProcessManager):
         await self._store.save(self.PROJECTION_NAME, notice.key, notice.model_dump(mode="json"))
 
     def get_idempotency_key(self, todo_item: dict[str, str | int | float | bool | None]) -> str:
-        """One notice per (execution, phase, repository)."""
-        return str(todo_item.get("key", ""))
+        """One notice per (execution, phase, repository): the `key` every stored row carries."""
+        return str(todo_item["key"])
 
     async def clear_all_data(self) -> None:
         if self._store is not None:

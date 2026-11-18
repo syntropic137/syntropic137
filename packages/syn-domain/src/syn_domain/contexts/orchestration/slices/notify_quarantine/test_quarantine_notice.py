@@ -46,6 +46,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal
 from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     QuarantineNoticeProcessManager,
 )
+from syn_domain.contexts.orchestration.slices.notify_quarantine.value_objects import read_notice
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -150,6 +151,26 @@ async def test_replaying_the_quarantine_posts_nothing() -> None:
         await manager.handle_event(_failed(), MemoryCheckpointStore())
     # handle_event is all a catch-up replay ever calls.
     assert commenter.posts == 0 and commenter.edits == 0
+
+
+@pytest.mark.asyncio
+async def test_each_stored_row_carries_its_own_idempotency_key() -> None:
+    store = InMemoryProjectionStore()
+    manager = QuarantineNoticeProcessManager(commenter=_Commenter(), store=store)
+    first = _failed()
+    second = EventEnvelope(
+        event=first.event.model_copy(update={"execution_id": "exec-q2"}),
+        metadata=first.metadata.model_copy(update={"global_nonce": 2}),
+    )
+    for envelope in (first, second):
+        await manager.handle_event(envelope, MemoryCheckpointStore())
+
+    rows = await store.get_all(manager.PROJECTION_NAME)
+    keys = {manager.get_idempotency_key(row) for row in rows}
+    assert keys == {"exec-q1:implement:acme/widget", "exec-q2:implement:acme/widget"}
+    # A row saved before the key was dumped still reads; a disagreeing key does not.
+    assert read_notice({k: v for k, v in rows[0].items() if k != "key"}) is not None
+    assert read_notice({**rows[0], "key": "exec-q9:implement:acme/widget"}) is None
 
 
 @pytest.mark.asyncio
