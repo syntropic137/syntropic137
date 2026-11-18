@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import pytest
-from event_sourcing import DomainEvent, EventEnvelope, EventMetadata
+from event_sourcing import DomainEvent, EventEnvelope, EventMetadata, ProjectionResult
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.agent_sessions import InventoryReconciliationSweepEvent
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
@@ -26,6 +27,9 @@ from syn_domain.contexts.orchestration.slices.notify_execution_lifecycle import 
     ExecutionLifecycleNotice,
     ExecutionLifecycleNoticeProcessManager,
     ExecutionOutcome,
+)
+from syn_domain.contexts.orchestration.slices.notify_execution_lifecycle.value_objects import (
+    read_record,
 )
 
 pytestmark = pytest.mark.unit
@@ -189,3 +193,69 @@ def test_the_clock_tick_wakes_it_so_an_owed_notice_is_retried_on_a_quiet_system(
         "ExecutionCancelled",
         "InventoryReconciliationSweep",
     }
+
+
+@pytest.mark.asyncio
+async def test_each_stored_row_carries_its_own_idempotency_key() -> None:
+    store = InMemoryProjectionStore()
+    manager = ExecutionLifecycleNoticeProcessManager(sink=_Sink(), store=store)
+    await _handle(manager, _failed(), _completed(), _completed("exec-2"))
+
+    rows = await store.get_all(manager.PROJECTION_NAME)
+    keys = {manager.get_idempotency_key(row) for row in rows}
+    assert keys == {"exec-1:failed", "exec-1:completed", "exec-2:completed"}
+    # The key is derived, so a row whose stored key disagrees is not a record.
+    assert read_record({**rows[0], "key": "exec-9:failed"}) is None
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_row_under_the_key_is_replaced_and_delivered_once() -> None:
+    sink = _Sink()
+    store = InMemoryProjectionStore()
+    manager = ExecutionLifecycleNoticeProcessManager(sink=sink, store=store)
+    await store.save(manager.PROJECTION_NAME, "exec-1:completed", {"garbage": True})
+    await _handle(manager, _completed())
+
+    assert await manager.process_pending() == 1
+    assert await manager.process_pending() == 0
+    assert [(n.execution_id, n.outcome) for n in sink.delivered] == [
+        ("exec-1", ExecutionOutcome.COMPLETED)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_handled_event_advances_the_checkpoint_to_its_global_position() -> None:
+    manager = _manager(_Sink())
+    checkpoints = MemoryCheckpointStore()
+
+    result = await manager.handle_event(_envelope(_completed(), nonce=7), checkpoints)
+
+    assert result is ProjectionResult.SUCCESS
+    checkpoint = await checkpoints.get_checkpoint(manager.PROJECTION_NAME)
+    assert checkpoint is not None and checkpoint.global_position == 7
+
+
+class _BrokenStore(InMemoryProjectionStore):
+    async def get(self, projection: str, key: str) -> None:
+        raise ConnectionError("store unreachable")
+
+
+@pytest.mark.asyncio
+async def test_a_store_failure_fails_the_event_and_leaves_the_checkpoint_where_it_was() -> None:
+    manager = ExecutionLifecycleNoticeProcessManager(sink=_Sink(), store=_BrokenStore())
+    checkpoints = MemoryCheckpointStore()
+
+    result = await manager.handle_event(_envelope(_completed(), nonce=7), checkpoints)
+
+    assert result is ProjectionResult.FAILURE
+    assert await checkpoints.get_checkpoint(manager.PROJECTION_NAME) is None
+
+
+@pytest.mark.asyncio
+async def test_a_clock_tick_writes_nothing_and_succeeds() -> None:
+    store = InMemoryProjectionStore()
+    manager = ExecutionLifecycleNoticeProcessManager(sink=_Sink(), store=store)
+    tick = _envelope(InventoryReconciliationSweepEvent(observed_at=_AT), nonce=3)
+
+    assert await manager.handle_event(tick, MemoryCheckpointStore()) is ProjectionResult.SUCCESS
+    assert await store.get_all(manager.PROJECTION_NAME) == []
