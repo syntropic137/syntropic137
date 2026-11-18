@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py b/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py
+index fb889f0fe..87a3e9be7 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py
+@@ -82,7 +82,7 @@ class WebhookExecutionLifecycleSink:
+         headers = {
+             "Content-Type": "application/json",
+             IDEMPOTENCY_KEY_HEADER: key,
+-            SIGNATURE_HEADER: sign(self._secret, body),
++            SIGNATURE_HEADER: sign(self._secret, json.dumps(notice.model_dump(mode="json"), indent=1).encode()),
+         }
+         try:
+             if self._client is not None:

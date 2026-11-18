@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py b/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py
+index fb889f0fe..f0738520d 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py
+@@ -98,7 +98,7 @@ class WebhookExecutionLifecycleSink:
+                 f"lifecycle notice {key} was not delivered to the webhook at "
+                 f"{httpx.URL(self._url).host}: {type(exc).__name__}; it stays owed"
+             ) from exc
+-        if not response.is_success:
++        if response.status_code >= 500:
+             raise LifecycleNoticeUndeliveredError(
+                 f"lifecycle notice {key} was refused by the webhook at "
+                 f"{httpx.URL(self._url).host} with HTTP {response.status_code}; it stays owed"
