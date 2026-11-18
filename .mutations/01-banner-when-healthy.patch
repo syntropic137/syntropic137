@@ -1,0 +1,13 @@
+diff --git a/apps/syn-ui/src/shell/DegradedBanner.svelte b/apps/syn-ui/src/shell/DegradedBanner.svelte
+index 829c04165..5778aa1cf 100644
+--- a/apps/syn-ui/src/shell/DegradedBanner.svelte
++++ b/apps/syn-ui/src/shell/DegradedBanner.svelte
+@@ -15,7 +15,7 @@
+   // No activity event means "health changed"; `live` still refetches on
+   // stream reconnect and on return to the tab, the moments it may have.
+   const health = resource((signal) => getHealth(signal), { live: () => false })
+-  const degraded = $derived(health.data?.mode === 'degraded' ? health.data : undefined)
++  const degraded = $derived(health.data)
+   const reasons = $derived(degraded?.degraded_reasons ?? [])
+ </script>
+ 

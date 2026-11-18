@@ -1,0 +1,12 @@
+diff --git a/apps/syn-ui/src/shell/AppShell.svelte b/apps/syn-ui/src/shell/AppShell.svelte
+index 85d68f81e..05aa0f9eb 100644
+--- a/apps/syn-ui/src/shell/AppShell.svelte
++++ b/apps/syn-ui/src/shell/AppShell.svelte
+@@ -30,7 +30,6 @@
+ <div class="sky-shell">
+   <div class="sky-shell__desktop-nav"><TopNav {active} {live} {onsearch} /></div>
+   <div class="sky-shell__phone-nav"><PhoneTop {live} {onsearch} /></div>
+-  <DegradedBanner />
+ 
+   {#if crumbs.length > 0}
+     <div class="sky-shell__crumbs"><BreadcrumbTrail {crumbs} /></div>
