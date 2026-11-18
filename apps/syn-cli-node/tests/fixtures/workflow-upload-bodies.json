@@ -2205,7 +2205,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2267,7 +2267,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2329,7 +2329,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2470,7 +2470,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2532,7 +2532,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2594,7 +2594,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2735,7 +2735,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2797,7 +2797,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -2859,7 +2859,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -3000,7 +3000,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -3062,7 +3062,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
@@ -3124,7 +3124,7 @@
         "output_artifacts": [
           "markdown"
         ],
-        "timeout_seconds": 3600,
+        "timeout_seconds": 5400,
         "allowed_tools": [
           "Read",
           "Grep",
