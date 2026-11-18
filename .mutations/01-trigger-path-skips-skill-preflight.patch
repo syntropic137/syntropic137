@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/_wiring_admission.py b/apps/syn-api/src/syn_api/_wiring_admission.py
+index f64e104fb..1ce569b94 100644
+--- a/apps/syn-api/src/syn_api/_wiring_admission.py
++++ b/apps/syn-api/src/syn_api/_wiring_admission.py
+@@ -697,8 +697,6 @@ class BackgroundWorkflowDispatcher:
+         a skill that does not resolve (#1003), an eval that is gone (#967).
+         """
+         await self._handler.validate_stored_declarations(workflow_id)
+-        if self._skill_preflight is not None:
+-            await self._skill_preflight(workflow_id)
+         return await self._launch_eval(workflow_id)
+ 
+     async def _launch_eval(self, workflow_id: str) -> LaunchEval | None:

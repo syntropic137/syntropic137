@@ -1,0 +1,15 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py b/packages/syn-domain/src/syn_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py
+index 41d9ed590..72161b197 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py
++++ b/packages/syn-domain/src/syn_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py
+@@ -419,8 +419,8 @@ class WorkflowDispatchProjection(ProcessManager):
+             logger.warning(
+                 "Dispatch of workflow %s for trigger %s refused: %s", workflow_id, trigger_id, exc
+             )
+-            await self._save_record_status(execution_id, record, "failed", str(exc))
+-            return False
++            await self._save_record_status(execution_id, record, _DISPATCHED, str(exc))
++            return True
+         except Exception:
+             logger.exception(
+                 "Failed to dispatch workflow %s for trigger %s", workflow_id, trigger_id
