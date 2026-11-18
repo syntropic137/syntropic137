@@ -102,11 +102,13 @@ class WebhookExecutionLifecycleSink:
                         self._url, content=body, headers=headers, follow_redirects=False
                     )
         # RequestError covers timeouts, refused connections and undecodable replies.
+        # Not chained: a transport may put request headers (the signature) in its
+        # message, and the process manager logs this error with its traceback.
         except httpx.RequestError as exc:
             raise LifecycleNoticeUndeliveredError(
                 f"lifecycle notice {key} was not delivered to the webhook at "
                 f"{httpx.URL(self._url).host}: {type(exc).__name__}; it stays owed"
-            ) from exc
+            ) from None
         if not response.is_success:
             raise LifecycleNoticeUndeliveredError(
                 f"lifecycle notice {key} was refused by the webhook at "

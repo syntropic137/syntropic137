@@ -136,7 +136,9 @@ async def test_a_transport_fault_leaves_the_notice_owed(fault: httpx.RequestErro
     async with client:
         with pytest.raises(LifecycleNoticeUndeliveredError) as raised:
             await sink.deliver(_NOTICE)
-    assert raised.value.__cause__ is fault
+    # Not chained: the fault never reaches the process manager's traceback log.
+    assert raised.value.__cause__ is None
+    assert raised.value.__suppress_context__
 
 
 async def test_neither_the_secret_nor_the_signature_is_logged(
@@ -161,3 +163,23 @@ async def test_neither_the_secret_nor_the_signature_is_logged(
 def test_refuses_to_construct_without_a_secret() -> None:
     with pytest.raises(ValueError, match="secret"):
         WebhookExecutionLifecycleSink(_URL, SecretStr(""))
+
+
+async def test_a_transport_fault_that_echoes_the_headers_leaks_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError(
+            f"peer reset after {request.headers[SIGNATURE_HEADER]} key={_SECRET}", request=request
+        )
+
+    sink, client = _sink(httpx.MockTransport(handle))
+    caplog.set_level(logging.DEBUG)
+    async with client:
+        with pytest.raises(LifecycleNoticeUndeliveredError) as raised:
+            await sink.deliver(_NOTICE)
+        logging.getLogger("test").exception("undelivered", exc_info=raised.value)
+
+    assert caplog.records
+    assert _SECRET not in caplog.text
+    assert "sha256=" not in caplog.text

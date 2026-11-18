@@ -5,7 +5,7 @@ index fb889f0fe..f0738520d 100644
 @@ -98,7 +98,7 @@ class WebhookExecutionLifecycleSink:
                  f"lifecycle notice {key} was not delivered to the webhook at "
                  f"{httpx.URL(self._url).host}: {type(exc).__name__}; it stays owed"
-             ) from exc
+             ) from None
 -        if not response.is_success:
 +        if response.status_code >= 500:
              raise LifecycleNoticeUndeliveredError(
