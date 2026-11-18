@@ -843,6 +843,23 @@ MUST be idempotent per (execution, outcome), and it happens live only, never
 while events are replayed: rebuilding a read model tells nobody anything.
 There is no adapter yet; adapters arrive in #1661's second slice.
 
+## Execution Lifecycle Notice ProcessManager
+
+`ExecutionLifecycleNoticeProcessManager`: the ProcessManager that tells an
+Execution Lifecycle Sink how each Execution ended. Its projection side writes
+one Lifecycle Notice Record per terminal event and nothing on a replay. Its
+processor side runs live only, delivers each owed record, and marks it
+delivered. A delivery the sink refused stays owed for the next pass. It
+subscribes to the clock tick, so that pass also comes on a quiet system.
+(#1661.)
+
+## Lifecycle Notice Record
+
+`LifecycleNoticeRecord`: one Execution Lifecycle Notice on the to-do list,
+keyed by (execution, outcome), so one Execution that fails and then completes
+owes two. Its Notice Delivery is `owed` until the sink accepts it, then
+`delivered`. `delivered` is final: a replayed event never reopens it.
+
 ## Owed Cancelled Work
 
 A cancelled Execution's landed Quarantine Refs that the event store refused to
