@@ -54,6 +54,9 @@ from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
 from syn_domain.contexts.orchestration.ports.EvidenceRunnerPort import (
     EvidenceRunnerPort,
 )
+from syn_domain.contexts.orchestration.ports.ExecutionLifecycleSinkPort import (
+    ExecutionLifecycleSinkPort,
+)
 from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
     DEFAULT_EXECUTOR_POOL,
     Capability,
@@ -119,6 +122,7 @@ __all__ = [
     "DelegationEvidenceUnavailableError",
     "DelegationOutcome",
     "EvidenceRunnerPort",
+    "ExecutionLifecycleSinkPort",
     "ExecutionRunQueue",
     "ExecutionStreamProbe",
     "ExecutorHost",
