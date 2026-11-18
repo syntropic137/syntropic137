@@ -4,9 +4,10 @@
   it (the API sends no display labels, and the client does not invent them).
   A degraded answer with no reasons (startup gate holding, probe failed)
   still shows, with the API's status instead. Nothing renders when the
-  instance is fully serving, or when the read fails with no answer yet: the
-  live badge covers an unreachable API. A failed refresh keeps the last
-  answer on screen, as every resource() read does (ADR-074).
+  instance is fully serving, or when the read fails: the live badge covers an
+  unreachable API. resource() keeps the last answer through a failed refresh
+  (ADR-074), but a stale "degraded" is not this banner's to show, so it hides
+  until the next successful read.
 -->
 <script lang="ts">
   import { getHealth } from '@syn137/syn-ui-data'
@@ -15,7 +16,7 @@
   // No activity event means "health changed"; `live` still refetches on
   // stream reconnect and on return to the tab, the moments it may have.
   const health = resource((signal) => getHealth(signal), { live: () => false })
-  const degraded = $derived(health.data?.mode === 'degraded' ? health.data : undefined)
+  const degraded = $derived(!health.error && health.data?.mode === 'degraded' ? health.data : undefined)
   const reasons = $derived(degraded?.degraded_reasons ?? [])
 </script>
 

@@ -72,6 +72,36 @@ describe('degraded-mode banner', () => {
     expect(banners(el)).toHaveLength(0)
   })
 
+  it('hides when a refresh fails after a degraded answer, and shows again on the next degraded one', async () => {
+    let calls = 0
+    let next: () => Promise<Health> = answer(HEALTH_DEGRADED)
+    served = () => {
+      calls++
+      return next()
+    }
+    const el = await render()
+    expect(banners(el)).toHaveLength(1)
+
+    // The existing refresh path: return to the tab (resource() live, throttled to one per 2s).
+    const refresh = async () => {
+      const before = calls
+      await new Promise((r) => setTimeout(r, 2100))
+      document.dispatchEvent(new Event('visibilitychange'))
+      await settle()
+      expect(calls).toBe(before + 1)
+    }
+    next = async () => {
+      throw new Error('health down')
+    }
+    await refresh()
+    expect(banners(el)).toHaveLength(0)
+
+    next = answer(HEALTH_DEGRADED)
+    await refresh()
+    expect(banners(el)).toHaveLength(1)
+    expect(reasons(el)).toEqual(HEALTH_DEGRADED.degraded_reasons)
+  }, 15000)
+
   it('lists every reason the API gives, once, as the API names it', async () => {
     served = answer({ ...HEALTH_DEGRADED, degraded_reasons: ['event_poller', 'disk_space', 'projection_stalled'] })
     const el = await render()
