@@ -841,7 +841,24 @@ Something outside the platform that is told an Execution ended, such as a
 webhook or an ntfy topic. Its port is `ExecutionLifecycleSinkPort`. Delivery
 MUST be idempotent per (execution, outcome), and it happens live only, never
 while events are replayed: rebuilding a read model tells nobody anything.
-There is no adapter yet; adapters arrive in #1661's second slice.
+The webhook adapter is `WebhookExecutionLifecycleSink`; the ntfy one is still
+to come in #1661.
+
+## Webhook Execution Lifecycle Sink
+
+`WebhookExecutionLifecycleSink`: the Execution Lifecycle Sink that POSTs each
+notice as JSON to one URL. Any reply but a 2xx, a timeout or a transport error
+raises `LifecycleNoticeUndeliveredError`, so the notice stays owed. It never
+retries by itself: the ProcessManager's next pass over owed records is the
+retry. Two headers go with each POST:
+
+- **`Idempotency-Key`**: `<execution_id>:<outcome>`, for example
+  `exec-1:completed`. This is the same string a Lifecycle Notice Record is
+  stored under. A receiver drops a key it has already seen, because a notice
+  can be offered more than once.
+- **`X-Syn-Signature-256`**: `sha256=<hex>`, an HMAC-SHA256 of the exact body
+  bytes keyed by the shared secret. The receiver recomputes it over the bytes it
+  received. Neither the secret nor the signature is ever logged.
 
 ## Execution Lifecycle Notice ProcessManager
 
