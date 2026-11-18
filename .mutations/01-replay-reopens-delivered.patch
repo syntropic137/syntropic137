@@ -1,12 +1,13 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py
-index b82e12863..297c619db 100644
+index bba1ee4d9..df1306f3d 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py
-@@ -89,8 +89,7 @@ class ExecutionLifecycleNoticeProcessManager(ProcessManager):
-             if notice is not None:
+@@ -90,9 +90,7 @@ class ExecutionLifecycleNoticeProcessManager(ProcessManager):
                  record = LifecycleNoticeRecord(notice=notice)
-                 # Present, owed or delivered: a replay, so write nothing.
--                if await self._store.get(self.PROJECTION_NAME, record.key) is None:
+                 # Readable, owed or delivered: a replay, so write nothing. An
+                 # unreadable row is no record at all, so it is owed afresh.
+-                row = await self._store.get(self.PROJECTION_NAME, record.key)
+-                if row is None or read_record(row) is None:
 -                    await self._save(record)
 +                await self._save(record)
              await checkpoint_store.save_checkpoint(

@@ -1,0 +1,25 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py
+index bba1ee4d9..715afde34 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/ExecutionLifecycleNoticeProcessManager.py
+@@ -135,7 +135,7 @@ class ExecutionLifecycleNoticeProcessManager(ProcessManager):
+ 
+     def get_idempotency_key(self, todo_item: dict[str, str | int | float | bool | None]) -> str:
+         """One notice per (execution_id, outcome): the `key` every stored row carries."""
+-        return str(todo_item["key"])
++        return str(todo_item.get("key", ""))
+ 
+     async def clear_all_data(self) -> None:
+         await self._store.delete_all(self.PROJECTION_NAME)
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/value_objects.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/value_objects.py
+index 051f8792c..0b873c8d7 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/value_objects.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_execution_lifecycle/value_objects.py
+@@ -137,7 +137,6 @@ class LifecycleNoticeRecord(BaseModel):
+     notice: ExecutionLifecycleNotice
+     delivery: NoticeDelivery = NoticeDelivery.OWED
+ 
+-    @computed_field
+     @property
+     def key(self) -> str:
+         """The store key: one record per (execution_id, outcome), as the sink dedups.

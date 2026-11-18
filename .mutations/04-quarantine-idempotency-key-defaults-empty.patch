@@ -1,0 +1,25 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_quarantine/QuarantineNoticeProcessManager.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_quarantine/QuarantineNoticeProcessManager.py
+index fa1686f85..5ed1b2757 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_quarantine/QuarantineNoticeProcessManager.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_quarantine/QuarantineNoticeProcessManager.py
+@@ -280,7 +280,7 @@ class QuarantineNoticeProcessManager(ProcessManager):
+ 
+     def get_idempotency_key(self, todo_item: dict[str, str | int | float | bool | None]) -> str:
+         """One notice per (execution, phase, repository): the `key` every stored row carries."""
+-        return str(todo_item["key"])
++        return str(todo_item.get("key", ""))
+ 
+     async def clear_all_data(self) -> None:
+         if self._store is not None:
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_quarantine/value_objects.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_quarantine/value_objects.py
+index 9b3dd3e53..a687c0cf1 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_quarantine/value_objects.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/notify_quarantine/value_objects.py
+@@ -48,7 +48,6 @@ class QuarantineNotice(BaseModel):
+     #: The forge's id for the comment, so a retry edits it instead of adding one.
+     comment_id: int | None = None
+ 
+-    @computed_field
+     @property
+     def key(self) -> str:
+         """The store key, dumped into the stored row for `get_idempotency_key`."""
