@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py b/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py
+index c288e981f..1dfb0215b 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_lifecycle/webhook_sink.py
+@@ -94,7 +94,7 @@ class WebhookExecutionLifecycleSink:
+                     content=body,
+                     headers=headers,
+                     timeout=self._timeout,
+-                    follow_redirects=False,
++                    follow_redirects=True,
+                 )
+             else:
+                 async with httpx.AsyncClient(timeout=self._timeout) as client:

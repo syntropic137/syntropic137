@@ -7,6 +7,7 @@ Test file: `packages/syn-adapters/src/syn_adapters/execution_lifecycle/test_webh
 |---|---|---|
 | `01-sign-other-bytes.patch` | signs a re-serialisation of the notice (`indent=1`), not the bytes that were sent | `test_posts_the_notice_keyed_and_signed_over_the_received_bytes` |
 | `02-non-2xx-delivered.patch` | treats any status below 500 (so a 404) as delivered | `test_a_non_2xx_leaves_the_notice_owed[404]` |
+| `03-follow-redirects.patch` | follows a redirect on an injected client, so a 307 then 200 counts as delivered | `test_a_redirect_is_not_followed_even_by_a_client_that_would[307]` |
 
-Both were killed in a local workspace run. That is not trusted evidence: the
+All three were killed in a local workspace run. That is not trusted evidence: the
 trusted run is `just mutation-evidence <pr> "<ids>" false`.
