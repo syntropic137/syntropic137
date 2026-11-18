@@ -223,6 +223,8 @@ async def admitted_launch_eval(workflow_id: str, choice: EvalChoice) -> LaunchEv
 ResumeHandlerFactory = Callable[[], Awaitable["StartResumeHandler"]]
 #: The eval a launch of this workflow joins, given what it asked for, admitted (#967).
 LaunchEvalResolver = Callable[[str, "EvalChoice"], Awaitable["LaunchEval"]]
+#: Raises `WorkflowNotStartableError` when a stored workflow's skills do not resolve (#1003).
+SkillPreflight = Callable[[str], Awaitable[None]]
 
 
 class BackgroundWorkflowDispatcher:
@@ -244,6 +246,7 @@ class BackgroundWorkflowDispatcher:
         requests: ExecutionRequests | None = None,
         launch_eval_for_workflow: LaunchEvalResolver | None = None,
         admits_to_run_queue: bool = False,
+        skill_preflight: SkillPreflight | None = None,
     ) -> None:
         """``admits_to_run_queue`` is `SYN_EXECUTION_RUN_QUEUE_ENABLED` (#1310 1.3).
 
@@ -271,6 +274,9 @@ class BackgroundWorkflowDispatcher:
         # queues, so neither the queue nor the handler re-resolves it. None:
         # every run is ordinary.
         self._launch_eval_for_workflow = launch_eval_for_workflow
+        # #1003: a trigger whose skill cannot resolve is refused here, with the
+        # resolver's message, before any task exists. None: nothing is checked.
+        self._skill_preflight = skill_preflight
         self._tasks: set[asyncio.Task[None]] = set()
         self._budget = budget if budget is not None else ExecutionBudget(max_concurrent)
         self._maintenance = maintenance
@@ -606,8 +612,7 @@ class BackgroundWorkflowDispatcher:
         # the two apart by exception type and records this one as `paused`, not
         # `failed`: the trigger was refused, not broken.
         if self._maintenance is None:
-            await self._handler.validate_stored_declarations(workflow_id)
-            launch_eval = await self._launch_eval(workflow_id)
+            launch_eval = await self._accept(workflow_id)
             if self._admits_to_run_queue:
                 await admit_now(
                     None,
@@ -643,8 +648,7 @@ class BackgroundWorkflowDispatcher:
         # can be stale by the time it arrives.
         await self._maintenance.refuse_early()
 
-        await self._handler.validate_stored_declarations(workflow_id)
-        launch_eval = await self._launch_eval(workflow_id)
+        launch_eval = await self._accept(workflow_id)
 
         # The decisive one. Inside `admitting()` no maintenance transition can
         # complete, and the task is created before the ticket is spent - so
@@ -684,6 +688,18 @@ class BackgroundWorkflowDispatcher:
                 on_started,
             )
             return ticket
+
+    async def _accept(self, workflow_id: str) -> LaunchEval | None:
+        """Refuse a trigger whose workflow cannot start as stored, or name the eval it joins.
+
+        Every refusal here is raised before the task exists, so the projection
+        can still record it: a declaration the platform cannot honour (#1039),
+        a skill that does not resolve (#1003), an eval that is gone (#967).
+        """
+        await self._handler.validate_stored_declarations(workflow_id)
+        if self._skill_preflight is not None:
+            await self._skill_preflight(workflow_id)
+        return await self._launch_eval(workflow_id)
 
     async def _launch_eval(self, workflow_id: str) -> LaunchEval | None:
         """The eval this trigger joins, resolved and admitted NOW, at acceptance (#967).
