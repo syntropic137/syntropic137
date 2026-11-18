@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/insights.py b/apps/syn-api/src/syn_api/routes/insights.py
+index 0de4a6af9..7de8d9b49 100644
+--- a/apps/syn-api/src/syn_api/routes/insights.py
++++ b/apps/syn-api/src/syn_api/routes/insights.py
+@@ -114,7 +114,7 @@ def _aggregate_costs(
+         system_id=system_id,
+         system_name=system_name,
+         total_cost_usd=str(total_cost),
+-        total_cost_display=format_cost(total_cost, unpriced),
++        total_cost_display=format_cost(total_cost),
+         unpriced_observation_count=unpriced,
+         # All four components (issue #873) - matches the executions read model.
+         total_tokens=total_input + total_output + total_cache_creation + total_cache_read,

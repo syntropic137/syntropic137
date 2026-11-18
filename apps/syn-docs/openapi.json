@@ -16535,6 +16535,16 @@
             "title": "Total Cost Usd",
             "default": "0"
           },
+          "total_cost_display": {
+            "type": "string",
+            "title": "Total Cost Display",
+            "default": "$0.00"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
+          },
           "total_tokens": {
             "type": "integer",
             "title": "Total Tokens",
@@ -16573,6 +16583,13 @@
             },
             "type": "object",
             "title": "Cost By Workflow"
+          },
+          "unpriced_by_workflow": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Unpriced By Workflow"
           },
           "cost_by_model": {
             "additionalProperties": {
