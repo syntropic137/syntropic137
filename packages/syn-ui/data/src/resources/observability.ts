@@ -112,3 +112,10 @@ export type BuildInfo = components['schemas']['BuildInfo']
 export function getBuildInfo(signal?: AbortSignal): Promise<BuildInfo> {
   return cached('getBuildInfo', [], (s) => request('/version', { signal: s }), { signal })
 }
+
+/** Whether this instance is fully serving, and every way it is not (#693). */
+export type Health = components['schemas']['HealthResponse']
+
+export function getHealth(signal?: AbortSignal): Promise<Health> {
+  return cached('getHealth', [], (s) => request('/health', { signal: s }), { signal, staleAfter: 'metrics' })
+}

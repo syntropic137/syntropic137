@@ -8,6 +8,7 @@
   import type { Snippet } from 'svelte'
   import type { Crumb, LiveState } from '@syn137/skyline-core/patterns'
   import BreadcrumbTrail from './BreadcrumbTrail.svelte'
+  import DegradedBanner from './DegradedBanner.svelte'
   import { feedbackUi } from './feedback.svelte'
   import { overlays } from './overlays.svelte'
   import PhoneDock from './PhoneDock.svelte'
@@ -29,6 +30,7 @@
 <div class="sky-shell">
   <div class="sky-shell__desktop-nav"><TopNav {active} {live} {onsearch} /></div>
   <div class="sky-shell__phone-nav"><PhoneTop {live} {onsearch} /></div>
+  <DegradedBanner />
 
   {#if crumbs.length > 0}
     <div class="sky-shell__crumbs"><BreadcrumbTrail {crumbs} /></div>
