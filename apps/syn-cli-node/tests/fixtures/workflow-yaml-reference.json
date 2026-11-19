@@ -1079,7 +1079,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "c064bc041f7d92e3b88ab1291a3addbcdd7c756ed9c3bff915c65b9aaafb689f"
+      "document_sha256": "31668cd6696f0850ce6b4a17fa20f5f79d4afe61514f69cbf784037231d10bc7"
     },
     "workflows/triggers/ci-fix.yaml": {
       "phases": [
