@@ -1,0 +1,13 @@
+diff --git a/packages/syn-shared/src/syn_shared/pricing/__init__.py b/packages/syn-shared/src/syn_shared/pricing/__init__.py
+index 31edd060b..d4b264ae8 100644
+--- a/packages/syn-shared/src/syn_shared/pricing/__init__.py
++++ b/packages/syn-shared/src/syn_shared/pricing/__init__.py
+@@ -285,7 +285,7 @@ class ModelPricing:
+             output_usd=Decimal(output_tokens) * self.output_per_million / _MILLION,
+             cache_creation_usd=(
+                 Decimal(cache_creation) * self.cache_creation_per_million
+-                + Decimal(cache_creation_1h) * self.cache_creation_1h_per_million
++                + Decimal(cache_creation_1h) * self.cache_creation_per_million
+             )
+             / _MILLION,
+             cache_read_usd=Decimal(cache_read) * self.cache_read_per_million / _MILLION,
