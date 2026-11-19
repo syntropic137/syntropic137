@@ -4043,6 +4043,13 @@ class GlobalCostResponse(BaseModel):
     system_name: str = ""
     organization_id: str = ""
     total_cost_usd: str = "0"
+    total_cost_display: str = "$0.00"
+    """``total_cost_usd`` as ``format_cost`` renders it: ``unpriced`` when nothing
+    was priced, ``>=$X (partial)`` when some was (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations across these executions that carried no usable rate and so
+    added nothing to the total. Non-zero means the cost is INCOMPLETE, not that
+    the work was free (#890)."""
     total_tokens: int = 0
     """Sum of input, output, cache creation and cache read tokens (issue #873)."""
     total_input_tokens: int = 0
@@ -4051,7 +4058,11 @@ class GlobalCostResponse(BaseModel):
     total_cache_read_tokens: int = 0
     cost_by_repo: dict[str, str] = Field(default_factory=dict)
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
+    unpriced_by_workflow: dict[str, int] = Field(default_factory=dict)
+    """Per-workflow count of observations that could not be priced. A workflow
+    listed here has a ``cost_by_workflow`` entry that is only a lower bound."""
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
+    """Priced spend only: the source has no per-model unpriced count."""
     execution_count: int = 0
 
 

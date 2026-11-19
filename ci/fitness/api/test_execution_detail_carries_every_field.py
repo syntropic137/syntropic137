@@ -161,6 +161,7 @@ _PAIRS: tuple[tuple[str, tuple[str, str], tuple[tuple[str, str], ...]], ...] = (
 _NO_PAIR: dict[str, str] = {
     "sessions.py": "TODO(#1040): SessionSummary -> SessionDetail -> SessionResponse is the same shape and belongs here; adding it needs its own exception review",
     "workflows/queries.py": "WorkflowDetail maps through per-phase builders, not a flat copy",
+    "insights.py": "/insights/cost sums many ExecutionCost rows into one GlobalCostResponse, not a flat copy; its coverage hop is pinned by apps/syn-api/tests/test_897_insights_cost_reports_unpriced_work.py",
 }
 
 #: Fields the destination deliberately does not take from the read model, keyed

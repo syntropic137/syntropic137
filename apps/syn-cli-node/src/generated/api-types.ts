@@ -6031,6 +6031,16 @@ export interface components {
              */
             total_cost_usd: string;
             /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /**
              * Total Tokens
              * @default 0
              */
@@ -6062,6 +6072,10 @@ export interface components {
             /** Cost By Workflow */
             cost_by_workflow?: {
                 [key: string]: string;
+            };
+            /** Unpriced By Workflow */
+            unpriced_by_workflow?: {
+                [key: string]: number;
             };
             /** Cost By Model */
             cost_by_model?: {
