@@ -1,0 +1,11 @@
+--- a/apps/syn-api/src/syn_api/routes/insights.py
++++ b/apps/syn-api/src/syn_api/routes/insights.py
+@@ -98,7 +98,7 @@ def _aggregate_costs(
+         total_output += c.output_tokens
+         total_cache_creation += c.cache_creation_tokens
+         total_cache_read += c.cache_read_tokens
+-        unpriced += c.unpriced_observation_count
++        unpriced = c.unpriced_observation_count or unpriced
+         if c.workflow_id:
+             cost_by_workflow[c.workflow_id] = (
+                 cost_by_workflow.get(c.workflow_id, Decimal("0")) + c.total_cost_usd

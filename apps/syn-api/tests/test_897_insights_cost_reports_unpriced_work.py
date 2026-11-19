@@ -16,7 +16,7 @@ read model, which has no unpriced count to carry.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 import pytest
@@ -137,3 +137,20 @@ class TestInsightsCostReportsUnpricedWork:
 
         assert response.unpriced_by_workflow == {"wf-codex": 9}
         assert response.cost_by_workflow == {"wf-codex": "0", "wf-claude": "1.25"}
+
+    @pytest.mark.asyncio
+    async def test_every_unpriced_execution_counts_not_just_the_first(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Coverage is a sum over every record, in any order, per workflow too."""
+        from syn_api.routes.insights import get_global_cost_endpoint
+
+        second = replace(
+            _unpriced_execution(), execution_id="exec-unpriced-2", unpriced_observation_count=4
+        )
+        _patch(monkeypatch, [_unpriced_execution(), _priced_execution(), second])
+
+        response = await get_global_cost_endpoint(system_id=None)
+
+        assert response.unpriced_observation_count == 13
+        assert response.unpriced_by_workflow == {"wf-codex": 13}
