@@ -34,9 +34,9 @@ def test_opus_5_5_prices_a_1h_write_at_2x_input_not_the_5min_rate() -> None:
     assert split.cache_creation_usd == Decimal("8.00")
     assert split.total == Decimal("8.00")
     assert _OPUS_5_5.calculate_cost(0, 0, cache_creation_1h=_MILLION) == Decimal("8.00")
-    assert calculate_cost(0, 0, str(ModelId.CLAUDE_OPUS_5_5), cache_creation_1h=_MILLION) == Decimal(
-        "8.00"
-    )
+    assert calculate_cost(
+        0, 0, str(ModelId.CLAUDE_OPUS_5_5), cache_creation_1h=_MILLION
+    ) == Decimal("8.00")
 
 
 def test_1h_and_5min_writes_are_priced_each_at_its_own_rate() -> None:
@@ -62,7 +62,7 @@ def test_non_anthropic_rows_price_a_1h_write_as_their_cache_write(model: ModelId
 def test_the_non_anthropic_set_is_the_openai_rows() -> None:
     # Guards the classifier above: a Claude id that stopped matching "claude-"
     # would silently move its row to the weaker rule.
-    assert _NON_ANTHROPIC == {
+    openai_rows = {
         ModelId.GPT_6_1_SOL,
         ModelId.GPT_6_SOL,
         ModelId.GPT_6_LUNA,
@@ -71,6 +71,7 @@ def test_the_non_anthropic_set_is_the_openai_rows() -> None:
         ModelId.GPT_5_6_LUNA,
         ModelId.GPT_5_6,
     }
+    assert openai_rows == _NON_ANTHROPIC
 
 
 def _legacy_split(pricing: ModelPricing, i: int, o: int, cw: int, cr: int) -> TokenTypeCost:
