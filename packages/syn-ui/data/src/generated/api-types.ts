@@ -7751,7 +7751,8 @@ export interface components {
         };
         /**
          * RepoCostResponse
-         * @description Per-repo cost breakdown by workflow and model.
+         * @description Per-repo cost breakdown by workflow and model, summed from ``ExecutionCost``
+         *     exactly as ``/insights/cost`` sums it (#897).
          */
         RepoCostResponse: {
             /**
@@ -7769,6 +7770,16 @@ export interface components {
              * @default 0
              */
             total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /**
              * Total Tokens
              * @default 0
@@ -7864,7 +7875,7 @@ export interface components {
          *
          *     Note: ``recent_cost_usd`` is accumulated from WorkflowCompleted/Failed events
          *     since the projection was last reset — it is not a fixed time window and may
-         *     differ from ``RepoCostResponse.total_cost_usd`` which is a TimescaleDB total.
+         *     differ from ``RepoCostResponse.total_cost_usd``, which sums ``ExecutionCost`` (#897).
          */
         RepoHealthResponse: {
             /**
@@ -9668,7 +9679,8 @@ export interface components {
         };
         /**
          * SystemCostResponse
-         * @description System-wide cost breakdown by repo, workflow, and model.
+         * @description System-wide cost breakdown by repo, workflow, and model, summed from
+         *     ``ExecutionCost`` exactly as ``/insights/cost?system_id=`` sums it (#897).
          */
         SystemCostResponse: {
             /**
@@ -9691,6 +9703,16 @@ export interface components {
              * @default 0
              */
             total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /**
              * Total Tokens
              * @default 0
