@@ -3717,7 +3717,7 @@ class RepoHealthResponse(BaseModel):
 
     Note: ``recent_cost_usd`` is accumulated from WorkflowCompleted/Failed events
     since the projection was last reset — it is not a fixed time window and may
-    differ from ``RepoCostResponse.total_cost_usd`` which is a TimescaleDB total.
+    differ from ``RepoCostResponse.total_cost_usd``, which sums ``ExecutionCost`` (#897).
     """
 
     repo_id: str = ""
@@ -3733,11 +3733,19 @@ class RepoHealthResponse(BaseModel):
 
 
 class RepoCostResponse(BaseModel):
-    """Per-repo cost breakdown by workflow and model."""
+    """Per-repo cost breakdown by workflow and model, summed from ``ExecutionCost``
+    exactly as ``/insights/cost`` sums it (#897)."""
 
     repo_id: str = ""
     repo_full_name: str = ""
     total_cost_usd: str = "0"
+    total_cost_display: str = "$0.00"
+    """``total_cost_usd`` as ``format_cost`` renders it: ``unpriced`` when nothing
+    was priced, ``>=$X (partial)`` when some was (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations across these executions that carried no usable rate and so
+    added nothing to the total. Non-zero means the cost is INCOMPLETE, not that
+    the work was free (#890)."""
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -3864,12 +3872,20 @@ class SystemStatusResponse(BaseModel):
 
 
 class SystemCostResponse(BaseModel):
-    """System-wide cost breakdown by repo, workflow, and model."""
+    """System-wide cost breakdown by repo, workflow, and model, summed from
+    ``ExecutionCost`` exactly as ``/insights/cost?system_id=`` sums it (#897)."""
 
     system_id: str = ""
     system_name: str = ""
     organization_id: str = ""
     total_cost_usd: str = "0"
+    total_cost_display: str = "$0.00"
+    """``total_cost_usd`` as ``format_cost`` renders it: ``unpriced`` when nothing
+    was priced, ``>=$X (partial)`` when some was (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations across these executions that carried no usable rate and so
+    added nothing to the total. Non-zero means the cost is INCOMPLETE, not that
+    the work was free (#890)."""
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0

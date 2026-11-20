@@ -7,14 +7,13 @@ from __future__ import annotations
 
 import logging
 from datetime import date  # noqa: TC003 — needed at runtime for FastAPI Query params
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Query
 from starlette.responses import JSONResponse
 
 from syn_api._wiring import ensure_connected
-from syn_api.model_identity import cost_by_observed_model_text
+from syn_api.routes._cost_rollup import roll_up_costs
 from syn_api.types import (
     ContributionHeatmapResponse,
     GlobalCostResponse,
@@ -22,7 +21,6 @@ from syn_api.types import (
     HeatmapDayBucketResponse,
     SystemOverviewEntryResponse,
 )
-from syn_shared.display.formatters import format_cost
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -77,55 +75,23 @@ async def _get_execution_ids_for_system(system_id: str) -> set[str]:
 def _aggregate_costs(
     costs: Sequence[ExecutionCost], *, system_id: str, system_name: str
 ) -> GlobalCostResponse:
-    """Aggregate cost entries into totals and breakdowns.
-
-    Coverage travels with the money: a total summed without its unpriced count
-    reads as complete when it is only a lower bound (#890, #897).
-    """
-    total_cost = Decimal("0")
-    total_input = 0
-    total_output = 0
-    total_cache_creation = 0
-    total_cache_read = 0
-    unpriced = 0
-    cost_by_workflow: dict[str, Decimal] = {}
-    unpriced_by_workflow: dict[str, int] = {}
-    cost_by_model: dict[str, Decimal] = {}
-
-    for c in costs:
-        total_cost += c.total_cost_usd
-        total_input += c.input_tokens
-        total_output += c.output_tokens
-        total_cache_creation += c.cache_creation_tokens
-        total_cache_read += c.cache_read_tokens
-        unpriced += c.unpriced_observation_count
-        if c.workflow_id:
-            cost_by_workflow[c.workflow_id] = (
-                cost_by_workflow.get(c.workflow_id, Decimal("0")) + c.total_cost_usd
-            )
-            if c.unpriced_observation_count:
-                unpriced_by_workflow[c.workflow_id] = (
-                    unpriced_by_workflow.get(c.workflow_id, 0) + c.unpriced_observation_count
-                )
-        for model, model_cost in c.cost_by_model.items():
-            cost_by_model[model] = cost_by_model.get(model, Decimal("0")) + model_cost
-
+    """Aggregate cost entries into totals and breakdowns (see ``_cost_rollup``)."""
+    rollup = roll_up_costs(costs)
     return GlobalCostResponse(
         system_id=system_id,
         system_name=system_name,
-        total_cost_usd=str(total_cost),
-        total_cost_display=format_cost(total_cost, unpriced),
-        unpriced_observation_count=unpriced,
-        # All four components (issue #873) - matches the executions read model.
-        total_tokens=total_input + total_output + total_cache_creation + total_cache_read,
-        total_input_tokens=total_input,
-        total_output_tokens=total_output,
-        total_cache_creation_tokens=total_cache_creation,
-        total_cache_read_tokens=total_cache_read,
-        cost_by_workflow={k: str(v) for k, v in cost_by_workflow.items()},
-        unpriced_by_workflow=unpriced_by_workflow,
-        cost_by_model=cost_by_observed_model_text(cost_by_model),
-        execution_count=len(costs),
+        total_cost_usd=rollup.total_cost_usd,
+        total_cost_display=rollup.total_cost_display,
+        unpriced_observation_count=rollup.unpriced_observation_count,
+        total_tokens=rollup.total_tokens,
+        total_input_tokens=rollup.total_input_tokens,
+        total_output_tokens=rollup.total_output_tokens,
+        total_cache_creation_tokens=rollup.total_cache_creation_tokens,
+        total_cache_read_tokens=rollup.total_cache_read_tokens,
+        cost_by_workflow=rollup.cost_by_workflow,
+        unpriced_by_workflow=rollup.unpriced_by_workflow,
+        cost_by_model=rollup.cost_by_model,
+        execution_count=rollup.execution_count,
     )
 
 
