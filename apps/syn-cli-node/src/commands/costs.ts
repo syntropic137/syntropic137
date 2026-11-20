@@ -6,7 +6,7 @@
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
 import { api, unwrap } from "../client/typed.js";
-import { print, printError, printDim } from "../output/console.js";
+import { print, printError, printDim, printUnpricedNote } from "../output/console.js";
 import { style, BOLD, CYAN, DIM } from "../output/ansi.js";
 import { formatCost, formatCostModelKey, formatCostWithCoverage, formatDuration, formatTimestamp, formatTokens, formatBreakdown } from "../output/format.js";
 import { Table } from "../output/table.js";
@@ -107,9 +107,7 @@ const sessionDetailCommand: CommandDef = {
     print(style("Session Cost Detail", CYAN));
     print(`  ${style("Session:", BOLD)} ${s.session_id}`);
     print(`  ${style("Cost:", BOLD)} ${formatCostWithCoverage(s.total_cost_usd, s.unpriced_observation_count)}`);
-    if (s.unpriced_observation_count) {
-      printDim(`  ${s.unpriced_observation_count} observation(s) had no rate for their model, so this total is incomplete.`);
-    }
+    printUnpricedNote(s.unpriced_observation_count);
     print(`  ${style("Tokens:", BOLD)} ${formatTokens(s.total_tokens)} (in: ${formatTokens(s.input_tokens)}, out: ${formatTokens(s.output_tokens)})`);
     if (s.cache_creation_tokens) print(`  ${style("Cache Write:", BOLD)} ${formatTokens(s.cache_creation_tokens)}`);
     if (s.cache_read_tokens) print(`  ${style("Cache Read:", BOLD)}  ${formatTokens(s.cache_read_tokens)}`);
@@ -164,9 +162,7 @@ const executionDetailCommand: CommandDef = {
     print(style("Execution Cost Detail", CYAN));
     print(`  ${style("Execution:", BOLD)} ${e.execution_id}`);
     print(`  ${style("Cost:", BOLD)} ${formatCostWithCoverage(e.total_cost_usd, e.unpriced_observation_count)}`);
-    if (e.unpriced_observation_count) {
-      printDim(`  ${e.unpriced_observation_count} observation(s) had no rate for their model, so this total is incomplete.`);
-    }
+    printUnpricedNote(e.unpriced_observation_count);
     print(`  ${style("Sessions:", BOLD)} ${e.session_count}`);
     print(`  ${style("Tokens:", BOLD)} ${formatTokens(e.total_tokens)} (in: ${formatTokens(e.input_tokens)}, out: ${formatTokens(e.output_tokens)})`);
     if (e.cache_creation_tokens) print(`  ${style("Cache Write:", BOLD)} ${formatTokens(e.cache_creation_tokens)}`);

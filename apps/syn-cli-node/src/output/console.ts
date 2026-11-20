@@ -20,3 +20,12 @@ export function printDim(message: string): void {
 export function print(message: string): void {
   process.stdout.write(message + "\n");
 }
+
+/**
+ * Say why a cost total is incomplete (#897). Prints nothing when every
+ * observation was priced, so callers pass the count unconditionally.
+ */
+export function printUnpricedNote(unpricedCount: number | undefined): void {
+  if (!unpricedCount) return;
+  printDim(`  ${unpricedCount} observation(s) had no rate for their model, so this total is incomplete.`);
+}
