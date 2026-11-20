@@ -26,6 +26,7 @@ from syn_api.types import (
     TimelineEntry,
     ToolUsageSummary,
 )
+from syn_shared.display.formatters import EM_DASH, format_cost
 from syn_shared.pricing import canonical_cost_usd
 
 if TYPE_CHECKING:
@@ -79,6 +80,15 @@ class CostSummaryResponse(BaseModel):
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     estimated_cost_usd: Decimal | None = None
+    total_cost_display: str = EM_DASH
+    """``estimated_cost_usd`` as clients should show it: ``unpriced`` or
+    ``>=$X (partial)`` when ``unpriced_observation_count`` is non-zero (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations in this session that carried no usable rate and so added
+    nothing to ``estimated_cost_usd``.
+
+    Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
+    """
 
 
 class ToolSummary(BaseModel):
@@ -383,48 +393,67 @@ async def get_recent_activity_events(
         return Err(ObservabilityError.QUERY_FAILED, message=str(e))
 
 
+@dataclass(frozen=True)
+class TokenMetrics:
+    """Token usage and cost for one session or execution, read off its cost read model.
+
+    ``unpriced_observation_count`` comes from the same row as ``total_cost_usd``,
+    so the money is never reported without how much of it is missing (#897).
+    """
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cache_creation_tokens: int
+    cache_read_tokens: int
+    total_cost_usd: Decimal
+    unpriced_observation_count: int
+
+
 async def _get_session_token_metrics(
     manager: ProjectionManager, session_id: str
-) -> Result[dict[str, Any], ObservabilityError]:
-    """Build token metrics dict for a single session."""
+) -> Result[TokenMetrics, ObservabilityError]:
+    """Read token metrics for a single session."""
     cost = await manager.session_cost.get_session_cost(session_id)
     if cost is None:
         return Err(ObservabilityError.NOT_FOUND, message=f"Session {session_id} not found")
     return Ok(
-        {
-            "session_id": session_id,
-            "input_tokens": cost.input_tokens,
-            "output_tokens": cost.output_tokens,
-            "total_tokens": cost.total_tokens,
-            "total_cost_usd": str(cost.total_cost_usd),
-            "cache_creation_tokens": cost.cache_creation_tokens,
-            "cache_read_tokens": cost.cache_read_tokens,
-        }
+        TokenMetrics(
+            input_tokens=cost.input_tokens,
+            output_tokens=cost.output_tokens,
+            total_tokens=cost.total_tokens,
+            cache_creation_tokens=cost.cache_creation_tokens,
+            cache_read_tokens=cost.cache_read_tokens,
+            total_cost_usd=cost.total_cost_usd,
+            unpriced_observation_count=cost.unpriced_observation_count,
+        )
     )
 
 
 async def _get_execution_token_metrics(
     manager: ProjectionManager, execution_id: str
-) -> Result[dict[str, Any], ObservabilityError]:
-    """Build token metrics dict for a single execution."""
+) -> Result[TokenMetrics, ObservabilityError]:
+    """Read token metrics for a single execution."""
     exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
     if exec_cost is None:
         return Err(ObservabilityError.NOT_FOUND, message=f"Execution {execution_id} not found")
     return Ok(
-        {
-            "execution_id": execution_id,
-            "input_tokens": exec_cost.input_tokens,
-            "output_tokens": exec_cost.output_tokens,
-            "total_tokens": exec_cost.total_tokens,
-            "total_cost_usd": str(exec_cost.total_cost_usd),
-        }
+        TokenMetrics(
+            input_tokens=exec_cost.input_tokens,
+            output_tokens=exec_cost.output_tokens,
+            total_tokens=exec_cost.total_tokens,
+            cache_creation_tokens=exec_cost.cache_creation_tokens,
+            cache_read_tokens=exec_cost.cache_read_tokens,
+            total_cost_usd=exec_cost.total_cost_usd,
+            unpriced_observation_count=exec_cost.unpriced_observation_count,
+        )
     )
 
 
 async def get_token_metrics(
     execution_id: str | None = None,
     session_id: str | None = None,
-) -> Result[dict[str, Any], ObservabilityError]:
+) -> Result[TokenMetrics, ObservabilityError]:
     """Get token usage metrics for an execution or session.
 
     Args:
@@ -432,7 +461,7 @@ async def get_token_metrics(
         session_id: Filter by session ID.
 
     Returns:
-        Ok(dict) with token metrics on success.
+        Ok(TokenMetrics) on success.
     """
     await ensure_connected()
     try:
@@ -567,19 +596,20 @@ async def get_session_costs_endpoint(session_id: str) -> CostSummaryResponse:
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=f"Failed to get costs: {result.message}")
 
-    data = result.value
+    m = result.value
+    # Decimal, never float: a float here reintroduced the binary noise the
+    # read models canonicalise away (0.3056678 -> 0.30566780000000005).
+    estimated_cost_usd = canonical_cost_usd(m.total_cost_usd)
     return CostSummaryResponse(
         session_id=session_id,
-        input_tokens=data.get("input_tokens", 0),
-        output_tokens=data.get("output_tokens", 0),
-        total_tokens=data.get("total_tokens", 0),
-        cache_creation_tokens=data.get("cache_creation_tokens", 0),
-        cache_read_tokens=data.get("cache_read_tokens", 0),
-        # Decimal, never float: a float here reintroduced the binary noise the
-        # read models canonicalise away (0.3056678 -> 0.30566780000000005).
-        estimated_cost_usd=canonical_cost_usd(data["total_cost_usd"])
-        if "total_cost_usd" in data
-        else None,
+        input_tokens=m.input_tokens,
+        output_tokens=m.output_tokens,
+        total_tokens=m.total_tokens,
+        cache_creation_tokens=m.cache_creation_tokens,
+        cache_read_tokens=m.cache_read_tokens,
+        estimated_cost_usd=estimated_cost_usd,
+        total_cost_display=format_cost(estimated_cost_usd, m.unpriced_observation_count),
+        unpriced_observation_count=m.unpriced_observation_count,
     )
 
 

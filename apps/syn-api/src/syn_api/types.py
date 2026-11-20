@@ -3022,6 +3022,11 @@ class CostSummary(BaseModel):
     """Overall cost summary across all executions."""
 
     total_cost_usd: Decimal = Decimal("0")
+    total_cost_display: str = EM_DASH
+    """``total_cost_usd`` rendered with its coverage (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations that added nothing to ``total_cost_usd`` because nothing
+    priced them; non-zero means the total is a lower bound (#890)."""
     total_sessions: int = 0
     total_executions: int = 0
     total_tokens: int = 0

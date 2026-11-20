@@ -22,6 +22,7 @@ from syn_api.model_identity import (
     cost_by_observed_model,
     observed_model_ids,
 )
+from syn_api.routes._cost_rollup import roll_up_costs
 from syn_api.types import (
     CostSummary,
     Err,
@@ -33,7 +34,7 @@ from syn_api.types import (
     SessionCostData,
     SessionCostEntry,
 )
-from syn_shared.display.formatters import UNPRICED
+from syn_shared.display.formatters import EM_DASH, UNPRICED
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
@@ -149,6 +150,15 @@ class CostSummaryResponse(BaseModel):
     """Summary of all costs across sessions/executions."""
 
     total_cost_usd: Decimal = Decimal("0")
+    total_cost_display: str = EM_DASH
+    """``total_cost_usd`` as clients should show it: ``unpriced`` or
+    ``>=$X (partial)`` when ``unpriced_observation_count`` is non-zero (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations across the summed executions that carried no usable rate
+    and so added nothing to ``total_cost_usd``.
+
+    Non-zero means the total is INCOMPLETE, not that the work was free (#890).
+    """
     total_sessions: int = 0
     total_executions: int = 0
     total_tokens: int = 0
@@ -364,19 +374,17 @@ async def get_cost_summary() -> Result[CostSummary, MetricsError]:
     await ensure_connected()
     try:
         all_costs = await get_execution_cost_query().list_all()
-
-        total_cost = Decimal(str(sum(c.total_cost_usd for c in all_costs)))
-        total_tokens = sum(c.total_tokens for c in all_costs)
-        total_sessions = sum(c.session_count for c in all_costs)
-        total_tool_calls = sum(c.tool_calls for c in all_costs)
+        totals = roll_up_costs(all_costs)
 
         return Ok(
             CostSummary(
-                total_cost_usd=total_cost,
-                total_sessions=total_sessions,
-                total_executions=len(all_costs),
-                total_tokens=total_tokens,
-                total_tool_calls=total_tool_calls,
+                total_cost_usd=Decimal(totals.total_cost_usd),
+                total_cost_display=totals.total_cost_display,
+                unpriced_observation_count=totals.unpriced_observation_count,
+                total_sessions=sum(c.session_count for c in all_costs),
+                total_executions=totals.execution_count,
+                total_tokens=totals.total_tokens,
+                total_tool_calls=sum(c.tool_calls for c in all_costs),
                 top_models=_top_models(all_costs),
                 top_sessions=[
                     SessionCostEntry(
@@ -584,6 +592,8 @@ async def get_cost_summary_endpoint() -> CostSummaryResponse:
     s = result.value
     return CostSummaryResponse(
         total_cost_usd=Decimal(str(s.total_cost_usd)),
+        total_cost_display=s.total_cost_display,
+        unpriced_observation_count=s.unpriced_observation_count,
         total_sessions=s.total_sessions,
         total_executions=s.total_executions,
         total_tokens=s.total_tokens,
