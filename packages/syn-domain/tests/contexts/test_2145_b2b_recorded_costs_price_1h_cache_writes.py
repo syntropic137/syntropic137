@@ -491,28 +491,30 @@ def test_execution_list_keeps_the_1h_count_after_its_summary_arrives(
 
 @pytest.mark.parametrize("reader", ["list", "detail"])
 @pytest.mark.parametrize("running_first", [False, True])
+@pytest.mark.parametrize("completed_1h", [0, 600_000, _MILLION])
 def test_execution_summary_excludes_running_sessions_1h_writes(
-    reader: str, running_first: bool
+    reader: str, running_first: bool, completed_1h: int
 ) -> None:
     """A summary's total and TTL split must describe the same session set."""
-    completed = _grouped_row(_MILLION, 0)
+    completed = _grouped_row(_MILLION, completed_1h)
+    completed_cost = Decimal("5.00") + Decimal(3 * completed_1h) / _MILLION
     running = _grouped_row(_MILLION, _MILLION, session_id="running")
     turns = [completed, running]
     if running_first:
         turns.reverse()
-    summary = _summary_row(Decimal("5.00"))
+    summary = _summary_row(completed_cost)
 
     if reader == "list":
         query = execution_query_service.ExecutionCostQueryService(Mock())
         before = query._build_from_token_usage("exec-1", turns, {})
         after = query._build_from_summary("exec-1", [summary], {}, {}, turn_rows=turns)
         assert before.cache_creation_tokens == 2 * _MILLION
-        assert before.cache_creation_1h_tokens == _MILLION
-        assert before.total_cost_usd == Decimal("13.00")
+        assert before.cache_creation_1h_tokens == _MILLION + completed_1h
+        assert before.total_cost_usd == completed_cost + Decimal("8.00")
         assert after.session_ids == ["session-1"]
         assert after.cache_creation_tokens == _MILLION
-        assert after.cache_creation_1h_tokens == 0
-        assert after.total_cost_usd == Decimal("5.00")
+        assert after.cache_creation_1h_tokens == completed_1h
+        assert after.total_cost_usd == completed_cost
     else:
         detail = execution_timescale.TimescaleExecutionCostQuery(Mock())
         before_detail = detail._price_token_usage_groups(turns)
@@ -520,9 +522,9 @@ def test_execution_summary_excludes_running_sessions_1h_writes(
             [summary], execution_timescale.UnreportedSessionCosts(), turns
         )
         assert before_detail.data.cache_creation == 2 * _MILLION
-        assert before_detail.data.cache_creation_1h == _MILLION
-        assert before_detail.total_cost == Decimal("13.00")
+        assert before_detail.data.cache_creation_1h == _MILLION + completed_1h
+        assert before_detail.total_cost == completed_cost + Decimal("8.00")
         assert after_detail.data.session_ids == ["session-1"]
         assert after_detail.data.cache_creation == _MILLION
-        assert after_detail.data.cache_creation_1h == 0
-        assert after_detail.total_cost == Decimal("5.00")
+        assert after_detail.data.cache_creation_1h == completed_1h
+        assert after_detail.total_cost == completed_cost
