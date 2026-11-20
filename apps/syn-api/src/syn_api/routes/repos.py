@@ -258,7 +258,7 @@ async def get_repo_cost(repo_id: str) -> Result[RepoCostResponse, RepoError]:
     from syn_adapters.projection_stores import get_projection_store
     from syn_api._wiring import get_execution_cost_query
     from syn_api.routes._cost_rollup import roll_up_costs
-    from syn_domain.contexts.organization import executions_by_repo
+    from syn_domain.contexts.organization import correlations_by_execution
 
     await ensure_connected()
 
@@ -267,8 +267,10 @@ async def get_repo_cost(repo_id: str) -> Result[RepoCostResponse, RepoError]:
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
     full_name = repo_result.value.full_name
-    execution_ids = await executions_by_repo(get_projection_store(), {full_name})
-    rollup = roll_up_costs(await get_execution_cost_query().list_for_ids(execution_ids))
+    correlated = await correlations_by_execution(get_projection_store(), {full_name})
+    rollup = roll_up_costs(
+        await get_execution_cost_query().list_for_ids(correlated), correlated=correlated
+    )
     return Ok(
         RepoCostResponse(
             repo_id=repo_id,

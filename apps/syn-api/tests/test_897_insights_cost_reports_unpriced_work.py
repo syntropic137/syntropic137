@@ -58,6 +58,9 @@ class _StubExecutionCostQuery:
     async def list_all(self, limit: int = 500) -> list[ExecutionCost]:
         return self.costs[:limit]
 
+    async def list_for_ids(self, execution_ids: set[str]) -> list[ExecutionCost]:
+        return [c for c in self.costs if c.execution_id in execution_ids]
+
 
 @dataclass
 class _StubProjectionStore:

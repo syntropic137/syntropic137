@@ -107,12 +107,14 @@ async def get_global_cost(
     await ensure_connected()
 
     query_svc = get_execution_cost_query()
-    all_costs = await query_svc.list_all(limit=10_000)
-
-    # Fix(#542): filter by system_id when provided
+    # Fix(#542): scope by system_id when provided. Read the system's own ids,
+    # not the global recency window filtered afterwards: that window drops a
+    # system's older work once 10,000 newer executions elsewhere fill it, and
+    # ``/systems/{id}/cost`` reads by id, so the two would disagree (#897).
     if system_id:
-        allowed_exec_ids = await _get_execution_ids_for_system(system_id)
-        all_costs = [c for c in all_costs if c.execution_id in allowed_exec_ids]
+        all_costs = await query_svc.list_for_ids(await _get_execution_ids_for_system(system_id))
+    else:
+        all_costs = await query_svc.list_all(limit=10_000)
 
     # Resolve system name when filtering by system_id
     system_name = "global"

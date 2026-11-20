@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
         ExecutionCost,
     )
+    from syn_domain.contexts.organization import CorrelatedExecution
 
 
 @dataclass(frozen=True)
@@ -63,13 +64,23 @@ class _Totals:
 
 
 def roll_up_costs(
-    costs: Sequence[ExecutionCost], *, repo_of: Mapping[str, str] | None = None
+    costs: Sequence[ExecutionCost],
+    *,
+    correlated: Mapping[str, CorrelatedExecution] | None = None,
 ) -> CostRollup:
     """Sum ``costs`` into totals and breakdowns.
 
-    ``repo_of`` maps execution id to repo full name. When given, ``cost_by_repo``
-    groups the rows by it; an execution it does not name is left out of that
-    breakdown only, never out of the totals.
+    ``correlated`` is the repo correlation of the scoped executions. When given:
+
+    - ``cost_by_repo`` attributes each execution's cost to EVERY repo it is
+      correlated with, so the buckets can sum to more than the total when one
+      execution touched two repos. The totals count each execution once.
+    - an execution whose ``ExecutionCost`` carries no ``workflow_id`` (the
+      Timescale builders do not read one) is attributed to the workflow its
+      correlation recorded.
+
+    An execution it does not name is left out of those breakdowns only, never
+    out of the totals.
     """
     t = _Totals()
     for c in costs:
@@ -79,16 +90,17 @@ def roll_up_costs(
         t.cache_creation += c.cache_creation_tokens
         t.cache_read += c.cache_read_tokens
         t.unpriced += c.unpriced_observation_count
-        repo = repo_of.get(c.execution_id) if repo_of is not None else None
-        if repo:
+        correlation = correlated.get(c.execution_id) if correlated is not None else None
+        for repo in sorted(correlation.repos) if correlation else ():
             t.by_repo[repo] = t.by_repo.get(repo, Decimal("0")) + c.total_cost_usd
-        if c.workflow_id:
-            t.by_workflow[c.workflow_id] = (
-                t.by_workflow.get(c.workflow_id, Decimal("0")) + c.total_cost_usd
+        workflow_id = c.workflow_id or (correlation.workflow_id if correlation else None)
+        if workflow_id:
+            t.by_workflow[workflow_id] = (
+                t.by_workflow.get(workflow_id, Decimal("0")) + c.total_cost_usd
             )
             if c.unpriced_observation_count:
-                t.unpriced_by_workflow[c.workflow_id] = (
-                    t.unpriced_by_workflow.get(c.workflow_id, 0) + c.unpriced_observation_count
+                t.unpriced_by_workflow[workflow_id] = (
+                    t.unpriced_by_workflow.get(workflow_id, 0) + c.unpriced_observation_count
                 )
         for model, model_cost in c.cost_by_model.items():
             t.by_model[model] = t.by_model.get(model, Decimal("0")) + model_cost

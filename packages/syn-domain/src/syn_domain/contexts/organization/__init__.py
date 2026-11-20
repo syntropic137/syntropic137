@@ -15,7 +15,11 @@ Usage:
 
 # Aggregates
 # Projections
-from syn_domain.contexts.organization._shared.execution_correlation import executions_by_repo
+from syn_domain.contexts.organization._shared.execution_correlation import (
+    CorrelatedExecution,
+    correlations_by_execution,
+    executions_by_repo,
+)
 from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 from syn_domain.contexts.organization.domain import HandlerResult
 from syn_domain.contexts.organization.domain.aggregate_organization import (
@@ -178,6 +182,7 @@ __all__ = [
     # Commands
     "AssignRepoToSystemCommand",
     "ClaimRepoCommand",
+    "CorrelatedExecution",
     "CreateOrganizationCommand",
     # Command handlers
     "CreateOrganizationHandler",
@@ -230,6 +235,7 @@ __all__ = [
     "UpdateSystemCommand",
     # Utility
     "compute_repo_claim_id",
+    "correlations_by_execution",
     "executions_by_repo",
     "get_organization_projection",
     "get_repo_projection",

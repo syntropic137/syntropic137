@@ -19,7 +19,14 @@ import pytest
 
 from syn_api.types import RepoCostResponse, SystemCostResponse
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
+from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
+    ExecutionCostQueryService,
+)
+from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 from syn_domain.contexts.organization.domain.read_models.repo_cost import RepoCost
+from syn_domain.contexts.organization.slices.repo_correlation.projection import (
+    RepoCorrelationProjection,
+)
 
 REPO = "acme/payments"
 OTHER_REPO = "acme/ledger"
@@ -81,18 +88,38 @@ class _StubCostQuery:
 
 @dataclass
 class _StubStore:
-    """Projection store holding only the repo correlation; nothing else is read."""
+    """Projection store holding only the repo correlation; nothing else is read.
 
-    repo_of: dict[str, str]
+    Keyed and queried like the real one, so ``RepoCorrelationProjection`` can
+    write into it. ``reverse`` returns query rows in the opposite order.
+    """
+
+    records: dict[tuple[str, str], dict[str, str]] = field(default_factory=dict)
+    reverse: bool = False
+
+    @classmethod
+    def from_repo_of(cls, repo_of: dict[str, str]) -> _StubStore:
+        return cls(
+            {
+                (REPO_CORRELATION, f"{e}:{r}"): {"execution_id": e, "repo_full_name": r}
+                for e, r in repo_of.items()
+            }
+        )
+
+    async def save(self, projection: str, key: str, data: dict[str, str]) -> None:
+        self.records[(projection, key)] = data
 
     async def query(self, projection: str, filters: dict[str, list[str]]) -> list[dict[str, str]]:
         names = set(filters["repo_full_name"])
-        return [
-            {"execution_id": e, "repo_full_name": r} for e, r in self.repo_of.items() if r in names
+        rows = [
+            r
+            for (p, _), r in self.records.items()
+            if p == projection and r["repo_full_name"] in names
         ]
+        return rows[::-1] if self.reverse else rows
 
-    async def get(self, projection: str, key: str) -> None:
-        return None
+    async def get(self, projection: str, key: str) -> dict[str, str] | None:
+        return self.records.get((projection, key))
 
 
 @dataclass
@@ -140,6 +167,7 @@ def _patch(
     costs: list[ExecutionCost],
     repo_of: dict[str, str],
     system_repos: tuple[str, ...] = (REPO, OTHER_REPO),
+    store: _StubStore | None = None,
 ) -> None:
     import syn_adapters.projection_stores as projection_stores
     import syn_domain.contexts.organization as organization
@@ -147,7 +175,7 @@ def _patch(
     from syn_api.routes import repos, systems
     from syn_api.types import Ok
 
-    store = _StubStore(repo_of)
+    store = store or _StubStore.from_repo_of(repo_of)
 
     async def _connected() -> None:
         return None
@@ -329,3 +357,105 @@ class TestRepoAndSystemCostFromExecutionCost:
         assert system.total_cost_usd == overall.total_cost_usd == "1.65"
         assert system.unpriced_observation_count == overall.unpriced_observation_count == 9
         assert system.total_cost_display == overall.total_cost_display
+
+
+def _converted(execution_id: str = "exec-priced") -> ExecutionCost:
+    """Built by the production token-usage converter, which reads no workflow id."""
+    row = {
+        "execution_id": execution_id,
+        "model": PRICED_MODEL,
+        "requested_model": "sonnet",
+        "has_requested_model": True,
+        "total_input": 1_000_000,
+        "total_output": 0,
+        "cache_creation": 0,
+        "cache_read": 0,
+        "session_ids": ["session-1"],
+        "observation_count": 1,
+        "started_at": None,
+        "last_observation": None,
+    }
+    cost = ExecutionCostQueryService(object())._build_from_token_usage(execution_id, [row], {})  # type: ignore[arg-type]  # no pool: the converter does not touch it
+    assert cost.workflow_id is None
+    assert cost.total_cost_usd > 0
+    return cost
+
+
+async def _correlated_by_producer(*, reverse: bool = False) -> _StubStore:
+    """One execution correlated with two repos, written by the real producer.
+
+    A trigger on ``REPO`` starts a workflow whose ``repository_url`` input names
+    ``OTHER_REPO``: the projection keys each ``execution_id:repo`` separately.
+    """
+    store = _StubStore(reverse=reverse)
+    projection = RepoCorrelationProjection(store)  # type: ignore[arg-type]  # test double implements the methods it calls
+    await projection.on_trigger_fired(
+        {"execution_id": "exec-priced", "workflow_id": "wf-claude", "repository": REPO}
+    )
+    await projection.on_workflow_execution_started(
+        {
+            "execution_id": "exec-priced",
+            "workflow_id": "wf-claude",
+            "inputs": {"repository_url": f"https://github.com/{OTHER_REPO}.git"},
+        }
+    )
+    assert len(store.records) == 2
+    return store
+
+
+@pytest.mark.unit
+class TestProductionShapedCostRows:
+    """Rows and correlations as production writes them, not hand-built (verify round 1)."""
+
+    @pytest.mark.asyncio
+    async def test_workflow_comes_from_the_correlation_when_the_cost_row_has_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from syn_api.routes.repos import get_repo_cost_endpoint
+        from syn_api.routes.systems import get_system_cost_endpoint
+
+        cost = _converted()
+        _patch(monkeypatch, [cost], {}, store=await _correlated_by_producer())
+
+        repo = await get_repo_cost_endpoint("repo-1")
+        system = await get_system_cost_endpoint("sys-1")
+
+        assert repo.cost_by_workflow == {"wf-claude": str(cost.total_cost_usd)}
+        assert system.cost_by_workflow == {"wf-claude": str(cost.total_cost_usd)}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("reverse", [False, True], ids=["store-order", "reversed"])
+    async def test_one_execution_in_two_repos_is_in_both_buckets_and_counted_once(
+        self, monkeypatch: pytest.MonkeyPatch, reverse: bool
+    ) -> None:
+        from syn_api.routes.systems import get_system_cost_endpoint
+
+        _patch(monkeypatch, [_priced()], {}, store=await _correlated_by_producer(reverse=reverse))
+
+        response = await get_system_cost_endpoint("sys-1")
+
+        assert response.cost_by_repo == {REPO: "1.25", OTHER_REPO: "1.25"}
+        assert response.total_cost_usd == "1.25"
+        assert response.execution_count == 1
+
+    @pytest.mark.asyncio
+    async def test_system_and_insights_agree_when_newer_work_elsewhere_fills_the_window(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``/insights/cost`` read the latest 10,000 executions, THEN filtered by system."""
+        from syn_api.routes import insights
+        from syn_api.routes.insights import get_global_cost_endpoint
+        from syn_api.routes.systems import get_system_cost_endpoint
+
+        newer_elsewhere = [_priced(f"exec-outside-{i}") for i in range(10_000)]
+        _patch(monkeypatch, [*newer_elsewhere, _priced()], {"exec-priced": REPO})
+
+        async def _connected() -> None:
+            return None
+
+        monkeypatch.setattr(insights, "ensure_connected", _connected)
+        system = await get_system_cost_endpoint("sys-1")
+        overall = await get_global_cost_endpoint(system_id="sys-1")
+
+        assert system.total_cost_usd == overall.total_cost_usd == "1.25"
+        assert system.execution_count == overall.execution_count == 1

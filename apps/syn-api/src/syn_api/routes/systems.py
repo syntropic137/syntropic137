@@ -241,7 +241,7 @@ async def get_system_cost(system_id: str) -> Result[SystemCostResponse, SystemEr
     from syn_api._wiring import get_execution_cost_query
     from syn_api.routes._cost_rollup import roll_up_costs
     from syn_domain.contexts.organization import (
-        executions_by_repo,
+        correlations_by_execution,
         get_repo_projection,
         get_system_projection,
     )
@@ -253,8 +253,12 @@ async def get_system_cost(system_id: str) -> Result[SystemCostResponse, SystemEr
         return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
 
     repos = await get_repo_projection().list_all(system_id=system_id)
-    repo_of = await executions_by_repo(get_projection_store(), {r.full_name for r in repos})
-    rollup = roll_up_costs(await get_execution_cost_query().list_for_ids(repo_of), repo_of=repo_of)
+    correlated = await correlations_by_execution(
+        get_projection_store(), {r.full_name for r in repos}
+    )
+    rollup = roll_up_costs(
+        await get_execution_cost_query().list_for_ids(correlated), correlated=correlated
+    )
     return Ok(
         SystemCostResponse(
             system_id=system_id,

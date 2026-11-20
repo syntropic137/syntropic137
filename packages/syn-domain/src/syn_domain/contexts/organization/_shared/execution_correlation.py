@@ -21,6 +21,7 @@ fetched, and what a malformed record does, stop being their business.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
@@ -50,4 +51,46 @@ async def executions_by_repo(store: ProjectionStore, repo_names: Collection[str]
         c["execution_id"]: c["repo_full_name"]
         for c in correlations
         if c.get("execution_id") and c.get("repo_full_name")
+    }
+
+
+@dataclass(frozen=True)
+class CorrelatedExecution:
+    """Every repo one execution is correlated with, and the workflow it ran.
+
+    The correlation is many-to-many (one record per ``execution_id:repo``), so
+    an execution can name more than one repo: a trigger on one repo can start a
+    workflow whose ``repository_url`` input names another. ``repos`` keeps all
+    of them; a mapping to one repo would keep whichever row the store returned
+    last.
+    """
+
+    repos: frozenset[str]
+    workflow_id: str
+
+
+async def correlations_by_execution(
+    store: ProjectionStore, repo_names: Collection[str]
+) -> dict[str, CorrelatedExecution]:
+    """Map each execution correlated with ``repo_names`` to all its matching repos.
+
+    Same selection and the same empty-filter rule as ``executions_by_repo``.
+    ``workflow_id`` is the smallest non-empty one recorded, so the answer does
+    not depend on the order the store returns rows in; ``""`` when none is.
+    """
+    if not repo_names:
+        return {}
+    correlations = await store.query(REPO_CORRELATION, filters={"repo_full_name": list(repo_names)})
+    repos: dict[str, set[str]] = {}
+    workflows: dict[str, set[str]] = {}
+    for c in correlations:
+        execution_id, repo = c.get("execution_id"), c.get("repo_full_name")
+        if not execution_id or not repo:
+            continue
+        repos.setdefault(execution_id, set()).add(repo)
+        workflow_id = c.get("workflow_id")
+        workflows.setdefault(execution_id, set()).update([workflow_id] if workflow_id else [])
+    return {
+        e: CorrelatedExecution(repos=frozenset(r), workflow_id=min(workflows[e], default=""))
+        for e, r in repos.items()
     }
