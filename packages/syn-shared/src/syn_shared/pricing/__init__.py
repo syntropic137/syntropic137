@@ -310,8 +310,9 @@ class ModelPricing:
 # vendor breaks the multiplier cannot silently inherit it. OpenAI publishes no
 # 1-hour write; the OpenAI rows set it equal to their cache-write rate, so a
 # count that ever reached them would never be priced at zero.
-# Nothing feeds a 1-hour count yet: every caller passes 0, so every cost is
-# unchanged until transcripts report ephemeral_1h_input_tokens (#2145 slice B).
+# Only the live phase cost limiter feeds a 1-hour count so far (#2145 slice
+# B1); recorded costs are priced from stored totals at the 5-min rate until
+# the stored observation carries the split (slice B2).
 # ---------------------------------------------------------------------------
 
 MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
@@ -645,6 +646,7 @@ def price_tokens(
     cache_creation: int = 0,
     cache_read: int = 0,
     *,
+    cache_creation_1h: int = 0,
     context: str = "",
 ) -> PricedAmount:
     """Price token usage, or say why it could not be priced.
@@ -657,10 +659,12 @@ def price_tokens(
     Args:
         model: Recorded model id or alias. ``None`` when the harness reported
             no model (codex does not report one on the wire).
+        cache_creation: 5-minute cache writes.
+        cache_creation_1h: 1-hour cache writes, priced at their own rate.
         context: Optional identifier (session id, execution id) for the log
             line, so an unpriced run can be traced back to its source.
     """
-    if input_tokens == 0 and output_tokens == 0 and cache_creation == 0 and cache_read == 0:
+    if not (input_tokens or output_tokens or cache_creation or cache_read or cache_creation_1h):
         # Zero tokens cost zero at every rate, so no rate is needed to answer.
         # Resolving the model first made a no-token observation with no model
         # report as UNPRICED - claiming we cannot say what it cost, when we can
@@ -671,10 +675,11 @@ def price_tokens(
 
     if not model:
         logger.warning(
-            "unpriced token usage: no model recorded (in=%d out=%d cache_creation=%d cache_read=%d) %s",
+            "unpriced token usage: no model recorded (in=%d out=%d cache_creation=%d cache_creation_1h=%d cache_read=%d) %s",
             input_tokens,
             output_tokens,
             cache_creation,
+            cache_creation_1h,
             cache_read,
             context,
         )
@@ -683,17 +688,24 @@ def price_tokens(
     pricing = resolve_model_pricing(model)
     if pricing is None:
         logger.warning(
-            "unpriced token usage: no rate for model %r (in=%d out=%d cache_creation=%d cache_read=%d) %s",
+            "unpriced token usage: no rate for model %r (in=%d out=%d cache_creation=%d cache_creation_1h=%d cache_read=%d) %s",
             model,
             input_tokens,
             output_tokens,
             cache_creation,
+            cache_creation_1h,
             cache_read,
             context,
         )
         return PricedAmount.unpriced(PricingStatus.UNPRICED_NO_RATE, model=model)
 
-    cost = pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read)
+    cost = pricing.calculate_cost(
+        input_tokens,
+        output_tokens,
+        cache_creation,
+        cache_read,
+        cache_creation_1h=cache_creation_1h,
+    )
     status = (
         PricingStatus.PLACEHOLDER
         if pricing.model_id in PLACEHOLDER_PRICED_MODELS
