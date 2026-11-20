@@ -1,0 +1,12 @@
+diff --git a/apps/syn-cli-node/src/commands/events.ts b/apps/syn-cli-node/src/commands/events.ts
+index ffea09ec2..bbb6049d6 100644
+--- a/apps/syn-cli-node/src/commands/events.ts
++++ b/apps/syn-cli-node/src/commands/events.ts
+@@ -168,7 +168,6 @@ const costsCommand: CommandDef = {
+     if (d.cache_read_tokens) print(`  Cache read:         ${d.cache_read_tokens.toLocaleString()}`);
+     if (d.estimated_cost_usd != null) {
+       print(`  Estimated cost:     ${d.total_cost_display}`);
+-      printUnpricedNote(d.unpriced_observation_count);
+     }
+   },
+ };

@@ -1,0 +1,13 @@
+diff --git a/apps/syn-cli-node/src/commands/costs.ts b/apps/syn-cli-node/src/commands/costs.ts
+index 052e6f38d..9ebb08f09 100644
+--- a/apps/syn-cli-node/src/commands/costs.ts
++++ b/apps/syn-cli-node/src/commands/costs.ts
+@@ -24,7 +24,7 @@ const summaryCommand: CommandDef = {
+     const d = unwrap(await api.GET("/costs/summary"), "Get cost summary");
+ 
+     print(style("Cost Summary", CYAN));
+-    print(`  ${style("Total Cost:", BOLD)} ${d.total_cost_display}`);
++    print(`  ${style("Total Cost:", BOLD)} ${formatCost(d.total_cost_usd)}`);
+     printUnpricedNote(d.unpriced_observation_count);
+     print(`  ${style("Sessions:", BOLD)} ${d.total_sessions}`);
+     print(`  ${style("Executions:", BOLD)} ${d.total_executions}`);
