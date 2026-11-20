@@ -136,3 +136,46 @@ async def test_the_recorded_token_total_still_counts_every_cache_write() -> None
     _, tokens = await _spent_on_one_turn(ALL_1H)
 
     assert tokens.cache_creation_tokens == MILLION
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "usage_json",
+    [
+        '{"cache_creation_input_tokens": 100, "cache_creation": {"ephemeral_1h_input_tokens": true, "ephemeral_5m_input_tokens": 99}}',
+        '{"cache_creation_input_tokens": 100, "cache_creation": {"ephemeral_1h_input_tokens": 1, "ephemeral_5m_input_tokens": 99.0}}',
+        '{"cache_creation_input_tokens": 100, "cache_creation": {"ephemeral_1h_input_tokens": 99, "ephemeral_5m_input_tokens": true}}',
+        '{"cache_creation_input_tokens": 100, "cache_creation": {"ephemeral_1h_input_tokens": 40.0}}',
+        '{"cache_creation_input_tokens": 100, "cache_creation": {"ephemeral_1h_input_tokens": -1}}',
+        '{"cache_creation_input_tokens": 100, "cache_creation": {"ephemeral_1h_input_tokens": 101}}',
+        '{"cache_creation_input_tokens": 100, "cache_creation": {"ephemeral_1h_input_tokens": 60, "ephemeral_5m_input_tokens": 30}}',
+        '{"cache_creation_input_tokens": 100, "cache_creation": [60, 40]}',
+        '{"cache_creation_input_tokens": true, "cache_creation": {"ephemeral_1h_input_tokens": 1}}',
+    ],
+    ids=[
+        "1h-bool",
+        "5m-float",
+        "5m-bool",
+        "1h-float",
+        "1h-negative",
+        "1h-over-total",
+        "5m-disagrees",
+        "split-not-mapping",
+        "total-bool",
+    ],
+)
+def test_a_malformed_split_is_priced_as_it_was_before(usage_json: str) -> None:
+    """Anything but real non-negative int counts that add up is today's pricing: no 1-hour share.
+
+    The cases are JSON text because that is what the stream delivers: ``true``
+    and ``99.0`` arrive as ``bool`` and ``float``, which compare equal to ints.
+    """
+    from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+        CacheWrites,
+    )
+
+    usage = json.loads(usage_json)
+    writes = CacheWrites.from_claude_usage(usage)
+
+    assert writes.one_hour == 0
+    assert writes.five_minute is usage["cache_creation_input_tokens"]

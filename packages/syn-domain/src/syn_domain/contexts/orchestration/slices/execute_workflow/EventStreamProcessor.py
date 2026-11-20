@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, StrEnum, auto
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, TypeGuard
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
 from agentic_events.types import ClaudeToolName, EventType
@@ -252,6 +252,11 @@ class ClaudeUsageBlock(TypedDict, total=False):
     cache_creation: Mapping[str, int]
 
 
+def _is_count(value: object) -> TypeGuard[int]:
+    """A non-negative ``int`` that is not a ``bool``: a token count as the CLI sends it."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 @dataclass(frozen=True)
 class CacheWrites:
     """One turn's cache writes, split by the rate each is billed at (#2145).
@@ -277,11 +282,15 @@ class CacheWrites:
         if split is None:
             return cls(five_minute=total, one_hour=0)
         # The value came from json.loads, so the TypedDict is a claim, not a check.
-        one_hour = split.get("ephemeral_1h_input_tokens", 0) if isinstance(split, Mapping) else None
-        if isinstance(one_hour, int) and 0 <= one_hour <= total:
-            five_minute = total - one_hour
-            if split.get("ephemeral_5m_input_tokens", five_minute) == five_minute:
-                return cls(five_minute=five_minute, one_hour=one_hour)
+        # Counts must be real ints: ``True == 1`` and ``99.0 == 99`` would pass a
+        # numeric comparison and price a malformed split at the premium rate.
+        if _is_count(total) and isinstance(split, Mapping):
+            one_hour = split.get("ephemeral_1h_input_tokens", 0)
+            if _is_count(one_hour) and one_hour <= total:
+                five_minute = total - one_hour
+                reported_5m = split.get("ephemeral_5m_input_tokens", five_minute)
+                if _is_count(reported_5m) and reported_5m == five_minute:
+                    return cls(five_minute=five_minute, one_hour=one_hour)
         logger.warning(
             "cache_creation split %r disagrees with cache_creation_input_tokens=%r;"
             " pricing all cache writes at the 5-minute rate",
