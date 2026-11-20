@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/_cost_rollup.py b/apps/syn-api/src/syn_api/routes/_cost_rollup.py
+index 25809a76a..62973d854 100644
+--- a/apps/syn-api/src/syn_api/routes/_cost_rollup.py
++++ b/apps/syn-api/src/syn_api/routes/_cost_rollup.py
+@@ -93,7 +93,7 @@ def roll_up_costs(
+         correlation = correlated.get(c.execution_id) if correlated is not None else None
+         for repo in sorted(correlation.repos) if correlation else ():
+             t.by_repo[repo] = t.by_repo.get(repo, Decimal("0")) + c.total_cost_usd
+-        workflow_id = c.workflow_id or (correlation.workflow_id if correlation else None)
++        workflow_id = c.workflow_id
+         if workflow_id:
+             t.by_workflow[workflow_id] = (
+                 t.by_workflow.get(workflow_id, Decimal("0")) + c.total_cost_usd

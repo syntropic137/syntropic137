@@ -1,0 +1,18 @@
+diff --git a/apps/syn-api/src/syn_api/routes/insights.py b/apps/syn-api/src/syn_api/routes/insights.py
+index 8617d093c..3d2a2ed76 100644
+--- a/apps/syn-api/src/syn_api/routes/insights.py
++++ b/apps/syn-api/src/syn_api/routes/insights.py
+@@ -111,10 +111,10 @@ async def get_global_cost(
+     # not the global recency window filtered afterwards: that window drops a
+     # system's older work once 10,000 newer executions elsewhere fill it, and
+     # ``/systems/{id}/cost`` reads by id, so the two would disagree (#897).
++    all_costs = await query_svc.list_all(limit=10_000)
+     if system_id:
+-        all_costs = await query_svc.list_for_ids(await _get_execution_ids_for_system(system_id))
+-    else:
+-        all_costs = await query_svc.list_all(limit=10_000)
++        allowed_exec_ids = await _get_execution_ids_for_system(system_id)
++        all_costs = [c for c in all_costs if c.execution_id in allowed_exec_ids]
+ 
+     # Resolve system name when filtering by system_id
+     system_name = "global"
