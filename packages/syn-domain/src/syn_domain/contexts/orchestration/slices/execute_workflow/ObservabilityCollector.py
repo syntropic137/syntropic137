@@ -247,8 +247,13 @@ class ObservabilityCollector:
         cache_creation: int = 0,
         cache_read: int = 0,
         model: str | None = None,
+        cache_creation_1h: int = 0,
     ) -> None:
         """Record token usage observation.
+
+        ``cache_creation`` is every cache write this turn, whatever its TTL;
+        ``cache_creation_1h`` is the 1-hour share of it, 0 when the harness
+        reported no split (#2145).
 
         ``model`` is the model THIS TURN reported (claude repeats it on every
         assistant message, and a subagent's turn names its own). Without one
@@ -267,6 +272,7 @@ class ObservabilityCollector:
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "cache_creation_tokens": cache_creation,
+                "cache_creation_1h_tokens": cache_creation_1h,
                 "cache_read_tokens": cache_read,
                 OBSERVED_MODEL_KEY: row_model,
                 # ALWAYS present, null included: the key's presence is how a

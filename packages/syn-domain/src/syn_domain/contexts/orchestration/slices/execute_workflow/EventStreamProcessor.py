@@ -915,16 +915,18 @@ class EventStreamProcessor:
             # The model THIS message names, not the session's: a subagent turn
             # on another model is priced as that model, not as the leader.
             turn_model = announced_model_from(message.get("model"))
+            # Parsed once: the stored row and the limiter must agree on the split.
+            cache_writes = CacheWrites.from_claude_usage(usage)
+            # The row keeps the TOTAL and carries the 1-hour share beside it
+            # (#2145 B2a); the limiter prices each share at its own rate.
             await self._collector.record_token_usage(
                 input_tokens,
                 output_tokens,
                 cache_creation,
                 cache_read,
                 model=turn_model,
+                cache_creation_1h=cache_writes.one_hour,
             )
-            # Stored counts above keep the total; only the limiter prices the
-            # TTL split until the stored observation carries it (#2145 B2).
-            cache_writes = CacheWrites.from_claude_usage(usage)
             spend(
                 self._cost_limit,
                 turn_model,
