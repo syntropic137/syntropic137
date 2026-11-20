@@ -1,6 +1,6 @@
 """The nginx images run a patched release and serve plain HTTP/1.1 only (#2335).
 
-nginx's November 2026 security release (CVE-2026-123007 and nine more) fixes
+nginx's November 2026 security release (led by CVE-2026-123007) fixes
 bugs that sit in HTTP/2, HTTP/3, TLS, the resolver, the mail and stream
 modules, and the PROXY protocol. The fix is nginx 1.30.7; 1.28.x gets none.
 
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from infra.scripts.check_nginx_features import findings, main, parse
+from infra.scripts.check_nginx_features import NginxSyntaxError, check, findings, main, parse
 
 pytestmark = pytest.mark.unit
 
@@ -84,7 +84,7 @@ def test_both_images_pin_the_same_nginx() -> None:
 
 @pytest.mark.parametrize("path", _CONFIG_FILES, ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_no_affected_nginx_feature_is_enabled(path: Path) -> None:
-    found = findings(parse(path.read_text()))
+    found = check(path.read_text())
     assert not found, f"{path}: {found}; the gateway serves plain HTTP/1.1 only"
 
 
@@ -111,14 +111,38 @@ def test_no_affected_nginx_feature_is_enabled(path: Path) -> None:
         "add_header X-Test '#'; resolver 1.1.1.1;",
         # A quote opens a string only at token start (nginx), so a mid-token
         # quote cannot swallow the directive after it (Codex review, pass 2).
-        'server { listen 80; add_header X-Test a"; http2 on; #" }',
-        "server { listen 80; add_header X-Test a'; resolver 1.1.1.1; #' }",
-        # Case does not matter to nginx's directive table for these.
+        'server {\n listen 80;\n add_header X-Test a"; http2 on; #"\n}',
+        "server {\n listen 80;\n add_header X-Test a'; resolver 1.1.1.1; #'\n}",
+        # `}` does not end a word and form feed is not whitespace to nginx, so
+        # neither can put the quote at a token start (Codex review, pass 3).
+        'server {\n listen 80;\n add_header X-Test a}"; http2 on; #"\n}',
+        'server {\n listen 80;\n add_header X-Test a\x0c"; http2 on; #"\n}',
+        # A backslash escapes one character; the next `;` still ends the directive.
+        'server {\n add_header X-Test a\\"; http2 on;\n}',
+        # Matched case-insensitively: stricter than nginx, which is case-sensitive.
         "server { LISTEN 80 HTTP2; }",
     ],
 )
 def test_each_enabling_form_is_refused(config: str) -> None:
+    """Each case is config nginx loads (it parses cleanly) yet enables a feature."""
     assert findings(parse(config)), config
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        "server { listen 80;",
+        "listen 80; }",
+        'add_header X "unterminated; http2 on;',
+        'add_header X "a"b; http2 on;',
+        "; http2 on;",
+    ],
+)
+def test_config_nginx_would_refuse_fails_closed(config: str) -> None:
+    """Unreadable config is a finding, never a silent pass."""
+    with pytest.raises(NginxSyntaxError):
+        parse(config)
+    assert check(config)
 
 
 @pytest.mark.parametrize(
@@ -136,7 +160,7 @@ def test_each_enabling_form_is_refused(config: str) -> None:
     ],
 )
 def test_harmless_config_is_accepted(config: str) -> None:
-    assert not findings(parse(config)), findings(parse(config))
+    assert not check(config), check(config)
 
 
 def test_parse_keeps_quoted_separators_inside_one_argument() -> None:
