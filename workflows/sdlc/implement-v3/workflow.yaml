@@ -98,7 +98,7 @@ phases:
       - markdown
     output_artifacts:
       - markdown
-    timeout_seconds: 3600
+    timeout_seconds: 5400  # 90m: the gates alone take ~20m (#2320)
     allowed_tools:
       - Read
       - Grep
@@ -166,7 +166,7 @@ phases:
       - markdown
     output_artifacts:
       - markdown
-    timeout_seconds: 3600
+    timeout_seconds: 5400  # 90m: the gates alone take ~20m (#2320)
     allowed_tools:
       - Read
       - Grep
