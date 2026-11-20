@@ -1,0 +1,12 @@
+diff --git a/apps/syn-cli-node/src/output/console.ts b/apps/syn-cli-node/src/output/console.ts
+index a0f44fb38..61455c11e 100644
+--- a/apps/syn-cli-node/src/output/console.ts
++++ b/apps/syn-cli-node/src/output/console.ts
+@@ -26,6 +26,6 @@ export function print(message: string): void {
+  * observation was priced, so callers pass the count unconditionally.
+  */
+ export function printUnpricedNote(unpricedCount: number | undefined): void {
+-  if (!unpricedCount) return;
++  return;
+   printDim(`  ${unpricedCount} observation(s) had no rate for their model, so this total is incomplete.`);
+ }

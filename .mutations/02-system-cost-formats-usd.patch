@@ -1,0 +1,13 @@
+diff --git a/apps/syn-cli-node/src/commands/system.ts b/apps/syn-cli-node/src/commands/system.ts
+index f848d4fc6..6fa37cedd 100644
+--- a/apps/syn-cli-node/src/commands/system.ts
++++ b/apps/syn-cli-node/src/commands/system.ts
+@@ -188,7 +188,7 @@ const costCommand: CommandDef = {
+     const d = unwrap(await api.GET("/systems/{system_id}/cost", { params: { path: { system_id: id } } }), "Get system cost");
+ 
+     print(`${style("System Costs:", BOLD)} ${id}`);
+-    print(`  Total cost:  ${d.total_cost_display}`);
++    print(`  Total cost:  ${formatCost(d.total_cost_usd)}`);
+     printUnpricedNote(d.unpriced_observation_count);
+     print(`  Tokens:      ${formatTokens(d.total_tokens)}`);
+ 
