@@ -233,18 +233,62 @@ def _extract_error_reason(raw: str) -> str:
 
 
 class ClaudeUsageBlock(TypedDict, total=False):
-    """The cumulative usage block a claude CLI ``result`` line carries.
+    """The usage block a claude CLI line carries: per turn, or cumulative on ``result``.
 
     Harness knowledge, and it stays here rather than in the domain vocabulary:
     these are the CLI's key names, and they change when Anthropic ships a new
     CLI, not when we decide what usage means. ``total=False`` because a result
     event may omit any of them and the reader defaults each to zero.
+
+    ``cache_creation`` splits ``cache_creation_input_tokens`` by cache TTL
+    (``ephemeral_1h_input_tokens`` / ``ephemeral_5m_input_tokens``). Older CLIs
+    omit it. Read it only through ``CacheWrites.from_claude_usage``.
     """
 
     input_tokens: int
     output_tokens: int
     cache_creation_input_tokens: int
     cache_read_input_tokens: int
+    cache_creation: Mapping[str, int]
+
+
+@dataclass(frozen=True)
+class CacheWrites:
+    """One turn's cache writes, split by the rate each is billed at (#2145).
+
+    A 1-hour write costs more than a 5-minute one (2x input against 1.25x), so
+    pricing needs the split, not the total.
+    """
+
+    five_minute: int
+    one_hour: int
+
+    @classmethod
+    def from_claude_usage(cls, usage: ClaudeUsageBlock) -> CacheWrites:
+        """Split ``cache_creation_input_tokens`` using the CLI's per-TTL breakdown.
+
+        With no breakdown (an older CLI) every write is 5-minute, which is how
+        they were all priced before. A breakdown that disagrees with the total
+        is logged and treated the same way: it cannot be trusted, and pricing
+        the total at the old rate is no worse than it was.
+        """
+        total = usage.get("cache_creation_input_tokens", 0)
+        split = usage.get("cache_creation")
+        if split is None:
+            return cls(five_minute=total, one_hour=0)
+        # The value came from json.loads, so the TypedDict is a claim, not a check.
+        one_hour = split.get("ephemeral_1h_input_tokens", 0) if isinstance(split, Mapping) else None
+        if isinstance(one_hour, int) and 0 <= one_hour <= total:
+            five_minute = total - one_hour
+            if split.get("ephemeral_5m_input_tokens", five_minute) == five_minute:
+                return cls(five_minute=five_minute, one_hour=one_hour)
+        logger.warning(
+            "cache_creation split %r disagrees with cache_creation_input_tokens=%r;"
+            " pricing all cache writes at the 5-minute rate",
+            split,
+            total,
+        )
+        return cls(five_minute=total, one_hour=0)
 
 
 class ClaudeResultLine(TypedDict, total=False):
@@ -848,7 +892,7 @@ class EventStreamProcessor:
         if msg_id and msg_id in self._seen_message_ids:
             return
 
-        usage = message.get("usage") or {}
+        usage: ClaudeUsageBlock = message.get("usage") or {}
         if not usage:
             return
 
@@ -869,13 +913,17 @@ class EventStreamProcessor:
                 cache_read,
                 model=turn_model,
             )
+            # Stored counts above keep the total; only the limiter prices the
+            # TTL split until the stored observation carries it (#2145 B2).
+            cache_writes = CacheWrites.from_claude_usage(usage)
             spend(
                 self._cost_limit,
                 turn_model,
                 input_tokens,
                 output_tokens,
-                cache_creation,
+                cache_writes.five_minute,
                 cache_read,
+                cache_creation_1h=cache_writes.one_hour,
             )
             logger.info(
                 "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",

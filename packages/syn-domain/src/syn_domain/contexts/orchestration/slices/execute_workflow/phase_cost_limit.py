@@ -55,9 +55,22 @@ class PhaseCostLimit:
         output_tokens: int,
         cache_creation: int = 0,
         cache_read: int = 0,
+        *,
+        cache_creation_1h: int = 0,
     ) -> None:
-        """Add one model call's usage, priced at the model that call names."""
-        priced = price_tokens(model, input_tokens, output_tokens, cache_creation, cache_read)
+        """Add one model call's usage, priced at the model that call names.
+
+        ``cache_creation`` is the call's 5-minute cache writes and
+        ``cache_creation_1h`` its 1-hour ones, each at its own rate (#2145).
+        """
+        priced = price_tokens(
+            model,
+            input_tokens,
+            output_tokens,
+            cache_creation,
+            cache_read,
+            cache_creation_1h=cache_creation_1h,
+        )
         if priced.cost is not None:
             self._spent += priced.cost
 
@@ -75,10 +88,19 @@ def spend(
     output_tokens: int,
     cache_creation: int = 0,
     cache_read: int = 0,
+    *,
+    cache_creation_1h: int = 0,
 ) -> None:
     """Record a turn against `limit`, if the phase declared one."""
     if limit is not None:
-        limit.record_turn(model, input_tokens, output_tokens, cache_creation, cache_read)
+        limit.record_turn(
+            model,
+            input_tokens,
+            output_tokens,
+            cache_creation,
+            cache_read,
+            cache_creation_1h=cache_creation_1h,
+        )
 
 
 def limit_exceeded(limit: PhaseCostLimit | None) -> str | None:
