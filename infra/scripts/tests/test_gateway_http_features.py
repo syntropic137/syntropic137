@@ -113,10 +113,9 @@ def test_no_affected_nginx_feature_is_enabled(path: Path) -> None:
         # quote cannot swallow the directive after it (Codex review, pass 2).
         'server {\n listen 80;\n add_header X-Test a"; http2 on; #"\n}',
         "server {\n listen 80;\n add_header X-Test a'; resolver 1.1.1.1; #'\n}",
-        # `}` does not end a word and form feed is not whitespace to nginx, so
-        # neither can put the quote at a token start (Codex review, pass 3).
+        # `}` does not end a word to nginx, so it cannot put the quote at a
+        # token start (Codex review, pass 3).
         'server {\n listen 80;\n add_header X-Test a}"; http2 on; #"\n}',
-        'server {\n listen 80;\n add_header X-Test a\x0c"; http2 on; #"\n}',
         # A backslash escapes one character; the next `;` still ends the directive.
         'server {\n add_header X-Test a\\"; http2 on;\n}',
         # Matched case-insensitively: stricter than nginx, which is case-sensitive.
@@ -136,6 +135,12 @@ def test_each_enabling_form_is_refused(config: str) -> None:
         'add_header X "unterminated; http2 on;',
         'add_header X "a"b; http2 on;',
         "; http2 on;",
+        # Form feed is not whitespace to nginx (pass 3); refused as a control byte.
+        'server {\n listen 80;\n add_header X-Test a\x0c"; http2 on; #"\n}',
+        # nginx compares C strings, so a NUL truncates the flag it reads
+        # (Codex review, pass 4); any control byte is refused.
+        "server { listen 8080 proxy_protocol\x00suffix; }",
+        "server { listen 8080 http2\x01; }",
     ],
 )
 def test_config_nginx_would_refuse_fails_closed(config: str) -> None:

@@ -104,6 +104,11 @@ class _Tokenizer:
         if ch == "\n":
             self.line += 1
             self.sharp_comment = False
+        elif ch not in _WS and (ord(ch) < 0x20 or ord(ch) == 0x7F):
+            # nginx keeps control bytes inside a word, and its handlers compare
+            # C strings, so "proxy_protocol\0x" reads as proxy_protocol there
+            # (Codex review, pass 4). No legitimate config carries one: refuse.
+            raise NginxSyntaxError(self.line, f"control character 0x{ord(ch):02x}")
         if self.sharp_comment:
             return
         if self.escaped:
@@ -119,8 +124,12 @@ class _Tokenizer:
     def _after_quote(self, ch: str) -> None:
         """A quoted token just closed: nginx demands a separator next."""
         self.need_space = False
-        if ch in _WS or ch == ")":
+        if ch in _WS:
             self.last_space = True
+        elif ch == ")":
+            # nginx accepts `)` here and keeps it as the next token's first byte.
+            self.last_space = True
+            self._at_token_start(ch)
         elif ch in ";{":
             self._end_directive(opens_block=ch == "{")
         else:
