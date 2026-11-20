@@ -129,7 +129,8 @@ path = "apps/syn-api"
 # 144 -> 132 (#1424): the conversation-log line parser moved to
 # syn_adapters.conversations and reads each line as a recursive JsonValue.
 # 132 -> 130 (#897): /insights/cost aggregates straight into GlobalCostResponse.
-value = 130
+# 130 -> 128 (#897): repo and system cost return their response models, not dict[str, Any].
+value = 128
 issue = "#673"
 
 [untyped-dicts.syn-collector]

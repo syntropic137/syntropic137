@@ -162,6 +162,7 @@ _NO_PAIR: dict[str, str] = {
     "sessions.py": "TODO(#1040): SessionSummary -> SessionDetail -> SessionResponse is the same shape and belongs here; adding it needs its own exception review",
     "workflows/queries.py": "WorkflowDetail maps through per-phase builders, not a flat copy",
     "insights.py": "/insights/cost sums many ExecutionCost rows into one GlobalCostResponse, not a flat copy; its coverage hop is pinned by apps/syn-api/tests/test_897_insights_cost_reports_unpriced_work.py",
+    "_cost_rollup.py": "sums many ExecutionCost rows into one CostRollup for the insights, repo and system cost responses, not a flat copy; its coverage hop is pinned by apps/syn-api/tests/test_897_repo_and_system_cost_from_execution_cost.py",
 }
 
 #: Fields the destination deliberately does not take from the read model, keyed
