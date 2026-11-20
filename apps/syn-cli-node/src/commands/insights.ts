@@ -66,7 +66,10 @@ const costCommand: CommandDef = {
     const d = unwrap(await api.GET("/insights/cost"), "Fetch cost");
 
     print(style("Cost Overview", CYAN));
-    print(`  ${style("Total cost:", BOLD)}   ${formatCost(d.total_cost_usd)}`);
+    print(`  ${style("Total cost:", BOLD)}   ${d.total_cost_display}`);
+    if (d.unpriced_observation_count > 0) {
+      printDim(`  ${d.unpriced_observation_count} observation(s) had no rate for their model, so this total is incomplete.`);
+    }
     print(`  ${style("Total tokens:", BOLD)} ${formatTokens(d.total_tokens)}`);
 
     const byRepo = d.cost_by_repo ?? {};
