@@ -67,8 +67,10 @@ def parse(text: str) -> list[Directive]:
         c = text[i]
         if c == "\n":
             line += 1
-        if c in "\"'":
-            if not words and not word_started:
+        # As in nginx (ngx_conf_read_token), a quote opens a string only at the
+        # start of a token; mid-token it is a literal character.
+        if c in "\"'" and not word_started:
+            if not words:
                 start_line = line
             word_started = True
             quote = c

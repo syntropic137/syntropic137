@@ -109,6 +109,10 @@ def test_no_affected_nginx_feature_is_enabled(path: Path) -> None:
         # A # inside quotes is not a comment, so it cannot hide what follows.
         'add_header X-Test "#"; http2 on;',
         "add_header X-Test '#'; resolver 1.1.1.1;",
+        # A quote opens a string only at token start (nginx), so a mid-token
+        # quote cannot swallow the directive after it (Codex review, pass 2).
+        'server { listen 80; add_header X-Test a"; http2 on; #" }',
+        "server { listen 80; add_header X-Test a'; resolver 1.1.1.1; #' }",
         # Case does not matter to nginx's directive table for these.
         "server { LISTEN 80 HTTP2; }",
     ],
