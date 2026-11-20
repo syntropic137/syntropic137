@@ -1,0 +1,15 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/subscriptions/projection_adapters.py b/packages/syn-adapters/src/syn_adapters/subscriptions/projection_adapters.py
+index 53ad579aa..bd6b726f0 100644
+--- a/packages/syn-adapters/src/syn_adapters/subscriptions/projection_adapters.py
++++ b/packages/syn-adapters/src/syn_adapters/subscriptions/projection_adapters.py
+@@ -153,9 +153,7 @@ class ExecutionCostAdapter(_ObservationProjectionAdapter):
+     """
+ 
+     PROJECTION_NAME: ClassVar[str] = "execution_cost"
+-    # 2: prices 1-hour cache writes at the 1-hour rate and stores
+-    # cache_creation_1h_tokens (#2145 B2b).
+-    VERSION: ClassVar[int] = 2
++    VERSION: ClassVar[int] = 1
+     _SUBSCRIBED: ClassVar[set[str]] = set(_COST_HANDLER_MAP.keys())
+ 
+     def __init__(self, projection: ExecutionCostProjection) -> None:

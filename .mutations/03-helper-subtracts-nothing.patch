@@ -1,0 +1,13 @@
+diff --git a/packages/syn-shared/src/syn_shared/pricing/__init__.py b/packages/syn-shared/src/syn_shared/pricing/__init__.py
+index 204b8cc79..5543396e9 100644
+--- a/packages/syn-shared/src/syn_shared/pricing/__init__.py
++++ b/packages/syn-shared/src/syn_shared/pricing/__init__.py
+@@ -252,7 +252,7 @@ class CacheWrites:
+         bad row never exceeds pricing all of its writes at the 1-hour rate.
+         """
+         one_hour = min(max(one_hour, 0), max(total, 0))
+-        return cls(five_minute=max(total, 0) - one_hour, one_hour=one_hour)
++        return cls(five_minute=max(total, 0), one_hour=one_hour)
+ 
+ 
+ @dataclass(frozen=True)
