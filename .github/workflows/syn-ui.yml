@@ -291,21 +291,27 @@ jobs:
       # registry round trip. The Dockerfile itself is unchanged.
       #
       # The digests are the Docker Hub index digests for these tags
-      # (`docker buildx imagetools inspect docker.io/library/<ref>`). A FROM ref
-      # with no entry here fails the step, so bumping the Dockerfile forces a
-      # bump here. `node:22-alpine` floats upstream; this pin only freezes
-      # what CI builds the UI stages with, not what a release builds.
+      # (`docker buildx imagetools inspect docker.io/library/<ref>`). A FROM
+      # ref that carries its own `@sha256:` digest is pulled by that digest, so
+      # the Dockerfile stays the single source of truth for it. A FROM ref
+      # without one needs an entry in PINNED, or the step fails.
+      # `node:22-alpine` floats upstream; its pin only freezes what CI builds
+      # the UI stages with, not what a release builds.
       - name: Pre-pull base images by digest from mirror.gcr.io
         run: |
           set -euo pipefail
           declare -A PINNED=(
             ["node:22-alpine"]="sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402"
-            ["nginx:1.28.2-alpine"]="sha256:5b4900b042ccfa8b0a73df622c3a60f2322faeb2be800cbee5aa7b44d241649e"
           )
-          while read -r img; do
-            digest="${PINNED[$img]:-}"
+          while read -r ref; do
+            img="${ref%%@*}"
+            if [ "$img" != "$ref" ]; then
+              digest="${ref#*@}"
+            else
+              digest="${PINNED[$img]:-}"
+            fi
             if [ -z "$digest" ]; then
-              echo "::error::No pinned digest for gateway base image '$img'. Add it to PINNED in .github/workflows/syn-ui.yml."
+              echo "::error::No pinned digest for gateway base image '$img'. Pin it in the Dockerfile FROM (@sha256:...) or add it to PINNED in .github/workflows/syn-ui.yml."
               exit 1
             fi
             # mirror.gcr.io is a cache and can evict a digest, so fall back to
