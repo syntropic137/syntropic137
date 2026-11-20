@@ -136,8 +136,11 @@ GROUP BY {recorded_model_group_by()}, ((data->>'total_cost_usd') IS NULL),
 # by a Haiku worker phase). Pricing must happen per model group rather
 # than flattening all tokens into one SUM and pricing them as a single
 # model - the same class of bug as issue #788.
+# Preserve session identity so the summary path can exclude unfinished
+# sessions' TTL splits without excluding them from the token-only path (#2145).
 _TOKEN_USAGE_FALLBACK_QUERY = f"""
 SELECT
+    session_id,
     {recorded_model_select()},
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
@@ -152,7 +155,7 @@ SELECT
 FROM agent_events
 WHERE execution_id = $1 AND event_type = $2
   AND time >= $3 AND time < $4
-GROUP BY {recorded_model_group_by()}, {zero_usage_group_by()}
+GROUP BY session_id, {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
 # The true start of an execution: the earliest event of ANY type.
@@ -735,7 +738,7 @@ class TimescaleExecutionCostQuery:
     async def _query_token_usage(
         self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str, span: EventSpan
     ) -> list[asyncpg.Record]:
-        """Query token_usage events, grouped by model: the in-progress fallback, and the 1-hour share of a summary."""
+        """Query session/model groups for the fallback and the summary TTL split."""
         return await conn.fetch(
             _TOKEN_USAGE_FALLBACK_QUERY, execution_id, TOKEN_USAGE, span.lower, span.upper
         )
@@ -751,15 +754,17 @@ class TimescaleExecutionCostQuery:
         Delegates to ``price_grouped_session_summary`` (shared with
         ``ExecutionCostQueryService``) and repackages the result as
         ``_TokenData`` for this class's internal pipeline. ``turn_rows`` are
-        the execution's token_usage groups: a summary records no TTL split, so
-        the 1-hour share is theirs (#2145).
+        the execution's token_usage groups, split per session. Only summarized
+        sessions supply the 1-hour share (#2145).
         """
         grouped = price_grouped_session_summary(rows, self._cost_calculator, unreported)
         data = _TokenData(
             input_tokens=grouped.input_tokens,
             output_tokens=grouped.output_tokens,
             cache_creation=grouped.cache_creation,
-            cache_creation_1h=observed_cache_creation_1h(turn_rows, grouped.cache_creation),
+            cache_creation_1h=observed_cache_creation_1h(
+                turn_rows, grouped.cache_creation, session_ids=frozenset(grouped.session_ids)
+            ),
             cache_read=grouped.cache_read,
             session_count=len(grouped.session_ids),
             session_ids=grouped.session_ids,

@@ -94,9 +94,12 @@ GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_
 # group rather than flattening all tokens into one SUM per execution and
 # pricing them as a single model (issue #788). Rows for the same
 # execution_id are merged in Python via ``price_grouped_token_usage``.
+# Keep sessions separate so a summary's TTL split can use exactly the sessions
+# its authoritative total covers, excluding still-running sessions (#2145).
 _LIST_ALL_FROM_TOKEN_USAGE_QUERY = f"""
 SELECT
     execution_id,
+    session_id,
     {recorded_model_select()},
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
@@ -111,7 +114,7 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
   AND execution_id IS NOT NULL
-GROUP BY execution_id, {recorded_model_group_by()}, {zero_usage_group_by()}
+GROUP BY execution_id, session_id, {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
 # Same shape as _LIST_ALL_FROM_SUMMARY_QUERY, but scoped to a caller-provided
@@ -147,6 +150,7 @@ GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_
 _BY_IDS_FROM_TOKEN_USAGE_QUERY = f"""
 SELECT
     execution_id,
+    session_id,
     {recorded_model_select()},
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
@@ -162,7 +166,7 @@ FROM agent_events
 WHERE event_type = $1
   AND execution_id = ANY($2::text[])
   AND time >= $3 AND time < $4
-GROUP BY execution_id, {recorded_model_group_by()}, {zero_usage_group_by()}
+GROUP BY execution_id, session_id, {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
 # Per-execution, per-phase cost breakdown.
@@ -449,8 +453,8 @@ class ExecutionCostQueryService:
     ) -> ExecutionCost:
         """Build an ExecutionCost from model-grouped session_summary rows.
 
-        ``turn_rows`` are the execution's model-grouped token_usage rows; a
-        summary records no TTL split, so the 1-hour share comes from them (#2145).
+        ``turn_rows`` are grouped by session and model. A summary records no
+        TTL split; only turns of its summarized sessions supply that share (#2145).
 
         ``rows`` are all (execution_id, model) groups for this execution
         from ``_LIST_ALL_FROM_SUMMARY_QUERY``. Priced per group via
@@ -470,7 +474,9 @@ class ExecutionCostQueryService:
             input_tokens=grouped.input_tokens,
             output_tokens=grouped.output_tokens,
             cache_creation_tokens=grouped.cache_creation,
-            cache_creation_1h_tokens=observed_cache_creation_1h(turn_rows, grouped.cache_creation),
+            cache_creation_1h_tokens=observed_cache_creation_1h(
+                turn_rows, grouped.cache_creation, session_ids=frozenset(grouped.session_ids)
+            ),
             cache_read_tokens=grouped.cache_read,
             tool_calls=tool_counts.get(execution_id, 0),
             turns=grouped.total_turns,

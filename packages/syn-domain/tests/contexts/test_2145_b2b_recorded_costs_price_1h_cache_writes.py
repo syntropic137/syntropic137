@@ -177,7 +177,9 @@ class _FakeRow:
         return self._data.get(key, default)
 
 
-def _grouped_row(cache_creation: int, cache_creation_1h: int | None) -> asyncpg.Record:
+def _grouped_row(
+    cache_creation: int, cache_creation_1h: int | None, *, session_id: str = "session-1"
+) -> asyncpg.Record:
     row: dict[str, _Cell] = {
         "model": _OPUS,
         "agent_model": _OPUS,
@@ -185,7 +187,8 @@ def _grouped_row(cache_creation: int, cache_creation_1h: int | None) -> asyncpg.
         "total_output": 0,
         "cache_creation": cache_creation,
         "cache_read": 0,
-        "session_ids": ["session-1"],
+        "session_ids": [session_id],
+        "session_id": session_id,
         "observation_count": 1,
         "started_at": None,
         "last_observation": None,
@@ -484,3 +487,42 @@ def test_execution_list_keeps_the_1h_count_after_its_summary_arrives(
     assert before.cache_creation_1h_tokens == (one_hour or 0)
     assert after.cache_creation_1h_tokens == before.cache_creation_1h_tokens
     assert after.total_cost_usd == before.total_cost_usd == expected
+
+
+@pytest.mark.parametrize("reader", ["list", "detail"])
+@pytest.mark.parametrize("running_first", [False, True])
+def test_execution_summary_excludes_running_sessions_1h_writes(
+    reader: str, running_first: bool
+) -> None:
+    """A summary's total and TTL split must describe the same session set."""
+    completed = _grouped_row(_MILLION, 0)
+    running = _grouped_row(_MILLION, _MILLION, session_id="running")
+    turns = [completed, running]
+    if running_first:
+        turns.reverse()
+    summary = _summary_row(Decimal("5.00"))
+
+    if reader == "list":
+        query = execution_query_service.ExecutionCostQueryService(Mock())
+        before = query._build_from_token_usage("exec-1", turns, {})
+        after = query._build_from_summary("exec-1", [summary], {}, {}, turn_rows=turns)
+        assert before.cache_creation_tokens == 2 * _MILLION
+        assert before.cache_creation_1h_tokens == _MILLION
+        assert before.total_cost_usd == Decimal("13.00")
+        assert after.session_ids == ["session-1"]
+        assert after.cache_creation_tokens == _MILLION
+        assert after.cache_creation_1h_tokens == 0
+        assert after.total_cost_usd == Decimal("5.00")
+    else:
+        detail = execution_timescale.TimescaleExecutionCostQuery(Mock())
+        before_detail = detail._price_token_usage_groups(turns)
+        after_detail = detail._price_session_summary_groups(
+            [summary], execution_timescale.UnreportedSessionCosts(), turns
+        )
+        assert before_detail.data.cache_creation == 2 * _MILLION
+        assert before_detail.data.cache_creation_1h == _MILLION
+        assert before_detail.total_cost == Decimal("13.00")
+        assert after_detail.data.session_ids == ["session-1"]
+        assert after_detail.data.cache_creation == _MILLION
+        assert after_detail.data.cache_creation_1h == 0
+        assert after_detail.total_cost == Decimal("5.00")

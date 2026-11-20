@@ -1,9 +1,7 @@
-diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/recorded_model_rows.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/recorded_model_rows.py
-index 5fda0464f..21a225136 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/recorded_model_rows.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/recorded_model_rows.py
-@@ -126,7 +126,7 @@ def observed_cache_creation_1h(turn_rows: Iterable[ModelRow], total: int) -> int
-     for row in turn_rows:
+@@ -132,7 +132,7 @@
+             continue
          value = row.get("cache_creation_1h")
          one_hour += value if isinstance(value, int) else 0
 -    return CacheWrites.from_recorded(total, one_hour).one_hour

@@ -20,3 +20,13 @@ just mutation-evidence 2333 "packages/syn-domain/tests/contexts/test_2145_b2b_re
 |---|---|---|
 | `04-cost-rebuild-clears-nothing.patch` | the cost adapters' `clear_all_data` does nothing, so a VERSION mismatch replays onto the old running totals and counts every observation twice | all six cases of `test_version_rebuild_clears_old_totals_before_replaying` |
 | `05-summary-readers-drop-observed-1h.patch` | `observed_cache_creation_1h` ignores the turns' 1-hour share, so every reader that switches to a `session_summary` on completion reports 0 and the session's cache-write dollar split falls back to the 5-minute rate (verification finding 2) | 17 cases: the all-1h and mixed cases of `test_session_detail_keeps_the_1h_count_after_its_summary_arrives`, `test_session_list_keeps_the_1h_count_after_its_summary_arrives`, `test_execution_detail_keeps_the_1h_count_after_its_summary_arrives`, `test_execution_list_keeps_the_1h_count_after_its_summary_arrives`, and `test_session_cache_write_dollars_survive_an_authoritative_summary[reported-cost]` |
+
+
+## Mixed finished and running sessions (#2333 review repair)
+
+| Patch | Bug it re-introduces | Killed by |
+|---|---|---|
+| `06-summary-split-includes-running-sessions.patch` | Drops the session filter from the observed TTL split, attributing unfinished sessions' 1-hour writes to completed-session totals | `test_execution_summary_excludes_running_sessions_1h_writes` (both readers, both row orders) |
+
+Patch 02 is regenerated against the current `ExecutionCostAdapter`, whose handler
+subscriptions are inherited from `_CostProjectionAdapter`.
