@@ -188,7 +188,7 @@ def _query(rows_by_query: dict[str, list[_FakeRow]]) -> tuple[TimescaleSessionCo
 
 @pytest.mark.unit
 @pytest.mark.anyio
-async def test_cost_for_fifty_sessions_takes_six_round_trips() -> None:
+async def test_cost_for_fifty_sessions_takes_seven_round_trips() -> None:
     """The whole point: work is bounded by queries, not by page size."""
     ids = [f"sess-{i}" for i in range(50)]
     q, pool = _query(
@@ -205,9 +205,10 @@ async def test_cost_for_fifty_sessions_takes_six_round_trips() -> None:
     results = await q.calculate_many(ids)
 
     assert len(results) == 50
-    # Six round trips and one connection for fifty sessions. Three read the
-    # page; the token_usage fallback is skipped because every session had a
-    # usable summary. The other three are E2's time bound (agent_event_span):
+    # Seven round trips and one connection for fifty sessions. Four read the
+    # page; token_usage is read even though every session had a usable
+    # summary, because a summary records no 1-hour cache-write share and the
+    # turns do (#2145). The other three are E2's time bound (agent_event_span):
     # the BEGIN that opens the read-only snapshot, the plan setting, then ONE
     # span lookup for the
     # whole page, which bounds every read after it - still fixed, not per
@@ -219,13 +220,14 @@ async def test_cost_for_fifty_sessions_takes_six_round_trips() -> None:
         _PLAN,
         _SPAN,
         _SESSION_SUMMARY_BATCH_QUERY,
+        _TOKEN_USAGE_FALLBACK_BATCH_QUERY,
         _TALLY,
         _MIN_TIME_BATCH_QUERY,
     ]
     assert pool.acquisitions == 1
-    # The page's one day, from the span lookup, bound to both agent_events reads.
+    # The page's one day, from the span lookup, bound to all three agent_events reads.
     page_day = agent_event_span.EventSpan.of_days(date(2026, 9, 3), date(2026, 9, 3))
-    assert pool.conn.bounds == [(page_day.lower, page_day.upper)] * 2
+    assert pool.conn.bounds == [(page_day.lower, page_day.upper)] * 3
     assert results["sess-7"].total_cost_usd == Decimal("0.25")
     assert results["sess-7"].tool_calls == 3
 
@@ -358,9 +360,10 @@ async def test_a_full_page_is_still_one_batch() -> None:
 
     await q.calculate_many(ids)
 
-    # Four id arrays: the span lookup plus the three reads (#1114's three, plus
-    # E2's lookup, which binds the same capped array).
-    assert [len(batch) for batch in pool.conn.batches] == [MAX_SESSIONS_PER_QUERY] * 4
+    # Five id arrays: the span lookup plus the four reads (#1114's three, the
+    # token_usage read every summary now needs for its 1-hour share (#2145),
+    # plus E2's lookup, which binds the same capped array).
+    assert [len(batch) for batch in pool.conn.batches] == [MAX_SESSIONS_PER_QUERY] * 5
     assert pool.acquisitions == 1
 
 
@@ -373,8 +376,8 @@ async def test_one_id_past_the_cap_becomes_a_second_batch() -> None:
 
     results = await q.calculate_many(ids)
 
-    # Per batch: the span lookup and the three reads, so four arrays each.
-    assert [len(batch) for batch in pool.conn.batches] == [MAX_SESSIONS_PER_QUERY] * 4 + [1] * 4
+    # Per batch: the span lookup and the four reads, so five arrays each.
+    assert [len(batch) for batch in pool.conn.batches] == [MAX_SESSIONS_PER_QUERY] * 5 + [1] * 5
     assert pool.acquisitions == 2
     assert len(results) == MAX_SESSIONS_PER_QUERY + 1
     assert results[f"sess-{MAX_SESSIONS_PER_QUERY}"].total_cost_usd == Decimal("0.25")
