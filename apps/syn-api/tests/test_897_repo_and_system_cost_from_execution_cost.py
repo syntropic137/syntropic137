@@ -74,6 +74,10 @@ class _StubCostQuery:
         wanted = set(execution_ids)  # type: ignore[call-overload]  # test double: any iterable of ids
         return [c for c in self.costs if c.execution_id in wanted]
 
+    async def list_all(self, limit: int = 500) -> list[ExecutionCost]:
+        """Every row, unscoped: present so an unfiltered read fails on its total."""
+        return self.costs[:limit]
+
 
 @dataclass
 class _StubStore:
@@ -305,23 +309,21 @@ class TestRepoAndSystemCostFromExecutionCost:
         from syn_api.routes.insights import get_global_cost_endpoint
         from syn_api.routes.systems import get_system_cost_endpoint
 
-        costs = [_priced(), _unpriced("exec-other-repo"), _token_priced()]
-        repo_of = {"exec-priced": REPO, "exec-other-repo": OTHER_REPO, "exec-token-priced": REPO}
+        outsider = replace(_unpriced("exec-outside", count=50), total_cost_usd=Decimal("7"))
+        costs = [_priced(), _unpriced("exec-other-repo"), _token_priced(), outsider]
+        repo_of = {
+            "exec-priced": REPO,
+            "exec-other-repo": OTHER_REPO,
+            "exec-token-priced": REPO,
+            "exec-outside": OUTSIDE_REPO,
+        }
         _patch(monkeypatch, costs, repo_of)
-
-        @dataclass
-        class _ListAll:
-            async def list_all(self, limit: int = 500) -> list[ExecutionCost]:
-                return costs
 
         async def _connected() -> None:
             return None
 
-        from syn_api import _wiring
-
         monkeypatch.setattr(insights, "ensure_connected", _connected)
         system = await get_system_cost_endpoint("sys-1")
-        monkeypatch.setattr(_wiring, "get_execution_cost_query", lambda: _ListAll())
         overall = await get_global_cost_endpoint(system_id="sys-1")
 
         assert system.total_cost_usd == overall.total_cost_usd == "1.65"

@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/repos.py b/apps/syn-api/src/syn_api/routes/repos.py
+index 3635e99e2..aa97a0c23 100644
+--- a/apps/syn-api/src/syn_api/routes/repos.py
++++ b/apps/syn-api/src/syn_api/routes/repos.py
+@@ -268,7 +268,7 @@ async def get_repo_cost(repo_id: str) -> Result[RepoCostResponse, RepoError]:
+ 
+     full_name = repo_result.value.full_name
+     execution_ids = await executions_by_repo(get_projection_store(), {full_name})
+-    rollup = roll_up_costs(await get_execution_cost_query().list_for_ids(execution_ids))
++    rollup = roll_up_costs(await get_execution_cost_query().list_all(limit=10_000))
+     return Ok(
+         RepoCostResponse(
+             repo_id=repo_id,
