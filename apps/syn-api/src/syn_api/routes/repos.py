@@ -15,7 +15,6 @@ from syn_api._wiring import (
     ensure_connected,
     sync_published_events_to_projections,
 )
-from syn_api.model_identity import cost_by_observed_model_text
 from syn_api.types import (
     AssignRepoToSystemRequest,
     Err,
@@ -254,10 +253,12 @@ async def get_repo_health(repo_id: str) -> Result[dict[str, Any], RepoError]:
     return Ok(dict(result.to_dict()))
 
 
-async def get_repo_cost(repo_id: str) -> Result[dict[str, Any], RepoError]:
-    """Get cost breakdown for a repo."""
-    from syn_api._wiring import get_projection_mgr
-    from syn_domain.contexts.organization import GetRepoCostHandler, GetRepoCostQuery
+async def get_repo_cost(repo_id: str) -> Result[RepoCostResponse, RepoError]:
+    """Get cost breakdown for a repo, from the ``ExecutionCost`` rows of its executions."""
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_api._wiring import get_execution_cost_query
+    from syn_api.routes._cost_rollup import roll_up_costs
+    from syn_domain.contexts.organization import correlations_by_execution
 
     await ensure_connected()
 
@@ -265,12 +266,26 @@ async def get_repo_cost(repo_id: str) -> Result[dict[str, Any], RepoError]:
     if not isinstance(repo_result, Ok):
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
-    mgr = get_projection_mgr()
-    handler = GetRepoCostHandler(projection=mgr.repo_cost)
-    result = await handler.handle(
-        GetRepoCostQuery(repo_id=repo_id, repo_full_name=repo_result.value.full_name)
+    full_name = repo_result.value.full_name
+    correlated = await correlations_by_execution(get_projection_store(), {full_name})
+    rollup = roll_up_costs(
+        await get_execution_cost_query().list_for_ids(correlated), correlated=correlated
     )
-    return Ok(dict(result.to_dict()))
+    return Ok(
+        RepoCostResponse(
+            repo_id=repo_id,
+            repo_full_name=full_name,
+            total_cost_usd=rollup.total_cost_usd,
+            total_cost_display=rollup.total_cost_display,
+            unpriced_observation_count=rollup.unpriced_observation_count,
+            total_tokens=rollup.total_tokens,
+            total_input_tokens=rollup.total_input_tokens,
+            total_output_tokens=rollup.total_output_tokens,
+            cost_by_workflow=rollup.cost_by_workflow,
+            cost_by_model=rollup.cost_by_model,
+            execution_count=rollup.execution_count,
+        )
+    )
 
 
 async def get_repo_activity(
@@ -668,16 +683,7 @@ async def get_repo_cost_endpoint(repo_id: str) -> RepoCostResponse:
     result = await get_repo_cost(repo_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    # An alias key from a legacy read model is folded into the unknown bucket
-    # (ADR-067 D9) rather than failing the response.
-    data = result.value
-    response = RepoCostResponse(
-        **{**data, "cost_by_model": cost_by_observed_model_text(data.get("cost_by_model"))}
-    )
-    # Fix(#542): read model may return empty repo_id — ensure it matches the request
-    if not response.repo_id:
-        response = response.model_copy(update={"repo_id": repo_id})
-    return response
+    return result.value
 
 
 @router.get("/{repo_id}/activity")
