@@ -1,4 +1,4 @@
-"""The nginx images run a patched release and serve plain HTTP/1.1 only.
+"""The nginx images run a patched release and serve plain HTTP/1.1 only (#2335).
 
 nginx's November 2026 security release (CVE-2026-123007 and nine more) fixes
 bugs that sit in HTTP/2, HTTP/3, TLS, the resolver, the mail and stream
@@ -10,12 +10,10 @@ here:
 - Both nginx images build ``FROM`` 1.30.7 or later, pinned by digest, and the
   same digest, so a rebuild cannot float to another nginx and the two images
   cannot drift apart.
-- No config they ship or generate turns on any of those features. A listener
-  that gained ``http2`` would make the next advisory in that code reachable,
-  whatever version is pinned.
-
-Comments are stripped before matching, so a comment naming a directive (as
-the Dockerfile's does) is not mistaken for one.
+- No nginx config they ship turns on any of those features
+  (``infra/scripts/check_nginx_features.py``). The stanzas the gateway
+  entrypoint generates, the base image's ``nginx.conf`` and every include are
+  checked on the rendered ``nginx -T`` by ``just skyline-gateway-smoke``.
 """
 
 from __future__ import annotations
@@ -25,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from infra.scripts.check_nginx_features import findings, main, parse
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -33,15 +33,13 @@ _DASHBOARD = _REPO_ROOT / "apps" / "syn-dashboard-ui"
 
 _DOCKERFILES = (_GATEWAY_IMAGE / "Dockerfile", _DASHBOARD / "Dockerfile")
 
-#: Every file either image hands nginx as config, plus the entrypoint that
-#: writes more of it at startup.
+#: Every nginx config file either image ships.
 _CONFIG_FILES = (
     *sorted(
         p
         for p in _GATEWAY_IMAGE.iterdir()
         if p.suffix == ".conf" or p.name.startswith("nginx.conf")
     ),
-    _GATEWAY_IMAGE / "docker-entrypoint.sh",
     _DASHBOARD / "nginx.conf",
 )
 
@@ -53,27 +51,13 @@ _FROM_NGINX = re.compile(
     re.M,
 )
 
-#: Directives and listen flags that enable the affected modules.
-_FORBIDDEN = {
-    "http2 on|listen ... http2": re.compile(r"\bhttp2\b"),
-    "http3 / quic": re.compile(r"\b(?:http3|quic)\b"),
-    "TLS (ssl_*, listen ... ssl)": re.compile(r"\bssl(?:_\w+)?\b"),
-    "resolver": re.compile(r"\bresolver\b"),
-    "mail block": re.compile(r"^\s*mail\s*\{", re.M),
-    "stream block": re.compile(r"^\s*stream\s*\{", re.M),
-    "PROXY protocol": re.compile(r"\bproxy_protocol\b"),
-}
-
-
-def _strip_comments(text: str) -> str:
-    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
-
 
 def test_the_config_files_are_found() -> None:
     """A glob that matched nothing would make every check below vacuous."""
     names = {p.name for p in _CONFIG_FILES}
-    assert {"nginx.conf", "nginx.conf.dev", "docker-entrypoint.sh"} <= names
+    assert {"nginx.conf", "nginx.conf.dev", "security-headers.conf"} <= names
     assert all(p.is_file() for p in _CONFIG_FILES)
+    assert all(parse(p.read_text()) for p in _CONFIG_FILES), "a config parsed to no directives"
 
 
 @pytest.mark.parametrize("dockerfile", _DOCKERFILES, ids=lambda p: p.parent.name)
@@ -81,7 +65,7 @@ def test_nginx_base_is_patched_and_pinned_by_digest(dockerfile: Path) -> None:
     froms = [
         line
         for line in dockerfile.read_text().splitlines()
-        if "nginx" in line and line.startswith("FROM")
+        if "nginx" in line and line.lstrip().upper().startswith("FROM")
     ]
     assert len(froms) == 1, f"{dockerfile}: expected one nginx FROM, found {froms}"
     match = _FROM_NGINX.match(froms[0])
@@ -100,30 +84,68 @@ def test_both_images_pin_the_same_nginx() -> None:
 
 @pytest.mark.parametrize("path", _CONFIG_FILES, ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_no_affected_nginx_feature_is_enabled(path: Path) -> None:
-    text = _strip_comments(path.read_text())
-    found = sorted(name for name, pattern in _FORBIDDEN.items() if pattern.search(text))
-    assert not found, f"{path} enables {found}; the gateway serves plain HTTP/1.1 only"
+    found = findings(parse(path.read_text()))
+    assert not found, f"{path}: {found}; the gateway serves plain HTTP/1.1 only"
 
 
 @pytest.mark.parametrize(
-    "line",
+    "config",
     [
-        "    listen 80 http2;",
-        "    http2 on;",
-        "    listen 443 quic reuseport;",
-        "    listen 443 ssl;",
-        "    ssl_certificate /etc/ssl/cert.pem;",
-        "    resolver 127.0.0.11;",
-        "mail {",
-        "stream {",
-        "    listen 8081 proxy_protocol;",
+        "server { listen 80 http2; }",
+        "server { listen [::]:443 ssl default_server; }",
+        "server { listen 443 quic reuseport; }",
+        "server { listen 8081 proxy_protocol; }",
+        "http2 on;",
+        "http3 on;",
+        "quic_retry on;",
+        "ssl on;",
+        "ssl_certificate /etc/ssl/cert.pem;",
+        "resolver 127.0.0.11 valid=10s;",
+        "mail { }",
+        "stream { }",
+        # Directive separators work anywhere, not only at line starts.
+        "events {} stream { server { listen 12345; } }",
+        "location / { return 200; } http2 on;",
+        # A # inside quotes is not a comment, so it cannot hide what follows.
+        'add_header X-Test "#"; http2 on;',
+        "add_header X-Test '#'; resolver 1.1.1.1;",
+        # Case does not matter to nginx's directive table for these.
+        "server { LISTEN 80 HTTP2; }",
     ],
 )
-def test_each_forbidden_feature_is_detected(line: str) -> None:
-    """Every pattern fires on the directive it guards, so none is dead."""
-    assert any(p.search(_strip_comments(line)) for p in _FORBIDDEN.values())
+def test_each_enabling_form_is_refused(config: str) -> None:
+    assert findings(parse(config)), config
 
 
-def test_a_commented_directive_is_not_flagged() -> None:
-    text = _strip_comments("    # listen 80 http2;\n    listen 80;  # no ssl here\n")
-    assert not any(p.search(text) for p in _FORBIDDEN.values())
+@pytest.mark.parametrize(
+    "config",
+    [
+        "# listen 80 http2;\nlisten 80;",
+        "listen 80;  # no ssl, no http2 here",
+        "http2 off;",
+        "ssl off;",
+        'add_header Alt-Svc "h3=\\":443\\"; http2"; listen 80;',
+        "add_header X-Note 'resolver stream mail';",
+        "location /stream { proxy_pass http://api:8000; }",
+        "location /mail/ { return 404; }",
+        "proxy_http_version 1.1;",
+    ],
+)
+def test_harmless_config_is_accepted(config: str) -> None:
+    assert not findings(parse(config)), findings(parse(config))
+
+
+def test_parse_keeps_quoted_separators_inside_one_argument() -> None:
+    [directive] = parse('add_header X "a; b { } # c";')
+    assert directive.name == "add_header"
+    assert directive.args == ("X", "a; b { } # c")
+
+
+def test_cli_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    good = tmp_path / "good.conf"
+    good.write_text("server { listen 80; }\n")
+    bad = tmp_path / "bad.conf"
+    bad.write_text("server {\n    listen 80;\n    http2 on;\n}\n")
+    assert main([str(good)]) == 0
+    assert main([str(bad)]) == 1
+    assert "line 3: http2 on" in capsys.readouterr().out
