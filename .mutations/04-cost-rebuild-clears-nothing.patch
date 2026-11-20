@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/subscriptions/projection_adapters.py b/packages/syn-adapters/src/syn_adapters/subscriptions/projection_adapters.py
+index ab836fdef..b0438a2c3 100644
+--- a/packages/syn-adapters/src/syn_adapters/subscriptions/projection_adapters.py
++++ b/packages/syn-adapters/src/syn_adapters/subscriptions/projection_adapters.py
+@@ -158,7 +158,7 @@ class _CostProjectionAdapter(_ObservationProjectionAdapter):
+         self._cost_projection = projection
+ 
+     async def clear_all_data(self) -> None:
+-        await self._cost_projection.clear_all_data()
++        return None
+ 
+     def _resolve_handler_name(self, event_type: str) -> str:
+         return _COST_HANDLER_MAP.get(event_type, f"on_{_camel_to_snake(event_type)}")

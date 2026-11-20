@@ -13,3 +13,9 @@ Run without Docker:
 ```
 just mutation-evidence 2333 "packages/syn-domain/tests/contexts/test_2145_b2b_recorded_costs_price_1h_cache_writes.py" false
 ```
+
+## Added in fix round 1 (verification finding 1)
+
+| Patch | Bug it re-introduces | Killed by |
+|---|---|---|
+| `04-cost-rebuild-clears-nothing.patch` | the cost adapters' `clear_all_data` does nothing, so a VERSION mismatch replays onto the old running totals and counts every observation twice | all six cases of `test_version_rebuild_clears_old_totals_before_replaying` |
