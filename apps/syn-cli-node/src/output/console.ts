@@ -26,6 +26,6 @@ export function print(message: string): void {
  * observation was priced, so callers pass the count unconditionally.
  */
 export function printUnpricedNote(unpricedCount: number | undefined): void {
-  if (!unpricedCount) return;
+  if (unpricedCount === undefined || unpricedCount <= 0) return;
   printDim(`  ${unpricedCount} observation(s) had no rate for their model, so this total is incomplete.`);
 }
