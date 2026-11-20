@@ -78,10 +78,16 @@ def test_the_config_files_are_found() -> None:
 
 @pytest.mark.parametrize("dockerfile", _DOCKERFILES, ids=lambda p: p.parent.name)
 def test_nginx_base_is_patched_and_pinned_by_digest(dockerfile: Path) -> None:
-    froms = [line for line in dockerfile.read_text().splitlines() if "nginx" in line and line.startswith("FROM")]
+    froms = [
+        line
+        for line in dockerfile.read_text().splitlines()
+        if "nginx" in line and line.startswith("FROM")
+    ]
     assert len(froms) == 1, f"{dockerfile}: expected one nginx FROM, found {froms}"
     match = _FROM_NGINX.match(froms[0])
-    assert match, f"{dockerfile}: nginx FROM must be nginx:X.Y.Z-alpine@sha256:<digest>, got {froms[0]!r}"
+    assert match, (
+        f"{dockerfile}: nginx FROM must be nginx:X.Y.Z-alpine@sha256:<digest>, got {froms[0]!r}"
+    )
     version = tuple(int(part) for part in match.groups()[:3])
     assert version >= _MIN_NGINX, f"{dockerfile}: nginx {version} predates {_MIN_NGINX}"
 
