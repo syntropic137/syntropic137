@@ -26,6 +26,9 @@ from syn_domain.contexts.orchestration.domain.read_models.execution_cost import 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from syn_api.routes.metrics import MetricsResponse
+    from syn_api.routes.workflows.queries import ExecutionRunSummary
+
 pytestmark = pytest.mark.unit
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
@@ -88,7 +91,7 @@ async def _metrics(
     costs: list[ExecutionCost],
     workflow_id: str | None = None,
     workflow_execution_ids: set[str] | None = None,
-) -> dict[str, object]:
+) -> MetricsResponse:
     from syn_api.routes import metrics
 
     query = _FakeCostQuery(costs)
@@ -99,8 +102,7 @@ async def _metrics(
         return workflow_execution_ids or set()
 
     monkeypatch.setattr(metrics, "_workflow_execution_ids", _ids)
-    response = await metrics.get_metrics_endpoint(workflow_id=workflow_id)
-    return response.model_dump(mode="json")
+    return await metrics.get_metrics_endpoint(workflow_id=workflow_id)
 
 
 class TestGlobalMetrics:
@@ -110,9 +112,9 @@ class TestGlobalMetrics:
     ) -> None:
         body = await _metrics(monkeypatch, [_cost("e-1", "0", 4)])
 
-        assert body["total_cost_display"] == "unpriced"
-        assert body["unpriced_observation_count"] == 4
-        assert body["total_cost_usd"] == "0"
+        assert body.total_cost_display == "unpriced"
+        assert body.unpriced_observation_count == 4
+        assert str(body.total_cost_usd) == "0"
 
     @pytest.mark.asyncio
     async def test_partly_priced_work_reads_as_a_lower_bound(
@@ -120,9 +122,9 @@ class TestGlobalMetrics:
     ) -> None:
         body = await _metrics(monkeypatch, [_cost("e-1", "1.25", 0), _cost("e-2", "0", 2)])
 
-        assert body["total_cost_display"] == ">=$1.25 (partial)"
-        assert body["unpriced_observation_count"] == 2
-        assert body["total_cost_usd"] == "1.25"
+        assert body.total_cost_display == ">=$1.25 (partial)"
+        assert body.unpriced_observation_count == 2
+        assert str(body.total_cost_usd) == "1.25"
 
     @pytest.mark.asyncio
     async def test_fully_priced_work_reads_as_a_plain_total(
@@ -130,23 +132,23 @@ class TestGlobalMetrics:
     ) -> None:
         body = await _metrics(monkeypatch, [_cost("e-1", "1.00", 0), _cost("e-2", "0.25", 0)])
 
-        assert body["total_cost_display"] == "$1.25"
-        assert body["unpriced_observation_count"] == 0
-        assert body["total_cost_usd"] == "1.25"
+        assert body.total_cost_display == "$1.25"
+        assert body.unpriced_observation_count == 0
+        assert str(body.total_cost_usd) == "1.25"
 
     @pytest.mark.asyncio
     async def test_two_unpriced_executions_sum(self, monkeypatch: pytest.MonkeyPatch) -> None:
         body = await _metrics(monkeypatch, [_cost("e-1", "0", 4), _cost("e-2", "0", 9)])
 
-        assert body["unpriced_observation_count"] == 13
+        assert body.unpriced_observation_count == 13
 
     @pytest.mark.asyncio
     async def test_tokens_stay_canonical(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Only money moved; tokens still agree with the activity heatmap (#932)."""
         body = await _metrics(monkeypatch, [_cost("e-1", "0.5", 0)])
 
-        assert body["total_input_tokens"] == 7
-        assert body["total_cost_usd"] == "0.5"
+        assert body.total_input_tokens == 7
+        assert str(body.total_cost_usd) == "0.5"
 
 
 class TestWorkflowScopedMetrics:
@@ -165,11 +167,11 @@ class TestWorkflowScopedMetrics:
             return {"mine-1"}
 
         monkeypatch.setattr(metrics, "_workflow_execution_ids", _ids)
-        body = (await metrics.get_metrics_endpoint(workflow_id=WORKFLOW)).model_dump(mode="json")
+        body = await metrics.get_metrics_endpoint(workflow_id=WORKFLOW)
 
-        assert body["unpriced_observation_count"] == 1
-        assert body["total_cost_usd"] == "0.75"
-        assert body["total_cost_display"] == ">=$0.75 (partial)"
+        assert body.unpriced_observation_count == 1
+        assert str(body.total_cost_usd) == "0.75"
+        assert body.total_cost_display == ">=$0.75 (partial)"
         # One read, shared by the totals and the per-phase costs.
         assert query.asked_for_ids == [{"mine-1"}]
         assert query.asked_all == 0
@@ -180,8 +182,8 @@ class TestWorkflowScopedMetrics:
     ) -> None:
         body = await _metrics(monkeypatch, [_cost("theirs-1", "5", 40)], workflow_id=WORKFLOW)
 
-        assert body["unpriced_observation_count"] == 0
-        assert body["total_cost_display"] == "$0.00"
+        assert body.unpriced_observation_count == 0
+        assert body.total_cost_display == "$0.00"
 
 
 @pytest.mark.asyncio
@@ -209,7 +211,7 @@ async def test_cost_read_failure_is_503_not_zero(monkeypatch: pytest.MonkeyPatch
 
 async def _runs_with(
     monkeypatch: pytest.MonkeyPatch, rows: list[tuple[str, str, int]]
-) -> list[dict[str, object]]:
+) -> list[ExecutionRunSummary]:
     """Each run row is (execution id, total_cost_usd, unpriced count) on its summary."""
     from syn_api.routes.executions import queries as ex_queries
     from syn_api.routes.workflows import queries as wf_queries
@@ -250,22 +252,22 @@ async def _runs_with(
     monkeypatch.setattr(wf_queries, "get_workflow", _get_workflow)
     monkeypatch.setattr(ex_queries, "list_", _list)
     response = await wf_queries.list_workflow_runs_endpoint(WORKFLOW)
-    return [r.model_dump(mode="json") for r in response.runs]
+    return response.runs
 
 
 @pytest.mark.asyncio
 async def test_each_run_reports_its_own_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
     runs = {
-        r["workflow_execution_id"]: r
+        r.workflow_execution_id: r
         for r in await _runs_with(
             monkeypatch,
             [("unpriced", "0", 3), ("partial", "1.25", 2), ("priced", "1.25", 0)],
         )
     }
 
-    assert runs["unpriced"]["total_cost_display"] == "unpriced"
-    assert runs["unpriced"]["unpriced_observation_count"] == 3
-    assert runs["partial"]["total_cost_display"] == ">=$1.25 (partial)"
-    assert runs["partial"]["unpriced_observation_count"] == 2
-    assert runs["priced"]["total_cost_display"] == "$1.25"
-    assert runs["priced"]["unpriced_observation_count"] == 0
+    assert runs["unpriced"].total_cost_display == "unpriced"
+    assert runs["unpriced"].unpriced_observation_count == 3
+    assert runs["partial"].total_cost_display == ">=$1.25 (partial)"
+    assert runs["partial"].unpriced_observation_count == 2
+    assert runs["priced"].total_cost_display == "$1.25"
+    assert runs["priced"].unpriced_observation_count == 0
