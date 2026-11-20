@@ -144,7 +144,27 @@ _COST_HANDLER_MAP: dict[str, str] = {
 }
 
 
-class ExecutionCostAdapter(_ObservationProjectionAdapter):
+class _CostProjectionAdapter(_ObservationProjectionAdapter):
+    """Shared routing and rebuild clearing for the two cost projections.
+
+    Their stored documents are running totals, so a version rebuild must
+    delete them before replay or every observation is counted twice.
+    """
+
+    _SUBSCRIBED: ClassVar[set[str]] = set(_COST_HANDLER_MAP.keys())
+
+    def __init__(self, projection: ExecutionCostProjection | SessionCostProjection) -> None:
+        super().__init__(projection)
+        self._cost_projection = projection
+
+    async def clear_all_data(self) -> None:
+        await self._cost_projection.clear_all_data()
+
+    def _resolve_handler_name(self, event_type: str) -> str:
+        return _COST_HANDLER_MAP.get(event_type, f"on_{_camel_to_snake(event_type)}")
+
+
+class ExecutionCostAdapter(_CostProjectionAdapter):
     """Adapter for ExecutionCostProjection.
 
     Uses explicit handler mapping because tool_execution_completed and
@@ -156,16 +176,12 @@ class ExecutionCostAdapter(_ObservationProjectionAdapter):
     # 2: prices 1-hour cache writes at the 1-hour rate and stores
     # cache_creation_1h_tokens (#2145 B2b).
     VERSION: ClassVar[int] = 2
-    _SUBSCRIBED: ClassVar[set[str]] = set(_COST_HANDLER_MAP.keys())
 
     def __init__(self, projection: ExecutionCostProjection) -> None:
         super().__init__(projection)
 
-    def _resolve_handler_name(self, event_type: str) -> str:
-        return _COST_HANDLER_MAP.get(event_type, f"on_{_camel_to_snake(event_type)}")
 
-
-class SessionCostAdapter(_ObservationProjectionAdapter):
+class SessionCostAdapter(_CostProjectionAdapter):
     """Adapter for SessionCostProjection.
 
     Same handler mapping as ExecutionCostAdapter — both cost projections
@@ -176,10 +192,6 @@ class SessionCostAdapter(_ObservationProjectionAdapter):
     # 2: prices 1-hour cache writes at the 1-hour rate and stores
     # cache_creation_1h_tokens (#2145 B2b).
     VERSION: ClassVar[int] = 2
-    _SUBSCRIBED: ClassVar[set[str]] = set(_COST_HANDLER_MAP.keys())
 
     def __init__(self, projection: SessionCostProjection) -> None:
         super().__init__(projection)
-
-    def _resolve_handler_name(self, event_type: str) -> str:
-        return _COST_HANDLER_MAP.get(event_type, f"on_{_camel_to_snake(event_type)}")

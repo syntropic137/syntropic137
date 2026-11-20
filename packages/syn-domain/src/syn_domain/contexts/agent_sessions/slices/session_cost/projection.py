@@ -233,6 +233,14 @@ class SessionCostProjection:
         """Get the projection name."""
         return self.PROJECTION_NAME
 
+    async def clear_all_data(self) -> None:
+        """Delete every stored total so a version rebuild replays onto nothing.
+
+        The totals are running sums, so replaying onto the old documents
+        would count every observation twice.
+        """
+        await self._store.delete_all(self.PROJECTION_NAME)
+
     async def on_agent_observation(self, event_data: dict[str, Any]) -> None:
         """Handle AgentObservation event.
 

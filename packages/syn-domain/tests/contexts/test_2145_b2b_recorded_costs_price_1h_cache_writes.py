@@ -11,10 +11,13 @@ Opus 5.5 writes the cache at $5.00/MTok for 5 minutes and $8.00/MTok for 1 hour.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import pytest
+from event_sourcing import MemoryCheckpointStore, ProjectionCheckpoint, SubscriptionCoordinator
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_adapters.subscriptions.projection_adapters import (
@@ -253,3 +256,73 @@ def test_cost_projection_versions_are_bumped_for_the_1h_reprice() -> None:
     """The stored cost read models change shape and value, so both must replay (#2145 B2b)."""
     assert ExecutionCostAdapter.VERSION >= 2
     assert SessionCostAdapter.VERSION >= 2
+
+
+_UNRELATED = "tool_timeline"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("cache", "expected", "one_hour"), _CASES)
+@pytest.mark.parametrize("cost", ["execution", "session"])
+async def test_version_rebuild_clears_old_totals_before_replaying(
+    cost: str, cache: Mapping[str, int], expected: Decimal, one_hour: int
+) -> None:
+    """A v1 -> v2 mismatch through the real coordinator replays onto an empty read model.
+
+    The cost documents are running sums: without the clear, replaying the same
+    observation onto the v1 total counts it twice ($13 for an all-1h turn).
+    """
+    store = InMemoryProjectionStore()
+    projection: ExecutionCostProjection | SessionCostProjection
+    if cost == "execution":
+        projection = ExecutionCostProjection(store)
+        adapter: ExecutionCostAdapter | SessionCostAdapter = ExecutionCostAdapter(projection)
+    else:
+        projection = SessionCostProjection(store)
+        adapter = SessionCostAdapter(projection)
+
+    async def read() -> tuple[int, int, Decimal]:
+        if isinstance(projection, ExecutionCostProjection):
+            stored = await projection.get_execution_cost("exec-1")
+        else:
+            stored = await projection.get_session_cost("session-1")
+        assert stored is not None
+        return stored.cache_creation_tokens, stored.cache_creation_1h_tokens, stored.total_cost_usd
+
+    # What v1 stored for this turn: every write at 5 minutes. Plus another
+    # projection's namespace in the same store, which the clear must not touch.
+    await projection.on_agent_observation(_token_usage(_LEGACY))
+    await store.save(_UNRELATED, "kept", {"value": 1})
+    checkpoints = MemoryCheckpointStore()
+    await checkpoints.save_checkpoint(
+        ProjectionCheckpoint(
+            projection_name=adapter.get_name(),
+            global_position=10,
+            updated_at=datetime.now(UTC),
+            version=1,
+        )
+    )
+    coordinator = SubscriptionCoordinator(
+        event_store=Mock(), checkpoint_store=checkpoints, projections=[adapter]
+    )
+
+    assert await coordinator._resume_position(adapter.get_name(), adapter) == 0
+    assert await checkpoints.get_checkpoint(adapter.get_name()) is None
+    assert await store.get_all(projection.PROJECTION_NAME) == []
+    assert await store.get(_UNRELATED, "kept") == {"value": 1}
+
+    # Replay the same observation, now read with its 1-hour split.
+    await projection.on_agent_observation(_token_usage(cache))
+    assert await read() == (_MILLION, one_hour, expected)
+
+    # A second restart at the new version resumes after the checkpoint and clears nothing.
+    await checkpoints.save_checkpoint(
+        ProjectionCheckpoint(
+            projection_name=adapter.get_name(),
+            global_position=10,
+            updated_at=datetime.now(UTC),
+            version=adapter.get_version(),
+        )
+    )
+    assert await coordinator._resume_position(adapter.get_name(), adapter) == 11
+    assert await read() == (_MILLION, one_hour, expected)
