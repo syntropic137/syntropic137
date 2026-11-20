@@ -72,6 +72,13 @@ skyline-gateway-smoke:
             -p 127.0.0.1:{{_skyline_gw_port}}:80 "$image" > /dev/null
         for _ in $(seq 1 30); do curl -sf --noproxy '*' -o /dev/null "$url/health" && break; sleep 1; done
         python3 infra/scripts/check_gateway_ui.py "$url" --mode "$mode"
+        # The rendered config (base nginx.conf, includes, entrypoint stanzas)
+        # enables no HTTP/2, HTTP/3, TLS, resolver, mail or stream (#2335).
+        rendered="$(mktemp)"
+        docker exec "$name" nginx -T > "$rendered"
+        python3 infra/scripts/check_nginx_features.py "$rendered"
+        rm -f "$rendered"
+        echo "nginx -T: no disallowed features (SYN_GATEWAY_UI=$mode)"
         docker stop "$name" > /dev/null
         name=""
     done

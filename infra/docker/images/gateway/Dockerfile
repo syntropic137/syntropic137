@@ -80,7 +80,11 @@ RUN SYN_UI_BASE=/ pnpm build \
 # =============================================================================
 # Runtime Stage
 # =============================================================================
-FROM nginx:1.28.2-alpine AS runtime
+# nginx 1.30.7 (stable), pinned by the multi-arch index digest. 1.28.x gets no
+# fix for CVE-2026-123007 and the other November 2026 advisories. The gateway
+# serves plain HTTP/1.1 only: keep http2, http3/quic, ssl and resolver off
+# (infra/scripts/tests/test_gateway_http_features.py enforces it).
+FROM nginx:1.30.7-alpine@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3 AS runtime
 
 # Two document roots; docker-entrypoint.sh picks one from SYN_GATEWAY_UI.
 #   next (default): /usr/share/nginx/html   = syn-ui, base /
