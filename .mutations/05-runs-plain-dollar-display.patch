@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/workflows/queries.py b/apps/syn-api/src/syn_api/routes/workflows/queries.py
+index d4e4c772a..1e2210094 100644
+--- a/apps/syn-api/src/syn_api/routes/workflows/queries.py
++++ b/apps/syn-api/src/syn_api/routes/workflows/queries.py
+@@ -968,7 +968,7 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
+                 phase_progress=e.phase_progress,
+                 total_tokens=e.total_tokens,
+                 total_cost_usd=Decimal(str(e.total_cost_usd)),
+-                total_cost_display=format_cost(e.total_cost_usd, e.unpriced_observation_count),
++                total_cost_display=format_cost(e.total_cost_usd),
+                 unpriced_observation_count=e.unpriced_observation_count,
+                 error_message=e.error_message,
+                 failure_classification=e.failure_classification,
