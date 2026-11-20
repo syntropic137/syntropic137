@@ -23,6 +23,7 @@ on:
       # Serving: the gateway image serves Skyline at /.
       - 'infra/docker/images/gateway/**'
       - 'infra/scripts/check_gateway_ui.py'
+      - 'infra/scripts/check_nginx_features.py'
       - 'just/skyline.just'
       - 'just/skyline-serve.just'
       - '.github/workflows/syn-ui.yml'
@@ -36,6 +37,7 @@ on:
       - 'pnpm-workspace.yaml'
       - 'infra/docker/images/gateway/**'
       - 'infra/scripts/check_gateway_ui.py'
+      - 'infra/scripts/check_nginx_features.py'
       - 'just/skyline.just'
       - 'just/skyline-serve.just'
       - '.github/workflows/syn-ui.yml'
@@ -328,7 +330,7 @@ jobs:
               exit 1
             fi
             docker tag "$pulled" "$img"
-          done < <(grep -E '^FROM ' infra/docker/images/gateway/Dockerfile | awk '{print $2}' | sort -u)
+          done < <(grep -iE '^[[:space:]]*FROM[[:space:]]' infra/docker/images/gateway/Dockerfile | awk '{print $2}' | sort -u)
 
       # Builds infra/docker/images/gateway (both UI stages, the Skyline size
       # budget included), runs it in each SYN_GATEWAY_UI mode with no API
