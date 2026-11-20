@@ -1,13 +1,13 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py
-index dd836871a..1d19cfa61 100644
+index 732937ad8..c7e4ac4e3 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py
-@@ -277,7 +277,7 @@ class CacheWrites:
-         if split is None:
-             return cls(five_minute=total, one_hour=0)
-         # The value came from json.loads, so the TypedDict is a claim, not a check.
--        one_hour = split.get("ephemeral_1h_input_tokens", 0) if isinstance(split, Mapping) else None
-+        one_hour = 0 if isinstance(split, Mapping) else None
-         if isinstance(one_hour, int) and 0 <= one_hour <= total:
-             five_minute = total - one_hour
-             if split.get("ephemeral_5m_input_tokens", five_minute) == five_minute:
+@@ -285,7 +285,7 @@ class CacheWrites:
+         # Counts must be real ints: ``True == 1`` and ``99.0 == 99`` would pass a
+         # numeric comparison and price a malformed split at the premium rate.
+         if _is_count(total) and isinstance(split, Mapping):
+-            one_hour = split.get("ephemeral_1h_input_tokens", 0)
++            one_hour = 0
+             if _is_count(one_hour) and one_hour <= total:
+                 five_minute = total - one_hour
+                 reported_5m = split.get("ephemeral_5m_input_tokens", five_minute)
