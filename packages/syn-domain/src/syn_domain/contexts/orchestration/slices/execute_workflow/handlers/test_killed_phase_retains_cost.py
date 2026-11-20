@@ -267,6 +267,7 @@ class TestKilledPhaseKeepsItsTokens:
                 input_tokens=17,
                 output_tokens=9,
                 cache_creation_tokens=0,
+                cache_creation_1h_tokens=0,
                 cache_read_tokens=0,
                 # This stream never names its model, so the row says unknown
                 # and carries the phase's request separately (ADR-067).
