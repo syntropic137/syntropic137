@@ -74,8 +74,10 @@ skyline-gateway-smoke:
         python3 infra/scripts/check_gateway_ui.py "$url" --mode "$mode"
         # The rendered config (base nginx.conf, includes, entrypoint stanzas)
         # enables no HTTP/2, HTTP/3, TLS, resolver, mail or stream (#2335).
-        docker exec "$name" nginx -T > "${TMPDIR:-/tmp}/$name.nginx-T"
-        python3 infra/scripts/check_nginx_features.py "${TMPDIR:-/tmp}/$name.nginx-T"
+        rendered="$(mktemp)"
+        docker exec "$name" nginx -T > "$rendered"
+        python3 infra/scripts/check_nginx_features.py "$rendered"
+        rm -f "$rendered"
         echo "nginx -T: no disallowed features (SYN_GATEWAY_UI=$mode)"
         docker stop "$name" > /dev/null
         name=""
