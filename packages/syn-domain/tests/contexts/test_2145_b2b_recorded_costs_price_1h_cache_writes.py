@@ -67,7 +67,7 @@ _CASES = [
 ]
 
 
-def _token_usage(cache: Mapping[str, int]) -> dict[str, object]:
+def _token_usage(cache: Mapping[str, int]) -> dict[str, str | dict[str, str | int]]:
     return {
         "session_id": "session-1",
         "execution_id": "exec-1",
@@ -156,10 +156,14 @@ async def test_cache_creation_1h_tokens_sums_across_turns_and_survives_the_store
 # --- Timescale read paths ---------------------------------------------------
 
 
+#: A column value the grouped token_usage SQL can return.
+_Cell = int | str | list[str] | None
+
+
 class _FakeRow:
     """An asyncpg Record as the grouped token_usage SQL returns one."""
 
-    def __init__(self, data: Mapping[str, object]) -> None:
+    def __init__(self, data: Mapping[str, _Cell]) -> None:
         self._data = dict(data)
 
     def __getitem__(self, key: str) -> object:
@@ -170,7 +174,7 @@ class _FakeRow:
 
 
 def _grouped_row(cache_creation: int, cache_creation_1h: int | None) -> asyncpg.Record:
-    row: dict[str, object] = {
+    row: dict[str, _Cell] = {
         "model": _OPUS,
         "agent_model": _OPUS,
         "total_input": 0,
