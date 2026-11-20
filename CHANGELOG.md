@@ -11,14 +11,25 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-11-20
+
+### Security
+
+- security(gateway): nginx 1.30.7 (CVE-2026-123007 and 9 more) (#2339)
+
 ## [1.0.5] - 2026-10-27
 
 ### Added
 
 - feat(release): hotfix release path off the last release tag (ADR-077) (#2117)
 
+### Changed
+
+- Release v1.0.5 (hotfix: cloudflared eMudhra + JS dependency advisories) (#2118)
+
 ### Security
 
+- security(deps): next 16.4.1, dompurify 3.4.17, zod 4.6.6, fast-uri 3.1.9, undici 7.30.1/8.12.3 (#2120)
 - security(deps): pin cloudflared 2026.10.3 by digest (eMudhra cert compromise) (#2114)
 
 ## [1.0.4] - 2026-10-22
@@ -387,7 +398,8 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 - fix(#1519): pin the event-store INDEX digest, not a child manifest (#1522)
 
-[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.5...HEAD
+[unreleased]: https://github.com/syntropic137/syntropic137/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/syntropic137/syntropic137/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/syntropic137/syntropic137/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/syntropic137/syntropic137/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/syntropic137/syntropic137/compare/v1.0.2...v1.0.3
