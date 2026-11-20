@@ -11032,6 +11032,16 @@ export interface components {
              */
             total_cost_usd: string;
             /**
+             * Total Cost Display
+             * @default —
+             */
+            total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
+            /**
              * Total Sessions
              * @default 0
              */
@@ -11093,6 +11103,16 @@ export interface components {
             cache_read_tokens: number;
             /** Estimated Cost Usd */
             estimated_cost_usd?: string | null;
+            /**
+             * Total Cost Display
+             * @default —
+             */
+            total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
         };
     };
     responses: never;

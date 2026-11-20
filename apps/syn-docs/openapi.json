@@ -26541,6 +26541,16 @@
             "title": "Total Cost Usd",
             "default": "0"
           },
+          "total_cost_display": {
+            "type": "string",
+            "title": "Total Cost Display",
+            "default": "\u2014"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
+          },
           "total_sessions": {
             "type": "integer",
             "title": "Total Sessions",
@@ -26623,6 +26633,16 @@
               }
             ],
             "title": "Estimated Cost Usd"
+          },
+          "total_cost_display": {
+            "type": "string",
+            "title": "Total Cost Display",
+            "default": "\u2014"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
           }
         },
         "type": "object",

@@ -130,7 +130,8 @@ path = "apps/syn-api"
 # syn_adapters.conversations and reads each line as a recursive JsonValue.
 # 132 -> 130 (#897): /insights/cost aggregates straight into GlobalCostResponse.
 # 130 -> 128 (#897): repo and system cost return their response models, not dict[str, Any].
-value = 128
+# 128 -> 125 (#897): the session cost summary reads a TokenMetrics dataclass, not dict[str, Any].
+value = 125
 issue = "#673"
 
 [untyped-dicts.syn-collector]
