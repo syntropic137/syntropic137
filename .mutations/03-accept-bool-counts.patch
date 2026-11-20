@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py
+index 732937ad8..5a2789885 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py
+@@ -254,7 +254,7 @@ class ClaudeUsageBlock(TypedDict, total=False):
+ 
+ def _is_count(value: object) -> TypeGuard[int]:
+     """A non-negative ``int`` that is not a ``bool``: a token count as the CLI sends it."""
+-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
++    return isinstance(value, int) and value >= 0
+ 
+ 
+ @dataclass(frozen=True)
