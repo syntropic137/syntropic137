@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/costs.py b/apps/syn-api/src/syn_api/routes/costs.py
+index 9b6c29548..c107fe318 100644
+--- a/apps/syn-api/src/syn_api/routes/costs.py
++++ b/apps/syn-api/src/syn_api/routes/costs.py
+@@ -380,7 +380,7 @@ async def get_cost_summary() -> Result[CostSummary, MetricsError]:
+             CostSummary(
+                 total_cost_usd=Decimal(totals.total_cost_usd),
+                 total_cost_display=totals.total_cost_display,
+-                unpriced_observation_count=totals.unpriced_observation_count,
++                unpriced_observation_count=0,
+                 total_sessions=sum(c.session_count for c in all_costs),
+                 total_executions=totals.execution_count,
+                 total_tokens=totals.total_tokens,

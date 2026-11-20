@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/events.py b/apps/syn-api/src/syn_api/routes/events.py
+index e3f90f980..9d6d2ed17 100644
+--- a/apps/syn-api/src/syn_api/routes/events.py
++++ b/apps/syn-api/src/syn_api/routes/events.py
+@@ -425,7 +425,7 @@ async def _get_session_token_metrics(
+             cache_creation_tokens=cost.cache_creation_tokens,
+             cache_read_tokens=cost.cache_read_tokens,
+             total_cost_usd=cost.total_cost_usd,
+-            unpriced_observation_count=cost.unpriced_observation_count,
++            unpriced_observation_count=0,
+         )
+     )
+ 
