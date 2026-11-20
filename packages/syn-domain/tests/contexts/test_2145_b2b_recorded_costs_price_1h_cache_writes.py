@@ -25,6 +25,7 @@ from syn_adapters.subscriptions.projection_adapters import (
     SessionCostAdapter,
 )
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.agent_sessions.slices.session_cost import (
     query_service as session_query_service,
 )
@@ -160,7 +161,7 @@ async def test_cache_creation_1h_tokens_sums_across_turns_and_survives_the_store
 
 
 #: A column value the grouped token_usage SQL can return.
-_Cell = int | str | list[str] | None
+_Cell = int | str | list[str] | Decimal | None
 
 
 class _FakeRow:
@@ -326,3 +327,160 @@ async def test_version_rebuild_clears_old_totals_before_replaying(
     )
     assert await coordinator._resume_position(adapter.get_name(), adapter) == 11
     assert await read() == (_MILLION, one_hour, expected)
+
+
+# --- A summary arrives: the 1-hour count must not fall back to zero ----------
+#
+# A session_summary row records every cache write in one total and no TTL
+# split. Every reader that switches to it on completion takes the split from
+# the same sessions' token_usage rows.
+
+_COMPLETION_CASES = [
+    pytest.param(_MILLION, Decimal("8.00"), id="all-1h"),
+    pytest.param(None, Decimal("5.00"), id="legacy-row"),
+    pytest.param(600_000, Decimal("6.80"), id="mixed"),
+]
+_REPORTED = [pytest.param(True, id="reported-cost"), pytest.param(False, id="unreported-cost")]
+
+
+def _summary_row(sdk_cost: Decimal | None, total_input: int = 0) -> asyncpg.Record:
+    """One completed session's ``session_summary`` row: a total and no TTL split."""
+    return _FakeRow(  # type: ignore[return-value]
+        {
+            "session_id": "session-1",
+            "model": _OPUS,
+            "agent_model": _OPUS,
+            "total_input": total_input,
+            "total_output": 0,
+            "cache_creation": _MILLION,
+            "cache_read": 0,
+            "sdk_cost": sdk_cost,
+            "num_turns": 1,
+            "total_turns": 1,
+            "duration_ms_val": 0,
+            "completed_at": None,
+            "workspace_id": None,
+            "execution_id": "exec-1",
+            "phase_id": None,
+            "session_ids": ["session-1"],
+            "observation_count": 1,
+        }
+    )
+
+
+def _session_page(
+    summary: asyncpg.Record | None, turns: list[asyncpg.Record]
+) -> session_timescale._PageRows:
+    summaries = {"session-1": summary} if summary is not None else {}
+    return session_timescale._PageRows(summaries, {"session-1": turns}, {}, {})
+
+
+@pytest.mark.parametrize("reported", _REPORTED)
+@pytest.mark.parametrize(("one_hour", "expected"), _COMPLETION_CASES)
+def test_session_detail_keeps_the_1h_count_after_its_summary_arrives(
+    one_hour: int | None, expected: Decimal, reported: bool
+) -> None:
+    query = session_timescale.TimescaleSessionCostQuery(Mock())
+    turns = [_grouped_row(_MILLION, one_hour)]
+    summary = _summary_row(expected if reported else None)
+
+    before = query._cost_for("session-1", _session_page(None, turns))
+    after = query._cost_for("session-1", _session_page(summary, turns))
+
+    assert before is not None
+    assert after is not None
+    assert before.cache_creation_1h_tokens == (one_hour or 0)
+    assert after.cache_creation_1h_tokens == before.cache_creation_1h_tokens
+    assert after.total_cost_usd == before.total_cost_usd == expected
+    assert after.is_finalized
+
+
+@pytest.mark.parametrize("reported", _REPORTED)
+def test_session_cache_write_dollars_survive_an_authoritative_summary(reported: bool) -> None:
+    """1M input ($4) + 1M 1-hour writes ($8): the split stays $8 of $12 after completion."""
+    query = session_timescale.TimescaleSessionCostQuery(Mock())
+    turn = _FakeRow({**_grouped_row(_MILLION, _MILLION)._data, "total_input": _MILLION})  # type: ignore[attr-defined]
+    turns: list[asyncpg.Record] = [turn]  # type: ignore[list-item]
+    summary = _summary_row(Decimal("12.00") if reported else None, total_input=_MILLION)
+
+    before = query._cost_for("session-1", _session_page(None, turns))
+    after = query._cost_for("session-1", _session_page(summary, turns))
+
+    assert before is not None
+    assert after is not None
+    assert before.cost_by_token_type is not None
+    assert after.cost_by_token_type is not None
+    assert after.total_cost_usd == before.total_cost_usd == Decimal("12.00")
+    assert before.cost_by_token_type.cache_creation_usd == Decimal("8.00")
+    assert after.cost_by_token_type.cache_creation_usd == Decimal("8.00")
+
+
+@pytest.mark.parametrize("reported", _REPORTED)
+@pytest.mark.parametrize(("one_hour", "expected"), _COMPLETION_CASES)
+def test_session_list_keeps_the_1h_count_after_its_summary_arrives(
+    one_hour: int | None, expected: Decimal, reported: bool
+) -> None:
+    query = session_query_service.SessionCostQueryService(Mock())
+    turns = [_grouped_row(_MILLION, one_hour)]
+
+    before = query._build_from_token_usage("session-1", turns, {}, {})
+    after = query._build_from_summary(_summary_row(expected if reported else None), {}, {}, turns)
+
+    assert before is not None
+    assert before.cache_creation_1h_tokens == (one_hour or 0)
+    assert after.cache_creation_1h_tokens == before.cache_creation_1h_tokens
+    assert after.total_cost_usd == before.total_cost_usd == expected
+
+
+def _unreported(
+    expected: Decimal, one_hour: int | None, reported: bool
+) -> execution_timescale.UnreportedSessionCosts:
+    """What the session reader answers for a session whose summary reports no cost."""
+    if reported:
+        return execution_timescale.UnreportedSessionCosts()
+    session = SessionCost(
+        session_id="session-1",
+        cache_creation_tokens=_MILLION,
+        cache_creation_1h_tokens=one_hour or 0,
+        total_cost_usd=expected,
+        cost_by_model={_OPUS: expected},
+    )
+    return execution_timescale.UnreportedSessionCosts({"session-1": session})
+
+
+@pytest.mark.parametrize("reported", _REPORTED)
+@pytest.mark.parametrize(("one_hour", "expected"), _COMPLETION_CASES)
+def test_execution_detail_keeps_the_1h_count_after_its_summary_arrives(
+    one_hour: int | None, expected: Decimal, reported: bool
+) -> None:
+    query = execution_timescale.TimescaleExecutionCostQuery(Mock())
+    turns = [_grouped_row(_MILLION, one_hour)]
+    summary = _summary_row(expected if reported else None)
+
+    before = query._price_token_usage_groups(turns)
+    after = query._price_session_summary_groups(
+        [summary], _unreported(expected, one_hour, reported), turns
+    )
+
+    assert before.data.cache_creation_1h == (one_hour or 0)
+    assert after.data.cache_creation_1h == before.data.cache_creation_1h
+    assert after.total_cost == before.total_cost == expected
+
+
+@pytest.mark.parametrize("reported", _REPORTED)
+@pytest.mark.parametrize(("one_hour", "expected"), _COMPLETION_CASES)
+def test_execution_list_keeps_the_1h_count_after_its_summary_arrives(
+    one_hour: int | None, expected: Decimal, reported: bool
+) -> None:
+    query = execution_query_service.ExecutionCostQueryService(Mock())
+    turns = [_grouped_row(_MILLION, one_hour)]
+    summary = _summary_row(expected if reported else None)
+
+    before = query._build_from_token_usage("exec-1", turns, {})
+    after = query._build_from_summary(
+        "exec-1", [summary], {}, {}, _unreported(expected, one_hour, reported), turns
+    )
+
+    assert before.cache_creation_1h_tokens == (one_hour or 0)
+    assert after.cache_creation_1h_tokens == before.cache_creation_1h_tokens
+    assert after.total_cost_usd == before.total_cost_usd == expected

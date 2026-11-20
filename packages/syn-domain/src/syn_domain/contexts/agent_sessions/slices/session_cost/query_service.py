@@ -25,6 +25,7 @@ from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
     SessionCost,
 )
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
+    observed_cache_creation_1h,
     recorded_model_from_row,
     recorded_model_group_by,
     recorded_model_select,
@@ -256,7 +257,8 @@ class SessionCostQueryService:
         """Build a SessionCost from a session_summary row.
 
         ``turn_rows`` are the session's model-grouped token_usage rows. They
-        price the session only when the summary reports no cost (#1420).
+        price the session only when the summary reports no cost (#1420), and
+        always supply its 1-hour cache-write share (#2145).
         """
         sid = row["session_id"]  # type: ignore[index]
         # Classified, not read raw: a legacy summary's `model` is the REQUEST
@@ -267,6 +269,10 @@ class SessionCostQueryService:
         sc.input_tokens = row["total_input"] or 0  # type: ignore[index]
         sc.output_tokens = row["total_output"] or 0  # type: ignore[index]
         sc.cache_creation_tokens = row["cache_creation"] or 0  # type: ignore[index]
+        # A summary records no TTL split; its turns do (#2145).
+        sc.cache_creation_1h_tokens = observed_cache_creation_1h(
+            cast("Sequence[asyncpg.Record]", turn_rows), sc.cache_creation_tokens
+        )
         sc.cache_read_tokens = row["cache_read"] or 0  # type: ignore[index]
         sc.tool_calls = tool_counts.get(sid, 0)
         sc.turns = row["num_turns"] or 0  # type: ignore[index]

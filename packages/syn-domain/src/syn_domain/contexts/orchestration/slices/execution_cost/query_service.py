@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
     import asyncpg
 
@@ -21,6 +21,7 @@ from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions import (
     CostCalculator,
     SessionCostQueryService,
+    observed_cache_creation_1h,
     recorded_model_group_by,
     recorded_model_select,
     zero_usage_group_by,
@@ -325,6 +326,7 @@ class ExecutionCostQueryService:
         holding the caller's connection deadlocks a saturated pool (#1420).
         """
         summary_rows_by_execution = self._group_rows_by_execution(summary_rows)
+        all_token_rows_by_execution = self._group_rows_by_execution(token_rows)
         unreported = await self._unreported_session_costs(summary_rows)
         phase_map = self._price_phase_rows(phase_rows, unreported)
 
@@ -332,7 +334,12 @@ class ExecutionCostQueryService:
         for eid, rows in summary_rows_by_execution.items():
             results.append(
                 self._build_from_summary(
-                    eid, rows, tool_counts, phase_map, unreported.another_rollup()
+                    eid,
+                    rows,
+                    tool_counts,
+                    phase_map,
+                    unreported.another_rollup(),
+                    all_token_rows_by_execution.get(eid, []),
                 )
             )
 
@@ -438,8 +445,12 @@ class ExecutionCostQueryService:
         tool_counts: dict[str, int],
         phase_map: dict[str, PhaseCosts],
         unreported: UnreportedSessionCosts | None = None,
+        turn_rows: Sequence[asyncpg.Record] = (),
     ) -> ExecutionCost:
         """Build an ExecutionCost from model-grouped session_summary rows.
+
+        ``turn_rows`` are the execution's model-grouped token_usage rows; a
+        summary records no TTL split, so the 1-hour share comes from them (#2145).
 
         ``rows`` are all (execution_id, model) groups for this execution
         from ``_LIST_ALL_FROM_SUMMARY_QUERY``. Priced per group via
@@ -459,7 +470,7 @@ class ExecutionCostQueryService:
             input_tokens=grouped.input_tokens,
             output_tokens=grouped.output_tokens,
             cache_creation_tokens=grouped.cache_creation,
-            cache_creation_1h_tokens=grouped.cache_creation_1h,
+            cache_creation_1h_tokens=observed_cache_creation_1h(turn_rows, grouped.cache_creation),
             cache_read_tokens=grouped.cache_read,
             tool_calls=tool_counts.get(execution_id, 0),
             turns=grouped.total_turns,

@@ -28,6 +28,7 @@ from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions import (
     CostCalculator,
     SessionCostQueryService,
+    observed_cache_creation_1h,
     recorded_model_from_row,
     recorded_model_group_by,
     recorded_model_select,
@@ -734,26 +735,31 @@ class TimescaleExecutionCostQuery:
     async def _query_token_usage(
         self, conn: asyncpg.pool.PoolConnectionProxy, execution_id: str, span: EventSpan
     ) -> list[asyncpg.Record]:
-        """Query token_usage events, grouped by model, as fallback for in-progress executions."""
+        """Query token_usage events, grouped by model: the in-progress fallback, and the 1-hour share of a summary."""
         return await conn.fetch(
             _TOKEN_USAGE_FALLBACK_QUERY, execution_id, TOKEN_USAGE, span.lower, span.upper
         )
 
     def _price_session_summary_groups(
-        self, rows: list[asyncpg.Record], unreported: UnreportedSessionCosts
+        self,
+        rows: list[asyncpg.Record],
+        unreported: UnreportedSessionCosts,
+        turn_rows: Sequence[asyncpg.Record] = (),
     ) -> _PricedTokenUsage:
         """Merge model-grouped session_summary rows into one priced aggregate.
 
         Delegates to ``price_grouped_session_summary`` (shared with
         ``ExecutionCostQueryService``) and repackages the result as
-        ``_TokenData`` for this class's internal pipeline.
+        ``_TokenData`` for this class's internal pipeline. ``turn_rows`` are
+        the execution's token_usage groups: a summary records no TTL split, so
+        the 1-hour share is theirs (#2145).
         """
         grouped = price_grouped_session_summary(rows, self._cost_calculator, unreported)
         data = _TokenData(
             input_tokens=grouped.input_tokens,
             output_tokens=grouped.output_tokens,
             cache_creation=grouped.cache_creation,
-            cache_creation_1h=grouped.cache_creation_1h,
+            cache_creation_1h=observed_cache_creation_1h(turn_rows, grouped.cache_creation),
             cache_read=grouped.cache_read,
             session_count=len(grouped.session_ids),
             session_ids=grouped.session_ids,
@@ -961,10 +967,11 @@ class TimescaleExecutionCostQuery:
                     unpriced_observation_count=in_progress.unpriced_observation_count,
                 )
             phase_rows = await self._query_cost_by_phase(conn, execution_id, span)
+            turn_rows = await self._query_token_usage(conn, execution_id, span)
 
         # Outside the connection above: the session reader acquires its own.
         unreported = await self._unreported_session_costs(token_rows)
-        priced = self._price_session_summary_groups(token_rows, unreported)
+        priced = self._price_session_summary_groups(token_rows, unreported, turn_rows)
         data = priced.data
         return self._build_execution_cost(
             execution_id=execution_id,
