@@ -18,7 +18,7 @@ from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     zero_usage_group_by,
 )
 from syn_domain.storable_text import pg_safe
-from syn_shared.pricing import CostSplitBasis, TokenTypeCost, parse_vendor_cost
+from syn_shared.pricing import CacheWrites, CostSplitBasis, TokenTypeCost, parse_vendor_cost
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -135,6 +135,7 @@ SELECT
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+    SUM(COALESCE((data->>'cache_creation_1h_tokens')::int, 0)) as cache_creation_1h,
     SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
     MIN(time) as started_at,
     MAX(time) as last_observation,
@@ -172,24 +173,31 @@ GROUP BY session_id
 MAX_SESSIONS_PER_QUERY = 200
 
 
-def _extract_tokens(token_result: asyncpg.Record) -> tuple[int, int, int, int]:
+def _extract_tokens(token_result: asyncpg.Record) -> _GroupTokens:
     """Extract token counts from a DB result row."""
-    return (
-        token_result["total_input"] or 0,
-        token_result["total_output"] or 0,
-        token_result.get("cache_creation") or 0,
-        token_result.get("cache_read") or 0,
+    return _GroupTokens(
+        input_tokens=token_result["total_input"] or 0,
+        output_tokens=token_result["total_output"] or 0,
+        cache_creation=token_result.get("cache_creation") or 0,
+        cache_read=token_result.get("cache_read") or 0,
+        cache_creation_1h=token_result.get("cache_creation_1h") or 0,
     )
 
 
 @dataclass
 class _GroupTokens:
-    """Token counts for one model group."""
+    """Token counts for one model group.
+
+    ``cache_creation`` is every cache write, whatever its TTL, and
+    ``cache_creation_1h`` the 1-hour share of it (#2145); 0 on a row that
+    recorded none, every write at 5 minutes.
+    """
 
     input_tokens: int
     output_tokens: int
     cache_creation: int
     cache_read: int
+    cache_creation_1h: int = 0
 
     @property
     def total(self) -> int:
@@ -228,6 +236,8 @@ class PricedSessionTotals:
     workspace_id: str | None
     execution_id: str | None
     phase_id: str | None
+    cache_creation_1h: int = 0
+    """The 1-hour share of ``cache_creation`` (#2145)."""
 
     @property
     def total_tokens(self) -> int:
@@ -288,6 +298,7 @@ class _SessionAccumulator:
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation: int = 0
+    cache_creation_1h: int = 0
     cache_read: int = 0
     total_cost: Decimal = Decimal("0")
     cost_by_model: dict[str, Decimal] = field(default_factory=dict)
@@ -309,10 +320,11 @@ class _SessionAccumulator:
 
     def add_tokens(self, row: asyncpg.Record, model: RecordedModel) -> _GroupTokens:
         """Fold one group's tokens and metadata in; returns that group's tokens."""
-        group = _GroupTokens(*_extract_tokens(row))
+        group = _extract_tokens(row)
         self.input_tokens += group.input_tokens
         self.output_tokens += group.output_tokens
         self.cache_creation += group.cache_creation
+        self.cache_creation_1h += group.cache_creation_1h
         self.cache_read += group.cache_read
         self.started_at = _min_time(self.started_at, row.get("started_at"))
         self.last_observation = _max_time(self.last_observation, row.get("last_observation"))
@@ -358,6 +370,7 @@ class _SessionAccumulator:
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
             cache_creation=self.cache_creation,
+            cache_creation_1h=self.cache_creation_1h,
             cache_read=self.cache_read,
             total_cost=self.total_cost,
             cost_by_model=self.cost_by_model,
@@ -407,9 +420,14 @@ def _price_one_group(
     no breakdown, so its split is the rate table's proportions applied to it.
     """
     rates = cost_calculator.resolve_pricing(model)
+    writes = CacheWrites.from_recorded(group.cache_creation, group.cache_creation_1h)
     rated = (
         rates.cost_by_token_type(
-            group.input_tokens, group.output_tokens, group.cache_creation, group.cache_read
+            group.input_tokens,
+            group.output_tokens,
+            writes.five_minute,
+            group.cache_read,
+            cache_creation_1h=writes.one_hour,
         )
         if rates is not None
         else None
@@ -426,6 +444,7 @@ def _price_one_group(
         cache_creation=group.cache_creation,
         cache_read=group.cache_read,
         model=model,
+        cache_creation_1h=group.cache_creation_1h,
         context=f"session_id={session_id}",
     )
     if priced.cost is None:
@@ -580,6 +599,7 @@ class TimescaleSessionCostQuery:
         sc.input_tokens = totals.input_tokens
         sc.output_tokens = totals.output_tokens
         sc.cache_creation_tokens = totals.cache_creation
+        sc.cache_creation_1h_tokens = totals.cache_creation_1h
         sc.cache_read_tokens = totals.cache_read
         sc.tool_calls = tool_count
         sc.token_cost_usd = totals.total_cost

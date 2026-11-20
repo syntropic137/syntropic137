@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 from syn_domain.contexts.agent_sessions import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_shared.observed_model import split_observation_model
-from syn_shared.pricing import PricedAmount, parse_vendor_cost, price_tokens
+from syn_shared.pricing import CacheWrites, PricedAmount, parse_vendor_cost, price_tokens
 
 
 def _get_or_create(existing: dict[str, Any] | None, execution_id: str) -> ExecutionCost:
@@ -59,6 +59,8 @@ def _calculate_token_cost(
     cache_creation: int,
     cache_read: int,
     model: str | None = None,
+    *,
+    cache_creation_1h: int = 0,
 ) -> PricedAmount:
     """Calculate token cost from counts using model-specific pricing.
 
@@ -68,8 +70,19 @@ def _calculate_token_cost(
     unpriced WARNING fired from only one of them. An unknown or missing model
     MUST NOT be priced as any real model (issue #788), and MUST NOT be reported
     as a zero that reads like free work (issue #890).
+
+    ``cache_creation`` is the row's total of every TTL and ``cache_creation_1h``
+    the 1-hour share of it, each priced at its own rate (#2145).
     """
-    return price_tokens(model, input_tokens, output_tokens, cache_creation, cache_read)
+    writes = CacheWrites.from_recorded(cache_creation, cache_creation_1h)
+    return price_tokens(
+        model,
+        input_tokens,
+        output_tokens,
+        writes.five_minute,
+        cache_read,
+        cache_creation_1h=writes.one_hour,
+    )
 
 
 def _attribute_to_phase(
@@ -104,11 +117,13 @@ def _apply_token_usage(
     input_tokens = data.get("input_tokens") or 0
     output_tokens = data.get("output_tokens") or 0
     cache_creation = data.get("cache_creation_tokens") or 0
+    cache_creation_1h = data.get("cache_creation_1h_tokens") or 0
     cache_read = data.get("cache_read_tokens") or 0
 
     execution_cost.input_tokens += input_tokens
     execution_cost.output_tokens += output_tokens
     execution_cost.cache_creation_tokens += cache_creation
+    execution_cost.cache_creation_1h_tokens += cache_creation_1h
     execution_cost.cache_read_tokens += cache_read
 
     # Classified exactly as the SQL read path classifies the same row
@@ -116,7 +131,12 @@ def _apply_token_usage(
     # filed under what RAN - the reported id or the unknown bucket.
     model = split_observation_model(data)
     priced = _calculate_token_cost(
-        input_tokens, output_tokens, cache_creation, cache_read, model=model.pricing_model
+        input_tokens,
+        output_tokens,
+        cache_creation,
+        cache_read,
+        model=model.pricing_model,
+        cache_creation_1h=cache_creation_1h,
     )
     token_cost = priced.cost if priced.cost is not None else Decimal("0")
     execution_cost.token_cost_usd += token_cost

@@ -171,11 +171,11 @@ def test_a_malformed_split_is_priced_as_it_was_before(usage_json: str) -> None:
     and ``99.0`` arrive as ``bool`` and ``float``, which compare equal to ints.
     """
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
-        CacheWrites,
+        cache_writes_from_claude_usage,
     )
 
     usage = json.loads(usage_json)
-    writes = CacheWrites.from_claude_usage(usage)
+    writes = cache_writes_from_claude_usage(usage)
 
     assert writes.one_hour == 0
     assert writes.five_minute is usage["cache_creation_input_tokens"]

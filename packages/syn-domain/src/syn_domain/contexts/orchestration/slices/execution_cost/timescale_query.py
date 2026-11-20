@@ -43,7 +43,7 @@ from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
 )
-from syn_shared.pricing import parse_vendor_cost
+from syn_shared.pricing import CacheWrites, parse_vendor_cost
 
 # OUTSTANDING AT SCALE: EVERY QUERY IN THIS FILE IS EXECUTION-KEYED (#1338).
 #
@@ -141,6 +141,7 @@ SELECT
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+    SUM(COALESCE((data->>'cache_creation_1h_tokens')::int, 0)) as cache_creation_1h,
     SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
     COUNT(DISTINCT session_id) as session_count,
     ARRAY_AGG(DISTINCT session_id) as session_ids,
@@ -237,6 +238,7 @@ class _TokenData:
     duration_ms_raw: int
     total_turns: int
     from_summary: bool
+    cache_creation_1h: int = 0
 
 
 @dataclass
@@ -268,6 +270,7 @@ class GroupedTokenUsage:
     total_cost: Decimal
     cost_by_model: dict[str, Decimal]
     unpriced_observation_count: int
+    cache_creation_1h: int = 0
 
 
 @dataclass
@@ -292,16 +295,32 @@ class GroupedSessionSummary:
     unpriced_observation_count: int
     duration_ms_raw: int
     total_turns: int
+    cache_creation_1h: int = 0
 
 
 @dataclass
 class _GroupTokens:
-    """Token counts extracted from one model-grouped row."""
+    """Token counts extracted from one model-grouped row.
+
+    ``cache_creation`` is every cache write, whatever its TTL, and
+    ``cache_creation_1h`` the 1-hour share of it (#2145). Only token_usage rows
+    record a share; any other row reads as 0, every write at 5 minutes.
+    """
 
     input_tokens: int
     output_tokens: int
     cache_creation: int
     cache_read: int
+    cache_creation_1h: int = 0
+
+    def plus(self, other: _GroupTokens) -> _GroupTokens:
+        return _GroupTokens(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            cache_creation=self.cache_creation + other.cache_creation,
+            cache_read=self.cache_read + other.cache_read,
+            cache_creation_1h=self.cache_creation_1h + other.cache_creation_1h,
+        )
 
 
 def _extract_group_tokens(row: asyncpg.Record) -> _GroupTokens:
@@ -311,6 +330,7 @@ def _extract_group_tokens(row: asyncpg.Record) -> _GroupTokens:
         output_tokens=row["total_output"] or 0,
         cache_creation=row.get("cache_creation") or 0,
         cache_read=row.get("cache_read") or 0,
+        cache_creation_1h=row.get("cache_creation_1h") or 0,
     )
 
 
@@ -377,12 +397,7 @@ def price_grouped_token_usage(
 
     for row in rows:
         group = _extract_group_tokens(row)
-        totals = _GroupTokens(
-            input_tokens=totals.input_tokens + group.input_tokens,
-            output_tokens=totals.output_tokens + group.output_tokens,
-            cache_creation=totals.cache_creation + group.cache_creation,
-            cache_read=totals.cache_read + group.cache_read,
-        )
+        totals = totals.plus(group)
         session_ids.update(row.get("session_ids") or [])
         started_at, end_at = _extend_time_range(started_at, end_at, row)
 
@@ -395,6 +410,7 @@ def price_grouped_token_usage(
             cache_creation=group.cache_creation,
             cache_read=group.cache_read,
             model=model.pricing_model,
+            cache_creation_1h=group.cache_creation_1h,
         )
         if priced.cost is None:
             unpriced_observation_count += _row_observation_count(row)
@@ -409,6 +425,7 @@ def price_grouped_token_usage(
         output_tokens=totals.output_tokens,
         cache_creation=totals.cache_creation,
         cache_read=totals.cache_read,
+        cache_creation_1h=totals.cache_creation_1h,
         session_ids=sorted(session_ids),
         started_at=started_at,
         end_at=end_at,
@@ -537,8 +554,13 @@ def _price_session_summary_row(
     if pricing is None or pricing_model is None:
         return _RowPricing(cost=None, model=model, unpriced_count=_row_observation_count(row))
 
+    writes = CacheWrites.from_recorded(group.cache_creation, group.cache_creation_1h)
     group_cost = pricing.calculate_cost(
-        group.input_tokens, group.output_tokens, group.cache_creation, group.cache_read
+        group.input_tokens,
+        group.output_tokens,
+        writes.five_minute,
+        group.cache_read,
+        cache_creation_1h=writes.one_hour,
     )
     return _RowPricing(cost=group_cost, model=model, unpriced_count=0)
 
@@ -659,12 +681,7 @@ def price_grouped_session_summary(
 
     for row in rows:
         group = _extract_group_tokens(row)
-        totals = _GroupTokens(
-            input_tokens=totals.input_tokens + group.input_tokens,
-            output_tokens=totals.output_tokens + group.output_tokens,
-            cache_creation=totals.cache_creation + group.cache_creation,
-            cache_read=totals.cache_read + group.cache_read,
-        )
+        totals = totals.plus(group)
         session_ids.update(row.get("session_ids") or [])
         started_at, end_at = _extend_time_range(started_at, end_at, row, end_key="completed_at")
         duration_ms_raw += int(row.get("duration_ms_val") or 0)
@@ -683,6 +700,7 @@ def price_grouped_session_summary(
         output_tokens=totals.output_tokens,
         cache_creation=totals.cache_creation,
         cache_read=totals.cache_read,
+        cache_creation_1h=totals.cache_creation_1h,
         session_ids=sorted(session_ids),
         started_at=started_at,
         end_at=end_at,
@@ -735,6 +753,7 @@ class TimescaleExecutionCostQuery:
             input_tokens=grouped.input_tokens,
             output_tokens=grouped.output_tokens,
             cache_creation=grouped.cache_creation,
+            cache_creation_1h=grouped.cache_creation_1h,
             cache_read=grouped.cache_read,
             session_count=len(grouped.session_ids),
             session_ids=grouped.session_ids,
@@ -764,6 +783,7 @@ class TimescaleExecutionCostQuery:
             input_tokens=grouped.input_tokens,
             output_tokens=grouped.output_tokens,
             cache_creation=grouped.cache_creation,
+            cache_creation_1h=grouped.cache_creation_1h,
             cache_read=grouped.cache_read,
             session_count=len(grouped.session_ids),
             session_ids=grouped.session_ids,
@@ -872,6 +892,7 @@ class TimescaleExecutionCostQuery:
             input_tokens=data.input_tokens,
             output_tokens=data.output_tokens,
             cache_creation_tokens=data.cache_creation,
+            cache_creation_1h_tokens=data.cache_creation_1h,
             cache_read_tokens=data.cache_read,
             tool_calls=tool_count,
             turns=turn_count,

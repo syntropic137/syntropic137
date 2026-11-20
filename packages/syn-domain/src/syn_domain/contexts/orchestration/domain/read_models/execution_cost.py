@@ -100,6 +100,9 @@ class ExecutionCost:
     cache_creation_tokens: int = 0
     """Total cache creation tokens across all sessions."""
 
+    cache_creation_1h_tokens: int = 0
+    """The 1-hour share of ``cache_creation_tokens``, priced at the 1-hour rate (#2145)."""
+
     cache_read_tokens: int = 0
     """Total cache read tokens across all sessions."""
 
@@ -242,6 +245,7 @@ class ExecutionCost:
             input_tokens=data.get("input_tokens", 0),
             output_tokens=data.get("output_tokens", 0),
             cache_creation_tokens=data.get("cache_creation_tokens", 0),
+            cache_creation_1h_tokens=data.get("cache_creation_1h_tokens", 0),
             cache_read_tokens=data.get("cache_read_tokens", 0),
             tool_calls=data.get("tool_calls", 0),
             turns=data.get("turns", 0),
@@ -277,6 +281,7 @@ class ExecutionCost:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_creation_1h_tokens": self.cache_creation_1h_tokens,
             "cache_read_tokens": self.cache_read_tokens,
             "total_tokens": self.total_tokens,
             "tool_calls": self.tool_calls,

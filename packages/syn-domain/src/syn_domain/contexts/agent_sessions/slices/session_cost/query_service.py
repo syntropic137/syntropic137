@@ -87,6 +87,7 @@ SELECT
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+    SUM(COALESCE((data->>'cache_creation_1h_tokens')::int, 0)) as cache_creation_1h,
     SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
     MIN(time) as started_at,
     MAX(time) as last_observation,
@@ -316,6 +317,7 @@ class SessionCostQueryService:
         sc.input_tokens = totals.input_tokens
         sc.output_tokens = totals.output_tokens
         sc.cache_creation_tokens = totals.cache_creation
+        sc.cache_creation_1h_tokens = totals.cache_creation_1h
         sc.cache_read_tokens = totals.cache_read
         sc.total_cost_usd = totals.total_cost
         sc.token_cost_usd = totals.total_cost

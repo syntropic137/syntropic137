@@ -153,7 +153,9 @@ class ExecutionCostAdapter(_ObservationProjectionAdapter):
     """
 
     PROJECTION_NAME: ClassVar[str] = "execution_cost"
-    VERSION: ClassVar[int] = 1
+    # 2: prices 1-hour cache writes at the 1-hour rate and stores
+    # cache_creation_1h_tokens (#2145 B2b).
+    VERSION: ClassVar[int] = 2
     _SUBSCRIBED: ClassVar[set[str]] = set(_COST_HANDLER_MAP.keys())
 
     def __init__(self, projection: ExecutionCostProjection) -> None:
@@ -171,7 +173,9 @@ class SessionCostAdapter(_ObservationProjectionAdapter):
     """
 
     PROJECTION_NAME: ClassVar[str] = "session_cost"
-    VERSION: ClassVar[int] = 1
+    # 2: prices 1-hour cache writes at the 1-hour rate and stores
+    # cache_creation_1h_tokens (#2145 B2b).
+    VERSION: ClassVar[int] = 2
     _SUBSCRIBED: ClassVar[set[str]] = set(_COST_HANDLER_MAP.keys())
 
     def __init__(self, projection: SessionCostProjection) -> None:
