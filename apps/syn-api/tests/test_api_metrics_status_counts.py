@@ -86,6 +86,16 @@ async def _record_executions() -> None:
             await projection.on_workflow_interrupted(event)
 
 
+class _NoExecutionCosts:
+    """No ``ExecutionCost`` rows: /metrics reads its money from them (#897)."""
+
+    async def list_all(self, limit: int = 500) -> list[object]:
+        return []
+
+    async def list_for_ids(self, execution_ids: set[str]) -> list[object]:
+        return []
+
+
 def test_the_counts_name_exactly_the_domain_statuses() -> None:
     from syn_api.routes.metrics import ExecutionStatusCounts
 
@@ -98,6 +108,7 @@ async def test_status_counts_match_the_execution_store(monkeypatch: pytest.Monke
     from syn_api.routes import metrics
 
     monkeypatch.setattr(metrics, "get_canonical_usage_query", _FakeCanonicalQuery)
+    monkeypatch.setattr(metrics, "get_execution_cost_query", _NoExecutionCosts)
     await _record_executions()
 
     body = (await metrics.get_metrics_endpoint(workflow_id=None)).model_dump(mode="json")
@@ -122,6 +133,7 @@ async def test_status_counts_narrow_to_the_workflow(monkeypatch: pytest.MonkeyPa
     from syn_api.routes import metrics
 
     monkeypatch.setattr(metrics, "get_canonical_usage_query", _FakeCanonicalQuery)
+    monkeypatch.setattr(metrics, "get_execution_cost_query", _NoExecutionCosts)
     monkeypatch.setattr(metrics, "_build_phase_metrics", _no_phases)
     await _record_executions()
 
@@ -149,6 +161,7 @@ async def test_a_status_outside_the_vocabulary_is_unavailable_not_dropped(
     from syn_api.routes import metrics
 
     monkeypatch.setattr(metrics, "get_canonical_usage_query", _FakeCanonicalQuery)
+    monkeypatch.setattr(metrics, "get_execution_cost_query", _NoExecutionCosts)
     await _record_executions()
     projection = get_projection_mgr().workflow_execution_list
     record = await projection._store.get(projection.PROJECTION_NAME, "exec-r1")

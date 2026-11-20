@@ -65,6 +65,16 @@ class _ObservedSessions:
         return CanonicalTotals(sessions=3)
 
 
+class _NoExecutionCosts:
+    """No ``ExecutionCost`` rows: /metrics reads its money from them (#897)."""
+
+    async def list_all(self, limit: int = 500) -> list[object]:
+        return []
+
+    async def list_for_ids(self, execution_ids: set[str]) -> list[object]:
+        return []
+
+
 @pytest.fixture
 async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
     from syn_api._wiring import ensure_connected
@@ -73,6 +83,7 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
 
     await ensure_connected()
     monkeypatch.setattr(metrics, "get_canonical_usage_query", _ObservedSessions)
+    monkeypatch.setattr(metrics, "get_execution_cost_query", _NoExecutionCosts)
     monkeypatch.setattr(metrics, "_workflow_execution_ids", _no_execution_ids)
     monkeypatch.setattr(metrics, "_build_phase_metrics", _no_phases)
     async with AsyncClient(transport=ASGITransport(app=create_app()), base_url="http://t") as c:
