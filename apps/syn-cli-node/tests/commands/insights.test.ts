@@ -1,5 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { insightsGroup } from "../../src/commands/insights.js";
+import type { components } from "../../src/generated/api-types.js";
+
+type GlobalCostResponse = components["schemas"]["GlobalCostResponse"];
+
+function globalCost(overrides: Partial<GlobalCostResponse> = {}): GlobalCostResponse {
+  return {
+    system_id: "",
+    system_name: "All Systems",
+    organization_id: "",
+    total_cost_usd: "1.50",
+    total_cost_display: "$1.50",
+    unpriced_observation_count: 0,
+    total_tokens: 100000,
+    total_input_tokens: 60000,
+    total_output_tokens: 40000,
+    total_cache_creation_tokens: 0,
+    total_cache_read_tokens: 0,
+    cost_by_repo: {},
+    cost_by_workflow: {},
+    unpriced_by_workflow: {},
+    cost_by_model: {},
+    execution_count: 1,
+    ...overrides,
+  };
+}
 
 describe("insights commands", () => {
   const mockFetch = vi.fn();
@@ -50,12 +75,7 @@ describe("insights commands", () => {
 
   it("cost shows cost breakdown", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({
-        total_cost_usd: "1.50",
-        total_tokens: 100000,
-        cost_by_repo: { "test-repo": "1.50" },
-        cost_by_model: {},
-      }),
+      jsonResponse(globalCost({ cost_by_repo: { "test-repo": "1.50" } })),
     );
 
     await insightsGroup.getCommand("cost")!.handler({ positionals: [], values: {} });
@@ -66,12 +86,11 @@ describe("insights commands", () => {
 
   it("cost renders the unattributed model bucket as unknown", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({
-        total_cost_usd: "1.50",
-        total_tokens: 100000,
-        cost_by_repo: {},
-        cost_by_model: { "claude-opus-5-5": "1.00", "unattributed-model": "0.50" },
-      }),
+      jsonResponse(
+        globalCost({
+          cost_by_model: { "claude-opus-5-5": "1.00", "unattributed-model": "0.50" },
+        }),
+      ),
     );
 
     await insightsGroup.getCommand("cost")!.handler({ positionals: [], values: {} });
@@ -79,6 +98,57 @@ describe("insights commands", () => {
     expect(out).toContain("claude-opus-5-5");
     expect(out).toContain("unknown");
     expect(out).not.toContain("unattributed-model");
+  });
+
+  // #897: the API decides how honest the total is (total_cost_display); the
+  // CLI prints that verdict instead of formatting total_cost_usd itself.
+  it("cost prints a partial total as partial and names the unpriced count", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse(
+        globalCost({
+          total_cost_usd: "1.25",
+          total_cost_display: ">=$1.25 (partial)",
+          unpriced_observation_count: 9,
+          unpriced_by_workflow: { "wf-1": 9 },
+        }),
+      ),
+    );
+
+    await insightsGroup.getCommand("cost")!.handler({ positionals: [], values: {} });
+    const out = stdout();
+    expect(out).toContain(">=$1.25 (partial)");
+    expect(out).toContain("9 observation(s) had no rate");
+    expect(out).not.toMatch(/Total cost:\S*\s+\$1\.25/);
+  });
+
+  it("cost prints an unpriced total as unpriced and names the unpriced count", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse(
+        globalCost({
+          total_cost_usd: "0",
+          total_cost_display: "unpriced",
+          unpriced_observation_count: 4,
+          unpriced_by_workflow: { "wf-1": 4 },
+        }),
+      ),
+    );
+
+    await insightsGroup.getCommand("cost")!.handler({ positionals: [], values: {} });
+    const out = stdout();
+    expect(out).toMatch(/Total cost:\S*\s+unpriced/);
+    expect(out).toContain("4 observation(s) had no rate");
+    expect(out).not.toContain("$0.00");
+  });
+
+  it("cost prints a fully priced total with no unpriced line", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse(globalCost({ total_cost_usd: "1.25", total_cost_display: "$1.25" })),
+    );
+
+    await insightsGroup.getCommand("cost")!.handler({ positionals: [], values: {} });
+    const out = stdout();
+    expect(out).toMatch(/Total cost:\S*\s+\$1\.25/);
+    expect(out).not.toContain("had no rate");
   });
 
   it("heatmap renders sparkline", async () => {
