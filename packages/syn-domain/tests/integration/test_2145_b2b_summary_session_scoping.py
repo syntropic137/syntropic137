@@ -33,6 +33,7 @@ from syn_shared.agents import ModelId
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    import asyncpg
     from syn_tests.fixtures.infrastructure import TestInfrastructure
 
     from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
@@ -51,12 +52,18 @@ async def event_store(test_infrastructure: TestInfrastructure) -> AsyncIterator[
         await store.close()
 
 
+def _pool(store: AgentEventStore) -> asyncpg.Pool:
+    """The initialized store's pool; the fixture initializes it before any test runs."""
+    assert store.pool is not None
+    return store.pool
+
+
 async def _read(store: AgentEventStore, execution_id: str, reader: str) -> ExecutionCost:
     if reader == "detail":
-        cost = await TimescaleExecutionCostQuery(store.pool).calculate(execution_id)
+        cost = await TimescaleExecutionCostQuery(_pool(store)).calculate(execution_id)
         assert cost is not None
         return cost
-    query = ExecutionCostQueryService(store.pool)
+    query = ExecutionCostQueryService(_pool(store))
     costs = await query.list_all() if reader == "list" else await query.list_for_ids([execution_id])
     return next(cost for cost in costs if cost.execution_id == execution_id)
 
@@ -97,8 +104,10 @@ async def test_summary_split_tracks_only_the_sessions_in_its_total(
     assert partial.total_cost_usd == finished_cost
 
     # Both session readers must keep the unfinished session's TTL out of its neighbour.
-    sessions = await TimescaleSessionCostQuery(event_store.pool).calculate_many([finished, running])
-    listed = await SessionCostQueryService(event_store.pool).list_all()
+    sessions = await TimescaleSessionCostQuery(_pool(event_store)).calculate_many(
+        [finished, running]
+    )
+    listed = await SessionCostQueryService(_pool(event_store)).list_all()
     for session_id, one_hour, dollars in (
         (finished, finished_1h, finished_cost),
         (running, _MILLION, Decimal("8.00")),
