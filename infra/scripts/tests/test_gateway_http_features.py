@@ -23,7 +23,14 @@ from pathlib import Path
 
 import pytest
 
-from infra.scripts.check_nginx_features import NginxSyntaxError, check, findings, main, parse
+from infra.scripts.check_nginx_features import (
+    NginxSyntaxError,
+    check,
+    findings,
+    main,
+    parse,
+    read_config,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -84,7 +91,7 @@ def test_both_images_pin_the_same_nginx() -> None:
 
 @pytest.mark.parametrize("path", _CONFIG_FILES, ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_no_affected_nginx_feature_is_enabled(path: Path) -> None:
-    found = check(path.read_text())
+    found = check(read_config(path.read_bytes()))
     assert not found, f"{path}: {found}; the gateway serves plain HTTP/1.1 only"
 
 
@@ -182,3 +189,11 @@ def test_cli_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
     assert main([str(good)]) == 0
     assert main([str(bad)]) == 1
     assert "line 3: http2 on" in capsys.readouterr().out
+
+
+def test_a_carriage_return_is_read_as_nginx_reads_it(tmp_path: Path) -> None:
+    """nginx ends a comment only at LF; a text-mode read would turn this CR
+    into LF and expose the quote that hides `http2 on` (Codex review, pass 5)."""
+    conf = tmp_path / "cr.conf"
+    conf.write_bytes(b'server {\n# comment\radd_header X "\nhttp2 on;\n#";\n}\n')
+    assert main([str(conf)]) == 1

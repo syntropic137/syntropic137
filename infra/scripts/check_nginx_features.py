@@ -245,13 +245,23 @@ def check(text: str) -> list[str]:
         return [f"{err} (nginx would refuse this config; not checked further)"]
 
 
+def read_config(raw: bytes) -> str:
+    """Bytes as nginx sees them: no newline translation, one char per byte.
+
+    Text-mode reads turn a CR into LF, and nginx ends a comment only at LF, so
+    a translated file can expose a quote nginx never sees (Codex review,
+    pass 5). latin-1 maps every byte to one character and back.
+    """
+    return raw.decode("latin-1")
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print("usage: check_nginx_features.py FILE... | -", file=sys.stderr)
         return 2
     bad = 0
     for arg in argv:
-        text = sys.stdin.read() if arg == "-" else Path(arg).read_text()
+        text = read_config(sys.stdin.buffer.read() if arg == "-" else Path(arg).read_bytes())
         label = "stdin" if arg == "-" else arg
         for message in check(text):
             print(f"{label}: {message}")
