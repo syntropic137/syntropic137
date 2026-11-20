@@ -62,6 +62,30 @@ class _Totals:
     unpriced_by_workflow: dict[str, int] = field(default_factory=dict)
     by_model: dict[str, Decimal] = field(default_factory=dict)
 
+    def add(self, c: ExecutionCost, correlation: CorrelatedExecution | None) -> None:
+        self.cost += c.total_cost_usd
+        self.input += c.input_tokens
+        self.output += c.output_tokens
+        self.cache_creation += c.cache_creation_tokens
+        self.cache_read += c.cache_read_tokens
+        self.unpriced += c.unpriced_observation_count
+        for repo in sorted(correlation.repos) if correlation else ():
+            self.by_repo[repo] = self.by_repo.get(repo, Decimal("0")) + c.total_cost_usd
+        workflow_id = c.workflow_id or (correlation.workflow_id if correlation else None)
+        if workflow_id:
+            self._add_workflow(workflow_id, c)
+        for model, model_cost in c.cost_by_model.items():
+            self.by_model[model] = self.by_model.get(model, Decimal("0")) + model_cost
+
+    def _add_workflow(self, workflow_id: str, c: ExecutionCost) -> None:
+        self.by_workflow[workflow_id] = (
+            self.by_workflow.get(workflow_id, Decimal("0")) + c.total_cost_usd
+        )
+        if c.unpriced_observation_count:
+            self.unpriced_by_workflow[workflow_id] = (
+                self.unpriced_by_workflow.get(workflow_id, 0) + c.unpriced_observation_count
+            )
+
 
 def roll_up_costs(
     costs: Sequence[ExecutionCost],
@@ -84,26 +108,7 @@ def roll_up_costs(
     """
     t = _Totals()
     for c in costs:
-        t.cost += c.total_cost_usd
-        t.input += c.input_tokens
-        t.output += c.output_tokens
-        t.cache_creation += c.cache_creation_tokens
-        t.cache_read += c.cache_read_tokens
-        t.unpriced += c.unpriced_observation_count
-        correlation = correlated.get(c.execution_id) if correlated is not None else None
-        for repo in sorted(correlation.repos) if correlation else ():
-            t.by_repo[repo] = t.by_repo.get(repo, Decimal("0")) + c.total_cost_usd
-        workflow_id = c.workflow_id or (correlation.workflow_id if correlation else None)
-        if workflow_id:
-            t.by_workflow[workflow_id] = (
-                t.by_workflow.get(workflow_id, Decimal("0")) + c.total_cost_usd
-            )
-            if c.unpriced_observation_count:
-                t.unpriced_by_workflow[workflow_id] = (
-                    t.unpriced_by_workflow.get(workflow_id, 0) + c.unpriced_observation_count
-                )
-        for model, model_cost in c.cost_by_model.items():
-            t.by_model[model] = t.by_model.get(model, Decimal("0")) + model_cost
+        t.add(c, correlated.get(c.execution_id) if correlated is not None else None)
 
     return CostRollup(
         total_cost_usd=str(t.cost),
