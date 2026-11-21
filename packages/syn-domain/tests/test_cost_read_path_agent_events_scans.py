@@ -145,13 +145,12 @@ _EXPECTED_SCANS: dict[_Case, frozenset[str]] = {
     _case("GET /costs/sessions (list)", _Branch.IN_PROGRESS): frozenset(
         {SESSION_SUMMARY, TOKEN_USAGE, SESSION_STARTED}
     ),
+    # token_usage on the summarised arm too since #2145: a summary records no
+    # cache-write TTL split, so its 1-hour share is read from the session's
+    # turns. The same one batched, session-keyed query the fallback uses.
     _case("GET /costs/sessions/{id} (detail, via the batch path)", _Branch.SUMMARISED): frozenset(
-        {SESSION_SUMMARY, SESSION_STARTED}
+        {SESSION_SUMMARY, TOKEN_USAGE, SESSION_STARTED}
     ),
-    # The fallback query the summarised row never reaches. Inventoried here
-    # rather than merged into the line above, because "this endpoint scans
-    # token_usage" is true of one arm and not the other, and a union would say
-    # neither.
     _case("GET /costs/sessions/{id} (detail, via the batch path)", _Branch.IN_PROGRESS): frozenset(
         {SESSION_SUMMARY, TOKEN_USAGE, SESSION_STARTED}
     ),
@@ -167,12 +166,14 @@ _EXPECTED_SCANS: dict[_Case, frozenset[str]] = {
     _case("GET /executions (one page, by id)", _Branch.IN_PROGRESS): frozenset(
         {SESSION_SUMMARY, TOKEN_USAGE}
     ),
+    # token_usage here is the grouped turn query, read for the 1-hour
+    # cache-write share a summary does not record (#2145).
     _case("GET /costs/executions/{id} (detail)", _Branch.SUMMARISED): frozenset(
-        {SESSION_SUMMARY, _NO_EVENT_TYPE_FILTER}
+        {SESSION_SUMMARY, TOKEN_USAGE, _NO_EVENT_TYPE_FILTER}
     ),
-    # Two more, both only on this arm: the token_usage fallback itself, and the
-    # turn count - which a summarised execution reads off its summary row and an
-    # in-progress one gets by counting token_usage rows in agent_events.
+    # One more scan only on this arm: the turn count - which a summarised
+    # execution reads off its summary row and an in-progress one gets by
+    # counting token_usage rows in agent_events.
     _case("GET /costs/executions/{id} (detail)", _Branch.IN_PROGRESS): frozenset(
         {SESSION_SUMMARY, TOKEN_USAGE, _NO_EVENT_TYPE_FILTER}
     ),

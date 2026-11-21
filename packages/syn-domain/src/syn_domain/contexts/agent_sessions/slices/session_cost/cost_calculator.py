@@ -4,7 +4,13 @@ Delegates pricing to ``syn_shared.pricing`` — the single source of truth
 for model pricing across the platform.
 """
 
-from syn_shared.pricing import ModelPricing, PricedAmount, price_tokens, resolve_model_pricing
+from syn_shared.pricing import (
+    CacheWrites,
+    ModelPricing,
+    PricedAmount,
+    price_tokens,
+    resolve_model_pricing,
+)
 
 
 class CostCalculator:
@@ -40,6 +46,7 @@ class CostCalculator:
         cache_read: int = 0,
         model: str | None = None,
         *,
+        cache_creation_1h: int = 0,
         context: str = "",
     ) -> PricedAmount:
         """Calculate cost from token counts, or say why it could not be.
@@ -54,9 +61,12 @@ class CostCalculator:
         Args:
             input_tokens: Number of input tokens
             output_tokens: Number of output tokens
-            cache_creation: Cache write tokens
+            cache_creation: Cache write tokens of every TTL, as a recorded
+                row stores them in ``cache_creation_tokens``
             cache_read: Cache read tokens
             model: Model name for model-specific pricing
+            cache_creation_1h: The 1-hour share of ``cache_creation``, priced
+                at the 1-hour rate (#2145); 0 for a row that recorded none
             context: Optional session/execution id, logged when unpriced so
                 the run can be traced back to its source.
 
@@ -65,11 +75,13 @@ class CostCalculator:
             one carrying the reason - never a guessed price from a default
             model, and never a zero standing in for "unknown".
         """
+        writes = CacheWrites.from_recorded(cache_creation, cache_creation_1h)
         return price_tokens(
             model,
             input_tokens,
             output_tokens,
-            cache_creation,
+            writes.five_minute,
             cache_read,
+            cache_creation_1h=writes.one_hour,
             context=context,
         )

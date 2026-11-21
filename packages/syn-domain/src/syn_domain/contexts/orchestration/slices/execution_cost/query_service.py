@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
     import asyncpg
 
@@ -21,6 +21,7 @@ from syn_domain import agent_event_span, tool_call_counts
 from syn_domain.contexts.agent_sessions import (
     CostCalculator,
     SessionCostQueryService,
+    observed_cache_creation_1h,
     recorded_model_group_by,
     recorded_model_select,
     zero_usage_group_by,
@@ -93,13 +94,17 @@ GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_
 # group rather than flattening all tokens into one SUM per execution and
 # pricing them as a single model (issue #788). Rows for the same
 # execution_id are merged in Python via ``price_grouped_token_usage``.
+# Keep sessions separate so a summary's TTL split can use exactly the sessions
+# its authoritative total covers, excluding still-running sessions (#2145).
 _LIST_ALL_FROM_TOKEN_USAGE_QUERY = f"""
 SELECT
     execution_id,
+    session_id,
     {recorded_model_select()},
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+    SUM(COALESCE((data->>'cache_creation_1h_tokens')::int, 0)) as cache_creation_1h,
     SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
     COUNT(DISTINCT session_id) as session_count,
     ARRAY_AGG(DISTINCT session_id) as session_ids,
@@ -109,7 +114,7 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
   AND execution_id IS NOT NULL
-GROUP BY execution_id, {recorded_model_group_by()}, {zero_usage_group_by()}
+GROUP BY execution_id, session_id, {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
 # Same shape as _LIST_ALL_FROM_SUMMARY_QUERY, but scoped to a caller-provided
@@ -145,10 +150,12 @@ GROUP BY a.execution_id, {recorded_model_group_by("a.data")}, ((a.data->>'total_
 _BY_IDS_FROM_TOKEN_USAGE_QUERY = f"""
 SELECT
     execution_id,
+    session_id,
     {recorded_model_select()},
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+    SUM(COALESCE((data->>'cache_creation_1h_tokens')::int, 0)) as cache_creation_1h,
     SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
     COUNT(DISTINCT session_id) as session_count,
     ARRAY_AGG(DISTINCT session_id) as session_ids,
@@ -159,7 +166,7 @@ FROM agent_events
 WHERE event_type = $1
   AND execution_id = ANY($2::text[])
   AND time >= $3 AND time < $4
-GROUP BY execution_id, {recorded_model_group_by()}, {zero_usage_group_by()}
+GROUP BY execution_id, session_id, {recorded_model_group_by()}, {zero_usage_group_by()}
 """
 
 # Per-execution, per-phase cost breakdown.
@@ -323,6 +330,7 @@ class ExecutionCostQueryService:
         holding the caller's connection deadlocks a saturated pool (#1420).
         """
         summary_rows_by_execution = self._group_rows_by_execution(summary_rows)
+        all_token_rows_by_execution = self._group_rows_by_execution(token_rows)
         unreported = await self._unreported_session_costs(summary_rows)
         phase_map = self._price_phase_rows(phase_rows, unreported)
 
@@ -330,7 +338,12 @@ class ExecutionCostQueryService:
         for eid, rows in summary_rows_by_execution.items():
             results.append(
                 self._build_from_summary(
-                    eid, rows, tool_counts, phase_map, unreported.another_rollup()
+                    eid,
+                    rows,
+                    tool_counts,
+                    phase_map,
+                    unreported.another_rollup(),
+                    all_token_rows_by_execution.get(eid, []),
                 )
             )
 
@@ -436,8 +449,12 @@ class ExecutionCostQueryService:
         tool_counts: dict[str, int],
         phase_map: dict[str, PhaseCosts],
         unreported: UnreportedSessionCosts | None = None,
+        turn_rows: Sequence[asyncpg.Record] = (),
     ) -> ExecutionCost:
         """Build an ExecutionCost from model-grouped session_summary rows.
+
+        ``turn_rows`` are grouped by session and model. A summary records no
+        TTL split; only turns of its summarized sessions supply that share (#2145).
 
         ``rows`` are all (execution_id, model) groups for this execution
         from ``_LIST_ALL_FROM_SUMMARY_QUERY``. Priced per group via
@@ -457,6 +474,9 @@ class ExecutionCostQueryService:
             input_tokens=grouped.input_tokens,
             output_tokens=grouped.output_tokens,
             cache_creation_tokens=grouped.cache_creation,
+            cache_creation_1h_tokens=observed_cache_creation_1h(
+                turn_rows, grouped.cache_creation, session_ids=frozenset(grouped.session_ids)
+            ),
             cache_read_tokens=grouped.cache_read,
             tool_calls=tool_counts.get(execution_id, 0),
             turns=grouped.total_turns,
@@ -497,6 +517,7 @@ class ExecutionCostQueryService:
             input_tokens=grouped.input_tokens,
             output_tokens=grouped.output_tokens,
             cache_creation_tokens=grouped.cache_creation,
+            cache_creation_1h_tokens=grouped.cache_creation_1h,
             cache_read_tokens=grouped.cache_read,
             tool_calls=tool_counts.get(execution_id, 0),
             duration_ms=self._resolve_duration(None, grouped.started_at, grouped.end_at),
