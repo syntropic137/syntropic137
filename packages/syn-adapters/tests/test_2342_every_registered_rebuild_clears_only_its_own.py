@@ -2,18 +2,19 @@
 
 Runs over the real registry: ``create_coordinator_service()`` with both
 optional inventory managers, plus the realtime adapter, all on one shared
-``InMemoryProjectionStore``. Every namespace any of them stores gets two rows.
-Then one registration at a time is rebuilt through
+``InMemoryProjectionStore``. Every namespace any of them stores holds rows
+(``dashboard_metrics`` is one singleton row, every other namespace two). Then one registration at a time is rebuilt through
 ``SubscriptionCoordinator._resume_position`` (a VERSION mismatch). Its declared
 namespaces must be empty afterwards, and every other namespace must be exactly
 what it was, row for row.
 
-Rows are seeded rather than produced by each handler: thirty handlers need
-thirty event shapes, and the clear is unconditional on the row contents. The
-handler-to-clear path is covered for the observation adapters in
-``test_2342_observation_adapters_clear_on_rebuild.py``. Seeded rows carry every
-id field a per-key clear reads (``organization_id``, ``execution_id`` ...), so
-those clears find what they must delete.
+Every row is produced by a registered handler: one ordered event history goes
+through ``handle_event`` of every registration that subscribes to each event,
+the way the coordinator delivers it. Events are the real domain event classes
+(``_EVENT_CLASSES``), with every required field filled from its annotation (``_build``) and the few fields a handler keys on set
+explicitly. The observation events have no class and travel as
+``GenericDomainEvent``, as in ``test_2342_observation_adapters_clear_on_rebuild.py``.
+Only ``_UNOWNED`` is written directly, because no handler owns it.
 """
 
 from __future__ import annotations
@@ -23,7 +24,11 @@ import os
 # Must be set before any syn_* imports
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+import datetime as dt
+import enum
 import json
+import types
+import typing
 from datetime import UTC, datetime
 from typing import Any, cast
 from unittest.mock import MagicMock, Mock
@@ -31,12 +36,65 @@ from unittest.mock import MagicMock, Mock
 import pytest
 from event_sourcing import (
     CheckpointedProjection,
+    DomainEvent,
+    EventEnvelope,
+    EventMetadata,
+    GenericDomainEvent,
     MemoryCheckpointStore,
     ProjectionCheckpoint,
+    ProjectionResult,
     SubscriptionCoordinator,
 )
+from pydantic import BaseModel
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
+from syn_domain.contexts.agent_sessions.domain.events.SessionStartedEvent import SessionStartedEvent
+from syn_domain.contexts.artifacts.domain.events.ArtifactCreatedEvent import ArtifactCreatedEvent
+from syn_domain.contexts.github.domain.events.TriggerBlockedEvent import TriggerBlockedEvent
+from syn_domain.contexts.github.domain.events.TriggerFiredEvent import TriggerFiredEvent
+from syn_domain.contexts.github.domain.events.TriggerRegisteredEvent import TriggerRegisteredEvent
+from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import Verdict
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    QuarantinedRef,
+)
+from syn_domain.contexts.orchestration.domain.events.ClaudePluginRegisteredEvent import (
+    ClaudePluginRegisteredEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.EvalCreatedEvent import EvalCreatedEvent
+from syn_domain.contexts.orchestration.domain.events.EvalRunScoredEvent import EvalRunScoredEvent
+from syn_domain.contexts.orchestration.domain.events.ExecutionRequestedEvent import (
+    ExecutionRequestedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
+    ExecutionResumedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.GlobalClaudePluginAddedEvent import (
+    GlobalClaudePluginAddedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import PhaseCompletedEvent
+from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import PhaseStartedEvent
+from syn_domain.contexts.orchestration.domain.events.SkillRegisteredEvent import (
+    SkillRegisteredEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    WorkflowExecutionStartedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import WorkflowFailedEvent
+from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
+    WorkflowTemplateCreatedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
+    WorkspaceProvisionedForPhaseEvent,
+)
+from syn_domain.contexts.organization.domain.events.OrganizationCreatedEvent import (
+    OrganizationCreatedEvent,
+)
+from syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent import (
+    RepoAssignedToSystemEvent,
+)
+from syn_domain.contexts.organization.domain.events.RepoRegisteredEvent import RepoRegisteredEvent
+from syn_domain.contexts.organization.domain.events.SystemCreatedEvent import SystemCreatedEvent
+from syn_shared.events import TOKEN_USAGE, TOOL_EXECUTION_STARTED
 
 pytestmark = pytest.mark.unit
 
@@ -118,30 +176,151 @@ def _registered(store: InMemoryProjectionStore) -> dict[str, CheckpointedProject
     return {p.get_name(): p for p in [*service._projections, realtime]}
 
 
-async def _seeded_store() -> InMemoryProjectionStore:
-    """Two rows in every namespace, each carrying every id a per-key clear reads."""
-    store = InMemoryProjectionStore()
-    for namespace in _NAMESPACES:
-        for n in (1, 2):
-            key = f"{namespace}-{n}"
-            await store.save(
-                namespace,
-                key,
-                {
-                    "_projection_key": key,
-                    "organization_id": key,
-                    "system_id": key,
-                    "repo_id": key,
-                    "execution_id": key,
-                    "payload": {"n": n, "tags": [namespace, n]},
-                },
+def _value(field: str, annotation: object, n: int) -> object:
+    """A valid value for a required field, the same for every event with the same ``n``.
+
+    Ids are ``f"{field}-{n}"``, so ``execution_id`` correlates across events
+    the way it does in a real stream.
+    """
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if origin in (typing.Union, types.UnionType):
+        return _value(field, next(a for a in args if a is not type(None)), n)
+    if origin is typing.Literal:
+        return args[0]
+    if origin is list:
+        return []
+    if origin is dict:
+        return {}
+    if isinstance(annotation, type):
+        if issubclass(annotation, bool):
+            return False
+        if issubclass(annotation, enum.Enum):
+            return next(iter(annotation))
+        if issubclass(annotation, int | float):
+            return annotation(n)
+        if issubclass(annotation, dt.datetime):
+            return dt.datetime(2026, 11, 21, 0, n, tzinfo=UTC)
+        if issubclass(annotation, BaseModel):
+            return _build(annotation, n)
+    return f"{field}-{n}"
+
+
+def _build[M: BaseModel](model: type[M], n: int, **overrides: object) -> M:
+    required = {
+        name: _value(name, info.annotation, n)
+        for name, info in model.model_fields.items()
+        if info.is_required()
+    }
+    return model.model_validate(required | overrides)
+
+
+def _repository(n: int) -> str:
+    return f"owner/repo-{n}"
+
+
+def _domain_event(event_type: str, n: int) -> DomainEvent:
+    """One event of the history, as its registered class, for entity ``n``."""
+    if event_type in (TOOL_EXECUTION_STARTED, TOKEN_USAGE):
+        return GenericDomainEvent(
+            session_id=f"session_id-{n}",
+            execution_id=f"execution_id-{n}",
+            tool_use_id=f"tool_use_id-{n}",
+            tool_name="Bash",
+            timestamp="2026-11-21T00:00:00+00:00",
+            observation_type=event_type,
+            event_type=event_type,
+            data={"input_tokens": 100 * n, "output_tokens": 10, "model": "claude-opus-5-5"},
+        )
+    event_class = _EVENT_CLASSES[event_type]
+    # The fields a handler keys on that an annotation cannot supply.
+    match event_type:
+        case "EvalRunScored":
+            return _build(event_class, n, verdict=Verdict.PASS.value)
+        case "github.TriggerFired":
+            return _build(
+                event_class, n, repository=_repository(n), webhook_delivery_id=f"delivery-{n}"
             )
-    return store
+        case "WorkflowExecutionStarted":
+            return _build(
+                event_class, n, inputs={"repository": f"https://github.com/{_repository(n)}"}
+            )
+        case "WorkflowFailed":
+            return _build(
+                event_class,
+                n,
+                failed_phase_id=f"phase_id-{n}",
+                quarantined_refs=[_build(QuarantinedRef, n, repository=_repository(n))],
+            )
+        case _:
+            return _build(event_class, n)
+
+
+#: The class each event of ``_HISTORY`` is built as.
+_EVENT_CLASSES: dict[str, type[DomainEvent]] = {
+    "WorkflowTemplateCreated": WorkflowTemplateCreatedEvent,
+    "ArtifactCreated": ArtifactCreatedEvent,
+    "EvalCreated": EvalCreatedEvent,
+    "EvalRunScored": EvalRunScoredEvent,
+    "ClaudePluginRegistered": ClaudePluginRegisteredEvent,
+    "GlobalClaudePluginAdded": GlobalClaudePluginAddedEvent,
+    "SkillRegistered": SkillRegisteredEvent,
+    "ExecutionRequested": ExecutionRequestedEvent,
+    "ExecutionResumed": ExecutionResumedEvent,
+    "organization.OrganizationCreated": OrganizationCreatedEvent,
+    "organization.SystemCreated": SystemCreatedEvent,
+    "organization.RepoRegistered": RepoRegisteredEvent,
+    "organization.RepoAssignedToSystem": RepoAssignedToSystemEvent,
+    "github.TriggerRegistered": TriggerRegisteredEvent,
+    "github.TriggerFired": TriggerFiredEvent,
+    "github.TriggerBlocked": TriggerBlockedEvent,
+    "SessionStarted": SessionStartedEvent,
+    "WorkflowExecutionStarted": WorkflowExecutionStartedEvent,
+    "PhaseStarted": PhaseStartedEvent,
+    "PhaseCompleted": PhaseCompletedEvent,
+    "WorkflowFailed": WorkflowFailedEvent,
+    "WorkspaceProvisionedForPhase": WorkspaceProvisionedForPhaseEvent,
+}
+
+#: Creation before change, nothing deleted: after this history every namespace
+#: any registration owns holds at least one handler-produced row.
+_HISTORY = (*_EVENT_CLASSES, TOOL_EXECUTION_STARTED, TOKEN_USAGE)
+
+
+async def _fed_store() -> tuple[InMemoryProjectionStore, dict[str, CheckpointedProjection]]:
+    """The registry after ``_HISTORY`` for two entities went through every handler."""
+    store = InMemoryProjectionStore()
+    registered = _registered(store)
+    checkpoints = MemoryCheckpointStore()
+    nonce = 0
+    for event_type in _HISTORY:
+        for n in (1, 2):
+            nonce += 1
+            envelope = EventEnvelope(
+                event=_domain_event(event_type, n),
+                metadata=EventMetadata(
+                    event_type=event_type,
+                    aggregate_id=f"aggregate-{n}",
+                    aggregate_type="Fixture",
+                    aggregate_nonce=nonce,
+                    global_nonce=nonce,
+                ),
+            )
+            for name, adapter in registered.items():
+                if name in _SQL_BACKED or not adapter.should_handle_event_type(event_type):
+                    continue
+                result = await adapter.handle_event(envelope, checkpoints)
+                assert result is not ProjectionResult.FAILURE, f"{name} failed {event_type}"
+    for n in (1, 2):
+        await store.save(_UNOWNED, f"sentinel-{n}", {"n": n})
+    return store, registered
 
 
 async def _snapshot(store: InMemoryProjectionStore) -> dict[str, str]:
     """Each namespace's rows as canonical JSON, so equality means row-for-row identical."""
-    return {ns: json.dumps(await store.get_all(ns), sort_keys=True) for ns in _NAMESPACES}
+    return {
+        ns: json.dumps(await store.get_all(ns), sort_keys=True, default=str) for ns in _NAMESPACES
+    }
 
 
 def test_every_registration_is_declared() -> None:
@@ -159,11 +338,11 @@ def test_every_registration_is_declared() -> None:
 async def test_rebuild_clears_its_own_namespaces_and_leaves_every_other_row_exactly(
     rebuilt: str,
 ) -> None:
-    store = await _seeded_store()
-    adapter = _registered(store)[rebuilt]
+    store, registered = await _fed_store()
+    adapter = registered[rebuilt]
     before = await _snapshot(store)
-    for namespace in _NAMESPACES:
-        assert len(await store.get_all(namespace)) == 2, f"{namespace} was not seeded"
+    empty = sorted(ns for ns in _NAMESPACES if before[ns] == "[]")
+    assert not empty, f"no handler wrote to {empty}; extend _HISTORY"
 
     checkpoints = MemoryCheckpointStore()
     await checkpoints.save_checkpoint(
