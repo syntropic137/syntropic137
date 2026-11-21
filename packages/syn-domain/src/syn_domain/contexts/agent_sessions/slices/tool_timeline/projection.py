@@ -47,6 +47,10 @@ class ToolTimelineProjection:
         """Get the projection name."""
         return self.PROJECTION_NAME
 
+    async def clear_all_data(self) -> None:
+        """Delete every stored tool execution so a version rebuild replays onto nothing."""
+        await self._store.delete_all(self.PROJECTION_NAME)
+
     async def on_tool_execution_started(self, event_data: dict[str, Any]) -> None:
         """Handle tool_execution_started observation.
 
