@@ -44,19 +44,19 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 
-_TOOL_STARTED = {
-    "session_id": "session-1",
-    "tool_use_id": "tool-1",
-    "tool_name": "Bash",
-    "timestamp": "2026-11-21T00:00:00+00:00",
-}
-_TOKEN_USAGE = {
-    "session_id": "session-1",
-    "execution_id": "exec-1",
-    "observation_type": TOKEN_USAGE,
-    "event_type": TOKEN_USAGE,
-    "data": {"input_tokens": 100, "output_tokens": 10, "model": "claude-opus-5-5"},
-}
+_TOOL_STARTED = GenericDomainEvent(
+    session_id="session-1",
+    tool_use_id="tool-1",
+    tool_name="Bash",
+    timestamp="2026-11-21T00:00:00+00:00",
+)
+_TOKEN_USAGE = GenericDomainEvent(
+    session_id="session-1",
+    execution_id="exec-1",
+    observation_type=TOKEN_USAGE,
+    event_type=TOKEN_USAGE,
+    data={"input_tokens": 100, "output_tokens": 10, "model": "claude-opus-5-5"},
+)
 
 #: Every observation read model the coordinator wraps in an
 #: ``_ObservationProjectionAdapter``, with its namespace and an event it stores.
@@ -68,10 +68,10 @@ _OBSERVATION_READ_MODELS = {
 
 
 def _envelope(
-    event_type: str, data: dict[str, object], nonce: int
+    event_type: str, event: GenericDomainEvent, nonce: int
 ) -> EventEnvelope[GenericDomainEvent]:
     return EventEnvelope(
-        event=GenericDomainEvent(**data),
+        event=event,
         metadata=EventMetadata(
             event_type=event_type,
             aggregate_id="session-1",
@@ -90,11 +90,11 @@ async def _fed_adapters(store: InMemoryProjectionStore) -> dict[str, Checkpointe
         adapter = as_checkpointed(projection_type(store))
         assert adapter is not None
         adapters[name] = adapter
-        for nonce, (event_type, data) in enumerate(
+        for nonce, (event_type, event) in enumerate(
             ((TOOL_EXECUTION_STARTED, _TOOL_STARTED), (TOKEN_USAGE, _TOKEN_USAGE)), start=1
         ):
             if adapter.should_handle_event_type(event_type):
-                await adapter.handle_event(_envelope(event_type, data, nonce), checkpoints)
+                await adapter.handle_event(_envelope(event_type, event, nonce), checkpoints)
     return adapters
 
 
