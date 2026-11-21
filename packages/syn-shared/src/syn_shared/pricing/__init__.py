@@ -229,6 +229,33 @@ class TokenTypeCost:
 
 
 @dataclass(frozen=True)
+class CacheWrites:
+    """Cache writes split by the rate each is billed at (#2145).
+
+    A 1-hour write costs more than a 5-minute one (2x input against 1.25x), so
+    pricing needs the split, not the total: pass ``five_minute`` as
+    ``cache_creation`` and ``one_hour`` as ``cache_creation_1h``.
+    """
+
+    five_minute: int
+    one_hour: int
+
+    @classmethod
+    def from_recorded(cls, total: int, one_hour: int = 0) -> CacheWrites:
+        """Split a recorded row's cache writes: ``total`` of every TTL, ``one_hour`` of it 1-hour.
+
+        A ``TOKEN_USAGE`` row stores the total in ``cache_creation_tokens`` and
+        the 1-hour share beside it in ``cache_creation_1h_tokens`` (#2145 B2a).
+        A row written before that has no share, so ``one_hour`` is 0 and every
+        write is 5-minute, exactly as it was always priced. A share outside
+        ``0..total`` cannot be true of one row, so it is clamped: the cost of a
+        bad row never exceeds pricing all of its writes at the 1-hour rate.
+        """
+        one_hour = min(max(one_hour, 0), max(total, 0))
+        return cls(five_minute=max(total, 0) - one_hour, one_hour=one_hour)
+
+
+@dataclass(frozen=True)
 class ModelPricing:
     """Pricing for an LLM model, in USD per million tokens."""
 
@@ -926,6 +953,7 @@ __all__ = [
     "PLACEHOLDER_PRICED_MODELS",
     "VENDOR_COST_QUANTUM",
     "CacheRateMultipliers",
+    "CacheWrites",
     "CostSplitBasis",
     "ModelPricing",
     "PricedAmount",

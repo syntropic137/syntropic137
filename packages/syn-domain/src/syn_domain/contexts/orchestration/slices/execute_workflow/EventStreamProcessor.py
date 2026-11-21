@@ -53,6 +53,7 @@ from syn_shared.delegation import (
     looks_like_delegation_command,
 )
 from syn_shared.events import VALID_EVENT_TYPES
+from syn_shared.pricing import CacheWrites
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -242,7 +243,7 @@ class ClaudeUsageBlock(TypedDict, total=False):
 
     ``cache_creation`` splits ``cache_creation_input_tokens`` by cache TTL
     (``ephemeral_1h_input_tokens`` / ``ephemeral_5m_input_tokens``). Older CLIs
-    omit it. Read it only through ``CacheWrites.from_claude_usage``.
+    omit it. Read it only through ``cache_writes_from_claude_usage``.
     """
 
     input_tokens: int
@@ -257,47 +258,35 @@ def _is_count(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
-@dataclass(frozen=True)
-class CacheWrites:
-    """One turn's cache writes, split by the rate each is billed at (#2145).
+def cache_writes_from_claude_usage(usage: ClaudeUsageBlock) -> CacheWrites:
+    """Split ``cache_creation_input_tokens`` using the CLI's per-TTL breakdown.
 
-    A 1-hour write costs more than a 5-minute one (2x input against 1.25x), so
-    pricing needs the split, not the total.
+    With no breakdown (an older CLI) every write is 5-minute, which is how
+    they were all priced before. A breakdown that disagrees with the total
+    is logged and treated the same way: it cannot be trusted, and pricing
+    the total at the old rate is no worse than it was.
     """
-
-    five_minute: int
-    one_hour: int
-
-    @classmethod
-    def from_claude_usage(cls, usage: ClaudeUsageBlock) -> CacheWrites:
-        """Split ``cache_creation_input_tokens`` using the CLI's per-TTL breakdown.
-
-        With no breakdown (an older CLI) every write is 5-minute, which is how
-        they were all priced before. A breakdown that disagrees with the total
-        is logged and treated the same way: it cannot be trusted, and pricing
-        the total at the old rate is no worse than it was.
-        """
-        total = usage.get("cache_creation_input_tokens", 0)
-        split = usage.get("cache_creation")
-        if split is None:
-            return cls(five_minute=total, one_hour=0)
-        # The value came from json.loads, so the TypedDict is a claim, not a check.
-        # Counts must be real ints: ``True == 1`` and ``99.0 == 99`` would pass a
-        # numeric comparison and price a malformed split at the premium rate.
-        if _is_count(total) and isinstance(split, Mapping):
-            one_hour = split.get("ephemeral_1h_input_tokens", 0)
-            if _is_count(one_hour) and one_hour <= total:
-                five_minute = total - one_hour
-                reported_5m = split.get("ephemeral_5m_input_tokens", five_minute)
-                if _is_count(reported_5m) and reported_5m == five_minute:
-                    return cls(five_minute=five_minute, one_hour=one_hour)
-        logger.warning(
-            "cache_creation split %r disagrees with cache_creation_input_tokens=%r;"
-            " pricing all cache writes at the 5-minute rate",
-            split,
-            total,
-        )
-        return cls(five_minute=total, one_hour=0)
+    total = usage.get("cache_creation_input_tokens", 0)
+    split = usage.get("cache_creation")
+    if split is None:
+        return CacheWrites(five_minute=total, one_hour=0)
+    # The value came from json.loads, so the TypedDict is a claim, not a check.
+    # Counts must be real ints: ``True == 1`` and ``99.0 == 99`` would pass a
+    # numeric comparison and price a malformed split at the premium rate.
+    if _is_count(total) and isinstance(split, Mapping):
+        one_hour = split.get("ephemeral_1h_input_tokens", 0)
+        if _is_count(one_hour) and one_hour <= total:
+            five_minute = total - one_hour
+            reported_5m = split.get("ephemeral_5m_input_tokens", five_minute)
+            if _is_count(reported_5m) and reported_5m == five_minute:
+                return CacheWrites(five_minute=five_minute, one_hour=one_hour)
+    logger.warning(
+        "cache_creation split %r disagrees with cache_creation_input_tokens=%r;"
+        " pricing all cache writes at the 5-minute rate",
+        split,
+        total,
+    )
+    return CacheWrites(five_minute=total, one_hour=0)
 
 
 class ClaudeResultLine(TypedDict, total=False):
@@ -916,7 +905,7 @@ class EventStreamProcessor:
             # on another model is priced as that model, not as the leader.
             turn_model = announced_model_from(message.get("model"))
             # Parsed once: the stored row and the limiter must agree on the split.
-            cache_writes = CacheWrites.from_claude_usage(usage)
+            cache_writes = cache_writes_from_claude_usage(usage)
             # The row keeps the TOTAL and carries the 1-hour share beside it
             # (#2145 B2a); the limiter prices each share at its own rate.
             await self._collector.record_token_usage(

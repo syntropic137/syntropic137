@@ -176,6 +176,7 @@ from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     HAS_REQUESTED_MODEL_COLUMN,
     REQUESTED_MODEL_COLUMN,
+    observed_cache_creation_1h,
     pick_primary_model,
     recorded_model_from_row,
     recorded_model_group_by,
@@ -437,6 +438,7 @@ __all__ = [
     "import_phase_delegates",
     "inventory_counts",
     "namespace_counts",
+    "observed_cache_creation_1h",
     "pick_primary_model",
     "price_canonical_row",
     "record_error",

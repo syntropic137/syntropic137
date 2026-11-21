@@ -25,9 +25,10 @@ from syn_shared.observed_model import (
     RecordedModel,
     split_recorded_model,
 )
+from syn_shared.pricing import CacheWrites
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
 REQUESTED_MODEL_COLUMN: Final[str] = "requested_model"
 """Result column carrying ``data->>'requested_model'``."""
@@ -112,10 +113,33 @@ def pick_primary_model(tokens_by_model: Mapping[str, int]) -> str | None:
     return max(tokens_by_model.items(), key=lambda kv: (kv[1], kv[0]))[0]
 
 
+def observed_cache_creation_1h(
+    turn_rows: Iterable[ModelRow], total: int, *, session_ids: frozenset[str] | None = None
+) -> int:
+    """The 1-hour share of ``total`` cache writes, as a session's turns recorded it.
+
+    A ``session_summary`` row records every cache write in one total and no
+    TTL split, so a reader that prices or counts from a summary takes the split
+    from the ``token_usage`` rows (grouped, each carrying ``cache_creation_1h``)
+    of the same sessions (#2145). Clamped to ``total`` by ``CacheWrites``; a
+    legacy turn without the column contributes 0. Execution queries group turns
+    per session and pass the summarized ``session_ids`` so unfinished sessions
+    cannot contribute a split to another session's authoritative total.
+    """
+    one_hour = 0
+    for row in turn_rows:
+        if session_ids is not None and row.get("session_id") not in session_ids:
+            continue
+        value = row.get("cache_creation_1h")
+        one_hour += value if isinstance(value, int) else 0
+    return CacheWrites.from_recorded(total, one_hour).one_hour
+
+
 __all__ = [
     "HAS_REQUESTED_MODEL_COLUMN",
     "REQUESTED_MODEL_COLUMN",
     "ModelRow",
+    "observed_cache_creation_1h",
     "pick_primary_model",
     "recorded_model_from_row",
     "recorded_model_group_by",
