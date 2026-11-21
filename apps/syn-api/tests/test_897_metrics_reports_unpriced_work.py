@@ -3,12 +3,11 @@
 #897 slice H. The dashboard's cost card read ``total_cost_usd`` alone, so work
 that carried no usable rate rendered as ``$0.0000`` (free) or as a confident
 total (complete) when it was a lower bound. ``/metrics`` now reads its money
-and its coverage from the SAME ``ExecutionCost`` rows, through the one rollup
-every other cost surface uses, and the runs list passes through the count each
-run's execution row already carries.
+and its coverage from the SAME canonical usage rows, in one aggregate, and the
+runs list passes through the count each run's execution row already carries.
 
-Driven through the real routes; only the cost query, the canonical totals and
-the execution ids are stubbed.
+Driven through the real routes; only the canonical totals, the per-phase cost
+query and the execution ids are stubbed.
 """
 
 from __future__ import annotations
@@ -21,13 +20,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_domain.contexts.agent_sessions import CanonicalTotals
-from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from syn_api.routes.metrics import MetricsResponse
     from syn_api.routes.workflows.queries import ExecutionRunSummary
+    from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
+        ExecutionCost,
+    )
 
 pytestmark = pytest.mark.unit
 
@@ -37,27 +38,38 @@ WORKFLOW = "wf-mine"
 
 
 @dataclass
-class _FakeCostQuery:
-    """Stands in for ExecutionCostQueryService; records what it was asked."""
+class _FakeCanonical:
+    """Stands in for CanonicalUsageQueryService: one total per execution, summed."""
 
-    costs: list[ExecutionCost]
+    by_execution: dict[str, CanonicalTotals]
+    asked: list[set[str] | None] = field(default_factory=list)
+
+    async def totals(self, execution_ids: set[str] | None = None) -> CanonicalTotals:
+        self.asked.append(None if execution_ids is None else set(execution_ids))
+        picked = [
+            t
+            for eid, t in self.by_execution.items()
+            if execution_ids is None or eid in execution_ids
+        ]
+        return CanonicalTotals(
+            input_tokens=sum(t.input_tokens for t in picked),
+            cost_usd=sum((t.cost_usd for t in picked), Decimal("0")),
+            unpriced_observation_count=sum(t.unpriced_observation_count for t in picked),
+        )
+
+
+@dataclass
+class _FakeCostQuery:
+    """The per-phase cost read; the totals must never come from it."""
+
     asked_for_ids: list[set[str]] = field(default_factory=list)
-    asked_all: int = 0
 
     async def list_all(self, limit: int = 500) -> list[ExecutionCost]:
-        self.asked_all += 1
-        return self.costs[:limit]
+        raise AssertionError("/metrics must not read every execution's cost (#897)")
 
     async def list_for_ids(self, execution_ids: set[str]) -> list[ExecutionCost]:
         self.asked_for_ids.append(set(execution_ids))
-        return [c for c in self.costs if c.execution_id in execution_ids]
-
-
-class _CanonicalTokens:
-    """Tokens stay canonical (#932); its cost is a value no rollup produces."""
-
-    async def totals(self, execution_ids: set[str] | None = None) -> CanonicalTotals:
-        return CanonicalTotals(cost_usd=Decimal("999"), input_tokens=7)
+        return []
 
 
 @pytest.fixture(autouse=True)
@@ -78,25 +90,24 @@ def _reset_storage() -> Iterator[None]:
     reset_projection_manager()
 
 
-def _cost(execution_id: str, usd: str, unpriced: int) -> ExecutionCost:
-    return ExecutionCost(
-        execution_id=execution_id,
-        total_cost_usd=Decimal(usd),
-        unpriced_observation_count=unpriced,
+def _cost(execution_id: str, usd: str, unpriced: int) -> tuple[str, CanonicalTotals]:
+    return execution_id, CanonicalTotals(
+        input_tokens=7, cost_usd=Decimal(usd), unpriced_observation_count=unpriced
     )
 
 
 async def _metrics(
     monkeypatch: pytest.MonkeyPatch,
-    costs: list[ExecutionCost],
+    costs: list[tuple[str, CanonicalTotals]],
     workflow_id: str | None = None,
     workflow_execution_ids: set[str] | None = None,
 ) -> MetricsResponse:
     from syn_api.routes import metrics
 
-    query = _FakeCostQuery(costs)
+    canonical = _FakeCanonical(dict(costs))
+    query = _FakeCostQuery()
     monkeypatch.setattr(metrics, "get_execution_cost_query", lambda: query)
-    monkeypatch.setattr(metrics, "get_canonical_usage_query", _CanonicalTokens)
+    monkeypatch.setattr(metrics, "get_canonical_usage_query", lambda: canonical)
 
     async def _ids(_workflow_id: str) -> set[str]:
         return workflow_execution_ids or set()
@@ -143,12 +154,13 @@ class TestGlobalMetrics:
         assert body.unpriced_observation_count == 13
 
     @pytest.mark.asyncio
-    async def test_tokens_stay_canonical(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Only money moved; tokens still agree with the activity heatmap (#932)."""
-        body = await _metrics(monkeypatch, [_cost("e-1", "0.5", 0)])
+    async def test_tokens_and_money_read_one_source(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Tokens, money and coverage all agree with the activity heatmap (#932)."""
+        body = await _metrics(monkeypatch, [_cost("e-1", "0.5", 0), _cost("e-2", "0", 3)])
 
-        assert body.total_input_tokens == 7
+        assert body.total_input_tokens == 14
         assert str(body.total_cost_usd) == "0.5"
+        assert body.unpriced_observation_count == 3
 
 
 class TestWorkflowScopedMetrics:
@@ -158,10 +170,10 @@ class TestWorkflowScopedMetrics:
     ) -> None:
         from syn_api.routes import metrics
 
-        costs = [_cost("mine-1", "0.75", 1), _cost("theirs-1", "5", 40)]
-        query = _FakeCostQuery(costs)
+        canonical = _FakeCanonical(dict([_cost("mine-1", "0.75", 1), _cost("theirs-1", "5", 40)]))
+        query = _FakeCostQuery()
         monkeypatch.setattr(metrics, "get_execution_cost_query", lambda: query)
-        monkeypatch.setattr(metrics, "get_canonical_usage_query", _CanonicalTokens)
+        monkeypatch.setattr(metrics, "get_canonical_usage_query", lambda: canonical)
 
         async def _ids(_workflow_id: str) -> set[str]:
             return {"mine-1"}
@@ -172,9 +184,9 @@ class TestWorkflowScopedMetrics:
         assert body.unpriced_observation_count == 1
         assert str(body.total_cost_usd) == "0.75"
         assert body.total_cost_display == ">=$0.75 (partial)"
-        # One read, shared by the totals and the per-phase costs.
+        assert canonical.asked == [{"mine-1"}]
+        # The per-phase costs are read for this workflow's executions only.
         assert query.asked_for_ids == [{"mine-1"}]
-        assert query.asked_all == 0
 
     @pytest.mark.asyncio
     async def test_workflow_with_no_executions_reads_nothing(
@@ -193,11 +205,11 @@ async def test_cost_read_failure_is_503_not_zero(monkeypatch: pytest.MonkeyPatch
     from syn_api.routes import metrics
 
     class _Down:
-        async def list_all(self, limit: int = 500) -> list[ExecutionCost]:
+        async def totals(self, execution_ids: set[str] | None = None) -> CanonicalTotals:
             raise RuntimeError("timescale down")
 
-    monkeypatch.setattr(metrics, "get_execution_cost_query", _Down)
-    monkeypatch.setattr(metrics, "get_canonical_usage_query", _CanonicalTokens)
+    monkeypatch.setattr(metrics, "get_execution_cost_query", _FakeCostQuery)
+    monkeypatch.setattr(metrics, "get_canonical_usage_query", _Down)
 
     with pytest.raises(HTTPException) as exc_info:
         await metrics.get_metrics_endpoint(workflow_id=None)

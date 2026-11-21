@@ -21,7 +21,6 @@ from syn_api._wiring import (
     get_phase_profile_query,
     get_projection_mgr,
 )
-from syn_api.routes._cost_rollup import roll_up_costs
 from syn_api.services.shipped_ledger import shipped_metrics_service
 from syn_api.types import (
     DashboardMetrics,
@@ -34,6 +33,7 @@ from syn_api.types import (
 )
 from syn_domain.contexts.orchestration import SHIPPED_WINDOW_DAYS, ShippedMetricsQueryService
 from syn_domain.pagination import Page
+from syn_shared.display import format_cost
 from syn_shared.pricing import canonical_cost_usd
 
 if TYPE_CHECKING:
@@ -141,19 +141,20 @@ class MetricsResponse(BaseModel):
     total_cache_read_tokens: int
     total_tokens: int
     total_cost_usd: Decimal = Decimal("0")
-    """What the executions in scope cost, summed from ``ExecutionCost`` (Lane 2).
+    """What the executions in scope cost, from canonical usage (#932).
 
-    The same rows and the same sum as ``/insights/cost``, so the card and the
-    insights page agree. Read it beside ``unpriced_observation_count``: alone it
-    cannot say whether it is the total or a lower bound (#897).
+    The same rows the tokens and the activity heatmap read. Read it beside
+    ``unpriced_observation_count``: alone it cannot say whether it is the total
+    or a lower bound (#897).
     """
     total_cost_display: str = "$0.00"
     """``total_cost_usd`` as ``format_cost`` renders it: ``unpriced`` when nothing
     was priced, ``>=$X (partial)`` when some was (#897)."""
     unpriced_observation_count: int = 0
     """Observations across these executions that carried no usable rate and so
-    added nothing to the total. Non-zero means the cost is INCOMPLETE, not that
-    the work was free (#890)."""
+    added nothing to the total, counted from the same canonical rows as
+    ``total_cost_usd``. Non-zero means the cost is INCOMPLETE, not that the work
+    was free (#890)."""
     total_artifacts: int = 0
     total_artifact_bytes: int = 0
     phases: list[PhaseMetrics] = Field(default_factory=list)
@@ -367,28 +368,21 @@ async def _artifact_count(workflow_id: str | None) -> int:
         ) from exc
 
 
-# The global card's window: the same 10,000 most recent executions
-# ``/insights/cost`` sums, so the two agree on what "all" means.
-_GLOBAL_COST_WINDOW = 10_000
+async def _execution_costs(execution_ids: set[str]) -> list[ExecutionCost]:
+    """``ExecutionCost`` rows for a workflow's executions, for its per-phase costs.
 
-
-async def _execution_costs(execution_ids: set[str] | None) -> list[ExecutionCost]:
-    """``ExecutionCost`` rows for these executions, or the global window when ``None``.
-
-    The one read behind the response's money, its coverage and its per-phase
-    costs, so the three are always summed over the same rows (#897).
+    Never asked for the global card: a per-execution read of all history is
+    what took ``/metrics`` from 22ms to 684ms at p95 (#897). The totals are one
+    aggregate over canonical usage instead (``_canonical_totals``).
 
     Raises:
         MetricsUnavailableError: the costs could not be read. Deliberately not
             an empty list, which would render the work as ``$0``.
     """
-    if execution_ids is not None and not execution_ids:
+    if not execution_ids:
         return []
     try:
-        query_svc = get_execution_cost_query()
-        if execution_ids is None:
-            return await query_svc.list_all(limit=_GLOBAL_COST_WINDOW)
-        return await query_svc.list_for_ids(execution_ids)
+        return await get_execution_cost_query().list_for_ids(execution_ids)
     except Exception as exc:
         logger.warning("Failed to read execution costs", exc_info=True)
         raise MetricsUnavailableError(
@@ -397,7 +391,10 @@ async def _execution_costs(execution_ids: set[str] | None) -> list[ExecutionCost
 
 
 async def _canonical_totals(execution_ids: set[str] | None) -> CanonicalTotals:
-    """Canonical token/cost totals, narrowed to a set of executions when given.
+    """Canonical token/cost totals and their coverage, narrowed to a set of executions.
+
+    One aggregate over the usage rollup, so money and its unpriced count are
+    read from the same rows, in one snapshot, however long the history (#897).
 
     Raises:
         MetricsUnavailableError: the totals could not be read.
@@ -430,11 +427,10 @@ async def get_metrics_endpoint(
 
     m = result.value
 
-    # Tokens come from the ONE canonical definition, the same one the
-    # activity heatmap reads (#932). Money does not: it comes from
-    # ``ExecutionCost`` with its unpriced count, the rows every other cost
-    # surface sums, because the canonical rollup keeps no observation count
-    # and a total without its coverage reads as complete (#897). They previously came from Lane 1
+    # Tokens, cost and the cost's coverage come from the ONE canonical
+    # definition, the same one the activity heatmap reads (#932), and the
+    # coverage from the same rows as the money: a total without it reads as
+    # complete when it is a lower bound (#897). They previously came from Lane 1
     # SessionCompleted events while the heatmap read Lane 2 observations, so
     # the two cards quoted 9,151,116 tokens beside 10,002,629 for the same
     # reality. Counts of things a list endpoint pages through are read from
@@ -448,16 +444,13 @@ async def get_metrics_endpoint(
         if workflow_id:
             execution_ids = await _workflow_execution_ids(workflow_id)
             totals = await _canonical_totals(execution_ids)
-            costs = await _execution_costs(execution_ids)
-            phases = await _build_phase_metrics(workflow_id, costs)
+            phases = await _build_phase_metrics(workflow_id, await _execution_costs(execution_ids))
         else:
             totals = await _canonical_totals(None)
-            costs = await _execution_costs(None)
             phases = []
     except MetricsUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    money = roll_up_costs(costs)
     return MetricsResponse(
         total_workflows=m.total_workflows,
         # The execution list's tally, not the dashboard projection's running
@@ -474,9 +467,9 @@ async def get_metrics_endpoint(
         total_cache_creation_tokens=totals.cache_creation_tokens,
         total_cache_read_tokens=totals.cache_read_tokens,
         total_tokens=totals.total_tokens,
-        total_cost_usd=canonical_cost_usd(money.total_cost_usd),
-        total_cost_display=money.total_cost_display,
-        unpriced_observation_count=money.unpriced_observation_count,
+        total_cost_usd=totals.cost_usd,
+        total_cost_display=format_cost(totals.cost_usd, totals.unpriced_observation_count),
+        unpriced_observation_count=totals.unpriced_observation_count,
         total_artifacts=total_artifacts,
         total_artifact_bytes=m.total_artifact_bytes,
         phases=phases,
