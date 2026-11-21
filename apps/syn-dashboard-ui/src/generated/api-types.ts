@@ -5134,6 +5134,16 @@ export interface components {
              * @default 0
              */
             total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /** Error Message */
             error_message?: string | null;
             /** @default unclassified */
@@ -6648,6 +6658,16 @@ export interface components {
              * @default 0
              */
             total_cost_usd: string;
+            /**
+             * Total Cost Display
+             * @default $0.00
+             */
+            total_cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /**
              * Total Artifacts
              * @default 0
