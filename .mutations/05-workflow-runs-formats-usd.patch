@@ -1,0 +1,13 @@
+diff --git a/apps/syn-dashboard-ui/src/pages/WorkflowRuns.tsx b/apps/syn-dashboard-ui/src/pages/WorkflowRuns.tsx
+index efbca4f55..f30c1d68f 100644
+--- a/apps/syn-dashboard-ui/src/pages/WorkflowRuns.tsx
++++ b/apps/syn-dashboard-ui/src/pages/WorkflowRuns.tsx
+@@ -57,7 +57,7 @@ function RunRow({ exec }: { exec: WorkflowExecutionSummary }) {
+         {exec.total_tokens.toLocaleString()}
+         <span className="text-xs text-[var(--color-text-muted)] ml-1">
+           <CostWithCoverage
+-            display={exec.total_cost_display}
++            display={`$${Number(exec.total_cost_usd).toFixed(4)}`}
+             unpricedObservationCount={exec.unpriced_observation_count}
+           />
+         </span>

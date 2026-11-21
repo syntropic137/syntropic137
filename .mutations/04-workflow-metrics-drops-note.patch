@@ -1,0 +1,13 @@
+diff --git a/apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowMetrics.tsx b/apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowMetrics.tsx
+index 3eb003afc..9a974ad10 100644
+--- a/apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowMetrics.tsx
++++ b/apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowMetrics.tsx
+@@ -41,7 +41,7 @@ export function WorkflowMetrics({ workflow, metrics, artifactCount, executions,
+           metrics && (
+             <CostWithCoverage
+               display={metrics.total_cost_display}
+-              unpricedObservationCount={metrics.unpriced_observation_count}
++              unpricedObservationCount={0}
+             />
+           )
+         }

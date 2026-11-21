@@ -1,0 +1,13 @@
+diff --git a/apps/syn-dashboard-ui/src/pages/Dashboard/Dashboard.tsx b/apps/syn-dashboard-ui/src/pages/Dashboard/Dashboard.tsx
+index 32fc69db4..79f70916a 100644
+--- a/apps/syn-dashboard-ui/src/pages/Dashboard/Dashboard.tsx
++++ b/apps/syn-dashboard-ui/src/pages/Dashboard/Dashboard.tsx
+@@ -73,7 +73,7 @@ export function Dashboard() {
+             metrics && (
+               <CostWithCoverage
+                 display={metrics.total_cost_display}
+-                unpricedObservationCount={metrics.unpriced_observation_count}
++                unpricedObservationCount={0}
+               />
+             )
+           }
