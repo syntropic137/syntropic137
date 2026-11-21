@@ -15,8 +15,6 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     import asyncpg
 
     from syn_domain.contexts.agent_sessions.canonical_usage import PricingResolver
@@ -30,6 +28,7 @@ from syn_domain.contexts.agent_sessions.canonical_usage import (
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     HAS_REQUESTED_MODEL_COLUMN,
     REQUESTED_MODEL_COLUMN,
+    ModelRow,
     recorded_model_group_by,
     recorded_model_select,
     zero_usage_group_by,
@@ -104,11 +103,11 @@ type _ModelKey = tuple[object, object, bool]
 """A row's three model columns, as the canonical query groups on them."""
 
 
-def _model_key(row: Mapping[str, object]) -> _ModelKey:
+def _model_key(row: ModelRow) -> _ModelKey:
     return (
-        row["model"],
-        row[REQUESTED_MODEL_COLUMN],
-        bool(row[HAS_REQUESTED_MODEL_COLUMN]),
+        row.get("model"),
+        row.get(REQUESTED_MODEL_COLUMN),
+        bool(row.get(HAS_REQUESTED_MODEL_COLUMN)),
     )
 
 
