@@ -39,7 +39,7 @@ from syn_domain.contexts.orchestration import (
     is_phase_id,
 )
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, resolve_definition_model
-from syn_shared.display import format_phase_model_definition
+from syn_shared.display import format_cost, format_phase_model_definition
 from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
@@ -164,6 +164,13 @@ class ExecutionRunSummary(BaseModel):
     """Progress with skipped repair rounds accounted for; what clients render."""
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
+    total_cost_display: str = "$0.00"
+    """``total_cost_usd`` as ``format_cost`` renders it: ``unpriced`` when nothing
+    was priced, ``>=$X (partial)`` when some was (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations in this run that carried no usable rate and so added nothing
+    to the total. Non-zero means the cost is INCOMPLETE, not that the work was
+    free (#890). Read from the same execution row as ``total_cost_usd``."""
     error_message: str | None = None
     failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
     """What kind of failure ended this run, beside `status` (#1357).
@@ -961,6 +968,8 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
                 phase_progress=e.phase_progress,
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
+                total_cost_display=format_cost(e.total_cost_usd, e.unpriced_observation_count),
+                unpriced_observation_count=e.unpriced_observation_count,
                 error_message=e.error_message,
                 failure_classification=e.failure_classification,
                 reported_failure_reason=e.reported_failure_reason,
