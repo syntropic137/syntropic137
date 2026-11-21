@@ -1,6 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eventsGroup } from "../../src/commands/events.js";
 import { CLIError } from "../../src/framework/errors.js";
+import type { components } from "../../src/generated/api-types.js";
+
+type SessionCostSummary = components["schemas"]["syn_api__routes__events__CostSummaryResponse"];
+
+function sessionCosts(overrides: Partial<SessionCostSummary> = {}): SessionCostSummary {
+  return {
+    session_id: "sess-001",
+    input_tokens: 10000,
+    output_tokens: 5000,
+    total_tokens: 15000,
+    cache_creation_tokens: 200,
+    cache_read_tokens: 800,
+    estimated_cost_usd: "0.15",
+    total_cost_display: "$0.15",
+    unpriced_observation_count: 0,
+    ...overrides,
+  };
+}
 
 describe("events commands", () => {
   const mockFetch = vi.fn();
@@ -144,15 +162,7 @@ describe("events commands", () => {
 
     it("renders cost breakdown", async () => {
       mockFetch.mockResolvedValue(
-        jsonResponse({
-          session_id: "sess-001",
-          input_tokens: 10000,
-          output_tokens: 5000,
-          total_tokens: 15000,
-          cache_creation_tokens: 200,
-          cache_read_tokens: 800,
-          estimated_cost_usd: "0.15",
-        }),
+        jsonResponse(sessionCosts()),
       );
 
       await handler({ positionals: ["sess-001"], values: {} });
@@ -161,6 +171,38 @@ describe("events commands", () => {
       expect(out).toContain("10,000");
       expect(out).toContain("5,000");
       expect(out).toContain("15,000");
+    });
+
+    // #897: the API decides how honest the total is (total_cost_display); the
+    // CLI prints that verdict instead of formatting estimated_cost_usd itself.
+    async function runCosts(data: SessionCostSummary): Promise<string> {
+      mockFetch.mockResolvedValue(jsonResponse(data));
+      await handler({ positionals: ["sess-001"], values: {} });
+      return stdout();
+    }
+
+    it("prints a partial total as partial and names the unpriced count", async () => {
+      const out = await runCosts(
+        sessionCosts({ estimated_cost_usd: "1.25", total_cost_display: ">=$1.25 (partial)", unpriced_observation_count: 9 }),
+      );
+      expect(out).toContain(">=$1.25 (partial)");
+      expect(out).toContain("9 observation(s) had no rate");
+      expect(out).not.toMatch(/Estimated cost:\s+\$1\.25/);
+    });
+
+    it("prints an unpriced total as unpriced and names the unpriced count", async () => {
+      const out = await runCosts(
+        sessionCosts({ estimated_cost_usd: "0", total_cost_display: "unpriced", unpriced_observation_count: 4 }),
+      );
+      expect(out).toMatch(/Estimated cost:\s+unpriced/);
+      expect(out).toContain("4 observation(s) had no rate");
+      expect(out).not.toContain("$0.00");
+    });
+
+    it("prints a fully priced total with no unpriced line", async () => {
+      const out = await runCosts(sessionCosts({ estimated_cost_usd: "1.25", total_cost_display: "$1.25" }));
+      expect(out).toMatch(/Estimated cost:\s+\$1\.25/);
+      expect(out).not.toContain("had no rate");
     });
 
     it("throws on missing session-id", async () => {
