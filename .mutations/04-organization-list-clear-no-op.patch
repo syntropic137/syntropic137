@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py b/packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py
+index c2e876ac9..bd2cfb92f 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py
++++ b/packages/syn-domain/src/syn_domain/contexts/organization/_shared/organization_projection.py
+@@ -127,6 +127,7 @@ class OrganizationProjection:
+ 
+     async def clear_all_data(self) -> None:
+         """Clear all projection data (for rebuild)."""
++        return
+         records = await self._store.get_all(PROJECTION_NAME)
+         for record in records:
+             org_id = record.get("organization_id")

@@ -9,6 +9,7 @@ through ``SubscriptionCoordinator._resume_position``.
 
 from __future__ import annotations
 
+import copy
 import os
 
 # Must be set before any syn_* imports
@@ -44,19 +45,32 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.unit
 
-_TOOL_STARTED = GenericDomainEvent(
-    session_id="session-1",
-    tool_use_id="tool-1",
-    tool_name="Bash",
-    timestamp="2026-11-21T00:00:00+00:00",
-)
-_TOKEN_USAGE = GenericDomainEvent(
-    session_id="session-1",
-    execution_id="exec-1",
-    observation_type=TOKEN_USAGE,
-    event_type=TOKEN_USAGE,
-    data={"input_tokens": 100, "output_tokens": 10, "model": "claude-opus-5-5"},
-)
+#: Two sessions and two executions, so every namespace holds more than one row
+#: and a clear that drops one foreign row is as visible as one that drops all.
+_EVENTS = [
+    (
+        TOOL_EXECUTION_STARTED,
+        GenericDomainEvent(
+            session_id=f"session-{n}",
+            tool_use_id=f"tool-{n}",
+            tool_name="Bash",
+            timestamp="2026-11-21T00:00:00+00:00",
+        ),
+    )
+    for n in (1, 2)
+] + [
+    (
+        TOKEN_USAGE,
+        GenericDomainEvent(
+            session_id=f"session-{n}",
+            execution_id=f"exec-{n}",
+            observation_type=TOKEN_USAGE,
+            event_type=TOKEN_USAGE,
+            data={"input_tokens": 100 * n, "output_tokens": 10, "model": "claude-opus-5-5"},
+        ),
+    )
+    for n in (1, 2)
+]
 
 #: Every observation read model the coordinator wraps in an
 #: ``_ObservationProjectionAdapter``, with its namespace and an event it stores.
@@ -90,9 +104,7 @@ async def _fed_adapters(store: InMemoryProjectionStore) -> dict[str, Checkpointe
         adapter = as_checkpointed(projection_type(store))
         assert adapter is not None
         adapters[name] = adapter
-        for nonce, (event_type, event) in enumerate(
-            ((TOOL_EXECUTION_STARTED, _TOOL_STARTED), (TOKEN_USAGE, _TOKEN_USAGE)), start=1
-        ):
+        for nonce, (event_type, event) in enumerate(_EVENTS, start=1):
             if adapter.should_handle_event_type(event_type):
                 await adapter.handle_event(_envelope(event_type, event, nonce), checkpoints)
     return adapters
@@ -103,8 +115,12 @@ async def _fed_adapters(store: InMemoryProjectionStore) -> dict[str, Checkpointe
 async def test_version_rebuild_clears_only_the_rebuilt_adapters_namespace(rebuilt: str) -> None:
     store = InMemoryProjectionStore()
     adapters = await _fed_adapters(store)
-    for _projection_type, namespace in _OBSERVATION_READ_MODELS.values():
-        assert await store.get_all(namespace), f"{namespace} stored nothing to clear"
+    before = {
+        namespace: copy.deepcopy(await store.get_all(namespace))
+        for _projection_type, namespace in _OBSERVATION_READ_MODELS.values()
+    }
+    for namespace, rows in before.items():
+        assert len(rows) == 2, f"{namespace} stored {len(rows)} rows, expected one per session"
 
     adapter = adapters[rebuilt]
     checkpoints = MemoryCheckpointStore()
@@ -127,4 +143,4 @@ async def test_version_rebuild_clears_only_the_rebuilt_adapters_namespace(rebuil
         if name == rebuilt:
             assert stored == [], f"{namespace} kept its rows through a version rebuild"
         else:
-            assert stored, f"rebuilding {rebuilt} deleted {namespace}"
+            assert stored == before[namespace], f"rebuilding {rebuilt} changed {namespace}"
