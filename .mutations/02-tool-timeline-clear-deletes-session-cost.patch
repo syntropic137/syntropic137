@@ -1,0 +1,12 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/tool_timeline/projection.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/tool_timeline/projection.py
+index dcd08340b..612d18bc7 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/tool_timeline/projection.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/tool_timeline/projection.py
+@@ -50,6 +50,7 @@ class ToolTimelineProjection:
+     async def clear_all_data(self) -> None:
+         """Delete every stored tool execution so a version rebuild replays onto nothing."""
+         await self._store.delete_all(self.PROJECTION_NAME)
++        await self._store.delete_all("session_cost")
+ 
+     async def on_tool_execution_started(self, event_data: dict[str, Any]) -> None:
+         """Handle tool_execution_started observation.
