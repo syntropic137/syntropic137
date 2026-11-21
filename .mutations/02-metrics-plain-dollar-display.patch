@@ -1,13 +1,13 @@
 diff --git a/apps/syn-api/src/syn_api/routes/metrics.py b/apps/syn-api/src/syn_api/routes/metrics.py
-index a6802f141..2435c203c 100644
+index 0c685e4c0..d6acbbf35 100644
 --- a/apps/syn-api/src/syn_api/routes/metrics.py
 +++ b/apps/syn-api/src/syn_api/routes/metrics.py
-@@ -475,7 +475,7 @@ async def get_metrics_endpoint(
+@@ -468,7 +468,7 @@ async def get_metrics_endpoint(
          total_cache_read_tokens=totals.cache_read_tokens,
          total_tokens=totals.total_tokens,
-         total_cost_usd=canonical_cost_usd(money.total_cost_usd),
--        total_cost_display=money.total_cost_display,
-+        total_cost_display=f"\${money.total_cost_usd}",
-         unpriced_observation_count=money.unpriced_observation_count,
+         total_cost_usd=totals.cost_usd,
+-        total_cost_display=format_cost(totals.cost_usd, totals.unpriced_observation_count),
++        total_cost_display=f"${totals.cost_usd}",
+         unpriced_observation_count=totals.unpriced_observation_count,
          total_artifacts=total_artifacts,
          total_artifact_bytes=m.total_artifact_bytes,

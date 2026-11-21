@@ -1,0 +1,11 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+index ed908d5c7..80da09ad4 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+@@ -261,5 +261,5 @@ class CanonicalUsageQueryService:
+         return sum(
+             int(row["observations"])  # type: ignore[arg-type]  # a COUNT(*) column
+             for row in rows
+-            if _model_key(row) in models  # type: ignore[arg-type]  # asyncpg Record reads by name
++            if True  # type: ignore[arg-type]  # asyncpg Record reads by name
+         )

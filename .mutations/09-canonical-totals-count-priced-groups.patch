@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+index ed908d5c7..df374a7b8 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+@@ -210,7 +210,7 @@ class CanonicalUsageQueryService:
+                 row_cost = price_canonical_row(row, self._cost_calculator)
+                 cost += row_cost.cost
+                 unpriced += row_cost.unpriced_tokens
+-                if row_cost.unpriced_tokens:
++                if True:
+                     unpriced_observations += int(row["summary_observations"] or 0)
+                     turn_sessions = row["turn_sessions"] or []
+                     if turn_sessions:

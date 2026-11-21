@@ -1,13 +1,13 @@
 diff --git a/apps/syn-api/src/syn_api/routes/metrics.py b/apps/syn-api/src/syn_api/routes/metrics.py
-index a6802f141..5747cb27a 100644
+index 0c685e4c0..8c1b910b7 100644
 --- a/apps/syn-api/src/syn_api/routes/metrics.py
 +++ b/apps/syn-api/src/syn_api/routes/metrics.py
-@@ -386,7 +386,7 @@ async def _execution_costs(execution_ids: set[str] | None) -> list[ExecutionCost
-         return []
+@@ -401,7 +401,7 @@ async def _canonical_totals(execution_ids: set[str] | None) -> CanonicalTotals:
+     """
      try:
-         query_svc = get_execution_cost_query()
+         query_svc = get_canonical_usage_query()
 -        if execution_ids is None:
 +        if True:
-             return await query_svc.list_all(limit=_GLOBAL_COST_WINDOW)
-         return await query_svc.list_for_ids(execution_ids)
+             return await query_svc.totals()
+         return await query_svc.totals(execution_ids=execution_ids)
      except Exception as exc:
