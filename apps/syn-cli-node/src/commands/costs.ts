@@ -24,7 +24,8 @@ const summaryCommand: CommandDef = {
     const d = unwrap(await api.GET("/costs/summary"), "Get cost summary");
 
     print(style("Cost Summary", CYAN));
-    print(`  ${style("Total Cost:", BOLD)} ${formatCost(d.total_cost_usd)}`);
+    print(`  ${style("Total Cost:", BOLD)} ${d.total_cost_display}`);
+    printUnpricedNote(d.unpriced_observation_count);
     print(`  ${style("Sessions:", BOLD)} ${d.total_sessions}`);
     print(`  ${style("Executions:", BOLD)} ${d.total_executions}`);
     print(`  ${style("Tokens:", BOLD)} ${formatTokens(d.total_tokens)}`);
