@@ -532,10 +532,10 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
     **_declared(
         f"{_DOMAIN}/agent_sessions/slices/canonical_totals/query_service.py",
         {
-            "_UNPRICED_TURNS_QUERY": _segment_discard(
+            "_UNPRICED_TURNS_DAY": _segment_discard(
                 "Token-reporting turns of the summary-less sessions in an unpriced canonical "
-                "group, per model. Read here because the rollup counts zero-token turns too. "
-                "Pinned to those sessions and to their day span; runs only when an unrated "
+                "group, one UTC day per branch. Read here because the rollup counts zero-token "
+                "turns too. Pinned to that day's sessions and bounds; runs only when an unrated "
                 "model has turn-priced work, so priced history never reaches it. Nothing "
                 "bounds how many such sessions there are."
             ),
