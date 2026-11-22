@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/triggers/queries.py b/apps/syn-api/src/syn_api/routes/triggers/queries.py
+index 5c8f27419..c576865bf 100644
+--- a/apps/syn-api/src/syn_api/routes/triggers/queries.py
++++ b/apps/syn-api/src/syn_api/routes/triggers/queries.py
+@@ -308,7 +308,7 @@ def _priced_cost(costs: dict[str, ExecutionCost] | None, execution_id: str) -> E
+     """
+     if not costs or not execution_id:
+         return None
+-    return costs.get(pg_safe(execution_id))
++    return costs.get(execution_id)
+ 
+ 
+ async def _execution_costs(execution_ids: list[str]) -> dict[str, ExecutionCost] | None:

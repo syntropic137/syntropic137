@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/triggers/queries.py b/apps/syn-api/src/syn_api/routes/triggers/queries.py
+index 5c8f27419..e5f623260 100644
+--- a/apps/syn-api/src/syn_api/routes/triggers/queries.py
++++ b/apps/syn-api/src/syn_api/routes/triggers/queries.py
+@@ -360,7 +360,7 @@ async def _collect_history_entries(
+     for t in triggers:
+         # The global list carries no cost, so it reads the projection alone:
+         # pricing here would cost one Lane 2 read per trigger, for nothing.
+-        hist = await _read_trigger_history(t.trigger_id, limit)
++        hist = await get_trigger_history(trigger_id=t.trigger_id, limit=limit)
+         if isinstance(hist, Err):
+             continue
+         all_entries.extend(
