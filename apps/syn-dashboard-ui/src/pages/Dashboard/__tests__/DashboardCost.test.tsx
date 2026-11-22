@@ -10,6 +10,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ANY_UNPRICED_NOTE, COST_COVERAGE_CASES } from '../../../test/costCoverageFixtures'
+import type { components } from '../../../generated/api-types'
 import type { MetricsResponse } from '../../../types'
 import { Dashboard } from '../Dashboard'
 
@@ -28,8 +29,13 @@ vi.mock('../ContributionHeatmap', () => ({ ContributionHeatmap: () => null }))
 vi.mock('../DashboardCharts', () => ({ DashboardCharts: () => null, WorkflowStatusChart: () => null }))
 vi.mock('../../../components/EventFeed', () => ({ EventFeed: () => null }))
 
+/**
+ * The /metrics body as the API sends it, checked against the generated wire
+ * schema, then handed over exactly as `getMetrics` does: `fetchJSON` returns
+ * the parsed body under the UI type without converting it.
+ */
 function metricsFor(c: (typeof COST_COVERAGE_CASES)[number]): MetricsResponse {
-  return {
+  const wire = {
     total_workflows: 1,
     completed_workflows: 1,
     failed_workflows: 0,
@@ -53,7 +59,8 @@ function metricsFor(c: (typeof COST_COVERAGE_CASES)[number]): MetricsResponse {
     total_artifacts: 0,
     total_artifact_bytes: 0,
     phases: [],
-  }
+  } satisfies components['schemas']['MetricsResponse']
+  return wire as unknown as MetricsResponse
 }
 
 describe.each(COST_COVERAGE_CASES)('Dashboard total cost, $name', (c) => {

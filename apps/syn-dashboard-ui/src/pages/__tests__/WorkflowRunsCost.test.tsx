@@ -11,7 +11,8 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ANY_UNPRICED_NOTE, COST_COVERAGE_CASES } from '../../test/costCoverageFixtures'
-import type { WorkflowExecutionSummary, WorkflowResponse } from '../../types'
+import type { components } from '../../generated/api-types'
+import type { WorkflowResponse } from '../../types'
 import { WorkflowRuns } from '../WorkflowRuns'
 
 const WORKFLOW_ID = 'wf-1'
@@ -41,9 +42,12 @@ afterEach(() => {
 })
 
 describe.each(COST_COVERAGE_CASES)('Workflow Runs row cost, $name', (c) => {
-  const run: WorkflowExecutionSummary = {
+  // One row of the /workflows/{id}/runs body, typed from the generated schema:
+  // string dollars and every required field, as the API sends it.
+  const run: components['schemas']['ExecutionRunSummary'] = {
     workflow_execution_id: 'run00000-0000-0000-0000-000000000000',
     workflow_id: WORKFLOW_ID,
+    workflow_name: 'Nightly',
     status: 'completed',
     started_at: '2026-11-21T00:00:00Z',
     completed_at: '2026-11-21T00:05:00Z',
@@ -54,6 +58,7 @@ describe.each(COST_COVERAGE_CASES)('Workflow Runs row cost, $name', (c) => {
     total_cost_usd: c.total_cost_usd,
     total_cost_display: c.total_cost_display,
     unpriced_observation_count: c.unpriced_observation_count,
+    failure_classification: 'unclassified',
   }
 
   beforeEach(() => {

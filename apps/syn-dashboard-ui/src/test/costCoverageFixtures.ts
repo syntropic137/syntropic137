@@ -6,12 +6,19 @@
  * workflows/queries.py). `total_cost_usd` is deliberately NOT the figure the
  * display carries, so a surface that formats the dollars itself again shows
  * `$1.2500` or `$0.0000` and cannot pass.
+ *
+ * The three cost fields are typed from the GENERATED wire schema, so
+ * `total_cost_usd` is the decimal string the API actually sends.
  */
-export interface CostCoverageCase {
+import type { components } from '../generated/api-types'
+
+export type CostCoverageWire = Pick<
+  components['schemas']['MetricsResponse'],
+  'total_cost_usd' | 'total_cost_display' | 'unpriced_observation_count'
+>
+
+export interface CostCoverageCase extends CostCoverageWire {
   name: string
-  total_cost_usd: number
-  total_cost_display: string
-  unpriced_observation_count: number
   /** Text the surface must show for the cost. */
   shows: string
   /** The coverage note, or null when everything was priced. */
@@ -21,7 +28,7 @@ export interface CostCoverageCase {
 export const COST_COVERAGE_CASES: CostCoverageCase[] = [
   {
     name: 'partial',
-    total_cost_usd: 1.25,
+    total_cost_usd: '1.25',
     total_cost_display: '>=$1.25 (partial)',
     unpriced_observation_count: 3,
     shows: '>=$1.25 (partial)',
@@ -29,7 +36,7 @@ export const COST_COVERAGE_CASES: CostCoverageCase[] = [
   },
   {
     name: 'unpriced',
-    total_cost_usd: 0,
+    total_cost_usd: '0',
     total_cost_display: 'unpriced',
     unpriced_observation_count: 2,
     shows: 'unpriced',
@@ -37,7 +44,7 @@ export const COST_COVERAGE_CASES: CostCoverageCase[] = [
   },
   {
     name: 'fully priced',
-    total_cost_usd: 1.25,
+    total_cost_usd: '1.25',
     total_cost_display: '$1.25',
     unpriced_observation_count: 0,
     shows: '$1.25',

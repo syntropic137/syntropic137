@@ -11,6 +11,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
 import { ANY_UNPRICED_NOTE, COST_COVERAGE_CASES } from '../../../test/costCoverageFixtures'
+import type { components } from '../../../generated/api-types'
 import type { MetricsResponse, WorkflowResponse } from '../../../types'
 import { WorkflowMetrics } from '../WorkflowMetrics'
 
@@ -47,7 +48,9 @@ describe('WorkflowMetrics', () => {
 
 describe.each(COST_COVERAGE_CASES)('WorkflowMetrics total cost, $name', (c) => {
   it('shows the API display and the coverage note only when something was unpriced', () => {
-    const metrics: MetricsResponse = {
+    // The /metrics body as the API sends it, checked against the generated
+    // schema, then handed over as `getMetrics` does (no conversion).
+    const wire = {
       total_workflows: 1,
       completed_workflows: 1,
       failed_workflows: 0,
@@ -71,7 +74,8 @@ describe.each(COST_COVERAGE_CASES)('WorkflowMetrics total cost, $name', (c) => {
       total_artifacts: 0,
       total_artifact_bytes: 0,
       phases: [],
-    }
+    } satisfies components['schemas']['MetricsResponse']
+    const metrics = wire as unknown as MetricsResponse
     render(
       <MemoryRouter>
         <WorkflowMetrics
