@@ -20,6 +20,10 @@ class SessionInventorySettings(BaseSettings):
         default_factory=lambda: Path.home() / ".syntropic137" / "session-inventory",
         description="Absolute host-owned durable directory for native transcript bytes and installation identity. Mount a persistent volume in containers.",
     )
+    archive_compression: bool = Field(
+        default=True,
+        description="Store new archive objects gzip-compressed. Reads are verified against the uncompressed hash either way, and objects written uncompressed stay readable; `just session-archive-compress` re-encodes them.",
+    )
     source_instance_id: str = Field(
         default="",
         max_length=128,
@@ -48,6 +52,16 @@ class SessionInventorySettings(BaseSettings):
         ge=1,
         le=3600,
         description="Delay before retrying an interrupted inventory step.",
+    )
+    live_resweep_seconds: int = Field(
+        default=900,
+        ge=10,
+        le=86400,
+        description=(
+            "Longest a live session's caught-up capture spool waits between host re-sweeps. "
+            "Each re-sweep of a changed transcript archives a full new revision, so this "
+            "bounds revisions per live session; a settled session is swept as soon as it is due."
+        ),
     )
     park_safety_seconds: int = Field(
         default=900,
@@ -96,6 +110,11 @@ class SessionInventorySettings(BaseSettings):
         ge=1,
         description="Optional byte quota for retained staged spool bytes. Disabled by default. When exceeded, the oldest settled spools expire with a recorded gap; a non-terminal spool is evicted only when settled spools cannot satisfy the quota.",
     )
+    spool_max_count: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional ceiling on retained capture spools per backend. Disabled by default. For a remote backend each one is a paused sandbox, which byte quotas do not bound: an empty spool stages no bytes. When exceeded, the oldest settled spools expire with a recorded gap. A non-terminal spool is never evicted by it.",
+    )
 
     replication_enabled: bool = Field(
         default=False,
@@ -119,7 +138,7 @@ class SessionInventorySettings(BaseSettings):
     )
     exporter_binary: Path = Field(
         default=Path("/usr/local/bin/apss-session-exporter"),
-        description="Absolute path to the released standard exporter used for inventory replication.",
+        description="Absolute path to the standard exporter used for inventory replication. Defaults to the pinned, checksum-verified binary shipped in the syn-api image; override only for a non-image deployment.",
     )
 
     @field_validator("exporter_binary")

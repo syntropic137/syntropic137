@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions import CostCalculator, TokenUsageData
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
     SessionCostProjection,
@@ -106,19 +107,6 @@ def _alias_price(tokens: int) -> Decimal:
     return pricing.calculate_cost(tokens, tokens // 10, 0, 0)
 
 
-class _Store[RowT]:
-    """The projection store, in memory; rows are opaque, as the real store treats them."""
-
-    def __init__(self) -> None:
-        self._rows: dict[tuple[str, str], RowT] = {}
-
-    async def save(self, name: str, key: str, value: RowT) -> None:
-        self._rows[(name, key)] = value
-
-    async def get(self, name: str, key: str) -> RowT | None:
-        return self._rows.get((name, key))
-
-
 @dataclass(frozen=True)
 class _Row:
     """The row the grouped SQL yields for one observation - model columns included.
@@ -169,7 +157,7 @@ def _records(rows: Sequence[_Row]) -> list[asyncpg.Record]:
 
 
 async def _in_memory_session(*rows: TokenUsageData) -> SessionCost:
-    projection = SessionCostProjection(store=_Store())  # type: ignore[arg-type]
+    projection = SessionCostProjection(store=InMemoryProjectionStore())
     for data in rows:
         await projection.on_agent_observation(
             {
@@ -186,7 +174,7 @@ async def _in_memory_session(*rows: TokenUsageData) -> SessionCost:
 
 
 async def _in_memory_execution(*rows: TokenUsageData) -> ExecutionCost:
-    projection = ExecutionCostProjection(store=_Store())  # type: ignore[arg-type]
+    projection = ExecutionCostProjection(store=InMemoryProjectionStore())
     for data in rows:
         await projection.on_agent_observation(
             {
@@ -324,7 +312,7 @@ class TestSummaryAfterTurns:
         """Turn rows estimate one cost; the summary reports another. The
         breakdown must follow the summary, as the SQL path (which reads only
         the summary row) does - never keep the superseded turn estimate."""
-        projection = SessionCostProjection(store=_Store())  # type: ignore[arg-type]
+        projection = SessionCostProjection(store=InMemoryProjectionStore())
         base = {"session_id": _SESSION, "execution_id": _EXECUTION, "phase_id": _PHASE}
         await projection.on_agent_observation(
             {**base, "event_type": "token_usage", "data": reported(1000)}

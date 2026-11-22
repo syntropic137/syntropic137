@@ -162,6 +162,9 @@ class SecurityPolicy:
     # Resource limits
     memory_limit_mb: int = 4096
     cpu_limit_cores: float = 2.0
+    # Processes and threads (`--pids-limit`). 256 is agentic-workspace's
+    # SecurityConfig default; a phase may request more (okrs-51p.30).
+    pids_limit: int = 256
     timeout_seconds: int = 3600  # Max lifetime
 
     # Filesystem

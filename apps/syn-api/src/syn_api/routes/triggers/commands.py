@@ -7,9 +7,16 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
+from syn_adapters.projection_stores.prefix_match import (
+    format_ambiguous_error,
+    resolve_by_prefix,
+)
+from syn_adapters.repo_names import OrganizationRepoNames
 from syn_api._wiring import (
     ensure_connected,
+    get_projection_mgr,
     get_trigger_repo,
     get_trigger_store,
     get_workflow_repo,
@@ -22,6 +29,7 @@ from syn_api.types import (
     Result,
     TriggerActionResponse,
     TriggerError,
+    TriggerErrorResponse,
 )
 from syn_domain.contexts.github import TriggerStatus
 
@@ -36,69 +44,148 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/triggers", tags=["triggers"])
 
 
-async def _resolve_repo_full_name(repository: str) -> str | None:
-    """Resolve a repository identifier to its GitHub `owner/name` form.
+async def _github_name(repository: str) -> str:
+    """The repository as GitHub names it when it resolves, else as given.
 
-    - `repo-*` (syn internal ID): look up via the repo projection.
-    - `owner/name` (GitHub standard): passed through.
-    - Anything else: `None` (caller treats as unresolvable).
+    The CLI registers triggers by syn137 `repo-*` id. Stored as given, the id
+    reached the event poller, which cannot poll it (#1870), and event matching,
+    which compares against GitHub's `owner/name`.
     """
-    if repository.startswith("repo-"):
-        from syn_domain.contexts.organization import get_repo_projection
-
-        projection = get_repo_projection()
-        repo = await projection.get(repository)
-        return repo.full_name if repo is not None else None
-
-    if "/" in repository:
-        return repository
-
-    return None
+    return await OrganizationRepoNames().full_name(repository) or repository
 
 
-async def _resolve_installation_id(installation_id: str, repository: str) -> str:
-    """Auto-resolve installation_id from the GitHub App if not provided.
+async def _resolve_installation_id(
+    installation_id: str, repository: str
+) -> Result[str, TriggerError]:
+    """Resolve the GitHub App installation a trigger on `repository` fires through.
 
-    P0-3: the CLI registers triggers with syn `repo-*` IDs. Those are
-    unknown to the GitHub API, so we first resolve them to `owner/name`
-    via the repo projection, then ask the App which installation owns
-    that repo.
+    The CLI registers triggers with syn `repo-*` IDs. Those are unknown to the
+    GitHub API, so we first resolve them to `owner/name` via the repo
+    projection, then ask the App which installation owns that repo.
 
-    Returns `""` if resolution fails at any step. The trigger is then
-    persisted with empty installation_id and is silently skipped at
-    polling time (see ``event_ingestion._get_repos_to_poll``) until the
-    operator re-registers it. Lazy re-resolution at polling time is
-    tracked separately as #713 for v0.26+.
+    An explicit `installation_id`, or a trigger with no repository, is taken
+    as given. Otherwise a rule with no installation can never fire: dispatch
+    skips it (``event_ingestion._get_repos_to_poll``). So every way resolution
+    can fail is an `Err` and the caller refuses the registration, rather than
+    storing an `active` rule that is silently dead (#1864).
     """
     if installation_id or not repository:
-        return installation_id
+        return Ok(installation_id)
 
-    full_name = await _resolve_repo_full_name(repository)
+    full_name = await OrganizationRepoNames().full_name(repository)
     if full_name is None:
-        logger.warning(
-            "Could not resolve repository identifier '%s' to owner/name; "
-            "trigger will be persisted with installation_id='' and skipped at "
-            "polling - re-register after the App is installed on the repo",
-            repository,
+        return Err(
+            TriggerError.REPOSITORY_UNRESOLVED,
+            message=(
+                f"Repository '{repository}' is neither a registered repo ID nor "
+                "'owner/name', so no GitHub App installation can be found for it."
+            ),
         )
-        return ""
+
+    from syn_adapters.github.client import (
+        GitHubAppError,
+        GitHubAuthError,
+        GitHubNotConfiguredError,
+        get_github_client,
+    )
 
     try:
-        from syn_adapters.github.client import get_github_client
-
-        client = get_github_client()
-        resolved = await client.get_installation_for_repo(full_name)
-        logger.info("Auto-resolved installation_id=%s for %s", resolved, full_name)
-        return str(resolved)
-    except Exception:
-        logger.warning(
-            "Could not auto-resolve installation_id for %s; "
-            "trigger will be persisted with installation_id='' and skipped at "
-            "polling - re-register after the App is installed on the repo",
-            full_name,
-            exc_info=True,
+        resolved = await get_github_client().get_installation_for_repo(full_name)
+    except GitHubNotConfiguredError as e:
+        # The same words `GET /github/repos` answers with (baca940).
+        return Err(TriggerError.GITHUB_NOT_CONFIGURED, message=str(e))
+    except GitHubAuthError as e:
+        return Err(
+            TriggerError.NO_INSTALLATION,
+            message=(f"{e}. Install the GitHub App on {full_name}, then create the trigger again."),
         )
-        return ""
+    except GitHubAppError as e:
+        logger.warning("could not resolve installation for %s", full_name, exc_info=True)
+        return Err(
+            TriggerError.GITHUB_UNAVAILABLE,
+            message=(
+                f"Could not ask GitHub which installation covers {full_name} "
+                f"({type(e).__name__}: {e}). Nothing was stored; try again."
+            ),
+        )
+    logger.info("Auto-resolved installation_id=%s for %s", resolved, full_name)
+    return Ok(str(resolved))
+
+
+async def _resolve_workflow_id(workflow_id: str) -> Result[str, TriggerError]:
+    """The full id of the workflow `workflow_id` names, or `workflow_id` as given.
+
+    `syn workflow list` prints 8-character prefixes, and the trigger stores the
+    id it fires later, so a prefix must become the full id here (#642). Same
+    resolution the workflow routes use (#508), against the same projection.
+
+    A prefix that matches nothing is handed back unchanged rather than refused:
+    the projection may lag the event store (#1570), so only
+    `_check_workflow_exists` can say a workflow is missing. A prefix that
+    matches several is refused, never guessed at.
+
+    An id the event store already holds is taken as given before any prefix
+    is tried. Otherwise `self-heal-pr`, missing from a lagging projection,
+    would resolve as the prefix of `self-heal-pr-v2` and bind the trigger to
+    the wrong workflow.
+    """
+    exact = await _workflow_exists(workflow_id)
+    if isinstance(exact, Err):
+        return exact
+    if exact.value:
+        return Ok(workflow_id)
+    try:
+        match = await resolve_by_prefix(get_projection_mgr().store, "workflow_details", workflow_id)
+    except Exception as exc:
+        logger.warning("could not resolve workflow id %s", workflow_id, exc_info=True)
+        return Err(
+            TriggerError.STORE_UNAVAILABLE,
+            message=(
+                f"Could not resolve workflow '{workflow_id}': the workflow read model "
+                f"could not be read ({type(exc).__name__}). "
+                "This is not a statement that the workflow is missing."
+            ),
+        )
+    if match.is_ambiguous:
+        return Err(
+            TriggerError.WORKFLOW_AMBIGUOUS,
+            message=format_ambiguous_error("Workflow", workflow_id, match.candidates),
+        )
+    return Ok(match.full_id or workflow_id)
+
+
+async def _workflow_exists(workflow_id: str) -> Result[bool, TriggerError]:
+    """Whether the event store holds `workflow_id`, or why it could not say."""
+    # `exists` RAISES when the store cannot be read (ESP #310). Before that it
+    # answered False, so an outage reached this branch as "no such workflow" -
+    # a confident wrong answer. Catching it here keeps the two apart instead of
+    # letting the exception escape as a 500 with no explanation.
+    try:
+        workflow_exists = await get_workflow_repo().exists(workflow_id)
+    except Exception as exc:
+        logger.warning("could not determine whether workflow %s exists", workflow_id, exc_info=True)
+        return Err(
+            TriggerError.STORE_UNAVAILABLE,
+            message=(
+                f"Could not determine whether workflow '{workflow_id}' exists: "
+                f"the event store could not be read ({type(exc).__name__}). "
+                "This is not a statement that the workflow is missing."
+            ),
+        )
+    return Ok(workflow_exists)
+
+
+async def _check_workflow_exists(workflow_id: str) -> Result[None, TriggerError]:
+    """Refuse a trigger on a workflow the event store does not hold."""
+    found = await _workflow_exists(workflow_id)
+    if isinstance(found, Err):
+        return found
+    if not found.value:
+        return Err(
+            TriggerError.WORKFLOW_NOT_FOUND,
+            message=f"Workflow '{workflow_id}' does not exist. Seed workflows before creating triggers.",
+        )
+    return Ok(None)
 
 
 async def register_trigger(
@@ -116,30 +203,19 @@ async def register_trigger(
     from syn_domain.contexts.github import RegisterTriggerCommand, RegisterTriggerHandler
 
     await ensure_connected()
-    installation_id = await _resolve_installation_id(installation_id, repository)
+    repository = await _github_name(repository)
+    resolved = await _resolve_installation_id(installation_id, repository)
+    if isinstance(resolved, Err):
+        return resolved
+    installation_id = resolved.value
 
-    workflow_repo = get_workflow_repo()
-    # `exists` RAISES when the store cannot be read (ESP #310). Before that it
-    # answered False, so an outage reached this branch as "no such workflow" -
-    # a confident wrong answer. Catching it here keeps the two apart instead of
-    # letting the exception escape as a 500 with no explanation.
-    try:
-        workflow_exists = await workflow_repo.exists(workflow_id)
-    except Exception as exc:
-        logger.warning("could not determine whether workflow %s exists", workflow_id, exc_info=True)
-        return Err(
-            TriggerError.STORE_UNAVAILABLE,
-            message=(
-                f"Could not determine whether workflow '{workflow_id}' exists: "
-                f"the event store could not be read ({type(exc).__name__}). "
-                "This is not a statement that the workflow is missing."
-            ),
-        )
-    if not workflow_exists:
-        return Err(
-            TriggerError.WORKFLOW_NOT_FOUND,
-            message=f"Workflow '{workflow_id}' does not exist. Seed workflows before creating triggers.",
-        )
+    found = await _resolve_workflow_id(workflow_id)
+    if isinstance(found, Err):
+        return found
+    workflow_id = found.value
+    checked = await _check_workflow_exists(workflow_id)
+    if isinstance(checked, Err):
+        return checked
 
     try:
         command = RegisterTriggerCommand(
@@ -226,7 +302,20 @@ async def enable_preset(
     from syn_domain.contexts.github import RegisterTriggerHandler, create_preset_command
 
     await ensure_connected()
-    installation_id = await _resolve_installation_id(installation_id, repository)
+    repository = await _github_name(repository)
+    resolved = await _resolve_installation_id(installation_id, repository)
+    if isinstance(resolved, Err):
+        return resolved
+    installation_id = resolved.value
+
+    # Only an id the caller typed is resolved. The preset's own default is a
+    # full id already, and resolving it would let a lagging projection bind it
+    # to whichever workflow happens to share its prefix.
+    if workflow_id:
+        found = await _resolve_workflow_id(workflow_id)
+        if isinstance(found, Err):
+            return found
+        workflow_id = found.value
 
     try:
         command = create_preset_command(
@@ -239,27 +328,9 @@ async def enable_preset(
     except (ValueError, KeyError):
         return Err(TriggerError.PRESET_NOT_FOUND, message=f"Preset '{preset_name}' not found")
 
-    workflow_repo = get_workflow_repo()
-    # Same distinction as above: an unreadable store is not a missing workflow.
-    try:
-        workflow_exists = await workflow_repo.exists(command.workflow_id)
-    except Exception as exc:
-        logger.warning(
-            "could not determine whether workflow %s exists", command.workflow_id, exc_info=True
-        )
-        return Err(
-            TriggerError.STORE_UNAVAILABLE,
-            message=(
-                f"Could not determine whether workflow '{command.workflow_id}' exists: "
-                f"the event store could not be read ({type(exc).__name__}). "
-                "This is not a statement that the workflow is missing."
-            ),
-        )
-    if not workflow_exists:
-        return Err(
-            TriggerError.WORKFLOW_NOT_FOUND,
-            message=f"Workflow '{command.workflow_id}' does not exist. Seed workflows before creating triggers.",
-        )
+    checked = await _check_workflow_exists(command.workflow_id)
+    if isinstance(checked, Err):
+        return checked
 
     dedup = await _check_preset_duplicate(repository, command.name, command.event)
     if isinstance(dedup, Err):
@@ -394,8 +465,51 @@ async def disable_triggers(
     return Ok(paused_count)
 
 
-@router.post("", response_model=TriggerActionResponse)
-async def register_trigger_endpoint(body: RegisterTriggerRequest) -> TriggerActionResponse:
+# 409, not 422: the request is well-formed and the same body succeeds once an
+# operator configures the App or installs it on the repo. What it conflicts
+# with is the server's state. 422 is also FastAPI's own validation answer,
+# whose `detail` is a list, so sharing it would give clients two shapes to tell
+# apart on one status code (#1864).
+_TRIGGER_ERROR_STATUS: dict[TriggerError, int] = {
+    TriggerError.GITHUB_NOT_CONFIGURED: 409,
+    TriggerError.NO_INSTALLATION: 409,
+    TriggerError.REPOSITORY_UNRESOLVED: 409,
+    TriggerError.GITHUB_UNAVAILABLE: 503,
+    # As on the workflow routes (#508): the id is fine, there is just more
+    # than one workflow it could mean (#642).
+    TriggerError.WORKFLOW_AMBIGUOUS: 409,
+}
+
+_CREATE_RESPONSES: dict[int | str, dict[str, type[TriggerErrorResponse] | str]] = {
+    400: {"model": TriggerErrorResponse, "description": "Invalid request; nothing stored"},
+    409: {
+        "model": TriggerErrorResponse,
+        "description": (
+            "Refused; nothing stored. Either the trigger could never fire (no "
+            "GitHub App is configured, no installation covers the repository, or "
+            "the repository is unknown), or the workflow ID prefix matches more "
+            "than one workflow."
+        ),
+    },
+    503: {
+        "model": TriggerErrorResponse,
+        "description": "GitHub could not be asked for the installation; nothing stored",
+    },
+}
+
+
+def _trigger_error_response(err: Err[TriggerError]) -> JSONResponse:
+    """Render a refused trigger creation as its declared error body."""
+    body = TriggerErrorResponse(detail=err.message or err.error.value, code=err.error)
+    return JSONResponse(
+        status_code=_TRIGGER_ERROR_STATUS.get(err.error, 400), content=body.model_dump()
+    )
+
+
+@router.post("", response_model=TriggerActionResponse, responses=_CREATE_RESPONSES)
+async def register_trigger_endpoint(
+    body: RegisterTriggerRequest,
+) -> TriggerActionResponse | JSONResponse:
     """Register a new trigger rule."""
     cfg = body.config
     config_dict: dict[str, object] | None = (
@@ -424,16 +538,22 @@ async def register_trigger_endpoint(body: RegisterTriggerRequest) -> TriggerActi
     )
 
     if isinstance(result, Err):
-        raise HTTPException(status_code=400, detail=result.message)
+        return _trigger_error_response(result)
     return TriggerActionResponse(trigger_id=result.value, name=body.name, status="active")
 
 
-@router.post("/presets/{preset_name}", response_model=TriggerActionResponse)
-async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> TriggerActionResponse:
+@router.post(
+    "/presets/{preset_name}", response_model=TriggerActionResponse, responses=_CREATE_RESPONSES
+)
+async def enable_preset_endpoint(
+    preset_name: str, body: dict[str, Any]
+) -> TriggerActionResponse | JSONResponse:
     """Enable a preset for a repository."""
     repository = body.get("repository", "")
     if not repository:
-        raise HTTPException(status_code=400, detail="repository is required")
+        return _trigger_error_response(
+            Err(TriggerError.INVALID_INPUT, message="repository is required")
+        )
 
     result = await enable_preset(
         preset_name=preset_name,
@@ -443,7 +563,7 @@ async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> Trig
         workflow_id=body.get("workflow_id", ""),
     )
     if isinstance(result, Err):
-        raise HTTPException(status_code=400, detail=result.message)
+        return _trigger_error_response(result)
     return TriggerActionResponse(
         trigger_id=result.value,
         name=preset_name,

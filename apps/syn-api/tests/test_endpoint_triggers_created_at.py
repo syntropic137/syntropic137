@@ -16,7 +16,8 @@ import pytest
 from syn_api.routes.triggers.queries import list_triggers_endpoint
 from syn_api.types import Ok
 
-pytestmark = pytest.mark.unit
+# Creating a trigger on a repository needs an installation to resolve (#1864).
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("github_installation_resolves")]
 
 
 @dataclass

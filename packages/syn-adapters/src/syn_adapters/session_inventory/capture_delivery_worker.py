@@ -168,7 +168,13 @@ class CaptureDeliveryWorker:
                     raise FileNotFoundError("capture archive is absent")
                 receipt = await outbox.receipt(_identity(capture), body)
             if receipt is not None:
-                await publish_capture_receipt(self._journal, capture, lease.destination_id, receipt)
+                await publish_capture_receipt(
+                    self._journal,
+                    capture,
+                    lease.destination_id,
+                    receipt,
+                    await outbox.content_hash(body),
+                )
             # Append before checkpoint: interrupted publication repeats the same
             # immutable batch, including when another worker takes over the lease.
             await self._jobs.finish_receipt(

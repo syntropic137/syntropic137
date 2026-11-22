@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
-import yaml
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.list_query import MAX_PAGE_SIZE
+from syn_api.routes.workflows.command_phase_yaml import command_phase_yaml_lines
+from syn_api.routes.workflows.yaml_scalars import _yaml_flow_list, _yaml_quote
 from syn_api.types import (
+    CommandStepResponse,
     DeclaredSkillResponse,
     Err,
     FallbackAgentResponse,
@@ -21,10 +24,10 @@ from syn_api.types import (
     PhaseDefinitionResponse,
     PhaseProgressInfo,
     PhaseRefResponse,
+    PhaseResourcesResponse,
     Result,
     WorkflowDetail,
     WorkflowError,
-    WorkflowSummary,
     WorkflowTrendResponse,
     WorkflowTrendsResponse,
 )
@@ -36,7 +39,7 @@ from syn_domain.contexts.orchestration import (
     is_phase_id,
 )
 from syn_shared.agents import DEFAULT_PHASE_SANDBOX, resolve_definition_model
-from syn_shared.display import format_phase_model_definition
+from syn_shared.display import format_cost, format_phase_model_definition
 from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
@@ -54,11 +57,23 @@ router = APIRouter(prefix="/workflows", tags=["workflows"])
 # -- Response Models ----------------------------------------------------------
 
 
+# The only workflow summary model, built once in `list_workflows()`. A second,
+# service-layer copy used to sit between the domain and this one, so every
+# field had two build sites; the list dropped `classification` and
+# `description` at the second (#975).
 class WorkflowSummaryResponse(BaseModel):
+    """One workflow template in the `GET /workflows` list."""
+
     model_config = ConfigDict(from_attributes=True)
     id: str
     name: str
     workflow_type: str
+    # No default, for the reason `requires_repos` has none (#955): the domain
+    # always has a classification, so omitting it must fail construction.
+    classification: str
+    description: str | None
+    """Nullable but required: a workflow may have no description, and the
+    list says so with null rather than by leaving the key out (#975)."""
     phase_count: int
     created_at: str | None = None
     runs_count: int = 0
@@ -149,6 +164,13 @@ class ExecutionRunSummary(BaseModel):
     """Progress with skipped repair rounds accounted for; what clients render."""
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
+    total_cost_display: str = "$0.00"
+    """``total_cost_usd`` as ``format_cost`` renders it: ``unpriced`` when nothing
+    was priced, ``>=$X (partial)`` when some was (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations in this run that carried no usable rate and so added nothing
+    to the total. Non-zero means the cost is INCOMPLETE, not that the work was
+    free (#890). Read from the same execution row as ``total_cost_usd``."""
     error_message: str | None = None
     failure_classification: FailureClassification = FailureClassification.UNCLASSIFIED
     """What kind of failure ended this run, beside `status` (#1357).
@@ -236,6 +258,19 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
         delivers_repo_changes=p.delivers_repo_changes,
         platform_access=p.platform_access,
         requires_verdict=p.requires_verdict,
+        kind=p.kind.value,
+        commands=[
+            CommandStepResponse(
+                name=c.name,
+                run=c.run,
+                timeout_seconds=c.timeout_seconds,
+                allow_failure=c.allow_failure,
+            )
+            for c in p.commands
+        ],
+        resources=PhaseResourcesResponse(
+            memory_mb=p.resources.memory_mb, pids_limit=p.resources.pids_limit
+        ),
         sandbox=p.sandbox,
         claude_plugins=[_ref_response(r) for r in p.claude_plugins],
         skills=[_ref_response(r) for r in p.skills],
@@ -283,8 +318,9 @@ async def list_workflows(
     offset: int = 0,
     include_archived: bool = False,
     search: str | None = None,
-) -> Result[list[WorkflowSummary], WorkflowError]:
-    """List all workflow templates."""
+    order_by: str | None = None,
+) -> Result[list[WorkflowSummaryResponse], WorkflowError]:
+    """List workflow templates, ordered across the whole collection before paging."""
     await ensure_connected()
     domain_summaries = await get_projection_mgr().workflow_list.query(
         workflow_type_filter=workflow_type,
@@ -292,19 +328,27 @@ async def list_workflows(
         offset=offset,
         include_archived=include_archived,
         search=search,
+        order_by=order_by,
     )
     return Ok(
         [
-            WorkflowSummary(
+            WorkflowSummaryResponse(
                 id=s.id,
                 name=s.name,
                 workflow_type=s.workflow_type,
                 classification=s.classification,
-                phase_count=s.phase_count,
                 description=s.description,
-                created_at=s.created_at,
+                phase_count=s.phase_count,
+                created_at=_iso_timestamp(s.created_at),
                 runs_count=s.runs_count,
                 is_archived=s.is_archived,
+                # WHY (#955): omitting this let the model's old `= True`
+                # default answer for every workflow. Measured on a live
+                # deployment: the list reported requires_repos=True for all 36
+                # while the detail endpoint reported False for 20 of them, and
+                # the stored rows agreed with detail. An agent that lists
+                # workflows, sees True, and passes -R is then told repos are
+                # supported when they are not.
                 requires_repos=s.requires_repos,
                 tags=list(s.tags),
                 skills=[_skill_response(skill) for skill in s.skills],
@@ -312,6 +356,14 @@ async def list_workflows(
             for s in domain_summaries
         ]
     )
+
+
+def _iso_timestamp(value: datetime | str | None) -> str | None:
+    """`WorkflowSummary.from_dict` passes a stored timestamp through as the
+    ISO string it was saved as, so either form can arrive here."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 async def get_workflow(
@@ -383,9 +435,6 @@ async def export_workflow(
 
 _SAFE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
-# Characters that require quoting in YAML scalar values.
-_YAML_SPECIAL_RE = re.compile(r"[:{}\[\],&*?|>!%#@`\"\'\n]")
-
 
 def _sanitize_slug(name: str) -> str:
     """Convert a workflow name to a safe slug for file paths."""
@@ -403,53 +452,6 @@ def _validate_phase_id(phase_id: str) -> str:
         msg = f"Phase ID contains unsafe characters: {phase_id!r}"
         raise ValueError(msg)
     return phase_id
-
-
-def _yaml_flow_list(values: list[str]) -> str:
-    """A flow list the emitter builds, not string concatenation.
-
-    Quoting each item and joining with ", " is not enough: a value that is a
-    perfectly safe standalone scalar can still restructure a FLOW LIST. `a,b`
-    reads back as `a,b` on its own and splits into two entries inside
-    `[a,b]`, so per-item quoting decided correctly and the surrounding
-    context still broke it. The emitter knows both.
-    """
-    return yaml.safe_dump(values, default_flow_style=True, width=10**9).strip().rstrip("\n")
-
-
-def _yaml_quote(value: str) -> str:
-    """Quote a YAML string unless the bare form reads back as itself.
-
-    Special CHARACTERS are not the whole risk. A value made entirely of
-    ordinary characters can still change type: bare `null` parses as None and
-    erases the field, `123` becomes an int a string field then rejects, and
-    `true`/`no`/`on` become booleans. Those look nothing like injection while
-    reading the emitted file, which is why the character test missed them.
-
-    So the check is behavioural rather than syntactic: emit the bare form,
-    parse it, and quote unless it survives as the same string. That covers
-    every YAML scalar resolution rule without this function having to know
-    them.
-    """
-    if _YAML_SPECIAL_RE.search(value) or not _reads_back_as_itself(value):
-        # Delegate to the YAML emitter rather than hand-rolling the escape.
-        # A hand-written double-quoted scalar keeps PHYSICAL newlines, and
-        # YAML folds those to a single space -- so "A\nB" reinstalled as
-        # "A B". A NUL produced a document PyYAML refuses outright. The
-        # emitter knows every escape; this function only decides WHETHER.
-        #
-        # Emitted inside a one-item flow list and unwrapped, so there is no
-        # document-end marker to trim off a bare scalar dump.
-        return _yaml_flow_list([value])[1:-1]
-    return value
-
-
-def _reads_back_as_itself(value: str) -> bool:
-    """Whether the bare scalar parses back to the identical string."""
-    try:
-        return yaml.safe_load(value) == value
-    except yaml.YAMLError:
-        return False
 
 
 # -- Export file builders -----------------------------------------------------
@@ -605,7 +607,10 @@ def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
     ]
     if phase.description:
         lines.append(f"    description: {_yaml_quote(phase.description)}")
-    lines.append(f"    prompt_file: phases/{pid}.md")
+    if phase.kind == "command":
+        lines.extend(command_phase_yaml_lines(phase.commands))
+    else:
+        lines.append(f"    prompt_file: phases/{pid}.md")
     if phase.input_artifact_types:
         lines.append(f"    input_artifacts: {_yaml_flow_list(list(phase.input_artifact_types))}")
     if phase.output_artifact_types:
@@ -675,6 +680,18 @@ def _yaml_declaration_lines(phase: PhaseDefinitionResponse) -> list[str]:
         lines.append(f"    platform_access: {phase.platform_access.value}")
     if phase.requires_verdict:
         lines.append("    requires_verdict: true")
+    # okrs-51p.30: dropped, a reinstalled build phase would run in the default
+    # workspace and be OOM-killed, or hit EAGAIN at the default pids limit.
+    requested = [
+        f"{key}: {value}"
+        for key, value in (
+            ("memory_mb", phase.resources.memory_mb),
+            ("pids_limit", phase.resources.pids_limit),
+        )
+        if value is not None
+    ]
+    if requested:
+        lines.append(f"    resources: {{{', '.join(requested)}}}")
     return lines
 
 
@@ -763,7 +780,8 @@ def _build_package_files(
 
     for phase in detail.phases:
         pid = _validate_phase_id(phase.phase_id)
-        files[f"phases/{pid}.md"] = _build_phase_md(phase)
+        if phase.kind == "agent":
+            files[f"phases/{pid}.md"] = _build_phase_md(phase)
 
 
 def _build_plugin_files(
@@ -781,15 +799,11 @@ def _build_plugin_files(
 
     for phase in detail.phases:
         pid = _validate_phase_id(phase.phase_id)
-        files[f"{wf_prefix}/phases/{pid}.md"] = _build_phase_md(phase)
+        if phase.kind == "agent":
+            files[f"{wf_prefix}/phases/{pid}.md"] = _build_phase_md(phase)
 
 
 # -- HTTP Endpoints -----------------------------------------------------------
-
-
-_SORTABLE_SUMMARY_FIELDS: frozenset[str] = frozenset(
-    {"runs_count", "name", "workflow_type", "phase_count", "created_at"}
-)
 
 
 @router.get("", response_model=WorkflowListResponse)
@@ -812,41 +826,10 @@ async def list_workflows_endpoint(
         offset=offset,
         include_archived=include_archived,
         search=search,
+        order_by=order_by,
     )
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
-
-    summaries = [
-        WorkflowSummaryResponse(
-            id=s.id,
-            name=s.name,
-            workflow_type=s.workflow_type,
-            phase_count=s.phase_count,
-            created_at=s.created_at.isoformat() if s.created_at else None,
-            runs_count=s.runs_count,
-            is_archived=s.is_archived,
-            # WHY (#955): omitting this let WorkflowSummaryResponse's `= True`
-            # default answer for every workflow. Measured on a live deployment:
-            # the list reported requires_repos=True for all 36 while the detail
-            # endpoint reported False for 20 of them, and the stored rows agreed
-            # with detail. An agent that lists workflows, sees True, and passes
-            # -R is then told repos are supported when they are not.
-            requires_repos=s.requires_repos,
-            tags=list(s.tags),
-            skills=list(s.skills),
-        )
-        for s in result.value
-    ]
-
-    # KNOWN LIMITATION: this sorts the current PAGE, not the collection, so
-    # `order_by` with more than one page does not give a global ordering.
-    # Deliberately not pushed into the store yet: it orders on data->>'field',
-    # which is text, so runs_count and phase_count would sort lexically
-    # ("10" < "9"). Fixing it needs numeric casts in the query builder.
-    if order_by:
-        desc, field = order_by.startswith("-"), order_by.lstrip("-")
-        if field in _SORTABLE_SUMMARY_FIELDS:
-            summaries.sort(key=lambda s: getattr(s, field) or 0, reverse=desc)
 
     # `total` is the size of the whole filtered collection, NOT of this page.
     # It was previously `len(summaries)`, which reported the page size and told
@@ -861,7 +844,7 @@ async def list_workflows_endpoint(
         # No slice here: `list_workflows` already applied limit/offset. Slicing
         # again applied the offset twice, so page 2 sliced [20:40] of a 12-row
         # page and returned nothing.
-        workflows=summaries,
+        workflows=result.value,
         total=total,
         page=page,
         page_size=page_size,
@@ -985,6 +968,8 @@ async def list_workflow_runs_endpoint(workflow_id: str) -> ExecutionRunListRespo
                 phase_progress=e.phase_progress,
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
+                total_cost_display=format_cost(e.total_cost_usd, e.unpriced_observation_count),
+                unpriced_observation_count=e.unpriced_observation_count,
                 error_message=e.error_message,
                 failure_classification=e.failure_classification,
                 reported_failure_reason=e.reported_failure_reason,

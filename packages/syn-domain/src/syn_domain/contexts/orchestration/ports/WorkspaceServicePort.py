@@ -11,6 +11,9 @@ from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service import ManagedWorkspace
+    from syn_domain.contexts.orchestration._shared.workspace_resources import (
+        WorkspaceResourceRequest,
+    )
 
 
 class WorkspaceServicePort(Protocol):
@@ -38,6 +41,7 @@ class WorkspaceServicePort(Protocol):
         capture_session_id: str | None = None,
         platform_access: PlatformScope = PlatformScope.READ,
         eval_id: str | None = None,
+        resources: "WorkspaceResourceRequest | None" = None,
     ) -> AbstractAsyncContextManager["ManagedWorkspace"]:
         """Create an isolated workspace for agent execution.
 
@@ -57,6 +61,10 @@ class WorkspaceServicePort(Protocol):
                 the phase declared it (ADR-072, #1744).
             eval_id: The eval the execution belongs to. An EVAL token can
                 launch into or score that eval and no other (#1744).
+            resources: What the phase asked its workspace to be, e.g.
+                ``memory_mb`` (okrs-51p.30). None or empty: the deployment
+                default. A request above the deployment ceiling raises
+                ``WorkspaceMemoryOverCapError`` before any container exists.
 
         Returns:
             AsyncContextManager that yields ManagedWorkspace.

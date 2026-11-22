@@ -29,6 +29,10 @@ export interface PhaseLike {
   model_display?: string
   /** USD per observed model id, or `unattributed-model`; empty while a phase runs. */
   cost_by_model?: Readonly<Record<string, string | number>> | null
+  /** Models the phase ran that nothing priced (#1743); absent from a server that predates it. */
+  unpriced_models?: readonly string[] | null
+  /** Backend text shown in place of a cost for each of `unpriced_models`. */
+  unpriced_model_cost_display?: string
   start_pins_status?: 'recorded' | 'not_recorded' | 'unavailable'
   pinned_at_start?: {
     provider: string
@@ -171,9 +175,19 @@ export function costRowsByModel(phases: readonly PhaseLike[]): CostRowInput[] {
       const n = toNumber(cost)
       if (n !== null) totals.set(model, (totals.get(model) ?? 0) + n)
     }
-  return [...totals]
+  const priced: CostRowInput[] = [...totals]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([model, value]) => ({ label: model === UNATTRIBUTED_MODEL_KEY ? 'unknown model' : model, value }))
+  // A model that ran and priced nowhere is still listed, with the backend's
+  // text and no value, never as $0 (#1743).
+  const unpriced = new Map<string, string>()
+  for (const p of phases)
+    for (const model of p.unpriced_models ?? [])
+      if (!totals.has(model)) unpriced.set(model, p.unpriced_model_cost_display ?? '')
+  return [
+    ...priced,
+    ...[...unpriced].sort((a, b) => a[0].localeCompare(b[0])).map(([label, display]) => ({ label, value: null, display })),
+  ]
 }
 
 const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']

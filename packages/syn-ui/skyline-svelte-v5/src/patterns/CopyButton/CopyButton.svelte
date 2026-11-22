@@ -7,6 +7,7 @@
   import { onDestroy } from 'svelte'
   import { GLYPH } from '@syn137/skyline-core/patterns'
   import { COPY_FEEDBACK_MS, copyFeedback, type CopyEvent, type CopyState } from '@syn137/skyline-core/state'
+  import { writeClipboard } from '../../components/CopyButton/clipboard'
   import Glyph from '../Glyph/Glyph.svelte'
   import type { CopyButtonProps } from './types'
 
@@ -27,7 +28,7 @@
     const value = typeof text === 'function' ? text() : text
     send({ type: 'copy' })
     try {
-      await navigator.clipboard.writeText(value)
+      await writeClipboard(value)
       send({ type: 'success' })
       oncopied?.(value)
     } catch (err) {

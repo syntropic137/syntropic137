@@ -42,9 +42,9 @@ from syn_adapters.execution_host.reconciler import Reconciler
 from syn_domain.contexts.orchestration.ports import RunLeaseLost
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
-    from syn_adapters.execution_host.ports import ClaimedRunDrainer, DeadHostReaper, RunInterrupter
+    from syn_adapters.execution_host.ports import ClaimedRunDrainer, RunInterrupter, RunReaper
     from syn_domain.contexts.orchestration.ports import (
         ClaimedRun,
         ExecutionRunQueue,
@@ -93,17 +93,26 @@ class ExecutionHost:
         *,
         capacity: int,
         drainer: ClaimedRunDrainer,
-        reaper: DeadHostReaper,
+        reaper: RunReaper,
         interrupter: RunInterrupter,
         streams: ExecutionStreamProbe,
         timing: HostTiming | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
+        recovery: Sequence[RunReaper] = (),
     ) -> None:
+        held = frozenset(kit.scope() for kit in recovery)
+        if held != host.recovery_scopes:
+            # The row would advertise a reach the reconciler cannot reap (C8).
+            raise ValueError(
+                f"host {host.host_id!r} declares recovery scopes {sorted(host.recovery_scopes)} "
+                f"but holds Recovery Kits for {sorted(held)}"
+            )
         self._queue = queue
         self._host = host
         self._capacity = capacity
         self._drainer = drainer
+        self._reaper = reaper
         self._streams = streams
         self._timing = timing or HostTiming()
         self._sleep = sleep
@@ -116,6 +125,7 @@ class ExecutionHost:
             concurrency=self._timing.reconcile_concurrency,
             lease_ttl=self._timing.lease_ttl.total_seconds(),
             clock=clock,
+            kits=recovery,
         )
         self._runs: dict[str, asyncio.Task[None]] = {}
         self._sweep: asyncio.Task[None] | None = None
@@ -232,6 +242,14 @@ class ExecutionHost:
         await self._queue.sweep_opening(self._timing.opening_older_than, self._streams)
 
     def _spawn(self, claimed: ClaimedRun) -> None:
+        if claimed.overflowed:
+            # Lane 2 telemetry: the run spilled past a full higher-priority pool (D13).
+            logger.info(
+                "ExecutionHost %s claimed %s by overflow into Executor Pool %s",
+                self._host.host_id,
+                claimed.execution_id,
+                claimed.pool_id,
+            )
         task = asyncio.create_task(self._drive(claimed), name=f"run:{claimed.execution_id}")
         self._runs[claimed.execution_id] = task
         task.add_done_callback(lambda _: self._runs.pop(claimed.execution_id, None))
@@ -255,7 +273,25 @@ class ExecutionHost:
             keeper.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await keeper
+        if not await self._released(claimed):
+            # A drain can return normally over resources it could not remove, a
+            # failed delete or a create whose response was lost. Closing would
+            # free a slot that may still be running, so the lease expires and a
+            # same-scope reconciler reaps before it frees (D3, D5).
+            logger.warning(
+                "Run %s: resources not shown gone; leaving it charged for reconciliation",
+                claimed.execution_id,
+            )
+            return
         try:
             await self._queue.close(claimed)
         except RunLeaseLost:
             logger.warning("Close of %s refused: this host no longer owns it", claimed.execution_id)
+
+    async def _released(self, claimed: ClaimedRun) -> bool:
+        """Whether the backend shows the run's resources gone; a raise is not shown gone."""
+        try:
+            return await self._reaper.reap(self._host.host_id, claimed.execution_id)
+        except Exception:
+            logger.exception("Reap of %s before close raised", claimed.execution_id)
+            return False

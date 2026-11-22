@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions import SessionSummaryData, TokenUsageData
 from syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator import CostCalculator
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import SessionCostProjection
@@ -173,25 +174,6 @@ async def _run_phase(lines: list[str], exit_code: int) -> _RecordingWriter:
     return writer
 
 
-class _InMemoryStore[RowT]:
-    """The projection store, kept in memory for the life of one test.
-
-    Rows are opaque on purpose: the real store round-trips whatever the
-    projection serialised, and that round-trip is the property these tests
-    lean on. A fake that named the row's shape would be asserting something
-    the real store does not, and a fake that reshaped it would hide the hop.
-    """
-
-    def __init__(self) -> None:
-        self._rows: dict[tuple[str, str], RowT] = {}
-
-    async def save(self, name: str, key: str, value: RowT) -> None:
-        self._rows[(name, key)] = value
-
-    async def get(self, name: str, key: str) -> RowT | None:
-        return self._rows.get((name, key))
-
-
 class _FakeRow:
     """Stands in for the asyncpg record ``_COST_BY_PHASE_QUERY`` returns."""
 
@@ -285,6 +267,7 @@ class TestKilledPhaseKeepsItsTokens:
                 input_tokens=17,
                 output_tokens=9,
                 cache_creation_tokens=0,
+                cache_creation_1h_tokens=0,
                 cache_read_tokens=0,
                 # This stream never names its model, so the row says unknown
                 # and carries the phase's request separately (ADR-067).
@@ -313,7 +296,7 @@ class TestKilledPhaseKeepsItsTokens:
         ]
         writer = await _run_phase(lines, exit_code=0)
 
-        projection = SessionCostProjection(store=_InMemoryStore())  # type: ignore[arg-type]
+        projection = SessionCostProjection(store=InMemoryProjectionStore())
         for usage in writer.token_usages:
             await projection.on_agent_observation(
                 {"session_id": _SESSION_ID, "event_type": "token_usage", "data": usage}
@@ -344,7 +327,7 @@ class TestKilledPhaseKeepsItsTokens:
         writer = await _run_phase(lines, exit_code=124)
 
         # LIVE: what the running execution reported, accumulated per observation.
-        projection = SessionCostProjection(store=_InMemoryStore())  # type: ignore[arg-type]
+        projection = SessionCostProjection(store=InMemoryProjectionStore())
         for usage in writer.token_usages:
             await projection.on_agent_observation(
                 {
@@ -376,7 +359,7 @@ class TestKilledPhaseKeepsItsTokens:
         lines = [_assistant_turn(f"msg-{i}", inp, out) for i, (inp, out) in enumerate(_TURNS)]
         writer = await _run_phase(lines, exit_code=124)
 
-        projection = SessionCostProjection(store=_InMemoryStore())  # type: ignore[arg-type]
+        projection = SessionCostProjection(store=InMemoryProjectionStore())
         for usage in writer.token_usages:
             await projection.on_agent_observation(
                 {

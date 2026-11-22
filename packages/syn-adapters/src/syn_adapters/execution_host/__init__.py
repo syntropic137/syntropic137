@@ -7,13 +7,13 @@ until the host is told to drain, and ``drain()`` tells it. What it drives is rea
 
 from syn_adapters.execution_host.host import ExecutionHost, HostTiming
 from syn_adapters.execution_host.interrupter import AggregateRunInterrupter
-from syn_adapters.execution_host.ports import ClaimedRunDrainer, DeadHostReaper, RunInterrupter
+from syn_adapters.execution_host.ports import ClaimedRunDrainer, RunInterrupter, RunReaper
 
 __all__ = [
     "AggregateRunInterrupter",
     "ClaimedRunDrainer",
-    "DeadHostReaper",
     "ExecutionHost",
     "HostTiming",
     "RunInterrupter",
+    "RunReaper",
 ]

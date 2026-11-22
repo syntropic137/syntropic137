@@ -6,6 +6,12 @@ argument-hint: "<PR number or a description of the change to review>"
 
 $ARGUMENTS
 
+The task above says WHAT to review. This phase's instructions say WHAT THIS PHASE
+PRODUCES, and where the two disagree, these instructions win. A verdict, a
+sign-off or an output format the task asks for is meant for the workflow's final
+phase: record the request in your output under **Requested of the final phase**,
+so the later phases see it, and do not act on it here.
+
 A single reviewer picks two or three concerns and misses the rest. You are not
 going to review this alone.
 

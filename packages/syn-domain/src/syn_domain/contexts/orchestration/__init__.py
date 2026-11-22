@@ -16,6 +16,7 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
     ClaudePluginError,
     ClaudePluginInvalidName,
     ClaudePluginInvalidPath,
+    ClaudePluginLockedHashMismatch,
     ClaudePluginManifestInvalid,
     ClaudePluginManifestMissing,
     ClaudePluginNotRegistered,
@@ -24,6 +25,15 @@ from syn_domain.contexts.orchestration._shared.claude_plugin_errors import (
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,
 )
+from syn_domain.contexts.orchestration._shared.command_phase import (
+    COMMAND_TAIL_BYTES,
+    BoundedCommandResult,
+    CommandStep,
+    CommandTerminal,
+    InconsistentPhaseKindError,
+    PhaseKind,
+)
+from syn_domain.contexts.orchestration._shared.content_pin import content_pin_is_satisfied
 from syn_domain.contexts.orchestration._shared.eval_admission import (
     EvalUnavailableError,
     launch_eval_for,
@@ -39,6 +49,10 @@ from syn_domain.contexts.orchestration._shared.eval_membership_edit import (
 )
 from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH
 from syn_domain.contexts.orchestration._shared.execution_list_reads import ExecutionListReads
+from syn_domain.contexts.orchestration._shared.file_transfer import (
+    FileRefusal,
+    FilesRefusedError,
+)
 from syn_domain.contexts.orchestration._shared.repository_baseline import BaselineRequest
 from syn_domain.contexts.orchestration._shared.resolved_claude_plugin import (
     ResolvedClaudePlugin,
@@ -48,11 +62,11 @@ from syn_domain.contexts.orchestration._shared.resolved_skill import (
 )
 from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
     RETIRED_PHASE_FIELDS,
-    retired_field_notices,
 )
 from syn_domain.contexts.orchestration._shared.skill_errors import (
     SkillError,
     SkillInvalidName,
+    SkillLockedHashMismatch,
     SkillNotRegistered,
 )
 from syn_domain.contexts.orchestration._shared.skill_ref import (
@@ -91,6 +105,17 @@ from syn_domain.contexts.orchestration._shared.workspace_credential_policy impor
     NoCredentials,
     WorkspaceCredentialPolicy,
 )
+from syn_domain.contexts.orchestration._shared.workspace_resources import (
+    WorkspaceMemoryOverCapError,
+    WorkspacePidsOverCapError,
+    WorkspaceResourceRequest,
+    deployment_memory_ceiling_mb,
+    deployment_pids_ceiling,
+    require_memory_within_cap,
+    require_phases_within_cap,
+    require_pids_within_cap,
+    stored_resource_request,
+)
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
     build_command_from_definition,
 )
@@ -110,17 +135,30 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     FailExecutionCommand,
     InterruptExecutionCommand,
     ResumeExecutionCommand,
+    WithdrawResumeCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.eval_membership import (
+    AssociationKind,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+    IMAGE_MANIFEST_FILE,
+    IMAGE_MANIFEST_ROOT,
+    ImageManifestContent,
+    ImageManifestReading,
+    ImageManifestState,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_shapes import (
     replays_generic,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
+    phases_the_resume_runs,
     refuse_resume_start,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     DelegationAttempt,
     DelegationFailure,
     DelegationFailureReason,
+    EvalBaselinePin,
     ExecutablePhase,
     ExecutionStatus,
     FailureClassification,
@@ -136,6 +174,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.domain.aggregate_execution_request import (
     ExecutionAlreadyRequestedError,
     ExecutionRequestAggregate,
+    execution_id_for_key,
     execution_request_id,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.errors import (
@@ -149,6 +188,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.requir
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
+    require_consistent_phase_kind,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
@@ -196,13 +236,38 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionRequestWithdrawnEv
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumeWithdrawnEvent import (
+    ExecutionResumeWithdrawnEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
+)
+from syn_domain.contexts.orchestration.domain.read_models.eval_set_comparison import (
+    compare_pair,
+)
+from syn_domain.contexts.orchestration.domain.read_models.eval_sets import (
+    TaggedEval,
+    roster_of,
+    summarize_case,
+    summarize_eval_set,
+)
+from syn_domain.contexts.orchestration.domain.read_models.eval_trials import (
+    DeclaredModel,
+    EvalTag,
+    TrialExclusion,
+    TrialOutcome,
+    classify_trial,
+    declared_model_tags,
+    declared_models_of,
+    models_digest,
 )
 from syn_domain.contexts.orchestration.domain.read_models.phase_plan import PlannedPhase
 from syn_domain.contexts.orchestration.domain.read_models.phase_progress import PhaseProgress
 from syn_domain.contexts.orchestration.domain.read_models.workflow_definition_changes import (
     DefinitionChangeKind,
+)
+from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
+    PhaseExecutionDetail,
 )
 from syn_domain.contexts.orchestration.slices.archive_eval.ArchiveEvalHandler import (
     ArchiveEvalHandler,
@@ -279,6 +344,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     inherited_outputs,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
+    SalvagedPhase,
     salvage_stranded_phase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
@@ -296,6 +362,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt 
 from syn_domain.contexts.orchestration.slices.execution_cost.query_service import (
     ExecutionCostQueryService,
 )
+from syn_domain.contexts.orchestration.slices.failure_streak import TriggerDispatchStreakCheck
 from syn_domain.contexts.orchestration.slices.manage_global_claude_plugins import (
     GlobalClaudePluginEntry,
     GlobalClaudePluginNotFoundError,
@@ -358,6 +425,9 @@ from syn_domain.contexts.orchestration.slices.tag_workflow import (
     AddWorkflowTagsHandler,
     RemoveWorkflowTagsHandler,
 )
+from syn_domain.contexts.orchestration.slices.update_eval.UpdateEvalHandler import (
+    UpdateEvalHandler,
+)
 from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
     UpdateWorkflowPhaseHandler,
 )
@@ -365,7 +435,10 @@ from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkfl
 __all__ = [
     # Constants
     "AGENT_LAUNCH_MARKER",
+    "COMMAND_TAIL_BYTES",
     "HOST_CREDENTIALS",
+    "IMAGE_MANIFEST_FILE",
+    "IMAGE_MANIFEST_ROOT",
     "MAX_START_ATTEMPTS",
     "NO_CREDENTIALS",
     "ORCHESTRATION_EVENT_EPOCH",
@@ -392,22 +465,27 @@ __all__ = [
     "ArchiveWorkflowTemplateCommand",
     # Handlers
     "ArchiveWorkflowTemplateHandler",
+    "AssociationKind",
     "AttachExecutionToEvalCommand",
     "AttachExecutionToEvalHandler",
     # The clock a phase's retry budget is measured on (#1303)
     "AttemptClock",
     "BaselineRequest",
+    "BoundedCommandResult",
     # Claude plugin types + errors (issue #726)
     "CancelledWorkLedger",
     "ClaudePluginError",
     "ClaudePluginInvalidName",
     "ClaudePluginInvalidPath",
+    "ClaudePluginLockedHashMismatch",
     "ClaudePluginManifestInvalid",
     "ClaudePluginManifestMissing",
     "ClaudePluginNotFoundError",
     "ClaudePluginNotRegistered",
     "ClaudePluginRef",
     "ClaudePluginVersionHashMismatch",
+    "CommandStep",
+    "CommandTerminal",
     "CommitShipped",
     "CreateEvalHandler",
     "CreateWorkflowTemplateCommand",
@@ -416,6 +494,7 @@ __all__ = [
     "CreatedPullRequest",
     "CredentialFreePhaseRefusedError",
     "CredentialRenewalFailedError",
+    "DeclaredModel",
     "DefinitionChangeKind",
     "DelegationAttempt",
     "DelegationFailure",
@@ -424,10 +503,12 @@ __all__ = [
     "DetachExecutionFromEvalHandler",
     # Errors
     "DuplicateExecutionError",
+    "EvalBaselinePin",
     "EvalChoice",
     "EvalId",
     "EvalMembershipResult",
     "EvalRunNotMemberError",
+    "EvalTag",
     "EvalUnavailableError",
     # Value objects - execution
     "ExecutablePhase",
@@ -448,12 +529,15 @@ __all__ = [
     "ExecutionRequestedEvent",
     # Value objects - workspace
     "ExecutionResult",
+    "ExecutionResumeWithdrawnEvent",
     "ExecutionResumedEvent",
     "ExecutionStatus",
     "FailExecutionCommand",
     "FailureClassification",
     # Value objects - workflow
     "FallbackAgentYamlDefinition",
+    "FileRefusal",
+    "FilesRefusedError",
     "GlobalClaudePluginEntry",
     "GlobalClaudePluginNotFoundError",
     "Goal",
@@ -462,6 +546,10 @@ __all__ = [
     "HostCredentials",
     "HostWorkspaceGit",
     "ImageManifest",
+    "ImageManifestContent",
+    "ImageManifestReading",
+    "ImageManifestState",
+    "InconsistentPhaseKindError",
     "InheritanceUnavailableError",
     "InjectTokensCommand",
     # Value objects - workflow template
@@ -476,7 +564,9 @@ __all__ = [
     "OwnerExecution",
     "Percentiles",
     "PhaseDefinition",
+    "PhaseExecutionDetail",
     "PhaseExecutionType",
+    "PhaseKind",
     "PhaseProfileQueryService",
     "PhaseProfiles",
     "PhaseProgress",
@@ -511,6 +601,7 @@ __all__ = [
     "Retained",
     "RetainedReason",
     "ReviewVerdict",
+    "SalvagedPhase",
     "SecurityPolicy",
     "SetWorkflowDefaultEvalCommand",
     "SetWorkflowDefaultEvalHandler",
@@ -524,6 +615,7 @@ __all__ = [
     "SidecarConfig",
     "SkillError",
     "SkillInvalidName",
+    "SkillLockedHashMismatch",
     "SkillNotRegistered",
     "SkillRef",
     "StaleWorkspaceDir",
@@ -532,16 +624,22 @@ __all__ = [
     "StreamResult",
     "SubagentTracker",
     "TagSet",
+    "TaggedEval",
     "TemplateLaunches",
     "TerminateWorkspaceCommand",
     "TokenAccumulator",
+    "TrialExclusion",
+    "TrialOutcome",
+    "TriggerDispatchStreakCheck",
     "UnsupportedExecutionTypeError",
     "UnsupportedToolPolicyForProviderError",
+    "UpdateEvalHandler",
     "UpdatePhasePromptCommand",
     "UpdateWorkflowPhaseHandler",
     "UpdateWorkflowTemplateCommand",
     "Verdict",
     "WithdrawExecutionRequestCommand",
+    "WithdrawResumeCommand",
     "WorkflowClassification",
     "WorkflowDefinition",
     "WorkflowExecutionAggregate",
@@ -559,10 +657,21 @@ __all__ = [
     "WorkspaceCredentialPolicy",
     "WorkspaceDeleteFallback",
     "WorkspaceDirRemover",
+    "WorkspaceMemoryOverCapError",
+    "WorkspacePidsOverCapError",
+    "WorkspaceResourceRequest",
     "WorkspaceUsage",
     "announce_as",
     "build_command_from_definition",
+    "classify_trial",
+    "compare_pair",
+    "content_pin_is_satisfied",
     "created_pull_requests",
+    "declared_model_tags",
+    "declared_models_of",
+    "deployment_memory_ceiling_mb",
+    "deployment_pids_ceiling",
+    "execution_id_for_key",
     "execution_request_id",
     "guard_orphaned_workspace",
     "guard_stale_workspace_dir",
@@ -572,7 +681,9 @@ __all__ = [
     "judge_owner",
     "launch_eval_for",
     "mint_wrapper_name",
+    "models_digest",
     "open_eval",
+    "phases_the_resume_runs",
     "read_record",
     "read_start_record",
     "refuse_resume_start",
@@ -580,9 +691,16 @@ __all__ = [
     "render_workspace_prompt",
     "replays_generic",
     "repository_key",
+    "require_consistent_phase_kind",
+    "require_memory_within_cap",
+    "require_phases_within_cap",
+    "require_pids_within_cap",
     "require_supported_execution_type",
-    "retired_field_notices",
+    "roster_of",
     "salvage_stranded_phase",
+    "stored_resource_request",
+    "summarize_case",
+    "summarize_eval_set",
     "utc_day",
     "validate_phase_declarations",
     "validate_workflow_yaml",

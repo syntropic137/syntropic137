@@ -145,8 +145,9 @@ class DiskSettings(BaseSettings):
         default="",
         description=(
             "Comma-separated container names the workspace reclaimer may treat as pure "
-            "observers of the host tree (for example a node-exporter binding / read-only). "
-            "Listing a container asserts it never consumes workspace contents. It is "
+            "observers of the host tree. Only a bind of a workspace directory itself, or "
+            "of a path inside it, can block reclaim; a bind of the base or an ancestor of "
+            "it (a node-exporter binding / read-only) never does (#2215). Listing a container asserts it never consumes workspace contents. It is "
             "exempt from blocking reclaim only while its inspect shows every mount "
             "read-only, not privileged and no SYS_ADMIN, and every bind rprivate and "
             "forced recursively read-only, i.e. mounted as --mount type=bind,source=/,"

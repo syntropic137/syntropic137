@@ -17,8 +17,8 @@ Two sources may open a PR into `release` (ADR-077):
 Every other head branch is refused, and so is any head pushed from another
 repository: a fork's branch named `main` is not `main`.
 
-The checker never executes the candidate. CI runs the copy on the `release`
-branch (`pull_request_target`) and reads the head only as git objects.
+The checker never executes the candidate. CI runs the copy on `main`
+(`pull_request_target`) and reads the head only as git objects.
 
 CI DEPENDENCY - called by .github/workflows/release-source.yml:
     uv run --no-project python scripts/workflows/check_release_source.py \\

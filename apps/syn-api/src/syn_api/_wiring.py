@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     import asyncpg
 
     from syn_adapters.control import ExecutionController
-    from syn_adapters.control.commands import ControlSignal
     from syn_adapters.control.ports import SignalQueuePort
     from syn_adapters.conversations.minio import MinioConversationStorage
     from syn_adapters.events.store import AgentEventStore
@@ -32,9 +31,11 @@ if TYPE_CHECKING:
     from syn_api.services.claude_plugin_resolution_service import ClaudePluginResolutionService
     from syn_api.services.skill_materializer import SkillMaterializer
     from syn_api.services.skill_resolution_service import SkillResolutionService
+    from syn_domain.contexts.agent_sessions import ConversationLogReader
     from syn_domain.contexts.agent_sessions.ports.SessionObservationPort import (
         SessionObservationPort,
     )
+    from syn_domain.contexts.github.ports import PullRequestDraftPort
     from syn_domain.contexts.github.services import WebhookHealthTracker
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
@@ -75,7 +76,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.config import Settings
     from syn_shared.settings.github import GitHubAppSettings
 
-from syn_adapters.conversations import get_conversation_storage
+from syn_adapters.conversations import StoredConversationLogReader, get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
 from syn_adapters.projections.session_timeline_memory import get_in_memory_session_timeline
@@ -86,7 +87,7 @@ from syn_adapters.projections.session_timeline_memory import get_in_memory_sessi
 from syn_adapters.projections.sync import (
     sync_published_events_to_projections as sync_published_events_to_projections,
 )
-from syn_adapters.session_store import HttpSessionStore
+from syn_adapters.session_store import HttpSessionStore, StoredTranscriptUsageReader
 from syn_adapters.storage import (
     connect_event_store,
     disconnect_event_store,
@@ -104,7 +105,7 @@ from syn_adapters.storage.repositories import (
     get_trigger_repository,
     get_workflow_execution_repository,
 )
-from syn_adapters.workspace_backends.service import WorkspaceService
+from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api._wiring_admission import (
     BackgroundWorkflowDispatcher,
     admitted_launch_eval,
@@ -114,8 +115,12 @@ from syn_api._wiring_admission import (
 from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
 from syn_api._wiring_import_ledger import get_import_ledger
 from syn_api._wiring_launch import _build_resume_handler, get_execute_workflow_handler
+from syn_api._wiring_signal import _NullSignalQueueAdapter
+from syn_api._wiring_workspace_memory import get_workspace_memory_ledger, ledger_applies
+from syn_api.services.skill_preflight import require_resolvable_skills_for
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration import WorkflowExecutionProcessor
+from syn_shared import settings as shared_settings
 from syn_shared.env_constants import (
     ENV_CLAUDE_CODE_ENABLE_TELEMETRY,
     ENV_OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -137,15 +142,20 @@ def get_projection_mgr() -> ProjectionManager:
     return get_projection_manager()
 
 
-def get_artifact_query() -> ArtifactQueryService:
+async def get_artifact_query() -> ArtifactQueryService:
     """The artifact read service, on its own.
 
     Narrower than `get_execution_processor()` on purpose: a caller that only
     needs to READ artifacts - resolving a resume's inheritance before admitting it,
     for instance - should not drag the execution processor and therefore the
     observability event store into a request that writes nothing through them.
+    It does need object storage: binary files (#990) and large text (#2042)
+    are there and not in the read model, and without it a resume of a phase
+    that produced one is refused as if its artifacts were gone.
     """
-    return ArtifactQueryService(get_projection_manager().artifact_list)
+    return ArtifactQueryService(
+        get_projection_manager().artifact_list, content_storage=await get_artifact_storage()
+    )
 
 
 def _build_session_store(settings: Settings) -> HttpSessionStore | None:
@@ -180,9 +190,7 @@ def _build_workspace_telemetry_env() -> dict[str, str]:
     inside the container (CLAUDE_CODE_ENABLE_TELEMETRY is already baked into
     the workspace image as a default, so no-endpoint is a graceful fallback).
     """
-    from syn_shared.settings import get_settings
-
-    collector_url = get_settings().collector_url
+    collector_url = shared_settings.get_settings().collector_url
     if not collector_url:
         return {}
     return {
@@ -275,9 +283,8 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     from syn_adapters.workspace_backends.agentic.session_capture_service import (
         SessionCaptureService,
     )
-    from syn_shared.settings import get_settings
 
-    _settings = get_settings()
+    _settings = shared_settings.get_settings()
     from syn_api._wiring_inventory import get_inventory_runtime
 
     capture_source_id = (
@@ -309,6 +316,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         skill_materializer=skill_materializer,
         session_capture=session_capture,
         session_store=_build_session_store(_settings),
+        transcript_reader=StoredTranscriptUsageReader(),
         import_ledger=get_import_ledger(),
         # #1513: records which PR is open from each branch a failing phase
         # left, so a resume continues that PR and never one opened since.
@@ -330,13 +338,23 @@ def build_workspace_service(
 
     A function of its own so a test can build exactly what production runs.
     No credential policy is passed, deliberately: the executor this wiring
-    serves runs real agents, which need the host's credentials.
+    serves runs real agents, which need the host's credentials. E2B only when SYN_E2B_ENABLED (#1915).
     """
+    from syn_api._wiring_e2b import e2b_client_with_breaker
+
+    e2b = shared_settings.get_settings().e2b
+    backend = WorkspaceBackend.selected(e2b)
     return WorkspaceService.create(
+        backend=backend,
+        e2b=e2b,
+        e2b_client=e2b_client_with_breaker() if backend is WorkspaceBackend.E2B else None,
         config=ws_config,
         environment=_build_workspace_env(),
         capture_source_instance_id=capture_source_instance_id,
         platform_tokens=get_platform_token_service(),
+        # okrs-51p.30: a phase that asks for 16 GB holds four default shares
+        # of this host's memory, which an E2B sandbox does not spend.
+        memory_ledger=get_workspace_memory_ledger() if ledger_applies() else None,
     )
 
 
@@ -407,9 +425,7 @@ def get_trigger_repo():
     In test mode, returns a NullRepository since InMemoryTriggerQueryStore
     lacks save()/get_by_id() required by domain handlers.
     """
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
+    settings = shared_settings.get_settings()
     if settings.uses_in_memory_stores:
         global _test_trigger_repo
         if _test_trigger_repo is None:
@@ -442,9 +458,7 @@ def get_event_pipeline() -> EventPipeline:
     if _event_pipeline_singleton is not None:
         assert isinstance(_event_pipeline_singleton, EventPipeline)
         return _event_pipeline_singleton
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
+    settings = shared_settings.get_settings()
 
     dedup = _create_dedup_adapter()
     evaluator = EvaluateWebhookHandler(
@@ -452,6 +466,7 @@ def get_event_pipeline() -> EventPipeline:
         repository=get_trigger_repo(),
         dispatch_rate_limit=settings.polling.dispatch_rate_limit,
         dispatch_rate_window_seconds=settings.polling.dispatch_rate_window_seconds,
+        draft_reader=get_pull_request_draft_reader(),
     )
     pipeline = EventPipeline(
         dedup=dedup,
@@ -461,14 +476,20 @@ def get_event_pipeline() -> EventPipeline:
     return pipeline
 
 
+def get_pull_request_draft_reader() -> PullRequestDraftPort:
+    """The live draft lookup ``check_run`` trigger rules are held back by (#2058)."""
+    from syn_adapters.github.client import get_github_client
+    from syn_adapters.github.pull_request_draft_reader import GitHubPullRequestDraftReader
+
+    return GitHubPullRequestDraftReader(get_github_client)
+
+
 def _create_dedup_adapter() -> DedupPort:
     """Create the appropriate dedup adapter based on environment.
 
     Priority (ADR-060): Postgres (durable) > Redis (cache) > In-memory (tests).
     """
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
+    settings = shared_settings.get_settings()
 
     if settings.uses_in_memory_stores:
         from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
@@ -524,9 +545,7 @@ async def get_execution_run_queue() -> ExecutionRunQueue | None:
     remove. Its schema is ensured once, on first use.
     """
     global _run_queue_singleton
-    from syn_shared.settings import get_settings
-
-    if not get_settings().execution.run_queue_enabled:
+    if not shared_settings.get_settings().execution.run_queue_enabled:
         return None
     if _run_queue_singleton is not None:
         return _run_queue_singleton
@@ -556,9 +575,7 @@ def get_webhook_health_tracker() -> WebhookHealthTracker:
         assert isinstance(_webhook_health_tracker_singleton, WebhookHealthTracker)
         return _webhook_health_tracker_singleton
 
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
+    settings = shared_settings.get_settings()
     threshold = settings.polling.webhook_stale_threshold_seconds
     tracker = WebhookHealthTracker(stale_threshold=threshold)
     _webhook_health_tracker_singleton = tracker
@@ -582,9 +599,7 @@ def get_pending_sha_store() -> PendingSHAStore:
     if _pending_sha_store_singleton is not None:
         return _pending_sha_store_singleton  # type: ignore[return-value]
 
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
+    settings = shared_settings.get_settings()
 
     # Test/offline: use in-memory (guarded by InMemoryAdapter base class)
     if settings.uses_in_memory_stores:
@@ -632,7 +647,7 @@ _controller_singleton: ExecutionController | None = None
 
 
 def get_controller() -> ExecutionController:
-    """Return a singleton ExecutionController for pause/resume/cancel/inject.
+    """Return a singleton ExecutionController for cancel.
 
     Returns the same instance on every call so the execution engine and API
     endpoints share the same signal queue; signals enqueued by an HTTP
@@ -658,9 +673,8 @@ def get_controller() -> ExecutionController:
     executions = get_workflow_execution_repository()
 
     from syn_shared.logging.redaction import redact_url_credentials
-    from syn_shared.settings import get_settings
 
-    redis_url = get_settings().redis_url
+    redis_url = shared_settings.get_settings().redis_url
     try:
         from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
         from syn_adapters.redis_client import resilient_redis_client
@@ -691,8 +705,6 @@ logger = logging.getLogger(__name__)
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
     """Create a BackgroundWorkflowDispatcher backed by the processor."""
     handler = await get_execute_workflow_handler()
-    from syn_shared.settings import get_settings
-
     return BackgroundWorkflowDispatcher(
         handler,
         # #1557: the ONE budget `POST /execute` also claims from, so trigger,
@@ -712,22 +724,12 @@ async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
         # deployment, resuming or not.
         resume_handler=_build_resume_handler,
         launch_eval_for_workflow=admitted_launch_eval,
+        # #1003: the same skill preflight `POST /execute` runs, so a trigger
+        # whose skill cannot resolve fails with the resolver's message.
+        skill_preflight=require_resolvable_skills_for,
         # #1310 1.3: starts end at `admitted` in the run queue, awaited inline.
-        admits_to_run_queue=get_settings().execution.run_queue_enabled,
+        admits_to_run_queue=shared_settings.get_settings().execution.run_queue_enabled,
     )
-
-
-class _NullSignalQueueAdapter:
-    """No-op signal adapter when Redis is not available."""
-
-    async def enqueue(self, execution_id: str, signal: ControlSignal) -> None:
-        pass
-
-    async def dequeue(self, execution_id: str) -> ControlSignal | None:  # noqa: ARG002
-        return None
-
-    async def get_signal(self, execution_id: str) -> ControlSignal | None:  # noqa: ARG002
-        return None
 
 
 def get_event_store_instance() -> AgentEventStore:
@@ -748,9 +750,7 @@ def get_session_observations() -> SessionObservationPort:
     decision worth hiding behind a name is which lane a session operation
     lives on.
     """
-    from syn_shared.settings import get_settings
-
-    if get_settings().uses_in_memory_stores:
+    if shared_settings.get_settings().uses_in_memory_stores:
         return get_in_memory_session_timeline()
     return get_event_store()
 
@@ -828,6 +828,11 @@ async def get_conversation_store() -> MinioConversationStorage:
     return await get_conversation_storage()
 
 
+def get_conversation_log_reader() -> ConversationLogReader:
+    """Return the reader for stored conversation-log lines (#1424)."""
+    return StoredConversationLogReader()
+
+
 def get_realtime() -> RealTimeProjection:
     """Return the RealTimeProjection singleton."""
     from syn_adapters.projections.realtime import get_realtime_projection
@@ -857,14 +862,13 @@ def get_subscription_coordinator(
     from syn_adapters.projection_stores import get_projection_store
     from syn_adapters.subscriptions import create_coordinator_service
     from syn_api._wiring_inventory import get_inventory_runtime
-    from syn_shared.settings import get_settings
 
     # Pass TimescaleDB pool to cost projections (#505, #507)
     timescale_pool = None
     with contextlib.suppress(Exception):
         timescale_pool = get_event_store_instance().pool
 
-    settings = get_settings()
+    settings = shared_settings.get_settings()
 
     return create_coordinator_service(
         event_store=get_event_store_client(),
@@ -874,6 +878,7 @@ def get_subscription_coordinator(
         pool=timescale_pool,
         budget_checker=_get_budget_checker(),
         max_dispatches_per_hour=settings.polling.max_dispatches_per_hour,
+        failure_streak_threshold=settings.polling.failure_streak_threshold,
         inventory_replication_manager=(
             None if settings.uses_in_memory_stores else get_inventory_runtime().replication
         ),
@@ -960,9 +965,7 @@ async def get_claude_plugin_storage() -> MinioClaudePluginStorage | InMemoryClau
     if _claude_plugin_storage_singleton is not None:
         return _claude_plugin_storage_singleton
 
-    from syn_shared.settings import get_settings
-
-    if get_settings().uses_in_memory_stores:
+    if shared_settings.get_settings().uses_in_memory_stores:
         from syn_adapters.storage.claude_plugin_storage.factory import (
             get_test_claude_plugin_storage,
         )
@@ -1190,9 +1193,7 @@ async def get_skill_storage() -> MinioSkillStorage | InMemorySkillStorage:
     if _skill_storage_singleton is not None:
         return _skill_storage_singleton
 
-    from syn_shared.settings import get_settings
-
-    if get_settings().uses_in_memory_stores:
+    if shared_settings.get_settings().uses_in_memory_stores:
         from syn_adapters.storage.skill_storage.factory import get_test_skill_storage
 
         _skill_storage_singleton = get_test_skill_storage()
@@ -1319,9 +1320,8 @@ def get_platform_token_service() -> PlatformTokenService:
         PlatformTokenStore,
         RedisPlatformTokenStore,
     )
-    from syn_shared.settings import get_settings
 
-    settings = get_settings()
+    settings = shared_settings.get_settings()
     access = settings.platform_access
     store: PlatformTokenStore | None = None
     if access.enabled:

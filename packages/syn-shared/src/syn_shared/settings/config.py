@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.dependency_seed import DependencySeedSettings
     from syn_shared.settings.dev_tooling import DevToolingSettings
     from syn_shared.settings.disk import DiskSettings
+    from syn_shared.settings.e2b import E2BSettings
     from syn_shared.settings.execution import ExecutionSettings, ExecutorPoolSettings
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.image_verification import ImageVerificationSettings
@@ -815,6 +816,13 @@ class Settings(BaseSettings):
         from syn_shared.settings.session_inventory import SessionInventorySettings
 
         return SessionInventorySettings()
+
+    @property
+    def e2b(self) -> E2BSettings:
+        """E2B remote workspace settings from SYN_E2B_* (#1915). Off by default."""
+        from syn_shared.settings.e2b import E2BSettings
+
+        return E2BSettings()
 
     @property
     def session_store(self) -> SessionStoreSettings:

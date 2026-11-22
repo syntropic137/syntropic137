@@ -69,7 +69,7 @@ def _workflow_with_refs(
     return WorkflowDefinition(
         id="wf-test",
         name="test workflow",
-        type="ad-hoc",
+        type="custom",
         claude_plugins=workflow_refs,
         phases=[
             PhaseYamlDefinition(

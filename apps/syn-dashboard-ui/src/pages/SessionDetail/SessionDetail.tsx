@@ -23,7 +23,9 @@ function buildSessionBreadcrumbs(session: SessionResponse): BreadcrumbItem[] {
   if (session.execution_id) {
     items.push({ label: 'Execution', href: `/executions/${session.execution_id}` })
   }
-  items.push({ label: session.phase_id || `Session ${session.id.slice(0, 8)}` })
+  items.push({
+    label: session.phase_display || session.phase_id || `Session ${session.id.slice(0, 8)}`,
+  })
   return items
 }
 

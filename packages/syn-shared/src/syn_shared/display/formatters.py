@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from syn_shared.agents import PhaseModelResolution, resolve_model_alias
+from syn_shared.repo_names import owner_repo
 
 logger = logging.getLogger(__name__)
 
@@ -326,10 +327,15 @@ def format_model_compact(model: str | None) -> str | None:
 
 
 def format_repos(repos: list[str] | tuple[str, ...] | None) -> str | None:
-    """Render a list of ``owner/repo`` slugs as a compact label.
+    """Render stored repositories as a compact ``owner/repo`` label.
 
-    One repo: just the repo name (``"acme/foo" -> "foo"``).
-    Multiple: first repo + ``+N`` (``["acme/foo", "acme/bar"] -> "foo +1"``).
+    Entries may be in any shape ``owner_repo`` accepts (full URL, ``.git``,
+    ``git@`` remote, ``owner/repo`` shorthand). The label keeps the owner, so
+    two orgs' ``api`` repos stay distinguishable.
+
+    One repo: ``"https://github.com/acme/foo" -> "acme/foo"``.
+    Multiple: first repo + ``+N`` (``["acme/foo", "acme/bar"] -> "acme/foo +1"``).
+    An entry that names no repo is shown as written, without its slashes.
     Empty or ``None`` returns ``None``.
     """
     if not repos:
@@ -337,10 +343,33 @@ def format_repos(repos: list[str] | tuple[str, ...] | None) -> str | None:
     items = [r.strip() for r in repos if r and r.strip()]
     if not items:
         return None
-    first = items[0].split("/", 1)[-1] or items[0]
+    first = owner_repo(items[0]) or items[0].strip("/")
     if len(items) == 1:
         return first
     return f"{first} +{len(items) - 1}"
+
+
+#: How long a one-line task summary may be before it is ellipsised (#1075).
+TASK_SUMMARY_MAX_CHARS = 80
+
+
+def format_task_summary(task: str | None, max_chars: int = TASK_SUMMARY_MAX_CHARS) -> str | None:
+    """Render a run's task as one line a list row can show (#1075).
+
+    Every run of space (newlines and tabs included) collapses to one space,
+    and text longer than ``max_chars`` is cut to exactly ``max_chars`` with a
+    trailing ``…``. Short text is returned as written, apart from the
+    collapsing. ``None`` and blank text
+    return ``None``: a run asked nothing has no summary.
+    """
+    if task is None:
+        return None
+    line = " ".join(task.split())
+    if not line:
+        return None
+    if len(line) <= max_chars:
+        return line
+    return f"{line[: max_chars - 1].rstrip()}…"
 
 
 def format_exit_code(exit_code: int | None) -> str:

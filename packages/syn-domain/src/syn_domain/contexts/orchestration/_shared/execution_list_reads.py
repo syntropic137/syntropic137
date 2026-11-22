@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 
     from event_sourcing import ProjectionStore
 
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        ReviewVerdict,
+    )
     from syn_domain.pagination import Page
 
 WORKFLOW_EXECUTIONS = "workflow_executions"
@@ -48,6 +51,7 @@ class ExecutionListReads:
         eval_id: str | None = None,
         in_eval: bool | None = None,
         workflow_id: str | None = None,
+        review_verdict: ReviewVerdict | None = None,
         offset: int = 0,
         limit: int | None = None,
     ) -> Page[WorkflowExecutionSummary]:
@@ -76,10 +80,15 @@ class ExecutionListReads:
 
         `workflow_id` keeps only that workflow's executions, applied in the
         query like `eval_id` (#1788: the workflow trend).
+
+        `review_verdict` keeps only runs that completed on that verdict (#1630),
+        applied in the query like `eval_id`.
         """
         equals: dict[str, str] = {} if eval_id is None else {"eval_id": eval_id}
         if workflow_id is not None:
             equals["workflow_id"] = workflow_id
+        if review_verdict is not None:
+            equals["review_verdict"] = review_verdict.value
         query = PageQuery(
             status=StatusOf.text("status"),
             timestamp_field="started_at",

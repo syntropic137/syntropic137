@@ -10,15 +10,16 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from syn_domain.contexts.agent_sessions import CaptureSpoolLeaseLost
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable, Mapping
     from contextlib import AbstractAsyncContextManager
 
     from agentic_isolation.child_journal import WorkspaceChildJournalReader
     from agentic_isolation.session_spool import WorkspaceSpoolReader
 
     from syn_domain.contexts.agent_sessions import (
-        CaptureSpool,
         CaptureSpoolLease,
         SessionCaptureSpoolPort,
+        SpoolBackend,
     )
 
     from .child_journal import ChildJournalDrain
@@ -32,8 +33,10 @@ class RecoveryReaders:
     transcripts: WorkspaceSpoolReader
     children: WorkspaceChildJournalReader
     exclusive: bool = False
-    """No other container referenced the volume when it was opened, so nothing
-    else could write during this traversal. Release requires it."""
+    """Nothing else could write during this traversal: no other container
+    referenced the volume, or the provider confirmed no agent process remains
+    in the sandbox. Never inferred from a run state or a disconnected stream.
+    Release requires it."""
 
 
 class SpoolReleasePort(Protocol):
@@ -43,8 +46,14 @@ class SpoolReleasePort(Protocol):
 
 
 class SpoolRecoveryPort(Protocol):
-    def open(self, spool: CaptureSpool) -> AbstractAsyncContextManager[RecoveryReaders]:
-        """Reopen an existing volume and capture retained native files before reading."""
+    def open(
+        self, lease: CaptureSpoolLease, *, fence: Callable[[], Awaitable[None]]
+    ) -> AbstractAsyncContextManager[RecoveryReaders]:
+        """Reopen the retained spool and capture retained native files before reading.
+
+        ``fence`` renews the lease and raises ``CaptureSpoolLeaseLost`` once
+        another worker owns it. An adapter that changes what it reopens calls it
+        after every slow step and before every destructive one."""
         ...
 
 
@@ -52,21 +61,27 @@ class CaptureRecoveryWorker:
     def __init__(
         self,
         spools: SessionCaptureSpoolPort,
-        recovery: SpoolRecoveryPort,
+        recovery: Mapping[SpoolBackend, SpoolRecoveryPort],
         drain: LocalSpoolDrain,
         *,
         lease_seconds: int,
         retry_seconds: int,
         children: ChildJournalDrain | None = None,
-        release: SpoolReleasePort | None = None,
+        release: Mapping[SpoolBackend, SpoolReleasePort] | None = None,
     ) -> None:
+        """``recovery`` names every backend this worker can reach; it claims
+        only those spools. A backend with no ``release`` entry keeps its bytes."""
+        if not recovery:
+            raise ValueError("A recovery worker needs at least one backend")
         self._spools, self._recovery, self._drain = spools, recovery, drain
         self._children = children
-        self._release = release
+        self._release = release or {}
         self._lease_seconds, self._retry_seconds = lease_seconds, retry_seconds
 
     async def step(self) -> bool:
-        lease = await self._spools.claim(lease_seconds=self._lease_seconds)
+        lease = await self._spools.claim(
+            lease_seconds=self._lease_seconds, backends=tuple(self._recovery)
+        )
         if lease is None:
             return False
         try:
@@ -86,7 +101,9 @@ class CaptureRecoveryWorker:
         async def renew() -> None:
             await self._spools.renew(lease, lease_seconds=self._lease_seconds)
 
-        async with self._recovery.open(lease.spool) as readers:
+        # A stale worker must not reach the spool at all, let alone stop its writer.
+        await renew()
+        async with self._recovery[lease.spool.backend].open(lease, fence=renew) as readers:
             await renew()
             progress = await self._drain.page(
                 readers.transcripts,
@@ -97,23 +114,24 @@ class CaptureRecoveryWorker:
                 renew=renew,
             )
             children = await self._recover_children(lease, readers)
-            await self._spools.advance(
-                lease,
-                after=progress.next_after
-                if progress.next_after is not None
-                else progress.watermark,
-                watermark=progress.watermark if progress.next_after is not None else None,
-                retry_seconds=0
-                if progress.next_after is not None or children == "more"
-                else self._retry_seconds,
-                staged_bytes=progress.staged_bytes,
-            )
-            complete = progress.next_after is None and children == "complete"
+        # Advance only once the context has closed: advancing gives the lease
+        # up, and a sandbox backend's closing pause needs it still ours.
+        await self._spools.advance(
+            lease,
+            after=progress.next_after if progress.next_after is not None else progress.watermark,
+            watermark=progress.watermark if progress.next_after is not None else None,
+            retry_seconds=0
+            if progress.next_after is not None or children == "more"
+            else self._retry_seconds,
+            staged_bytes=progress.staged_bytes,
+        )
         # Release after the helper container is gone: its mount would block removal.
-        if complete:
+        # A remote sandbox stays paused until this point; release kills it.
+        if progress.next_after is None and children == "complete":
             await self._spools.mark_drained(lease)
-            if self._release is not None:
-                await self._release.after_drain(lease, exclusive=readers.exclusive)
+            release = self._release.get(lease.spool.backend)
+            if release is not None:
+                await release.after_drain(lease, exclusive=_exclusive_traversal(lease, readers))
 
     async def _recover_children(
         self, lease: CaptureSpoolLease, readers: RecoveryReaders
@@ -146,3 +164,15 @@ class CaptureRecoveryWorker:
             # cursor for retry while allowing durable transcript work to advance.
             logger.exception("Child journal recovery failed; child cursor remains retryable")
             return "failed"
+
+
+def _exclusive_traversal(lease: CaptureSpoolLease, readers: RecoveryReaders) -> bool:
+    """Exclusive for the whole traversal, not just its last page.
+
+    A watermark carried in on the lease was frozen by an earlier claim, which
+    may have read while a writer still ran. Bytes written after that freeze
+    and before this claim's stop lie beyond it, so finishing that traversal
+    archived none of them: releasing now would delete them. Only a traversal
+    whose watermarks this exclusive claim froze itself may release; the next
+    claim starts a fresh one."""
+    return readers.exclusive and lease.watermark is None and lease.child_watermark is None

@@ -223,8 +223,10 @@ class DependencySeedStore:
         ``(repository, host path of its checkout)``. A seed the store does not
         have is reported missing, not raised: that workspace installs cold.
 
-        A copy that fails partway removes the whole of that tool's cache from
-        the workspace, so it installs cold rather than from half a seed.
+        Each seed is merged into a staging copy of that tool's cache and
+        swapped in whole, so a copy that fails partway leaves the cache as the
+        earlier seeds left it: the failed repository installs cold, never from
+        half a seed, and an earlier repository's seed is kept (#1812).
 
         Ends with a `prune`: a cache hit is the only event a store that is
         over budget may ever see again.
@@ -243,6 +245,7 @@ class DependencySeedStore:
         self, key: SeedKey, clone_dir: Path, destination: Path, outcome: SeedOutcome
     ) -> None:
         source = self._root / key.relative_path
+        staging = destination.parent / f".{destination.name}-staging-{uuid.uuid4().hex}"
         try:
             with _seed_lease(source, exclusive=False):
                 # Checked under the lease: a prune may have deleted the seed
@@ -250,16 +253,22 @@ class DependencySeedStore:
                 if not source.is_dir():
                     outcome.missing.append((key, clone_dir))
                     return
+                if destination.exists():
+                    # Hardlinks, so staging costs no copy of the earlier seeds.
+                    # `_merge_tree` unlinks before it writes a file, so nothing
+                    # written to staging reaches the destination's inodes.
+                    shutil.copytree(destination, staging, symlinks=True, copy_function=os.link)
                 # Touched under the lease, so a prune waiting on it re-reads
                 # this as the seed's LRU clock before deciding.
                 os.utime(source)
-                _copy_writable(source, destination)
+                _copy_writable(source, staging)
+            _swap_in(staging, destination)
         except OSError:
-            logger.exception("Could not copy dependency seed %s; installing cold", _label(key))
-            # The destination is fresh (no agent has run yet), so all of it
-            # goes, including any earlier clone's seed for the same tool.
-            shutil.rmtree(destination, ignore_errors=True)
-            outcome.copied = [copied for copied in outcome.copied if copied.tool != key.tool]
+            logger.exception(
+                "Could not copy dependency seed %s; installing cold, earlier seeds kept",
+                _label(key),
+            )
+            shutil.rmtree(staging, ignore_errors=True)
             return
         outcome.copied.append(key)
 
@@ -294,9 +303,6 @@ class DependencySeedStore:
             os.utime(staging)
             size = _size(staging)
             _make_read_only(staging)
-            # Recorded once here, so a prune on every cache hit reads one
-            # small file per seed instead of walking every file of every seed.
-            _write_size(target, size)
         except BaseException:
             # A failed publish leaves nothing behind: prune spares a recent
             # staging directory as a publish in flight, so it must not linger.
@@ -304,11 +310,20 @@ class DependencySeedStore:
                 with contextlib.suppress(OSError):
                     _remove(staging)
             raise
-        try:
-            staging.rename(target)
-        except OSError:
-            # Another warmer published the same lockfile first; theirs is as good.
-            _remove(staging)
+        # The seed and its recorded size are published together, by whichever
+        # warmer wins the rename: a loser writing its own size would leave the
+        # winner's seed accounted at the loser's bytes (#1812).
+        with _seed_lease(target, exclusive=True):
+            try:
+                staging.rename(target)
+            except OSError:
+                # Another warmer published the same lockfile first; theirs is
+                # as good, and so is the size it recorded.
+                _remove(staging)
+            else:
+                # Recorded once here, so a prune on every cache hit reads one
+                # small file per seed instead of walking every file of every seed.
+                _write_size(target, size)
         self.prune()
 
     def prune(self) -> int:
@@ -445,8 +460,9 @@ def _merge_tree(source: Path, destination: Path) -> None:
     cache shares wheel entries, many of them symlinks. `shutil.copytree` with
     `dirs_exist_ok` calls `os.symlink` straight onto an existing link and
     fails, so links are merged here: one already pointing at the same target
-    is kept, any other is replaced atomically. A file over a file is
-    overwritten (the cache is content-addressed, so it is the same bytes).
+    is kept, and one pointing elsewhere is replaced atomically and logged
+    (`_place_symlink`). A file over a file is overwritten (the cache is
+    content-addressed, so it is the same bytes).
     """
     destination.mkdir(parents=True, exist_ok=True)
     for directory, dirs, files in os.walk(source):
@@ -460,14 +476,42 @@ def _merge_tree(source: Path, destination: Path) -> None:
             if src.is_symlink():
                 _place_symlink(src.readlink(), dst)
                 continue
-            if dst.is_symlink():
+            # Unlinked, never written through: the destination may be a
+            # hardlinked staging copy of a cache `_swap_in` has yet to replace.
+            if dst.is_symlink() or dst.is_file():
                 dst.unlink()
             shutil.copy2(src, dst, follow_symlinks=False)
 
 
+def _swap_in(staging: Path, destination: Path) -> None:
+    """Replace ``destination`` with ``staging``; on failure ``destination`` is as it was."""
+    retired = destination.parent / f".{destination.name}-retired-{uuid.uuid4().hex}"
+    if destination.exists():
+        destination.rename(retired)
+    try:
+        staging.rename(destination)
+    except OSError:
+        if retired.exists():
+            retired.rename(destination)
+        raise
+    shutil.rmtree(retired, ignore_errors=True)
+
+
 def _place_symlink(link: Path, destination: Path) -> None:
-    if destination.is_symlink() and destination.readlink() == link:
-        return
+    if destination.is_symlink():
+        existing = destination.readlink()
+        if existing == link:
+            return
+        # Two seeds disagree on one cache entry. The later seed's link wins, so
+        # the seed copied last stays whole; the earlier seed keeps every other
+        # entry. Logged, never silent: uv names its entries by content, so a
+        # disagreement means the seeds were not built the same way (#1812).
+        logger.warning(
+            "Dependency seeds disagree on %s (%s, now %s); keeping the later seed's",
+            destination,
+            existing,
+            link,
+        )
     staged = destination.parent / f".link-{uuid.uuid4().hex}"
     staged.symlink_to(link)
     # Fails (and the seed copy with it) if a real directory is in the way.

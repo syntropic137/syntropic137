@@ -79,20 +79,43 @@ export function readSkillTree(dir: string): SkillFilePayload[] {
  * Locate the skill directory inside a freshly cloned repository.
  *
  * A skills repo usually publishes many skills as subdirectories, but a
- * single-skill repo puts SKILL.md at its root. Candidates are tried in
+ * single-skill repo puts SKILL.md at its root. A project repo keeps its own
+ * skills where Claude Code reads them, `.claude/skills/<name>/`, so a workflow
+ * can load a target repo's skills by the same ref (DreamShip, 2026-11-06: the
+ * agent runs from /workspace, so the cloned repo's own skills never load). Candidates are tried in
  * most-specific-first order so a repo containing both a `<name>/` directory
  * and a root SKILL.md resolves to the named one.
  *
  * The skill name is already validated as a single safe path segment by
- * `requireSafeSkillName`, so it cannot escape the clone directory here.
+ * `requireSafeSkillName`, but a cloned repo controls its own tree: any
+ * directory on a candidate path (`skills`, `.claude`, the skill folder itself)
+ * may be a symlink to somewhere else on this machine, and reading it would
+ * upload those files as the skill. So each candidate is resolved to its real
+ * path and skipped unless it stays inside the clone (review P1, #2191). It is
+ * skipped rather than fatal so an unrelated outside link earlier in the order
+ * cannot hide a real skill later in it (review P2); when nothing is found, the
+ * error names what was skipped.
  */
 export function skillDirInClone(cloneDir: string, skillName: string): string {
   const candidates = [
     path.join(cloneDir, skillName),
     path.join(cloneDir, "skills", skillName),
+    path.join(cloneDir, ".claude", "skills", skillName),
     cloneDir,
   ];
+  const root = fs.realpathSync(cloneDir);
+  const outside: string[] = [];
   for (const candidate of candidates) {
+    let real: string;
+    try {
+      real = fs.realpathSync(candidate);
+    } catch {
+      continue;
+    }
+    if (real !== root && !real.startsWith(root + path.sep)) {
+      outside.push(`${path.relative(cloneDir, candidate)} -> ${real}`);
+      continue;
+    }
     try {
       readSkillTree(candidate);
       return candidate;
@@ -100,8 +123,10 @@ export function skillDirInClone(cloneDir: string, skillName: string): string {
       continue;
     }
   }
+  const skipped =
+    outside.length > 0 ? `; skipped, as outside the clone: ${outside.join(", ")}` : "";
   throw new Error(
     `cloned source has no skill '${skillName}' (looked for a SKILL.md in ` +
-      `${skillName}/, skills/${skillName}/, and the repository root)`,
+      `${skillName}/, skills/${skillName}/, .claude/skills/${skillName}/, and the repository root${skipped})`,
   );
 }

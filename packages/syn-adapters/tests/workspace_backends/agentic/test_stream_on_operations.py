@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock
 from urllib.parse import quote
 
 import pytest
@@ -162,6 +163,7 @@ class _Host:
     def __init__(self, operations: RecordingOperations, credentials: WorkspaceCredentials) -> None:
         self.operations = operations
         self.credentials = credentials
+        self.shares_host_kernel = True
 
     def workspace(self, isolation_id: str) -> Workspace | None:
         return Workspace(
@@ -350,7 +352,7 @@ async def test_the_launch_marker_is_the_one_the_evidence_counts() -> None:
             adapter.stream(_HANDLE, ["claude"], wrapper_name=evidence.wrapper_name)
         )
     ]
-    await evidence.settle(adapter.last_exit_code)
+    await evidence.settle(adapter.exit_code_of(_HANDLE))
 
     marker = ops.specs[0].launch_marker
     assert marker is not MISSING
@@ -378,7 +380,7 @@ async def test_a_forged_announcement_under_another_name_does_not_count() -> None
             adapter.stream(_HANDLE, ["claude"], wrapper_name=evidence.wrapper_name)
         )
     ]
-    await evidence.settle(adapter.last_exit_code)
+    await evidence.settle(adapter.exit_code_of(_HANDLE))
 
     assert launches == 0
 
@@ -386,8 +388,8 @@ async def test_a_forged_announcement_under_another_name_does_not_count() -> None
 async def test_exit_status_survives() -> None:
     adapter, _, _ = _stream([b"x\n"], state="failed", exit_code=3)
     await _lines(adapter)
-    assert adapter.last_exit_code == 3
-    assert adapter.last_signal_death is None
+    assert adapter.exit_code_of(_HANDLE) == 3
+    assert adapter.signal_death_of(_HANDLE) is None
 
 
 async def test_signal_death_survives_and_carries_no_credential(
@@ -399,8 +401,8 @@ async def test_signal_death_survives_and_carries_no_credential(
     with caplog.at_level(logging.ERROR):
         await _lines(adapter, environment=grant.env)
 
-    assert adapter.last_exit_code == 139
-    death = adapter.last_signal_death
+    assert adapter.exit_code_of(_HANDLE) == 139
+    death = adapter.signal_death_of(_HANDLE)
     assert death is not None
     assert "claude" in death.command
     assert _TOKEN not in " ".join(death.command)
@@ -408,10 +410,29 @@ async def test_signal_death_survives_and_carries_no_credential(
     assert "SIGSEGV" in caplog.text
 
 
+@pytest.mark.parametrize(("shares_host_kernel", "reads"), [(True, 1), (False, 0)])
+async def test_a_remote_signal_death_never_reads_this_hosts_kernel(
+    monkeypatch: pytest.MonkeyPatch, shares_host_kernel: bool, reads: int
+) -> None:
+    """#1912: this host's ring buffer explains only a process on this host's kernel."""
+    host_reader = AsyncMock(return_value=(("HOST_ONLY_FAULT",), None))
+    monkeypatch.setattr("syn_adapters.diagnostics.signal_capture._kernel_fault_lines", host_reader)
+    adapter, _, _ = _stream([b"{}\n"], state="failed", exit_code=None, signal="SIGTERM")
+    adapter._host.shares_host_kernel = shares_host_kernel  # type: ignore[attr-defined]
+
+    await _lines(adapter)
+
+    death = adapter.signal_death_of(_HANDLE)
+    assert death is not None
+    assert (adapter.exit_code_of(_HANDLE), death.signal_number) == (143, 15)
+    assert host_reader.await_count == reads
+    assert ("HOST_ONLY_FAULT" in death.describe()) is shares_host_kernel
+
+
 async def test_a_timed_out_success_reports_the_timeout_status() -> None:
     adapter, ops, _ = _stream([b"x\n"], state="timed_out", exit_code=0)
     await _lines(adapter, timeout_seconds=1.2)
-    assert adapter.last_exit_code == stream_adapter._TIMEOUT_EXIT_CODE
+    assert adapter.exit_code_of(_HANDLE) == stream_adapter._TIMEOUT_EXIT_CODE
     assert ops.specs[0].timeout_seconds == 2, "rounded up, never cut short"
 
 
@@ -449,7 +470,7 @@ async def test_an_observation_gap_is_surfaced_never_silent(
     with caplog.at_level(logging.ERROR):
         lines = await _lines(adapter)
 
-    assert adapter.last_observation_lost_bytes == expected
+    assert adapter.lost_bytes_of(_HANDLE) == expected
     assert "LOST" in caplog.text
     # The line the gap severed is dropped, not glued to bytes from after the gap.
     assert lines == ['{"a":1}', 'ated":1}', '{"b":2}']

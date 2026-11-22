@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from syn_domain import agent_event_span
 from syn_domain.contexts.organization.domain.read_models.repo_cost import RepoCost
 
 if TYPE_CHECKING:
@@ -196,7 +197,10 @@ class TimescaleRepoCostQuery:
         if not execution_ids:
             return RepoCost(repo_full_name=repo_full_name)
 
-        async with self._pool.acquire() as conn:
+        # One snapshot for both reads (#983, #2251): at READ COMMITTED each took
+        # its own, so a session finishing between them was read as missing by
+        # the summary query and then priced at zero from its raw turns.
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             exec_costs = await self._query_summary_costs(conn, execution_ids)
             if not exec_costs:
                 exec_costs = await self._query_fallback_costs(conn, execution_ids)
@@ -245,7 +249,8 @@ class TimescaleRepoCostQuery:
 
         all_execution_ids = [eid for eids in repo_executions.values() for eid in eids]
 
-        async with self._pool.acquire() as conn:
+        # One snapshot for the summary read and its fallback (#983, #2251).
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             exec_costs = await self._query_all_exec_costs(conn, all_execution_ids)
 
         results: list[RepoCost] = []

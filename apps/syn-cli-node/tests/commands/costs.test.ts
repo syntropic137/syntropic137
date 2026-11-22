@@ -1,6 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { costsGroup } from "../../src/commands/costs.js";
 import { CLIError } from "../../src/framework/errors.js";
+import type { components } from "../../src/generated/api-types.js";
+
+type CostSummaryResponse = components["schemas"]["syn_api__routes__costs__CostSummaryResponse"];
+
+function costSummary(overrides: Partial<CostSummaryResponse> = {}): CostSummaryResponse {
+  return {
+    total_cost_usd: "5.00",
+    total_cost_display: "$5.00",
+    unpriced_observation_count: 0,
+    total_sessions: 10,
+    total_executions: 5,
+    total_tokens: 50000,
+    total_tool_calls: 100,
+    top_models: [],
+    top_sessions: [],
+    ...overrides,
+  };
+}
 
 describe("costs commands", () => {
   const mockFetch = vi.fn();
@@ -32,20 +50,46 @@ describe("costs commands", () => {
 
   it("summary shows cost overview", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({
-        total_cost_usd: "5.00",
-        total_sessions: 10,
-        total_executions: 5,
-        total_tokens: 50000,
-        total_tool_calls: 100,
-        top_models: [],
-        top_sessions: [],
-      }),
+      jsonResponse(costSummary()),
     );
     await costsGroup.getCommand("summary")!.handler({ positionals: [], values: {} });
     const out = stdout();
     expect(out).toContain("$5.00");
     expect(out).toContain("10");
+  });
+
+  // #897: the API decides how honest the total is (total_cost_display); the
+  // CLI prints that verdict instead of formatting total_cost_usd itself.
+  describe("summary total", () => {
+    async function runSummary(data: CostSummaryResponse): Promise<string> {
+      mockFetch.mockResolvedValue(jsonResponse(data));
+      await costsGroup.getCommand("summary")!.handler({ positionals: [], values: {} });
+      return stdout();
+    }
+
+    it("prints a partial total as partial and names the unpriced count", async () => {
+      const out = await runSummary(
+        costSummary({ total_cost_usd: "1.25", total_cost_display: ">=$1.25 (partial)", unpriced_observation_count: 9 }),
+      );
+      expect(out).toContain(">=$1.25 (partial)");
+      expect(out).toContain("9 observation(s) had no rate");
+      expect(out).not.toMatch(/Total Cost:\S*\s+\$1\.25/);
+    });
+
+    it("prints an unpriced total as unpriced and names the unpriced count", async () => {
+      const out = await runSummary(
+        costSummary({ total_cost_usd: "0", total_cost_display: "unpriced", unpriced_observation_count: 4 }),
+      );
+      expect(out).toMatch(/Total Cost:\S*\s+unpriced/);
+      expect(out).toContain("4 observation(s) had no rate");
+      expect(out).not.toContain("$0.00");
+    });
+
+    it("prints a fully priced total with no unpriced line", async () => {
+      const out = await runSummary(costSummary({ total_cost_usd: "1.25", total_cost_display: "$1.25" }));
+      expect(out).toMatch(/Total Cost:\S*\s+\$1\.25/);
+      expect(out).not.toContain("had no rate");
+    });
   });
 
   it("session detail shows breakdown", async () => {
@@ -92,23 +136,22 @@ describe("costs commands", () => {
 
   it("summary renders typed top models", async () => {
     mockFetch.mockResolvedValue(
-      jsonResponse({
-        total_cost_usd: "5.00",
-        total_sessions: 10,
-        total_executions: 5,
-        total_tokens: 50000,
-        total_tool_calls: 100,
+      jsonResponse(costSummary({
         top_models: [
           { model: "gpt-6-sol", cost_usd: "4.00" },
           { model: "unattributed-model", cost_usd: "1.00" },
         ],
-        top_sessions: [],
-      }),
+        top_sessions: [
+          { session_id: "sess-expensive-1", total_cost_usd: "3.25", total_tokens: 42000 },
+        ],
+      })),
     );
     await costsGroup.getCommand("summary")!.handler({ positionals: [], values: {} });
     const out = stdout();
     expect(out).toContain("gpt-6-sol");
     expect(out).toContain("$4.00");
+    expect(out).toContain("sess-expensi...");
+    expect(out).toContain("$3.25");
     expect(out).toContain("unknown");
     expect(out).not.toContain("unattributed-model");
   });
@@ -127,5 +170,33 @@ describe("costs commands", () => {
     );
     await costsGroup.getCommand("sessions")!.handler({ positionals: [], values: {} });
     expect(stdout()).toContain("sess-1");
+  });
+  // #1743: a model that ran with no rate is named beside the priced split by
+  // the backend's display text (a distinct string here to prove it is read),
+  // never as $0, and the priced total is untouched.
+  function executionCost(cost_by_model: Record<string, string>, total: string) {
+    return {
+      execution_id: "exec-1", session_count: 1, total_cost_usd: total, total_tokens: 100,
+      input_tokens: 50, output_tokens: 50, duration_ms: 1000, started_at: "2026-01-01T00:00:00Z",
+      unpriced_observation_count: 1, cost_by_model,
+      unpriced_models: ["acme-reasoner-7b"], unpriced_model_cost_display: "no rate",
+    };
+  }
+
+  it("execution detail lists an unpriced model beside the priced ones", async () => {
+    mockFetch.mockResolvedValue(jsonResponse(executionCost({ "gpt-5.6-sol": "0.19" }, "0.19")));
+    await costsGroup.getCommand("execution")!.handler({ positionals: ["exec-1"], values: {} });
+    const out = stdout();
+    expect(out).toContain("gpt-5.6-sol: $0.19");
+    expect(out).toContain("acme-reasoner-7b: no rate");
+    expect(out).not.toContain("acme-reasoner-7b: $");
+  });
+
+  it("execution detail lists an unpriced model when nothing priced", async () => {
+    mockFetch.mockResolvedValue(jsonResponse(executionCost({}, "0")));
+    await costsGroup.getCommand("execution")!.handler({ positionals: ["exec-1"], values: {} });
+    const out = stdout();
+    expect(out).toContain("Cost by Model");
+    expect(out).toContain("acme-reasoner-7b: no rate");
   });
 });

@@ -9,9 +9,10 @@ from fastapi import APIRouter
 
 from .commands import execute
 from .commands import router as commands_router
-from .control import cancel, get_state, inject
+from .control import cancel, get_state
 from .control import router as control_router
 from .inventory import router as inventory_router
+from .pushes import router as pushes_router
 from .queries import get, get_detail, list_, list_active
 from .queries import router as queries_router
 from .resume import ResumeRequest, ResumeResponse, resume
@@ -24,6 +25,7 @@ router.include_router(commands_router)
 router.include_router(control_router)
 router.include_router(resume_router)
 router.include_router(inventory_router)
+router.include_router(pushes_router)
 router.include_router(transcripts_router)
 
 # Re-export service functions so callers can do:
@@ -36,7 +38,6 @@ __all__ = [
     "get",
     "get_detail",
     "get_state",
-    "inject",
     "list_",
     "list_active",
     "resume",

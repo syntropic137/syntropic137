@@ -68,6 +68,10 @@ class Outbox:
     items: list[tuple[str, str, bytes]] = field(default_factory=list)
     pause: asyncio.Event | None = None
     paused: asyncio.Event = field(default_factory=asyncio.Event)
+    # Every delete ever handed over; a discard cannot erase this record.
+    delete_calls: list[str] = field(default_factory=list)
+    # A failed removal: raise and leave every queued item in place.
+    discard_error: OSError | None = None
 
     async def content_hash(self, envelope: bytes) -> str:
         return _hash(envelope)
@@ -81,8 +85,14 @@ class Outbox:
         return EnqueueReceipt(schema_version=1, inserted=True)
 
     async def delete(self, identity: QualifiedTranscript, content_hash: str) -> EnqueueReceipt:
+        self.delete_calls.append(content_hash)
         self.items.append(("delete", content_hash, b""))
         return EnqueueReceipt(schema_version=1, inserted=True)
+
+    async def discard(self) -> None:
+        if self.discard_error is not None:
+            raise self.discard_error
+        self.items.clear()
 
     async def receipt(self, identity: QualifiedTranscript, envelope: bytes) -> None:
         self.wire.handed.append(envelope)
@@ -400,3 +410,278 @@ async def test_backfill_derives_no_facts_from_a_withdrawn_body(
     facts = {item.capture_id: item.facts for item in acquired.archives}
     assert facts["withdrawn"] is None and facts["kept"] is not None
     assert stack_capture.capture_id == "kept"
+
+
+async def _deletion_checkpoints(stack: Stack) -> int:
+    async with stack.pool.acquire() as conn:
+        return int(
+            await conn.fetchval(
+                """SELECT count(*) FROM session_capture_deletion_checkpoints
+                WHERE source_instance_id=$1""",
+                stack.source,
+            )
+        )
+
+
+async def _delivered(stack: Stack, body: bytes) -> CataloguedCapture:
+    capture = await stack.capture(body)
+    assert await stack.worker.enqueue_step()
+    assert (await stack.worker.drain_step()) is not None
+    assert stack.wire.sent == [body]
+    return capture
+
+
+@pytest.mark.parametrize("expiry", ["retention_age", "retention_quota", "default"])
+async def test_automatic_expiry_never_deletes_the_replica_copy(stack: Stack, expiry: str) -> None:
+    """#2107: the replica is what made local expiry safe; it must survive it.
+
+    ``default`` is a tombstone written before reasons were recorded. Asserted
+    after one deletion-worker step and on a cumulative record of every delete
+    handed to the exporter, so no later cancellation could mask an enqueue.
+    """
+    body = b'{"raw":"expires locally, kept remotely"}'
+    capture = await _delivered(stack, body)
+    if expiry == "retention_age":
+        retention = await _expire_by_age(stack, erase=True)
+    elif expiry == "retention_quota":
+        retention = LocalBodyRetention(stack.pool, stack.archive, stack.source, max_bytes=1)
+        assert await retention.drain() == 1
+    else:
+        async with stack.pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO session_body_deletions(source_instance_id,archive_sha256,archive)
+                VALUES($1,$2,$3::jsonb)""",
+                stack.source,
+                capture.archive.sha256,
+                capture.archive.model_dump_json(),
+            )
+        retention = LocalBodyRetention(stack.pool, stack.archive, stack.source)
+        assert await retention.drain() == 1
+    assert await stack.archive.get(capture.archive) is None  # local bytes gone
+    worker = CaptureDeletionWorker(stack.pool, stack.deletes, stack.source, DESTINATION)
+    assert not await worker.step()  # nothing to queue
+    assert stack.deletes.delete_calls == []
+    assert await _deletion_checkpoints(stack) == 0
+    await stack.churn()
+    assert stack.deletes.delete_calls == [] and stack.wire.deleted == []
+    assert await _deletion_checkpoints(stack) == 0
+    state = await stack.deletions.state(capture)
+    assert state is not None and state.reason == (
+        "retention_age" if expiry == "default" else expiry
+    )
+    assert state.local_status == "deleted"
+    assert state.replication == "not_applicable" and state.replicas == ()
+
+
+@pytest.mark.parametrize("reason", ["deletion", "retraction"])
+async def test_owner_deletion_and_retraction_still_delete_the_replica_copy(
+    stack: Stack, reason: str
+) -> None:
+    body = b'{"raw":"owner withdraws it"}'
+    capture = await _delivered(stack, body)
+    await stack.deletions.request(capture, reason)  # type: ignore[arg-type]  # parametrized literal
+    assert await LocalBodyRetention(stack.pool, stack.archive, stack.source).drain() == 1
+    await stack.churn()
+    assert stack.wire.deleted == [_hash(body)]
+    assert await stack.replica_status(capture) == "propagated"
+
+
+async def test_owner_deletion_propagates_while_automatic_expiry_beside_it_does_not(
+    stack: Stack,
+) -> None:
+    # Delivered one at a time: only the newest revision per transcript queues.
+    owned = await stack.capture(b'{"raw":"owner"}', "owned")
+    await stack.churn()
+    expired = await stack.capture(b'{"raw":"expired"}', "expired")
+    await stack.churn()
+    assert stack.wire.sent == [b'{"raw":"owner"}', b'{"raw":"expired"}']
+    async with stack.pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE session_capture_catalog SET created_at=now()-interval '2 days'
+            WHERE source_instance_id=$1 AND capture_id='expired'""",
+            stack.source,
+        )
+    retention = LocalBodyRetention(stack.pool, stack.archive, stack.source, age_seconds=86400)
+    assert await retention.drain() == 1
+    await stack.deletions.request(owned, "deletion")
+    assert await retention.drain() == 1
+    await stack.churn()
+    assert stack.wire.deleted == [_hash(b'{"raw":"owner"}')]
+    assert await stack.replica_status(owned) == "propagated"
+    state = await stack.deletions.state(expired)
+    assert state is not None and state.replication == "not_applicable"
+
+
+async def _expire_by_age(stack: Stack, *, erase: bool) -> LocalBodyRetention:
+    async with stack.pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE session_capture_catalog SET created_at=now()-interval '2 days'
+            WHERE source_instance_id=$1""",
+            stack.source,
+        )
+    retention = LocalBodyRetention(stack.pool, stack.archive, stack.source, age_seconds=86400)
+    if erase:
+        assert await retention.drain() == 1
+    else:
+        await retention.discover()
+    return retention
+
+
+@pytest.mark.parametrize("reason", ["deletion", "retraction"])
+@pytest.mark.parametrize("expiry", ["pending", "completed"])
+async def test_owner_request_promotes_an_automatic_tombstone_and_propagates(
+    stack: Stack, reason: str, expiry: str
+) -> None:
+    """Owner intent arriving during or after automatic expiry is never swallowed."""
+    body = b'{"raw":"owner after expiry"}'
+    capture = await _delivered(stack, body)
+    retention = await _expire_by_age(stack, erase=expiry == "completed")
+    before = await stack.deletions.state(capture)
+    assert before is not None and before.reason == "retention_age"
+    await stack.churn()
+    assert stack.wire.deleted == []
+    state, created = await stack.deletions.request(capture, reason)  # type: ignore[arg-type]  # parametrized literal
+    assert created and state.reason == reason
+    assert state.requested_at == before.requested_at  # same tombstone, promoted
+    await retention.drain()
+    await stack.churn()
+    assert stack.wire.deleted == [_hash(body)]
+    assert await stack.replica_status(capture) == "propagated"
+    # Owner intent is never downgraded by later automatic expiry passes.
+    await retention.drain()
+    after = await stack.deletions.state(capture)
+    assert after is not None and after.reason == reason
+
+
+async def test_repeated_owner_request_keeps_the_original_owner_reason(stack: Stack) -> None:
+    capture = await _delivered(stack, b'{"raw":"owner twice"}')
+    await stack.deletions.request(capture, "retraction")
+    state, created = await stack.deletions.request(capture, "deletion")
+    assert not created and state.reason == "retraction"
+
+
+async def _older_build_left(stack: Stack, *, checkpointed: CataloguedCapture | None) -> None:
+    """The deployment as an older build left it: no purge recorded yet."""
+    async with stack.pool.acquire() as conn:
+        await conn.execute(
+            """DELETE FROM session_capture_deletion_outbox_purges
+            WHERE source_instance_id=$1""",
+            stack.source,
+        )
+        if checkpointed is not None:
+            await conn.execute(
+                """INSERT INTO session_capture_deletion_checkpoints
+                (source_instance_id,destination_id,producer_id,capture_id,content_hash)
+                VALUES($1,$2,$3,$4,'x')""",
+                stack.source,
+                DESTINATION,
+                checkpointed.producer_id,
+                checkpointed.capture_id,
+            )
+
+
+async def _purge_recorded(stack: Stack) -> bool:
+    async with stack.pool.acquire() as conn:
+        return (
+            await conn.fetchval(
+                """SELECT count(*)::text FROM session_capture_deletion_outbox_purges
+                WHERE source_instance_id=$1 AND destination_id=$2""",
+                stack.source,
+                DESTINATION,
+            )
+            == "1"
+        )
+
+
+async def test_checkpointed_automatic_delete_from_an_older_build_is_purged_unsent(
+    stack: Stack,
+) -> None:
+    body = b'{"raw":"queued by an older build"}'
+    capture = await _delivered(stack, body)
+    await _expire_by_age(stack, erase=True)
+    stack.deletes.items.append(("delete", _hash(body), b""))
+    await _older_build_left(stack, checkpointed=capture)
+    restarted = CaptureDeletionWorker(stack.pool, stack.deletes, stack.source, DESTINATION)
+    assert await restarted.step()  # purge, before any drain
+    assert not await restarted.step()  # nothing left, nothing requeued
+    await stack.churn()
+    assert stack.wire.deleted == [] and stack.deletes.items == []
+    assert await _deletion_checkpoints(stack) == 0 and await _purge_recorded(stack)
+
+
+async def _owned_and_expired(stack: Stack) -> tuple[CataloguedCapture, CataloguedCapture]:
+    """Both delivered (owner first: only the newest revision per transcript queues),
+    then only ``expired`` aged out and erased locally."""
+    owned = await stack.capture(OWNED_BODY, "owned")
+    await stack.churn()
+    expired = await stack.capture(EXPIRED_BODY, "expired")
+    await stack.churn()
+    assert stack.wire.sent == [OWNED_BODY, EXPIRED_BODY]
+    async with stack.pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE session_capture_catalog SET created_at=now()-interval '2 days'
+            WHERE source_instance_id=$1 AND capture_id='expired'""",
+            stack.source,
+        )
+    retention = LocalBodyRetention(stack.pool, stack.archive, stack.source, age_seconds=86400)
+    assert await retention.drain() == 1
+    return owned, expired
+
+
+OWNED_BODY, EXPIRED_BODY = b'{"raw":"owner"}', b'{"raw":"expired"}'
+
+
+async def test_crash_between_exporter_enqueue_and_checkpoint_commit_is_purged(
+    stack: Stack,
+) -> None:
+    """Orphaned automatic delete, no checkpoint: an owner delete must not drain it."""
+    owned, expired = await _owned_and_expired(stack)
+    # The older build enqueued the automatic delete, then died before its
+    # checkpoint committed.
+    stack.deletes.items.append(("delete", _hash(EXPIRED_BODY), b""))
+    await _older_build_left(stack, checkpointed=None)
+    await stack.deletions.request(owned, "deletion")
+    await stack.churn(4)
+    assert stack.wire.deleted == [_hash(OWNED_BODY)]
+    assert await stack.replica_status(owned) == "propagated"
+    state = await stack.deletions.state(expired)
+    assert state is not None and state.replication == "not_applicable"
+
+
+async def test_failed_outbox_removal_records_no_purge_and_drains_nothing(
+    stack: Stack,
+) -> None:
+    owned, expired = await _owned_and_expired(stack)
+    stack.deletes.items.append(("delete", _hash(EXPIRED_BODY), b""))
+    await _older_build_left(stack, checkpointed=expired)
+    stack.deletes.discard_error = PermissionError("outbox entry not removable")
+    restarted = CaptureDeletionWorker(stack.pool, stack.deletes, stack.source, DESTINATION)
+    for _ in range(3):
+        with pytest.raises(PermissionError):
+            await restarted.step()
+    await stack.deletions.request(owned, "deletion")
+    await stack.churn(4)  # failures are logged and retried, never drained past
+    assert stack.wire.deleted == []
+    assert stack.deletes.items == [("delete", _hash(EXPIRED_BODY), b"")]
+    assert await _deletion_checkpoints(stack) == 1  # the older build's, kept
+    assert not await _purge_recorded(stack)
+    stack.deletes.discard_error = None  # removal works again
+    await stack.churn(4)
+    assert stack.wire.deleted == [_hash(OWNED_BODY)]
+    assert await _purge_recorded(stack)
+
+
+async def test_owner_delete_in_flight_from_an_older_build_is_regenerated(stack: Stack) -> None:
+    body = b'{"raw":"owner in flight"}'
+    capture = await _delivered(stack, body)
+    await stack.deletions.request(capture, "deletion")
+    stack.wire.online = False
+    await stack.churn(2)
+    assert await stack.replica_status(capture) == "queued"
+    stack.wire.online = True
+    await _older_build_left(stack, checkpointed=None)
+    restarted = CaptureDeletionWorker(stack.pool, stack.deletes, stack.source, DESTINATION)
+    for _ in range(4):
+        await restarted.step()
+    assert stack.wire.deleted == [_hash(body)]
+    assert await stack.replica_status(capture) == "propagated"

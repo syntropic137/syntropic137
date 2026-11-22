@@ -44,6 +44,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.legacy_event_s
 )
 from syn_domain.contexts.orchestration.slices.start_resume.value_objects import (
     ResumeStartRecord,
+    read_record,
 )
 
 if TYPE_CHECKING:
@@ -94,8 +95,12 @@ _ADMISSION_OPEN = AdmissionOpenEvent.event_type
 #: exists, and this event is the only thing that says so.
 _EXECUTION_STARTED = "WorkflowExecutionStarted"
 
+#: The parent's resume taken back before its child started (#1677).
+_EXECUTION_RESUME_WITHDRAWN = "ExecutionResumeWithdrawn"
+
 _SUBSCRIBED_EVENTS = {
     _EXECUTION_RESUMED,
+    _EXECUTION_RESUME_WITHDRAWN,
     _EXECUTION_FORKED,
     _EXECUTION_STARTED,
     _ADMISSION_OPEN,
@@ -176,6 +181,8 @@ class ResumeStartProcessManager(StartToDoProcessManager[ResumeStartRecord]):
                 await self._record_resume(envelope.metadata.aggregate_id)
             elif event_type == _EXECUTION_STARTED:
                 await self._settle_if_a_resume_started(envelope.event)
+            elif event_type == _EXECUTION_RESUME_WITHDRAWN:
+                await self._record_withdrawal(envelope.metadata.aggregate_id, envelope.event)
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(
                     projection_name=self.PROJECTION_NAME,
@@ -204,6 +211,30 @@ class ResumeStartProcessManager(StartToDoProcessManager[ResumeStartRecord]):
             parent_execution_id=parent_execution_id, recorded_at=datetime.now(UTC)
         )
         await self._store.save_if(self.PROJECTION_NAME, parent_execution_id, record, expected=None)
+
+    async def _record_withdrawal(self, parent_execution_id: str | None, event: DomainEvent) -> None:
+        """Settle the record `withdrawn`, so no pass offers it again (#1677).
+
+        Over whatever it held short of `started`, as for a direct request
+        (#1650): a start already holding the claim reads the parent again once
+        it has a slot (`StartResumeHandler.handle`), so it does not run either.
+        """
+        if self._store is None or not parent_execution_id:
+            return
+        await self._record_resume(parent_execution_id)
+        row = await self._store.get(self.PROJECTION_NAME, parent_execution_id)
+        current = read_record(row) if row is not None else None
+        if current is None:
+            return
+        reason = getattr(event, "reason", None)
+        await self._save(
+            current.model_copy(
+                update={
+                    "status": "withdrawn",
+                    "status_reason": None if reason is None else str(reason),
+                }
+            )
+        )
 
     async def process_pending(self) -> int:
         """PROCESSOR SIDE: offer each owed start. Live-only, idempotent.

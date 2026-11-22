@@ -233,6 +233,14 @@ class SessionCostProjection:
         """Get the projection name."""
         return self.PROJECTION_NAME
 
+    async def clear_all_data(self) -> None:
+        """Delete every stored total so a version rebuild replays onto nothing.
+
+        The totals are running sums, so replaying onto the old documents
+        would count every observation twice.
+        """
+        await self._store.delete_all(self.PROJECTION_NAME)
+
     async def on_agent_observation(self, event_data: dict[str, Any]) -> None:
         """Handle AgentObservation event.
 
@@ -277,12 +285,14 @@ class SessionCostProjection:
         input_tokens = data.get("input_tokens") or 0
         output_tokens = data.get("output_tokens") or 0
         cache_creation = data.get("cache_creation_tokens") or 0
+        cache_creation_1h = data.get("cache_creation_1h_tokens") or 0
         cache_read = data.get("cache_read_tokens") or 0
 
         # Update token counts
         session_cost.input_tokens += input_tokens
         session_cost.output_tokens += output_tokens
         session_cost.cache_creation_tokens += cache_creation
+        session_cost.cache_creation_1h_tokens += cache_creation_1h
         session_cost.cache_read_tokens += cache_read
 
         # Classified exactly as the SQL read path classifies the same row, so a
@@ -305,6 +315,7 @@ class SessionCostProjection:
             cache_creation=cache_creation,
             cache_read=cache_read,
             model=model.pricing_model,
+            cache_creation_1h=cache_creation_1h,
         )
         if priced.cost is None:
             session_cost.unpriced_observation_count += 1

@@ -74,7 +74,7 @@ The agent uses 16 tools under the hood — you don't need to know their names.
 |------|-------------|
 | `syn_resume_execution` | Resume a failed execution into a new one |
 | `syn_cancel_execution` | Cancel an execution |
-| `syn_inject_context` | Send a message to a running agent |
+| `syn_inject_context` | Not supported (#1530): the API refuses it; cancel and start again |
 
 ### Observability
 | Tool | What it does |
@@ -135,7 +135,7 @@ src/
 └── tools/
     ├── workflows.ts      # List + execute workflows
     ├── executions.ts     # List + detail executions
-    ├── control.ts        # Pause, resume, cancel, inject
+    ├── control.ts        # Resume, cancel, inject (refused, #1530)
     ├── observability.ts  # Sessions, costs, metrics
     ├── artifacts.ts      # List + get artifacts
     └── triggers.ts       # List + create triggers

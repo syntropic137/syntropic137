@@ -2,6 +2,12 @@
 
 $ARGUMENTS
 
+The task above says WHAT to review. This phase's instructions say WHAT THIS PHASE
+PRODUCES, and where the two disagree, these instructions win. A verdict, a
+sign-off or an output format the task asks for is meant for the workflow's final
+phase: record the request in your output under **Requested of the final phase**,
+so the later phases see it, and do not act on it here.
+
 Your job this phase is to produce a map, not a verdict. Do not decide whether the
 change is good. A phase that judges while it investigates stops investigating,
 because forming an opinion feels like progress.

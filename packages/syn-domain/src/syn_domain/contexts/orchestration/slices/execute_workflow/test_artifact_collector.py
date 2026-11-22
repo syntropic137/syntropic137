@@ -222,17 +222,19 @@ class TestArtifactCollector:
         workspace = MockWorkspace(
             collected_files=[("artifacts/output/partial.md", b"partial content")]
         )
-        result = await collector.collect_from_unfinished_phase(
-            workspace=workspace,
-            workflow_id="w1",
-            phase_id="p1",
-            execution_id="e1",
-            session_id="s1",
-            phase_name="Phase",
-            output_artifact_types=("text",),
-            agent=UNREPORTED_AGENT,
-            outcome=UnfinishedPhase.INTERRUPTED,
-        )
+        result = (
+            await collector.collect_from_unfinished_phase(
+                workspace=workspace,
+                workflow_id="w1",
+                phase_id="p1",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Phase",
+                output_artifact_types=("text",),
+                agent=UNREPORTED_AGENT,
+                outcome=UnfinishedPhase.INTERRUPTED,
+            )
+        ).artifact_ids
         assert len(result) == 1
         assert len(repo.saved) == 1
 
@@ -243,17 +245,19 @@ class TestArtifactCollector:
                 raise RuntimeError("disk full")
 
         collector = ArtifactCollector(MockArtifactRepo(), None, None)
-        result = await collector.collect_from_unfinished_phase(
-            workspace=BrokenWorkspace(),
-            workflow_id="w1",
-            phase_id="p1",
-            execution_id="e1",
-            session_id="s1",
-            phase_name="Phase",
-            output_artifact_types=("text",),
-            agent=UNREPORTED_AGENT,
-            outcome=UnfinishedPhase.INTERRUPTED,
-        )
+        result = (
+            await collector.collect_from_unfinished_phase(
+                workspace=BrokenWorkspace(),
+                workflow_id="w1",
+                phase_id="p1",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Phase",
+                output_artifact_types=("text",),
+                agent=UNREPORTED_AGENT,
+                outcome=UnfinishedPhase.INTERRUPTED,
+            )
+        ).artifact_ids
         assert result == []
 
 
@@ -339,17 +343,19 @@ class TestBuildJunkIsNotCollected:
             ]
         )
 
-        ids = await collector.collect_from_unfinished_phase(
-            workspace=workspace,
-            workflow_id="w1",
-            phase_id="p1",
-            execution_id="e1",
-            session_id="s1",
-            phase_name="Test Phase",
-            output_artifact_types=("markdown",),
-            agent=UNREPORTED_AGENT,
-            outcome=UnfinishedPhase.INTERRUPTED,
-        )
+        ids = (
+            await collector.collect_from_unfinished_phase(
+                workspace=workspace,
+                workflow_id="w1",
+                phase_id="p1",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Test Phase",
+                output_artifact_types=("markdown",),
+                agent=UNREPORTED_AGENT,
+                outcome=UnfinishedPhase.INTERRUPTED,
+            )
+        ).artifact_ids
 
         assert len(ids) == 1
 
@@ -479,6 +485,38 @@ class TestExactlyOnePrimaryDeliverable:
         assert result.first_content == "# Plan"
 
     @pytest.mark.asyncio
+    async def test_a_named_primary_is_primary_whatever_order_it_was_collected_in(self) -> None:
+        """A command phase names `commands.json`, never left to order (ADR-078 D7)."""
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        workspace = MockWorkspace(
+            collected_files=[
+                ("artifacts/output/commands/build.log", b"error: nope"),
+                ("artifacts/output/commands.json", b'{"success": false}'),
+                ("artifacts/output/commands/test.log", b"ok"),
+            ]
+        )
+
+        result = await collector.collect_from_workspace(
+            workspace=workspace,
+            workflow_id="w1",
+            phase_id="p1",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Build",
+            output_artifact_types=(),
+            agent=UNREPORTED_AGENT,
+            primary_path="artifacts/output/commands.json",
+        )
+
+        assert [(a.source_path, a.is_primary_deliverable) for a in repo.saved] == [
+            ("artifacts/output/commands.json", True),
+            ("artifacts/output/commands/build.log", False),
+            ("artifacts/output/commands/test.log", False),
+        ]
+        assert result.first_content == '{"success": false}'
+
+    @pytest.mark.asyncio
     async def test_a_single_file_is_still_primary(self) -> None:
         repo = MockArtifactRepo()
         collector = ArtifactCollector(repo, None, None)
@@ -496,6 +534,171 @@ class TestExactlyOnePrimaryDeliverable:
         )
 
         assert [a.is_primary_deliverable for a in repo.saved] == [True]
+
+
+class TestThePhaseReportOutranksItsLogs:
+    """Which text file stands for an agent phase (#2084).
+
+    Text used to keep disk order, so a verify phase that wrote its pytest log
+    before its report handed the next phase the log as `<phase>.md`
+    (exec-269d15483078). These follow the choice to where it is consumed: the
+    stored flag, the live cache, and the alias written into the next workspace.
+    """
+
+    @staticmethod
+    async def _collect_and_reinject(
+        files: list[tuple[str, bytes]], *, phase_id: str = "verify", primary_path: str | None = None
+    ) -> tuple[list[tuple[str, bool]], dict[str, bytes]]:
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        result = await collector.collect_from_workspace(
+            workspace=MockWorkspace(collected_files=files),
+            workflow_id="w1",
+            phase_id=phase_id,
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Verify",
+            output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
+            primary_path=primary_path,
+        )
+        # The live path, as phase_workspace drives it.
+        cache = PhaseOutputCache()
+        cache.record(phase_id, result.first_content, result.files)
+        next_phase = MockWorkspace()
+        await collector.inject_from_previous_phases_explicit(
+            workspace=next_phase,
+            completed_phase_ids=[phase_id],
+            phase_outputs=cache.primary,
+            execution_id="e1",
+            phase_files=cache.files,
+        )
+        stored = [(a.source_path or "", a.is_primary_deliverable) for a in repo.saved]
+        return stored, dict(next_phase.injected_files)
+
+    @pytest.mark.asyncio
+    async def test_the_report_beats_a_log_listed_before_it(self) -> None:
+        stored, injected = await self._collect_and_reinject(
+            [
+                ("artifacts/output/fitness-ci.log", b"FAILED test_x - assert 1 == 2"),
+                ("artifacts/output/verify.md", b"# Verify\nverdict: certified"),
+            ]
+        )
+
+        assert stored == [
+            ("artifacts/output/verify.md", True),
+            ("artifacts/output/fitness-ci.log", False),
+        ]
+        assert injected["artifacts/input/verify.md"] == b"# Verify\nverdict: certified"
+
+    @pytest.mark.asyncio
+    async def test_the_report_named_for_the_phase_beats_other_markdown(self) -> None:
+        stored, injected = await self._collect_and_reinject(
+            [
+                ("artifacts/output/notes.md", b"# scratch notes"),
+                ("artifacts/output/run.log", b"log"),
+                ("artifacts/output/verify.md", b"# Verify report"),
+            ]
+        )
+
+        assert [path for path, _ in stored] == [
+            "artifacts/output/verify.md",
+            "artifacts/output/notes.md",
+            "artifacts/output/run.log",
+        ]
+        assert injected["artifacts/input/verify.md"] == b"# Verify report"
+
+    @pytest.mark.asyncio
+    async def test_markdown_beats_a_log_when_no_file_is_named_for_the_phase(self) -> None:
+        stored, injected = await self._collect_and_reinject(
+            [
+                ("artifacts/output/pytest.log", b"log"),
+                ("artifacts/output/deliverable.md", b"# The report"),
+            ]
+        )
+
+        assert stored[0] == ("artifacts/output/deliverable.md", True)
+        assert injected["artifacts/input/verify.md"] == b"# The report"
+
+    @pytest.mark.asyncio
+    async def test_a_phase_that_wrote_only_a_log_still_has_it_as_primary(self) -> None:
+        stored, injected = await self._collect_and_reinject(
+            [("artifacts/output/fitness-ci.log", b"all green")]
+        )
+
+        assert stored == [("artifacts/output/fitness-ci.log", True)]
+        assert injected["artifacts/input/verify.md"] == b"all green"
+
+    @pytest.mark.asyncio
+    async def test_a_command_phase_keeps_its_named_primary(self) -> None:
+        """A markdown file named for the phase does not unseat `commands.json`."""
+        stored, _ = await self._collect_and_reinject(
+            [
+                ("artifacts/output/commands/build.log", b"error: nope"),
+                ("artifacts/output/build.md", b"# written by a command"),
+                ("artifacts/output/commands.json", b'{"success": false}'),
+            ],
+            phase_id="build",
+            primary_path="artifacts/output/commands.json",
+        )
+
+        assert stored[0] == ("artifacts/output/commands.json", True)
+        assert [primary for _, primary in stored] == [True, False, False]
+
+    @pytest.mark.asyncio
+    async def test_an_unfinished_phase_keeps_its_report_as_primary(self) -> None:
+        """Same ranking on the route a failed or interrupted phase takes."""
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        await collector.collect_from_unfinished_phase(
+            workspace=MockWorkspace(
+                collected_files=[
+                    ("artifacts/output/fitness-ci.log", b"FAILED"),
+                    ("artifacts/output/verify.md", b"# Verify: refused"),
+                ]
+            ),
+            workflow_id="w1",
+            phase_id="verify",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Verify",
+            output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
+            outcome=UnfinishedPhase.FAILED,
+        )
+
+        assert [(a.source_path, a.is_primary_deliverable) for a in repo.saved] == [
+            ("artifacts/output/verify.md", True),
+            ("artifacts/output/fitness-ci.log", False),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_command_phase_keeps_its_named_primary(self) -> None:
+        """A cancelled COMMAND phase still names `commands.json`, not stray markdown."""
+        repo = MockArtifactRepo()
+        collector = ArtifactCollector(repo, None, None)
+        await collector.collect_from_unfinished_phase(
+            workspace=MockWorkspace(
+                collected_files=[
+                    ("artifacts/output/commands.json", b'{"success": false}'),
+                    ("artifacts/output/build.md", b"# written by a command"),
+                ]
+            ),
+            workflow_id="w1",
+            phase_id="build",
+            execution_id="e1",
+            session_id="s1",
+            phase_name="Build",
+            output_artifact_types=("markdown",),
+            agent=UNREPORTED_AGENT,
+            outcome=UnfinishedPhase.INTERRUPTED,
+            primary_path="artifacts/output/commands.json",
+        )
+
+        assert [(a.source_path, a.is_primary_deliverable) for a in repo.saved] == [
+            ("artifacts/output/commands.json", True),
+            ("artifacts/output/build.md", False),
+        ]
 
 
 class TestADeclaredOutputMustBeProduced:
@@ -563,17 +766,19 @@ class TestADeclaredOutputMustBeProduced:
         """
         collector = ArtifactCollector(MockArtifactRepo(), None, None)
 
-        ids = await collector.collect_from_unfinished_phase(
-            workspace=MockWorkspace(),
-            workflow_id="w1",
-            phase_id="p1",
-            execution_id="e1",
-            session_id="s1",
-            phase_name="Interrupted",
-            output_artifact_types=("markdown",),
-            agent=UNREPORTED_AGENT,
-            outcome=UnfinishedPhase.INTERRUPTED,
-        )
+        ids = (
+            await collector.collect_from_unfinished_phase(
+                workspace=MockWorkspace(),
+                workflow_id="w1",
+                phase_id="p1",
+                execution_id="e1",
+                session_id="s1",
+                phase_name="Interrupted",
+                output_artifact_types=("markdown",),
+                agent=UNREPORTED_AGENT,
+                outcome=UnfinishedPhase.INTERRUPTED,
+            )
+        ).artifact_ids
 
         assert ids == []
 

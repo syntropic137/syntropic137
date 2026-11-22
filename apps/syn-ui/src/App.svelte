@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, type Component } from 'svelte'
+  import { chunkReload } from './lib/chunkReload'
   import { live } from './lib/live.svelte'
   import { page, setPage } from './lib/page.svelte'
   import { type PageProps } from './lib/routes'
@@ -23,11 +24,14 @@
     match.route.load?.().then(
       (mod) => {
         if (cancelled) return
+        chunkReload.loaded()
         setPage({ title: match.route.title(match.params), crumbs: match.route.crumbs(match.params) })
         shown = { match, Page: mod.default }
       },
       (e: unknown) => {
-        if (!cancelled) loadError = e
+        // A tab left open across a deploy asks for a chunk the new build removed:
+        // reload once into the new build before showing the error.
+        if (!cancelled && !chunkReload.recover()) loadError = e
       },
     )
     return () => {

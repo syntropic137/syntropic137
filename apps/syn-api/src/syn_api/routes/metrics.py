@@ -33,10 +33,14 @@ from syn_api.types import (
 )
 from syn_domain.contexts.orchestration import SHIPPED_WINDOW_DAYS, ShippedMetricsQueryService
 from syn_domain.pagination import Page
+from syn_shared.display import format_cost
 from syn_shared.pricing import canonical_cost_usd
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions import CanonicalTotals
+    from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
+        ExecutionCost,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -112,19 +116,45 @@ class ExecutionStatusCounts(BaseModel):
 class MetricsResponse(BaseModel):
     """Aggregated metrics response."""
 
-    total_workflows: int = 0
-    completed_workflows: int = 0
-    failed_workflows: int = 0
+    total_workflows: int = Field(
+        default=0,
+        description="Workflow templates that are not archived; matches the default total of GET /workflows",
+    )
+    completed_workflows: int = Field(
+        default=0,
+        description="Executions whose status is completed; equals execution_status_counts.completed",
+    )
+    failed_workflows: int = Field(
+        default=0,
+        description="Executions whose status is failed; equals execution_status_counts.failed",
+    )
     execution_status_counts: ExecutionStatusCounts = Field(default_factory=ExecutionStatusCounts)
     """Executions tallied by status, from the same read model the execution list
     counts its ``status_counts`` facet over, narrowed to ``workflow_id`` when given."""
-    total_sessions: int = 0
+    total_sessions: int = Field(
+        default=0,
+        description="Sessions in the session list; matches the total of GET /sessions",
+    )
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
     total_cache_read_tokens: int
     total_tokens: int
     total_cost_usd: Decimal = Decimal("0")
+    """What the executions in scope cost, from canonical usage (#932).
+
+    The same rows the tokens and the activity heatmap read. Read it beside
+    ``unpriced_observation_count``: alone it cannot say whether it is the total
+    or a lower bound (#897).
+    """
+    total_cost_display: str = "$0.00"
+    """``total_cost_usd`` as ``format_cost`` renders it: ``unpriced`` when nothing
+    was priced, ``>=$X (partial)`` when some was (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations across these executions that carried no usable rate and so
+    added nothing to the total, counted from the same canonical rows as
+    ``total_cost_usd``. Non-zero means the cost is INCOMPLETE, not that the work
+    was free (#890)."""
     total_artifacts: int = 0
     total_artifact_bytes: int = 0
     phases: list[PhaseMetrics] = Field(default_factory=list)
@@ -155,17 +185,6 @@ async def get_dashboard_metrics(
         return Ok(
             DashboardMetrics(
                 total_workflows=data.total_workflows,
-                completed_workflows=data.completed_workflows,
-                failed_workflows=data.failed_workflows,
-                total_sessions=data.total_sessions,
-                total_input_tokens=data.total_input_tokens,
-                total_output_tokens=data.total_output_tokens,
-                total_cache_creation_tokens=data.total_cache_creation_tokens,
-                total_cache_read_tokens=data.total_cache_read_tokens,
-                total_tokens=data.total_tokens,
-                # Lane 2: cost is enriched at the endpoint from execution_cost (#695)
-                total_cost_usd=Decimal("0"),
-                total_artifacts=data.total_artifacts,
                 total_artifact_bytes=data.total_artifact_bytes,
             )
         )
@@ -186,27 +205,13 @@ class _PhaseCost:
     unpriced_observation_count: int
 
 
-async def _phase_costs(execution_ids: set[str]) -> dict[str, _PhaseCost]:
-    """Per-phase cost summed across ``execution_ids``, keyed by phase id.
+def _phase_costs(costs: list[ExecutionCost]) -> dict[str, _PhaseCost]:
+    """Per-phase cost summed across ``costs``, keyed by phase id.
 
     The same source and the same fields the execution detail page reads
     (``cost_by_phase`` / ``unpriced_by_phase``), so the workflow view and the
     execution view cannot disagree about what a phase cost.
-
-    Raises:
-        MetricsUnavailableError: the costs could not be read. Deliberately not
-            an empty mapping, which would render every phase as ``$0``.
     """
-    if not execution_ids:
-        return {}
-    try:
-        costs = await get_execution_cost_query().list_for_ids(execution_ids)
-    except Exception as exc:
-        logger.warning("Failed to read per-phase execution costs", exc_info=True)
-        raise MetricsUnavailableError(
-            "phase costs are unavailable: the observability store could not be read"
-        ) from exc
-
     cost_by_phase: dict[str, Decimal] = {}
     unpriced_by_phase: dict[str, int] = {}
     for execution in costs:
@@ -226,18 +231,17 @@ async def _phase_costs(execution_ids: set[str]) -> dict[str, _PhaseCost]:
 _NO_PHASE_COST = _PhaseCost(cost_usd=Decimal("0"), unpriced_observation_count=0)
 
 
-async def _build_phase_metrics(workflow_id: str, execution_ids: set[str]) -> list[PhaseMetrics]:
+async def _build_phase_metrics(
+    workflow_id: str, execution_costs: list[ExecutionCost]
+) -> list[PhaseMetrics]:
     """Per-phase metrics: tokens and durations from the projection, cost from Lane 2.
 
     A failure to read the phase projection degrades to no phases (the
-    pre-existing behaviour). A failure to read COSTS does not: it raises
-    ``MetricsUnavailableError`` like the totals do, because a phase list whose
+    pre-existing behaviour). The costs are read by the caller, once, and a
+    failure there is a 503 (``_execution_costs``), because a phase list whose
     every cost is ``$0`` reads as fact.
-
-    Raises:
-        MetricsUnavailableError: the phase costs could not be read.
     """
-    costs = await _phase_costs(execution_ids)
+    costs = _phase_costs(execution_costs)
     await ensure_connected()
     try:
         manager = get_projection_mgr()
@@ -321,8 +325,76 @@ async def _execution_status_counts(workflow_id: str | None) -> ExecutionStatusCo
         ) from exc
 
 
+async def _session_count(workflow_id: str | None) -> int:
+    """Sessions, counted exactly as GET /sessions counts its ``total`` (#1843).
+
+    This was the canonical Lane 2 count: every session id that emitted an agent
+    event. That population is not the one the session list holds - it has
+    delegate sessions the list has no row for, and misses sessions that failed
+    before the agent emitted anything - so the card read 7080 beside a list
+    of 6806. The list is what a user can open, so the card counts it.
+
+    Raises:
+        MetricsUnavailableError: the session list could not be read.
+    """
+    try:
+        page = await get_projection_mgr().session_list.page(workflow_id=workflow_id, limit=0)
+        return page.total
+    except Exception as exc:
+        logger.warning("Failed to count sessions", exc_info=True)
+        raise MetricsUnavailableError(
+            "the session count is unavailable: the session list could not be read"
+        ) from exc
+
+
+async def _artifact_count(workflow_id: str | None) -> int:
+    """Artifacts, counted exactly as GET /artifacts counts its ``total`` (#1843).
+
+    This was the dashboard projection's running counter: one per
+    ArtifactCreated, on a single global row, so an increment lost in its
+    read-modify-write was never recovered and the card read 7 fewer than the
+    list (28907 beside 28914). The counter also ignored ``workflow_id``.
+
+    Raises:
+        MetricsUnavailableError: the artifact list could not be read.
+    """
+    try:
+        page = await get_projection_mgr().artifact_list.page(workflow_id=workflow_id, limit=0)
+        return page.total
+    except Exception as exc:
+        logger.warning("Failed to count artifacts", exc_info=True)
+        raise MetricsUnavailableError(
+            "the artifact count is unavailable: the artifact list could not be read"
+        ) from exc
+
+
+async def _execution_costs(execution_ids: set[str]) -> list[ExecutionCost]:
+    """``ExecutionCost`` rows for a workflow's executions, for its per-phase costs.
+
+    Never asked for the global card: a per-execution read of all history is
+    what took ``/metrics`` from 22ms to 684ms at p95 (#897). The totals are one
+    aggregate over canonical usage instead (``_canonical_totals``).
+
+    Raises:
+        MetricsUnavailableError: the costs could not be read. Deliberately not
+            an empty list, which would render the work as ``$0``.
+    """
+    if not execution_ids:
+        return []
+    try:
+        return await get_execution_cost_query().list_for_ids(execution_ids)
+    except Exception as exc:
+        logger.warning("Failed to read execution costs", exc_info=True)
+        raise MetricsUnavailableError(
+            "costs are unavailable: the observability store could not be read"
+        ) from exc
+
+
 async def _canonical_totals(execution_ids: set[str] | None) -> CanonicalTotals:
-    """Canonical token/cost totals, narrowed to a set of executions when given.
+    """Canonical token/cost totals and their coverage, narrowed to a set of executions.
+
+    One aggregate over the usage rollup, so money and its unpriced count are
+    read from the same rows, in one snapshot, however long the history (#897).
 
     Raises:
         MetricsUnavailableError: the totals could not be read.
@@ -355,18 +427,24 @@ async def get_metrics_endpoint(
 
     m = result.value
 
-    # Tokens, cost and session count come from the ONE canonical definition, the same
-    # one the activity heatmap reads (#932). They previously came from Lane 1
+    # Tokens, cost and the cost's coverage come from the ONE canonical
+    # definition, the same one the activity heatmap reads (#932), and the
+    # coverage from the same rows as the money: a total without it reads as
+    # complete when it is a lower bound (#897). They previously came from Lane 1
     # SessionCompleted events while the heatmap read Lane 2 observations, so
     # the two cards quoted 9,151,116 tokens beside 10,002,629 for the same
-    # reality. Workflow/artifact counts stay on the projection: those are
-    # domain lifecycle facts, not observed telemetry.
+    # reality. Counts of things a list endpoint pages through are read from
+    # that list's own read model, so the card and the list's total cannot
+    # disagree (#1843). Template and artifact-byte counts stay on the
+    # projection: the artifact list has no byte sum to read instead.
     try:
         status_counts = await _execution_status_counts(workflow_id)
+        total_sessions = await _session_count(workflow_id)
+        total_artifacts = await _artifact_count(workflow_id)
         if workflow_id:
             execution_ids = await _workflow_execution_ids(workflow_id)
             totals = await _canonical_totals(execution_ids)
-            phases = await _build_phase_metrics(workflow_id, execution_ids)
+            phases = await _build_phase_metrics(workflow_id, await _execution_costs(execution_ids))
         else:
             totals = await _canonical_totals(None)
             phases = []
@@ -375,21 +453,24 @@ async def get_metrics_endpoint(
 
     return MetricsResponse(
         total_workflows=m.total_workflows,
-        completed_workflows=m.completed_workflows,
-        failed_workflows=m.failed_workflows,
+        # The execution list's tally, not the dashboard projection's running
+        # counters: those added one per WorkflowFailed/WorkflowCompleted event,
+        # so an execution that failed and was later resumed to completion
+        # counted in both, a second failure counted twice, and an increment
+        # the single global row lost was never recovered (#1843).
+        completed_workflows=status_counts.completed,
+        failed_workflows=status_counts.failed,
         execution_status_counts=status_counts,
-        # Sessions come from the canonical source too. Counting them in the
-        # projection instead meant the card saw every FAILED session but no
-        # DELEGATE session, while the heatmap saw every delegate and no
-        # failure - two honest counts of two different populations.
-        total_sessions=totals.sessions,
+        total_sessions=total_sessions,
         total_input_tokens=totals.input_tokens,
         total_output_tokens=totals.output_tokens,
         total_cache_creation_tokens=totals.cache_creation_tokens,
         total_cache_read_tokens=totals.cache_read_tokens,
         total_tokens=totals.total_tokens,
         total_cost_usd=totals.cost_usd,
-        total_artifacts=m.total_artifacts,
+        total_cost_display=format_cost(totals.cost_usd, totals.unpriced_observation_count),
+        unpriced_observation_count=totals.unpriced_observation_count,
+        total_artifacts=total_artifacts,
         total_artifact_bytes=m.total_artifact_bytes,
         phases=phases,
     )

@@ -31,6 +31,11 @@ reviewer or a verify phase asks "does this test kill the bug?".
    argument `false` uses the socket-less sandbox instead:
    `just mutation-evidence 1929 "<ids>" false`. See "What the runner
    guarantees".
+   Each patch reruns the named tests, about 2.5 minutes each with docker, and
+   the job stops at 120 minutes. Split more than 20 patches into
+   subdirectories and dispatch each as the fourth argument:
+   `just mutation-evidence 1929 "<ids>" true .mutations/a/`.
+   Both halves write the same PR comment, so record each run URL.
    It prints the run URL, waits, prints the table, and exits non-zero unless
    every mutation was killed. The same table is the job summary and ONE PR
    comment (marker `<!-- mutation-evidence -->`, updated in place on re-runs).

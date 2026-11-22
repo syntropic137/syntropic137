@@ -15,7 +15,7 @@ from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api._wiring_admission import get_execution_budget
 from syn_api.cache_rate_display import cache_rate_display
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
-from syn_api.model_identity import cost_by_observed_model
+from syn_api.model_identity import cost_by_observed_model, observed_model_ids
 from syn_api.services.read_model_status import read_model_status
 from syn_api.types import (
     Err,
@@ -32,6 +32,7 @@ from syn_api.types import (
 )
 from syn_domain.contexts.orchestration import (
     InvalidTagsError,
+    ReviewVerdict,
     TagSet,
 )
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
@@ -45,6 +46,7 @@ from syn_shared.display import (
     format_cost,
     format_duration_seconds,
     format_repos,
+    format_task_summary,
     format_tokens,
     resolve_duration_seconds,
 )
@@ -61,7 +63,7 @@ from .phase_mapping import (
     _map_phase_to_response,
     load_configured_models,
 )
-from .queued_start import QueuedStart, not_yet_started, queued_starts
+from .queued_start import filter_queued, not_yet_started, queued_starts
 from .resume_lineage import ResumeLineage, resumed_from_info
 from .resume_start_info import resume_start_of
 from .start_config import load_start_configs
@@ -71,6 +73,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from syn_adapters.projections.manager import ProjectionManager
+    from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
     )
@@ -141,13 +144,23 @@ class _MergedExecutionTotals:
     total_tokens: int
 
 
+def _lane2_or(lane2: int | None, domain: int) -> int:
+    """A Lane 2 token count when it measured one, else the domain projection's.
+
+    Lane 2 counts every phase that reported usage, failed ones included, which
+    is also what the cost beside it counts. The domain list row only adds a
+    phase's tokens when it completes (#1843 item 5).
+    """
+    return domain if lane2 is None else lane2
+
+
 def _merge_totals(
     e: ExecutionSummary, enrichment: _ExecutionEnrichment | None
 ) -> _MergedExecutionTotals:
     """Prefer Lane 2 totals when present; fall back to the domain summary."""
     if enrichment is None:
         return _MergedExecutionTotals(
-            cost=Decimal(str(e.total_cost_usd)),
+            cost=e.total_cost_usd,
             unpriced_observation_count=e.unpriced_observation_count,
             input_tokens=e.total_input_tokens,
             output_tokens=e.total_output_tokens,
@@ -158,21 +171,13 @@ def _merge_totals(
     return _MergedExecutionTotals(
         cost=enrichment.total_cost_usd,
         unpriced_observation_count=enrichment.unpriced_observation_count,
-        input_tokens=enrichment.input_tokens
-        if enrichment.input_tokens is not None
-        else e.total_input_tokens,
-        output_tokens=enrichment.output_tokens
-        if enrichment.output_tokens is not None
-        else e.total_output_tokens,
-        cache_creation_tokens=enrichment.cache_creation_tokens
-        if enrichment.cache_creation_tokens is not None
-        else e.total_cache_creation_tokens,
-        cache_read_tokens=enrichment.cache_read_tokens
-        if enrichment.cache_read_tokens is not None
-        else e.total_cache_read_tokens,
-        total_tokens=enrichment.total_tokens
-        if enrichment.total_tokens is not None
-        else e.total_tokens,
+        input_tokens=_lane2_or(enrichment.input_tokens, e.total_input_tokens),
+        output_tokens=_lane2_or(enrichment.output_tokens, e.total_output_tokens),
+        cache_creation_tokens=_lane2_or(
+            enrichment.cache_creation_tokens, e.total_cache_creation_tokens
+        ),
+        cache_read_tokens=_lane2_or(enrichment.cache_read_tokens, e.total_cache_read_tokens),
+        total_tokens=_lane2_or(enrichment.total_tokens, e.total_tokens),
     )
 
 
@@ -221,9 +226,12 @@ def _build_execution_summary_response(
         error_message=e.error_message,
         failure_classification=e.failure_classification,
         reported_failure_reason=e.reported_failure_reason,
+        review_verdict=e.review_verdict,
         repos=list(e.repos),
         tags=list(e.tags),
         repos_display=format_repos(e.repos),
+        task=e.task,
+        task_display=format_task_summary(e.task),
         resumed_from=e.resumed_from,
         resumed_as=e.resumed_as,
         eval=eval_run,
@@ -316,6 +324,7 @@ async def _load_execution_list_data(
     tags: TagSet | None = None,
     eval_id: str | None = None,
     in_eval: bool | None = None,
+    review_verdict: ReviewVerdict | None = None,
 ) -> tuple[Page[WorkflowExecutionSummary], dict[str, _ExecutionEnrichment]]:
     """Fetch one page of domain summaries plus its tool-count and cost enrichment, once.
 
@@ -342,6 +351,7 @@ async def _load_execution_list_data(
             tags=tags,
             eval_id=eval_id,
             in_eval=in_eval,
+            review_verdict=review_verdict,
             offset=offset,
             limit=limit,
         )
@@ -356,7 +366,12 @@ def _to_execution_summary(
     s: WorkflowExecutionSummary,
     cost_by_execution: dict[str, _ExecutionEnrichment],
 ) -> ExecutionSummary:
-    """Build an ExecutionSummary from a domain summary plus already-loaded enrichment."""
+    """Build an ExecutionSummary from a domain summary plus already-loaded enrichment.
+
+    Tokens and cost come from the same Lane 2 record, so they count the same
+    phases. Every list of runs goes through here, so a run reads the same usage
+    on ``/workflows/{id}/runs`` as on ``/executions/{id}`` (#1843 item 5).
+    """
     enrichment = _enrichment_for(cost_by_execution, s.workflow_execution_id)
     return ExecutionSummary(
         workflow_execution_id=s.workflow_execution_id,
@@ -368,13 +383,16 @@ def _to_execution_summary(
         completed_phases=s.completed_phases,
         total_phases=s.total_phases,
         phase_progress=PhaseProgressInfo.of(s.phase_progress),
-        total_tokens=s.total_tokens,
-        total_input_tokens=s.total_input_tokens,
-        total_output_tokens=s.total_output_tokens,
-        total_cache_creation_tokens=s.total_cache_creation_tokens,
-        total_cache_read_tokens=s.total_cache_read_tokens,
+        total_tokens=_lane2_or(enrichment.total_tokens, s.total_tokens),
+        total_input_tokens=_lane2_or(enrichment.input_tokens, s.total_input_tokens),
+        total_output_tokens=_lane2_or(enrichment.output_tokens, s.total_output_tokens),
+        total_cache_creation_tokens=_lane2_or(
+            enrichment.cache_creation_tokens, s.total_cache_creation_tokens
+        ),
+        total_cache_read_tokens=_lane2_or(enrichment.cache_read_tokens, s.total_cache_read_tokens),
         failure_classification=s.failure_classification,
         reported_failure_reason=s.reported_failure_reason,
+        review_verdict=s.review_verdict,
         total_cost_usd=enrichment.total_cost_usd,
         unpriced_observation_count=enrichment.unpriced_observation_count,
         tool_call_count=enrichment.tool_call_count,
@@ -383,6 +401,7 @@ def _to_execution_summary(
         tags=list(s.tags),
         resumed_from=resumed_from_info(s.resumed_from),
         resumed_as=s.resumed_as,
+        task=s.task,
     )
 
 
@@ -414,7 +433,7 @@ async def get(
     total_output = detail.total_output_tokens
     total_cache_creation = detail.total_cache_creation_tokens
     total_cache_read = detail.total_cache_read_tokens
-    total_cost: Decimal | str = Decimal("0")
+    total_cost = Decimal("0")
     # Derived from the phases rather than read from the projection's running
     # sum, so the total and the phase list can never disagree: the sum only
     # counts phases that have COMPLETED, which silently excluded the one still
@@ -470,8 +489,14 @@ class _EnrichedExecutionCost:
     """Execution-level totals from Lane 2, with the coverage of that total."""
 
     total_tokens: int
-    total_cost_usd: Decimal | str
+    total_cost_usd: Decimal
     unpriced_observation_count: int = 0
+
+
+def _mark_unpriced_models(phase: PhaseExecution, exec_cost: ExecutionCost) -> None:
+    """Name the models ``phase`` ran that are absent from its cost split (#1743)."""
+    observed = observed_model_ids(exec_cost.observed_models_by_phase.get(phase.phase_id, ()))
+    phase.unpriced_models = [m for m in observed if m not in phase.cost_by_model]
 
 
 async def _enrich_costs(
@@ -479,7 +504,7 @@ async def _enrich_costs(
     manager: object,
     phases: list[PhaseExecution],
     fallback_tokens: int,
-    fallback_cost: Decimal | str,
+    fallback_cost: Decimal,
 ) -> _EnrichedExecutionCost:
     """Enrich execution and phase costs from TimescaleDB (#505).
 
@@ -494,13 +519,14 @@ async def _enrich_costs(
         logger.debug("Failed to load execution cost for %s", execution_id, exc_info=True)
         return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
-    # Availability is decided by has_cost_data (input + output), while the
-    # number displayed below is total_tokens (all four components). Keeping
-    # those two decoupled is what makes #873 a display-only change.
-    if exec_cost is None or not exec_cost.has_cost_data:
+    if exec_cost is None:
         return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
-    for phase in phases:
+    # Availability is decided by has_cost_data (input + output), while the
+    # number displayed below is total_tokens (all four components). Keeping
+    # those two decoupled is what makes #873 a display-only change. Identity is
+    # not gated on it: a cache-only phase still ran its models (#1743).
+    for phase in phases if exec_cost.has_cost_data else ():
         phase_cost = exec_cost.cost_by_phase.get(phase.phase_id)
         if phase_cost is not None:
             phase.cost_usd = phase_cost
@@ -513,6 +539,10 @@ async def _enrich_costs(
         if phase_models:
             phase.cost_by_model = cost_by_observed_model(phase_models)
         phase.unpriced_observation_count = exec_cost.unpriced_by_phase.get(phase.phase_id, 0)
+    for phase in phases:
+        _mark_unpriced_models(phase, exec_cost)
+    if not exec_cost.has_cost_data:
+        return _EnrichedExecutionCost(fallback_tokens, fallback_cost)
 
     return _EnrichedExecutionCost(
         total_tokens=exec_cost.total_tokens,
@@ -604,34 +634,7 @@ async def list_active(
     cost_by_execution = await _load_execution_enrichment(
         manager, [s.workflow_execution_id for s in active]
     )
-    return Ok(
-        [
-            ExecutionSummary(
-                workflow_execution_id=s.workflow_execution_id,
-                workflow_id=s.workflow_id,
-                workflow_name=s.workflow_name,
-                status=s.status,
-                started_at=s.started_at,
-                completed_at=s.completed_at,
-                completed_phases=s.completed_phases,
-                total_phases=s.total_phases,
-                phase_progress=PhaseProgressInfo.of(s.phase_progress),
-                total_tokens=s.total_tokens,
-                total_cost_usd=_enrichment_for(
-                    cost_by_execution, s.workflow_execution_id
-                ).total_cost_usd,
-                unpriced_observation_count=_enrichment_for(
-                    cost_by_execution, s.workflow_execution_id
-                ).unpriced_observation_count,
-                error_message=s.error_message,
-                failure_classification=s.failure_classification,
-                reported_failure_reason=s.reported_failure_reason,
-                repos=list(s.repos),
-                tags=list(s.tags),
-            )
-            for s in active
-        ]
-    )
+    return Ok([_to_execution_summary(s, cost_by_execution) for s in active])
 
 
 # -- HTTP Endpoints -----------------------------------------------------------
@@ -677,6 +680,13 @@ async def list_executions_endpoint(
             "false keeps only executions in no eval. Omit for both."
         ),
     ),
+    review_verdict: ReviewVerdict | None = Query(
+        None,
+        description=(
+            "Keep only executions that completed on this review verdict (#1630). "
+            "A queued start or a run that reviewed nothing has none, so is never kept."
+        ),
+    ),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
 ) -> ExecutionListResponse:
@@ -692,9 +702,10 @@ async def list_executions_endpoint(
     manager = get_projection_mgr()
     selected = parse_statuses(statuses, status)
     all_queued = await queued_starts(manager.store)
-    queued = _filter_queued(
+    queued = filter_queued(
         all_queued,
         tags=tags,
+        review_verdict=review_verdict,
         eval_id=eval_id,
         in_eval=in_eval,
         search=q,
@@ -717,6 +728,7 @@ async def list_executions_endpoint(
         tags=tags,
         eval_id=eval_id,
         in_eval=in_eval,
+        review_verdict=review_verdict,
     )
     eval_by_execution = await execution_eval_runs(manager.store, execution_page.rows)
     names = await _workflow_names(manager, {qs.workflow_id for qs in head})
@@ -763,45 +775,9 @@ def _read_model_statuses(selected: list[str] | None) -> list[str] | None:
     return [s for s in selected if s != QUEUED] or [QUEUED]
 
 
-def _filter_queued(
-    starts: list[QueuedStart],
-    *,
-    tags: TagSet,
-    eval_id: str | None,
-    in_eval: bool | None,
-    search: str | None,
-    after: datetime | None,
-    before: datetime | None,
-) -> list[QueuedStart]:
-    """The queued starts the list's filters keep.
-
-    A queued start has no read model, so no tags or eval to judge: a request
-    filtering on either is not shown one, and it is in no eval, so
-    ``in_eval=true`` excludes it while ``in_eval=false`` keeps it. It has not started, so a time
-    window judges when it was accepted - the dashboard's default 24h window
-    would otherwise hide every queued start.
-    """
-    if tags or eval_id or in_eval:
-        return []
-    return [qs for qs in starts if _matches(qs, search=search, after=after, before=before)]
-
-
 def _with_queued_count(counts: dict[str, int], queued: int) -> dict[str, int]:
     """The read model's counts plus queued, present only when something has it."""
     return {**counts, QUEUED: queued} if queued else dict(counts)
-
-
-def _matches(
-    start: QueuedStart, *, search: str | None, after: datetime | None, before: datetime | None
-) -> bool:
-    """The list's search and window, as they apply to a start that has not started."""
-    queued_at = start.queue.queued_at
-    if (after is not None and queued_at < after) or (before is not None and queued_at > before):
-        return False
-    if not search:
-        return True
-    needle = search.lower()
-    return needle in start.execution_id.lower() or needle in start.workflow_id.lower()
 
 
 async def _workflow_names(manager: ProjectionManager, workflow_ids: set[str]) -> dict[str, str]:
@@ -920,7 +896,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
             detail.total_tokens,
             total_input + total_output + total_cache_creation + total_cache_read,
         ),
-        total_cost_usd=Decimal(str(detail.total_cost_usd)),
+        total_cost_usd=detail.total_cost_usd,
         unpriced_observation_count=detail.unpriced_observation_count,
         cache_read_rate_display=cache_rates.cache_read_rate_display,
         cache_write_rate_display=cache_rates.cache_write_rate_display,

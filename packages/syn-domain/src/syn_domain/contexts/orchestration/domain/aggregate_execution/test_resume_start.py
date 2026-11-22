@@ -14,6 +14,7 @@ import pytest
 from event_sourcing import DomainEvent, EventEnvelope, GenericDomainEvent
 from pydantic import ValidationError
 
+from syn_domain.contexts.orchestration._shared.command_phase import CommandStep, PhaseKind
 from syn_domain.contexts.orchestration.domain.aggregate_execution.resume_start import (
     refuse_resume_start,
 )
@@ -378,3 +379,47 @@ class TestTheChildRefusesASnapshotThatDoesNotMatch:
 
         with pytest.raises(ValueError, match="Phase IDs must be unique"):
             WorkflowExecutionAggregate().start_resume(command)
+
+
+class TestTheChildRefusesAnAgentPhaseWithNoPrompt:
+    """#963: a parent pinned before the prompt rule must not resume into an empty prompt."""
+
+    def _command(self) -> StartResumeCommand:
+        return _resumed_parent(pinned=_pinned()).load().resume_start_command()
+
+    @pytest.mark.parametrize("blank", ["", "   \n"])
+    def test_a_resumed_agent_phase_with_no_prompt_is_refused(self, blank: str) -> None:
+        command = self._command()
+        command.pinned_phases = [
+            replace(p, prompt_template=blank) if p.phase_id == "plan" else p
+            for p in command.pinned_phases
+        ]
+
+        with pytest.raises(ValueError, match=r"agent phase\(s\) \['plan'\] have no prompt"):
+            WorkflowExecutionAggregate().start_resume(command)
+
+    def test_an_inherited_phase_with_no_prompt_does_not_block_it(self) -> None:
+        """An inherited phase never runs again, so its prompt is not asked for."""
+        command = self._command()
+        command.pinned_phases = [
+            replace(p, prompt_template="") if p.phase_id == "research" else p
+            for p in command.pinned_phases
+        ]
+
+        assert refuse_resume_start(command) is None
+
+    def test_a_command_phase_it_runs_needs_no_prompt(self) -> None:
+        command = self._command()
+        command.pinned_phases = [
+            replace(
+                p,
+                prompt_template="",
+                kind=PhaseKind.COMMAND,
+                commands=(CommandStep(name="build", run="just build"),),
+            )
+            if p.phase_id == "implement"
+            else p
+            for p in command.pinned_phases
+        ]
+
+        assert refuse_resume_start(command) is None

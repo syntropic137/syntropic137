@@ -114,9 +114,8 @@ async def test_phase_cost_is_summed_across_the_workflows_executions(
     query = _FakeCostQuery(_two_executions())
     monkeypatch.setattr(metrics, "get_execution_cost_query", lambda: query)
 
-    phases = {
-        p.phase_id: p for p in await metrics._build_phase_metrics(WORKFLOW, {"exec-1", "exec-2"})
-    }
+    costs = await metrics._execution_costs({"exec-1", "exec-2"})
+    phases = {p.phase_id: p for p in await metrics._build_phase_metrics(WORKFLOW, costs)}
 
     assert str(phases["plan"].cost_usd) == "0.6988648"
     assert phases["plan"].unpriced_observation_count == 0
@@ -140,7 +139,7 @@ async def test_phase_cost_read_failure_is_not_reported_as_zero(
     monkeypatch.setattr(metrics, "get_execution_cost_query", lambda: query)
 
     with pytest.raises(metrics.MetricsUnavailableError, match="unavailable"):
-        await metrics._build_phase_metrics(WORKFLOW, {"exec-1"})
+        await metrics._execution_costs({"exec-1"})
 
 
 @pytest.mark.asyncio
@@ -202,7 +201,7 @@ async def test_workflow_without_executions_does_not_query_costs(
     query = _FakeCostQuery([], fail=True)
     monkeypatch.setattr(metrics, "get_execution_cost_query", lambda: query)
 
-    phases = await metrics._build_phase_metrics(WORKFLOW, set())
+    phases = await metrics._build_phase_metrics(WORKFLOW, await metrics._execution_costs(set()))
 
     assert [p.cost_usd for p in phases] == [Decimal("0")]
     assert query.asked == []
@@ -231,12 +230,8 @@ async def test_a_running_phase_marks_its_cost_as_so_far(
             "completed_at": "2026-09-25T00:00:27+00:00",
         }
     )
-    monkeypatch.setattr(
-        metrics, "get_execution_cost_query", lambda: _FakeCostQuery(_two_executions())
-    )
-
     phases = {
-        p.phase_id: p for p in await metrics._build_phase_metrics(WORKFLOW, {"exec-1", "exec-2"})
+        p.phase_id: p for p in await metrics._build_phase_metrics(WORKFLOW, _two_executions())
     }
 
     assert phases["plan"].cost_in_progress is False

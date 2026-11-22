@@ -310,7 +310,7 @@ class _StreamThatSays(MemoryEventStreamAdapter):
         yield json.dumps(
             {"type": "assistant", "message": {"content": [{"type": "text", "text": self._text}]}}
         )
-        self._last_exit_code = 0
+        self._exit_codes[handle.isolation_id] = 0
 
 
 class TestTheRealHandlerCarriesIt:

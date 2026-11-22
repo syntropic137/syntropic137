@@ -69,8 +69,24 @@ async def throwaway_database(admin_url: str) -> AsyncIterator[str]:
             await admin.close()
 
 
+# ensure_schema adds a compression policy, and every row these tests write is
+# dated weeks back, so its chunk qualifies at once. The TimescaleDB scheduler
+# would compress it whenever it next woke, and compressing a chunk locks it
+# against INSERT: the suspected, not observed, blocker in #1952. Unscheduled
+# before any row exists, it never runs here.
+_PAUSE_COMPRESSION_SQL = """
+SELECT alter_job(job_id, scheduled => false)
+FROM timescaledb_information.jobs
+WHERE proc_name = 'policy_compression' AND hypertable_name = 'agent_events'
+"""
+
+
 async def prepare_pre_e1_schema(dsn: str) -> None:
-    """agent_events and the day rollup, and no usage rollup: a pre-E1 database."""
+    """agent_events and the day rollup, and no usage rollup: a pre-E1 database.
+
+    Its compression policy is unscheduled, so no background job takes a lock
+    on agent_events while a test is watching who waits on what.
+    """
     from syn_adapters.events import AgentEventStore
 
     store = AgentEventStore(dsn)
@@ -78,6 +94,7 @@ async def prepare_pre_e1_schema(dsn: str) -> None:
     try:
         assert store.pool is not None
         async with store.pool.acquire() as conn:
+            await conn.execute(_PAUSE_COMPRESSION_SQL)
             await conn.execute("DROP TRIGGER IF EXISTS agent_events_usage_rollup ON agent_events")
             await conn.execute(
                 "DROP TABLE IF EXISTS agent_summary_usage, agent_turn_usage_rollup, "

@@ -576,6 +576,38 @@ def verdict_for(
     return None
 
 
+#: agentic-workspace's ``ExecFn`` protocol (``agentic_isolation.harnesses``),
+#: parameter for parameter: (name, keyword-only, annotation).
+#:
+#: A function with exactly this signature is an executor handed to a harness
+#: reader, not an event handler: what reaches ``env`` is process environment,
+#: which IS a string-to-string map, and the signature is the external
+#: protocol's rather than ours to change. Matched on the WHOLE signature, so a
+#: handler cannot opt out by naming one parameter ``env``; anything else - an
+#: extra parameter, a wider ``env``, a different return - is measured as usual.
+_EXEC_FN_SIGNATURE = (
+    ("command", False, "str"),
+    ("timeout", True, "float | None"),
+    ("cwd", True, "str | None"),
+    ("env", True, "dict[str, str] | None"),
+)
+_EXEC_FN_RETURN = "ExecuteResult"
+
+
+def _satisfies_exec_fn(node: _FunctionNode) -> bool:
+    """True when ``node`` is an ``ExecFn`` implementation, signature and all."""
+    args = node.args
+    if args.posonlyargs or args.vararg or args.kwarg or node.returns is None:
+        return False
+    declared = [(arg, False) for arg in args.args if arg.arg not in ("self", "cls")]
+    declared += [(arg, True) for arg in args.kwonlyargs]
+    shape = tuple(
+        (arg.arg, keyword_only, ast.unparse(arg.annotation) if arg.annotation else None)
+        for arg, keyword_only in declared
+    )
+    return shape == _EXEC_FN_SIGNATURE and ast.unparse(node.returns) == _EXEC_FN_RETURN
+
+
 def find_untyped_handler_parameters(source: str) -> list[Violation]:
     """Handler parameters in ``source`` that do not declare a typed payload.
 
@@ -588,6 +620,8 @@ def find_untyped_handler_parameters(source: str) -> list[Violation]:
     declaring_no_fields = _types_declaring_no_fields(tree, shapes)
     violations: list[Violation] = []
     for node, qualname in dispatched_handlers(tree).items():
+        if _satisfies_exec_fn(node):
+            continue
         for arg in _payload_parameters(node):
             verdict = verdict_for(arg.annotation, shapes, declaring_no_fields)
             if verdict is None:
@@ -1037,6 +1071,48 @@ class SessionProjection:
         row.pop("hidden", None)
 """
     assert _handler_names(source) == {"SessionProjection.on_session_started"}
+
+
+_EXEC_FN_ADAPTER = """
+def _exec_fn_for(execute: object) -> object:
+    async def exec_fn(
+        command: str,
+        *,
+        timeout: float | None = None,
+        cwd: str | None = None,
+        env: ENV = None,
+    ) -> ExecuteResult:
+        return await execute(["sh", "-c", command], environment=env)
+
+    return exec_fn
+"""
+
+
+@pytest.mark.architecture
+def test_an_exec_fn_implementation_is_not_a_handler() -> None:
+    """agentic-workspace's `ExecFn`, implemented exactly, carries no payload.
+
+    Its `env` is process environment handed to a harness reader, and the
+    signature is the external protocol's. Before #1516 each such adapter
+    needed its own waiver; three had accumulated.
+    """
+    source = _EXEC_FN_ADAPTER.replace("ENV", "dict[str, str] | None")
+    assert _verdicts(source) == {}
+
+
+@pytest.mark.architecture
+@pytest.mark.parametrize(
+    "env_annotation",
+    ["dict[str, Any] | None", "dict[str, str]", "Mapping[str, str] | None"],
+)
+def test_an_almost_exec_fn_is_still_measured(env_annotation: str) -> None:
+    """The exemption is the WHOLE signature, so a near miss is still a handler.
+
+    A wider `env` is exactly the untyped payload this gate exists for, under
+    the one parameter name the exemption could otherwise be read as blessing.
+    """
+    source = _EXEC_FN_ADAPTER.replace("ENV", env_annotation)
+    assert _verdicts(source) == {"_exec_fn_for.exec_fn.env": Verdict.STRING_KEYED}
 
 
 # ---------------------------------------------------------------------------

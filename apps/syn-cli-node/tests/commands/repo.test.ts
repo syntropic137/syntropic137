@@ -1,6 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { repoGroup } from "../../src/commands/repo.js";
 import { CLIError } from "../../src/framework/errors.js";
+import type { components } from "../../src/generated/api-types.js";
+
+type RepoCostResponse = components["schemas"]["RepoCostResponse"];
+
+function repoCost(overrides: Partial<RepoCostResponse> = {}): RepoCostResponse {
+  return {
+    repo_id: "repo-1",
+    repo_full_name: "acme/api",
+    total_cost_usd: "1.50",
+    total_cost_display: "$1.50",
+    unpriced_observation_count: 0,
+    total_tokens: 100000,
+    total_input_tokens: 60000,
+    total_output_tokens: 40000,
+    cost_by_workflow: {},
+    cost_by_model: {},
+    execution_count: 1,
+    ...overrides,
+  };
+}
 
 describe("repo commands", () => {
   const mockFetch = vi.fn();
@@ -163,6 +183,40 @@ describe("repo commands", () => {
           values: { url: "owner/repo" },
         }),
       ).rejects.toThrow(CLIError);
+    });
+  });
+
+  // #897: the API decides how honest the total is (total_cost_display); the
+  // CLI prints that verdict instead of formatting total_cost_usd itself.
+  describe("cost", () => {
+    async function runCost(data: RepoCostResponse): Promise<string> {
+      mockFetch.mockResolvedValue(jsonResponse(data));
+      await repoGroup.getCommand("cost")!.handler({ positionals: ["repo-1"], values: {} });
+      return stdout();
+    }
+
+    it("prints a partial total as partial and names the unpriced count", async () => {
+      const out = await runCost(
+        repoCost({ total_cost_usd: "1.25", total_cost_display: ">=$1.25 (partial)", unpriced_observation_count: 9 }),
+      );
+      expect(out).toContain(">=$1.25 (partial)");
+      expect(out).toContain("9 observation(s) had no rate");
+      expect(out).not.toMatch(/Total cost:\s+\$1\.25/);
+    });
+
+    it("prints an unpriced total as unpriced and names the unpriced count", async () => {
+      const out = await runCost(
+        repoCost({ total_cost_usd: "0", total_cost_display: "unpriced", unpriced_observation_count: 4 }),
+      );
+      expect(out).toMatch(/Total cost:\s+unpriced/);
+      expect(out).toContain("4 observation(s) had no rate");
+      expect(out).not.toContain("$0.00");
+    });
+
+    it("prints a fully priced total with no unpriced line", async () => {
+      const out = await runCost(repoCost({ total_cost_usd: "1.25", total_cost_display: "$1.25" }));
+      expect(out).toMatch(/Total cost:\s+\$1\.25/);
+      expect(out).not.toContain("had no rate");
     });
   });
 });

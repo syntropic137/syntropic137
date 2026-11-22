@@ -25,6 +25,7 @@ import shlex
 import pytest
 
 from syn_adapters.workspace_backends.agentic.adapter import AgenticIsolationAdapter
+from syn_adapters.workspace_backends.backend_kit import BackendKit
 
 CODEX_AUTH = "/workspace/.setup/codex-auth.json"
 
@@ -59,6 +60,7 @@ def _adapter_with_spy() -> tuple[AgenticIsolationAdapter, _SpyProvider, object]:
         isolation_id = "ws-1"
 
     adapter._workspaces = {"ws-1": object()}  # type: ignore[attr-defined]
+    adapter._kit = BackendKit()  # type: ignore[attr-defined]
     return adapter, spy, _Handle()
 
 

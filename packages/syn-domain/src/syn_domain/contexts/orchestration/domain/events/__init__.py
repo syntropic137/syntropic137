@@ -54,6 +54,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionRequestWithdrawnEv
 from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.ExecutionResumeWithdrawnEvent import (
+    ExecutionResumeWithdrawnEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.ExecutionTagsAddedEvent import (
     ExecutionTagsAddedEvent,
 )
@@ -74,6 +77,12 @@ from syn_domain.contexts.orchestration.domain.events.MutationPatchesRemovedEvent
 )
 from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
     NextPhaseReadyEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.OutputFilesRefusedForPhaseEvent import (
+    OutputFilesRefusedForPhaseEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.PhaseCommandsCompletedEvent import (
+    PhaseCommandsCompletedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.PhaseCommitPushedEvent import (
     PhaseCommitPushedEvent,
@@ -158,6 +167,7 @@ __all__ = [
     "ExecutionDetachedFromEvalEvent",
     "ExecutionRequestWithdrawnEvent",
     "ExecutionRequestedEvent",
+    "ExecutionResumeWithdrawnEvent",
     "ExecutionResumedEvent",
     "ExecutionTagsAddedEvent",
     "ExecutionTagsRemovedEvent",
@@ -166,6 +176,8 @@ __all__ = [
     "IsolationStartedEvent",
     "MutationPatchesRemovedEvent",
     "NextPhaseReadyEvent",
+    "OutputFilesRefusedForPhaseEvent",
+    "PhaseCommandsCompletedEvent",
     "PhaseCommitPushedEvent",
     "PhaseCompletedEvent",
     "PhaseRetryScheduledEvent",

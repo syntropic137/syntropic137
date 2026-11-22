@@ -12,10 +12,10 @@ from syn_domain.contexts.agent_sessions import (
 from .capture_deletion_worker import CaptureDeletionWorker
 from .capture_delivery_jobs import PostgresCaptureDeliveryJobs
 from .capture_delivery_worker import CaptureDeliveryWorker
-from .capture_outboxes import ExporterCaptureOutboxes
+from .capture_outboxes import ExporterCaptureOutboxes, ExporterDeletionOutbox
 from .deletion_fence import DeletionFence
 from .evidence_reader import PostgresSessionEvidence
-from .exporter_transport import ExporterCaptureTransport, ExporterConfig, ExporterInventoryTransport
+from .exporter_transport import ExporterConfig, ExporterInventoryTransport
 from .replication_jobs import PostgresReplicationJobs
 from .replication_supervisor import ReplicationSupervisor
 from .replication_worker import InventoryReplicationWorker
@@ -93,7 +93,7 @@ def create_replication_manager(
         outboxes = capture_outboxes(settings, source_id)
         if outboxes is None:
             raise ValueError("capture delivery configuration is incomplete")
-        deletion_transport = ExporterCaptureTransport(
+        deletion_transport = ExporterDeletionOutbox(
             ExporterConfig(
                 binary=settings.exporter_binary,
                 # Deletes never queue behind uploads: their outbox is separate.

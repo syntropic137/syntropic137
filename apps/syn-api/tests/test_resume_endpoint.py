@@ -282,7 +282,11 @@ def _point_wiring_at(
 
     query = artifacts or _ArtifactQuery()
     monkeypatch.setattr(wiring, "get_workflow_execution_repository", lambda: executions)
-    monkeypatch.setattr(wiring, "get_artifact_query", lambda: query)
+
+    async def _query() -> _ArtifactQuery:
+        return query
+
+    monkeypatch.setattr(wiring, "get_artifact_query", _query)
     return query
 
 

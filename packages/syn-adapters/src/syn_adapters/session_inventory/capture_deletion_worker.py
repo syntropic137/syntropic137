@@ -10,13 +10,28 @@ drain acknowledgement count is attributable to it:
 
 The source-content hash comes from the delivery job, recorded before the body
 could reach the exporter, so propagation never needs local bytes.
+
+Only owner deletions and retractions propagate (#2107). Automatic local expiry
+(age, byte quota) never deletes the replica: the remote copy is what made local
+expiry safe. Legacy tombstones recorded before reasons existed default to
+``retention_age`` and are therefore never propagated either. An owner request
+on an automatically expired object promotes the tombstone, so it then propagates.
+
+An older build may have left automatic deletes in the outbox, checkpointed or
+not (it can crash between the exporter enqueue and the checkpoint commit). So
+before its first drain each destination's outbox is purged unsent, once,
+recorded durably: every unacknowledged checkpoint is dropped with it and owner
+deletes are regenerated from the SQL tombstones. A purge that cannot remove the
+outbox raises, records nothing and drains nothing; the next step retries it.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, get_args
 
 from apss_session_capture.inventory import QualifiedTranscript
+
+from syn_domain.contexts.agent_sessions import OwnerDeletionReason
 
 from .deletion_fence import try_deletion_lane
 
@@ -24,10 +39,14 @@ if TYPE_CHECKING:
     from .database import Connection, Pool
     from .exporter_transport import CaptureDrain, EnqueueReceipt
 
+# Allowlist, so an unknown or future automatic reason is never propagated.
+PROPAGATED_REASONS: tuple[str, ...] = get_args(OwnerDeletionReason)
+
 
 class CaptureDeletionTransport(Protocol):
     async def delete(self, identity: QualifiedTranscript, content_hash: str) -> EnqueueReceipt: ...
     async def drain(self, limit: int = 1) -> CaptureDrain: ...
+    async def discard(self) -> None: ...
 
 
 class CaptureDeletionWorker:
@@ -41,9 +60,33 @@ class CaptureDeletionWorker:
         async with self._pool.acquire() as conn, conn.transaction():
             if not await try_deletion_lane(conn, self._source, self._destination):
                 return False
+            if await self._purge_pre_2107_outbox(conn):
+                return True
             if await self._settle_in_flight(conn):
                 return True
             return await self._queue_next(conn)
+
+    async def _purge_pre_2107_outbox(self, conn: Connection) -> bool:
+        """Once per destination, under the lane lock, before any drain (#2107)."""
+        recorded = await conn.fetchval(
+            """INSERT INTO session_capture_deletion_outbox_purges
+            (source_instance_id,destination_id) VALUES($1,$2)
+            ON CONFLICT DO NOTHING RETURNING destination_id""",
+            self._source,
+            self._destination,
+        )
+        if recorded is None:
+            return False
+        # Raises on a failed removal: the transaction rolls back, so the purge
+        # is not recorded and no checkpoint is dropped or drained.
+        await self._transport.discard()
+        await conn.execute(
+            """DELETE FROM session_capture_deletion_checkpoints
+            WHERE source_instance_id=$1 AND destination_id=$2 AND NOT acknowledged""",
+            self._source,
+            self._destination,
+        )
+        return True
 
     async def _settle_in_flight(self, conn: Connection) -> bool:
         rows = await conn.fetch(
@@ -57,11 +100,11 @@ class CaptureDeletionWorker:
         if not rows:
             return False
         row = rows[0]
-        drained = await self._transport.drain(limit=1)
-        acknowledgements = int(row["acknowledgements"]) + drained.acknowledged
         args = (self._source, self._destination, row["producer_id"], row["capture_id"])
         where = """WHERE source_instance_id=$1 AND destination_id=$2
             AND producer_id=$3 AND capture_id=$4"""
+        drained = await self._transport.drain(limit=1)
+        acknowledgements = int(row["acknowledgements"]) + drained.acknowledged
         if drained.remaining > 0:
             await conn.execute(
                 f"UPDATE session_capture_deletion_checkpoints SET acknowledgements=$5 {where}",
@@ -92,12 +135,14 @@ class CaptureDeletionWorker:
             AND c.payload->>'content_format'='envelope'
             AND (j.queued OR j.content_hash IS NOT NULL)
             AND COALESCE(j.content_hash,d.content_hash) IS NOT NULL
+            AND d.reason=ANY($3::text[])
             AND NOT EXISTS(SELECT 1 FROM session_capture_deletion_checkpoints k
                 WHERE k.source_instance_id=c.source_instance_id AND k.destination_id=$2
                 AND k.producer_id=c.producer_id AND k.capture_id=c.capture_id)
             ORDER BY d.requested_at,c.producer_id,c.capture_id LIMIT 1""",
             self._source,
             self._destination,
+            list(PROPAGATED_REASONS),
         )
         if not rows:
             return False

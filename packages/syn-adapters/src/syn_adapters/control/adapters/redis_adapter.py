@@ -4,7 +4,9 @@ Signals are stored as short-lived Redis keys so they survive inter-process
 communication and are automatically cleaned up if never consumed.
 
 Key design decisions:
-- One signal per execution (last-write-wins — cancel always overrides pause)
+- One signal per execution. A cancel replaces whatever is pending; any other
+  signal only fills an empty slot, so nothing can overwrite a pending cancel
+  (#1530)
 - Consume moves the signal to a per-execution claim key and returns it, in
   one Lua script; a separate DEL acknowledges it. Delivery is AT LEAST ONCE
   (#1756), see ``dequeue``
@@ -64,9 +66,12 @@ class RedisSignalQueueAdapter:
         return f"{_CLAIM_PREFIX}{execution_id}"
 
     async def enqueue(self, execution_id: str, signal: ControlSignal) -> None:
-        """Store a signal for the given execution.
+        """Store a signal for the given execution, unless it would erase a cancel.
 
-        Overwrites any existing pending signal (cancel wins over pause).
+        There is one slot per execution. A cancel takes it unconditionally. Any
+        other signal is written with NX, so it never replaces what is pending:
+        an INJECT once overwrote a queued CANCEL here and the cancel was lost
+        (#1530). NX makes that atomic in Redis, with no read-then-write race.
         """
         payload = json.dumps(
             {
@@ -76,7 +81,19 @@ class RedisSignalQueueAdapter:
                 "inject_message": signal.inject_message,
             }
         )
-        await self._redis.set(self._key(execution_id), payload, ex=_SIGNAL_TTL_SECONDS)
+        from syn_adapters.control.commands import ControlSignalType
+
+        is_cancel = signal.signal_type is ControlSignalType.CANCEL
+        written = await self._redis.set(
+            self._key(execution_id), payload, ex=_SIGNAL_TTL_SECONDS, nx=not is_cancel
+        )
+        if not written:
+            logger.warning(
+                "Signal type=%s for execution %s not queued: a signal is already pending",
+                signal.signal_type,
+                execution_id,
+            )
+            return
         logger.debug("Enqueued signal type=%s for execution %s", signal.signal_type, execution_id)
 
     async def dequeue(self, execution_id: str) -> ControlSignal | None:

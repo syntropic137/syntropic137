@@ -34,7 +34,11 @@ class TokenUsageData(TypedDict):
 
     input_tokens: int
     output_tokens: int
+    #: Every cache write this turn, whatever its TTL.
     cache_creation_tokens: int
+    #: The 1-hour share of ``cache_creation_tokens`` (#2145). Absent on rows
+    #: written before it existed, which read as 0: every write at 5 minutes.
+    cache_creation_1h_tokens: NotRequired[int]
     cache_read_tokens: int
     #: What the harness REPORTED for this turn, or None. Never an alias (ADR-067).
     model: str | None

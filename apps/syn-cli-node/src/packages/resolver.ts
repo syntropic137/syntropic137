@@ -4,6 +4,7 @@ import path from "node:path";
 import { synPath } from "../persistence/store.js";
 import { readJsonFile, writeJsonFile } from "../persistence/store.js";
 import {
+  type InstallationRecord,
   type InstalledRegistry,
   InstalledRegistrySchema,
   type InstalledWorkflowRef,
@@ -25,7 +26,46 @@ const INSTALLED_PATH = synPath("workflows", "installed.json");
 
 export function loadInstalled(): InstalledRegistry {
   const fallback: InstalledRegistry = { version: 1, installations: [] };
-  return readJsonFile(INSTALLED_PATH, InstalledRegistrySchema, fallback);
+  return canonicalize(readJsonFile(INSTALLED_PATH, InstalledRegistrySchema, fallback));
+}
+
+/**
+ * One record per package, whatever the file says (issue #886).
+ *
+ * WHY on load: `recordInstallation` has deduped since #822/#883, but only on
+ * its next write, so a registry written before then can still hold several
+ * records for one package. Every reader takes this one, and they disagreed
+ * about duplicates: `findInstallation` returned the first, `removeInstallation`
+ * dropped them all, so `uninstall` archived only the first record's workflows
+ * and forgot the rest while they were still live on the server.
+ *
+ * Duplicates merge into the newest record (by `installed_at`; a tie goes to
+ * the later one, since writes append) carrying every workflow id any of them
+ * tracked. Nothing is written here; the merged form reaches disk on the next
+ * install, update or uninstall. A registry without duplicates is returned as
+ * is.
+ */
+function canonicalize(registry: InstalledRegistry): InstalledRegistry {
+  const byPackage = new Map<string, InstallationRecord>();
+  for (const record of registry.installations) {
+    const seen = byPackage.get(record.package_name);
+    if (seen === undefined) {
+      byPackage.set(record.package_name, record);
+      continue;
+    }
+    const recordIsNewer = Date.parse(record.installed_at) >= Date.parse(seen.installed_at);
+    const [newer, older] = recordIsNewer ? [record, seen] : [seen, record];
+    // One ref per id across BOTH lists: a single record can already repeat an
+    // id (two YAML files declaring the same workflow), and the newer record's
+    // ref wins where they overlap.
+    const workflows = new Map<string, InstalledWorkflowRef>();
+    for (const ref of [...newer.workflows, ...older.workflows]) {
+      if (!workflows.has(ref.id)) workflows.set(ref.id, ref);
+    }
+    byPackage.set(record.package_name, { ...newer, workflows: [...workflows.values()] });
+  }
+  if (byPackage.size === registry.installations.length) return registry;
+  return { version: registry.version, installations: [...byPackage.values()] };
 }
 
 export function saveInstalled(registry: InstalledRegistry): void {
@@ -73,10 +113,33 @@ export function recordInstallation(opts: {
 // ADR-058: requires_repos default inference
 // ---------------------------------------------------------------------------
 
+// ADR-058 (v0.25.2 update): an explicit `requires_repos` wins; unset means
+// `true` (opt-out). `repository:` presence plays no part. The server applies
+// the same rule in `infer_requires_repos` (yaml_to_command.py); they must
+// agree, or the CLI reports a gate the server does not enforce (#1050).
+//
+// The server field is `bool | None` under Pydantic's lax mode, which coerces
+// some non-boolean YAML values. Mirror that coercion exactly, and refuse what
+// the server refuses, so a quoted "false" or a 0 cannot mean opposite things
+// on each side (#1050 review).
+const TRUE_STRINGS = new Set(["1", "on", "t", "true", "y", "yes"]);
+const FALSE_STRINGS = new Set(["0", "off", "f", "false", "n", "no"]);
+
 function inferRequiresRepos(data: Record<string, unknown>): boolean {
-  if (data["requires_repos"] === true) return true;
-  if (data["requires_repos"] === false) return false;
-  return data["repository"] != null;
+  const value = data["requires_repos"];
+  if (value === undefined || value === null) return true;
+  if (typeof value === "boolean") return value;
+  if (value === 1) return true;
+  if (value === 0) return false;
+  if (typeof value === "string") {
+    const lowered = value.toLowerCase();
+    if (TRUE_STRINGS.has(lowered)) return true;
+    if (FALSE_STRINGS.has(lowered)) return false;
+  }
+  throw new Error(
+    `requires_repos must be true or false (got ${JSON.stringify(value)}); ` +
+      "the server rejects any other value (ADR-058)",
+  );
 }
 
 // ---------------------------------------------------------------------------

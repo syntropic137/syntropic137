@@ -38,6 +38,11 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from syn_domain.contexts.artifacts import PhaseOutputFile
+from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    RecordRefusedOutputCommand,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     SourceCommit,
 )
@@ -47,6 +52,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
     UnfinishedPhase,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.command_report import (
+    COMMANDS_REPORT_PATH,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import RESCUE_PATCH_NAME
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
@@ -59,6 +67,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Workspac
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
+    collect_recorded_commands,
+)
 
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service import WorkspaceService
@@ -68,7 +79,11 @@ if TYPE_CHECKING:
         ArtifactQueryServiceProtocol,
     )
     from syn_domain.contexts.artifacts.ports import ArtifactContentStoragePort
+    from syn_domain.contexts.orchestration._shared.FileRefusalValueObjects import FileRefusal
     from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.command_gate import (
+        RecordedCommands,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
     )
@@ -159,7 +174,8 @@ class PhaseWorkspace:
     ) -> None:
         """Dispatch PROVISION_WORKSPACE."""
         assert todo.phase_id is not None
-        session_id = str(uuid4())
+        # A command phase runs no agent, so it opens no session (ADR-078 D3).
+        session_id = str(uuid4()) if phase.kind is PhaseKind.AGENT else None
         start_cmd = StartPhaseCommand(
             execution_id=todo.execution_id,
             workflow_id=aggregate.workflow_id or "",
@@ -170,18 +186,20 @@ class PhaseWorkspace:
         )
         aggregate.start_phase(start_cmd)
 
-        session_mgr = SessionLifecycleManager(
-            repository=self._session_repo,
-            session_id=session_id,
-            workflow_id=aggregate.workflow_id or "",
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            agent_provider=phase.agent_config.provider,
-            agent_model=phase.agent_config.model,
-            repos=[r.slug for r in repos] if repos else [],
-            observability=self._observability_writer,
-        )
-        await session_mgr.start()
+        session_mgr = None
+        if session_id is not None:
+            session_mgr = SessionLifecycleManager(
+                repository=self._session_repo,
+                session_id=session_id,
+                workflow_id=aggregate.workflow_id or "",
+                execution_id=todo.execution_id,
+                phase_id=todo.phase_id,
+                agent_provider=phase.agent_config.provider,
+                agent_model=phase.agent_config.model,
+                repos=[r.slug for r in repos] if repos else [],
+                observability=self._observability_writer,
+            )
+            await session_mgr.start()
         self._runtime.begin(
             todo.phase_id, session_manager=session_mgr, started_at=datetime.now(UTC)
         )
@@ -227,7 +245,7 @@ class PhaseWorkspace:
         todo: TodoItem,
         phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
-        session_id: str,
+        session_id: str | None,
         repo_urls: list[str],
         completed_phase_ids: list[str],
         phase_outputs: PhaseOutputCache,
@@ -272,9 +290,9 @@ class PhaseWorkspace:
         phase: ExecutablePhase,
         *,
         workspace: ManagedWorkspace,
-        workflow_id: str,
         last_agent_message: str | None,
         outcome: UnfinishedPhase,
+        aggregate: WorkflowExecutionAggregate,
     ) -> list[str]:
         """Store what a phase wrote before the run that produced it is torn down.
 
@@ -287,11 +305,15 @@ class PhaseWorkspace:
         `last_agent_message` comes from the run's own stream result, not the
         aggregate: a failed run is never told `agent_execution_completed`, so
         the aggregate holds no message for it.
+
+        What the provider refused of that output is recorded on ``aggregate``
+        (the processor's own instance) before its outcome is told, so it is on
+        the execution whichever way the phase ends (#1913).
         """
         assert todo.phase_id is not None
-        kept = await self._collector().collect_from_unfinished_phase(
+        output = await self._collector().collect_from_unfinished_phase(
             workspace=workspace,
-            workflow_id=workflow_id,
+            workflow_id=aggregate.workflow_id or "",
             phase_id=todo.phase_id,
             execution_id=todo.execution_id,
             session_id=todo.session_id or "",
@@ -300,7 +322,12 @@ class PhaseWorkspace:
             agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
             outcome=outcome,
             last_agent_message=last_agent_message,
+            # The same named primary as the completed path (ADR-078 D7, #2084).
+            primary_path=COMMANDS_REPORT_PATH if phase.kind is PhaseKind.COMMAND else None,
         )
+        kept = output.artifact_ids
+        if output.refused:
+            await self._record_refused(aggregate, todo.phase_id, output.refused)
         if kept:
             logger.warning(
                 "Phase %s (%s) did not complete (%s); kept %d artifact(s) rather "
@@ -311,6 +338,27 @@ class PhaseWorkspace:
                 len(kept),
             )
         return kept
+
+    async def _record_refused(
+        self,
+        aggregate: WorkflowExecutionAggregate,
+        phase_id: str,
+        refused: tuple[FileRefusal, ...],
+    ) -> None:
+        """Record the refusals; a failure to is logged loudly, never raised (the outcome stands)."""
+        try:
+            aggregate.record_refused_output(
+                RecordRefusedOutputCommand(
+                    execution_id=aggregate.id or "", phase_id=phase_id, refused_files=refused
+                )
+            )
+            await self._journal.append(aggregate)
+        except Exception:
+            logger.exception(
+                "Could not record the refused output of phase %s: %s",
+                phase_id,
+                ", ".join(r.describe() for r in refused),
+            )
 
     async def keep_dropped_workflows(
         self,
@@ -380,6 +428,18 @@ class PhaseWorkspace:
         """Dispatch COLLECT_ARTIFACTS."""
         assert todo.phase_id is not None
         workspace = self._runtime.workspace_for(todo.phase_id)
+        recorded = aggregate.recorded_commands_for(todo.phase_id)
+        if (
+            workspace is None
+            and recorded is not None
+            and aggregate.running_phase_id == todo.phase_id
+        ):
+            # The runtime lost the workspace after `PhaseCommandsCompleted`, and
+            # only the output with it: the verdict is in the event (ADR-078 D6).
+            await self._collect_recorded_commands(
+                todo, phase, aggregate, recorded, all_artifact_ids, phase_outputs
+            )
+            return
         if workspace is None:
             # Defense in depth: in-process this branch is unreachable
             # (the runtime gives up a phase's workspace only after
@@ -418,6 +478,8 @@ class PhaseWorkspace:
             # costs a git inspection, and it has to happen HERE rather than on
             # the failure path because a salvaged phase does not fail (#1300).
             describe_work=partial(self._runtime.describe_work, todo.phase_id),
+            # Named, not left to collection order (ADR-078 D7).
+            primary_path=COMMANDS_REPORT_PATH if phase.kind is PhaseKind.COMMAND else None,
         )
         all_artifact_ids.extend(result.artifact_ids)
         self._runtime.record_artifacts(todo.phase_id, result.artifact_ids)
@@ -427,4 +489,33 @@ class PhaseWorkspace:
             # the event it records rather than I/O inside it (plan §A.2).
             result.command.observed(await self._evidence_heads.observe(aggregate, todo.phase_id))
         aggregate.artifacts_collected(result.command)
+        await self._journal.append(aggregate)
+
+    async def _collect_recorded_commands(
+        self,
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        aggregate: WorkflowExecutionAggregate,
+        recorded: RecordedCommands,
+        all_artifact_ids: list[str],
+        phase_outputs: PhaseOutputCache,
+    ) -> None:
+        """Store `commands.json` rebuilt from the event, tails lost, then collect as normal."""
+        assert todo.phase_id is not None
+        collected = await collect_recorded_commands(
+            aggregate,
+            collector=self._collector(),
+            phase_id=todo.phase_id,
+            phase_name=phase.name,
+            session_id=todo.session_id,
+            recorded=recorded,
+            agent=self._runtime.agent_for(todo.phase_id, provider=phase.agent_config.provider),
+        )
+        all_artifact_ids.append(collected.artifact_id)
+        self._runtime.record_artifacts(todo.phase_id, [collected.artifact_id])
+        phase_outputs.record(
+            todo.phase_id,
+            collected.content,
+            [PhaseOutputFile(source_path=collected.source_path, content=collected.content)],
+        )
         await self._journal.append(aggregate)

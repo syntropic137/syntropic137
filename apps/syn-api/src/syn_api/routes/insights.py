@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import logging
 from datetime import date  # noqa: TC003 — needed at runtime for FastAPI Query params
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Query
 from starlette.responses import JSONResponse
 
 from syn_api._wiring import ensure_connected
-from syn_api.model_identity import cost_by_observed_model_text
+from syn_api.routes._cost_rollup import roll_up_costs
 from syn_api.types import (
     ContributionHeatmapResponse,
     GlobalCostResponse,
@@ -21,6 +21,13 @@ from syn_api.types import (
     HeatmapDayBucketResponse,
     SystemOverviewEntryResponse,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
+        ExecutionCost,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -65,48 +72,32 @@ async def _get_execution_ids_for_system(system_id: str) -> set[str]:
     return set(correlated)
 
 
-def _aggregate_costs(costs: list[Any]) -> dict[str, Any]:
-    """Aggregate cost entries into totals and breakdowns."""
-    from decimal import Decimal
-
-    total_cost = Decimal("0")
-    total_input = 0
-    total_output = 0
-    total_cache_creation = 0
-    total_cache_read = 0
-    cost_by_workflow: dict[str, Decimal] = {}
-    cost_by_model: dict[str, Decimal] = {}
-
-    for c in costs:
-        total_cost += c.total_cost_usd
-        total_input += c.input_tokens
-        total_output += c.output_tokens
-        total_cache_creation += c.cache_creation_tokens
-        total_cache_read += c.cache_read_tokens
-        if c.workflow_id:
-            cost_by_workflow[c.workflow_id] = (
-                cost_by_workflow.get(c.workflow_id, Decimal("0")) + c.total_cost_usd
-            )
-        for model, model_cost in c.cost_by_model.items():
-            cost_by_model[model] = cost_by_model.get(model, Decimal("0")) + model_cost
-
-    return {
-        "total_cost_usd": str(total_cost),
-        # All four components (issue #873) - matches the executions read model.
-        "total_tokens": total_input + total_output + total_cache_creation + total_cache_read,
-        "total_input_tokens": total_input,
-        "total_output_tokens": total_output,
-        "total_cache_creation_tokens": total_cache_creation,
-        "total_cache_read_tokens": total_cache_read,
-        "cost_by_workflow": {k: str(v) for k, v in cost_by_workflow.items()},
-        "cost_by_model": {k: str(v) for k, v in cost_by_model.items()},
-        "execution_count": len(costs),
-    }
+def _aggregate_costs(
+    costs: Sequence[ExecutionCost], *, system_id: str, system_name: str
+) -> GlobalCostResponse:
+    """Aggregate cost entries into totals and breakdowns (see ``_cost_rollup``)."""
+    rollup = roll_up_costs(costs)
+    return GlobalCostResponse(
+        system_id=system_id,
+        system_name=system_name,
+        total_cost_usd=rollup.total_cost_usd,
+        total_cost_display=rollup.total_cost_display,
+        unpriced_observation_count=rollup.unpriced_observation_count,
+        total_tokens=rollup.total_tokens,
+        total_input_tokens=rollup.total_input_tokens,
+        total_output_tokens=rollup.total_output_tokens,
+        total_cache_creation_tokens=rollup.total_cache_creation_tokens,
+        total_cache_read_tokens=rollup.total_cache_read_tokens,
+        cost_by_workflow=rollup.cost_by_workflow,
+        unpriced_by_workflow=rollup.unpriced_by_workflow,
+        cost_by_model=rollup.cost_by_model,
+        execution_count=rollup.execution_count,
+    )
 
 
 async def get_global_cost(
     system_id: str | None = None,
-) -> dict[str, Any]:
+) -> GlobalCostResponse:
     """Get global cost breakdown across all executions.
 
     Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532/#542.
@@ -116,17 +107,14 @@ async def get_global_cost(
     await ensure_connected()
 
     query_svc = get_execution_cost_query()
-    all_costs = await query_svc.list_all(limit=10_000)
-
-    # Fix(#542): filter by system_id when provided
+    # Fix(#542): scope by system_id when provided. Read the system's own ids,
+    # not the global recency window filtered afterwards: that window drops a
+    # system's older work once 10,000 newer executions elsewhere fill it, and
+    # ``/systems/{id}/cost`` reads by id, so the two would disagree (#897).
     if system_id:
-        allowed_exec_ids = await _get_execution_ids_for_system(system_id)
-        all_costs = [c for c in all_costs if c.execution_id in allowed_exec_ids]
-
-    result = _aggregate_costs(all_costs)
-    result["system_id"] = system_id or ""
-    result["organization_id"] = ""
-    result["cost_by_repo"] = {}
+        all_costs = await query_svc.list_for_ids(await _get_execution_ids_for_system(system_id))
+    else:
+        all_costs = await query_svc.list_all(limit=10_000)
 
     # Resolve system name when filtering by system_id
     system_name = "global"
@@ -136,8 +124,7 @@ async def get_global_cost(
         sys_data = await get_projection_store().get("system_details", system_id)
         system_name = sys_data.get("name", "") if sys_data else system_id
 
-    result["system_name"] = system_name
-    return result
+    return _aggregate_costs(all_costs, system_id=system_id or "", system_name=system_name)
 
 
 async def get_contribution_heatmap(
@@ -221,22 +208,7 @@ async def get_global_cost_endpoint(
     system_id: str | None = Query(None, description="Filter costs by system ID"),
 ) -> GlobalCostResponse:
     """Get global cost breakdown, optionally filtered by system."""
-    data = await get_global_cost(system_id=system_id)
-    return GlobalCostResponse(
-        system_id=data.get("system_id", ""),
-        system_name=data.get("system_name", ""),
-        organization_id=data.get("organization_id", ""),
-        total_cost_usd=str(data.get("total_cost_usd", "0")),
-        total_tokens=data.get("total_tokens", 0),
-        total_input_tokens=data.get("total_input_tokens", 0),
-        total_output_tokens=data.get("total_output_tokens", 0),
-        total_cache_creation_tokens=data.get("total_cache_creation_tokens", 0),
-        total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
-        cost_by_repo=data.get("cost_by_repo", {}),
-        cost_by_workflow=data.get("cost_by_workflow", {}),
-        cost_by_model=cost_by_observed_model_text(data.get("cost_by_model")),
-        execution_count=data.get("execution_count", 0),
-    )
+    return await get_global_cost(system_id=system_id)
 
 
 @router.get("/contribution-heatmap", response_model=ContributionHeatmapResponse)

@@ -18,12 +18,14 @@ if TYPE_CHECKING:
 
     from syn_shared.observed_model import RecordedModel
 
-from syn_domain import tool_call_counts
+from syn_domain import agent_event_span, tool_call_counts
+from syn_domain.contexts.agent_sessions.canonical_usage import SUMMARY_USAGE_TABLE
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
     CostField,
     SessionCost,
 )
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
+    observed_cache_creation_1h,
     recorded_model_from_row,
     recorded_model_group_by,
     recorded_model_select,
@@ -86,6 +88,7 @@ SELECT
     SUM((data->>'input_tokens')::int) as total_input,
     SUM((data->>'output_tokens')::int) as total_output,
     SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+    SUM(COALESCE((data->>'cache_creation_1h_tokens')::int, 0)) as cache_creation_1h,
     SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
     MIN(time) as started_at,
     MAX(time) as last_observation,
@@ -96,6 +99,27 @@ SELECT
 FROM agent_events
 WHERE event_type = $1
 GROUP BY session_id, {recorded_model_group_by()}, {zero_usage_group_by()}
+"""
+
+# Rank sessions by the cost their newest summary reports (#2228). Read from the
+# usage rollup, never from agent_events: the rollup holds one row per
+# session_summary, so this grows with sessions rather than telemetry and no
+# compressed chunk is decompressed to rank them. DISTINCT ON keeps the newest
+# summary per session, as in timescale_query.py, so a re-reported session ranks
+# by its final cost and appears once. Only ids leave the database: pricing stays
+# on the one ``get_many`` path, and the LIMIT bounds what is priced however long
+# the history is. A summary without a reported cost is not ranked - its cost is
+# priced from token rows, which SQL cannot order by.
+_TOP_BY_COST_QUERY = f"""
+SELECT session_id
+FROM (
+    SELECT DISTINCT ON (session_id) session_id, vendor_cost_usd
+    FROM {SUMMARY_USAGE_TABLE}
+    ORDER BY session_id, time DESC
+) newest_summary
+WHERE vendor_cost_usd IS NOT NULL
+ORDER BY vendor_cost_usd DESC, session_id
+LIMIT $1
 """
 
 _STARTED_AT_BY_SESSION_QUERY = """
@@ -163,6 +187,20 @@ class SessionCostQueryService:
         query = TimescaleSessionCostQuery(self._pool, self._cost_calculator)
         return await query.calculate_many(session_ids)
 
+    async def top_by_cost(self, limit: int) -> list[SessionCost]:
+        """The ``limit`` most expensive completed sessions, most expensive first.
+
+        Ranked by the cost each session's newest summary reports, across the
+        whole history - not just the newest ``list_all`` page - and priced
+        through ``get_many``. Sessions still in progress, and summaries that
+        report no cost, are not ranked (#2228).
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(_TOP_BY_COST_QUERY, limit)
+        ranked_ids = [row["session_id"] for row in rows]  # type: ignore[index]
+        costs = await self.get_many(ranked_ids)
+        return [costs[sid] for sid in ranked_ids if sid in costs]
+
     async def list_all(self, limit: int = 500) -> list[SessionCost]:
         """List cost data for all sessions.
 
@@ -173,7 +211,10 @@ class SessionCostQueryService:
         Args:
             limit: Maximum number of results (pushed down to SQL).
         """
-        async with self._pool.acquire() as conn:
+        # One snapshot for all four reads (#983): a session that finished
+        # between the summary read and the turn read was reported from its
+        # placeholder turn rows instead of its summary.
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
             summary_rows = await conn.fetch(_LIST_ALL_FROM_SUMMARY_QUERY, SESSION_SUMMARY, limit)
             summarized_session_ids = {row["session_id"] for row in summary_rows}  # type: ignore[index]
             token_rows = await conn.fetch(_LIST_ALL_FROM_TOKEN_USAGE_QUERY, TOKEN_USAGE)
@@ -216,7 +257,8 @@ class SessionCostQueryService:
         """Build a SessionCost from a session_summary row.
 
         ``turn_rows`` are the session's model-grouped token_usage rows. They
-        price the session only when the summary reports no cost (#1420).
+        price the session only when the summary reports no cost (#1420), and
+        always supply its 1-hour cache-write share (#2145).
         """
         sid = row["session_id"]  # type: ignore[index]
         # Classified, not read raw: a legacy summary's `model` is the REQUEST
@@ -227,6 +269,10 @@ class SessionCostQueryService:
         sc.input_tokens = row["total_input"] or 0  # type: ignore[index]
         sc.output_tokens = row["total_output"] or 0  # type: ignore[index]
         sc.cache_creation_tokens = row["cache_creation"] or 0  # type: ignore[index]
+        # A summary records no TTL split; its turns do (#2145).
+        sc.cache_creation_1h_tokens = observed_cache_creation_1h(
+            cast("Sequence[asyncpg.Record]", turn_rows), sc.cache_creation_tokens
+        )
         sc.cache_read_tokens = row["cache_read"] or 0  # type: ignore[index]
         sc.tool_calls = tool_counts.get(sid, 0)
         sc.turns = row["num_turns"] or 0  # type: ignore[index]
@@ -277,6 +323,7 @@ class SessionCostQueryService:
         sc.input_tokens = totals.input_tokens
         sc.output_tokens = totals.output_tokens
         sc.cache_creation_tokens = totals.cache_creation
+        sc.cache_creation_1h_tokens = totals.cache_creation_1h
         sc.cache_read_tokens = totals.cache_read
         sc.total_cost_usd = totals.total_cost
         sc.token_cost_usd = totals.total_cost

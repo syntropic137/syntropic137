@@ -110,6 +110,8 @@ api() {{
     esac
 }}
 maintenance() {{ echo "maintenance $1" >> {tmp}/maintenance_calls; }}
+# Moving the staged compose in is pinned in test_pit_stop_stage_write.py (#1511).
+apply_staged() {{ :; }}
 """
     preamble = f"""
 set -euo pipefail

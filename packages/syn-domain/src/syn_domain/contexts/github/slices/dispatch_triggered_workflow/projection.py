@@ -39,6 +39,7 @@ from event_sourcing import (
 from syn_domain.contexts._shared.admission_refusal import AdmissionRefusedError
 from syn_domain.contexts._shared.integration_events import AdmissionOpenEvent
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts._shared.start_refusal import WorkflowNotStartableError
 from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
 
 
@@ -93,6 +94,16 @@ class _BudgetChecker(Protocol):
         execution_id: str,
         workflow_type: str,
     ) -> object: ...
+
+
+class _DispatchRefusal(Protocol):
+    def describe(self) -> str: ...
+
+
+class _DispatchRefusals(Protocol):
+    """Why a trigger may not dispatch a workflow now, or None (#1569: a failure streak)."""
+
+    async def refusal_for(self, workflow_id: str) -> _DispatchRefusal | None: ...
 
 
 logger = logging.getLogger(__name__)
@@ -240,10 +251,12 @@ class WorkflowDispatchProjection(ProcessManager):
         store: ProjectionStore | None = None,
         budget_checker: _BudgetChecker | None = None,
         max_dispatches_per_hour: int = 50,
+        dispatch_refusals: _DispatchRefusals | None = None,
     ) -> None:
         self._execution_service = execution_service
         self._store = store
         self._budget_checker = budget_checker
+        self._dispatch_refusals = dispatch_refusals
         self._max_dispatches_per_hour = max_dispatches_per_hour
         self._dispatch_timestamps: list[float] = []
 
@@ -370,6 +383,15 @@ class WorkflowDispatchProjection(ProcessManager):
             await self._save_record_status(execution_id, record, "failed", "no_workflow_id")
             return False
 
+        # #1569: terminal, like budget_exceeded. Only a manual run, which never
+        # passes here, can complete and so clear the refusal.
+        refusals = self._dispatch_refusals
+        refused = None if refusals is None else await refusals.refusal_for(workflow_id)
+        if refused is not None:
+            logger.warning("Dispatch for trigger %s refused: %s", trigger_id, refused.describe())
+            await self._save_record_status(execution_id, record, "failed", refused.describe())
+            return False
+
         budget_ok = await self._check_budget(execution_id)
         if budget_ok is False:
             await self._save_record_status(execution_id, record, "failed", "budget_exceeded")
@@ -390,6 +412,14 @@ class WorkflowDispatchProjection(ProcessManager):
                 "Dispatch of workflow %s for trigger %s held: %s", workflow_id, trigger_id, exc
             )
             await self._save_record_status(execution_id, record, _PAUSED, exc.hold_reason)
+            return False
+        except WorkflowNotStartableError as exc:
+            # #1003: refused before any task exists, and it will not clear on
+            # its own. The message is the reason: it names what to fix.
+            logger.warning(
+                "Dispatch of workflow %s for trigger %s refused: %s", workflow_id, trigger_id, exc
+            )
+            await self._save_record_status(execution_id, record, "failed", str(exc))
             return False
         except Exception:
             logger.exception(

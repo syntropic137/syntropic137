@@ -124,11 +124,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from functools import partial
 from time import monotonic
 from typing import TYPE_CHECKING, Final
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_names import (
+    DETACHED_HEAD,
+    NO_COMMITS,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
@@ -141,6 +145,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.moved_gitlinks import (
     split_moved_gitlinks,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.pytest_temp_trees import (
+    split_pytest_temp_trees,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_diffstat import diffstat
 from syn_domain.contexts.orchestration.slices.execute_workflow.quarantine_rehearsal import (
@@ -164,6 +171,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_git imp
     GitWorkspace,
     checked,
     git,
+    git_status,
     push,
     repositories,
     run_bounded,
@@ -517,26 +525,20 @@ def quarantined_records(
     return saved.quarantined
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
 class _UnsavedWork:
     """A repository's unsaved state: what is missing, and from which tips."""
 
-    __slots__ = ("branch", "commit_count", "files", "parents")
-
-    def __init__(
-        self,
-        *,
-        branch: str,
-        commit_count: int,
-        files: tuple[str, ...],
-        parents: tuple[str, ...],
-    ) -> None:
-        self.branch = branch
-        self.commit_count = commit_count
-        self.files = files
-        #: Commits the quarantine commit must descend from for every unpushed
-        #: commit to be reachable through the one ref. HEAD first, so the
-        #: recovered history reads as the phase left it.
-        self.parents = parents
+    branch: str
+    commit_count: int
+    files: tuple[str, ...]
+    #: Commits the quarantine commit must descend from for every unpushed
+    #: commit to be reachable through the one ref. HEAD first, so the
+    #: recovered history reads as the phase left it.
+    parents: tuple[str, ...]
+    #: Submodules with work in them, which the quarantine commit holds only
+    #: as a gitlink: see `QuarantinedWork.unsaved_submodules`.
+    submodules: tuple[str, ...]
 
 
 def _read_only_mount(mount_table: str, path: str) -> bool:
@@ -610,7 +612,8 @@ async def _unsaved_work(
     # --ignore-submodules=none: a repository's `submodule.<path>.ignore` or
     # `diff.ignoreSubmodules` would otherwise drop a dirty submodule's line
     # from this listing altogether, and with it the only report of the work.
-    status = await git(workspace, repo, "status", "--porcelain", "--ignore-submodules=none")
+    # Its own, larger bound: the first walk of a cold worktree (#1678).
+    status = await git_status(workspace, repo, "--porcelain", "--ignore-submodules=none")
     tips = await git(
         workspace, repo, "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads"
     )
@@ -639,7 +642,10 @@ async def _unsaved_work(
     # A gitlink git moved is not a change anybody made (#1499), and the
     # porcelain line cannot say so: see `moved_gitlinks`.
     split = await split_moved_gitlinks(workspace, repo, files)
-    authored, moved = split.authored, split.moved
+    # Nor is pytest's temp root (#2200): see `pytest_temp_trees`.
+    authored = (await split_pytest_temp_trees(workspace, repo, split.authored)).authored
+    moved = split.moved
+    submodules = tuple(sorted(split.worked_in)) if uncommitted_is_work else ()
     # THE ONE LINE THE EXEMPTION DECIDES (#1308). An uncommitted change is
     # evidence of work unless the phase both disclaimed it and was unable to
     # write it, in which case the same line is a build tool that dirtied a
@@ -683,6 +689,7 @@ async def _unsaved_work(
         commit_count=len(unpushed),
         files=files,
         parents=_dedup([head_sha, *(sha for sha, _ in named if sha in unpushed)]),
+        submodules=submodules,
     )
 
 
@@ -810,6 +817,7 @@ def _record(
         files=work.files,
         pushed_ref=ref,
         commit=commit,
+        unsaved_submodules=work.submodules,
     )
     if pushed.exit_code == 0:
         logger.warning("Quarantined unpushed work from %s at %s", repo, ref)
@@ -1011,11 +1019,11 @@ def _cut_off(what: str, seconds: float) -> ExecutionResult:
 def _branch_name(head_sha: str, named: list[tuple[str, str]]) -> str:
     """The checked-out branch, or a readable stand-in when HEAD is not on one."""
     if not head_sha:
-        return "(no commits)"
+        return NO_COMMITS
     for sha, name in named:
         if sha == head_sha:
             return name
-    return "(detached HEAD)"
+    return DETACHED_HEAD
 
 
 def _dedup(shas: list[str]) -> tuple[str, ...]:

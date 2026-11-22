@@ -767,6 +767,16 @@ test-unit:
     @echo "Running unit tests (parallel)..."
     uv run pytest -m unit -n auto --tb=short
 
+# The E2B conformance suite against REAL E2B (#1915). Local only, never CI:
+# needs SYN_E2B_API_KEY and SYN_E2B_TEMPLATE from your environment or keychain
+# (docs/deployment/e2b.md). Without them every test SKIPS, which is not a pass.
+# The e2b SDK is not in the lock (it is agentic-isolation's optional extra), so
+# it is added for this run only, at the version agentic-isolation pins. It is
+# newer than the project cutoff, so this run resolves it with a later cutoff;
+# --frozen keeps that from rewriting uv.lock.
+test-e2b:
+    uv run --frozen --with e2b==2.52.0 --exclude-newer 2026-10-02T00:00:00Z pytest -m e2b -rA --tb=short packages/syn-adapters/src/syn_adapters/workspace_backends/e2b/live_e2b_suite.py
+
 # Integration tests (uses test-stack if running, else testcontainers)
 test-integration:
     @echo "🧪 Running integration tests..."
@@ -1142,6 +1152,8 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 #                                      image; needs the docker CLI, absent)
 #   check-docker-proxy-haproxy         (added 2026-10-14, not measured in the
 #                                      image; needs the docker CLI, absent)
+#   check-architecture-docs            exit 0    markdown only; the svg prints
+#                                                NOT RUN, no vsa (#1782, 2026-11-16)
 #
 # Re-measure before moving a recipe across the line. "It should work" is how
 # a gate ends up passing because it never ran.
@@ -1180,11 +1192,13 @@ preflight-portable: check-agent-docs lint format-check typecheck validate-domain
 # a PR having passed this can still be failed by vsa or codegen on GitHub, and
 # that is the correct division of labour - CI has the toolchain, the workspace
 # does not.
-preflight-agent: preflight-portable fitness-agent fitness-invariants-agent
+preflight-agent: preflight-portable fitness-agent fitness-invariants-agent check-architecture-docs
     @echo "✅ preflight-agent: every static gate that RUNS in a workspace passed"
     @echo "   Fitness ran in full: fitness-check AND fitness-invariants. Any"
     @echo "   ci/fitness test marked NOT RUN in the pytest summary above needs a"
     @echo "   binary this image lacks (today: test_gateway_bind.py, docker)."
+    @echo "   check-architecture-docs checked the markdown only; without vsa"
+    @echo "   it prints NOT RUN for vsa-overview.svg, which CI checks."
     @echo "   Not run here (no toolchain in the image): vsa-validate,"
     @echo "   codegen-check, check-submodules, check-compose-overlays,"
     @echo "   check-default-workspace-image, check-pinned-image-channels,"
@@ -1985,9 +1999,11 @@ check-docs-drift *FILES:
 docs: docs-cli-gen
     cd apps/syn-docs && pnpm run dev
 
-# Regenerate ALL generated architecture docs from the source tree: rebuilds the
-# VSA manifest, then vsa-overview.svg, projection-subscriptions.md,
-# event-flows/README.md and the README counts row. Hand-written docs under
+# Regenerate ALL generated architecture docs from the source tree:
+# projection-subscriptions.md, event-flows/README.md, the README counts row and
+# the two docs-site pages (from scripts/architecture_manifest.py, so no vsa
+# needed), plus vsa-overview.svg when vsa and pnpm are installed. Without them
+# the svg is reported NOT RUN and left alone (#1782). Hand-written docs under
 # docs/architecture/ are not touched.
 docs-regen:
     @scripts/architecture-docs.sh
@@ -1996,8 +2012,11 @@ alias diagram := docs-regen
 alias docs-gen := docs-regen
 
 # Fail when the committed architecture docs differ from a fresh regeneration
-# (temp dir, never the working tree). In `preflight`, so CI's preflight job
-# runs it; needs vsa, so it cannot be in preflight-portable/-agent.
+# (temp dir, never the working tree). The markdown needs only uv, so it is in
+# `preflight-agent` too (#1782). The svg needs vsa + pnpm: without them it is
+# printed as NOT RUN, never passed. CI's preflight job has both and checks all
+# six files. Not in preflight-portable: with vsa present it builds the
+# visualizer, which is too slow for the fast inner loop.
 check-architecture-docs:
     @scripts/architecture-docs.sh --check
 
@@ -2600,6 +2619,27 @@ changelog-check *args:
 [positional-arguments]
 vps-reclaim *flags:
     uv run python infra/scripts/vps_reclaim.py "$@"
+
+# Dry run by default: reports objects, bytes before/after and integrity failures.
+# --apply re-encodes each object gzip under the live workers' lock (verify, then
+# atomic replace); safe beside running workers; re-run to continue.
+#   just session-archive-compress
+#   just session-archive-compress --apply --budget-minutes 60
+# Compress existing session archive objects on the selfhost VPS (#2107)
+[positional-arguments]
+session-archive-compress *flags:
+    uv run python infra/scripts/session_archive_compress.py "$@"
+
+# Dry run by default: groups revisions per session, reports how many older ones
+# splice onto the newest, bytes saved, non-prefix count. Run it first.
+# --apply stores each as a verified reference under the live workers' locks
+# (verify, pin, publish, re-verify, then unlink); re-run to continue.
+#   just session-archive-dedupe
+#   just session-archive-dedupe --apply --budget-minutes 60
+# Store older session revisions as splice references on the selfhost VPS (#2107)
+[positional-arguments]
+session-archive-dedupe *flags:
+    uv run python -m infra.scripts.session_archive_dedupe "$@"
 
 # Pit stop: put a beta on the selfhost VPS fast - stage early, swap late.
 # Codifies docs/deployment/test-deploy.md (direct path). Not a release.

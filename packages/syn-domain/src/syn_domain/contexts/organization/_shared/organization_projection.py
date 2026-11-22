@@ -214,6 +214,9 @@ class OrganizationProjection:
         if org_id:
             await self.increment_repo_count(org_id, delta=-1)
 
+    # Canonical name for coordinator dispatch (bare event type: RepoDeregistered)
+    on_repo_deregistered = on_repo_deregistered_decrement
+
 
 _projection: OrganizationProjection | None = None
 

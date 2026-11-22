@@ -47,6 +47,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionTagsRemovedEvent i
 from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
     NextPhaseReadyEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
+    recorded_inputs,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
     WorkspaceProvisionedForPhaseEvent,
 )
@@ -197,7 +200,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # v19: resumed_from (from WorkflowExecutionStarted) and resumed_as (from the
     # parent's ExecutionResumed / pre-rename ExecutionForked), so every resume
     # already in the store links both ways, not only new ones (#1881).
-    VERSION = 19
+    # v20: starting_checkout and each phase's image_manifest from
+    # WorkspaceProvisionedForPhase, so every eval trial already in the store
+    # is judged against its base and reports its image (#2108).
+    VERSION = 20
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -295,7 +301,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # that died on the platform dispatches these again. Reading one key out
         # of it and discarding the rest is what left an execution unable to say
         # what its own task was.
-        inputs = {str(k): str(v) for k, v in (event_data.get("inputs") or {}).items()}
+        inputs = recorded_inputs(event_data.get("inputs"))
 
         repos = self._repos_from(inputs.get("repos", ""))
         launch_tags = self._launch_tags(event_data.get("tags"))
@@ -474,18 +480,27 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         """Handle WorkspaceProvisionedForPhase: the phase's clock starts here (#1546).
 
         Overwrites, because a retried phase is provisioned again and runs on a
-        fresh clock.
+        fresh clock, on a fresh workspace whose image manifest is the phase's
+        now. The run's starting checkout is the FIRST provisioning's and is
+        never overwritten, as the aggregate keeps it (#2108).
         """
         event = WorkspaceProvisionedForPhaseEvent.model_validate(event_data)
         existing = await self._store.get(self.PROJECTION_NAME, event.execution_id)
         if not existing:
             return
+        if existing.get("starting_checkout") is None:
+            existing["starting_checkout"] = [
+                c.model_dump(mode="json") for c in event.checked_out_commits or ()
+            ]
         phases = existing.get("phases", [])
         found = self._find_phase(phases, event.phase_id)
         if found is None:
+            await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
             return
         _, phase = found
         phase["provisioned_at"] = event.provisioned_at.isoformat()
+        if event.image_manifest is not None:
+            phase["image_manifest"] = event.image_manifest.model_dump(mode="json")
         await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
 
     @staticmethod

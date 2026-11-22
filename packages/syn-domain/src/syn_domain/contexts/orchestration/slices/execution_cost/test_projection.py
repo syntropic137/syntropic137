@@ -2,10 +2,10 @@
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
@@ -20,35 +20,14 @@ from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
 pytestmark = pytest.mark.unit
 
 
-class MockProjectionStore:
-    """Mock projection store for testing."""
-
-    def __init__(self) -> None:
-        self._data: dict[str, dict[str, Any]] = {}
-
-    async def save(self, projection_name: str, key: str, data: dict[str, Any]) -> None:
-        """Save data to the store."""
-        if projection_name not in self._data:
-            self._data[projection_name] = {}
-        self._data[projection_name][key] = data
-
-    async def get(self, projection_name: str, key: str) -> dict[str, Any] | None:
-        """Get data from the store."""
-        return self._data.get(projection_name, {}).get(key)
-
-    async def get_all(self, projection_name: str) -> list[dict[str, Any]]:
-        """Get all data from the store."""
-        return list(self._data.get(projection_name, {}).values())
-
-
 @pytest.fixture
-def store() -> MockProjectionStore:
+def store() -> InMemoryProjectionStore:
     """Create a mock projection store."""
-    return MockProjectionStore()
+    return InMemoryProjectionStore()
 
 
 @pytest.fixture
-def projection(store: MockProjectionStore) -> ExecutionCostProjection:
+def projection(store: InMemoryProjectionStore) -> ExecutionCostProjection:
     """Create an ExecutionCostProjection with mock store."""
     return ExecutionCostProjection(store)
 

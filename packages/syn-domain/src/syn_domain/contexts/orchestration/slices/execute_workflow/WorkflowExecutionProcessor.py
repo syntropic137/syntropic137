@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration._shared.command_phase import PhaseKind
 from syn_domain.contexts.orchestration._shared.shipped_ledger import ShippedLedgerProvider
 from syn_domain.contexts.orchestration._shared.shipped_recorder import shipped_recorder
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
@@ -21,7 +22,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseResult,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-    CancelExecutionCommand,
     StartExecutionCommand,
     StartResumeCommand,
     WorkflowExecutionAggregate,
@@ -41,6 +41,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown i
 from syn_domain.contexts.orchestration.slices.execute_workflow.cancelled_work_record import (
     CancelledWorkLedger,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.command_phase_run import (
+    gate_failed_result,
+    record_cancel,
+    run_command_phase,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.evidence_heads import (
     EvidenceHeadObserver,
 )
@@ -52,7 +57,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.failed_execution 
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
-    AgentExecutionResult,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_completion import (
     complete_phase,
@@ -90,12 +94,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types i
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     inherited_outputs,
-    inherited_phase_ids,
     record_continuation,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import open_start
-from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
-    RunScopedTodoFold,
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_progress import RunProgress
+from syn_domain.contexts.orchestration.slices.execute_workflow.run_reservation import (
+    fold_claimed_run,
+    open_start,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.shutdown_interruption import (
     preserve_interrupted_run,
@@ -113,6 +117,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts._shared.maintenance import AdmissionTicket
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
+    from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+        TranscriptUsageReader,
+    )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
@@ -156,6 +163,7 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.slices.execute_workflow.run_todo_fold import (
         ExecutionEventStream,
+        RunScopedTodoFold,
         TodoProjectionType,
     )
 
@@ -219,6 +227,7 @@ class WorkflowExecutionProcessor:
         skill_materializer: SkillMaterializerProtocol | None = None,
         session_capture: SessionCapturePort | None = None,
         session_store: SessionStorePort | None = None,
+        transcript_reader: TranscriptUsageReader | None = None,
         import_ledger: ImportLedgerPort | None = None,
         retry_policy: UpstreamRetryPolicy | None = None,
         remote_branches: RemoteBranchPort | None = None,
@@ -302,6 +311,7 @@ class WorkflowExecutionProcessor:
         self._runtimes = PhaseRuntimes(
             capture_port=session_capture,
             session_store=session_store,
+            transcript_reader=transcript_reader,
             writer=observability_writer,
             ledger=import_ledger,
         )
@@ -461,8 +471,8 @@ class WorkflowExecutionProcessor:
             phases,
             _DispatchContext(inputs=inputs),
             repos,
-            origin,
             phase_outputs,
+            RunProgress.starting(origin),
             started_at,
         )
 
@@ -497,26 +507,26 @@ class WorkflowExecutionProcessor:
         folded from this execution's stream at the claim and kept current by
         the run's own saves, never read from the shared `execution_todo`
         store, whose other writers this run cannot see. Closing the run row
-        is the claimer's (1.5), not this.
+        is the claimer's (1.5), not this. Raises as `run_recovered` does.
+        """
+        return await self.run_recovered(claimed.execution_id)
+
+    async def run_recovered(self, execution_id: str) -> WorkflowExecutionResult:
+        """`run_claimed` without a claim: a run boot collected green goes on (ADR-078 D6).
 
         Raises:
-            RuntimeError: the processor was built without the event stream and
-                projection type the fold is made from - a wiring defect.
-            LookupError: the claimed execution has no stream.
+            RuntimeError: built without the fold inputs - a wiring defect.
+            LookupError: the execution has no stream.
         """
         if self._execution_events is None or self._todo_projection_type is None:
             msg = "run_claimed needs execution_events and todo_projection_type (ADR-072 D8)"
             raise RuntimeError(msg)
-        fold = await RunScopedTodoFold.for_execution(
-            claimed.execution_id,
+        fold, aggregate = await fold_claimed_run(
+            execution_id,
             self._execution_repo,
             self._execution_events,
             self._todo_projection_type,
         )
-        aggregate = await fold.journal.reload(claimed.execution_id)
-        if aggregate is None:
-            msg = f"Claimed run {claimed.execution_id} has no execution stream"
-            raise LookupError(msg)
         pins = aggregate.start_pins
         repos = [RepositoryRef.from_slug(c.repository) for c in pins.source_commits]
         phase_outputs = await inherited_outputs(self._artifact_query, pins.resumed_from)
@@ -526,8 +536,8 @@ class WorkflowExecutionProcessor:
             pins.pinned_phases,
             _DispatchContext(inputs=dict(pins.inputs), fold=fold),
             repos or None,
-            pins.resumed_from,
             phase_outputs,
+            await RunProgress.read(self._execution_events, execution_id, pins.resumed_from),
             datetime.now(UTC),
         )
 
@@ -538,8 +548,8 @@ class WorkflowExecutionProcessor:
         phases: list[ExecutablePhase],
         dispatch_ctx: _DispatchContext,
         repos: list[RepositoryRef] | None,
-        origin: ResumeOrigin | None,
         phase_outputs: PhaseOutputCache,
+        progress: RunProgress,
         started_at: datetime,
     ) -> WorkflowExecutionResult:
         """Drain the to-do list of a started run until it ends."""
@@ -547,9 +557,9 @@ class WorkflowExecutionProcessor:
         journal = self._journal_of(dispatch_ctx)
         phase_map = {p.phase_id: p for p in phases}
 
-        phase_results: list[PhaseResult] = []
-        all_artifact_ids: list[str] = []
-        completed_phase_ids = inherited_phase_ids(origin)
+        phase_results = progress.phase_results
+        all_artifact_ids = progress.artifact_ids
+        completed_phase_ids = progress.completed_phase_ids
         try:
             await self._drain_todo_list(
                 execution_id=execution_id,
@@ -581,6 +591,8 @@ class WorkflowExecutionProcessor:
                     cancel_reason=aggregate.cancel_reason,
                     phase_id=dispatch_ctx.current_phase_id,
                 )
+            if aggregate.status == ExecutionStatus.FAILED:  # a command gate (ADR-078 D5)
+                return gate_failed_result(aggregate, phase_results, all_artifact_ids, started_at)
             return await self._complete_execution(
                 aggregate,
                 execution_id,
@@ -699,6 +711,18 @@ class WorkflowExecutionProcessor:
                 completed_phase_ids,
                 phase_outputs,
             )
+        elif todo.action == TodoAction.RUN_AGENT and phase.kind is PhaseKind.COMMAND:
+            # The same action, a different runner (ADR-078 D3).
+            await run_command_phase(
+                self._controller,
+                todo,
+                phase,
+                aggregate,
+                runtime=self._runtimes.of(todo.execution_id),
+                workspaces=self._workspaces_for(todo.execution_id, dispatch_ctx.inputs, journal),
+                journal=journal,
+                kept=dispatch_ctx,
+            )
         elif todo.action == TodoAction.RUN_AGENT:
             await self._handle_run_agent(todo, phase, aggregate, dispatch_ctx)
         elif todo.action == TodoAction.COLLECT_ARTIFACTS:
@@ -798,7 +822,7 @@ class WorkflowExecutionProcessor:
         runtime = self._runtimes.of(todo.execution_id)
         journal = self._journal_of(dispatch_ctx)
         launch = runtime.launch(todo.phase_id, session_id=session_id)
-        await runtime.record_runtime(todo.phase_id)
+        await runtime.record_launch(todo.phase_id)
         workflow_id = aggregate.workflow_id or ""
 
         # EVERY WAY OUT OF HERE THAT ENDS THE RUN GOES PAST THE SAME DOOR
@@ -864,12 +888,12 @@ class WorkflowExecutionProcessor:
                     todo,
                     phase,
                     launch,
-                    workflow_id,
+                    aggregate,
                     dispatch_ctx,
                     said,
                     UnfinishedPhase.INTERRUPTED,
                 )
-                await self._handle_cancel_signal(todo, result, aggregate, journal)
+                await record_cancel(todo, result.stream_result.interrupt_reason, aggregate, journal)
                 return
 
             command = result.command
@@ -906,7 +930,7 @@ class WorkflowExecutionProcessor:
         except Exception:
             if not kept:
                 await self._keep(
-                    todo, phase, launch, workflow_id, dispatch_ctx, said, UnfinishedPhase.FAILED
+                    todo, phase, launch, aggregate, dispatch_ctx, said, UnfinishedPhase.FAILED
                 )
             raise
 
@@ -915,7 +939,7 @@ class WorkflowExecutionProcessor:
         todo: TodoItem,
         phase: ExecutablePhase,
         launch: PhaseLaunch,
-        workflow_id: str,
+        aggregate: WorkflowExecutionAggregate,
         dispatch_ctx: _DispatchContext,
         said: str | None,
         outcome: UnfinishedPhase,
@@ -927,27 +951,10 @@ class WorkflowExecutionProcessor:
             todo,
             phase,
             workspace=launch.workspace,
-            workflow_id=workflow_id,
             last_agent_message=said,
             outcome=outcome,
+            aggregate=aggregate,
         )
-
-    async def _handle_cancel_signal(
-        self,
-        todo: TodoItem,
-        result: AgentExecutionResult,
-        aggregate: WorkflowExecutionAggregate,
-        journal: ExecutionJournal,
-    ) -> None:
-        """Dispatch CancelExecutionCommand when the agent stream was interrupted by a cancel signal."""
-        assert todo.phase_id is not None, "phase_id must be set for a running agent todo"
-        cancel_cmd = CancelExecutionCommand(
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
-            reason=result.stream_result.interrupt_reason or "Cancelled by user",
-        )
-        aggregate.cancel_execution(cancel_cmd)
-        await journal.append(aggregate)
 
     async def _handle_complete_phase(
         self,

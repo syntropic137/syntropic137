@@ -12,16 +12,26 @@
 # webhook or a poller could admit work in the gap before the swap.
 #
 #   stages: prepare -> build -> ship -> stage | gate -> drain -> swap -> verify -> ungate
-#   --stage-only  stop after `stage` (runs may still be in flight)
+#   --stage-only  stop after `stage` (runs may still be in flight). The pins
+#                 go to a SIDE file, never the live compose, so a routine
+#                 `compose up` before the swap still starts the old build (#1511)
 #   --swap-only   skip to `gate`; the version must already be staged
 #   --dry-run     echo every mutating command; still run read-only checks
 #   --skip-probe  EMERGENCIES ONLY: do not prove a real execution starts after ungate
 #   --service gateway   build, ship, stage and swap the gateway alone, with no
 #                 gate, no drain and no probe: it is on syn-internal only, never
 #                 agent-net, so no execution depends on it (#1310). Default: all
+#   --service api build, ship, stage and swap the API alone, with no gate and no
+#                 drain: the runs are the executor's, and it is not touched.
+#                 Refuses unless the Run Queue is on, an executor is running and
+#                 the new image shares its event epoch (#1310). `all` recreates
+#                 an executor too, when the host has one
+#   Refuses to stage, printing the diff, when the deployed compose differs from
+#   the one $REF publishes in anything but image pins: the new image may need
+#   that config to start (#1511). Bring the host's compose up to date first.
 set -euo pipefail
 
-usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ $# -ge 1 ] || usage
 VERSION="${1#v}"; shift
 TAG="v${VERSION}"
@@ -30,6 +40,10 @@ HOST="${SYN_PIT_HOST:-root@100.114.86.77}"
 API="${SYN_PIT_API:-http://100.114.86.77:8137/api/v1}"
 COMPOSE_DIR="/root/.syntropic137"
 COMPOSE="docker-compose.syntropic137.yaml"
+# Where `stage` puts the repointed compose until the swap applies it (#1511).
+STAGED="$COMPOSE.pit-stop-staged"
+# What $REF publishes; the deployed compose is held to it, image pins aside.
+PUBLISHED="docker/docker-compose.syntropic137.yaml"
 DRAIN_TIMEOUT="${SYN_PIT_DRAIN_TIMEOUT:-2700}"
 API_READY_TIMEOUT="${SYN_PIT_API_READY_TIMEOUT:-900}"
 PROBE_WORKFLOW="${SYN_PIT_PROBE_WORKFLOW:-telemetry-lag-probe-v1}"
@@ -130,8 +144,14 @@ case "$SERVICE" in
          ALREADY="both pins are already $TAG" ;;
     gateway) SWAPPED="gateway"; SHIPS="syn-gateway"; REPOINTS="the syn-gateway pin"; N=1
          ALREADY="the syn-gateway pin is already $TAG" ;;
-    *) die "--service must be all or gateway (got: $SERVICE)" ;;
+    api) SWAPPED="api"; SHIPS="syn-api"; REPOINTS="the syn-api pin"; N=1
+         ALREADY="the syn-api pin is already $TAG" ;;
+    *) die "--service must be all, api or gateway (got: $SERVICE)" ;;
 esac
+# What compose is asked to recreate, and the repoint that matches it. `all`
+# widens both, and N_PINS, once it has read whether the host has an executor.
+SWAP_ARGS="api gateway"; REPOINT_AS="$SERVICE"; ALSO_PINNED=""; N_PINS="$N"
+if [ "$SERVICE" = api ]; then SWAP_ARGS="--no-deps api"; fi
 IMAGES=""
 for svc in $SWAPPED; do IMAGES="$IMAGES ghcr.io/syntropic137/syn-$svc:$TAG"; done
 IMAGES="${IMAGES# }"
@@ -307,10 +327,13 @@ GATE
 # for v0.33.2-beta.1, and an unescaped `.` let `ghcrxio/...` stand in for
 # `ghcr.io/...`. The pin is read by the repoint's own parser, so the precheck
 # and the stage agree on what an image line is.
+#
+# It counts the STAGED file, not the live one: staging no longer touches the
+# compose a routine `compose up` reads (#1511), so the pins are only there.
 pins_on_tag() {
     local n=0 svc c
-    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.check" || { echo 0; return 0; }
-    for svc in $SWAPPED; do
+    remote "cat $COMPOSE_DIR/$STAGED" > "$TMP/compose.check" || { echo 0; return 0; }
+    for svc in $SWAPPED ${ALSO_PINNED:-}; do
         c="$(python3 "$REPOINT_PY" --on-tag "$TAG" "$TMP/compose.check" "$svc" || true)"
         if [ "$c" = 1 ]; then n=$((n + 1)); fi
     done
@@ -427,13 +450,44 @@ or, in an emergency only, re-run with --skip-probe."
 # Only when this run will dispatch the probe: --stage-only never does, and
 # neither does --service gateway, which exits after its own verify: it does not
 # touch the path an execution starts on (#1310).
-if [ "$SKIP_PROBE" = 0 ] && [ "$MODE" != "stage" ] && [ "$SERVICE" = all ]; then
+if [ "$SKIP_PROBE" = 0 ] && [ "$MODE" != "stage" ] && [ "$SERVICE" != gateway ]; then
     step "precheck: the probe workflow $PROBE_WORKFLOW is installed and active"
     probe_workflow_ready
 fi
 
 step "precheck: free space on the data volume"
 disk_space
+
+# The executor runs the syn-api image from its own pin, behind the `run-queue`
+# profile. Read by container, never by naming it to compose: naming a profiled
+# service starts it, which would add an executor to a host that has none.
+EXECUTOR_ID=""
+if [ "$SERVICE" != gateway ]; then
+    EXECUTOR_ID="$(remote "docker ps -aq --no-trunc --filter 'name=^syn137-executor\$'")" \
+        || die "could not list containers on $HOST"
+fi
+if [ "$SERVICE" = all ] && [ -n "$EXECUTOR_ID" ]; then
+    echo "   syn137-executor exists: it moves to $TAG with the API, or it would stay on the old build"
+    SWAP_ARGS="api gateway executor"; REPOINT_AS="all-with-executor"; REPOINTS="all three pins"
+    ALSO_PINNED="executor"; N_PINS=$((N + 1))
+fi
+
+# With the Run Queue off, every run lives inside the API and recreating it kills
+# them all. So the no-drain path proves the runs are elsewhere first (#1310).
+if [ "$SERVICE" = api ]; then
+    step "precheck: the Run Queue is on and an executor is running"
+    queue="$(remote "docker exec syn137-api printenv SYN_EXECUTION_RUN_QUEUE_ENABLED" || true)"
+    case "$(printf '%s' "$queue" | tr '[:upper:]' '[:lower:]')" in
+        true|1|yes|on) : ;;
+        *) die "the Run Queue is off on $HOST, so executions run inside the API and --service api would kill them. Use --service all" ;;
+    esac
+    # `all` is a role too: it claims queued runs in the API process.
+    role="$(remote "docker exec syn137-api printenv SYN_EXECUTION_PROCESS_ROLE" || true)"
+    [ "$role" = api ] || die "syn137-api has process role '$role', so it may hold runs of its own. Use --service all"
+    [ -n "$EXECUTOR_ID" ] || die "no syn137-executor on $HOST, so nothing would hold the runs. Use --service all"
+    [ "$(remote "docker inspect syn137-executor --format '{{.State.Running}}'")" = true ] \
+        || die "syn137-executor is not running on $HOST. Use --service all"
+fi
 
 # ONE SWAPPER AT A TIME, and never under a compose up already running (#1310
 # 1.6). Taken BEFORE anything is shipped, in every mode but --dry-run, and held
@@ -460,7 +514,8 @@ claim_the_swap() {
 #     admission. The platform is exactly as it was apart from the gate, and a
 #     gate left shut with no pit stop to clear it held admission 2.25h (PC-115).
 #   Gated, and the swap has begun (SWAPPING=1): stay PAUSED and print RECOVERY.
-#     A build that has not passed verify never takes traffic (#1575).
+#     A build that has not passed verify never takes traffic (#1575). The swap
+#     begins at the write of the live compose, not at the recreate (#1511).
 # GATED is set BEFORE the pause PUT, so a PUT that persisted but failed in
 # flight is still undone. The lock goes on every exit; $TMP as the first trap.
 GATED=0
@@ -489,11 +544,67 @@ trap 'exit 143' TERM
 # Read-only and lock-free under --dry-run.
 if [ "$DRY" = 0 ]; then claim_the_swap; fi
 
+# Die, printing the diff, unless $TMP/compose.deployed is $TMP/compose.published
+# with only its image pins changed (#1511). $1 says what the refusal left undone.
+refuse_drift() {
+    if ! python3 "$REPOINT_PY" --drift "$TMP/compose.published" "$TMP/compose.deployed" > "$TMP/compose.drift"; then
+        cat "$TMP/compose.drift"
+        die "$COMPOSE_DIR/$COMPOSE on $HOST is not the compose $REF publishes (diff above, image pins ignored). The $TAG images may need that config to start: bring the deployed compose up to date, then run the pit stop again. $1"
+    fi
+}
+
+# Add to the deployed compose the `KEY: null` env passthroughs $REF's compose
+# has and it lacks, and nothing else (#2154). A null passthrough carries no
+# value: it forwards the host's .env, unset for a new key, so the default
+# applies, as on a fresh install. Any other drift is left for refuse_drift,
+# which still stops the pit stop for the owner. The write is compare-and-swap
+# against the file read (checked before the backup and again just before the
+# rename), backed up first, checked by sha256, and read back. Not atomic
+# against a hand edit landing between that last check and the rename; the
+# swap lock covers every other pit stop, and the backup keeps what was read.
+apply_null_keys() {
+    local keys sum was bak
+    keys="$(python3 "$REPOINT_PY" --add-null-keys "$TMP/compose.published" "$TMP/compose.deployed" "$TMP/compose.keyed")" \
+        || return 0
+    [ -n "$keys" ] || return 0
+    echo "   adding $(printf '%s\n' "$keys" | wc -l | tr -d ' ') KEY: null env passthrough line(s):"
+    diff "$TMP/compose.deployed" "$TMP/compose.keyed" | sed 's/^/     /' || true
+    if [ "$DRY" = 1 ]; then
+        echo "   (dry-run) not written; continuing as if it were"
+        cp "$TMP/compose.keyed" "$TMP/compose.deployed"
+        return 0
+    fi
+    sum="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.keyed")"
+    was="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.deployed")"
+    bak="$COMPOSE.bak-$(date -u +%Y%m%dT%H%M%SZ)-pitstop-keys"
+    remote "cd $COMPOSE_DIR && echo '$was  $COMPOSE' | sha256sum -c --status - && cp -p $COMPOSE $bak && cp -p $COMPOSE $COMPOSE.pit-stop-keys && cat > $COMPOSE.pit-stop-keys && echo '$sum  $COMPOSE.pit-stop-keys' | sha256sum -c --status - && echo '$was  $COMPOSE' | sha256sum -c --status - && mv $COMPOSE.pit-stop-keys $COMPOSE || { rm -f $COMPOSE.pit-stop-keys; exit 1; }" < "$TMP/compose.keyed" \
+        || die "could not add the env keys: $COMPOSE on $HOST changed since it was read, or the write failed. Nothing was built, shipped or staged"
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not re-read the deployed compose file"
+    cmp -s "$TMP/compose.deployed" "$TMP/compose.keyed" \
+        || die "the compose on $HOST is not the one written; the backup is $COMPOSE_DIR/$bak"
+    echo "   backed up to $COMPOSE_DIR/$bak"
+}
+
 if [ "$MODE" != "swap" ]; then
+    # Before anything is built: a pit stop repoints image pins and nothing else,
+    # so a compose the new image's startup depends on would never reach the
+    # host. beta.6 aborted on every start for want of the session-inventory
+    # archive dir it carried (#1511). Read-only, so it runs under --dry-run too.
+    step "precheck: the deployed compose is $REF's published compose, image pins aside"
+    # Fetched here, not at prepare, so $REF is the ref that ships, not a stale one.
+    run git -C "$REPO_TOP" fetch -q origin
+    # Always $REF's own file: an older baseline (the release asset the host
+    # was installed from, say) lacks exactly the config the new image needs.
+    git -C "$REPO_TOP" show "$REF:$PUBLISHED" > "$TMP/compose.published" \
+        || die "could not read $PUBLISHED at $REF"
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
+    apply_null_keys
+    refuse_drift "Nothing was built, shipped or staged"
+    echo "   no drift"
+
     step "prepare: worktree at $REF, bump to $VERSION"
     WT="$WT_BASE/pit-stop-$VERSION"
     [ -e "$WT" ] && die "$WT already exists; remove it or pick another version"
-    run git -C "$REPO_TOP" fetch -q origin
     run git -C "$REPO_TOP" worktree add -b "chore/bump-$VERSION" "$WT" "$REF"
     if [ "$DRY" = 0 ]; then
         git -C "$WT" submodule update --init --recursive --quiet
@@ -514,7 +625,7 @@ if [ "$MODE" != "swap" ]; then
     fi
 
     step "build: $SHIPS $TAG for linux/amd64 (commit $BUILT_SHA)"
-    if [ "$SERVICE" = all ]; then
+    if [ "$SERVICE" != gateway ]; then
         # SYN_BUILD_* are what /version reports as image_tag and commit, and verify
         # reads them back below. The fitness test in
         # ci/fitness/infrastructure/test_release_build_args.py fails if they go.
@@ -522,11 +633,13 @@ if [ "$MODE" != "swap" ]; then
             --build-arg SYN_BUILD_IMAGE_TAG="$TAG" --build-arg SYN_BUILD_COMMIT="$BUILT_SHA" \
             -t "ghcr.io/syntropic137/syn-api:$TAG" --load -f "$WT/infra/docker/images/syn-api/Dockerfile" "$WT"
     fi
-    run docker buildx build --platform linux/amd64 \
-        -t "ghcr.io/syntropic137/syn-gateway:$TAG" --load -f "$WT/infra/docker/images/gateway/Dockerfile" "$WT"
+    if [ "$SERVICE" != api ]; then
+        run docker buildx build --platform linux/amd64 \
+            -t "ghcr.io/syntropic137/syn-gateway:$TAG" --load -f "$WT/infra/docker/images/gateway/Dockerfile" "$WT"
+    fi
     # The #1216 trap: /health stays green while every execution fails at bootstrap.
     # Only syn-api runs executions, so only syn-api needs the capabilities.
-    if [ "$SERVICE" = all ] && [ "$DRY" = 0 ]; then
+    if [ "$SERVICE" != gateway ] && [ "$DRY" = 0 ]; then
         (cd "$WT" && just verify-image-capabilities syn-api "ghcr.io/syntropic137/syn-api:$TAG")
     fi
 
@@ -544,33 +657,40 @@ if [ "$MODE" != "swap" ]; then
     [ "$DRY" = 1 ] || [ "$(images_on_tag)" = "$N" ] \
         || die "expected $N image(s) tagged $TAG on the host; the deploy would be half old"
 
-    step "stage: back up the deployed compose and repoint $REPOINTS"
+    step "stage: repoint $REPOINTS into $STAGED (the live compose is untouched until the swap)"
     # Read here, repointed locally, written back whole: a release-installed host
     # pins each image by its own digest and a hotfixed one by its own tag, so no
     # single substitution covers both services (scripts/pit_stop_repoint.py).
+    #
+    # Into a SIDE file, never over $COMPOSE: a routine `compose up` between
+    # stage and swap (a rotated credential, say) would otherwise start the new
+    # build undrained, ungated and unverified (#1511). apply_staged moves it in.
     remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.deployed" || die "could not read the deployed compose file"
-    BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged" --service "$SERVICE")" \
+    # Checked again on the bytes actually repointed: the precheck read was
+    # before the build, and the host's file may have changed since. Null keys
+    # again first: a no-op after the precheck wrote them, and under --dry-run,
+    # which wrote nothing, it re-adds them to this fresh read.
+    apply_null_keys
+    refuse_drift "The $TAG images are on the host, but nothing was staged"
+    BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.deployed" "$TMP/compose.staged" --service "${REPOINT_AS:-$SERVICE}")" \
         || die "could not repoint the syn-api/syn-gateway pins in the deployed compose file"
-    if [ -n "$BAK" ]; then
-        # Written beside the file, checked against the staged checksum, and only
-        # then renamed over it. `cat` exits 0 on a short read, so without the
-        # check a dropped transfer would install half a compose file.
-        SUM="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.staged")"
-        run remote "cd $COMPOSE_DIR && cat > $COMPOSE.pit-stop && echo '$SUM  $COMPOSE.pit-stop' | sha256sum -c --status - && cp $COMPOSE $COMPOSE.bak-$BAK && mv $COMPOSE.pit-stop $COMPOSE || { rm -f $COMPOSE.pit-stop; exit 1; }" < "$TMP/compose.staged" \
-            || die "the staged compose did not arrive intact on $HOST; the deployed file is unchanged"
-        if [ "$DRY" = 0 ]; then
-            remote "cat $COMPOSE_DIR/$COMPOSE" | cmp -s - "$TMP/compose.staged" || die "the compose on $HOST is not the one staged; the backup is $COMPOSE.bak-$BAK"
-            echo "   backed up to $COMPOSE.bak-$BAK"
-        fi
-    else
-        echo "   $ALREADY"
+    [ -n "$BAK" ] || echo "   $ALREADY"
+    # Written beside the file, checked against the staged checksum, and only
+    # then renamed into place. `cat` exits 0 on a short read, so without the
+    # check a dropped transfer would stage half a compose file.
+    SUM="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/compose.staged")"
+    run remote "cd $COMPOSE_DIR && cat > $COMPOSE.pit-stop && echo '$SUM  $COMPOSE.pit-stop' | sha256sum -c --status - && mv $COMPOSE.pit-stop $STAGED || { rm -f $COMPOSE.pit-stop; exit 1; }" < "$TMP/compose.staged" \
+        || die "the staged compose did not arrive intact on $HOST; nothing was staged"
+    if [ "$DRY" = 0 ]; then
+        remote "cat $COMPOSE_DIR/$STAGED" | cmp -s - "$TMP/compose.staged" || die "$STAGED on $HOST is not the compose staged"
+        echo "   staged in $STAGED; $COMPOSE still runs what it ran"
     fi
     # The same count --swap-only prechecks, so a stage it would refuse fails here.
     # Only the swapped services are counted, so syn-api's pin, old or new, says
     # nothing about a gateway-only stage.
     if [ "$DRY" = 0 ]; then
         new_n="$(pins_on_tag)"
-        [ "$new_n" = "$N" ] || die "the deployed compose pins $new_n/$N services to $TAG after the repoint"
+        [ "$new_n" = "${N_PINS:-$N}" ] || die "the staged compose pins $new_n/${N_PINS:-$N} services to $TAG after the repoint"
     fi
     if [ "$MODE" = "stage" ]; then
         step "staged $TAG; run with --swap-only once drained"
@@ -579,12 +699,12 @@ if [ "$MODE" != "swap" ]; then
 fi
 
 if [ "$MODE" = "swap" ] && [ "$DRY" = 0 ]; then
-    step "precheck: $TAG is staged in the compose file and present on the host"
+    step "precheck: $TAG is staged in $STAGED and present on the host"
     # --swap-only recreates whatever the compose file names. Without this it
     # would drain the platform and disrupt production containers before
     # discovering, at verify, that the file pins something else entirely.
     pins="$(pins_on_tag)"
-    [ "$pins" = "$N" ] || die "the deployed compose file pins $pins/$N services to $TAG; stage it first"
+    [ "$pins" = "${N_PINS:-$N}" ] || die "$STAGED pins $pins/${N_PINS:-$N} services to $TAG; stage it first"
     staged="$(images_on_tag)"
     [ "$staged" = "$N" ] || die "$staged/$N images tagged $TAG on $HOST; stage it first"
     echo "   pins=$N images=$N"
@@ -599,10 +719,11 @@ fi
 # Every read guarded with `|| die`: under `set -e` a failed assignment exits on
 # the spot, skipping die() and the RECOVERY it prints. An unreachable host is
 # exactly when the operator needs it (#1575).
-swapped_is_running() {  # $1: api|gateway
-    local svc="$1" want got up
-    want="$(remote "docker image inspect ghcr.io/syntropic137/syn-$svc:$TAG --format '{{.Id}}'")" \
-        || die "could not read the id of image syn-$svc:$TAG on $HOST"
+swapped_is_running() {  # $1: api|gateway|executor
+    local svc="$1" image="syn-$1" want got up
+    if [ "$svc" = executor ]; then image="syn-api"; fi
+    want="$(remote "docker image inspect ghcr.io/syntropic137/$image:$TAG --format '{{.Id}}'")" \
+        || die "could not read the id of image $image:$TAG on $HOST"
     got="$(remote "docker inspect syn137-$svc --format '{{.Image}}'")" \
         || die "could not inspect syn137-$svc on $HOST"
     up="$(remote "docker inspect syn137-$svc --format '{{.State.Running}}'")" \
@@ -629,7 +750,64 @@ start_gateway() {
     echo "   syn137-gateway: docker start issued"
 }
 
+# Move the staged compose over the live one, keeping the live one as a backup.
+# Only here, at the swap: until now a `compose up` kept starting the old build
+# (#1511). The staged file must still be what repointing the live compose
+# gives, so an edit made to the live file since the stage is never undone by it.
+apply_staged() {
+    step "apply: $STAGED over $COMPOSE, the previous one kept as a backup"
+    remote "cat $COMPOSE_DIR/$COMPOSE" > "$TMP/compose.live" \
+        || die "could not read the deployed compose file; nothing was recreated"
+    BAK="$(python3 "$REPOINT_PY" "$TAG" "$TMP/compose.live" "$TMP/compose.want" --service "${REPOINT_AS:-$SERVICE}")" \
+        || die "could not repoint the deployed compose file; nothing was recreated"
+    if [ "$DRY" = 0 ]; then
+        remote "cat $COMPOSE_DIR/$STAGED" | cmp -s - "$TMP/compose.want" \
+            || die "$COMPOSE on $HOST changed after $TAG was staged; stage again so that change is kept. Nothing was recreated"
+    fi
+    if [ -z "$BAK" ]; then
+        run remote "rm -f $COMPOSE_DIR/$STAGED" || die "could not remove $STAGED on $HOST; nothing was recreated"
+        echo "   $ALREADY"
+        return 0
+    fi
+    # From this write on, the live compose may name $TAG while the old build
+    # still runs: an ssh that fails here, or loses the reply, may have moved the
+    # stage in anyway. A `compose up` would then recreate under executions
+    # admitted since, so admission stays PAUSED from here and RECOVERY says
+    # how to finish or undo it. The move is a rename: $STAGED still being there
+    # means it never happened (#1511).
+    if [ "$SERVICE" = gateway ]; then
+        RECOVERY="RECOVERY: admission was never paused and nothing was recreated, but $COMPOSE on $HOST may already name the $TAG gateway.
+   ssh $HOST 'ls $COMPOSE_DIR/$STAGED'     # still there: the live compose is unchanged; run the pit stop again
+   gone, so finish:  ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d --no-deps gateway'
+   or put it back:   ssh $HOST 'cd $COMPOSE_DIR && cp $COMPOSE.bak-$BAK $COMPOSE'"
+    elif [ "${SERVICE:-all}" = api ]; then
+        RECOVERY="RECOVERY: admission was never paused and nothing was recreated, but $COMPOSE on $HOST may already name the new API.
+   ssh $HOST 'ls $COMPOSE_DIR/$STAGED'     # still there: the live compose is unchanged; run the pit stop again
+   gone, so finish:  ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d --no-deps api'
+   or put it back:   ssh $HOST 'cd $COMPOSE_DIR && cp $COMPOSE.bak-$BAK $COMPOSE'"
+    else
+        RECOVERY="RECOVERY: admission is still PAUSED and nothing was recreated, but $COMPOSE on $HOST may already name $TAG.
+   ssh $HOST 'ls $COMPOSE_DIR/$STAGED'     # still there: the live compose is unchanged; re-open admission (last line)
+   gone, so either finish the swap:
+     ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d ${SWAP_ARGS:-api gateway}'
+     curl -fsS -u admin:\$SYN_API_PASSWORD $API/version     # image_tag must be $TAG
+   or put the previous compose back (the running containers already match it):
+     ssh $HOST 'cd $COMPOSE_DIR && cp $COMPOSE.bak-$BAK $COMPOSE'
+   then re-open admission:
+     curl -fsS -u admin:\$SYN_API_PASSWORD -X PUT $API/maintenance -H 'Content-Type: application/json' -d '{\"active\": false, \"reason\": \"\", \"actor\": \"manual\"}'"
+    fi
+    SWAPPING=1
+    run remote "cd $COMPOSE_DIR && cp $COMPOSE $COMPOSE.bak-$BAK && mv $STAGED $COMPOSE" \
+        || die "could not apply $STAGED on $HOST; nothing was recreated"
+    if [ "$DRY" = 0 ]; then
+        remote "cat $COMPOSE_DIR/$COMPOSE" | cmp -s - "$TMP/compose.want" \
+            || die "the compose on $HOST is not the one staged; the backup is $COMPOSE.bak-$BAK"
+        echo "   backed up to $COMPOSE.bak-$BAK"
+    fi
+}
+
 if [ "$SERVICE" = gateway ]; then
+    apply_staged
     # NO GATE AND NO DRAIN, deliberately. The gateway is on syn-internal only,
     # never agent-net (docker/docker-compose.syntropic137.yaml), so no execution
     # reaches it and recreating it cannot kill one. --no-deps is what keeps the
@@ -666,6 +844,10 @@ if [ "$SERVICE" = gateway ]; then
     exit 0
 fi
 
+# NO GATE AND NO DRAIN for --service api: the precheck proved the runs are the
+# executor's, and admitted work waits durably in the Run Queue while the API is
+# away, so neither closing admission nor waiting for idle protects anything.
+if [ "${SERVICE:-all}" = all ]; then
 step "gate: pausing execution admission for the rest of the pit stop"
 GATED=1
 maintenance true "pit stop $VERSION" || die "could not pause admission; nothing was recreated"
@@ -674,10 +856,11 @@ status_counts || true
 step "drain: waiting for every execution to be terminal (budget ${DRAIN_TIMEOUT}s)"
 drain_loop
 [ "$DRAINED" = 1 ] || abort_drain "the drain ended without a drained verdict (see the error above)"
+fi
 
 # Bring api + gateway up. Idempotent: a second call recreates nothing that
 # already matches the compose file, it only starts what is still `Created`.
-swap_up() { run remote "cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d api gateway" 2>&1 | tail -4; }
+swap_up() { run remote "cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d ${SWAP_ARGS:-api gateway}" 2>&1 | tail -4; }
 
 # Wait, bounded, for the API CONTAINER to pass its health check. That check is
 # liveness: /health answers 200 "starting" while a long startup migration runs
@@ -708,11 +891,55 @@ wait_for_api_ready() {
     done
 }
 
+# A newer epoch would have the new API admit runs this executor may not claim:
+# nothing fails, they just queue for ever. Read from the bytes about to run, so
+# it holds under --swap-only too. An epoch bump goes through --service all.
+epoch_of() {  # $1: the command prefix that runs python
+    remote "$1 -c 'from syn_domain.contexts.orchestration._shared.event_epoch import ORCHESTRATION_EVENT_EPOCH as e; print(e)'" | tail -1
+}
+if [ "${SERVICE:-all}" = api ] && [ "$DRY" = 0 ]; then
+    step "precheck: the new image shares the running executor's event epoch"
+    new_epoch="$(epoch_of "docker run --rm --network none --entrypoint python ghcr.io/syntropic137/syn-api:$TAG")" \
+        || die "could not read the event epoch of syn-api:$TAG on $HOST; nothing was recreated"
+    old_epoch="$(epoch_of "docker exec syn137-executor python")" \
+        || die "could not read the event epoch of syn137-executor on $HOST; nothing was recreated"
+    printf '   event epoch: executor=%s new image=%s\n' "$old_epoch" "$new_epoch"
+    case "$new_epoch" in ''|*[!0-9]*) die "syn-api:$TAG reported no event epoch (got: $new_epoch)" ;; esac
+    [ "$new_epoch" = "$old_epoch" ] \
+        || die "event epoch $new_epoch is not the running executor's $old_epoch: use --service all, which moves both. Nothing was recreated"
+
+    # The checks above read the RUNNING container; compose starts the new one
+    # from today's .env. Flag off there, and its startup reconcile would reap the
+    # executor's live workspaces. Parsed from the pipe, printing two values only:
+    # the resolved config carries every secret, so it never reaches a file.
+    step "precheck: the API compose is about to start is still split from the executor"
+    resolved="$(remote "cd $COMPOSE_DIR && docker compose -f $STAGED config --format json" | python3 -c '
+import json, sys
+env = json.load(sys.stdin)["services"]["api"]["environment"]
+print(env.get("SYN_EXECUTION_PROCESS_ROLE"), str(env.get("SYN_EXECUTION_RUN_QUEUE_ENABLED")).lower())
+')" || die "could not resolve the staged compose on $HOST; nothing was recreated"
+    case "$resolved" in
+        "api true"|"api 1"|"api yes"|"api on") echo "   resolved: role and Run Queue as required" ;;
+        *) die "the new API would start as (role, Run Queue): $resolved. It must be api with the queue on, or its startup reaps the executor's runs. Fix .env; nothing was recreated" ;;
+    esac
+fi
+
+# Gated and drained, nothing recreated yet: a refusal before apply_staged writes
+# the live compose re-opens admission; from that write on it stays PAUSED.
+apply_staged
+if [ "${SERVICE:-all}" = api ]; then
+    step "swap: recreate the API alone (no pull, no deps: the executor and its runs are untouched)"
+    RECOVERY="RECOVERY: admission was never paused and the executor was not recreated. To put the previous API back:
+   ssh $HOST 'cd $COMPOSE_DIR && ls -t $COMPOSE.bak-*'     # the newest is the compose this pit stop replaced
+   ssh $HOST 'cd $COMPOSE_DIR && cp $COMPOSE.bak-<suffix> $COMPOSE && docker compose -f $COMPOSE up -d --no-deps api'"
+else
 step "swap: recreate api + gateway (no pull: the images are only in the host's daemon)"
 RECOVERY="RECOVERY: admission is still PAUSED. Once syn137-api is healthy, finish by hand:
-   ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d gateway'
+   ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d gateway${ALSO_PINNED:+ $ALSO_PINNED}'${ALSO_PINNED:+
+   ssh $HOST \"docker inspect syn137-executor --format '{{.Config.Image}}'\"     # must name $TAG, or new runs may never be claimed}
    curl -fsS -u admin:\$SYN_API_PASSWORD $API/version     # image_tag must be $TAG
    curl -fsS -u admin:\$SYN_API_PASSWORD -X PUT $API/maintenance -H 'Content-Type: application/json' -d '{\"active\": false, \"reason\": \"\", \"actor\": \"manual\"}'"
+fi
 # From here on an exit leaves admission PAUSED (release_on_exit, #1575).
 SWAPPING=1
 if ! swap_up; then
@@ -725,11 +952,17 @@ if ! swap_up; then
     swap_up || die "compose up failed again after syn137-api reported healthy"
 fi
 # Started even when compose exited 0: that is exactly how it was left Created.
-[ "$DRY" = 1 ] || start_gateway
+[ "$DRY" = 1 ] || [ "${SERVICE:-all}" = api ] || start_gateway
 
 step "verify: images, docker CLI, projections, build identity"
 if [ "$DRY" = 0 ]; then
-    for svc in api gateway; do swapped_is_running "$svc"; done
+    for svc in ${SWAPPED:-api gateway} ${ALSO_PINNED:-}; do swapped_is_running "$svc"; done
+    # The whole promise of --service api, read back rather than assumed.
+    if [ "${SERVICE:-all}" = api ]; then
+        [ "$(remote "docker inspect syn137-executor --format '{{.Id}}'")" = "$EXECUTOR_ID" ] \
+            || die "syn137-executor was recreated by an API-only swap: its runs were interrupted"
+        echo "   syn137-executor: same container, not recreated"
+    fi
     wait_for_api_ready || die "the API did not finish starting within ${API_READY_TIMEOUT}s"
     remote "docker exec syn137-api sh -c 'command -v docker'" >/dev/null || die "no docker CLI in syn-api (#1216): every execution will fail at bootstrap"
     # A `for` loop reports its LAST command, which here is `sleep`. Written as
@@ -757,9 +990,11 @@ fi
 # AFTER verify, deliberately. Every stage above can `die`, and a deploy that
 # failed should leave the new container refusing rather than admitting work to
 # a version nobody has confirmed is healthy.
+if [ "${SERVICE:-all}" = all ]; then
 step "gate: resuming execution admission"
 maintenance false "" || die "$TAG is live but the clear did not complete; retry PUT /maintenance (a 503 means admission is open but the paused triggers were not woken, #1387)"
 GATED=0
+fi
 
 # THE START PATH, PROVEN (#1641). Every check above passed on beta.8 and beta.9
 # while no execution could start: each direct start was dropped as a duplicate,
@@ -874,17 +1109,35 @@ PROBE $PROBE_ID MAY STILL BE LIVE: not seen terminal within ${PROBE_CANCEL_TIMEO
 Probe $PROBE_ID is terminal, verified by GET: $PROBE_LAST"
 }
 
+# Whether a probe can start now. --service api does not wait for idle, so every
+# slot may be taken: the probe would queue past its deadline and report a healthy
+# swap as broken. Asked of the executor itself: its /health counts the Run Queue
+# against the capacity it claims with, which the new API's own sizing need not
+# match. Unknown is no room.
+executor_has_room() {
+    remote "docker exec syn137-executor python -c 'import urllib.request as u; print(u.urlopen(\"http://localhost:8000/health\", timeout=10).read().decode())'" > "$TMP/room.json" || return 1
+    python3 -c 'import json, sys; b = json.load(open(sys.argv[1]))["execution_budget"]; sys.exit(0 if b and b["running"] + b["queued"] < b["budget"] else 1)' "$TMP/room.json"
+}
+
 PROBE_LINE=""
 if [ "$DRY" = 1 ]; then
     printf '   (dry-run) POST /workflows/%s/execute, then wait for a phase to reach running\n' "$PROBE_WORKFLOW"
 elif [ "$SKIP_PROBE" = 1 ]; then
     printf '\n!!! --skip-probe: NO EXECUTION HAS BEEN SEEN TO START ON %s.\n!!! beta.8 passed every other check with every start dropped (#1641).\n!!! Dispatch one real workflow now and watch a PHASE reach running.\n' "$TAG" >&2
     PROBE_LINE=" PROBE SKIPPED: dispatch one real workflow and watch a PHASE reach running."
+elif [ "${SERVICE:-all}" = api ] && ! executor_has_room; then
+    PROBE_LINE=" PROBE SKIPPED: no free execution slot could be seen, so no start could be either. Dispatch one real workflow once a slot frees."
+    printf '\n!!! No free execution slot: NO EXECUTION HAS BEEN SEEN TO START ON %s.\n' "$TAG"
 else
     # BAK is set only when this run repointed the pins; under --swap-only the
     # backup is the $COMPOSE.bak-* an earlier stage left on the host: put its PIN in.
     rollback="ssh $HOST 'cd $COMPOSE_DIR && ls $COMPOSE.bak-* && cp $COMPOSE.bak-${BAK:-PIN} $COMPOSE'
-   ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d api gateway'"
+   ssh $HOST 'cd $COMPOSE_DIR && docker compose -f $COMPOSE up -d ${SWAP_ARGS:-api gateway}'"
+    # Admission is open by now, so an executor may hold other people's runs, and
+    # a recreate would interrupt them. Only a drained pit stop may move it back.
+    if [ -n "${ALSO_PINNED:-}" ]; then
+        rollback="do NOT recreate syn137-executor by hand: it may hold live runs. Roll back with a pit stop to the previous version, which gates and drains. If that lowers the event epoch, runs admitted since may need a new enough executor."
+    fi
     RECOVERY="$TAG is LIVE and admission is OPEN, deliberately: in-flight work from other users is not held hostage to a failed probe. Nothing was rolled back. To roll back by hand:
    $rollback"
     step "probe: dispatching $PROBE_WORKFLOW; waiting up to ${PROBE_TIMEOUT}s for a PHASE to reach running"

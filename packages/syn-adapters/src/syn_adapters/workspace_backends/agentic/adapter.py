@@ -10,11 +10,12 @@ See ADR-021: Isolated Workspace Architecture
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import os
 import shlex
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast, get_args
 
 from agentic_isolation import (
     AppArmorProfileNotLoadedError,
@@ -24,12 +25,18 @@ from agentic_isolation import (
     WorkspaceDockerProvider,
 )
 from agentic_isolation.contract import OperationError
+from agentic_isolation.providers.base import SupportsOperations
+from agentic_isolation.providers.base import Workspace as ProviderWorkspace
+from agentic_isolation.providers.capabilities import SupportsFileTransfer, TransferRoot
+from agentic_isolation.providers.file_transfer import ReadFilesResult, ReadLimits
 from agentic_isolation.providers.operation_spool import OperationFailure
 
 from syn_adapters.diagnostics import capture_signal_death
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
+    MAX_COLLECTION_BYTES,
+    MAX_COLLECTION_ENTRIES,
+    MAX_DIRECTORY_DEPTH,
     check_workspace_health,
-    copy_files_from_workspace,
     copy_files_to_workspace,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
@@ -66,19 +73,24 @@ from syn_adapters.workspace_backends.exec_status_lost import (
 )
 from syn_adapters.workspace_backends.host_labels import host_labels
 from syn_adapters.workspace_backends.host_security import host_security_failure
+from syn_domain.contexts.orchestration import (
+    FileRefusal,
+    FilesRefusedError,
+)
 from syn_shared.env_constants import (
     ENV_SYN_AGENT_NETWORK,
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
     ENV_SYN_WORKSPACE_HOST_DIR,
 )
+from syn_shared.settings import get_settings
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from agentic_isolation import AgenticWorkspace
     from agentic_isolation.contract import FinalizationOutcome
-    from agentic_isolation.providers.base import SupportsOperations, Workspace
+    from agentic_isolation.providers.base import CredentialResolver, Workspace, WorkspaceProvider
 
     from syn_domain.contexts.orchestration import (
         WorkspaceCredentialPolicy,
@@ -204,6 +216,7 @@ class AgenticIsolationAdapter:
         session_store: SessionStoreSettings | None = None,
         capture_source_instance_id: str | None = None,
         kit: BackendKit | None = None,
+        provider: Callable[[CredentialResolver], WorkspaceProvider] | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -220,6 +233,11 @@ class AgenticIsolationAdapter:
                 ``capture_source_instance_id`` must be left at their defaults.
                 Omitted, it is the Docker kit built from those two arguments
                 under ``HostCredentials`` - the behaviour before the kit existed.
+            provider: Builds the workspace provider from the credential
+                resolver it must resolve every binding through (#1912). Taken
+                as a builder, not an instance, because the resolver is this
+                adapter's: a provider built without it refuses every launch
+                credential. Omitted, it is the Docker provider.
 
         When running inside a container, both paths are needed:
         - container_dir: where this process writes files (/workspaces)
@@ -272,13 +290,17 @@ class AgenticIsolationAdapter:
         #: Shared with the event stream, which binds launch-scoped credentials
         #: (the platform grant) through it.
         self.credentials = WorkspaceCredentials(session_store)
-        self._provider = WorkspaceDockerProvider(
-            default_image=default_image,
-            security=self._security,
-            workspace_base_dir=container_dir,
-            workspace_host_dir=host_dir,  # For Docker volume mounts
-            default_network=agent_network,
-            credentials=self.credentials,
+        self._provider: WorkspaceProvider = (
+            provider(self.credentials)
+            if provider is not None
+            else WorkspaceDockerProvider(
+                default_image=default_image,
+                security=self._security,
+                workspace_base_dir=container_dir,
+                workspace_host_dir=host_dir,  # For Docker volume mounts
+                default_network=agent_network,
+                credentials=self.credentials,
+            )
         )
         self._workspaces: dict[str, AgenticWorkspace] = {}
 
@@ -288,8 +310,24 @@ class AgenticIsolationAdapter:
         return self._kit.credential_policy
 
     @property
+    def shares_host_kernel(self) -> bool:
+        """Whether this backend's processes run on this host's kernel (#1912)."""
+        return self._kit.shares_host_kernel
+
+    @property
     def operations(self) -> SupportsOperations:
-        """The provider's operation contract, which the event stream launches through."""
+        """The provider's operation contract, which the event stream launches through.
+
+        Raises WorkspaceProvisionError for a provider without one, so an agent
+        cannot launch on it, and saying so beats an AttributeError mid-launch.
+        """
+        if not isinstance(self._provider, SupportsOperations):
+            msg = (
+                f"The {self._kit.isolation_type} workspace backend cannot launch agent "
+                "operations yet: its agentic-workspace provider does not implement "
+                "SupportsOperations."
+            )
+            raise WorkspaceProvisionError(msg)
         return self._provider
 
     def workspace(self, isolation_id: str) -> Workspace | None:
@@ -356,6 +394,11 @@ class AgenticIsolationAdapter:
             IsolationHandle,
         )
 
+        self._kit.require_fits(
+            config.security_policy.cpu_limit_cores,
+            config.security_policy.memory_limit_mb,
+            config.security_policy.pids_limit,
+        )
         environment = self._build_environment(config)
         capture_mounts = self._kit.capture_mounts(config, environment)
 
@@ -382,14 +425,19 @@ class AgenticIsolationAdapter:
         image = await self._kit.resolve_image(config.image)
 
         ws_config = WorkspaceConfig(
-            provider="docker",
+            provider=self._kit.isolation_type,
             image=image,
             working_dir="/workspace",
             environment=environment,
             credentials=session_store_credential_bindings(self._session_store),
             mounts=capture_mounts,
             labels=_container_labels(config),
-            security=self._security,
+            # The provider-level policy (image-derived runtime, AppArmor,
+            # seccomp) with only this phase's pids limit replaced
+            # (okrs-51p.30). syn137 owns the default, so it is always passed.
+            security=dataclasses.replace(
+                self._security, pids_limit=config.security_policy.pids_limit
+            ),
             limits=ResourceLimits(
                 cpu=f"{config.security_policy.cpu_limit_cores:g}",
                 memory=f"{config.security_policy.memory_limit_mb}m",
@@ -630,7 +678,9 @@ class AgenticIsolationAdapter:
         # bare `-11` (#1295). Captured HERE rather than by any caller because
         # the reap removes the container moments later and no caller runs
         # before it (#1319).
-        signal_death = await capture_signal_death(command, result.exit_code)
+        signal_death = await capture_signal_death(
+            command, result.exit_code, host_kernel=self._kit.shares_host_kernel
+        )
         if signal_death is not None:
             logger.error(
                 "Command in workspace %s died on a signal:\n%s",
@@ -678,14 +728,61 @@ class AgenticIsolationAdapter:
         patterns: list[str],
         base_path: str = "/workspace",
     ) -> list[tuple[str, bytes]]:
-        """Copy files from workspace via mounted volume.
+        """Copy files from workspace, read by the provider's bounded file transfer.
+
+        Every root of every backend, Docker's `/workspace` included (#1913):
+        the provider walks and reads inside the workspace, refusing links,
+        special files and anything past `collection_read_limits()`, and names
+        each refusal. The host bind mount could only log what it skipped, so
+        a refusal there was a file that silently went missing.
+
+        Raises `FilesRefusedError` when anything asked for was refused; the
+        caller decides what a refusal means, never this adapter.
 
         Every workspace holds the session-store token, and only this adapter
         knows it, so a file the workload wrote leaves with it replaced (#1927).
         """
-        collected = await copy_files_from_workspace(handle, patterns, base_path)
+        files, refused = await self._read_through_provider(handle, patterns, base_path)
         scrubber = CredentialScrubber(self.credentials.withheld(()))
-        return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
+        scrubbed = tuple((path, scrub_bytes(scrubber, content)) for path, content in files)
+        if refused:
+            raise FilesRefusedError(scrubbed, refused)
+        return list(scrubbed)
+
+    async def _read_through_provider(
+        self, handle: IsolationHandle, patterns: list[str], base_path: str
+    ) -> tuple[tuple[tuple[str, bytes], ...], tuple[FileRefusal, ...]]:
+        """The files the provider read, and what it refused, by path and reason."""
+        workspace = self._workspaces.get(handle.isolation_id)
+        if not isinstance(workspace, ProviderWorkspace):
+            raise RuntimeError(f"Workspace not found: {handle.isolation_id}")
+        if not isinstance(self._provider, SupportsFileTransfer):
+            msg = f"the {self._kit.isolation_type} provider cannot transfer files"
+            raise TypeError(msg)
+        if base_path not in get_args(TransferRoot):
+            msg = f"cannot read files from {base_path!r}: not a transfer root"
+            raise ValueError(msg)
+        root = cast("TransferRoot", base_path)
+        result: ReadFilesResult = await self._provider.read_files(
+            workspace, patterns, base_path=root, limits=collection_read_limits()
+        )
+        refused = tuple(FileRefusal(path=r.path, reason=r.reason) for r in result.refused)
+        return result.files, refused
+
+
+def collection_read_limits() -> ReadLimits:
+    """The budget for one read, chosen to match what the host-mount read allowed.
+
+    The same per-file cap as artifact storage, and the same collection-wide
+    bytes, entries and depth the bind-mount walk was bounded by, so moving
+    Docker onto the provider read does not move where a collection is cut off.
+    """
+    return ReadLimits(
+        max_total_bytes=MAX_COLLECTION_BYTES,
+        max_file_bytes=get_settings().storage.max_file_size_bytes,
+        max_entries=MAX_COLLECTION_ENTRIES,
+        max_depth=MAX_DIRECTORY_DEPTH,
+    )
 
 
 def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:

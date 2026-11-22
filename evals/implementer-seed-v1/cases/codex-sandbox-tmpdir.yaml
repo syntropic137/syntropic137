@@ -25,5 +25,9 @@ task: |
   over a provider double whose fresh workspace holds only `/workspace`. The only
   command the double understands is `mkdir -p <dirs>` sent through the
   provider's `execute()`; any other command at create fails the test.
+  When the directory cannot be made, the `WorkspaceProvisionError` message
+  contains `could not create TMPDIR`. If destroying that workspace then fails,
+  even after the caller was cancelled, it is logged at ERROR with a message
+  containing `Could not destroy workspace`.
 hidden_tests:
   - packages/syn-adapters/tests/workspace_backends/agentic/test_executable_tmpdir.py

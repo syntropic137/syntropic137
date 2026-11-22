@@ -27,7 +27,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from syn_api.routes.workflows.commands import _build_phase_defs
-from syn_domain.contexts.orchestration import PhaseDefinition, PhaseExecutionType
+from syn_domain.contexts.orchestration import (
+    CommandStep,
+    InconsistentPhaseKindError,
+    PhaseDefinition,
+    PhaseExecutionType,
+    PhaseKind,
+)
 from syn_shared.platform_access import PlatformScope
 
 if TYPE_CHECKING:
@@ -81,6 +87,10 @@ _EVERY_FIELD: Mapping[str, object] = {
     "platform_access": "eval",
     # Not the default, which is False: a dropped mapping reads False (PC-116).
     "requires_verdict": True,
+    # NOT the default (empty). Below the default 4096 ceiling, so the create
+    # path's ceiling check passes and only the mapping is measured (okrs-51p.30).
+    # pids_limit 128: below the 256 default ceiling, and not the default.
+    "resources": {"memory_mb": 2048, "pids_limit": 128},
     "argument_hint": "[task]",
     "model": "claude-opus-5-5",
     # NOT the default (None). Claude, not codex: a codex phase cannot carry
@@ -109,7 +119,9 @@ def test_the_fixture_covers_every_field_on_the_model() -> None:
     level up.
     """
     assert not set(_EVERY_FIELD) & set(_NOT_CALLER_SETTABLE)
-    assert set(_EVERY_FIELD) | set(_NOT_CALLER_SETTABLE) == set(PhaseDefinition.model_fields)
+    assert set(_EVERY_FIELD) | set(_NOT_CALLER_SETTABLE) | {"kind", "commands"} == set(
+        PhaseDefinition.model_fields
+    )
 
 
 def test_a_caller_cannot_set_what_is_not_caller_settable() -> None:
@@ -162,6 +174,9 @@ def test_every_field_a_caller_sends_survives_into_the_domain() -> None:
     # only the caller's declaration arriving satisfies this (#1744).
     assert phase.platform_access is PlatformScope.EVAL
     assert phase.requires_verdict is True
+    # 2048 cannot come from any fallback: every hop defaults to None.
+    assert phase.resources.memory_mb == 2048
+    assert phase.resources.pids_limit == 128
     assert phase.argument_hint == "[task]"
     assert phase.model == "claude-opus-5-5"
     assert phase.provider == "claude"
@@ -186,7 +201,36 @@ class TestTheFieldsThatWereActuallyDropped:
     """
 
     def _phase(self, **extra: object) -> Mapping[str, object]:
-        return {"phase_id": "review", "name": "Review", "order": 1, **extra}
+        # An agent phase needs a prompt (#963); a command phase must not carry one.
+        prompt = {} if extra.get("kind") == "command" else {"prompt_template": "Do the work."}
+        return {"phase_id": "review", "name": "Review", "order": 1, **prompt, **extra}
+
+    #: A command phase's steps as the wire carries them, built from the model so
+    #: the request cannot drift from what the domain accepts (ADR-078).
+    _STEPS = (
+        CommandStep(name="cargo-build", run="cargo build", timeout_seconds=900),
+        CommandStep(name="size", run="./size.sh", allow_failure=True),
+    )
+
+    def _wire_steps(self) -> list[object]:
+        """The steps as JSON a caller sends; opaque until `_build_phase_defs` reads them."""
+        return [step.model_dump(exclude_none=True) for step in self._STEPS]
+
+    def test_a_command_phase_reaches_the_domain_with_its_steps(self) -> None:
+        """kind and commands survive, and the undeclared delivers default is False."""
+        (phase,) = _build_phase_defs([self._phase(kind="command", commands=self._wire_steps())])
+
+        assert phase.kind is PhaseKind.COMMAND
+        assert phase.commands == self._STEPS
+        assert phase.delivers_repo_changes is False
+        assert phase.prompt_template is None
+
+    def test_a_command_phase_with_an_agent_field_is_refused_at_create(self) -> None:
+        """The API holds a command phase to the YAML's kind rule (ADR-078 D2)."""
+        with pytest.raises(InconsistentPhaseKindError, match="prompt_template"):
+            _build_phase_defs(
+                [self._phase(kind="command", commands=self._wire_steps(), prompt_template="do it")]
+            )
 
     def test_provider_reaches_the_domain(self) -> None:
         """Without this, `codex` phases installed via the API run as claude."""
@@ -234,6 +278,7 @@ class TestTheNestedAgentSpellingIsUnderstood:
                     "phase_id": "review",
                     "name": "Review",
                     "order": 1,
+                    "prompt_template": "Do the work.",
                     "agent": {"provider": "codex", "model": "gpt-5.6-sol"},
                 }
             ]
@@ -252,6 +297,7 @@ class TestTheNestedAgentSpellingIsUnderstood:
                     "phase_id": "review",
                     "name": "Review",
                     "order": 1,
+                    "prompt_template": "Do the work.",
                     "provider": "claude",
                     "agent": {"provider": "codex"},
                 }
@@ -261,7 +307,15 @@ class TestTheNestedAgentSpellingIsUnderstood:
 
     def test_an_agent_block_without_the_keys_changes_nothing(self) -> None:
         (phase,) = _build_phase_defs(
-            [{"phase_id": "r", "name": "R", "order": 1, "agent": {"allow_delegation": True}}]
+            [
+                {
+                    "phase_id": "r",
+                    "name": "R",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
+                    "agent": {"allow_delegation": True},
+                }
+            ]
         )
         assert phase.provider is None
         assert phase.allow_delegation is True
@@ -281,12 +335,28 @@ class TestBooleansAreNotCoerced:
         """
         with pytest.raises(ValueError, match="must be a boolean"):
             _build_phase_defs(
-                [{"phase_id": "r", "name": "R", "order": 1, "allow_delegation": sent}]
+                [
+                    {
+                        "phase_id": "r",
+                        "name": "R",
+                        "order": 1,
+                        "prompt_template": "Do the work.",
+                        "allow_delegation": sent,
+                    }
+                ]
             )
 
     def test_a_real_true_still_enables_it(self) -> None:
         (phase,) = _build_phase_defs(
-            [{"phase_id": "r", "name": "R", "order": 1, "allow_delegation": True}]
+            [
+                {
+                    "phase_id": "r",
+                    "name": "R",
+                    "order": 1,
+                    "prompt_template": "Do the work.",
+                    "allow_delegation": True,
+                }
+            ]
         )
         assert phase.allow_delegation is True
 
@@ -312,6 +382,7 @@ class TestMultiNameSkillsExpand:
                     "phase_id": "r",
                     "name": "R",
                     "order": 1,
+                    "prompt_template": "Do the work.",
                     "skills": [
                         {"source": "github.com/a/b", "version": "v1", "names": ["alpha", "beta"]}
                     ],
@@ -331,6 +402,7 @@ class TestMultiNameSkillsExpand:
                     "phase_id": "r",
                     "name": "R",
                     "order": 1,
+                    "prompt_template": "Do the work.",
                     "skills": ["owner/repo/one-skill@v1"],
                 }
             ]
@@ -339,15 +411,40 @@ class TestMultiNameSkillsExpand:
         assert [s.skill_name for s in phase.skills] == ["one-skill"]
 
 
+@pytest.mark.parametrize("sent", [True, "60", 1.0, 1.5])
+def test_a_non_integer_timeout_is_refused_at_create(sent: object) -> None:
+    """ADR-078 D4 on the API path, which never passes the YAML validator."""
+    with pytest.raises(ValueError, match="must be an integer"):
+        _build_phase_defs([{"name": "Build", "timeout_seconds": sent}])
+
+
+def test_an_integer_timeout_is_kept_at_create() -> None:
+    (phase,) = _build_phase_defs(
+        [{"name": "Build", "prompt_template": "Build it.", "timeout_seconds": 60}]
+    )
+
+    assert phase.timeout_seconds == 60
+
+
 def test_a_cost_limit_on_a_codex_phase_is_refused_at_create() -> None:
     """#1376: the API create path never passes the YAML validator, so it refuses too."""
-    phase = {"name": "Experiment", "max_cost_usd": 12.5, "agent": {"provider": "codex"}}
+    phase = {
+        "name": "Experiment",
+        "prompt_template": "Try it.",
+        "max_cost_usd": 12.5,
+        "agent": {"provider": "codex"},
+    }
 
     with pytest.raises(ValueError, match="max_cost_usd on provider 'codex'"):
         _build_phase_defs([phase])
 
 
 def test_a_cost_limit_on_a_claude_phase_is_kept_at_create() -> None:
-    phase = {"name": "Experiment", "max_cost_usd": 12.5, "agent": {"provider": "claude"}}
+    phase = {
+        "name": "Experiment",
+        "prompt_template": "Try it.",
+        "max_cost_usd": 12.5,
+        "agent": {"provider": "claude"},
+    }
 
     assert _build_phase_defs([phase])[0].max_cost_usd == 12.5

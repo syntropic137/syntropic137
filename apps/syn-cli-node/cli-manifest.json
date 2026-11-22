@@ -483,6 +483,37 @@
           ]
         },
         {
+          "name": "set",
+          "args": [],
+          "options": [
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
+            },
+            {
+              "name": "k",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "split",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "suite",
+              "short": null,
+              "takes_value": true
+            },
+            {
+              "name": "suite-version",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        },
+        {
           "name": "show",
           "args": [
             "eval-id"
@@ -611,6 +642,24 @@
               "name": "tag",
               "short": null,
               "takes_value": true
+            },
+            {
+              "name": "verdict",
+              "short": null,
+              "takes_value": true
+            }
+          ]
+        },
+        {
+          "name": "pushes",
+          "args": [
+            "execution-id"
+          ],
+          "options": [
+            {
+              "name": "json",
+              "short": null,
+              "takes_value": false
             }
           ]
         },
@@ -731,6 +780,13 @@
               "takes_value": false
             }
           ]
+        },
+        {
+          "name": "watch",
+          "args": [
+            "execution-id"
+          ],
+          "options": []
         }
       ]
     },
@@ -1752,7 +1808,13 @@
           "args": [
             "workflow-id"
           ],
-          "options": []
+          "options": [
+            {
+              "name": "full",
+              "short": null,
+              "takes_value": false
+            }
+          ]
         },
         {
           "name": "status",

@@ -337,6 +337,145 @@ class AgentExecutionResult:
         self.primary_failure: str | None = None
 
 
+async def _stream_observing_launch(
+    processor: EventStreamProcessor | CodexStreamProcessor,
+    workspace: ManagedWorkspace,
+    launch: AgentLaunchEvidence,
+    *,
+    claude_cmd: list[str],
+    timeout_seconds: int,
+    agent_env: dict[str, str],
+    phase_id: str,
+    collector: ObservabilityCollector | None,
+) -> StreamResult:
+    """Run the agent's stream to its end, with ``launch`` settled however it ends.
+
+    The launch fact is never taken from the marker alone: it is
+    announced before the exec it predicts, so a failed exec is decided
+    by the status the process finally returns (#1065). The agent's first
+    line after the marker already decides it, and is recorded live so a
+    working agent is visible while it works (#1717); every other case
+    is settled AFTER the stream.
+    `finally`, because an agent that announced itself and then blew up
+    mid-stream still existed, and the exception must not swallow that.
+
+    The transport is told which name to announce under, rather than the
+    observer being told by the stream which name to believe. That is the
+    whole of the forgery defence: `launch.wrapper_name` exists before
+    this stream does, so no line on it can become the name that counts.
+
+    The credential is kept fresh for exactly as long as the agent runs
+    (#725): an installation token lives an hour, a phase may not. The
+    renewal task is this process's, not the event store's - after a
+    crash the container it would renew is gone too.
+    """
+    try:
+        async with workspace.keep_git_credential_fresh(
+            on_lapse=_credential_lapse_reporter(phase_id, collector)
+        ):
+            return await processor.process_stream(
+                launch.observing(
+                    workspace.stream(
+                        claude_cmd,
+                        timeout_seconds=timeout_seconds,
+                        environment=agent_env,
+                        wrapper_name=launch.wrapper_name,
+                    ),
+                ),
+                workspace,
+            )
+    finally:
+        await launch.settle(workspace.last_stream_exit_code)
+
+
+async def _record_session_summary(
+    collector: ObservabilityCollector | None,
+    runner: AgentRunner,
+    stream_result: StreamResult,
+    usage: FinalUsage,
+) -> None:
+    """Emit the phase's Lane 2 session_summary with its end-of-run totals (ISS-217).
+
+    The codex path already emits its summary inside CodexStreamProcessor
+    (single-layer), so this skips it for runner == "codex".
+
+    `total_cost_usd` stays whatever the harness said, including None: a
+    NULL cost is priced downstream from these tokens and this model,
+    which is exactly the estimate wanted for a phase that was killed
+    before it could report one. Passing 0.0 instead would be taken as
+    authoritative and priced verbatim.
+    """
+    if collector is None or runner == AgentRunner.CODEX:
+        return
+    await collector.record_session_summary(
+        total_cost_usd=stream_result.total_cost_usd,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_creation=usage.cache_creation,
+        cache_read=usage.cache_read,
+        num_turns=stream_result.num_turns,
+        duration_ms=stream_result.duration_ms,
+        totals_are_authoritative=usage.is_authoritative,
+    )
+
+
+def _assemble_result(
+    *,
+    todo: TodoItem,
+    session_id: str,
+    exit_code: int | None,
+    stream_result: StreamResult,
+    usage: FinalUsage,
+    tokens: TokenAccumulator,
+    subagents: SubagentTracker,
+    launch_failed: bool,
+) -> AgentExecutionResult:
+    """The run's result: with a completion command iff an exit status was observed.
+
+    A None ``exit_code`` reaching here is a cancellation (the caller has
+    already raised for every other unobserved exit), and it gets no command:
+    there is no status to put on one, and nothing is owed one (#1341).
+    """
+    assert todo.phase_id is not None
+    if exit_code is None:
+        return AgentExecutionResult(
+            stream_result=stream_result,
+            tokens=tokens,
+            subagents=subagents,
+            command=None,
+            exit_code=None,
+            usage=usage,
+            launch_failed=launch_failed,
+        )
+
+    command = AgentExecutionCompletedCommand(
+        execution_id=todo.execution_id,
+        phase_id=todo.phase_id,
+        session_id=session_id,
+        exit_code=exit_code,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_creation_tokens=usage.cache_creation,
+        cache_read_tokens=usage.cache_read,
+        # Onto the command, and from there onto the event, so a restart
+        # between here and artifact collection cannot lose the salvage
+        # input (#1195, #1300).
+        last_agent_message=stream_result.last_agent_message,
+        reported_side_effects=stream_result.verdict.reported_side_effects,
+        reported_review_verdict=stream_result.verdict.reported_review_verdict,
+        reported_evidence=stream_result.verdict.reported_evidence,
+    )
+
+    return AgentExecutionResult(
+        stream_result=stream_result,
+        tokens=tokens,
+        subagents=subagents,
+        command=command,
+        usage=usage,
+        launch_failed=launch_failed,
+    )
+
+
 class AgentExecutionHandler:
     """Launches agent in container, streams output via EventStreamProcessor.
 
@@ -481,42 +620,17 @@ class AgentExecutionHandler:
             on_push=on_push,
         )
 
-        # The launch fact is never taken from the marker alone: it is
-        # announced before the exec it predicts, so a failed exec is decided
-        # by the status the process finally returns (#1065). The agent's first
-        # line after the marker already decides it, and is recorded live so a
-        # working agent is visible while it works (#1717); every other case
-        # is settled AFTER the stream.
-        # `finally`, because an agent that announced itself and then blew up
-        # mid-stream still existed, and the exception must not swallow that.
-        #
-        # The transport is told which name to announce under, rather than the
-        # observer being told by the stream which name to believe. That is the
-        # whole of the forgery defence: `launch.wrapper_name` exists before
-        # this stream does, so no line on it can become the name that counts.
-        #
-        # The credential is kept fresh for exactly as long as the agent runs
-        # (#725): an installation token lives an hour, a phase may not. The
-        # renewal task is this process's, not the event store's - after a
-        # crash the container it would renew is gone too.
         launch = AgentLaunchEvidence(on_launch)
-        try:
-            async with workspace.keep_git_credential_fresh(
-                on_lapse=_credential_lapse_reporter(todo.phase_id, collector)
-            ):
-                stream_result = await processor.process_stream(
-                    launch.observing(
-                        workspace.stream(
-                            claude_cmd,
-                            timeout_seconds=timeout_seconds,
-                            environment=agent_env,
-                            wrapper_name=launch.wrapper_name,
-                        ),
-                    ),
-                    workspace,
-                )
-        finally:
-            await launch.settle(workspace.last_stream_exit_code)
+        stream_result = await _stream_observing_launch(
+            processor,
+            workspace,
+            launch,
+            claude_cmd=claude_cmd,
+            timeout_seconds=timeout_seconds,
+            agent_env=agent_env,
+            phase_id=todo.phase_id,
+            collector=collector,
+        )
 
         exit_code = _detect_exit_code(stream_result, workspace, todo.phase_id, tokens)
         exit_code = await _exit_code_after_codex_verdict(
@@ -528,32 +642,13 @@ class AgentExecutionHandler:
         )
 
         # Resolved ONCE, for both lanes. The session_summary used to be written
-        # straight from `stream_result.result_*` while the command below used
+        # straight from `stream_result.result_*` while the completion command used
         # the accumulator fallback, so a killed phase reported its real tokens
         # to the aggregate and zeros to observability - and observability is
         # what the cost ledger reads (#1164).
         usage = FinalUsage.resolve(stream_result, tokens)
 
-        # ISS-217: Emit session_summary with the phase's end-of-run totals (Lane 2).
-        # The codex path already emits its summary inside CodexStreamProcessor
-        # (single-layer), so the handler skips it for runner == "codex".
-        #
-        # `total_cost_usd` stays whatever the harness said, including None: a
-        # NULL cost is priced downstream from these tokens and this model,
-        # which is exactly the estimate wanted for a phase that was killed
-        # before it could report one. Passing 0.0 instead would be taken as
-        # authoritative and priced verbatim.
-        if collector is not None and runner != AgentRunner.CODEX:
-            await collector.record_session_summary(
-                total_cost_usd=stream_result.total_cost_usd,
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                cache_creation=usage.cache_creation,
-                cache_read=usage.cache_read,
-                num_turns=stream_result.num_turns,
-                duration_ms=stream_result.duration_ms,
-                totals_are_authoritative=usage.is_authoritative,
-            )
+        await _record_session_summary(collector, runner, stream_result, usage)
 
         # AFTER the session summary above, and that order is deliberate: the
         # tokens a phase burned are Lane 2 and are true whether or not anyone
@@ -578,40 +673,13 @@ class AgentExecutionHandler:
         if exit_code is None and not stream_result.interrupt_requested:
             raise ExitStatusUnavailableError(todo.phase_id, lines_seen=stream_result.line_count)
 
-        if exit_code is None:
-            return AgentExecutionResult(
-                stream_result=stream_result,
-                tokens=tokens,
-                subagents=subagents,
-                command=None,
-                exit_code=None,
-                usage=usage,
-                launch_failed=launch.launch_failed,
-            )
-
-        command = AgentExecutionCompletedCommand(
-            execution_id=todo.execution_id,
-            phase_id=todo.phase_id,
+        return _assemble_result(
+            todo=todo,
             session_id=session_id,
             exit_code=exit_code,
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            cache_creation_tokens=usage.cache_creation,
-            cache_read_tokens=usage.cache_read,
-            # Onto the command, and from there onto the event, so a restart
-            # between here and artifact collection cannot lose the salvage
-            # input (#1195, #1300).
-            last_agent_message=stream_result.last_agent_message,
-            reported_side_effects=stream_result.verdict.reported_side_effects,
-            reported_review_verdict=stream_result.verdict.reported_review_verdict,
-            reported_evidence=stream_result.verdict.reported_evidence,
-        )
-
-        return AgentExecutionResult(
             stream_result=stream_result,
+            usage=usage,
             tokens=tokens,
             subagents=subagents,
-            command=command,
-            usage=usage,
             launch_failed=launch.launch_failed,
         )

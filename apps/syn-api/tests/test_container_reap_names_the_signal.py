@@ -25,6 +25,7 @@ async def _reap_reason(rm_returncode: int | None) -> str | None:
     """Run the reap with a ``docker rm -f`` that exits ``rm_returncode``."""
     ps_proc = MagicMock()
     ps_proc.communicate = AsyncMock(return_value=(b"c0ffee\n", b""))
+    ps_proc.returncode = 0
 
     rm_proc = MagicMock()
     rm_proc.wait = AsyncMock(return_value=rm_returncode)

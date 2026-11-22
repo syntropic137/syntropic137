@@ -95,7 +95,7 @@ Two environments are needed across the two repos:
    gh api repos/syntropic137/syntropic137/git/refs --method POST \
      -f ref=refs/heads/release -f sha=$(git rev-parse main)
    ```
-2. Branch ruleset: PR required, merge commits only (no squash, no rebase), Release Gate + CI Success checks, admin bypass.
+2. Branch ruleset: PR required, merge commits only (no squash, no rebase), required checks `Release Gate`, `CI Success`, `Compose Stack Smoke Test` and `Release Source`, admin bypass.
 3. Vercel: set production branch to `release` in project settings.
 
 ### Docker / Container Setup
@@ -718,8 +718,8 @@ process: do not trigger it.
 
 A hotfix ships one already-merged fix on top of the last release, without the
 beta. Design and rationale: [ADR-077](adrs/ADR-077-hotfix-release-path.md).
-`release-source.yml` enforces the shape below with the `release` branch's own
-copy of the checker, so a hotfix PR cannot rewrite it.
+`release-source.yml` enforces the shape below with `main`'s copy of the
+checker (`pull_request_target`), so a hotfix PR cannot rewrite it.
 
 ### Hotfix or beta-gated release?
 
@@ -739,7 +739,7 @@ When in doubt, it is a beta-gated release.
 
 Skips: the beta (pit stop, live run) and the upgrade rehearsal. Keeps: every
 required check on the PR into `release` (`CI Success`, `Release Gate`,
-`Compose Stack Smoke Test`), and the owner's `release-publish` approval.
+`Compose Stack Smoke Test`, `Release Source`), and the owner's `release-publish` approval.
 
 ### Steps (example: v1.0.5 off v1.0.4)
 
@@ -838,8 +838,8 @@ the `--check` that follows the bump.
 ```
 PR: main → release, or hotfix/vX.Y.Z → release
   ├── ci.yml (full CI suite)
-  ├── release-source.yml (pull_request_target: the release branch's copy judges
-  │                       the head as git objects; hotfix secret scan; ADR-077)
+  ├── release-source.yml (pull_request_target: main's copy judges the head
+  │                       as git objects; hotfix secret scan; ADR-077)
   └── release-gate.yml  (thin orchestrator - 4 reusable checks + 3 inline security scans)
         ├── checks/version-check.yml       - every version file consistent, version > release
         ├── checks/changelog-check.yml     - PR body >= 20 chars
@@ -876,7 +876,7 @@ Merge to release
 |------|---------|
 | `.github/workflows/release-gate.yml` | Thin orchestrator - calls checks + inline security scans |
 | `.github/workflows/release-create.yml` | Release pipeline - create tag/release, publish containers + CLI |
-| `.github/workflows/release-source.yml` | `pull_request_target`, trusted base copy: the head is `main` (on `origin/main`) or a hotfix cut from the last release tag, same repository; gitleaks on hotfix commits (ADR-077) |
+| `.github/workflows/release-source.yml` | `pull_request_target`, main's trusted copy: the head is `main` (on `origin/main`) or a hotfix cut from the last release tag, same repository; gitleaks on hotfix commits (ADR-077) |
 | `.github/workflows/_check-version.yml` | Version consistency: every version file matches, bumped vs release |
 | `.github/workflows/_check-changelog.yml` | PR body length validation (takes `pr_body` input) |
 | `.github/workflows/_check-codegen-sync.yml` | Runs `just codegen`, checks for drift (CLI types, API docs, CLI docs) |
@@ -890,7 +890,8 @@ Merge to release
 ## Branch Protection (release)
 
 - Require PR (no direct push)
-- Required status checks: `Release Gate` + `CI Success`
+- Required status checks: `Release Gate`, `CI Success`, `Compose Stack Smoke Test`, `Release Source` (all GitHub Actions, integration 15368). `Release Source` is required since 2026-10-27 (ADR-077).
+- The checks are matched by job name. Renaming any of these jobs must update the ruleset in the same change, or every PR into `release` blocks on a check that never reports.
 - Merge commits only (no squash, no rebase — squashing rewrites history and forces rebasing main on every release)
 - No force pushes, no deletions
 - Admin bypass for emergencies

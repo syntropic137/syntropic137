@@ -18,10 +18,15 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import datetime
 
+    from syn_domain.contexts.orchestration._shared.CommandStepValueObjects import CommandStepResult
     from syn_domain.contexts.orchestration._shared.evidence_contract import StepOutcome, StepRef
+    from syn_domain.contexts.orchestration._shared.file_transfer import FileRefusal
     from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
         ContinuedBranch,
         RemoteBranchReading,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+        ImageManifestReading,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
@@ -286,6 +291,17 @@ class RetryPhaseCommand:
         self.reason = reason
 
 
+class RecordRefusedOutputCommand:
+    """Command to record what the provider refused of an unfinished phase's output (#1913)."""
+
+    def __init__(
+        self, execution_id: str, phase_id: str, refused_files: Sequence[FileRefusal]
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.refused_files = tuple(refused_files)
+
+
 class RecordPhasePushCommand:
     """Command to record a commit the running phase's workspace pushed (PC-128)."""
 
@@ -394,6 +410,8 @@ class ProvisionWorkspaceCompletedCommand:
     `checked_out_commits` is where each pinned repository was actually found,
     read back off the workspace once setup finished and verified against its
     pin (#967) - the run's recorded starting state, not its request.
+    `image_manifest` is the workspace image's manifest, or why there is none
+    (#1913).
     """
 
     def __init__(
@@ -403,12 +421,14 @@ class ProvisionWorkspaceCompletedCommand:
         workspace_id: str,
         session_id: str = "",
         checked_out_commits: Sequence[SourceCommit] = (),
+        image_manifest: ImageManifestReading | None = None,
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.workspace_id = workspace_id
         self.session_id = session_id
         self.checked_out_commits = tuple(checked_out_commits)
+        self.image_manifest = image_manifest
 
 
 class AgentExecutionCompletedCommand:
@@ -464,6 +484,31 @@ class AgentExecutionCompletedCommand:
         self.agent_model = model
 
 
+class RecordPhaseCommandsCommand:
+    """Command reported by CommandPhaseHandler after a command Phase's steps ran.
+
+    The command Phase's counterpart of `AgentExecutionCompletedCommand`: there
+    is no session, provider, model or token count, because nothing that has
+    them ran (ADR-078 D5).
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        workspace_id: str,
+        success: bool,
+        steps: Sequence[CommandStepResult],
+        timed_out: bool = False,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.workspace_id = workspace_id
+        self.success = success
+        self.timed_out = timed_out
+        self.steps = tuple(steps)
+
+
 class ArtifactsCollectedCommand:
     """Command reported by ArtifactCollectionHandler after outputs stored."""
 
@@ -477,10 +522,13 @@ class ArtifactsCollectedCommand:
         deliverable_recovered: bool = False,
         observed_heads: Sequence[ObservedHead] = (),
         evidence_gate: EvidenceGatePolicy | None = None,
+        refused_files: Sequence[FileRefusal] = (),
     ) -> None:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.artifact_ids = artifact_ids
+        #: Output files the provider refused to read, by path and reason (#1913).
+        self.refused_files = tuple(refused_files)
         #: None is the gate OFF (plan §A.3, `SYN_EVIDENCE_GATE_ENABLED`): the
         #: aggregate reads no settings, so the host says it here.
         self.evidence_gate = evidence_gate
@@ -606,3 +654,19 @@ class ResumeExecutionCommand:
         self.resume_execution_id = resume_execution_id
         self.override_cancellation = override_cancellation
         self.acknowledge_external_effects = acknowledge_external_effects
+
+
+class WithdrawResumeCommand:
+    """Command to withdraw an admitted resume before its child starts (#1677).
+
+    Addressed to the PARENT, which admitted the resume and so is the one record
+    that can take it back. `resume_execution_id` names the child being
+    withdrawn, so a stale request cannot withdraw a different resume.
+    """
+
+    def __init__(
+        self, execution_id: str, resume_execution_id: str, reason: str | None = None
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.resume_execution_id = resume_execution_id
+        self.reason = reason

@@ -62,6 +62,38 @@ describe("workflow crud commands", () => {
       expect(out).toContain("wf-new-001");
     });
 
+    it("an unknown --type prints the API's 422 message, naming the choices (#2290)", async () => {
+      // The body POST /workflows returns for workflow_type "bogus", verbatim.
+      mockFetch.mockResolvedValue(
+        jsonResponse(
+          {
+            detail: [
+              {
+                type: "value_error",
+                loc: ["body", "workflow_type"],
+                msg: "Value error, workflow_type must be one of: research, planning, implementation, review, deployment, custom; got 'bogus'",
+                input: "bogus",
+                ctx: { error: {} },
+              },
+            ],
+          },
+          422,
+        ),
+      );
+
+      const run = createCommand.handler({
+        positionals: ["My Workflow"],
+        values: { type: "bogus" },
+      });
+
+      await expect(run).rejects.toThrow(CLIError);
+      await expect(run).rejects.toThrow(
+        "Failed to create workflow: Value error, workflow_type must be one of: research, planning, implementation, review, deployment, custom; got 'bogus'",
+      );
+      const request = mockFetch.mock.calls[0]![0] as Request;
+      expect(((await request.json()) as { workflow_type: string }).workflow_type).toBe("bogus");
+    });
+
     it("throws CLIError when name is missing", async () => {
       await expect(
         createCommand.handler({ positionals: [], values: {} }),
@@ -224,10 +256,10 @@ describe("workflow crud commands", () => {
   });
 
   describe("validate", () => {
-    // A retired key is accepted by the server with a notice (#1477 follow-up).
-    // The CLI must carry the file to the server untouched and print what comes
-    // back; it holds no list of retired keys of its own.
-    const NOTICE = "phase 'p1': 'can_open_pr' is retired (#1477) and ignored";
+    // The server may return notices that never make the file invalid. The CLI
+    // must carry the file to the server untouched and print what comes back;
+    // it holds no authoring rules of its own.
+    const NOTICE = "phase 'p1': an example notice from the server";
     let tmpDir: string;
 
     beforeEach(() => {
@@ -235,7 +267,7 @@ describe("workflow crud commands", () => {
       fs.writeFileSync(
         path.join(tmpDir, "workflow.yaml"),
         "id: pkg-wf\nname: Pkg WF\ntype: custom\nphases:\n" +
-          "  - id: p1\n    name: Phase\n    order: 1\n    prompt_template: hi\n    can_open_pr: true\n",
+          "  - id: p1\n    name: Phase\n    order: 1\n    prompt_template: hi\n",
         "utf-8",
       );
     });
@@ -255,7 +287,7 @@ describe("workflow crud commands", () => {
       const request = mockFetch.mock.calls[0]![0] as Request;
       expect(request.url).toContain("/workflows/validate");
       const body = JSON.parse(await request.text()) as { content: string };
-      expect(body.content).toContain("can_open_pr");
+      expect(body.content).toContain("\"prompt_template\":\"hi\"");
       expect(stdout()).toContain("Valid");
       expect(stderr()).toContain(NOTICE);
     });
@@ -283,6 +315,51 @@ describe("workflow crud commands", () => {
 
       expect(stdout()).toContain("Valid workflow definition");
       expect(stderr()).toContain(NOTICE);
+    });
+
+    describe("a retired phase key (#1502, #2100)", () => {
+      // The server is the only authority on retired keys. The CLI must carry
+      // `can_open_pr` to it unchanged; a client-side normalization that drops
+      // the key would make the server see a clean file and say "Valid".
+      const REFUSAL =
+        "phase 'p1': 'can_open_pr' is retired (#1477) and no longer accepted - an example reason";
+
+      beforeEach(() => {
+        fs.writeFileSync(
+          path.join(tmpDir, "workflow.yaml"),
+          "id: pkg-wf\nname: Pkg WF\ntype: custom\nphases:\n" +
+            "  - id: p1\n    name: Phase\n    order: 1\n    prompt_template: hi\n" +
+            "    can_open_pr: true\n",
+          "utf-8",
+        );
+        mockFetch.mockResolvedValue(jsonResponse({ valid: false, errors: [REFUSAL] }));
+      });
+
+      async function expectRefused(target: string): Promise<string> {
+        const err = await validateCommand
+          .handler({ positionals: [target], values: {} })
+          .then(() => undefined, (e: unknown) => e);
+        expect(err).toBeInstanceOf(CLIError);
+        expect((err as CLIError).exitCode).not.toBe(0);
+        expect(stdout()).toContain(REFUSAL);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        const request = mockFetch.mock.calls[0]![0] as Request;
+        expect(request.url).toContain("/workflows/validate");
+        const body = JSON.parse(await request.text()) as { content: string };
+        return body.content;
+      }
+
+      it("a single file reaches the server unchanged, prints the refusal and exits non-zero", async () => {
+        const file = path.join(tmpDir, "workflow.yaml");
+        const sent = await expectRefused(file);
+        expect(sent).toBe(fs.readFileSync(file, "utf-8"));
+      });
+
+      it("a package directory keeps the key, prints the refusal and exits non-zero", async () => {
+        const sent = await expectRefused(tmpDir);
+        const definition = JSON.parse(sent) as { phases: Array<Record<string, unknown>> };
+        expect(definition.phases[0]).toHaveProperty("can_open_pr", true);
+      });
     });
   });
 
@@ -370,6 +447,88 @@ describe("workflow crud commands", () => {
       expect(out).toContain("pr_number");
       expect(out).toContain("required");
       expect(out).toContain("branch");
+    });
+
+    // Fixtures shaped from the generated PhaseDefinitionResponse (#950).
+    const promptedPhase = {
+      phase_id: "implement",
+      name: "implement",
+      order: 1,
+      agent_type: "claude",
+      prompt_template: "Fix issue {{issue}}.\n\nRun the gates before pushing.",
+      timeout_seconds: 1800,
+      max_cost_usd: 4.25,
+      allowed_tools: ["Read", "Bash(git:*)"],
+      argument_hint: "<issue-number>",
+      allow_delegation: false,
+      require_delegation: false,
+      clone_repos: true,
+      delivers_repo_changes: true,
+    };
+    const barePhase = {
+      phase_id: "notify",
+      name: "notify",
+      order: 2,
+      agent_type: "claude",
+      prompt_template: null,
+      timeout_seconds: 300,
+      max_cost_usd: null,
+      allowed_tools: [],
+      argument_hint: null,
+      allow_delegation: false,
+      require_delegation: false,
+      clone_repos: true,
+      delivers_repo_changes: true,
+    };
+
+    async function showWith(phases: unknown[], values: Record<string, unknown>): Promise<string> {
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ detail: "Not found" }, 404))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            workflows: [{ id: "wf-full-123456789", name: "Full", workflow_type: "custom", phase_count: phases.length }],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: "wf-full-123456789",
+            name: "Full",
+            workflow_type: "custom",
+            classification: "multi-phase",
+            phases,
+            input_declarations: [],
+          }),
+        );
+      await showCommand.handler({ positionals: ["wf-full"], values });
+      return stdout();
+    }
+
+    it("--full prints the prompt verbatim, allowed_tools, timeout, cost and hint", async () => {
+      const out = await showWith([promptedPhase], { full: true });
+      expect(out).toContain("          Fix issue {{issue}}.\n          \n          Run the gates before pushing.\n");
+      expect(out).toContain("Read, Bash(git:*)");
+      expect(out).toContain("timeout_seconds:");
+      expect(out).toContain("1800");
+      expect(out).toContain("max_cost_usd:");
+      expect(out).toContain("4.25");
+      expect(out).toContain("<issue-number>");
+    });
+
+    it("without --full, default output carries none of the full fields", async () => {
+      const out = await showWith([promptedPhase], {});
+      expect(out).toContain("implement");
+      for (const absent of ["Fix issue", "Run the gates", "allowed_tools", "Bash(git:*)", "timeout_seconds", "1800", "max_cost_usd", "4.25", "<issue-number>", "prompt_template"]) {
+        expect(out).not.toContain(absent);
+      }
+    });
+
+    it("--full marks a null prompt and empty allowed_tools explicitly", async () => {
+      const out = await showWith([barePhase], { full: true });
+      expect(out).toContain("(no prompt)");
+      expect(out).toContain("(none declared)");
+      expect(out).toContain("300");
+      expect(out).not.toContain("max_cost_usd");
+      expect(out).not.toContain("argument_hint");
     });
 
     it("throws CLIError when workflow-id is missing", async () => {

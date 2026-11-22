@@ -400,6 +400,7 @@ class _Request:
         default_factory=lambda: ["https://github.com/syntropic137/syntropic137"]
     )
     task: str | None = None
+    idempotency_key: str | None = None
     tags: TagSet = field(default_factory=TagSet)
     eval_id: None = None
     no_eval: bool = False

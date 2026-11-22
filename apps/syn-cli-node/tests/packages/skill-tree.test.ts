@@ -109,6 +109,71 @@ describe("skillDirInClone", () => {
     expect(skillDirInClone(dir, "alpha")).toBe(path.join(dir, "skills", "alpha"));
   });
 
+  it("finds a project repo's own skill under .claude/skills/, before a root SKILL.md", () => {
+    // A project repo (not a skills repo) keeps its skills where Claude Code
+    // reads them. A root SKILL.md must not shadow the named one.
+    fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: root\ndescription: d\n---\n");
+    fs.mkdirSync(path.join(dir, ".claude", "skills", "managing-beads"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, ".claude", "skills", "managing-beads", "SKILL.md"),
+      "---\nname: managing-beads\ndescription: d\n---\n",
+    );
+
+    expect(skillDirInClone(dir, "managing-beads")).toBe(
+      path.join(dir, ".claude", "skills", "managing-beads"),
+    );
+  });
+
+  // A cloned repo controls its own tree. Following a link out of it would
+  // upload files from elsewhere on this machine as the skill (Codex P1, #2191).
+  it.each([
+    // [what is linked, link path inside the clone, where the skill sits under the link target]
+    ["the skill folder", [".claude", "skills", "alpha"], []],
+    ["the .claude/skills folder", [".claude", "skills"], ["alpha"]],
+    ["the skills/ folder", ["skills"], ["alpha"]],
+  ])("refuses a skill that leaves the clone through a symlinked %s", (_what, linkPath, under) => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "skilltree-outside-"));
+    try {
+      const skillHome = path.join(outside, ...under);
+      fs.mkdirSync(skillHome, { recursive: true });
+      fs.writeFileSync(path.join(skillHome, "SKILL.md"), "---\nname: alpha\ndescription: d\n---\n");
+      fs.mkdirSync(path.join(dir, ...linkPath.slice(0, -1)), { recursive: true });
+      fs.symlinkSync(outside, path.join(dir, ...linkPath));
+
+      expect(() => skillDirInClone(dir, "alpha")).toThrow(/outside the clone/);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("an unrelated link out of the clone does not hide a real skill later in the order", () => {
+    // Codex P2, #2191: `<clone>/alpha` links elsewhere, the skill is in .claude/skills.
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "skilltree-outside-"));
+    try {
+      fs.symlinkSync(outside, path.join(dir, "alpha"));
+      fs.mkdirSync(path.join(dir, ".claude", "skills", "alpha"), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, ".claude", "skills", "alpha", "SKILL.md"),
+        "---\nname: alpha\ndescription: d\n---\n",
+      );
+
+      expect(skillDirInClone(dir, "alpha")).toBe(path.join(dir, ".claude", "skills", "alpha"));
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("still finds a skill through a symlink that stays inside the clone", () => {
+    fs.mkdirSync(path.join(dir, "shared", "alpha"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "shared", "alpha", "SKILL.md"),
+      "---\nname: alpha\ndescription: d\n---\n",
+    );
+    fs.symlinkSync(path.join(dir, "shared"), path.join(dir, "skills"));
+
+    expect(skillDirInClone(dir, "alpha")).toBe(path.join(dir, "skills", "alpha"));
+  });
+
   it("falls back to the repository root for a single-skill repo", () => {
     fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: solo\ndescription: d\n---\n");
 
@@ -118,6 +183,6 @@ describe("skillDirInClone", () => {
   it("names every place it looked when the skill is absent", () => {
     fs.writeFileSync(path.join(dir, "README.md"), "no skill here");
 
-    expect(() => skillDirInClone(dir, "missing")).toThrow(/missing\/.*skills\/missing/s);
+    expect(() => skillDirInClone(dir, "missing")).toThrow(/missing\/.*skills\/missing.*\.claude\/skills\/missing/s);
   });
 });

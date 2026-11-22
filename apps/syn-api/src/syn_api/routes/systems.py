@@ -15,7 +15,6 @@ from syn_api._wiring import (
     ensure_connected,
     sync_published_events_to_projections,
 )
-from syn_api.model_identity import cost_by_observed_model_text
 from syn_api.types import (
     CostOutlierResponse,
     CreateSystemRequest,
@@ -233,29 +232,50 @@ async def get_system_status(system_id: str) -> Result[dict[str, Any], SystemErro
     return Ok(result.to_dict())
 
 
-async def get_system_cost(system_id: str) -> Result[dict[str, Any], SystemErrorCode]:
-    """Get cost breakdown for a system."""
+async def get_system_cost(system_id: str) -> Result[SystemCostResponse, SystemErrorCode]:
+    """Get cost breakdown for a system, from the ``ExecutionCost`` rows of its repos' executions.
+
+    Same rows and same sum as ``/insights/cost?system_id=`` (#897).
+    """
     from syn_adapters.projection_stores import get_projection_store
+    from syn_api._wiring import get_execution_cost_query
+    from syn_api.routes._cost_rollup import roll_up_costs
     from syn_domain.contexts.organization import (
-        GetSystemCostHandler,
-        GetSystemCostQuery,
+        correlations_by_execution,
         get_repo_projection,
         get_system_projection,
     )
 
     await ensure_connected()
 
-    sys_proj = get_system_projection()
-    if (await sys_proj.get(system_id)) is None:
+    system = await get_system_projection().get(system_id)
+    if system is None:
         return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
 
-    handler = GetSystemCostHandler(
-        store=get_projection_store(),
-        system_projection=sys_proj,
-        repo_projection=get_repo_projection(),
+    repos = await get_repo_projection().list_all(system_id=system_id)
+    correlated = await correlations_by_execution(
+        get_projection_store(), {r.full_name for r in repos}
     )
-    result = await handler.handle(GetSystemCostQuery(system_id=system_id))
-    return Ok(result.to_dict())
+    rollup = roll_up_costs(
+        await get_execution_cost_query().list_for_ids(correlated), correlated=correlated
+    )
+    return Ok(
+        SystemCostResponse(
+            system_id=system_id,
+            system_name=system.name,
+            organization_id=system.organization_id,
+            total_cost_usd=rollup.total_cost_usd,
+            total_cost_display=rollup.total_cost_display,
+            unpriced_observation_count=rollup.unpriced_observation_count,
+            total_tokens=rollup.total_tokens,
+            total_input_tokens=rollup.total_input_tokens,
+            total_output_tokens=rollup.total_output_tokens,
+            cost_by_repo=rollup.cost_by_repo,
+            cost_by_workflow=rollup.cost_by_workflow,
+            cost_by_model=rollup.cost_by_model,
+            execution_count=rollup.execution_count,
+        )
+    )
 
 
 async def get_system_activity(
@@ -465,12 +485,7 @@ async def get_system_cost_endpoint(system_id: str) -> SystemCostResponse:
     result = await get_system_cost(system_id)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
-    # An alias key from a legacy read model is folded into the unknown bucket
-    # (ADR-067 D9) rather than failing the response.
-    data = result.value
-    return SystemCostResponse(
-        **{**data, "cost_by_model": cost_by_observed_model_text(data.get("cost_by_model"))}
-    )
+    return result.value
 
 
 @router.get("/{system_id}/activity")

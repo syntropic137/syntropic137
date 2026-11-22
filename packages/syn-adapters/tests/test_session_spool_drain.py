@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 from typing import TYPE_CHECKING
@@ -70,7 +71,7 @@ async def test_interrupted_page_retries_without_duplicate_evidence(
     assert progress.watermark == 2
     assert await journal.watermark(run) == 2
     for entry, body in zip(entries, bodies, strict=True):
-        assert (tmp_path / entry.archive_sha256).read_bytes() == body
+        assert gzip.decompress((tmp_path / entry.archive_sha256).read_bytes()) == body
 
     # A replay after deletion advances the source cursor without restoring bytes
     # or altering the immutable acquisition history.

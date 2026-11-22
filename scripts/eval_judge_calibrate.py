@@ -15,8 +15,9 @@ All keyword-missed blocked runs are listed, and a deterministic sample of
 ``--sample`` keyword-matched ones (default 10), so the table can show whether
 the LLM judge credits vague findings (precision) as well as paraphrases (recall).
 
-The judge's key is the platform's ``ANTHROPIC_API_KEY`` setting (environment or
-``.env``). Every defect case must carry ``expected.defect``.
+The judge runs through Claude Code (``claude -p``) on the CLI's own login: it
+reads no API key, so ``claude`` must be on PATH and logged in. Every defect case
+must carry ``expected.defect``.
 
 The ledger must hold the runs: the checked-in ``launches.jsonl`` has no v6 lines
 unless they were committed from the workspace that launched them.
@@ -28,26 +29,22 @@ import argparse
 import sys
 from pathlib import Path
 
-import httpx
 from eval_suite import (
     DEFAULT_SUITE,
-    AnthropicMessages,
     DefectCase,
-    JudgeError,
+    HeadlessJudgeClient,
     KeywordJudge,
     LlmJudge,
-    _basic_auth,
     _Execution,
     _get,
     _report_of,
+    api_client,
     blocking_findings,
     judge_problems,
     launches_path,
     load_suite,
     read_launches,
 )
-
-from syn_shared.settings.dev_tooling import get_dev_api_url
 
 
 def _cell(text: str) -> str:
@@ -80,18 +77,12 @@ def main(argv: list[str] | None = None) -> int:
         print("❌ the LLM judge cannot score:\n  " + "\n  ".join(problems), file=sys.stderr)
         return 1
     cases = {c.id: c for c in loaded.cases}
-    try:
-        llm = LlmJudge(AnthropicMessages.from_settings())
-    except JudgeError as exc:
-        print(f"❌ {exc}", file=sys.stderr)
-        return 1
+    llm = LlmJudge(HeadlessJudgeClient())
     keyword = KeywordJudge()
 
     missed: list[str] = []
     matched: list[str] = []
-    with httpx.Client(
-        base_url=args.api_url or get_dev_api_url(), timeout=60, auth=_basic_auth()
-    ) as client:
+    with api_client(args.api_url) as client:
         for launch in launches:
             case = cases.get(launch.case)
             if not isinstance(case, DefectCase):

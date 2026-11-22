@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID  # noqa: TC003 - dataclass field
@@ -31,9 +32,13 @@ from syn_domain.contexts.agent_sessions import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import AsyncIterator, Callable
 
-    from syn_domain.contexts.agent_sessions import InventoryItem, ItemKind
+    from syn_domain.contexts.agent_sessions import (
+        InventoryItem,
+        ItemKind,
+        RequestInventoryReconciliationCommand,
+    )
 
 _OPEN = (ReconciliationStage.PENDING, ReconciliationStage.PUBLISHING)
 
@@ -249,3 +254,38 @@ class InMemorySessionInventoryJobs(InMemoryAdapter):
     def _held(self, lease: InventoryJobLease) -> _Row | None:
         row = self._rows.get(lease.job.job_id)
         return row if row is not None and row.lease_token == lease.token else None
+
+
+class InMemoryInventorySchedulingGuard(InMemoryAdapter):
+    """Twin of ``PostgresInventorySchedulingGuard``: one try per hold, never waits.
+
+    Share one instance between handlers to model managers on one database.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.held: set[RunIdentity] = set()
+        self.scheduled: dict[RunIdentity, RequestInventoryReconciliationCommand] = {}
+
+    @asynccontextmanager
+    async def hold(self, run: RunIdentity) -> AsyncIterator[_InMemorySchedule | None]:
+        if run in self.held:
+            yield None
+            return
+        self.held.add(run)
+        try:
+            yield _InMemorySchedule(self.scheduled, run)
+        finally:
+            self.held.discard(run)
+
+
+@dataclass(frozen=True)
+class _InMemorySchedule:
+    scheduled: dict[RunIdentity, RequestInventoryReconciliationCommand]
+    run: RunIdentity
+
+    async def last_scheduled(self) -> RequestInventoryReconciliationCommand | None:
+        return self.scheduled.get(self.run)
+
+    async def record_scheduled(self, command: RequestInventoryReconciliationCommand) -> None:
+        self.scheduled[self.run] = command

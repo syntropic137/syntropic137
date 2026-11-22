@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gzip
 import logging
 import os
 from dataclasses import dataclass
@@ -256,7 +257,8 @@ async def test_deletion_withholds_at_once_erases_later_and_cannot_be_resurrected
     assert deletion["replication"] == "disabled" and deletion["requested_at"].endswith("Z")
     # Withheld through the other membership before erasure has run.
     assert (await stack.read("run-a", capture.archive.sha256)).json()["status"] == "deleted"
-    assert (stack.root / capture.archive.sha256).read_bytes() == b"delete me"
+    # Withheld, not erased yet: the object still holds the body (gzip at rest, #2107).
+    assert gzip.decompress((stack.root / capture.archive.sha256).read_bytes()) == b"delete me"
     assert await stack.archive.get(capture.archive) is None
     assert await LocalBodyRetention(stack.pool, stack.archive, stack.source).drain() == 1
     state = await stack.client.get(base, params=params)

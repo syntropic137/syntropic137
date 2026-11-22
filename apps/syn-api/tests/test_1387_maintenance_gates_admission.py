@@ -38,6 +38,7 @@ class _Request:
     inputs: dict[str, str] = field(default_factory=dict)
     repos: list[str] = field(default_factory=list)
     task: str | None = None
+    idempotency_key: str | None = None
     tags: TagSet = field(default_factory=TagSet)
     provider: str = "claude"
 

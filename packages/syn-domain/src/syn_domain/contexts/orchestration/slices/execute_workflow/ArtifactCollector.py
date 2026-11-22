@@ -22,6 +22,7 @@ from syn_domain.contexts.artifacts import (
     PhaseOutputFile,
     primary_text,
 )
+from syn_domain.contexts.orchestration._shared.file_transfer import FileRefusal  # noqa: TC001
 from syn_domain.contexts.orchestration.slices.execute_workflow.artifact_recovery import (
     RECOVERED_SOURCE_PATH,
     DescribeWork,
@@ -34,6 +35,12 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     EmptyPhaseArtifactError,
     PhaseProducedNoDeclaredOutputError,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.output_refusals import (
+    KeptOutput,
+    OutputCollectionIncompleteError,
+    collect_output_files,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.primary_deliverable import ranked
 from syn_shared.workspace_paths import (
     WORKSPACE_INPUT_DIR,
     WORKSPACE_OUTPUT_DIR,
@@ -179,6 +186,9 @@ class CollectedArtifacts:
     #: reading the artifact; this tells the execution record (#1195, #1300),
     #: which is what anyone counting salvages across many runs reads.
     deliverable_recovered: bool = False
+    #: Output files the provider would not read, by path and reason (#1913).
+    #: Collection went on without them; the execution record says so.
+    refused: tuple[FileRefusal, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -220,7 +230,7 @@ async def _with_report(
     title: str,
     describe_work: DescribeWork | None,
 ) -> list[_Deliverable]:
-    """`deliverables`, text first, with the transcript salvaged when none is text.
+    """`deliverables`, with the transcript salvaged when none is text.
 
     Files on disk are not a report when none of them is text. A verify phase
     screenshots before it writes its report (#1648); when the report never
@@ -229,9 +239,9 @@ async def _with_report(
     file at all" are therefore one incident and get one answer here; the
     binaries are kept beside the salvage either way.
 
-    Text before binary, otherwise in collection order: the head is flagged the
-    Primary Deliverable, and a screenshot the glob happened to list first must
-    not take the flag from the phase's report (#990).
+    Not ordered here: the caller passes the result through `ranked`, so a
+    screenshot or a log the glob happened to list first cannot take the
+    Primary Deliverable flag from the phase's report (#990, #2084).
     """
     if not any(isinstance(d.content, str) for d in deliverables):
         binaries = tuple(d.source_path for d in deliverables)
@@ -250,7 +260,7 @@ async def _with_report(
                 ", ".join(binaries) or "none",
             )
             deliverables = [*deliverables, _Deliverable.of(recovered)]
-    return sorted(deliverables, key=lambda d: isinstance(d.content, bytes))
+    return deliverables
 
 
 #: DIRECTORY names that hold machine-generated build output (issue #919).
@@ -567,6 +577,7 @@ class ArtifactCollector:
         agent: AgentIdentity,
         last_agent_message: str | None = None,
         describe_work: DescribeWork | None = None,
+        primary_path: str | None = None,
     ) -> CollectedArtifacts:
         """Collect a phase's declared output from its workspace, or fail.
 
@@ -614,9 +625,7 @@ class ArtifactCollector:
         Returns:
             CollectedArtifacts with IDs and first artifact content for injection.
         """
-        collected = await workspace.collect_files(
-            patterns=[_OUTPUT_GLOB],
-        )
+        collected, refused = await collect_output_files(workspace, [_OUTPUT_GLOB])
         artifacts = [(path, body) for path, body in collected if _is_collectable(path)]
 
         deliverables = await self._deliverables(
@@ -627,6 +636,7 @@ class ArtifactCollector:
             last_agent_message=last_agent_message,
             describe_work=describe_work,
         )
+        deliverables = ranked(deliverables, phase_id=phase_id, primary_path=primary_path)
 
         artifact_ids = await self._store(
             deliverables,
@@ -645,6 +655,7 @@ class ArtifactCollector:
             first_content=primary_text(files),
             files=files,
             deliverable_recovered=any(d.recovered for d in deliverables),
+            refused=refused,
         )
 
     async def _store(
@@ -778,7 +789,8 @@ class ArtifactCollector:
         agent: AgentIdentity,
         outcome: UnfinishedPhase,
         last_agent_message: str | None = None,
-    ) -> list[str]:
+        primary_path: str | None = None,
+    ) -> KeptOutput:
         """Keep whatever a phase that will not complete managed to write. Never raises.
 
         Deliberately does NOT enforce the output contract that
@@ -801,16 +813,20 @@ class ArtifactCollector:
         "failed on its own report" distinguishable in a listing without giving
         this loop two shapes to have (#1321).
 
-        Returns the ids of what was kept, newest question first: an empty list
-        is the ordinary answer for a phase that wrote nothing, and is not an
-        error.
+        Returns the ids of what was kept, newest question first, and every
+        file the provider refused (#1913): no ids is the ordinary answer for a
+        phase that wrote nothing, and is not an error.
         """
+        # Held outside the try: a refusal known before a later step fails
+        # (storing, salvaging) is still a refusal, and the fallback below must
+        # hand it back to be recorded rather than erase it.
+        refused: tuple[FileRefusal, ...] = ()
         try:
             # Same filter as the happy path: this is the route a phase takes
             # when it will not complete, and it shares the pattern, so fixing
             # only the other site would leave every such run sweeping junk
             # (issue #919).
-            partial_collected = await workspace.collect_files(patterns=[_OUTPUT_GLOB])
+            partial_collected, refused = await collect_output_files(workspace, [_OUTPUT_GLOB])
             kept: list[_Deliverable] = []
             for artifact_path, artifact_content in partial_collected:
                 if not _is_collectable(artifact_path):
@@ -843,8 +859,8 @@ class ArtifactCollector:
                 title=outcome.title(phase_name=phase_name, source_path=RECOVERED_SOURCE_PATH),
                 describe_work=None,
             )
-            return await self._store(
-                kept,
+            stored = await self._store(
+                ranked(kept, phase_id=phase_id, primary_path=primary_path),
                 workflow_id=workflow_id,
                 phase_id=phase_id,
                 execution_id=execution_id,
@@ -852,6 +868,12 @@ class ArtifactCollector:
                 artifact_type=_primary_type(output_artifact_types),
                 agent=agent,
             )
+            return KeptOutput(artifact_ids=stored, refused=refused)
+        except OutputCollectionIncompleteError as err:
+            # The walk stopped: nothing is kept as if it were whole, and what
+            # stopped it is handed back to be recorded, never only logged.
+            logger.warning("Output of unfinished phase %s not kept: %s", phase_id, err)
+            return KeptOutput(refused=err.refused)
         except Exception as err:
             logger.warning(
                 "Failed to keep the output of unfinished phase %s (%s): %s",
@@ -859,7 +881,7 @@ class ArtifactCollector:
                 session_id,
                 err,
             )
-            return []
+            return KeptOutput(refused=refused)
 
     async def create_artifact(
         self,
@@ -905,11 +927,11 @@ class ArtifactCollector:
         # know how a backend establishes readability, only that a returned URI
         # can be read. A backend that cannot confirm it raises
         # ArtifactStorageError, and we leave storage_uri None - the artifact is
-        # still whole, because the event embeds TEXT content either way.
+        # still whole, because the event embeds small TEXT content either way.
         #
-        # BINARY content is not embedded (#990): its bytes are in object
-        # storage or nowhere, so a binary artifact with no readable upload is
-        # refused by the aggregate rather than stored as a hash of nothing.
+        # BINARY content is not embedded (#990), nor is text over
+        # MAX_INLINE_TEXT_BYTES (#2042): in storage or nowhere, so with no
+        # readable upload the aggregate refuses it, not a hash of nothing.
         #
         # ONLY that exception. A bare `except Exception` here would swallow our
         # own bugs - a bad keyword argument to upload() would read as a backend

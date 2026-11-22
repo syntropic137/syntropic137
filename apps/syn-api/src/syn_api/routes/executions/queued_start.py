@@ -21,15 +21,20 @@ from syn_domain.contexts.orchestration import (
     ExecutionRequestStartRecord,
     FailureClassification,
     PhaseProgress,
+    ResumeStartProcessManager,
+    read_record,
     read_start_record,
 )
 
 from .models import ExecutionDetailResponse, ExecutionStartQueueInfo, ExecutionSummaryResponse
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_adapters.projections.manager import ProjectionManager
-    from syn_api.execution_budget import StartPosition
+    from syn_api.execution_budget import StartClaim, StartPosition
+    from syn_domain.contexts.orchestration import ReviewVerdict, TagSet
 
 
 def start_queue_info(
@@ -71,6 +76,32 @@ async def _request_record(
     return read_start_record(ExecutionRequestStartRecord, row) if row is not None else None
 
 
+async def _held_record(
+    store: ProjectionStoreProtocol, claim: StartClaim
+) -> ExecutionRequestStartRecord | None:
+    """The durable record of a start held here: its request's, or its withdrawn resume's.
+
+    A resume has no request; its withdrawal is recorded on the parent, whose
+    `resume_start` record says so once projected (#1677). The parent admits one
+    resume, so a withdrawn record there is this child's, and it is stated in
+    the request record's terms so both starts are reported alike.
+    """
+    record = await _request_record(store, claim.execution_id)
+    if record is not None or claim.resumed_from is None:
+        return record
+    row = await store.get(ResumeStartProcessManager.PROJECTION_NAME, claim.resumed_from)
+    resume = read_record(row) if row is not None else None
+    if resume is None or resume.status != "withdrawn":
+        return None
+    return ExecutionRequestStartRecord(
+        execution_id=claim.execution_id,
+        workflow_id=claim.workflow_id,
+        recorded_at=resume.recorded_at,
+        status="withdrawn",
+        status_reason=resume.status_reason,
+    )
+
+
 def _status(position: StartPosition | None, record: ExecutionRequestStartRecord | None) -> str:
     if record is not None and record.status == "withdrawn":
         # #1650: whatever the budget still holds, it gives back without starting.
@@ -99,10 +130,10 @@ async def _find(
     """The full id, workflow id and durable record of a start, by id or prefix."""
     matches = get_execution_budget().matching(execution_id)
     claim = matches[0].claim if len(matches) == 1 else None
-    full_id = claim.execution_id if claim is not None else execution_id
-    record = await _request_record(store, full_id)
     if claim is not None:
-        return full_id, claim.workflow_id, record
+        return claim.execution_id, claim.workflow_id, await _held_record(store, claim)
+    full_id = execution_id
+    record = await _request_record(store, full_id)
     if record is None:
         record = await _from_the_request_stream(full_id)
     if record is not None:
@@ -249,7 +280,7 @@ async def queued_starts(store: ProjectionStoreProtocol) -> list[QueuedStart]:
     found: dict[str, QueuedStart] = {}
     for position in budget.queued():
         claim = position.claim
-        record = await _request_record(store, claim.execution_id)
+        record = await _held_record(store, claim)
         if record is not None and record.status == "withdrawn":
             continue
         found[claim.execution_id] = QueuedStart(
@@ -292,3 +323,69 @@ def _info(
     info = start_queue_info(position, record)
     assert info is not None  # one of the two is always given
     return info
+
+
+async def withdraw_queued_resume(execution_id: str, reason: str | None) -> bool:
+    """Withdraw a resume whose child waits here for a slot (#1677).
+
+    False when ``execution_id`` is not a resume start held in this process.
+    The withdrawal is recorded on the PARENT, which admitted the resume and is
+    the only stream a resume has before its child starts: durable before this
+    returns, so the waiting start reads it once granted and does not run, and
+    after a restart the parent's `resume_start` record is `withdrawn`.
+    """
+    position = get_execution_budget().position(execution_id)
+    parent_id = position.claim.resumed_from if position is not None else None
+    if parent_id is None:
+        return False
+    from syn_adapters.storage.repositories import get_workflow_execution_repository
+    from syn_domain.contexts.orchestration import WithdrawResumeCommand
+
+    executions = get_workflow_execution_repository()
+    parent = await executions.get_by_id(parent_id)
+    if parent is None or parent.resume_execution_id != execution_id:
+        return False
+    parent.withdraw_resume(
+        WithdrawResumeCommand(
+            execution_id=parent_id, resume_execution_id=execution_id, reason=reason
+        )
+    )
+    await executions.save(parent)
+    return True
+
+
+def filter_queued(
+    starts: list[QueuedStart],
+    *,
+    tags: TagSet,
+    review_verdict: ReviewVerdict | None,
+    eval_id: str | None,
+    in_eval: bool | None,
+    search: str | None,
+    after: datetime | None,
+    before: datetime | None,
+) -> list[QueuedStart]:
+    """The queued starts the list's filters keep.
+
+    A queued start has no read model, so no tags, eval or review verdict to
+    judge: a request filtering on any of them is not shown one, and it is in no eval, so
+    ``in_eval=true`` excludes it while ``in_eval=false`` keeps it. It has not started, so a time
+    window judges when it was accepted - the dashboard's default 24h window
+    would otherwise hide every queued start.
+    """
+    if tags or eval_id or in_eval or review_verdict is not None:
+        return []
+    return [qs for qs in starts if _matches(qs, search=search, after=after, before=before)]
+
+
+def _matches(
+    start: QueuedStart, *, search: str | None, after: datetime | None, before: datetime | None
+) -> bool:
+    """The list's search and window, as they apply to a start that has not started."""
+    queued_at = start.queue.queued_at
+    if (after is not None and queued_at < after) or (before is not None and queued_at > before):
+        return False
+    if not search:
+        return True
+    needle = search.lower()
+    return needle in start.execution_id.lower() or needle in start.workflow_id.lower()

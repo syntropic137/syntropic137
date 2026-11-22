@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { components } from "../generated/api-types.js";
 import { z } from "zod";
 import { api, unwrap } from "../client/typed.js";
+import { retryRateLimited } from "../client/rate-limit.js";
 import type { CommandDef } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
 import { print } from "../output/console.js";
@@ -69,13 +70,24 @@ function pageError(error: unknown, response: Response | undefined): CLIError {
   return new CLIError(`Failed to read inventory page: ${text}`);
 }
 
-async function readPage(
-  status: Status, snapshotId: string, kind: Kind, limit: number, filters: Filters, server: string | undefined,
-): Promise<Page> {
-  const query = { limit, ...filters, ...(server === undefined ? {} : { cursor: server }) };
-  const result = await api.GET("/executions/{execution_id}/session-inventory/{snapshot_id}/{kind}", {
+/** Rate-limited on every attempt: say so, and how to pick up from this page. */
+function rateLimitedError(plan: Plan, kind: Kind, server: string | undefined, attempts: number): CLIError {
+  const resume = server === undefined
+    ? `rerun to read the ${kind} section from its first page`
+    : `resume with --cursor ${continuation(plan, kind, server)}`;
+  return new CLIError(`Failed to read inventory page: rate-limited by the API (HTTP 429) on all ${attempts} attempts; ${resume}`);
+}
+
+async function readPage(plan: Plan, kind: Kind, server: string | undefined): Promise<Page> {
+  const { status, snapshotId } = plan;
+  const query = { limit: plan.limit, ...plan.filters, ...(server === undefined ? {} : { cursor: server }) };
+  const send = () => api.GET("/executions/{execution_id}/session-inventory/{snapshot_id}/{kind}", {
     params: { path: { execution_id: status.run.execution_id, snapshot_id: snapshotId, kind }, query },
   });
+  // --all is the unattended read; a 429 there resends the same pinned page.
+  const result = plan.everyPage
+    ? await retryRateLimited(send, attempts => rateLimitedError(plan, kind, server, attempts))
+    : await send();
   if (result.error !== undefined || !result.response.ok) throw pageError(result.error, result.response);
   const page = result.data!;
   if (page.kind !== kind) throw new CLIError("Inventory response belongs to another section");
@@ -115,7 +127,7 @@ interface ReadState { budget: number; pinned: Snapshot | null; pages: Page[] }
 async function nextPage(plan: Plan, kind: Kind, server: string | undefined, state: ReadState): Promise<Page | null> {
   if (state.budget <= 0) return null;
   state.budget -= 1;
-  const page = await readPage(plan.status, plan.snapshotId, kind, plan.limit, plan.filters, server);
+  const page = await readPage(plan, kind, server);
   state.pinned = page.snapshot;
   plan.onPage(page);
   if (plan.keepPages) state.pages.push(page);

@@ -49,14 +49,74 @@ from syn_adapters.workspace_backends.reclaim_delete import (
     DELETE_PREFIX,
     is_being_deleted,
 )
+from syn_shared.pytest_temp import (
+    PYTEST_TEMP_PREFIX,
+    EntryKind,
+    TempTreeEntry,
+    is_pytest_temp_root,
+)
 
 __all__ = ["CLAIM_PREFIX", "DELETE_PREFIX", "is_being_deleted"]
 
 
-#: Where AW keeps session capture when it is written into the workspace
-#: rather than to the `/spool` volume. Its presence anywhere keeps the
-#: directory: capture there is the only copy (#1983, design 1.3).
+#: AW's reserved session-store metadata namespace, ``$SPOOL/.agentic-session-store``
+#: (lib/agentic-workspace/workspace/capabilities/session-store/README.md,
+#: "Spool layout"; ``__META_ROOT`` in .../session-store/apss/init.sh). It lands
+#: in a workspace directory only when the spool is inside ``/workspace``: the
+#: README's own example is ``SPOOL=/workspace``, which puts it at the top of the
+#: directory, but ``SPOOL`` (``SYN_SESSION_STORE_SPOOL_DIR`` here) is any path
+#: and may have differed when the directory was written. So its depth cannot be
+#: pinned, and one found outside the workspace's own pytest temp trees
+#: (`pytest_temp_roots`) keeps the directory: capture
+#: there is the only copy (#1983, design 1.3).
 SESSION_STORE_DIRNAME = ".agentic-session-store"
+
+#: Where syn137 points every workspace's TMPDIR, relative to the workspace
+#: directory: ``_EXECUTABLE_TMPDIR = "/workspace/.tmp"``
+#: (syn_adapters/workspace_backends/agentic/adapter.py), and ``/workspace`` is
+#: the bind of the workspace directory. It is the ONE place the platform
+#: itself puts a temp tree, so it is the only place one is recognised.
+WORKSPACE_TMPDIR = ".tmp"
+
+
+def pytest_temp_roots(directory: Path) -> frozenset[Path]:
+    """The pytest temp trees in ``directory``'s TMPDIR that pytest provably made.
+
+    Each is ``<directory>/.tmp/pytest-of-<user>``, exactly one level down, a
+    real directory (not a symlink, inside a real ``.tmp``) holding only what
+    pytest writes there. pytest rotates these itself, keeping only its last
+    few runs, so nothing in one is meant to outlive the session that made it:
+    such a tree is disposable (`_unversioned_under`) and a session store
+    inside it is a fixture, not capture (`measure_workspace_dir`). A
+    workspace directory that is itself a repository has none. Anything else
+    - another name, another place, an unexpected child - is not recognised
+    and stays fail-closed. Raises ``OSError`` when it cannot be listed.
+    """
+    tmp = directory / WORKSPACE_TMPDIR
+    if os.path.lexists(directory / ".git") or tmp.is_symlink() or not tmp.is_dir():
+        return frozenset()
+    roots: set[Path] = set()
+    for entry in tmp.iterdir():
+        if entry.name.startswith(PYTEST_TEMP_PREFIX) and _is_pytest_shaped(entry):
+            roots.add(entry)
+    return frozenset(roots)
+
+
+def _is_pytest_shaped(root: Path) -> bool:
+    """`is_pytest_temp_root`, asked of a real directory on this filesystem."""
+    if root.is_symlink() or not root.is_dir():
+        return False
+    return is_pytest_temp_root(root.name, (_entry(child) for child in root.iterdir()))
+
+
+def _entry(child: Path) -> TempTreeEntry:
+    if child.is_symlink():
+        return TempTreeEntry(child.name, EntryKind.SYMLINK)
+    return TempTreeEntry(child.name, EntryKind.DIRECTORY if child.is_dir() else EntryKind.OTHER)
+
+
+def _inside_any(path: Path, roots: frozenset[Path]) -> bool:
+    return any(path == root or path.is_relative_to(root) for root in roots)
 
 
 def _raise(error: OSError) -> NoReturn:
@@ -110,13 +170,15 @@ _CACHEDIR_TAG_SIGNATURE = b"Signature: 8a477f597d28d172789f06886806bc55"
 
 
 def _is_proven_cache(path: Path) -> bool:
-    """Whether a directory's contents are shown regenerable by what it holds.
+    """Whether a directory's contents are shown disposable.
 
     A name proves nothing - an agent may write its only copy into ``target``
     or ``.cache`` - so each rule reads the directory, not what it is called:
     a CACHEDIR.TAG explicitly designates the contents as disposable. A
     package manifest or virtualenv marker does not prove that every file
-    inside can be reproduced: agents may edit installed dependencies.
+    inside can be reproduced: agents may edit installed dependencies. (The
+    workspace's own pytest temp trees are proven by place and shape instead,
+    `pytest_temp_roots`.)
     """
     if path.is_symlink() or not path.is_dir():
         return False
@@ -149,19 +211,24 @@ class UnsafeRepositoryError(HostGitError):
     """
 
 
+_BLOCK = 512
+"""POSIX ``st_blocks`` unit, whatever the filesystem's block size."""
+
+
 @dataclass(frozen=True)
 class WorkspaceDirListing:
     """One directory under the workspace base, measured in a single walk."""
 
     workspace_id: str
     host_dir: str
+    #: Allocated bytes of its files, each inode once: see `measure_workspace_dir`.
     size_bytes: int
     #: ``(st_dev, st_ino)`` of the directory itself: a rename keeps it, a
     #: replacement does not.
     identity: tuple[int, int] = (0, 0)
     #: Why some of it could not be read, or None when the walk saw all of it.
     unreadable: str | None = None
-    #: Whether a session-store directory exists anywhere inside.
+    #: Whether a session store exists inside, outside any pytest temp tree.
     session_store: bool = False
 
 
@@ -185,26 +252,31 @@ class ContainerMounts:
         return f"{self.name or 'unnamed'} ({self.container_id[:12]})"
 
     def blocks(self, workspace_id: str, host_base: str) -> bool:
-        """Whether any source can reach the workspace directory under any of its names.
+        """Whether any source is the workspace directory, under any of its names, or inside it.
 
         Compared as canonical host paths: a source that is the directory (as
-        itself, claimed or being deleted), anything inside it, or any
-        ANCESTOR of it - the base, its parent, ``/`` - reaches it. Only the
-        caller's own container is exempt, and the caller decides that
-        (`own_container_id`), not this method.
+        itself, claimed or being deleted) or anything inside it blocks, rw or
+        ro. Only the caller's own container is exempt, and the caller decides
+        that (`own_container_id`), not this method.
 
-        Read-only binds block like any other: read-only does not mean unused,
-        and ``RW: false`` alone does not keep submounts read-only. The one
-        other exemption is an operator-listed observer that passes every
-        observer condition, and the reclaimer decides that (`_bound`).
+        A bind of the base or of any ANCESTOR of it - the base's parent, ``/``
+        - does NOT block, rw or ro (#2215). Permanent platform containers hold
+        such binds (the executor writes the whole base; the docker-create guard
+        and node-exporter read it), so counting them kept every directory.
+        Such a container reaches the directory only through paths it was given
+        for an Execution; the reclaimer's proof that the directory's owner
+        Execution is terminal and settled, with its capture proven
+        (`_judge_owner`), is what rules out a live writer there. A bind naming
+        the directory itself carries no such proof, so it still blocks.
+
+        The one other exemption is an operator-listed observer that passes
+        every observer condition, and the reclaimer decides that (`_bound`).
         """
         base = PurePosixPath(posixpath.normpath(host_base))
         names = (workspace_id, CLAIM_PREFIX + workspace_id, DELETE_PREFIX + workspace_id)
         dirs = [base / name for name in names]
         for raw in self.sources:
             source = PurePosixPath(posixpath.normpath(raw))
-            if base == source or base.is_relative_to(source):
-                return True
             if any(source == d or source.is_relative_to(d) for d in dirs):
                 return True
         return False
@@ -277,18 +349,45 @@ def scan_workspace_dirs(base: str) -> list[WorkspaceDirListing]:
 
 
 def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
-    """One directory, sized in a single walk that fails closed. Blocking."""
+    """One directory, sized in a single walk that fails closed. Blocking.
+
+    ``size_bytes`` is the bytes the walk saw allocated to files
+    (``st_blocks * 512``), each inode once (#2216). A length overstates a
+    sparse file, and the uv and pnpm caches under ``seeds/`` hard-link one
+    inode under many names, so summing ``st_size`` per name read about 14x
+    the disk the directories occupy.
+
+    It is not exactly what a delete frees: an inode that also has links
+    outside the directory stays allocated after it goes. That is left
+    counted, not subtracted by ``st_nlink``: a link outside may itself be in
+    a directory this pass deletes, so no one directory can tell, and the
+    fix belongs to whoever sums across directories. Directory entries
+    themselves are not counted.
+
+    Every inode is remembered, whatever its link count: a live cache links
+    and unlinks while the walk runs, so a count read at one name says
+    nothing about a name already passed or still to come.
+    """
     stat = directory.lstat()
     size = 0
+    seen: set[tuple[int, int]] = set()
     session_store = False
     unreadable: str | None = None
     try:
+        fixtures = pytest_temp_roots(directory)
         for dirpath, dirnames, filenames in os.walk(directory, onerror=_raise):
             here = Path(dirpath)
-            if SESSION_STORE_DIRNAME in dirnames or SESSION_STORE_DIRNAME in filenames:
+            if (
+                SESSION_STORE_DIRNAME in dirnames or SESSION_STORE_DIRNAME in filenames
+            ) and not _inside_any(here, fixtures):
                 session_store = True
             for name in filenames:
-                size += (here / name).lstat().st_size
+                found = (here / name).lstat()
+                inode = (found.st_dev, found.st_ino)
+                if inode in seen:
+                    continue
+                seen.add(inode)
+                size += found.st_blocks * _BLOCK
     except OSError as exc:
         unreadable = f"{type(exc).__name__}: {exc}"
     return WorkspaceDirListing(
@@ -653,7 +752,8 @@ def _list_unversioned(host_dir: str, repos: list[str], ignored: list[str]) -> li
     """
     root = Path(host_dir)
     repo_roots = {Path(r) for r in repos}
-    members = _unversioned_under(root, repo_roots)
+    disposable: frozenset[Path] = frozenset() if root in repo_roots else pytest_temp_roots(root)
+    members = _unversioned_under(root, repo_roots, disposable)
     for repo in repos:
         git_dir = Path(repo) if _is_bare(repo) else _git_dir(Path(repo))
         members.extend(_unrecognized_git_metadata(git_dir, root))
@@ -667,7 +767,9 @@ def _list_unversioned(host_dir: str, repos: list[str], ignored: list[str]) -> li
     return sorted({str(member.relative_to(root)) for member in members})
 
 
-def _unversioned_under(path: Path, repo_roots: set[Path]) -> list[Path]:
+def _unversioned_under(
+    path: Path, repo_roots: set[Path], disposable: frozenset[Path] = frozenset()
+) -> list[Path]:
     """``path`` itself if a file, else every file below it outside ``repo_roots`` and caches."""
     if path.is_symlink() or path.is_file():
         return [path]
@@ -675,7 +777,11 @@ def _unversioned_under(path: Path, repo_roots: set[Path]) -> list[Path]:
     for dirpath, dirnames, filenames in os.walk(path, onerror=_raise):
         here = Path(dirpath)
         dirnames[:] = [
-            d for d in dirnames if here / d not in repo_roots and not _is_proven_cache(here / d)
+            d
+            for d in dirnames
+            if here / d not in repo_roots
+            and here / d not in disposable
+            and not _is_proven_cache(here / d)
         ]
         members.extend(here / f for f in filenames)
         members.extend(here / d for d in dirnames if (here / d).is_symlink())

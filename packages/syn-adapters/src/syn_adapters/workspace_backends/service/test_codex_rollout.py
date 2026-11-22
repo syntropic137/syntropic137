@@ -34,12 +34,13 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from syn_adapters.session_store.codex_rollout_model import model_from_rollout
 from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
-from syn_domain.contexts.agent_sessions import model_from_rollout
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     ExecutionResult,
 )
+from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutReading
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions import RolloutDocument, RolloutRecord
@@ -284,7 +285,7 @@ async def test_a_half_written_last_line_does_not_cost_the_file(codex_home: Path)
 
 
 async def test_the_port_asks_for_the_session_codex_announced(codex_home: Path) -> None:
-    """The last hop: ``ManagedWorkspace.codex_rollout`` forwards WHICH id.
+    """The last hop: ``ManagedWorkspace.codex_rollout_model`` forwards WHICH id.
 
     This is the trap a test at either end cannot see - a hop that forwarded
     the workspace id, or the platform session id, instead of the id codex
@@ -298,9 +299,9 @@ async def test_the_port_asks_for_the_session_codex_announced(codex_home: Path) -
     _write_two_rollouts(codex_home)
     wanted = next(iter(TWO_ROLLOUTS))
 
-    document = await ManagedWorkspace.codex_rollout(_workspace(codex_home), wanted)
+    reading = await ManagedWorkspace.codex_rollout_model(_workspace(codex_home), wanted)
 
-    assert _model_of(document) == TWO_ROLLOUTS[wanted]
+    assert reading == CodexRolloutReading(model=TWO_ROLLOUTS[wanted])
 
 
 def test_the_double_reports_the_real_execute_signature() -> None:
@@ -313,3 +314,45 @@ def test_the_double_reports_the_real_execute_signature() -> None:
     has.
     """
     assert inspect.signature(_ShellWorkspace.execute) == inspect.signature(ManagedWorkspace.execute)
+
+
+class TestWhatTheRolloutNames:
+    """``model_from_rollout`` over the real capture (moved from the domain, #1424).
+
+    These pinned which rollouts name a model while the reader lived in
+    orchestration's tests. The reader is the adapter's now, so they are too:
+    the domain receives a ``CodexRolloutReading`` and takes it as given.
+    """
+
+    def test_the_capture_names_its_model(self) -> None:
+        assert model_from_rollout(_captured_records()) == CAPTURED_MODEL
+
+    def test_a_rollout_that_names_no_model_names_none(self) -> None:
+        """The usage-bearing records of the real capture with its one
+        `turn_context` removed - a rollout cut off before its first turn looks
+        exactly like this."""
+        without_model = [r for r in _captured_records() if r.get("type") != "turn_context"]
+        assert model_from_rollout(without_model) is None
+
+    @pytest.mark.parametrize("blank", ["", "   ", None, 4])
+    def test_a_model_that_says_nothing_usable_is_not_taken(self, blank: object) -> None:
+        """A model that is not a non-blank string names nothing, so `""` must
+        not reach an artifact as though it were an id."""
+        document = [
+            {**record, "payload": {**payload, "model": blank}}
+            if record.get("type") == "turn_context"
+            and isinstance(payload := record.get("payload"), Mapping)
+            else record
+            for record in _captured_records()
+        ]
+        assert model_from_rollout(document) is None
+
+    def test_a_rollout_spanning_two_models_names_neither(self) -> None:
+        """The refusal the usage adapter makes for pricing, for the same
+        reason: a session that spanned models cannot be attributed to one of
+        them, and the later one is not more true for being later."""
+        document = [
+            *_captured_records(),
+            {"type": "turn_context", "payload": {"model": "gpt-5.6-codex"}},
+        ]
+        assert model_from_rollout(document) is None

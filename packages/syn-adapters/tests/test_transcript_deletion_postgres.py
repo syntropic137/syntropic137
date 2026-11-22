@@ -8,6 +8,7 @@ the session discoverable.
 
 from __future__ import annotations
 
+import gzip
 import json
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -200,7 +201,7 @@ async def test_owner_deletion_is_whole_object_idempotent_and_cannot_be_resurrect
 
     # Withheld immediately for every sharing run: the archive marker denies
     # reads and puts although erasure has not run yet.
-    assert (tmp_path / "archive" / first.archive.sha256).read_bytes() == body
+    assert gzip.decompress((tmp_path / "archive" / first.archive.sha256).read_bytes()) == body
     assert await archive.get(first.archive) is None
     for capture in (first, shared):
         assert await access.tombstone(capture) == "deleted"
@@ -324,9 +325,10 @@ async def test_retention_expiry_is_expired_not_deleted_and_quota_counts_objects_
     reader = ReadLocalTranscriptHandler(PostgresCaptureCatalog(db_pool), archive, access)
     read = await reader.handle(middle.run, _identity(middle), middle.archive.sha256)
     assert read.status == "expired" and read.capture == middle
-    # An owner request for an already-expired body keeps the original reason.
+    # An owner request for an already-expired body promotes it to owner intent
+    # (#2128), so the deletion propagates to replicas; promotion reports created.
     again, created = await _deletions(db_pool, source, archive, None).request(middle, "deletion")
-    assert not created and again.reason == "retention_quota"
+    assert created and again.reason == "deletion"
     with pytest.raises(ValueError):
         LocalBodyRetention(db_pool, archive, source, max_bytes=0)
 

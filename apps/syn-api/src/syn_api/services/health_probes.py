@@ -6,16 +6,26 @@ response; each probe here answers one question and never raises.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from syn_api.services.degraded_reasons import DegradedReason
 from syn_api.services.workspace_reclaim_status import DELETE_FAILED_PASSES_TO_DEGRADE
-from syn_api.types import DiskSpaceHealth, RetainedWorkspaceDirs, WorkspaceReclaimHealth
+from syn_api.types import (
+    DiskSpaceHealth,
+    RetainedWorkspaceDirs,
+    SessionStoreHealth,
+    WorkspaceReclaimHealth,
+    format_bytes,
+)
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from syn_shared.codex_auth_status import CodexAuthStatus
 
 logger = logging.getLogger(__name__)
@@ -107,3 +117,80 @@ def describe_codex_auth_health() -> CodexAuthStatus | None:
     except Exception:
         logger.debug("codex auth freshness probe failed", exc_info=True)
         return None
+
+
+SESSION_STORE_CACHE_SECONDS = 300.0
+"""The archive walk is O(objects); /health is polled far more often than this."""
+
+
+@dataclass
+class _SessionStoreCache:
+    """The last measurement and the one walk refreshing it. A cache, never state."""
+
+    refreshed_at: float | None = None
+    """``time.monotonic()`` when ``value`` was published; ``None`` before the first."""
+    value: SessionStoreHealth | None = None
+    refresh: asyncio.Task[None] | None = None
+
+
+_session_store_cache = _SessionStoreCache()
+
+
+async def describe_session_store() -> SessionStoreHealth | None:
+    """Session archive size and growth (#2107) as last measured. Never raises, never waits.
+
+    A stale or missing value starts one background walk and is returned as is:
+    /health answers within its probe timeout however slow the disk, a
+    cancelled request cannot strand the walk, and a walk slower than the
+    window never overlaps another.
+    """
+    cache = _session_store_cache
+    stale = (
+        cache.refreshed_at is None
+        or time.monotonic() - cache.refreshed_at >= SESSION_STORE_CACHE_SECONDS
+    )
+    if stale and (cache.refresh is None or cache.refresh.done()):
+        cache.refresh = asyncio.create_task(_refresh_session_store(cache))
+    return cache.value
+
+
+async def _refresh_session_store(cache: _SessionStoreCache) -> None:
+    try:
+        from syn_shared.settings import get_settings
+
+        root = get_settings().session_inventory.archive_dir
+        value = await asyncio.to_thread(_measure_session_store, root, time.time())
+    except Exception:
+        logger.warning("session store probe failed", exc_info=True)
+        value = None
+    cache.value = value
+    cache.refreshed_at = time.monotonic()
+
+
+def _measure_session_store(root: Path, now: float) -> SessionStoreHealth | None:
+    from syn_adapters.session_inventory.archive_usage import measure_archive_usage
+
+    usage = measure_archive_usage(root, now)
+    if usage is None:
+        return None
+    per_day = usage.added_bytes_7d // 7
+    runway = None if per_day == 0 else round(usage.filesystem_free_bytes / per_day, 1)
+    detail = (
+        f"{format_bytes(usage.stored_bytes)} in {usage.object_count} objects and "
+        f"{usage.reference_count} references; +{format_bytes(usage.added_bytes_24h)} in 24h, "
+        f"+{format_bytes(per_day)}/day over 7d; "
+        f"{format_bytes(usage.filesystem_free_bytes)} free"
+        + ("" if runway is None else f", about {runway:.0f} days at that rate")
+    )
+    return SessionStoreHealth(
+        path=str(root),
+        measured_at=datetime.fromtimestamp(now, tz=UTC),
+        stored_bytes=usage.stored_bytes,
+        object_count=usage.object_count,
+        reference_count=usage.reference_count,
+        added_bytes_24h=usage.added_bytes_24h,
+        added_bytes_per_day_7d=per_day,
+        filesystem_free_bytes=usage.filesystem_free_bytes,
+        days_until_full=runway,
+        detail=detail,
+    )

@@ -181,6 +181,7 @@ class _RawStreamHandler:
     streams: tuple[_Stream, ...]
     granted_timeouts: list[int] = field(default_factory=list)
     collectors: list[ObservabilityCollector | None] = field(default_factory=list)
+    runners: list[Runner] = field(default_factory=list)
 
     async def handle(
         self,
@@ -199,6 +200,7 @@ class _RawStreamHandler:
     ) -> AgentExecutionResult:
         self.granted_timeouts.append(timeout_seconds)
         self.collectors.append(collector)
+        self.runners.append(runner)
         assert collector is not None
         # The LAST entry repeats, so a script of one stream describes an agent
         # that fails the same way however many times it is asked.
@@ -491,10 +493,10 @@ def _claude_failed(result: object) -> str:
     return json.dumps({"type": "result", "is_error": True, "result": result})
 
 
-#: Failures no reader in this repo recognises, as raw claude streams. The
-#: weekly-limit sentence is claude's real quota line (exec-8ad0e101db7b): it
-#: is recognised nowhere here, deliberately (#1605), so it must fall to the
-#: same refusal as everything else unrecognised. A failure with no reason at
+#: Failures that are never retried, as raw claude streams. The weekly-limit
+#: sentence is claude's real quota line (exec-8ad0e101db7b): it reads as
+#: `quota` (#1605), which is no more transient than anything unrecognised.
+#: A failure with no reason at
 #: all is not here: this double exits zero without one, so it would pass
 #: without asking the rule. `test_busy_upstream.py` pins None and "" instead.
 _UNRECOGNISED_CLAUDE_FAILURES = {

@@ -29,5 +29,15 @@ task: |
   `syn_shared.process_exit.describe_process_failure` (exists today);
   `run_setup_phase` driven through a real `ManagedWorkspace` and
   `AgenticIsolationAdapter` with only the provider replaced.
+  The tests replace two names, so both must exist with these spellings:
+  `exec_status_lost.container_state(container_name: str) -> str`, an async
+  function returning the container's state as `docker inspect` reports it;
+  and a module-level `_SETUP_RETRY_BACKOFF_SECONDS` (float seconds) in
+  `syn_adapters.workspace_backends.service.setup_phase`, the wait before the
+  one retry. A message explaining a lost status contains, per lost exec,
+  `container <name>: <state>` and the timing as `<elapsed>s against a
+  <timeout>s timeout`, with elapsed to one decimal and the timeout as given
+  (for example `141.0s against a 120s timeout`, `7.2s against a 5s timeout`).
+  When the exec ran past its timeout, it also contains `event loop is blocked`.
 hidden_tests:
   - packages/syn-adapters/tests/workspace_backends/test_exec_status_lost.py

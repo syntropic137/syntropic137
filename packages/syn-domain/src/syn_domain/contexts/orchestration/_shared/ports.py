@@ -7,9 +7,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from syn_domain.contexts.orchestration._shared.command_phase import COMMAND_TAIL_BYTES
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable
 
+    from syn_domain.contexts.orchestration._shared.command_phase import BoundedCommandResult
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         Artifact,
         ArtifactCollectionResult,
@@ -78,7 +81,12 @@ class IsolationBackendPort(Protocol):
         patterns: list[str],
         base_path: str = "/workspace",
     ) -> list[tuple[str, bytes]]:
-        """Copy files out of the isolation."""
+        """Copy files out of the isolation.
+
+        Raises `FilesRefusedError` (`_shared.file_transfer`) when any entry asked
+        for was refused, carrying what was read and each refusal by path and
+        reason: a refused file is never returned as absent or empty.
+        """
         ...
 
 
@@ -230,9 +238,34 @@ class EventStreamPort(Protocol):
         """
         ...
 
-    @property
-    def last_exit_code(self) -> int | None:
-        """Exit code from the most recent stream() call."""
+    def exit_code_of(self, handle: IsolationHandle) -> int | None:
+        """Exit code from the most recent stream() in ``handle``'s workspace.
+
+        Per workspace, never per adapter: one adapter serves every workspace of
+        its service, so a phase must read its own stream's code and not the
+        one a concurrent phase's stream ended with last (#980). None when no
+        stream there has completed.
+        """
+        ...
+
+    async def run_bounded(
+        self,
+        handle: IsolationHandle,
+        command: list[str],
+        *,
+        timeout_seconds: int,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+        tail_bytes: int = COMMAND_TAIL_BYTES,
+        withheld: Callable[[], Iterable[str]] | None = None,
+    ) -> BoundedCommandResult:
+        """Run ``command`` to its end and keep only a scrubbed tail of its output (ADR-078 D3).
+
+        Memory is bounded whatever the command prints, credentials are
+        withheld as in ``stream`` before anything is retained, and how it
+        ended is a typed terminal beside the exit code, never folded into it.
+        ``cancel_running`` stops it, and it then ends ``interrupted``.
+        """
         ...
 
     async def cancel_running(self, handle: IsolationHandle) -> bool:

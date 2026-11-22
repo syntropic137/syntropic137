@@ -8,6 +8,7 @@
   import { onDestroy } from 'svelte'
   import { GLYPH, buildAgentPrompt } from '@syn137/skyline-core/patterns'
   import { COPY_FEEDBACK_MS, copyFeedback, type CopyEvent, type CopyState } from '@syn137/skyline-core/state'
+  import { writeClipboard } from '../../components/CopyButton/clipboard'
   import Glyph from '../Glyph/Glyph.svelte'
   import type { AgentPromptButtonProps } from './types'
 
@@ -36,7 +37,7 @@
   async function copy() {
     send({ type: 'copy' })
     try {
-      await navigator.clipboard.writeText(text)
+      await writeClipboard(text)
       send({ type: 'success' })
       oncopied?.(text)
     } catch {

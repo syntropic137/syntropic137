@@ -14,7 +14,7 @@ async def list_workflows(
     limit: int = 100,
     offset: int = 0,
     auth: AuthContext | None = None,
-) -> Result[list[WorkflowSummary], WorkflowError]
+) -> Result[list[WorkflowSummaryResponse], WorkflowError]
 ```
 
 **Parameters:**
@@ -26,7 +26,7 @@ async def list_workflows(
 | `offset` | `int` | `0` | Pagination offset |
 | `auth` | `AuthContext \| None` | `None` | Optional auth context |
 
-**Returns:** `Ok(list[WorkflowSummary])` on success.
+**Returns:** `Ok(list[WorkflowSummaryResponse])` on success.
 
 **Errors:** None expected under normal operation.
 
@@ -104,7 +104,7 @@ async def create_workflow(
 |------|------|---------|-------------|
 | `name` | `str` | required | Workflow name |
 | `workflow_type` | `str` | `"custom"` | Type: research, planning, implementation, review, deployment, custom |
-| `classification` | `str` | `"standard"` | Classification: standard, advanced |
+| `classification` | `str` | `"standard"` | Classification, case-insensitive: simple, standard, complex, epic. Unknown values are refused with 422 |
 | `repository_url` | `str` | `""` | Repository URL (empty = no repo configured; ADR-058) |
 | `repository_ref` | `str` | `"main"` | Git ref/branch |
 | `description` | `str \| None` | `None` | Human-readable description |

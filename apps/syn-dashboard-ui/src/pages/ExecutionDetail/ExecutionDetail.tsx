@@ -17,8 +17,10 @@ import { TokenBreakdown } from '../../components/TokenBreakdown'
 import type { BreadcrumbItem } from '../../components/Breadcrumbs'
 import { ExecutionControl } from '../../components/ExecutionControl'
 import { ReadModelNotice } from '../../components/ReadPathBanner'
+import { CaptureDegradedBadge, type DegradedPhase } from '../../components/capture'
 import { ExecutionEvalBadge } from '../../components/evals'
 import { useExecutionData } from '../../hooks'
+import { useExecutionCapture } from '../../hooks/useExecutionCapture'
 import { useReadModelStatus } from '../../hooks/useReadPathHealth'
 import type { ExecutionDetailResponse, FailureClassification, ReportedFailureReason } from '../../types'
 import { type ExactUsd, exactUsdToString, parseExactUsd } from '../../utils/exactUsd'
@@ -81,6 +83,28 @@ function aggregateCostByModel(phases: Phase[]): Record<string, string> {
     }
   }
   return Object.fromEntries(Array.from(totals.entries()).map(([m, v]) => [m, exactUsdToString(v)]))
+}
+
+/**
+ * Models some phase ran that nothing priced anywhere in the execution (#1743).
+ *
+ * A model priced in one phase already has a row in the split, so only models
+ * absent from `costByModel` are listed. The label is the backend's.
+ */
+function aggregateUnpricedModels(
+  phases: Phase[],
+  costByModel: Record<string, string>,
+): { models: string[]; label: string } {
+  const models = new Set<string>()
+  let label = ''
+  for (const phase of phases) {
+    for (const model of phase.unpriced_models ?? []) {
+      if (model in costByModel) continue
+      models.add(model)
+      label = phase.unpriced_model_cost_display ?? label
+    }
+  }
+  return { models: Array.from(models).sort(), label }
 }
 
 /**
@@ -181,8 +205,9 @@ function ExecutionErrorCard({
 
 const CONTROLLABLE_STATUSES = new Set(['running', 'queued'])
 
-function ExecutionHeader({ execution, executionId, isConnected, refreshError, now, refreshExecution }: {
+function ExecutionHeader({ execution, executionId, isConnected, refreshError, now, refreshExecution, captureDegraded }: {
   execution: ExecutionDetailResponse
+  captureDegraded: readonly DegradedPhase[]
   executionId: string | undefined
   isConnected: boolean
   refreshError: string | null
@@ -208,6 +233,7 @@ function ExecutionHeader({ execution, executionId, isConnected, refreshError, no
                 pulse={execution.status === 'running'}
               />
               <ExecutionEvalBadge evalRun={execution.eval} />
+              <CaptureDegradedBadge degraded={captureDegraded} />
             </div>
             <p className="mt-1 break-words text-sm text-[var(--color-text-secondary)]">{execution.workflow_name}</p>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
@@ -290,6 +316,9 @@ export function ExecutionDetail() {
   // From /health once measured, so a 404 while the detail read model replays
   // can say why, and a terminal execution's snapshot cannot outlive catch-up.
   const rebuilding = useReadModelStatus('workflow_execution_details', execution?.read_model_status)
+  // Called before the early returns below, like every hook here; it waits for
+  // the id and follows the status, so it re-reads as the run finishes (#1516).
+  const captureDegraded = useExecutionCapture(executionId ?? '', execution?.status ?? '')
 
   if (loading) return <PageLoader />
 
@@ -315,13 +344,14 @@ export function ExecutionDetail() {
     { label: `Execution ${execution.workflow_execution_id.slice(0, 8)}` },
   ]
   const aggregatedCostByModel = aggregateCostByModel(execution.phases)
+  const unpricedModels = aggregateUnpricedModels(execution.phases, aggregatedCostByModel)
   const tokens = executionTokenTotals(execution)
 
   return (
     <div className="space-y-6">
       <Breadcrumbs items={breadcrumbs} />
       <ReadModelNotice status={rebuilding} />
-      <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} refreshError={error} now={now} refreshExecution={refreshExecution} />
+      <ExecutionHeader execution={execution} executionId={executionId} isConnected={isConnected} refreshError={error} now={now} refreshExecution={refreshExecution} captureDegraded={captureDegraded} />
       {execution.error_message && (
         <ExecutionErrorCard
           message={execution.error_message}
@@ -348,17 +378,19 @@ export function ExecutionDetail() {
           cacheWriteRateDisplay={execution.cache_write_rate_display}
         />
       </section>
-      {Object.keys(aggregatedCostByModel).length > 0 && (
+      {(Object.keys(aggregatedCostByModel).length > 0 || unpricedModels.models.length > 0) && (
         <section id="cost-by-model">
           <ModelBreakdown
             costByModel={aggregatedCostByModel}
             totalCost={execution.total_cost_usd}
             unpricedObservationCount={execution.unpriced_observation_count}
+            unpricedModels={unpricedModels.models}
+            unpricedLabel={unpricedModels.label}
           />
         </section>
       )}
       <section id="phase-timeline">
-        <PhaseTimeline execution={execution} now={now} />
+        <PhaseTimeline execution={execution} now={now} captureDegraded={captureDegraded} />
       </section>
       <SessionInventory key={execution.workflow_execution_id} executionId={execution.workflow_execution_id} />
       {execution.artifact_ids.length > 0 && (

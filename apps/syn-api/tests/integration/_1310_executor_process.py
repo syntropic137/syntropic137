@@ -146,7 +146,9 @@ async def main(
             "WorkflowExecution",
         )
     )
+    reaper = DockerDeadHostReaper()
     host = ExecutorHost(
+        reap_scope=reaper.scope(),  # this daemon: the live executor B fences only in it
         host_id=host_id,
         container_id=f"c-{host_id}",
         generation="g1",
@@ -157,7 +159,7 @@ async def main(
         host,
         capacity=1,
         drainer=_StallingDrainer(executions, Path(out)),
-        reaper=DockerDeadHostReaper(),
+        reaper=reaper,
         interrupter=AggregateRunInterrupter(executions),
         streams=EventStoreExecutionEventStream(clients[1]),
         timing=HostTiming(

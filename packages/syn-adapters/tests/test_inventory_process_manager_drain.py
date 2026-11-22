@@ -34,6 +34,7 @@ from event_sourcing.client.memory import MemoryEventStoreClient
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 
 from syn_adapters.session_inventory.memory_jobs import (
+    InMemoryInventorySchedulingGuard,
     InMemorySessionInventory,
     InMemorySessionInventoryJobs,
     Publication,
@@ -150,7 +151,11 @@ class _Harness:
             self.evidence, self.inventory, max_evidence_records=100_000, max_evidence_batches=10_000
         )
         self.scheduler = SchedulePendingInventoryHandler(
-            self.evidence, self.inventory, self.repository, self.jobs
+            self.evidence,
+            self.inventory,
+            self.repository,
+            self.jobs,
+            InMemoryInventorySchedulingGuard(),
         )
         self.step = InventoryStepHandler(
             self.repository, self.jobs, builder, self.evidence, lease_seconds=LEASE_SECONDS

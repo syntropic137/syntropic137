@@ -38,11 +38,22 @@ export async function synGetExecutionCost(
       ["Complete", c.is_complete ? "Yes" : "No"],
     ]),
     ...buildBreakdownSection("Cost by Phase", Object.entries(c.cost_by_phase ?? {})),
-    ...buildBreakdownSection("Cost by Model", Object.entries(c.cost_by_model ?? {})),
+    ...buildModelSection(c),
     ...buildBreakdownSection("Cost by Tool", Object.entries(c.cost_by_tool ?? {})),
   ];
 
   return { content: sections.join("\n") };
+}
+
+/** Cost by model, with each model that ran unpriced named beside the priced
+ * ones by the backend's display text, never as $0 (#1743). */
+function buildModelSection(c: ExecutionCost): string[] {
+  const priced = buildBreakdownSection("Cost by Model", Object.entries(c.cost_by_model ?? {}));
+  const unpriced = (c.unpriced_models ?? []).map(
+    (model) => `- ${model}: ${c.unpriced_model_cost_display}`,
+  );
+  if (unpriced.length === 0) return priced;
+  return priced.length > 0 ? [...priced, ...unpriced] : ["", "### Cost by Model", ...unpriced];
 }
 
 // ---------------------------------------------------------------------------

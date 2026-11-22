@@ -109,6 +109,7 @@ _SESSION = SessionCost(
     input_tokens=16229,
     output_tokens=1535,
     cache_creation_tokens=4096,
+    cache_creation_1h_tokens=1024,
     cache_read_tokens=144640,
     tool_calls=10,
     turns=7,
@@ -149,6 +150,7 @@ _EXECUTION = ExecutionCost(
     input_tokens=32458,
     output_tokens=3070,
     cache_creation_tokens=8192,
+    cache_creation_1h_tokens=2048,
     cache_read_tokens=289280,
     tool_calls=20,
     turns=14,
@@ -157,6 +159,7 @@ _EXECUTION = ExecutionCost(
     cost_by_model={"claude-opus-5": Decimal("2.269134")},
     cost_by_tool={"Bash": Decimal("0.1")},
     models_by_phase={"implement": {"claude-opus-5": Decimal("2.269134")}},
+    observed_models_by_phase={"implement": ["claude-opus-5", "acme-reasoner-7b"]},
     unpriced_by_phase={"implement": 3},
     unpriced_observation_count=3,
     is_complete=True,
@@ -181,6 +184,12 @@ _CHAINS: tuple[_Chain, ...] = (
         to_api=_execution_cost_to_api,
         dto=ExecutionCostData,
         response=ExecutionCostResponse,
+        exempt={
+            "unpriced_model_cost_display": (
+                "display text the response owns (#1743), a constant with no source "
+                "value for the DTO to carry"
+            ),
+        },
     ),
 )
 

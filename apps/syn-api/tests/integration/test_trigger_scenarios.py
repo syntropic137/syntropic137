@@ -19,7 +19,11 @@ from pathlib import Path
 import pytest
 
 from syn_api.types import Err, Ok
+from syn_domain.contexts.github.ports import PullRequestDraftReading, PullRequestReadiness
 from syn_shared.agents import PhaseModelDefaults
+
+# Creating a trigger on a repository needs an installation to resolve (#1864).
+pytestmark = pytest.mark.usefixtures("github_installation_resolves")
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
@@ -32,6 +36,25 @@ os.environ["SYN_GITHUB_APP_ID"] = ""
 
 # Path to webhook fixtures (relative to repo root)
 _FIXTURES_DIR = Path(__file__).resolve().parents[4] / "fixtures" / "webhooks"
+
+
+class _ReadyPullRequests:
+    """Every pull request is ready for review: these scenarios are not about drafts (#2058)."""
+
+    async def read_draft_state(
+        self, repository: str, pr_number: int, installation_id: str
+    ) -> PullRequestDraftReading:
+        return PullRequestDraftReading(readiness=PullRequestReadiness.READY)
+
+
+@pytest.fixture(autouse=True)
+def _pull_requests_are_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Answer the live draft lookup offline, at the wiring seam both evaluators use."""
+    monkeypatch.setattr("syn_api._wiring._event_pipeline_singleton", None)
+    monkeypatch.setattr("syn_api._wiring.get_pull_request_draft_reader", _ReadyPullRequests)
+    monkeypatch.setattr(
+        "syn_api.routes.webhooks.handlers.get_pull_request_draft_reader", _ReadyPullRequests
+    )
 
 
 @pytest.fixture(autouse=True)

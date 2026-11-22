@@ -22,6 +22,9 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from syn_adapters.workspace_backends.agentic.capability_verdict import (
+    CapabilityStatusValue,  # noqa: TC001 - a pydantic field type, needed at runtime
+)
 from syn_adapters.workspace_backends.agentic.capture_result import CaptureExpectations
 from syn_adapters.workspace_backends.agentic.capture_status import CaptureState
 from syn_adapters.workspace_backends.agentic.session_store_env import deployment_identity
@@ -29,6 +32,9 @@ from syn_adapters.workspace_backends.agentic.session_store_env import deployment
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from syn_adapters.workspace_backends.agentic.capability_verdict import (
+        CapabilityVerdict,
+    )
     from syn_adapters.workspace_backends.agentic.capture_result import (
         AuthoritativeCapture,
     )
@@ -51,7 +57,10 @@ logger = logging.getLogger(__name__)
 #:
 #: 2 added `agent_session_ids`, the agent-native session ids the store
 #: confirmed for this phase.
-_PAYLOAD_SCHEMA_VERSION: Final = 2
+#:
+#: 3 added `capability_status`, `failed_checks` and `doctor_exit`, the
+#: session-store capability's start-up verdict, and the `degraded` state (#1516).
+_PAYLOAD_SCHEMA_VERSION: Final = 3
 
 #: The recorded-payload versions a reader can interpret.
 #:
@@ -74,7 +83,7 @@ _PAYLOAD_SCHEMA_VERSION: Final = 2
 #: of silent widening that coupling this gate to the exporter's constant caused.
 #: When the payload version moves, this set is edited deliberately, or not
 #: at all.
-SUPPORTED_OBSERVATION_SCHEMA_VERSIONS: Final = frozenset({1, 2})
+SUPPORTED_OBSERVATION_SCHEMA_VERSIONS: Final = frozenset({1, 2, 3})
 
 #: Telemetry gets a short, bounded slice of teardown. The write is already
 #: failure-tolerant, but a hung connection pool would otherwise block a phase
@@ -140,6 +149,12 @@ class CaptureObservationData(BaseModel):
     expected_store_url: str | None = None
     expected_deployment: str | None = None
     expected_sessions: bool | None = None
+
+    # The session-store capability's START-UP verdict, read from the workspace's
+    # audit row. None when there was no row or it could not be read (#1516).
+    capability_status: CapabilityStatusValue | None = None
+    failed_checks: list[str] = Field(default_factory=list)
+    doctor_exit: int | None = None
 
     partition: str | None = None
     """The spool partition this execution wrote to.
@@ -269,6 +284,7 @@ async def record_capture_outcome(
     session_id: str,
     expectations: CaptureExpectations | None,
     partition: str | None,
+    capability: CapabilityVerdict | None = None,
     execution_id: str | None = None,
     phase_id: str | None = None,
     workspace_id: str | None = None,
@@ -304,6 +320,14 @@ async def record_capture_outcome(
         expected_sessions=expectations.expect_sessions if expectations else None,
         partition=partition,
     )
+    if capability is not None:
+        payload = payload.model_copy(
+            update={
+                "capability_status": capability.status,
+                "failed_checks": list(capability.failed_checks),
+                "doctor_exit": capability.doctor_exit,
+            }
+        )
 
     try:
         await asyncio.wait_for(

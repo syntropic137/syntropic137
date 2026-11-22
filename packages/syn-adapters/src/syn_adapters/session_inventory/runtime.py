@@ -44,21 +44,25 @@ from .postgres_inventory import PostgresSessionInventory
 from .postgres_jobs import PostgresSessionInventoryJobs
 from .postgres_settlements import PostgresSettlementDeadlines
 from .postgres_spools import PostgresCaptureSpools
-from .recovery_worker import CaptureRecoveryWorker
+from .recovery_worker import CaptureRecoveryWorker, SpoolRecoveryPort
 from .replication_runtime import (
     capture_destination_id,
     capture_outboxes,
     create_replication_manager,
 )
+from .scheduling_guard import PostgresInventorySchedulingGuard
 from .spool_drain import LocalSpoolDrain
-from .spool_release import CaptureSpoolRetention
+from .spool_release import CaptureSpoolRetention, SpoolVolumePort
 from .transcript_access import InstallationTranscriptAccess
 from .transcript_conversation import AgenticTranscriptConversation
 from .transcript_deletions import PostgresTranscriptDeletions
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from event_sourcing import EventStoreClient
 
+    from syn_domain.contexts.agent_sessions import SpoolBackend
     from syn_domain.contexts.agent_sessions.slices.replicate_session_inventory.projection import (
         InventoryReplicationProcessManager,
     )
@@ -66,6 +70,7 @@ if TYPE_CHECKING:
 
     from .database import Pool
     from .history_source import CaptureObservationQuery
+    from .sandbox_recovery import SandboxSpoolRecovery
 
 
 logger = logging.getLogger(__name__)
@@ -109,7 +114,8 @@ class InventoryWork:
     recovery: CaptureRecoveryWorker | None = None
     retention: LocalBodyRetention | None = None
     history: ProcessHistoryBackfillQueueHandler | None = None
-    spool_release: CaptureSpoolRetention | None = None
+    spool_release: tuple[CaptureSpoolRetention, ...] = ()
+    """One per backend: each holds its own age and byte limits."""
 
     async def schedule(self) -> None:
         if self.retention is not None:
@@ -121,9 +127,9 @@ class InventoryWork:
                     "Local body deletion failed (%s); durable request remains pending",
                     type(exc).__name__,
                 )
-        if self.spool_release is not None:
+        for release in self.spool_release:
             try:
-                await self.spool_release.step()
+                await release.step()
             except Exception as exc:
                 logger.error(
                     "Capture spool release failed (%s); durable intent remains pending",
@@ -149,6 +155,7 @@ async def create_inventory_runtime(
     settings: SessionInventorySettings,
     *,
     recovery_image: str | None = None,
+    remote_recovery: Mapping[SpoolBackend, SandboxSpoolRecovery] | None = None,
     observations: CaptureObservationQuery | None = None,
 ) -> InventoryRuntime:
     evidence = PostgresSessionEvidence(pool)
@@ -156,12 +163,16 @@ async def create_inventory_runtime(
     jobs = PostgresSessionInventoryJobs(pool)
     # One schema bootstrap initializes the shared durable tables.
     await evidence.ensure_ready()
-    archive = LocalSessionTranscriptArchive(settings.archive_dir)
+    archive = LocalSessionTranscriptArchive(
+        settings.archive_dir, compress=settings.archive_compression
+    )
     await archive.ensure_ready()
     source_id = await asyncio.to_thread(
         installation_identity, settings.archive_dir, settings.source_instance_id
     )
-    spools = PostgresCaptureSpools(pool, source_id)
+    spools = PostgresCaptureSpools(
+        pool, source_id, live_resweep_seconds=settings.live_resweep_seconds
+    )
     receipts = PostgresBackfillReceipts(pool)
     await receipts.ensure_ready()
     history_queue = PostgresHistoryBackfillQueue(pool, source_id)
@@ -180,19 +191,28 @@ async def create_inventory_runtime(
         archive, evidence, AgenticNativeSessionEvidence(), catalog=PostgresCaptureCatalog(pool)
     )
     drain = LocalSpoolDrain(capture)
-    recovery = DockerSpoolRecovery(recovery_image) if recovery_image is not None else None
-    spool_release = (
-        CaptureSpoolRetention(
+    # One recovery port per backend this worker can reach (decision 7): it claims
+    # only those spools. Docker needs the verified helper image; a remote backend
+    # needs its recovery kit, supplied by the caller holding that credential.
+    remote = dict(remote_recovery or {})
+    recovery: dict[SpoolBackend, SpoolRecoveryPort] = dict(remote)
+    volumes: dict[SpoolBackend, SpoolVolumePort] = dict(remote)
+    if recovery_image is not None:
+        docker = DockerSpoolRecovery(recovery_image)
+        recovery["docker"], volumes["docker"] = docker, docker
+    retention: dict[SpoolBackend, CaptureSpoolRetention] = {
+        backend: CaptureSpoolRetention(
             pool,
             source_id,
-            recovery,
+            volume,
             evidence,
+            backend=backend,
             age_seconds=settings.spool_retention_seconds,
             max_bytes=settings.spool_max_bytes,
+            max_count=settings.spool_max_count,
         )
-        if recovery is not None
-        else None
-    )
+        for backend, volume in volumes.items()
+    }
     catalog = PostgresCaptureCatalog(pool)
     access = InstallationTranscriptAccess(pool, source_id)
     fence = DeletionFence(pool, source_id)
@@ -233,7 +253,7 @@ async def create_inventory_runtime(
             max_bytes=settings.local_body_max_bytes,
             exporter_binary=settings.exporter_binary,
         ),
-        spool_release=spool_release,
+        spool_release=tuple(retention.values()),
         recovery=CaptureRecoveryWorker(
             spools,
             recovery,
@@ -241,11 +261,13 @@ async def create_inventory_runtime(
             lease_seconds=settings.lease_seconds,
             retry_seconds=settings.retry_seconds,
             children=ChildJournalDrain(evidence),
-            release=spool_release,
+            release=retention,
         )
-        if recovery is not None
+        if recovery
         else None,
-        scheduler=SchedulePendingInventoryHandler(evidence, inventory, repository, jobs),
+        scheduler=SchedulePendingInventoryHandler(
+            evidence, inventory, repository, jobs, PostgresInventorySchedulingGuard(pool)
+        ),
         step=InventoryStepHandler(
             repository, jobs, builder, evidence, lease_seconds=settings.lease_seconds
         ),

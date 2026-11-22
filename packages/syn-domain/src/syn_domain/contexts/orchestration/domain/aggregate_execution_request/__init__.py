@@ -7,11 +7,12 @@ from .ExecutionRequestAggregate import (
     ExecutionRequestAggregate,
     ExecutionRequestNotFoundError,
 )
-from .value_objects import execution_request_id
+from .value_objects import execution_id_for_key, execution_request_id
 
 __all__ = [
     "ExecutionAlreadyRequestedError",
     "ExecutionRequestAggregate",
     "ExecutionRequestNotFoundError",
+    "execution_id_for_key",
     "execution_request_id",
 ]

@@ -137,6 +137,7 @@ class _Host:
     def __init__(self, operations: SignalIgnoringOperations) -> None:
         self.operations = operations
         self.credentials = WorkspaceCredentials(SessionStoreSettings())
+        self.shares_host_kernel = True
 
     def workspace(self, isolation_id: str) -> Workspace | None:
         return Workspace(

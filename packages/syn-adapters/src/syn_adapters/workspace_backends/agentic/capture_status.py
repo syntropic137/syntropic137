@@ -52,6 +52,16 @@ class CaptureState(StrEnum):
     worth retrying and the state a backfill should target.
     """
 
+    DEGRADED = "degraded"
+    """The workspace started with capture switched off (#1516).
+
+    The session-store capability's start-up checks failed, so agentic-workspace
+    degraded it rather than failing the workspace. Nothing was exported, and
+    that is EXPLAINED: the capability's own verdict says which check failed.
+    Distinct from FAILED, where capture was on and the export broke. Still not
+    settled - the sessions are not in the store - so it asks for a backfill.
+    """
+
     UNKNOWN = "unknown"
     """The verdict cannot be trusted either way.
 

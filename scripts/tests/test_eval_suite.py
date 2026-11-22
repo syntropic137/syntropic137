@@ -14,9 +14,11 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
@@ -24,12 +26,21 @@ from typing import get_args
 
 import httpx
 import pytest
-from pydantic import SecretStr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import eval_suite
 import yaml
+from agentic_isolation.harnesses.claude import ClaudeHeadless
+from agentic_isolation.harnesses.claude.headless import (
+    ClaudeHeadlessEmptyOutputError,
+    ClaudeHeadlessExitError,
+    ClaudeHeadlessModelError,
+    ClaudeHeadlessNotOAuthError,
+    ClaudeHeadlessReportedError,
+    ClaudeHeadlessTimeoutError,
+    ClaudeHeadlessUnreadableOutputError,
+)
 from eval_suite import (
     DEFAULT_SUITE,
     ROOT,
@@ -62,6 +73,7 @@ from eval_suite import (
 from syn_domain.contexts.orchestration import (
     ArchiveWorkflowTemplateCommand,
     CreateWorkflowTemplateHandler,
+    TagSet,
     WorkflowTemplateAggregate,
     WorkflowTemplateConflictError,
     build_command_from_definition,
@@ -75,7 +87,6 @@ from syn_shared.agents import (
     resolve_model_alias,
 )
 from syn_shared.pricing import resolve_model_pricing
-from syn_shared.settings.config import Settings
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -105,6 +116,7 @@ _PINNED_CODEX_WFS = {
     "eval-verify-pinned-codex-gpt-6-luna-v1": "gpt-6-luna",
     "eval-verify-pinned-codex-gpt-5-6-luna-v1": "gpt-5.6-luna",
     "eval-verify-pinned-codex-gpt-5-6-terra-v1": "gpt-5.6-terra",
+    "eval-verify-pinned-codex-gpt-6-1-sol-v1": "gpt-6.1-sol",
 }
 
 
@@ -2280,8 +2292,15 @@ def test_v5_scores_its_own_cases_under_every_verifier_without_the_v6_controls(
     }
 
 
+# Added under v8 (2026-11-06): no earlier version ran it, so version-history tests skip it.
+_ADDED_IN_V8 = frozenset({"eval-verify-pinned-codex-gpt-6-1-sol-v1"})
+_V6_VERIFIERS = [
+    w for w in (_WF, _CODEX_WF, _SONNET_WF, *_PINNED_CODEX_WFS) if w not in _ADDED_IN_V8
+]
+
+
 @pytest.mark.unit
-@pytest.mark.parametrize("workflow", [_WF, _CODEX_WF, _SONNET_WF, *_PINNED_CODEX_WFS])
+@pytest.mark.parametrize("workflow", _V6_VERIFIERS)
 def test_v6_scores_its_own_cases_under_every_verifier_without_v7s_escape(workflow: str) -> None:
     v6 = load_suite(DEFAULT_SUITE, workflow=workflow, version=6)
     current = load_suite(DEFAULT_SUITE, workflow=workflow)
@@ -3284,8 +3303,37 @@ class _FakeModel:
         return self.reply
 
 
+@dataclass
+class _SplitModel:
+    """A `ModelClient` whose successive answers differ: the judge's samples disagree."""
+
+    replies: list[str]
+    calls: int = 0
+
+    def complete(self, *, model: str, system: str, prompt: str) -> str:
+        self.calls += 1
+        return self.replies[(self.calls - 1) % len(self.replies)]
+
+
 def _reply(verdict: str, quote: str = "", reason: str = "r") -> str:
     return json.dumps({"verdict": verdict, "quote": quote, "reason": reason})
+
+
+@pytest.mark.unit
+def test_a_reply_that_omits_the_quote_is_read_as_an_empty_quote() -> None:
+    """The prompt says quote is empty unless match; a model left it out on a live no_match
+    (dry run 2026-11-06) and scoring crashed. Omitted means empty, so no verdict changes."""
+    no_quote = json.dumps({"verdict": "no_match", "reason": "different root cause"})
+    judgement = eval_suite.LlmJudge(_FakeModel(no_quote)).judge(
+        _EXPECTED, blocking_findings(_PARAPHRASED)
+    )
+    assert (judgement.verdict, judgement.quote) == ("no_match", "")
+
+    match_no_quote = json.dumps({"verdict": "match", "reason": "same"})
+    judgement = eval_suite.LlmJudge(_FakeModel(match_no_quote)).judge(
+        _EXPECTED, blocking_findings(_PARAPHRASED)
+    )
+    assert judgement.verdict == "unclear", "a match must still quote a finding to count"
 
 
 # The seeded defect, said in words the keyword judge does not know.
@@ -3326,9 +3374,45 @@ def test_llm_judge_credits_a_paraphrase_the_keyword_judge_misses() -> None:
     assert score.llm is not None and score.llm.verdict == "match"
     assert score.llm.quote == _PARAPHRASE_QUOTE
     assert score.passed and score.caught
-    [call] = model.calls
-    assert call["model"] == eval_suite.JUDGE_MODEL
-    assert "minio.py" in call["prompt"] and _PARAPHRASE_QUOTE in call["prompt"]
+    assert len(model.calls) == eval_suite.JUDGE_SAMPLES
+    for call in model.calls:
+        assert call["model"] == eval_suite.JUDGE_MODEL
+        assert "minio.py" in call["prompt"] and _PARAPHRASE_QUOTE in call["prompt"]
+
+
+@pytest.mark.unit
+def test_the_judges_majority_answer_is_the_verdict() -> None:
+    model = _SplitModel(
+        [_reply("match", _PARAPHRASE_QUOTE), _reply("no_match"), _reply("match", _PARAPHRASE_QUOTE)]
+    )
+    judgement = eval_suite.LlmJudge(model).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert (judgement.verdict, judgement.quote) == ("match", _PARAPHRASE_QUOTE)
+    assert "match 2/3" in judgement.reason and "no_match 1/3" in judgement.reason
+    assert model.calls == eval_suite.JUDGE_SAMPLES
+
+
+@pytest.mark.unit
+def test_a_judge_that_disagrees_with_itself_is_unclear_and_not_caught() -> None:
+    """No verdict has a majority: the score must not credit a catch on one vote in three."""
+    model = _SplitModel([_reply("match", _PARAPHRASE_QUOTE), _reply("no_match"), _reply("unclear")])
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, eval_suite.LlmJudge(model))
+    assert score.llm is not None and score.llm.verdict == "unclear"
+    assert score.llm.reason.startswith("no majority")
+    assert not score.caught and not score.passed
+
+
+@pytest.mark.unit
+def test_a_sample_quoting_no_finding_votes_unclear_not_match() -> None:
+    """The quote check runs per sample, before the vote: an invented quote cannot tip it."""
+    model = _SplitModel(
+        [
+            _reply("match", "an invented sentence"),
+            _reply("match", _PARAPHRASE_QUOTE),
+            _reply("no_match"),
+        ]
+    )
+    judgement = eval_suite.LlmJudge(model).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert judgement.verdict == "unclear"
 
 
 @pytest.mark.unit
@@ -3386,9 +3470,9 @@ def test_llm_judged_score_is_recorded_under_the_judges_identity(
     rows, _ = score_suite(loaded, server.client(), [_LAUNCHED], eval_suite.LlmJudge(model))
 
     [(_, body)] = server.scores
-    assert body["scorer_version"] == "8+llm:claude-sonnet-4-6@prompt-v3"
+    assert body["scorer_version"] == "8+llm:claude-sonnet-5-5@prompt-v5"
     assert body["verdict"] == "PASS"
-    assert "LLM judge (`llm:claude-sonnet-4-6@prompt-v3`): `match`" in str(body["evidence"])
+    assert "LLM judge (`llm:claude-sonnet-5-5@prompt-v5`): `match`" in str(body["evidence"])
     assert "keyword judge: no match" in str(body["evidence"])
     table = render(loaded, rows)
     assert "keyword OR LLM match, unclear not caught): 1/1" in table
@@ -3411,80 +3495,295 @@ def test_keyword_only_scoring_records_the_plain_suite_version(
     assert "LLM judge" not in str(body["evidence"])
 
 
+@dataclass
+class _FakeTransport:
+    """Stands in for `ClaudeHeadless` behind `HeadlessJudgeClient`: answers `replies` in
+    turn, raising any that is an exception, and records the model of every call."""
+
+    replies: list[str | Exception]
+    models: list[str] = field(default_factory=list)
+
+    def complete(self, *, model: str, system: str, prompt: str) -> str:
+        self.models.append(model)
+        reply = self.replies[(len(self.models) - 1) % len(self.replies)]
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+def _wired_judge(transport: _FakeTransport) -> eval_suite.LlmJudge:
+    """The judge exactly as `score --llm-judge` builds it, on a fake transport."""
+    return eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient(transport=transport))
+
+
 @pytest.mark.unit
-def test_llm_judge_flag_without_a_key_fails_before_any_call(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_score_llm_judge_runs_on_agentic_workspaces_claude_headless(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(eval_suite, "get_settings", lambda: Settings(_env_file=None))
-    assert eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"]) == 1
-    assert "needs ANTHROPIC_API_KEY" in capsys.readouterr().err
+    """The `score --llm-judge` wiring builds the judge on AW's `ClaudeHeadless` at the
+    pinned effort, behind `HeadlessJudgeClient`: no local transport, no API client."""
+    built: list[eval_suite.ModelClient] = []
+
+    def spy(client: eval_suite.ModelClient, model: str = eval_suite.JUDGE_MODEL) -> object:
+        built.append(client)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(eval_suite, "LlmJudge", spy)
+    with pytest.raises(SystemExit):
+        eval_suite.main(["score", "--llm-judge", "--api-url", "http://unreachable.invalid"])
+    [client] = built
+    assert isinstance(client, eval_suite.HeadlessJudgeClient)
+    assert type(client.transport) is ClaudeHeadless
+    assert client.transport.effort == eval_suite.JUDGE_EFFORT
 
 
 @pytest.mark.unit
-def test_the_judge_uses_the_key_configured_in_settings_dotenv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_calibration_wiring_runs_on_agentic_workspaces_claude_headless(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """ADR-004: the credential comes from `Settings` (env or .env), not a parallel env read."""
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    dotenv = tmp_path / ".env"
-    dotenv.write_text("ANTHROPIC_API_KEY=fake-dotenv-key\n")
-    sent: list[httpx.Request] = []
+    """`eval_judge_calibrate` builds the same judge as `score --llm-judge`."""
+    import eval_judge_calibrate
 
-    def handle(request: httpx.Request) -> httpx.Response:
-        sent.append(request)
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+    built: list[eval_suite.ModelClient] = []
 
-    client = eval_suite.AnthropicMessages.from_settings(Settings(_env_file=dotenv))
-    client._http = httpx.Client(transport=httpx.MockTransport(handle))
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    [request] = sent
-    assert request.headers["x-api-key"] == "fake-dotenv-key"
-    assert "fake-dotenv-key" not in repr(vars(client)) + capsys.readouterr().out
+    def spy(client: eval_suite.ModelClient, model: str = eval_suite.JUDGE_MODEL) -> object:
+        built.append(client)
+        raise SystemExit(0)
 
-
-@pytest.mark.unit
-def test_anthropic_client_sends_the_pinned_model_at_temperature_zero() -> None:
-    sent: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        sent.append(request)
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
-
-    client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(handle))
-    )
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    [request] = sent
-    assert request.headers["x-api-key"] == "test-key"
-    body = json.loads(request.content)
-    assert (body["model"], body["temperature"]) == (eval_suite.JUDGE_MODEL, 0)
+    monkeypatch.setattr(eval_judge_calibrate, "LlmJudge", spy)
+    with pytest.raises(SystemExit):
+        eval_judge_calibrate.main(["--suite-tag", "", "--api-url", "http://unreachable.invalid"])
+    [client] = built
+    assert isinstance(client, eval_suite.HeadlessJudgeClient)
+    assert type(client.transport) is ClaudeHeadless
 
 
 @pytest.mark.unit
-def test_a_model_that_rejects_temperature_zero_is_refused_before_sending() -> None:
-    """The 4.7+/5.x models 400 on a non-default temperature: the pinned judge is not one of them.
+def test_the_judge_runs_every_sample_through_the_transport_with_the_pinned_model() -> None:
+    transport = _FakeTransport([_reply("match", _PARAPHRASE_QUOTE)])
+    judgement = _wired_judge(transport).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert judgement.verdict == "match"
+    assert judgement.judge == "llm:claude-sonnet-5-5@prompt-v5"
+    assert transport.models == [eval_suite.JUDGE_MODEL] * eval_suite.JUDGE_SAMPLES
 
-    The transport below plays the provider's contract, so a pinned model it rejects
-    fails here rather than mid-scoring against the real API.
+
+_TRANSPORT_FAILURES = [
+    ClaudeHeadlessExitError("claude -p --model claude-sonnet-5-5 exited 1: not logged in"),
+    ClaudeHeadlessTimeoutError("gave no answer within 300s"),
+    ClaudeHeadlessEmptyOutputError("printed nothing"),
+    ClaudeHeadlessUnreadableOutputError("printed no JSON result envelope"),
+    ClaudeHeadlessReportedError("reported an error: 'usage limit reached'"),
+    ClaudeHeadlessNotOAuthError("runs only on its OAuth login"),
+    ClaudeHeadlessModelError("needs an exact model id"),
+    FileNotFoundError(2, "No such file or directory", "claude"),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure", _TRANSPORT_FAILURES, ids=lambda e: type(e).__name__)
+def test_every_transport_failure_is_a_judge_error_with_its_cause(failure: Exception) -> None:
+    """Each AW error, and the CLI missing altogether, reaches the caller as a
+    `JudgeTransportError` chained to it: never a reply, never a raw transport type."""
+    client = eval_suite.HeadlessJudgeClient(transport=_FakeTransport([failure]))
+    with pytest.raises(eval_suite.JudgeTransportError) as raised:
+        client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p")
+    assert raised.value.__cause__ is failure
+    assert type(failure).__name__ in str(raised.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failing_sample", range(3))
+def test_one_failed_sample_fails_the_judgement_rather_than_voting(failing_sample: int) -> None:
+    """Two samples agree on `match`; the third fails. A failure is never a vote and never
+    an abstention: the judgement fails, whichever sample it was."""
+    assert eval_suite.JUDGE_SAMPLES == 3
+    replies: list[str | Exception] = [_reply("match", _PARAPHRASE_QUOTE)] * 3
+    replies[failing_sample] = ClaudeHeadlessReportedError("usage limit reached")
+    transport = _FakeTransport(replies)
+    with pytest.raises(eval_suite.JudgeTransportError, match="usage limit reached"):
+        _wired_judge(transport).judge(_EXPECTED, blocking_findings(_PARAPHRASED))
+    assert len(transport.models) == failing_sample + 1
+
+
+@dataclass
+class _EntryPoint:
+    """The real `score --llm-judge` and `eval_judge_calibrate` entry points with only
+    their two outside edges replaced: AW's `ClaudeHeadless` by `transport` and the API
+    by `server`. The adapter, judge, vote, report extraction and scorer all run.
+
+    `server.scores` is what was POSTed, `transport.models` the calls made, and `built`
+    the keyword arguments every `ClaudeHeadless` was constructed with.
     """
-    sent: list[httpx.Request] = []
 
-    def provider(request: httpx.Request) -> httpx.Response:
-        sent.append(request)
-        body = json.loads(request.content)
-        if body["model"] not in eval_suite.TEMPERATURE_ZERO_MODELS and body["temperature"] != 1:
-            return httpx.Response(400, json={"error": {"message": "temperature not supported"}})
-        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+    server: _Server
+    transport: _FakeTransport
+    ledger: Path
+    built: list[dict[str, object]] = field(default_factory=list)
 
-    client = eval_suite.AnthropicMessages(
-        SecretStr("test-key"), httpx.Client(transport=httpx.MockTransport(provider))
+    def run(self, command: str) -> int:
+        import eval_judge_calibrate
+
+        args = ["--launches", str(self.ledger), "--version", "8", "--api-url", "http://api.invalid"]
+        if command == "score":
+            return eval_suite.main(["score", "--llm-judge", *args])
+        return eval_judge_calibrate.main(["--suite-tag", _LAUNCHED.suite, *args])
+
+
+def _entry_point(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, replies: list[str | Exception]
+) -> _EntryPoint:
+    monkeypatch.setitem(globals(), "_FINDING", _PARAPHRASED)
+    server = _Server(load_suite(DEFAULT_SUITE))
+    http = server.client()
+    ledger = tmp_path / "launches.jsonl"
+    ledger.write_text(_LAUNCHED.model_dump_json() + "\n")
+    edges = _EntryPoint(server, _FakeTransport(replies), ledger)
+
+    def claude_headless(**kwargs: object) -> _FakeTransport:
+        edges.built.append(kwargs)
+        return edges.transport
+
+    monkeypatch.setattr(eval_suite, "ClaudeHeadless", claude_headless)
+    monkeypatch.setattr(httpx, "Client", lambda **_: http)
+    return edges
+
+
+@pytest.mark.unit
+def test_score_main_posts_the_llm_judges_majority_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Through `eval_suite.main`: three pinned samples reach AW's client, and the POSTed
+    score carries the LLM judge's identity and its majority `match`. The keyword judge
+    alone misses this paraphrase, so the PASS can only be the LLM's.
+
+    Mutation check: score with `llm=None` in `main` and this fails.
+    """
+    edges = _entry_point(
+        monkeypatch,
+        tmp_path,
+        [
+            _reply("match", _PARAPHRASE_QUOTE),
+            _reply("no_match"),
+            _reply("match", _PARAPHRASE_QUOTE),
+        ],
     )
-    assert client.complete(model=eval_suite.JUDGE_MODEL, system="s", prompt="p") == "ok"
-    for unsupported in ("claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-4-7"):
-        with pytest.raises(eval_suite.JudgeError, match="does not accept temperature 0"):
-            client.complete(model=unsupported, system="s", prompt="p")
-    assert len(sent) == 1
+
+    edges.run("score")  # exits 1: the suite's other cases were never launched
+
+    assert edges.built == [{"effort": eval_suite.JUDGE_EFFORT}]
+    assert edges.transport.models == [eval_suite.JUDGE_MODEL] * eval_suite.JUDGE_SAMPLES
+    [(_, body)] = edges.server.scores
+    assert body["scorer_version"] == "8+llm:claude-sonnet-5-5@prompt-v5"
+    assert body["verdict"] == "PASS"
+    assert "LLM judge (`llm:claude-sonnet-5-5@prompt-v5`): `match`" in str(body["evidence"])
+
+
+@pytest.mark.unit
+def test_calibration_main_reports_the_llm_judges_majority_verdict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Through `eval_judge_calibrate.main`: the row's LLM column is the majority vote of
+    three pinned samples on AW's client, here `no_match` over one `match`."""
+    edges = _entry_point(
+        monkeypatch,
+        tmp_path,
+        [_reply("no_match"), _reply("match", _PARAPHRASE_QUOTE), _reply("no_match")],
+    )
+
+    assert edges.run("calibrate") == 0
+
+    assert edges.built == [{"effort": eval_suite.JUDGE_EFFORT}]
+    assert edges.transport.models == [eval_suite.JUDGE_MODEL] * eval_suite.JUDGE_SAMPLES
+    out = capsys.readouterr().out
+    assert "judge: llm:claude-sonnet-5-5@prompt-v5" in out
+    assert f"| {_LAUNCHED.case} | {_LAUNCHED.run_id} | no_match | no_match |" in out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("command", ["score", "calibrate"])
+@pytest.mark.parametrize("failing_sample", range(3))
+def test_a_transport_failure_aborts_the_entry_point_without_a_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    failing_sample: int,
+) -> None:
+    """An AW error on any sample, including after valid ones, aborts the real entry
+    point as a `JudgeTransportError` chained to it: no score is POSTed and no
+    calibration table is printed. A failure is never a vote."""
+    failure = ClaudeHeadlessReportedError("usage limit reached")
+    replies: list[str | Exception] = [_reply("match", _PARAPHRASE_QUOTE)] * 3
+    replies[failing_sample] = failure
+    edges = _entry_point(monkeypatch, tmp_path, replies)
+
+    with pytest.raises(eval_suite.JudgeTransportError) as raised:
+        edges.run(command)
+
+    assert raised.value.__cause__ is failure
+    assert len(edges.transport.models) == failing_sample + 1
+    assert edges.server.scores == []
+    assert "| case | run |" not in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_the_judge_reads_no_api_key() -> None:
+    """Owner decision 2026-10-20: the judge never calls the API with a key."""
+    source = Path(eval_suite.__file__).read_text()
+    assert "anthropic_api_key" not in source and "x-api-key" not in source
+    assert not hasattr(eval_suite, "AnthropicMessages")
+
+
+@pytest.mark.unit
+def test_no_claude_code_transport_is_left_in_this_repo() -> None:
+    """The headless transport is agentic-workspace's (#2036): no argv, envelope or
+    auth-status parsing here, and nothing here starts a `claude` process."""
+    source = Path(eval_suite.__file__).read_text()
+    for marker in ('"--output-format"', '"--system-prompt"', '"auth", "status"', "ClaudeCode"):
+        assert marker not in source, marker
+
+
+_PRE5_MODELS = (
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
+    "claude-haiku-4-5",
+    "claude-3-7-sonnet-20250219",
+    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-latest",
+    "sonnet",
+)
+
+
+@pytest.mark.unit
+def test_the_pinned_judge_model_is_an_allowed_5x_model() -> None:
+    assert eval_suite.JUDGE_MODEL in eval_suite.JUDGE_MODELS
+    for model in eval_suite.JUDGE_MODELS:
+        assert re.fullmatch(r"claude-(opus|sonnet|haiku)-5-\d+", model)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model", _PRE5_MODELS)
+def test_a_pre5_model_passed_to_the_client_is_refused_before_any_call(model: str) -> None:
+    """The outgoing boundary: a direct `complete` with a pre-5 id or alias never reaches
+    the transport, so `ClaudeHeadless`'s looser `claude-` prefix check is not the policy."""
+    transport = _FakeTransport(["ok"])
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.HeadlessJudgeClient(transport=transport).complete(
+            model=model, system="s", prompt="p"
+        )
+    assert transport.models == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model", _PRE5_MODELS)
+def test_a_pre5_judge_override_is_refused_before_any_call(model: str) -> None:
+    """An explicit `LlmJudge(model=...)` cannot route the judge to a pre-5 model."""
+    transport = _FakeTransport(["ok"])
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient(transport=transport), model=model).judge(
+            _EXPECTED, blocking_findings(_PARAPHRASED)
+        )
+    assert transport.models == []
 
 
 @pytest.mark.unit
@@ -3498,8 +3797,9 @@ def test_every_defect_case_gives_the_judge_its_root_cause_and_hides_it_from_the_
         assert case.expected.defect not in case.task
         model = _FakeModel(_reply("no_match"))
         eval_suite.LlmJudge(model).judge(case.expected, ["some finding"])
-        [call] = model.calls
-        assert case.expected.defect in call["prompt"], case.id
+        assert model.calls and all(
+            case.expected.defect in call["prompt"] for call in model.calls
+        ), case.id
 
 
 @pytest.mark.unit
@@ -3522,3 +3822,734 @@ def test_calibration_refuses_a_ledger_without_the_runs(
     ledger.write_text(_LAUNCHED.model_dump_json() + "\n")
     assert eval_judge_calibrate.main(["--launches", str(ledger), "--suite-tag", "nope:v6:"]) == 1
     assert "no ledger line has a suite tag starting 'nope:v6:'" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# k trials per case (#2108 S3): register, launch --trials, --top-up, check
+# ---------------------------------------------------------------------------
+
+# An explicit codex slug: a --trials cohort refuses an alias, and opus is one.
+_TRIAL_WF = "eval-verify-pinned-codex-gpt-6-luna-v1"
+
+
+class _TrialServer(_Server):
+    """`_Server` with every case eval already made, eval tag edits, and eval-set figures.
+
+    `roster` holds tags written onto an eval after create; `metrics` is what
+    `GET /eval-sets/metrics` answers. Each started run gets its own id.
+    """
+
+    def __init__(self, loaded: LoadedSuite) -> None:
+        super().__init__(loaded)
+        self.existing = True
+        self.roster: dict[str, list[str]] = {}
+        self.metrics: dict[str, object] = {}
+        self.started = 0
+        self.run_tags: dict[str, list[str]] = {}
+        self.lose_answer: set[int] = set()
+        """Start attempts (from 1) that start the run but answer 504."""
+        self.refuse: set[int] = set()
+        """Start attempts (from 1) that answer 503 and start nothing."""
+        self.attempts = 0
+        self.lagging_lookups = 0
+        """How many tag lookups still answer empty, as a lagging list read does."""
+
+    def _stable(self, case_id: str) -> dict[str, object]:
+        # Keyed by case, as the real stable key is: two cases may share a pin.
+        ev = {**super()._stable(case_id), "eval_id": f"eval-{case_id}"}
+        return {
+            **ev,
+            "tags": [self.tag, f"case:{case_id}", *self.roster.get(f"eval-{case_id}", [])],
+        }  # pyright: ignore[reportGeneralTypeIssues]
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.method == "POST" and path.startswith("/evals/") and path.endswith("/tags"):
+            self.requests.append(request)
+            eval_id = path.split("/")[2]
+            self.roster.setdefault(eval_id, []).extend(json.loads(request.content)["tags"])
+            return httpx.Response(200, json={"eval_id": eval_id, "tags": self.roster[eval_id]})
+        if path == "/eval-sets/metrics":
+            self.requests.append(request)
+            return httpx.Response(200, json=self.metrics)
+        if request.method == "POST" and path.endswith("/execute") and self.installed:
+            self.requests.append(request)
+            self.attempts += 1
+            if self.attempts in self.refuse:
+                return httpx.Response(503, json={"detail": "unavailable"})
+            self.started += 1
+            run_id = f"exec-{self.started}"
+            self.run_tags[run_id] = json.loads(request.content)["tags"]
+            if self.attempts in self.lose_answer:
+                return httpx.Response(504, json={"detail": "gateway timeout"})
+            return httpx.Response(200, json={"execution_id": run_id, "workflow_id": self.installed})
+        if (
+            request.method == "GET"
+            and path.startswith("/executions/")
+            and path[12:] in self.run_tags
+        ):
+            run_id = path[12:]
+            return httpx.Response(
+                200,
+                json={
+                    "workflow_execution_id": run_id,
+                    "workflow_id": self.installed,
+                    "status": "running",
+                },
+            )
+        if request.method == "GET" and path == "/executions":
+            if self.lagging_lookups:
+                self.lagging_lookups -= 1
+                return httpx.Response(200, json={"executions": [], "total": 0})
+            wanted = request.url.params.get_list("tag")
+            rows = [
+                {"workflow_execution_id": run_id}
+                for run_id, tags in self.run_tags.items()
+                if all(t in tags for t in wanted)
+            ]
+            return httpx.Response(200, json={"executions": rows, "total": len(rows)})
+        return super().handle(request)
+
+    def posts(self, suffix: str) -> list[httpx.Request]:
+        return [r for r in self.requests if r.method == "POST" and r.url.path.endswith(suffix)]
+
+
+def _eval_of(loaded: LoadedSuite, case_id: str) -> str:
+    assert any(c.id == case_id for c in loaded.cases)
+    return f"eval-{case_id}"
+
+
+def _case_metrics(
+    eval_id: str, *, short: int, pending: int = 0, exhausted: bool = False
+) -> dict[str, object]:
+    return {
+        "eval_id": eval_id,
+        "n": 3 - short - pending,
+        "c": 0,
+        "pending": pending,
+        "infra_error_count": 3 if exhausted else 0,
+        "trials_short": short,
+        "exhausted": exhausted,
+        "pass_at_k_display": "-",
+        "pass_hat_k_display": "-",
+        "flaky": None,
+    }
+
+
+def _figures(
+    loaded: LoadedSuite,
+    cases: list[dict[str, object]],
+    scorer_protocol: str = "8",
+    workflow_version: str | None = None,
+) -> dict[str, object]:
+    """`GET /eval-sets/metrics` for one cohort: the one `launch --trials` declares, by default.
+
+    The default workflow version is the one launch installs, `<suite>.<revision>.0`.
+    """
+    installs = f"{loaded.suite.version}.{loaded.workflow.revision}.0"
+    digest = eval_suite.declared_model_tags(eval_suite.declared(loaded))[0].split(":", 1)[1]
+    bounds = {"lower": 0.0, "upper": 1.0, "display": "0% to 100%"}
+    return {
+        "suite": "verifier-seed",
+        "version": "8",
+        "split": None,
+        "k": 3,
+        "roster": [],
+        "cohorts": [
+            {
+                "cohort": {
+                    "suite_version": "8",
+                    "workflow_id": loaded.workflow.id,
+                    "workflow_version": workflow_version or installs,
+                    "models_digest": digest,
+                    "scorer_protocol": scorer_protocol,
+                },
+                "k": 3,
+                "cases": cases,
+                "coverage": {
+                    "roster_size": len(cases),
+                    "complete": 0,
+                    "short": len(cases),
+                    "never_launched": 0,
+                },
+                "mean_pass_at_k_display": "-",
+                "mean_pass_hat_k_display": "-",
+                "partial": True,
+                "flaky_cases": [],
+                "pass_at_k_bounds": bounds,
+                "pass_hat_k_bounds": bounds,
+                "infra_error_count": 0,
+                "base_mismatch_count": 0,
+                "treatment_mismatch_count": 0,
+            }
+        ],
+        "comparison": None,
+        "not_a_trial_count": 0,
+    }
+
+
+@pytest.mark.unit
+def test_register_writes_the_roster_onto_every_case_eval_once() -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+
+    eval_suite.register_roster(loaded, server.client())
+
+    edits = {r.url.path.split("/")[2]: json.loads(r.content)["tags"] for r in server.posts("/tags")}
+    assert edits == {
+        _eval_of(loaded, c.id): ["suite-version:8", f"split:{c.split}", f"polarity:{c.polarity}"]
+        for c in loaded.cases
+    }
+    before = len(server.posts("/tags"))
+    eval_suite.register_roster(loaded, server.client())
+    assert len(server.posts("/tags")) == before  # tags present: nothing written
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("conflict", ["split", "polarity"])
+def test_register_refuses_a_split_or_polarity_the_case_file_disagrees_with(conflict: str) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    case = loaded.cases[-1]
+    wrong = {
+        "split": "train" if case.split == "holdout" else "holdout",
+        "polarity": "clean" if case.polarity == "defect" else "defect",
+    }[conflict]
+    server.roster[_eval_of(loaded, case.id)] = [f"{conflict}:{wrong}"]
+
+    with pytest.raises(RuntimeError, match=f"{case.id}: its eval is tagged {conflict}"):
+        eval_suite.register_roster(loaded, server.client())
+    assert server.posts("/tags") == []  # no case is tagged when any conflicts
+
+
+@pytest.mark.unit
+def test_launch_trials_starts_k_tagged_trials_per_case_with_one_ledger_line_each(
+    tmp_path: Path,
+) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+
+    recorded = read_launches(ledger)
+    assert Counter(x.case for x in recorded) == {c.id: 3 for c in loaded.cases}
+    assert {x.scorer for x in recorded} == {"8"}
+    assert len({x.batch for x in recorded}) == 1
+    # numbered across the batch, so no two cases share a trial tag
+    assert sorted(x.trial or 0 for x in recorded) == list(range(1, 3 * len(loaded.cases) + 1))
+    starts = [json.loads(r.content) for r in server.posts("/execute")]
+    batch = recorded[0].batch
+    cohort = {
+        "suite-version:8",
+        f"verifier:{_TRIAL_WF}",
+        "scorer:8",
+        *eval_suite.declared_model_tags(eval_suite.declared(loaded)),
+    }
+    assert "model:verify:gpt-6-luna" in cohort
+    for start, line in zip(starts, recorded, strict=True):
+        assert set(start["tags"]) == cohort | {f"trial:{batch}/{line.trial}"}
+        assert list(TagSet(start["tags"])) == sorted(start["tags"])  # valid, already normalised
+        assert start["eval_id"] == line.eval_id
+
+
+def _dry_run_pair(loaded: LoadedSuite) -> list[str]:
+    """One train defect and one train clean case: the plan sec 13 dry run's shape."""
+    train = [c for c in loaded.cases if c.split == "train"]
+    defect = next(c for c in train if c.polarity == "defect")
+    clean = next(c for c in train if c.polarity == "clean")
+    return [defect.id, clean.id]
+
+
+@pytest.mark.unit
+def test_a_dry_run_launches_k_trials_of_the_named_cases_and_rosters_every_case(
+    tmp_path: Path,
+) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    pair = _dry_run_pair(loaded)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(
+        eval_suite.select_cases(loaded, pair), server.client(), ledger, 3, roster=loaded
+    )
+
+    recorded = read_launches(ledger)
+    assert Counter(x.case for x in recorded) == dict.fromkeys(pair, 3)
+    assert len(server.posts("/execute")) == 6
+    tagged = {r.url.path.split("/")[2] for r in server.posts("/tags")}
+    assert tagged == {_eval_of(loaded, c.id) for c in loaded.cases}  # roster is the whole version
+
+
+@pytest.mark.unit
+def test_the_case_flag_narrows_what_check_and_launch_hand_on(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pair = _dry_run_pair(load_suite(DEFAULT_SUITE))
+    checked: list[LoadedSuite] = []
+    launched: list[tuple[LoadedSuite, LoadedSuite | None]] = []
+
+    def record(loaded: LoadedSuite, repo: Path) -> list[str]:
+        checked.append(loaded)
+        return []
+
+    def launch(
+        loaded: LoadedSuite, *_: object, roster: LoadedSuite | None = None, **__: object
+    ) -> list[str]:
+        launched.append((loaded, roster))
+        return []
+
+    monkeypatch.setattr(eval_suite, "check_commits", record)
+    monkeypatch.setattr(eval_suite, "launch_trials", launch)
+    cases = [a for c in pair for a in ("--case", c)]
+    assert main(["check", "--split", "train", *cases]) == 0
+    assert [c.id for c in checked[0].cases] == pair
+    assert ": 2 case(s)" in capsys.readouterr().out
+
+    args = ["launch", "--trials", "3", "--workflow", _TRIAL_WF, "--split", "train"]
+    args += ["--api-url", "http://x.invalid"]
+    assert main([*args, *cases]) == 0
+    loaded, roster = launched[0]
+    assert [c.id for c in loaded.cases] == pair
+    assert roster is not None and len(roster.cases) == len(load_suite(DEFAULT_SUITE).cases)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        (["check", "--case", "no-such-case"], "not among the loaded cases"),
+        (["check", "--split", "holdout", "--case", "<train>"], "not among the loaded cases"),
+        (["score", "--case", "<train>"], "narrows `check` and `launch` only"),
+        (["register", "--case", "<train>"], "narrows `check` and `launch` only"),
+    ],
+    ids=["unknown", "other-split", "score", "register"],
+)
+def test_the_case_flag_refuses_what_it_cannot_narrow(
+    argv: list[str], error: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Refused, never skipped: a typo must not launch a smaller dry run than was asked."""
+    train = _dry_run_pair(load_suite(DEFAULT_SUITE))[0]
+    assert main([a.replace("<train>", train) for a in argv]) == 1
+    assert error in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_top_up_launches_exactly_the_servers_trials_short(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    first, second, *rest = loaded.cases
+    server.metrics = _figures(
+        loaded,
+        [
+            _case_metrics(_eval_of(loaded, first.id), short=2),
+            _case_metrics(_eval_of(loaded, second.id), short=1),
+            *(_case_metrics(_eval_of(loaded, c.id), short=0) for c in rest),
+        ],
+    )
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 3, top_up=True)
+
+    assert Counter(x.case for x in read_launches(ledger)) == {first.id: 2, second.id: 1}
+
+
+@pytest.mark.unit
+def test_top_up_is_refused_while_the_cohort_has_a_pending_trial(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    first, *rest = loaded.cases
+    server.metrics = _figures(
+        loaded,
+        [
+            _case_metrics(_eval_of(loaded, first.id), short=1, pending=1),
+            *(_case_metrics(_eval_of(loaded, c.id), short=3) for c in rest),
+        ],
+    )
+    ledger = tmp_path / "launches.jsonl"
+
+    with pytest.raises(RuntimeError, match="pending trials"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3, top_up=True)
+    assert server.posts("/execute") == []
+    assert read_launches(ledger) == []
+
+
+@pytest.mark.unit
+def test_top_up_launches_none_for_an_exhausted_case(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    first, *rest = loaded.cases
+    server.metrics = _figures(
+        loaded,
+        [
+            _case_metrics(_eval_of(loaded, first.id), short=0, exhausted=True),
+            *(_case_metrics(_eval_of(loaded, c.id), short=1) for c in rest),
+        ],
+    )
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 3, top_up=True)
+
+    launched = Counter(x.case for x in read_launches(ledger))
+    assert first.id not in launched
+    assert launched == {c.id: 1 for c in rest}
+
+
+@pytest.mark.unit
+def test_top_up_of_a_cohort_that_launched_nothing_is_refused(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.metrics = {**_figures(loaded, []), "cohorts": []}
+
+    with pytest.raises(RuntimeError, match="launched nothing yet"):
+        eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3, top_up=True)
+    assert server.posts("/execute") == []
+
+
+@pytest.mark.unit
+def test_top_up_never_continues_a_cohort_of_another_workflow_version(tmp_path: Path) -> None:
+    """The 8.0.0 cohort's shortfall is not this launch's: it installs 8.1.0 (codex #2126 P1)."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    assert loaded.workflow.revision == 1  # installs 8.1.0
+    server = _TrialServer(loaded)
+    server.metrics = _figures(
+        loaded,
+        [_case_metrics(_eval_of(loaded, c.id), short=2) for c in loaded.cases],
+        workflow_version="8.0.0",
+    )
+
+    with pytest.raises(RuntimeError, match="another treatment"):
+        eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3, top_up=True)
+    assert server.posts("/execute") == []
+
+
+@pytest.mark.unit
+def test_a_second_launcher_on_the_same_ledger_is_refused(tmp_path: Path) -> None:
+    """Two top-ups would each launch the same trials_short (codex #2126 P2)."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    with eval_suite.ledger_lock(ledger), pytest.raises(RuntimeError, match="another launch holds"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert server.posts("/execute") == []
+    assert read_launches(ledger) == []
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 1)  # released: the next one runs
+    assert len(read_launches(ledger)) == len(loaded.cases)
+
+
+@pytest.mark.unit
+def test_a_trial_whose_answer_was_lost_is_found_by_its_tag_and_ledgered(tmp_path: Path) -> None:
+    """A 504 after the run started must not leave an unledgered trial (codex #2126 P2)."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.lose_answer = {2}
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+
+    lines = read_launches(ledger)
+    assert [x.run_id for x in lines] == [f"exec-{i}" for i in range(1, server.started + 1)]
+    assert len(lines) == 3 * len(loaded.cases)
+
+
+@pytest.mark.unit
+def test_a_trial_that_never_started_stops_the_launch_and_ledgers_nothing_for_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.refuse = {2}
+    ledger = tmp_path / "launches.jsonl"
+    monkeypatch.setattr(eval_suite, "RECONCILE_PAUSE_S", 0)
+
+    with pytest.raises(RuntimeError, match="0 runs carry that tag"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert [x.run_id for x in read_launches(ledger)] == ["exec-1"]
+
+
+@pytest.mark.unit
+def test_no_two_trials_share_a_trial_tag_across_cases_or_launches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lost answer is found again by its trial tag alone (codex #2126 pass 2)."""
+    monkeypatch.setattr(eval_suite.time, "strftime", lambda *_: "20261027t000000z")  # one second
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+
+    eval_suite.launch_trials(loaded, server.client(), ledger, 2)
+    eval_suite.launch_trials(loaded, server.client(), ledger, 2)  # same second, still a new batch
+
+    trial_tags = [t for tags in server.run_tags.values() for t in tags if t.startswith("trial:")]
+    assert len(trial_tags) == 4 * len(loaded.cases)
+    assert len(set(trial_tags)) == len(trial_tags)
+
+
+@pytest.mark.unit
+def test_an_unresolved_intent_blocks_every_later_launch_until_its_run_is_visible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The intent is written before the POST; a lagging list never makes a duplicate (pass 2)."""
+    monkeypatch.setattr(eval_suite, "RECONCILE_PAUSE_S", 0)
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    ledger = tmp_path / "launches.jsonl"
+    server.lose_answer = {2}
+    server.lagging_lookups = eval_suite.RECONCILE_ATTEMPTS
+
+    with pytest.raises(RuntimeError, match="intent stays pending"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert [x.run_id for x in read_launches(ledger)] == ["exec-1"]
+    [pending] = eval_suite.unresolved_intents(ledger)
+    assert pending.launch.trial == 2
+
+    server.lagging_lookups = eval_suite.RECONCILE_ATTEMPTS  # still not listed
+    with pytest.raises(RuntimeError, match="unresolved trial intents"):
+        eval_suite.launch_trials(loaded, server.client(), ledger, 3)
+    assert server.started == 2  # nothing replaced it
+
+    eval_suite.launch_trials(
+        loaded, server.client(), ledger, 1
+    )  # now listed: resolved, then launched
+    runs = [x.run_id for x in read_launches(ledger)]
+    assert runs[:2] == ["exec-1", "exec-2"]
+    assert eval_suite.unresolved_intents(ledger) == []
+    assert len(runs) == 2 + len(loaded.cases)
+
+
+@pytest.mark.unit
+def test_top_up_never_continues_a_cohort_scored_under_another_protocol(tmp_path: Path) -> None:
+    """Only an LLM-judged cohort exists; a keyword top-up has nothing of its own to continue."""
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    server = _TrialServer(loaded)
+    server.metrics = _figures(
+        loaded,
+        [_case_metrics(_eval_of(loaded, c.id), short=2) for c in loaded.cases],
+        scorer_protocol="8-llm-judge",
+    )
+
+    with pytest.raises(RuntimeError, match="launched nothing yet"):
+        eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3, top_up=True)
+    assert server.posts("/execute") == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "git fetch origin && git merge origin/<base>",
+        "run `git merge --no-edit origin/main` first",
+        "git pull",
+        "git pull --ff-only origin feature",
+        "git rebase main",
+        'git rebase "$BASE_BRANCH"',
+        "Before you write anything, merge `origin/main` into your working branch",
+    ],
+)
+def test_a_prompt_that_integrates_the_default_branch_is_refused(prompt: str) -> None:
+    assert eval_suite.default_branch_integrations(prompt)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Do not fetch, pull, check out or merge any other ref",
+        "on a conflict, git merge --abort",
+        "git merge-base HEAD origin/main",
+        "git merge feature-x",
+        "the pull request",
+    ],
+)
+def test_a_prompt_that_stays_on_the_pin_is_not_refused(prompt: str) -> None:
+    assert eval_suite.default_branch_integrations(prompt) == []
+
+
+@pytest.mark.unit
+def test_every_suite_workflow_is_pin_safe_and_implement_v7_is_not() -> None:
+    refs = [r for d in ROOT.glob("evals/*/suite.yaml") for r in _suite_refs(d)]
+    assert refs
+    assert [p for r in refs for p in eval_suite.pin_safety_problems(r)] == []
+    v7 = eval_suite.WorkflowRef(
+        id="sdlc-implement-v7", path="workflows/sdlc/implement-v7/workflow.yaml", models={"x": "y"}
+    )
+    assert any("git merge origin/main" in p for p in eval_suite.pin_safety_problems(v7))
+
+
+def _suite_refs(suite_yaml: Path) -> list[eval_suite.WorkflowRef]:
+    raw = yaml.safe_load(suite_yaml.read_text())
+    return [eval_suite.WorkflowRef.model_validate(w) for w in raw.get("workflows", [])]
+
+
+@pytest.mark.unit
+def test_a_model_alias_is_refused_in_a_trials_suite(tmp_path: Path) -> None:
+    loaded = load_suite(DEFAULT_SUITE)  # eval-verify-pinned-v1 declares `opus`
+    server = _TrialServer(loaded)
+
+    assert eval_suite.alias_problems(loaded) == [
+        f"workflow {_WF} phase verify: declares 'opus', not an explicit model id; "
+        "replace it in the workflow and suite.yaml and bump the suite version"
+    ]
+    with pytest.raises(RuntimeError, match="declares 'opus'"):
+        eval_suite.launch_trials(loaded, server.client(), tmp_path / "l.jsonl", 3)
+    assert server.requests == []  # refused before anything is registered or installed
+    assert eval_suite.alias_problems(load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)) == []
+
+
+@pytest.mark.unit
+def test_the_llm_scoring_protocol_is_a_tag_the_server_can_compare() -> None:
+    loaded = load_suite(DEFAULT_SUITE, workflow=_TRIAL_WF)
+    judge = eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient())
+
+    protocol = eval_suite.scorer_protocol(loaded, judge)
+
+    assert protocol == f"8-llm-{eval_suite.JUDGE_MODEL}-prompt-v{eval_suite.JUDGE_PROMPT_VERSION}"
+    assert list(TagSet([f"scorer:{protocol}"])) == [f"scorer:{protocol}"]
+    assert eval_suite.scorer_protocol(loaded, None) == eval_suite.scorer_version(loaded, None)
+
+
+_ANY_FAMILY = eval_suite.JUDGE_MODELS | eval_suite.CODEX_JUDGE_MODELS
+
+
+def _panel(
+    claude_reply: str, codex_reply: str
+) -> tuple[eval_suite.PanelJudge, _FakeModel, _FakeModel]:
+    claude, codex = _FakeModel(claude_reply), _FakeModel(codex_reply)
+    panel = eval_suite.PanelJudge(
+        eval_suite.LlmJudge(claude),
+        eval_suite.LlmJudge(
+            codex, model=eval_suite.CODEX_JUDGE_MODEL, allowed=eval_suite.CODEX_JUDGE_MODELS
+        ),
+    )
+    return panel, claude, codex
+
+
+@pytest.mark.unit
+def test_both_arms_of_a_comparison_score_under_one_panel_protocol() -> None:
+    """One ruler: the protocol names the panel, never the arm, and fits a `scorer:` tag."""
+    panel, _, _ = _panel(_reply("no_match"), _reply("no_match"))
+    a = eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_CODEX_WF), panel)
+    b = eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_SONNET_WF), panel)
+
+    assert a == b
+    assert panel.identity == (
+        f"panel:{eval_suite.JUDGE_MODEL}+{eval_suite.CODEX_JUDGE_MODEL}"
+        f"@prompt-v{eval_suite.JUDGE_PROMPT_VERSION}"
+    )
+    assert a.endswith(
+        f"panel-{eval_suite.JUDGE_MODEL}-{eval_suite.CODEX_JUDGE_MODEL}"
+        f"-prompt-v{eval_suite.JUDGE_PROMPT_VERSION}"
+    )
+    assert list(TagSet([f"scorer:{a}"])) == [f"scorer:{a}"]
+    single = eval_suite.LlmJudge(_FakeModel(_reply("no_match")))
+    assert a != eval_suite.scorer_protocol(load_suite(DEFAULT_SUITE, workflow=_CODEX_WF), single)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("claude_says", "codex_says"),
+    [
+        (_reply("match", _PARAPHRASE_QUOTE), _reply("no_match")),
+        (_reply("no_match"), _reply("match", _PARAPHRASE_QUOTE)),
+        (_reply("match", _PARAPHRASE_QUOTE), _reply("unclear")),
+    ],
+    ids=["claude-only", "codex-only", "match-and-unclear"],
+)
+def test_a_panel_that_disagrees_is_unclear_and_not_caught(
+    claude_says: str, codex_says: str
+) -> None:
+    panel, _, _ = _panel(claude_says, codex_says)
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
+    assert score.llm is not None and score.llm.verdict == "unclear"
+    assert score.llm.reason.startswith("panel split")
+    assert score.llm.quote == "", "a split quotes no member, so no one family's finding stands"
+    assert not score.caught
+
+
+@pytest.mark.unit
+def test_a_panel_that_agrees_on_no_match_says_no_match() -> None:
+    panel, _, _ = _panel(_reply("no_match"), _reply("no_match"))
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
+    assert score.llm is not None and score.llm.verdict == "no_match"
+    assert not score.caught
+
+
+@pytest.mark.unit
+def test_a_panel_that_agrees_credits_the_catch_and_asks_each_family_its_own_model() -> None:
+    panel, claude, codex = _panel(
+        _reply("match", _PARAPHRASE_QUOTE), _reply("match", _PARAPHRASE_QUOTE)
+    )
+    score = score_case(_case(_CASE), "blocked", _PARAPHRASED, panel)
+    assert score.llm is not None and (score.llm.verdict, score.llm.quote) == (
+        "match",
+        _PARAPHRASE_QUOTE,
+    )
+    assert score.llm.judge == panel.identity and score.caught
+    assert {c["model"] for c in claude.calls} == {eval_suite.JUDGE_MODEL}
+    assert {c["model"] for c in codex.calls} == {eval_suite.CODEX_JUDGE_MODEL}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("claude_model", "codex_model"),
+    [
+        (eval_suite.JUDGE_MODEL, "claude-opus-5-5"),
+        (eval_suite.CODEX_JUDGE_MODEL, eval_suite.CODEX_JUDGE_MODEL),
+        (eval_suite.CODEX_JUDGE_MODEL, eval_suite.JUDGE_MODEL),
+    ],
+    ids=["two-claude", "two-codex", "swapped"],
+)
+def test_a_panel_is_one_claude_and_one_codex_judge(claude_model: str, codex_model: str) -> None:
+    with pytest.raises(eval_suite.JudgeError, match="one Claude and one codex"):
+        eval_suite.PanelJudge(
+            eval_suite.LlmJudge(_FakeModel(""), model=claude_model, allowed=_ANY_FAMILY),
+            eval_suite.LlmJudge(_FakeModel(""), model=codex_model, allowed=_ANY_FAMILY),
+        )
+
+
+@pytest.mark.unit
+def test_a_codex_judge_is_refused_at_construction_unless_its_client_is_codex() -> None:
+    """Refused before any launch, not at the first finding: an unusable scorer never tags a cohort."""
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(eval_suite.HeadlessJudgeClient(), model=eval_suite.CODEX_JUDGE_MODEL)
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.LlmJudge(
+            _FakeModel(""), model=eval_suite.JUDGE_MODEL, allowed=eval_suite.CODEX_JUDGE_MODELS
+        )
+
+
+@pytest.mark.unit
+def test_the_claude_transport_never_carries_a_codex_model() -> None:
+    transport = _FakeTransport(["ok"])
+    with pytest.raises(eval_suite.JudgeError, match="never calls"):
+        eval_suite.HeadlessJudgeClient(transport=transport).complete(
+            model=eval_suite.CODEX_JUDGE_MODEL, system="s", prompt="p"
+        )
+    assert transport.models == []
+
+
+@pytest.mark.unit
+def test_a_trial_is_scored_under_the_protocol_it_launched_with_and_no_other() -> None:
+    loaded = load_suite(DEFAULT_SUITE)
+    trial = _LAUNCHED.model_copy(update={"batch": "b", "trial": 1, "scorer": "8"})
+    server = _Server(loaded)
+
+    rows, _ = score_suite(loaded, server.client(), [trial])
+    assert [body["scorer_version"] for _, body in server.scores] == ["8"]
+
+    other = _LAUNCHED.model_copy(update={"batch": "b", "trial": 1, "scorer": "8-llm-x"})
+    server = _Server(loaded)
+    rows, _ = score_suite(loaded, server.client(), [other])
+    assert server.scores == []
+    assert any("launched for scorer 8-llm-x" in r.status for r in rows)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("workflow", sorted(_ADDED_IN_V8))
+def test_a_verifier_added_in_v8_has_no_earlier_version(workflow: str) -> None:
+    """An earlier version never ran it, so asking for one must refuse, not borrow a table."""
+    assert load_suite(DEFAULT_SUITE, workflow=workflow).tag == f"verifier-seed-v1:v8:{workflow}"
+    with pytest.raises(DefinitionError, match="ran only"):
+        load_suite(DEFAULT_SUITE, workflow=workflow, version=6)

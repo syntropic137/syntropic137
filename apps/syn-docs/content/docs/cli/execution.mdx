@@ -18,9 +18,39 @@ syn execution list [options]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--status`, `-s` | `text` | --- | Filter by status |
+| `--verdict` | `text` | --- | Only runs that completed on this review verdict (certified, blocked) |
 | `--tag` | `text` | --- | Only executions carrying this tag (repeatable; all must match) |
 | `--page` | `text` | `1` | Page number |
 | `--page-size` | `text` | `50` | Items per page (max 100) |
+
+---
+
+## `syn execution pushes`
+
+List the pushes an execution's phases recorded (PhaseCommitPushed): phase, repository, branch, SHA
+
+```bash
+syn execution pushes <execution-id> [options]
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution-id` | `text` | Yes | Execution ID or unique prefix |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--json` | `boolean` | --- | Print the response as JSON |
+
+**Examples:**
+
+```bash
+syn execution pushes <execution-id>          # one line per push, in recorded order
+syn execution pushes <execution-id> --json   # for scripts and agents
+```
 
 ---
 
@@ -169,5 +199,21 @@ syn execution sessions <execution-id> --kind capture --all   # find harness, nat
 syn execution transcript <execution-id> claude <native-id> <sha256>          # format, size and revision
 syn execution transcript <execution-id> claude <native-id> <sha256> --raw > transcript.raw  # exact archived bytes
 ```
+
+---
+
+## `syn execution watch`
+
+Stream live events for a specific execution
+
+```bash
+syn execution watch <execution-id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution-id` | `text` | Yes | Execution ID to watch |
 
 ---

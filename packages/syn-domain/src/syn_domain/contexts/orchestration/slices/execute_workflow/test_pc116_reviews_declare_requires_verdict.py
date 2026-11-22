@@ -22,7 +22,12 @@ pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 _ROUNDS = ("verify", "reverify", "reverify_2")
 _REVIEWS = [
     (w, p)
-    for w in ("sdlc/implement-v3", "sdlc/implement-v4-precheck", "sdlc/reverify-pr")
+    for w in (
+        "sdlc/implement-v3",
+        "sdlc/implement-v4-precheck",
+        "sdlc/implement-v7",
+        "sdlc/reverify-pr",
+    )
     for p in _ROUNDS
 ]
 

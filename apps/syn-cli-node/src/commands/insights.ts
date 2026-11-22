@@ -5,7 +5,7 @@
 
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { api, unwrap } from "../client/typed.js";
-import { print, printDim } from "../output/console.js";
+import { print, printDim, printUnpricedNote } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
 import { formatCost, formatCostModelKey, formatTokens } from "../output/format.js";
 import { Table } from "../output/table.js";
@@ -66,7 +66,8 @@ const costCommand: CommandDef = {
     const d = unwrap(await api.GET("/insights/cost"), "Fetch cost");
 
     print(style("Cost Overview", CYAN));
-    print(`  ${style("Total cost:", BOLD)}   ${formatCost(d.total_cost_usd)}`);
+    print(`  ${style("Total cost:", BOLD)}   ${d.total_cost_display}`);
+    printUnpricedNote(d.unpriced_observation_count);
     print(`  ${style("Total tokens:", BOLD)} ${formatTokens(d.total_tokens)}`);
 
     const byRepo = d.cost_by_repo ?? {};

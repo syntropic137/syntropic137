@@ -227,3 +227,6 @@ evals/*/migration-journal.jsonl
 
 # Local artifact storage (SYN_STORAGE_LOCAL_PATH default)
 /.artifacts/
+
+# pytest temp root when TMPDIR is the checkout (#2200)
+pytest-of-*/

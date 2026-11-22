@@ -100,6 +100,9 @@ class ExecutionCost:
     cache_creation_tokens: int = 0
     """Total cache creation tokens across all sessions."""
 
+    cache_creation_1h_tokens: int = 0
+    """The 1-hour share of ``cache_creation_tokens``, priced at the 1-hour rate (#2145)."""
+
     cache_read_tokens: int = 0
     """Total cache read tokens across all sessions."""
 
@@ -131,6 +134,14 @@ class ExecutionCost:
     priced under its own session id but the same phase_id. ``cost_by_phase``
     can only say what the phase cost in total; this says which model spent it,
     which is the number that decides whether more fan-out is affordable.
+    """
+
+    observed_models_by_phase: dict[str, list[str]] = field(default_factory=dict)
+    """Every reported model each phase ran, sorted, priced or not (#1743).
+
+    ``models_by_phase`` decomposes money, so it can only name a model that
+    priced. A delegate whose model has no rate still ran, and this is where it
+    is named - never as a $0 entry in the cost split.
     """
 
     unpriced_by_phase: dict[str, int] = field(default_factory=dict)
@@ -234,6 +245,7 @@ class ExecutionCost:
             input_tokens=data.get("input_tokens", 0),
             output_tokens=data.get("output_tokens", 0),
             cache_creation_tokens=data.get("cache_creation_tokens", 0),
+            cache_creation_1h_tokens=data.get("cache_creation_1h_tokens", 0),
             cache_read_tokens=data.get("cache_read_tokens", 0),
             tool_calls=data.get("tool_calls", 0),
             turns=data.get("turns", 0),
@@ -242,6 +254,10 @@ class ExecutionCost:
             models_by_phase={
                 phase: _coerce_decimal_dict(models)
                 for phase, models in (data.get("models_by_phase") or {}).items()
+            },
+            observed_models_by_phase={
+                phase: list(models)
+                for phase, models in (data.get("observed_models_by_phase") or {}).items()
             },
             unpriced_by_phase=dict(data.get("unpriced_by_phase") or {}),
             cost_by_model=_coerce_decimal_dict(data.get("cost_by_model")),
@@ -265,6 +281,7 @@ class ExecutionCost:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_creation_1h_tokens": self.cache_creation_1h_tokens,
             "cache_read_tokens": self.cache_read_tokens,
             "total_tokens": self.total_tokens,
             "tool_calls": self.tool_calls,
@@ -274,6 +291,9 @@ class ExecutionCost:
             "models_by_phase": {
                 phase: {m: str(c) for m, c in models.items()}
                 for phase, models in self.models_by_phase.items()
+            },
+            "observed_models_by_phase": {
+                phase: list(models) for phase, models in self.observed_models_by_phase.items()
             },
             "unpriced_by_phase": dict(self.unpriced_by_phase),
             "cost_by_model": {k: str(v) for k, v in self.cost_by_model.items()},

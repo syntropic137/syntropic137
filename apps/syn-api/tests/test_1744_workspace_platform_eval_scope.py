@@ -191,3 +191,18 @@ async def test_an_expired_eval_token_is_refused(
     clock.now += timedelta(seconds=3601)
     response = await client.post(_SCORE, content=b"{}", headers=headers)
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize("scope", [PlatformScope.READ, PlatformScope.EVAL])
+async def test_a_workspace_token_reads_eval_set_metrics(
+    client: AsyncClient, service: PlatformTokenService, scope: PlatformScope
+) -> None:
+    """#2108: an eval phase reads its set's figures. The route answers (422 on the missing
+    ``k`` it alone validates), so the enforcer let it through rather than refusing it."""
+    response = await client.get(
+        "/eval-sets/metrics",
+        params={"suite": "s", "version": "1"},
+        headers=await _bearer(service, scope),
+    )
+    assert response.status_code == 422
+    assert _route_rejected_only(response.text, "k")

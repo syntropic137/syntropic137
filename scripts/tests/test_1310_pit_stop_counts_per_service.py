@@ -51,7 +51,10 @@ def _precheck(
     host, bin_dir = tmp / "host", tmp / "bin"
     host.mkdir()
     bin_dir.mkdir()
-    (host / _COMPOSE).write_text(_compose(api, gateway) if compose is None else compose)
+    # What `stage` wrote: the precheck counts the staged file, never the live one (#1511).
+    (host / f"{_COMPOSE}.pit-stop-staged").write_text(
+        _compose(api, gateway) if compose is None else compose
+    )
     (tmp / "images").write_text("".join(f"{line}\n" for line in images))
     docker = bin_dir / "docker"
     docker.write_text(_DOCKER)
@@ -61,7 +64,7 @@ def _precheck(
 set -euo pipefail
 export PATH={bin_dir}:$PATH PIT_IMAGES={tmp / "images"}
 TAG={_NEW}; MODE=swap; DRY=0; HOST=fake-host; N={n}; SWAPPED="{swapped}"
-COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; TMP={tmp}; REPOINT_PY={_SCRIPT.parent / "pit_stop_repoint.py"}
+COMPOSE_DIR={host}; COMPOSE={_COMPOSE}; STAGED={_COMPOSE}.pit-stop-staged; TMP={tmp}; REPOINT_PY={_SCRIPT.parent / "pit_stop_repoint.py"}
 step() {{ printf '==> %s\\n' "$*"; }}
 die() {{ printf 'PIT STOP ABORTED: %s\\n' "$*" >&2; exit 1; }}
 remote() {{ bash -c "$*"; }}

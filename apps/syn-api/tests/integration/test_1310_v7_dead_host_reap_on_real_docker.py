@@ -135,7 +135,7 @@ async def test_v7_reaping_a_dead_hosts_run_removes_only_its_workspace_and_sideca
     fenced = FencedRun(
         execution_id="exec-a", executor_id=dead_host, reconciler=b_ws["syn.host_id"], token=2
     )
-    assert await DockerDeadHostReaper().reap(fenced)
+    assert await DockerDeadHostReaper().reap(fenced.executor_id, fenced.execution_id)
 
     assert not await _exists(f"agentic-ws-a-{tag}")
     assert not await _exists(f"syn-sidecar-a-{tag}")

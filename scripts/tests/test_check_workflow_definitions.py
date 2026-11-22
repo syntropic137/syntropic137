@@ -127,7 +127,7 @@ class TestTheGateAgreesWithTheApi:
 
 
 class TestARetiredKeyFailsTheRepoGate:
-    """The platform accepts `can_open_pr` with a warning; this gate does not.
+    """The platform refuses `can_open_pr` (#1502), and so does this gate.
 
     The repository's workflows are the examples authors copy, so a retired key
     here would teach the next workflow to carry a line that does nothing.

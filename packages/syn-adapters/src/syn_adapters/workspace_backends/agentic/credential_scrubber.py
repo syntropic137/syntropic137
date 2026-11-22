@@ -185,7 +185,7 @@ def _encodings(value: str) -> tuple[set[str], set[str]]:
 class CredentialScrubber:
     """Replaces every known credential value in a line with ``REDACTED_MARKER``."""
 
-    __slots__ = ("_bodies", "_chunks", "_pattern", "_values")
+    __slots__ = ("_bodies", "_chunks", "_pattern", "_reach", "_values")
 
     def __init__(self, values: Iterable[str] = ()) -> None:
         self._values = frozenset(v for v in values if v)
@@ -193,10 +193,18 @@ class CredentialScrubber:
         embedded: set[str] = set()
         bodies: set[str] = set()
         self._chunks: frozenset[str] = frozenset()
+        # The longest text one match can span: a form, a wrapped chunk, or an
+        # aligned encoding with the two edge characters it shares.
+        self._reach = 0
         for value in self._values:
             whole, chunks = _encodings(value)
             forms |= whole
             aligned = _aligned_encodings(value.encode("utf-8"))
+            self._reach = max(
+                self._reach,
+                *(len(f) for f in (*whole, *chunks)),
+                *(len(body) + 2 for _, body, _ in aligned),
+            )
             embedded |= {head + re.escape(body) + tail for head, body, tail in aligned}
             bodies |= {body for _, body, _ in aligned if len(body) >= _FRAGMENT_MIN_CHARS}
             self._chunks |= chunks
@@ -208,6 +216,16 @@ class CredentialScrubber:
         patterns = [_pattern_of(f) for f in sorted(forms, key=len, reverse=True)]
         patterns += sorted(embedded, key=len, reverse=True)
         self._pattern = re.compile("|".join(patterns)) if patterns else None
+
+    @property
+    def reach(self) -> int:
+        """The most characters one match can span (0 when there is nothing to withhold).
+
+        What a reader scrubbing text in pieces rather than lines must hold back
+        at each cut, so a value split across two pieces is still whole when it
+        is scrubbed (ADR-078 D3).
+        """
+        return self._reach
 
     def covers(self, values: Iterable[str]) -> bool:
         """Whether this scrubber already matches exactly ``values``."""

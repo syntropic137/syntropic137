@@ -42,6 +42,28 @@ Started by `SessionStarted`, ended by `SessionCompleted`. A Session that never
 completed is not an error in itself - the run may have been killed - but it has
 no final totals.
 
+## Conversation Log and Conversation Log Row
+
+The **Conversation Log** is a Session's raw agent stdout, stored line by line
+and served under `GET /conversations/{session_id}`. A **Conversation Log Row**
+(`ConversationLogRow`) is what one stored line shows a reader: an event type,
+the tools the line names and a short preview, with nothing harness-specific
+left in it. `ConversationLogReader` is the port that reads one line into one
+row and says whether a line is CLI chrome that does not belong in the log at
+all; how Claude Code or Codex spells a line is the adapter's business (#1424).
+
+An **Unreadable Conversation Line** (`UnreadableConversationLine`) is a stored
+line the reader could not read as a row: a field of the wrong type, or JSON
+nested past the decoder's limit. The reader returns it with its cause rather
+than raising; the API fails the whole log request with it, as it always has.
+When the wrong-typed field is the event type, the cause is a
+`NonStringEventTypeError` carrying the value, so the API can report it as the
+same response-model validation failure it always did.
+
+Not a **Transcript Conversation** (`TranscriptConversationPort`): that is a
+bounded user/assistant excerpt of a whole inventory document. A Conversation
+Log Row is per line, and every line that belongs in the log keeps its row.
+
 ## Requested Model and Observed Model
 
 Two different facts about which model a Session used, never conflated
@@ -138,3 +160,62 @@ Rebuilding one run's session inventory snapshot from host evidence, one durable
 - **Coalesce:** while a run has an open job, new evidence for that run waits.
   The next job picks up the latest watermark, so one job is minted per
   catch-up and not one per watermark.
+- **Scheduling guard:** held for one run across "is a job open?" and
+  "schedule one", so two inventory managers cannot both find the run free
+  and open two jobs (#1534). It is asked for once and never waited on: a
+  manager that does not get it skips the run this tick and the wakeup stays
+  pending, as with coalesce.
+- **Held schedule:** what holding the scheduling guard gives a manager: the
+  run's last scheduled request, recorded durably under the guard before it is
+  saved. "Is a job open?" reads that job's own stream, so a job the projection
+  has not caught up with still holds its run (#2254). A recorded job whose
+  stream is absent is not free: its save may still commit, so the next holder
+  retries that same request rather than scheduling a successor.
+
+## Replica Body
+
+What a remote store holds for one transcript revision, read back behind
+`ReplicaBodyEvidencePort` (#946).
+
+- **Capture receipt:** a store's acknowledgement of one revision. It proves
+  acceptance of the original-content hash, not that a body was stored: a row
+  emptied by the store echoes the same hash.
+- **Replica body reading:** the stored row's sizes (`raw`, search text,
+  message count) for that revision. Remote PRESENT needs one with a non-empty
+  `raw` body whenever the archive has bytes. Search text and message count
+  never stand in for the body.
+
+## Capture Spool
+
+Staged transcript and child-journal bytes a workspace wrote before they reached
+the local archive, and the durable row (`CaptureSpool`) that lets a recovery
+worker find them after any crash (#1398, #1916).
+
+- **Spool backend:** where the staged bytes live. `docker` is a named volume on
+  this host; `e2b` is the `/spool` directory on a sandbox's own disk, kept by
+  pausing the sandbox. Rows written before #1916 carry no backend and are
+  `docker`. A worker claims only spools on a backend it holds recovery access
+  to.
+- **Sandbox spool:** profile `sandbox-spool/1`. Its row names the sandbox and
+  the executor that launched it, so a fresh worker routes from the row and
+  never from memory.
+- **Exclusive drain:** a traversal during which nothing else could write. For
+  Docker, no other container referenced the volume. For a sandbox, the provider
+  confirmed every agent process stopped after resume. A run in `fencing`, a
+  `disconnected` stream outcome, or the spool lease are never evidence of it.
+  Release requires it.
+- **Settled spool:** a spool whose session or run reached a terminal fact, so
+  no executor will resume it (`settled_at`, `CaptureSpoolLease.settled`). Only
+  a settled sandbox spool is claimed or opened: recovering it stops its agent,
+  and reaching a sandbox is not permission to stop it.
+- **Spool fence:** the lease renewal a recovery adapter calls before attaching
+  and again after, before anything destructive, and once more before the
+  closing pause. It fails once another worker owns the spool, so a stale worker
+  stops nothing and does not pause the sandbox its new owner is reading.
+- **Pause-until-drained:** a sandbox spool stays paused until `mark_drained`;
+  only release kills it. A failed archive leaves it paused and retryable.
+- **Release:** removing staged bytes after a drained traversal (`archived`) or
+  a retention limit (`expired`). Docker removes the volume; a sandbox is killed,
+  but only once the provider confirms no agent process remains: a retention
+  limit evicts bytes, it never ends a running agent. Retention limits apply
+  per backend.

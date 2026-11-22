@@ -6,17 +6,15 @@ to a specific workflow.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 from event_sourcing import ConcurrencyConflictError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from syn_api._wiring import (
     ensure_connected,
@@ -25,14 +23,25 @@ from syn_api._wiring import (
     get_workflow_repo,
 )
 from syn_api.routes.executions.admission_gate import admit_or_409, refuse_while_paused
+from syn_api.routes.executions.credential_access import require_claude_credential
 from syn_api.routes.executions.direct_start import (
     queue_direct_start,
-    record_execution_request,
     start_direct_now,
+    start_failure,
+)
+from syn_api.routes.executions.keyed_start import (
+    already_started,
+    record_unless_started,
+    start_execution_id,
 )
 from syn_api.routes.executions.repo_access import (
     _parse_repo_from_url,
     _validate_all_repos_access,
+)
+from syn_api.services.skill_preflight import (
+    SkillPreflightUnavailableError,
+    UnresolvableSkillRefError,
+    require_resolvable_skills,
 )
 from syn_api.types import (
     Err,
@@ -48,14 +57,15 @@ from syn_domain.contexts.orchestration import (
     EvalChoice,
     EvalId,
     EvalUnavailableError,
+    InconsistentPhaseKindError,
     LaunchEval,
     RepositoryOutsideBaselineError,
     RequestExecutionCommand,
-    SkillError,
-    SkillRef,
     TagSet,
     UnsupportedExecutionTypeError,
     UnsupportedToolPolicyForProviderError,
+    WorkspaceMemoryOverCapError,
+    WorkspacePidsOverCapError,
     launch_eval_for,
     validate_phase_declarations,
 )
@@ -293,6 +303,18 @@ class ExecuteWorkflowRequest(BaseModel):
             "eval (#967). Cannot be combined with `eval_id` (422)."
         ),
     )
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        pattern=r"^[^\x00]+$",
+        description=(
+            "Makes the start idempotent (#2129): the execution id is derived from the "
+            "workflow and this key, so every start with the same key, concurrent ones "
+            "included, answers with the one execution and `replayed: true` after the "
+            "first. A start that differs from the one that made it is refused with 409."
+        ),
+    )
     provider: str = Field(
         default="claude",
         description=(
@@ -322,6 +344,13 @@ class ExecuteWorkflowRequest(BaseModel):
             raise ValueError("task is empty; describe the work, or omit task to run without one")
         return task
 
+    @model_validator(mode="after")
+    def _one_eval_choice(self) -> ExecuteWorkflowRequest:
+        """On the model, so a keyed retry is a 422 before its replay lookup (#2129)."""
+        if self.no_eval and self.eval_id is not None:
+            raise ValueError("Pass either eval_id or no_eval, not both")
+        return self
+
 
 class ExecuteWorkflowResponse(BaseModel):
     """Response after starting workflow execution."""
@@ -330,6 +359,8 @@ class ExecuteWorkflowResponse(BaseModel):
     workflow_id: str
     status: str = "started"
     message: str = "Workflow execution started"
+    replayed: bool = False
+    """True when `idempotency_key` named a start already accepted: nothing new started (#2129)."""
 
 
 class ExecutionStatusResponse(BaseModel):
@@ -436,7 +467,7 @@ async def execute(
         return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
     except Exception as e:
         logger.exception("Workflow execution error for %s", workflow_id)
-        return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
+        return start_failure(e)
 
     if result.unrecorded_work_error is not None:
         # #1547: neither store took the cancel's landed refs, so no event will
@@ -501,8 +532,8 @@ async def _preflight_repos_or_reject(
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Workflow '{workflow_id}' requires a repository, but none was "
-                "resolved. Pass one via the 'repos' field (ADR-058)."
+                f"Workflow '{workflow_id}' requires a repository, but none was resolved. Pass one "
+                "with -R ('repos'), or if it needs none declare `requires_repos: false` (ADR-058)."
             ),
         )
     await _validate_all_repos_access(preflight_repos)
@@ -544,40 +575,16 @@ def _check_phase_declarations(workflow: WorkflowTemplateAggregate) -> None:
         validate_phase_declarations(workflow)
     except (
         UnsupportedExecutionTypeError,
+        InconsistentPhaseKindError,  # #963: an agent phase stored with no prompt
         UnsupportedToolNameError,
         UnsupportedToolPolicyForProviderError,
         UnrunnablePhaseSandboxError,
+        # okrs-51p.30: a phase asking for more workspace memory or pids than this
+        # deployment allows is refused before the run exists.
+        WorkspaceMemoryOverCapError,
+        WorkspacePidsOverCapError,
     ) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-#: A preflight that hangs is worse than one that fails: it converts a fast 200
-#: into a request that never returns. The resolver reads Postgres and the
-#: projection store supplies no timeout of its own.
-_SKILL_PREFLIGHT_TIMEOUT_SECONDS = 10.0
-
-
-def _unique_skill_refs(
-    workflow: WorkflowTemplateAggregate,
-) -> list[tuple[SkillRef, str]]:
-    """Each distinct skill ref once, paired with the phase that declared it.
-
-    Split from the preflight because collecting refs and talking to the resolver
-    are different jobs, and together they pushed one function past the
-    complexity thresholds. The pairing is what lets an error name the phase that
-    actually failed rather than guessing afterwards.
-
-    Deduplicates on `(source_url, version, skill_name)` because resolution
-    merges by exactly that identity - the answer cannot vary by phase, so an
-    N-phase workflow sharing one ref should cost one lookup, not N.
-    """
-    seen: dict[tuple[str, str, str], tuple[SkillRef, str]] = {}
-    for ref in workflow.skills or ():
-        seen.setdefault((ref.source_url, ref.version, ref.skill_name), (ref, "<workflow>"))
-    for phase in workflow.phases:
-        for ref in phase.skills or ():
-            seen.setdefault((ref.source_url, ref.version, ref.skill_name), (ref, phase.phase_id))
-    return list(seen.values())
 
 
 async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -> None:
@@ -591,58 +598,16 @@ async def _reject_unresolvable_skill_refs(workflow: WorkflowTemplateAggregate) -
         POST /execute      -> 200 {"status": "started"}
         GET  /executions/X -> 404, permanently
 
-    while the exception - which already names the skill, its source, its pinned
-    version and two ways to fix it - went to a log file. For an orchestration
-    platform that is worse than a generic failure: a 500 tells a caller to look,
-    a 200 tells it to wait.
-
-    FAILS CLOSED on infrastructure. An earlier version skipped the preflight
-    when the resolver could not be constructed, so as not to block all work on a
-    degraded subsystem. That was wrong here: the background handler constructs
-    the SAME resolver moments later, before persistence, so skipping merely
-    relocated the failure back into the window this exists to close.
-
-    The timeout encloses the FACTORY as well as resolution. Constructing the
-    service is cheap today, but it is the call that would acquire a pool or do a
-    DNS lookup tomorrow, and a timeout that starts after it would not bound the
-    request at all.
-
-    Deduplicates by ref identity. Resolution merges scopes by exact
-    ``(source_url, version, skill_name)``, so the answer for a given ref does
-    not vary by phase. Per-phase resolution is necessary when BUILDING each
-    executable phase; for an existence check it is N identical lock lookups on
-    an N-phase workflow.
+    The check itself is shared with the trigger dispatcher (#1003); this only
+    says what its answers mean over HTTP. A resolver that cannot answer is a
+    503 with a constant body: the cause can carry a DSN, and it is logged there.
     """
-    refs = _unique_skill_refs(workflow)
-    if not refs:
-        return
-
     try:
-        async with asyncio.timeout(_SKILL_PREFLIGHT_TIMEOUT_SECONDS):
-            from syn_api._wiring import get_skill_resolution_service
-
-            service = await get_skill_resolution_service()
-            for ref, owner in refs:
-                try:
-                    await service.resolve_for_phase((), (ref,))
-                except SkillError as exc:
-                    # Caught PER REF so the message names the phase that
-                    # actually declared it. Catching outside the loop meant
-                    # guessing afterwards, and the guess - first phase with any
-                    # skill - is wrong whenever a later phase is the broken one.
-                    raise HTTPException(status_code=422, detail=f"phase '{owner}': {exc}") from exc
-    except HTTPException:
-        raise
-    except Exception:
-        # The exception text is NOT reflected to the caller. It can be a
-        # database error carrying a DSN - user, host, database name, possibly
-        # credentials - and an HTTP body is the wrong place for any of that.
-        # The detail stays constant; the cause goes to the log.
-        logger.warning("Skill preflight could not complete", exc_info=True)
-        raise HTTPException(
-            status_code=503,
-            detail="skill validation is temporarily unavailable; retry shortly",
-        ) from None
+        await require_resolvable_skills(workflow)
+    except UnresolvableSkillRefError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SkillPreflightUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
 async def _launch_eval(
@@ -655,8 +620,6 @@ async def _launch_eval(
     missing (404) or archived (409) eval is an answer to the request rather
     than a 200 followed by an execution that never starts.
     """
-    if request.no_eval and request.eval_id is not None:
-        raise HTTPException(status_code=422, detail="Pass either eval_id or no_eval, not both")
     choice = EvalChoice(eval_id=request.eval_id, ordinary=request.no_eval)
     try:
         return await launch_eval_for(get_eval_repo(), choice, workflow.default_eval_id)
@@ -686,6 +649,8 @@ async def _validate_execution_request(
     # with its historical provider. Reject it here rather than remapping it to
     # headless claude downstream.
     _check_phase_providers(workflow)
+
+    require_claude_credential(workflow)  # #1948: the predicate /health reports
 
     # #1039: same shape as the provider check - a stored declaration the
     # platform cannot honour must be a 422, never a ghost execution.
@@ -747,6 +712,15 @@ async def _validate_execution_request(
     return workflow, effective_inputs, typed_repos
 
 
+def _replayed(workflow_id: str, execution_id: str) -> ExecuteWorkflowResponse:
+    return ExecuteWorkflowResponse(
+        execution_id=execution_id,
+        workflow_id=workflow_id,
+        message=f"Execution {execution_id} was already started",
+        replayed=True,
+    )
+
+
 @router.post("/{workflow_id}/execute", response_model=ExecuteWorkflowResponse)
 async def execute_workflow_endpoint(
     workflow_id: str,
@@ -756,7 +730,16 @@ async def execute_workflow_endpoint(
     """Start workflow execution in background.
 
     Returns 409 while maintenance mode is active; no execution is started.
+    With `idempotency_key`, a start already accepted is answered again, not
+    repeated (#2129).
     """
+    execution_id = start_execution_id(workflow_id, request.idempotency_key)
+    # Before the maintenance gate: a replay admits nothing, and a retry during
+    # a deploy should hear about the start it already has.
+    if request.idempotency_key is not None:
+        await ensure_connected()
+        if await already_started(workflow_id, execution_id, request):
+            return _replayed(workflow_id, execution_id)
     # #1387, SYNCHRONOUS and first: everything below the `add_task` line runs
     # after the response has been sent, so a refusal discovered there would
     # arrive as a 200 followed by an execution that never happened. Before
@@ -773,7 +756,6 @@ async def execute_workflow_endpoint(
         launch_eval.refuse_unpinned(typed_repos)
     except RepositoryOutsideBaselineError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    execution_id = f"exec-{uuid4().hex[:12]}"
 
     # Bound by the `async with` below, and closed over like every other value
     # this task carries. Passing it through `add_task` instead would say the
@@ -814,7 +796,7 @@ async def execute_workflow_endpoint(
     async with admit_or_409() as admitted:
         # #1557: durable BEFORE the 200, so a start waiting for a budget slot
         # survives a restart; the request ProcessManager starts it from here.
-        await record_execution_request(
+        if await record_unless_started(
             RequestExecutionCommand(
                 execution_id=execution_id,
                 workflow_id=workflow_id,
@@ -822,22 +804,22 @@ async def execute_workflow_endpoint(
                 task=request.task,
                 repos=typed_repos,
                 tags=request.tags,
+                idempotency_key=request.idempotency_key,
                 launch_eval=launch_eval,
             ),
             admitted,
-        )
+            request,
+        ):
+            return _replayed(workflow_id, execution_id)
         from syn_shared.settings import get_settings
 
         if get_settings().execution.run_queue_enabled:
             # #1310 1.3: admitted into the run queue before the 200, inline.
             # The start has already happened or failed here, so a failure is
             # the caller's answer, not a log line behind a 200.
-            admission = await start_direct_now(admitted, _execute)
-            if isinstance(admission, Err):
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Execution {execution_id} was not admitted: {admission.message}",
-                )
+            # #2259: True when another starter started this request first.
+            if await start_direct_now(admitted, execution_id, _execute):
+                return _replayed(workflow_id, execution_id)
         else:
             queue_direct_start(
                 background_tasks,

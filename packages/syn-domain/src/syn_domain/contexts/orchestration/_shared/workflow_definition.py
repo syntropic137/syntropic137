@@ -21,23 +21,29 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from syn_domain.contexts.orchestration._shared.claude_plugin_ref import (
     ClaudePluginRef,  # noqa: TC001 - needed at runtime for Pydantic field validation
+)
+from syn_domain.contexts.orchestration._shared.command_phase import (
+    CommandStep,
+    InconsistentPhaseKindError,
+    PhaseKind,
 )
 from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
     load_md_prompt,
     normalize_frontmatter,
 )
 from syn_domain.contexts.orchestration._shared.retired_phase_fields import (
-    without_retired_fields,
+    reject_retired_fields,
 )
 from syn_domain.contexts.orchestration._shared.skill_ref import (
     SkillRef,
     expand_skill_entry,
 )
 from syn_domain.contexts.orchestration._shared.tags import TagSet
+from syn_domain.contexts.orchestration._shared.workspace_resources import WorkspaceResourceRequest
 from syn_domain.contexts.orchestration.domain.aggregate_eval.value_objects import (  # noqa: TC001 - pydantic field type
     EvalId,
 )
@@ -47,6 +53,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     PhaseDefinition,
     PhaseExecutionType,
     WorkflowClassification,
+    WorkflowType,
+    require_consistent_phase_kind,
     require_supported_execution_type,
 )
 from syn_shared.agents import (
@@ -373,6 +381,10 @@ class PhaseYamlDefinition(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     order: int = Field(..., ge=1)
     execution_type: PhaseExecutionType = PhaseExecutionType.SEQUENTIAL
+    kind: PhaseKind = PhaseKind.AGENT
+    """``command`` runs ``commands`` instead of an agent, at 0 tokens (ADR-078)."""
+    commands: list[CommandStep] = Field(default_factory=list)
+    """A command phase's ordered steps. Refused on an agent phase."""
     description: str | None = None
 
     # YAML uses different names than domain model
@@ -383,7 +395,9 @@ class PhaseYamlDefinition(BaseModel):
     prompt_template: str | None = None
     prompt_file: str | None = None
     max_tokens: int | None = None
-    timeout_seconds: int | None = None
+    timeout_seconds: StrictInt | None = None
+    """Strict, as a command step's is (ADR-078 D4): ``1.0``, ``"60"`` and ``true``
+    are refused rather than coerced. Positivity is the domain rule's."""
     max_cost_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     """Stop the phase once its agent has spent more than this, in USD (#1376).
 
@@ -457,6 +471,20 @@ class PhaseYamlDefinition(BaseModel):
     DEFAULTS TO FALSE because the verdict is meaningless outside a review: a
     phase that never judges anything cannot be asked to report a judgement.
     Declare it on every verify and reverify phase."""
+
+    resources: WorkspaceResourceRequest = Field(default_factory=WorkspaceResourceRequest)
+    """What this phase's workspace needs beyond the deployment default (okrs-51p.30).
+
+    ``resources: {memory_mb: 12288}`` gives this phase's workspace 12 GB. Per
+    phase because a workspace is per phase: a build that needs it does not
+    hold it through the review phases after it. Omitted means the deployment
+    default (``SYN_WORKSPACE_MEMORY_LIMIT_MB``). A request above the
+    deployment ceiling (``SYN_WORKSPACE_MEMORY_MAX_MB``) is refused at
+    install and at start, never clamped.
+
+    ``resources: {pids_limit: 2048}`` raises the workspace's process and
+    thread limit the same way: default ``SYN_WORKSPACE_PIDS_LIMIT``, ceiling
+    ``SYN_WORKSPACE_PIDS_MAX``, refused above it."""
 
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
@@ -554,19 +582,37 @@ class PhaseYamlDefinition(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _drop_retired_fields(cls, data: object) -> object:
-        """Ignore a key that is retired, by name, before `extra="forbid"` runs.
+    def _reject_retired_fields(cls, data: object) -> object:
+        """Refuse a retired key by name, before `extra="forbid"` runs (#1502).
 
-        By name and not `extra="ignore"`: ignoring every unknown key is exactly
-        what let a misspelt `prompt:` install and run with no instructions
-        (#961). Only the keys in `RETIRED_PHASE_FIELDS` are dropped, and the
-        author is told about each one (`retired_field_notices`).
+        By name so the author is told which key, since when and why, in the
+        style of `_reject_removed_provider`, rather than the generic "Extra
+        inputs are not permitted". Only the keys in `RETIRED_PHASE_FIELDS` get
+        this message; any other unknown key is still refused by
+        `extra="forbid"` (#961).
 
-        Ignoring is safe here when it was not for the removed provider
-        (`_reject_removed_provider`): a retired key already does nothing, so
-        dropping it changes nothing the phase does.
+        Stored events are NOT checked here: `REMOVED_EXECUTABLE_PHASE_KEYS`
+        keeps replay of pre-retirement history working forever.
         """
-        return without_retired_fields(data)
+        return reject_retired_fields(data)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _command_phase_delivers_nothing_by_default(cls, data: object) -> object:
+        """An undeclared ``delivers_repo_changes`` is False on a command phase (ADR-078 D2).
+
+        A command phase gates a revision; nothing it does is a deliverable, so
+        the agent default (True, the strict answer) would arm the unpushed-work
+        gate against a build tool's side effects. Declaring True is refused by
+        ``require_consistent_phase_kind``.
+        """
+        if (
+            isinstance(data, dict)
+            and data.get("kind") == PhaseKind.COMMAND
+            and "delivers_repo_changes" not in data
+        ):
+            return {**data, "delivers_repo_changes": False}
+        return data
 
     @field_validator("skills", mode="before")
     @classmethod
@@ -640,15 +686,33 @@ class PhaseYamlDefinition(BaseModel):
     def validate_prompt_source(self) -> PhaseYamlDefinition:
         """Ensure at most one of prompt_template or prompt_file is set.
 
-        NOT enforced here: that at least one is set. A phase with no
-        instructions cannot do useful work and should be rejected, but adding
-        that guard breaks 21 existing tests whose fixtures omit the prompt, so
-        it is split into its own change rather than buried in a PR about
-        unknown keys. Tracked separately.
+        That an agent phase has at least one is a kind rule, so it lives in
+        ``require_consistent_phase_kind`` (#963), reached via ``validate_phase_kind``.
         """
         if self.prompt_template is not None and self.prompt_file is not None:
             msg = f"Phase '{self.id}': specify either 'prompt_template' or 'prompt_file', not both"
             raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def validate_phase_kind(self) -> PhaseYamlDefinition:
+        """Refuse a field this phase's kind does not apply, naming it (ADR-078 D2).
+
+        The rule is ``require_consistent_phase_kind``, which execution applies
+        again to stored templates. ``prompt_file`` is checked here because it
+        never reaches the domain: the loader resolves it into the template.
+
+        Every phase is judged, agent phases included, so one without a prompt
+        is refused here (#963). The exception is a ``prompt_file`` that
+        ``from_yaml`` left unresolved: it is a prompt the domain cannot see
+        yet, and ``to_domain`` refuses it on its own terms when it is used.
+        """
+        if self.kind is PhaseKind.COMMAND and self.prompt_file is not None:
+            raise InconsistentPhaseKindError(
+                self.id, self.kind, "prompt_file applies only to an agent phase"
+            )
+        if self.prompt_file is None or self.commands:
+            require_consistent_phase_kind(self.to_domain())
         return self
 
     def _fallback_agent_domain(self) -> FallbackAgent | None:
@@ -684,6 +748,8 @@ class PhaseYamlDefinition(BaseModel):
             name=self.name,
             order=self.order,
             execution_type=self.execution_type,
+            kind=self.kind,
+            commands=tuple(self.commands),
             description=self.description,
             input_artifact_types=self.input_artifacts,
             output_artifact_types=self.output_artifacts,
@@ -696,6 +762,7 @@ class PhaseYamlDefinition(BaseModel):
             delivers_repo_changes=self.delivers_repo_changes,
             platform_access=self.platform_access,
             requires_verdict=self.requires_verdict,
+            resources=self.resources,
             argument_hint=self.argument_hint,
             model=model,
             provider=provider,
@@ -773,7 +840,9 @@ class WorkflowDefinition(BaseModel):
     description: str | None = None
 
     # Classification
-    type: str = "custom"
+    # An enum like classification, so an unknown type fails validation here
+    # instead of being stored as CUSTOM by whoever builds the command (#2290).
+    type: WorkflowType = WorkflowType.CUSTOM
     classification: WorkflowClassification = WorkflowClassification.STANDARD
 
     # Repository context
@@ -787,7 +856,8 @@ class WorkflowDefinition(BaseModel):
     # added here rather than deleting the documented capability.
     repos: list[str] = Field(default_factory=list)
 
-    # Execution gate (ADR-058 #666): None = infer from repository presence
+    # Execution gate (ADR-058 #666): None = True (opt-out, v0.25.2 update);
+    # resolved by infer_requires_repos in yaml_to_command.py
     requires_repos: bool | None = None
 
     # Project association

@@ -26,8 +26,14 @@ class _Clock:
         return self.now
 
 
-def _host(host_id: str) -> ExecutorHost:
-    return ExecutorHost(host_id=host_id, container_id=f"c-{host_id}", generation="g1", epoch=1)
+def _host(host_id: str, reap_scope: str = "daemon-1") -> ExecutorHost:
+    return ExecutorHost(
+        reap_scope=reap_scope,
+        host_id=host_id,
+        container_id=f"c-{host_id}",
+        generation="g1",
+        epoch=1,
+    )
 
 
 async def _queue_with(clock: _Clock, capacity: int, *ids: str) -> InMemoryExecutionRunQueue:
@@ -121,7 +127,14 @@ async def test_reconciling_adopts_only_from_a_reconciler_that_left_and_a_restart
     assert await queue.take_over("rec-2", limit=10) == []
     # rec-1 restarts in its container: the new process retires it.
     await queue.register(
-        ExecutorHost(host_id="rec-1b", container_id="c-rec-1", generation="g1", epoch=1), 1
+        ExecutorHost(
+            reap_scope="daemon-1",
+            host_id="rec-1b",
+            container_id="c-rec-1",
+            generation="g1",
+            epoch=1,
+        ),
+        1,
     )
     assert await queue.reconciling("rec-2") == []  # reading adopts nothing
     (adopted,) = await queue.take_over("rec-2", limit=10)
@@ -165,7 +178,9 @@ async def test_a_restart_moves_the_machine_budget_one_release_at_a_time() -> Non
     queue = await _queue_with(clock, 1, "held", "waiting")
     held = await queue.claim("h1")
     assert held is not None
-    successor = ExecutorHost(host_id="h1.new", container_id="c-h1", generation="g1", epoch=1)
+    successor = ExecutorHost(
+        reap_scope="daemon-1", host_id="h1.new", container_id="c-h1", generation="g1", epoch=1
+    )
     await queue.register(successor, 1)
     await queue.heartbeat("h1.new")
     assert await queue.claim("h1.new") is None
@@ -187,6 +202,7 @@ _P1 = ExecutorPool(pool_id="p1", priority=1, provider="docker")
 
 def _in_pool(host_id: str, pool: ExecutorPool, container_id: str | None = None) -> ExecutorHost:
     return ExecutorHost(
+        reap_scope="daemon-1",
         host_id=host_id,
         container_id=container_id or f"c-{host_id}",
         generation="g1",
@@ -224,3 +240,21 @@ async def test_a_sole_member_restarting_in_its_container_may_redefine_its_pool()
     await queue.heartbeat("a.1")
     await queue.register(_in_pool("a.2", _P1.model_copy(update={"region": "eu-west"}), "box"), 1)
     await queue.heartbeat("a.2")
+
+
+async def test_fencing_and_takeover_stay_inside_the_claimers_reap_scope() -> None:
+    """Mirrors the Postgres scope predicate (ADR-072 D5, D13)."""
+    clock = _Clock()
+    queue = await _queue_with(clock, 1, "a")
+    for host, scope in (("other", "daemon-2"), ("rec", "daemon-1"), ("same", "daemon-1")):
+        await queue.register(_host(host, scope), 1)
+        await queue.heartbeat(host)
+    assert await queue.claim("h1") is not None
+    clock.now += timedelta(minutes=5)
+
+    assert await queue.fence_expired("other", limit=10) == []
+    (fenced,) = await queue.fence_expired("rec", limit=10)
+    await queue.deregister("rec")
+    assert await queue.take_over("other", limit=10) == []
+    (adopted,) = await queue.take_over("same", limit=10)
+    assert (adopted.execution_id, adopted.token) == ("a", fenced.token + 1)

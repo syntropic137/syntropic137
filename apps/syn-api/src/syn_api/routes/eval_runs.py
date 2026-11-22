@@ -31,7 +31,12 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
-from syn_api.model_identity import UNKNOWN_MODEL_KEY, cost_by_observed_model, observed_model_of
+from syn_api.model_identity import (
+    UNKNOWN_MODEL_KEY,
+    cost_by_observed_model,
+    observed_model_ids,
+    observed_model_of,
+)
 from syn_api.routes.executions.queries import DurationTotal, phase_duration
 from syn_api.types import (
     EvalRunListResponse,
@@ -41,7 +46,14 @@ from syn_api.types import (
     EvalVariantResponse,
     ExecutionEvalRunResponse,
 )
-from syn_domain.contexts.orchestration import ExecutionListReads
+from syn_domain.contexts.orchestration import (
+    AssociationKind,
+    EvalBaselinePin,
+    ExecutionListReads,
+    ExecutionStatus,
+    classify_trial,
+    declared_models_of,
+)
 from syn_domain.contexts.orchestration.domain.read_models.eval_runs import (
     EvalRunFacts,
     EvalRunsSummary,
@@ -62,6 +74,7 @@ if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
     from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
     from syn_domain.contexts.orchestration.domain.read_models.eval_runs import EvalRunScore
+    from syn_domain.contexts.orchestration.domain.read_models.eval_summary import EvalRecord
     from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
         ExecutionCost,
     )
@@ -82,6 +95,27 @@ def _iso(value: datetime | str | None) -> str | None:
     return value.isoformat() if isinstance(value, datetime) else value
 
 
+def baseline_pins(record: EvalRecord | None) -> tuple[EvalBaselinePin, ...]:
+    """The eval's frozen baseline, as the pins a run was launched against."""
+    if record is None:
+        return ()
+    return tuple(
+        EvalBaselinePin(
+            repository=f"{repo.owner}/{repo.name}",
+            requested_ref=repo.requested_ref,
+            commit_sha=repo.commit_sha,
+        )
+        for repo in record.baseline_repos
+    )
+
+
+def _association(kind: str | None) -> AssociationKind | None:
+    try:
+        return AssociationKind(kind) if kind else None
+    except ValueError:
+        return None
+
+
 def decimal_or_none(value: Decimal | str) -> Decimal | None:
     try:
         return Decimal(value)
@@ -90,17 +124,22 @@ def decimal_or_none(value: Decimal | str) -> Decimal | None:
 
 
 def _observed_models(
-    phase_id: str, own_model: str | None, cost_by_model: Mapping[str, Decimal]
+    phase_id: str,
+    own_model: str | None,
+    cost_by_model: Mapping[str, Decimal],
+    unpriced_observed: Iterable[str] = (),
 ) -> tuple[PhaseModel, ...]:
     """Every model the phase was observed running, sorted: its own and its delegates'.
 
     The phase's own reported model is always in, priced or not. ``cost_by_model``
     (the per-model split of the phase's Lane 2 cost) adds its delegates' models:
     a codex phase that delegated to claude ran both. Its unknown bucket is not a
-    model and is dropped. Known limit: the split holds only PRICED rows, so a
-    delegate whose model has no rate and no SDK cost is not seen here (#1743).
+    model and is dropped. The split holds only PRICED rows, so
+    ``unpriced_observed`` (the execution cost's ``observed_models_by_phase``)
+    adds a delegate whose model has no rate and no SDK cost (#1743).
     """
     observed = {key for key in cost_by_model if key != UNKNOWN_MODEL_KEY}
+    observed.update(observed_model_ids(unpriced_observed))
     if own_model:
         observed.add(own_model)
     return tuple(PhaseModel(phase_id, model) for model in sorted(observed))
@@ -143,13 +182,19 @@ class RunReads:
         return observed_model_of(session.agent_model, session.requested_model).observed
 
     def phase_models(
-        self, phase: PhaseExecutionDetail, priced: ExecutionCost | None
+        self,
+        phase: PhaseExecutionDetail,
+        priced: ExecutionCost | None,
+        stored: ExecutionCost | None = None,
     ) -> tuple[PhaseModel, ...]:
         """The models one phase ran, by the rules the execution page applies.
 
         Own model: the session's OBSERVED model (``observed_model_of``). Split:
         the execution cost's ``models_by_phase`` when it has one for the phase,
         else the session's own (``_enrich_costs`` and ``_load_session_cost``).
+        Observed identity is read from ``stored`` whether or not it has cost
+        data: ``has_cost_data`` selects money, and a cache-only run still ran
+        its models (#1743).
         """
         session = self.sessions.get(phase.session_id) if phase.session_id else None
         own = self.own_model(phase)
@@ -157,20 +202,31 @@ class RunReads:
         by_phase = priced.models_by_phase.get(phase.workflow_phase_id) if priced else None
         if by_phase:
             split = cost_by_observed_model(by_phase)
-        return _observed_models(phase.workflow_phase_id, own, split)
+        seen = stored.observed_models_by_phase.get(phase.workflow_phase_id, ()) if stored else ()
+        return _observed_models(phase.workflow_phase_id, own, split, seen)
 
-    def facts(self, row: WorkflowExecutionSummary, score: EvalRunScore | None) -> EvalRunFacts:
-        """One member row, with what its phases ran and what it cost."""
+    def facts(
+        self,
+        row: WorkflowExecutionSummary,
+        score: EvalRunScore | None,
+        baseline: tuple[EvalBaselinePin, ...] = (),
+    ) -> EvalRunFacts:
+        """One member row, with what its phases ran and what it cost.
+
+        Trial identity is read from ``inherited_tags``, never the editable
+        ``tags``, so a retag cannot move a run between cohorts (#2108).
+        """
         execution_id = row.workflow_execution_id
         detail = self.details.get(execution_id)
         if detail is None:
             models: tuple[PhaseModel, ...] = ()
             cost, duration, unpriced, unknown_phases = None, None, 0, 0
             final_model: str | None = None
+            own: tuple[PhaseModel, ...] = ()
         else:
             stored = self.costs.get(pg_safe(execution_id))
             priced = stored if stored is not None and stored.has_cost_data else None
-            models = tuple(m for p in detail.phases for m in self.phase_models(p, priced))
+            models = tuple(m for p in detail.phases for m in self.phase_models(p, priced, stored))
             cost = decimal_or_none(priced.total_cost_usd) if priced is not None else Decimal(0)
             total = DurationTotal.over(phase_duration(p) for p in detail.phases)
             duration, unknown_phases = total.seconds, total.unknown_phase_count
@@ -178,6 +234,12 @@ class RunReads:
             final_model = next(
                 (m for m in (self.own_model(p) for p in reversed(detail.phases)) if m), None
             )
+            own = tuple(
+                PhaseModel(p.workflow_phase_id, m)
+                for p in detail.phases
+                if (m := self.own_model(p))
+            )
+        failed = row.status == ExecutionStatus.FAILED
         return EvalRunFacts(
             execution_id=execution_id,
             workflow_id=row.workflow_id,
@@ -193,6 +255,15 @@ class RunReads:
             unknown_duration_phase_count=unknown_phases,
             total_tokens=row.total_tokens,
             final_phase_model=final_model,
+            own_models=own,
+            failure_classification=row.failure_classification if failed else None,
+            association_kind=_association(row.association_kind),
+            inherited_tags=row.inherited_tags,
+            starting_checkout=() if detail is None else detail.starting_checkout,
+            baseline=baseline,
+            image_manifests=()
+            if detail is None
+            else tuple(p.image_manifest for p in detail.phases if p.image_manifest is not None),
         )
 
 
@@ -209,9 +280,10 @@ async def eval_run_facts(
         eval_id, statuses=statuses, offset=offset, limit=limit
     )
     scores = await manager.eval_list.scores(eval_id)
+    baseline = baseline_pins(await manager.eval_list.record(eval_id))
     reads = await RunReads.load(manager, [row.workflow_execution_id for row in members.rows])
     return [
-        reads.facts(row, scores.get(row.workflow_execution_id)) for row in members.rows
+        reads.facts(row, scores.get(row.workflow_execution_id), baseline) for row in members.rows
     ], members.total
 
 
@@ -223,7 +295,10 @@ async def eval_summaries(
     Every id given gets an entry; an eval with no runs summarizes nothing.
     """
     members = await manager.eval_list.members_of(eval_ids)
-    scores = await manager.eval_list.scores_in(eval_ids)
+    # The members' scores only: the score history also holds detached runs.
+    scores = await manager.eval_list.scores_of(
+        [(e, row.workflow_execution_id) for e, rows in members.items() for row in rows]
+    )
     execution_ids = {row.workflow_execution_id for rows in members.values() for row in rows}
     reads = await RunReads.load(manager, sorted(execution_ids))
     return {
@@ -312,6 +387,7 @@ def _run_response(run: EvalRunFacts) -> EvalRunResponse:
         scorer_version=None if score is None else score.scorer_version,
         scored_at=None if score is None else score.scored_at,
         judge_model=None if score is None else score.judge_model,
+        trial_result=classify_trial(run, declared_models_of(run.inherited_tags)).result,
     )
 
 

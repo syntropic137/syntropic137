@@ -107,13 +107,34 @@ async def test_the_declared_fallback_reaches_the_caller_and_survives_export() ->
 
 def test_the_json_create_path_holds_the_fallback_to_the_yaml_rules() -> None:
     [phase] = _build_phase_defs(
-        [{"name": "Verify", "fallback_agent": {"provider": "claude", "model": "opus"}}]
+        [
+            {
+                "name": "Verify",
+                "prompt_template": "Do the work.",
+                "fallback_agent": {"provider": "claude", "model": "opus"},
+            }
+        ]
     )
     assert phase.fallback_agent == FallbackAgent(provider="claude", model="opus")
 
     with pytest.raises(ValueError, match="max_cost_usd on provider 'codex'"):
         _build_phase_defs(
-            [{"name": "Verify", "max_cost_usd": 5.0, "fallback_agent": {"provider": "codex"}}]
+            [
+                {
+                    "name": "Verify",
+                    "prompt_template": "Do the work.",
+                    "max_cost_usd": 5.0,
+                    "fallback_agent": {"provider": "codex"},
+                }
+            ]
         )
     with pytest.raises(ValueError):
-        _build_phase_defs([{"name": "Verify", "fallback_agent": {"model": "opus"}}])
+        _build_phase_defs(
+            [
+                {
+                    "name": "Verify",
+                    "prompt_template": "Do the work.",
+                    "fallback_agent": {"model": "opus"},
+                }
+            ]
+        )

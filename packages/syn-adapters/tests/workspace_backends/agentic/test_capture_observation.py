@@ -106,7 +106,7 @@ class TestThePhaseToAgentSessionMapping:
         )
 
         data = writer.calls[0]["data"]
-        assert data["schema_version"] == 2
+        assert data["schema_version"] == 3
         assert data["agent_session_ids"] == expected
 
     @pytest.mark.asyncio

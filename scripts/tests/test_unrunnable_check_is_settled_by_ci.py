@@ -39,6 +39,8 @@ _GATING_PHASES = [
     ("sdlc/implement-v3", "Confirm the fix closed what verification found"),
     ("sdlc/implement-v4-precheck", "Verify the change independently"),
     ("sdlc/implement-v4-precheck", "Confirm the fix closed what verification found"),
+    ("sdlc/implement-v7", "Verify the change independently"),
+    ("sdlc/implement-v7", "Confirm the fix closed what verification found"),
     ("sdlc/reverify-pr", "Verify the change independently"),
     ("sdlc/reverify-pr", "Confirm the fix closed what verification found"),
     ("sdlc/implement", "Verify the change independently"),

@@ -15,7 +15,6 @@ from syn_adapters.control import (
     ControlCommand,
     ControlSignalType,
     ExecutionController,
-    InjectContext,
 )
 from syn_adapters.control.adapters.memory import InMemorySignalQueueAdapter
 from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
@@ -150,7 +149,6 @@ async def _record(
 
 _REQUESTS: dict[ControlSignalType, Callable[[str], ControlCommand]] = {
     ControlSignalType.CANCEL: lambda eid: CancelExecution(execution_id=eid, reason="r"),
-    ControlSignalType.INJECT: lambda eid: InjectContext(execution_id=eid, message="m"),
 }
 
 
@@ -229,21 +227,6 @@ class TestAdmissionIsTheAggregatesDecision:
         assert queued is not None
         assert queued.signal_type == ControlSignalType.CANCEL
 
-    @pytest.mark.parametrize("status", list(_TO_STATUS))
-    async def test_inject_is_refused_exactly_when_terminal(self, status: ExecutionStatus) -> None:
-        executions = _executions()
-        signals = InMemorySignalQueueAdapter()
-        await _record(executions, "exec-i", status)
-
-        result = await ExecutionController(executions, signals).handle_command(
-            InjectContext(execution_id="exec-i", message="m")
-        )
-
-        live = status is ExecutionStatus.RUNNING
-        assert result.success is live
-        if not live:
-            assert "terminal" in (result.error or "").lower()
-
     async def test_an_execution_with_no_stream_is_refused(self) -> None:
         """No stream is not a pending execution. The old controller read a
         missing row as PENDING, from which cancel and inject were admitted."""
@@ -295,22 +278,6 @@ class TestExecutionController:
         assert signal is not None
         assert signal.signal_type == ControlSignalType.CANCEL
         assert signal.reason == "Timed out"
-
-    async def test_inject_carries_its_message(self) -> None:
-        executions = _executions()
-        signals = InMemorySignalQueueAdapter()
-        await _record(executions, "exec-1", ExecutionStatus.RUNNING)
-
-        result = await ExecutionController(executions, signals).handle_command(
-            InjectContext(execution_id="exec-1", message="New instructions", role="user")
-        )
-
-        assert result.success
-        assert result.message == "Context injection queued"
-        signal = await signals.dequeue("exec-1")
-        assert signal is not None
-        assert signal.signal_type == ControlSignalType.INJECT
-        assert signal.inject_message == "New instructions"
 
     async def test_get_state_reads_the_stream(self) -> None:
         executions = _executions()

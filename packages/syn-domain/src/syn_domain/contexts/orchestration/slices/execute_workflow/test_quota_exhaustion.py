@@ -1,9 +1,8 @@
 """A spent quota is its own kind, is never retried, and says when it ends (PC-83).
 
 The codex sentence is the one observed on 2026-10-06, byte for byte as the
-task recorded it. No claude quota
-message exists in this repo, agentic-workspace or any fixture, so none is
-pinned here and claude quota text reads as it did before.
+task recorded it. Claude's weekly limit is pinned end to end in
+tests/.../test_1605_harness_classified_upstream_failures.py (#1605).
 """
 
 from __future__ import annotations
@@ -47,7 +46,6 @@ def test_the_observed_codex_quota_sentence_reads_as_quota_with_its_reset() -> No
     "message",
     [
         "You've hit your usage limit. Upgrade to Pro or try again later.",
-        "Visit settings to purchase more credits",
         "You've hit your usage limit. Try again at 9:10 PM.",
     ],
 )

@@ -1,9 +1,11 @@
 """Tests for get_metrics query slice.
 
-Cost is Lane 2 telemetry (#695): the dashboard_metrics projection no longer
-tracks cost. The API enriches responses from the execution_cost projection.
+The projection counts workflow templates and artifacts only. Execution status
+counts, sessions, tokens and cost are read by GET /metrics from their own read
+models (#1843, #932), so the projection no longer keeps copies (#2272).
 """
 
+import dataclasses
 import os
 
 import pytest
@@ -12,8 +14,26 @@ import pytest
 os.environ["APP_ENVIRONMENT"] = "test"
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType, ContentType
+from syn_domain.contexts.artifacts.domain.events.ArtifactCreatedEvent import (
+    ArtifactCreatedEvent,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    PhaseDefinition,
+    WorkflowClassification,
+    WorkflowType,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
+    WorkflowTemplateArchivedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateUpdatedEvent import (
+    WorkflowTemplateUpdatedEvent,
+)
 from syn_domain.contexts.orchestration.domain.queries.get_dashboard_metrics import (
     GetDashboardMetricsQuery,
+)
+from syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics import (
+    DashboardMetrics,
 )
 from syn_domain.contexts.orchestration.slices.dashboard_metrics.GetDashboardMetricsHandler import (
     GetDashboardMetricsHandler,
@@ -23,6 +43,24 @@ from syn_domain.contexts.orchestration.slices.dashboard_metrics.projection impor
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _archived(workflow_id: str) -> dict:
+    """A WorkflowTemplateArchived payload as the dispatch paths deliver it."""
+    return WorkflowTemplateArchivedEvent(workflow_id=workflow_id).model_dump()
+
+
+def _reinstalled(workflow_id: str) -> dict:
+    """A WorkflowTemplateUpdated payload: what a reinstall emits (#822)."""
+    return WorkflowTemplateUpdatedEvent(
+        workflow_id=workflow_id,
+        name=workflow_id,
+        workflow_type=WorkflowType.RESEARCH,
+        classification=WorkflowClassification.SIMPLE,
+        repository_url="",
+        repository_ref="main",
+        phases=[PhaseDefinition(phase_id="p1", name="P1", order=1)],
+    ).model_dump()
 
 
 @pytest.fixture
@@ -52,10 +90,8 @@ class TestDashboardMetricsProjection:
         """Test that initial metrics are all zero."""
         metrics = await projection.get_metrics()
         assert metrics.total_workflows == 0
-        assert metrics.active_workflows == 0
-        assert metrics.completed_workflows == 0
-        assert metrics.total_sessions == 0
         assert metrics.total_artifacts == 0
+        assert metrics.total_artifact_bytes == 0
 
     @pytest.mark.asyncio
     async def test_workflow_created_increments_total(self, projection: DashboardMetricsProjection):
@@ -67,50 +103,6 @@ class TestDashboardMetricsProjection:
         assert metrics.total_workflows == 2
 
     @pytest.mark.asyncio
-    async def test_workflow_lifecycle(self, projection: DashboardMetricsProjection):
-        """Test full workflow lifecycle updates metrics correctly."""
-        # Create workflow
-        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
-        metrics = await projection.get_metrics()
-        assert metrics.total_workflows == 1
-        assert metrics.active_workflows == 0
-
-        # Start execution
-        await projection.on_workflow_execution_started({"workflow_id": "wf-1"})
-        metrics = await projection.get_metrics()
-        assert metrics.active_workflows == 1
-
-        # Complete workflow
-        await projection.on_workflow_completed({"workflow_id": "wf-1"})
-        metrics = await projection.get_metrics()
-        assert metrics.active_workflows == 0
-        assert metrics.completed_workflows == 1
-
-    @pytest.mark.asyncio
-    async def test_workflow_failed_updates_counts(self, projection: DashboardMetricsProjection):
-        """Test WorkflowFailed updates counts correctly."""
-        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
-        await projection.on_workflow_execution_started({"workflow_id": "wf-1"})
-        await projection.on_workflow_failed(
-            {"workflow_id": "wf-1", "error": "Something went wrong"}
-        )
-
-        metrics = await projection.get_metrics()
-        assert metrics.active_workflows == 0
-        assert metrics.failed_workflows == 1
-
-    @pytest.mark.asyncio
-    async def test_session_events_update_metrics(self, projection: DashboardMetricsProjection):
-        """Test session events update metrics."""
-        await projection.on_session_started({"session_id": "s-1"})
-        metrics = await projection.get_metrics()
-        assert metrics.total_sessions == 1
-
-        await projection.on_session_completed({"session_id": "s-1", "total_tokens": 1000})
-        metrics = await projection.get_metrics()
-        assert metrics.total_tokens == 1000
-
-    @pytest.mark.asyncio
     async def test_artifact_created_increments_count(self, projection: DashboardMetricsProjection):
         """Test ArtifactCreated increments artifact count."""
         await projection.on_artifact_created({"artifact_id": "a-1"})
@@ -118,68 +110,6 @@ class TestDashboardMetricsProjection:
 
         metrics = await projection.get_metrics()
         assert metrics.total_artifacts == 2
-
-    @pytest.mark.asyncio
-    async def test_token_accumulation(self, projection: DashboardMetricsProjection):
-        """Test that tokens accumulate correctly across sessions (cost is Lane 2)."""
-        await projection.on_session_started({"session_id": "s-1"})
-        await projection.on_session_completed({"session_id": "s-1", "total_tokens": 500})
-
-        await projection.on_session_started({"session_id": "s-2"})
-        await projection.on_session_completed({"session_id": "s-2", "total_tokens": 1500})
-
-        metrics = await projection.get_metrics()
-        assert metrics.total_tokens == 2000
-
-    @pytest.mark.asyncio
-    async def test_input_output_token_tracking(self, projection: DashboardMetricsProjection):
-        """Test that input/output tokens are tracked separately."""
-        await projection.on_session_started({"session_id": "s-1"})
-        await projection.on_session_completed(
-            {
-                "session_id": "s-1",
-                "total_tokens": 2500,
-                "total_input_tokens": 1000,
-                "total_output_tokens": 1500,
-                "total_cost_usd": "0.025",
-            }
-        )
-
-        await projection.on_session_started({"session_id": "s-2"})
-        await projection.on_session_completed(
-            {
-                "session_id": "s-2",
-                "total_tokens": 3500,
-                "total_input_tokens": 1500,
-                "total_output_tokens": 2000,
-                "total_cost_usd": "0.035",
-            }
-        )
-
-        metrics = await projection.get_metrics()
-        assert metrics.total_tokens == 6000
-        assert metrics.total_input_tokens == 2500
-        assert metrics.total_output_tokens == 3500
-
-    @pytest.mark.asyncio
-    async def test_input_output_tokens_default_to_zero(
-        self, projection: DashboardMetricsProjection
-    ):
-        """Test that input/output tokens default to zero when not provided."""
-        await projection.on_session_started({"session_id": "s-1"})
-        await projection.on_session_completed(
-            {
-                "session_id": "s-1",
-                "total_tokens": 1000,
-                "total_cost_usd": "0.01",
-                # No input/output breakdown provided
-            }
-        )
-
-        metrics = await projection.get_metrics()
-        assert metrics.total_tokens == 1000
-        assert metrics.total_input_tokens == 0
-        assert metrics.total_output_tokens == 0
 
 
 class TestGetDashboardMetricsHandler:
@@ -194,7 +124,6 @@ class TestGetDashboardMetricsHandler:
         """Test handler returns metrics correctly."""
         # Setup some data
         await projection.on_workflow_template_created({"workflow_id": "wf-1"})
-        await projection.on_session_started({"session_id": "s-1"})
         await projection.on_artifact_created({"artifact_id": "a-1"})
 
         # Execute query
@@ -203,5 +132,265 @@ class TestGetDashboardMetricsHandler:
 
         # Assert
         assert result.total_workflows == 1
-        assert result.total_sessions == 1
         assert result.total_artifacts == 1
+
+
+# Kept by GET /metrics from their own read models since #1843 and #932.
+_REMOVED_COUNTERS = {
+    "active_workflows",
+    "completed_workflows",
+    "failed_workflows",
+    "total_sessions",
+    "total_tokens",
+    "total_input_tokens",
+    "total_output_tokens",
+    "total_cache_creation_tokens",
+    "total_cache_read_tokens",
+}
+
+
+@pytest.mark.unit
+class TestNoCountersGetMetricsDoesNotRead:
+    """The projection keeps only what GET /metrics reads from it (#2272)."""
+
+    def test_read_model_carries_only_the_counts_metrics_reads(self):
+        fields = {f.name for f in dataclasses.fields(DashboardMetrics)}
+        assert fields == {"total_workflows", "total_artifacts", "total_artifact_bytes"}
+        assert set(DashboardMetrics().to_dict()) == fields
+
+    def test_projection_no_longer_subscribes_to_execution_or_session_events(
+        self, projection: DashboardMetricsProjection
+    ):
+        # Each of these took a read-modify-write of the single global row.
+        subscribed = projection.get_subscribed_event_types() or set()
+        assert subscribed.isdisjoint(
+            {
+                "WorkflowExecutionStarted",
+                "PhaseStarted",
+                "WorkflowCompleted",
+                "WorkflowFailed",
+                "SessionStarted",
+                "SessionCompleted",
+            }
+        )
+        assert subscribed == {
+            "WorkflowTemplateCreated",
+            "WorkflowCreated",
+            "WorkflowTemplateArchived",
+            "WorkflowTemplateUpdated",
+            "ArtifactCreated",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_row_stored_before_the_bump_reads_without_the_old_counters(
+        self, memory_store: InMemoryProjectionStore, projection: DashboardMetricsProjection
+    ):
+        """A VERSION 5 row still carries the old keys until the rebuild clears it."""
+        stale = {"total_workflows": 3, "total_artifacts": 4, "total_artifact_bytes": 0}
+        stale.update(dict.fromkeys(_REMOVED_COUNTERS, 7))
+        await memory_store.save(
+            DashboardMetricsProjection.PROJECTION_NAME,
+            DashboardMetricsProjection.METRICS_KEY,
+            stale,
+        )
+
+        metrics = await projection.get_metrics()
+        assert metrics == DashboardMetrics(total_workflows=3, total_artifacts=4)
+
+
+@pytest.mark.unit
+class TestTotalWorkflowsExcludesArchived:
+    """total_workflows matches GET /workflows, which hides archived templates (#641)."""
+
+    @pytest.mark.asyncio
+    async def test_archived_template_is_not_counted(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        for workflow_id in ("wf-1", "wf-2", "wf-3"):
+            await projection.on_workflow_template_created({"workflow_id": workflow_id})
+        await projection.on_workflow_template_archived(_archived("wf-2"))
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 2
+
+    @pytest.mark.asyncio
+    async def test_archive_never_drives_count_below_zero(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        await projection.on_workflow_template_archived(_archived("wf-1"))
+        await projection.on_workflow_template_archived(_archived("wf-2"))
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 0
+
+    @pytest.mark.asyncio
+    async def test_repeated_archive_counts_once(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        for workflow_id in ("wf-1", "wf-2", "wf-3"):
+            await projection.on_workflow_template_created({"workflow_id": workflow_id})
+        await projection.on_workflow_template_archived(_archived("wf-1"))
+        await projection.on_workflow_template_archived(_archived("wf-1"))
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 2
+
+    @pytest.mark.asyncio
+    async def test_reinstalling_an_archived_template_counts_it_again(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        """A reinstall emits WorkflowTemplateUpdated and un-archives the template (#822)."""
+        for workflow_id in ("wf-1", "wf-2", "wf-3"):
+            await projection.on_workflow_template_created({"workflow_id": workflow_id})
+        await projection.on_workflow_template_archived(_archived("wf-2"))
+        await projection.on_workflow_template_updated(_reinstalled("wf-2"))
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 3
+
+        # Archiving it again after the reinstall is counted again.
+        await projection.on_workflow_template_archived(_archived("wf-2"))
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 2
+
+    @pytest.mark.asyncio
+    async def test_updating_a_live_template_does_not_count_it_twice(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        for workflow_id in ("wf-1", "wf-2", "wf-3"):
+            await projection.on_workflow_template_created({"workflow_id": workflow_id})
+        await projection.on_workflow_template_archived(_archived("wf-3"))
+        await projection.on_workflow_template_updated(_reinstalled("wf-1"))
+        await projection.on_workflow_template_updated(_reinstalled("wf-1"))
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 2
+
+    @pytest.mark.asyncio
+    async def test_archiving_a_template_never_counted_changes_nothing(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        """A legacy template the list never showed: archiving it must not subtract another."""
+        await projection.on_workflow_template_created({"workflow_id": "wf-new"})
+        await projection.on_workflow_template_archived(_archived("wf-legacy"))
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("step", ["archive", "reinstall"])
+    async def test_a_failed_save_retried_still_counts_right(
+        self,
+        memory_store: InMemoryProjectionStore,
+        handler: GetDashboardMetricsHandler,
+        projection: DashboardMetricsProjection,
+        step: str,
+    ):
+        """A save that fails, then the same event retried, must land the change once."""
+        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
+        if step == "reinstall":
+            await projection.on_workflow_template_archived(_archived("wf-1"))
+        expected = 0 if step == "archive" else 1
+
+        async def apply() -> None:
+            if step == "archive":
+                await projection.on_workflow_template_archived(_archived("wf-1"))
+            else:
+                await projection.on_workflow_template_updated(_reinstalled("wf-1"))
+
+        save = memory_store.save
+        failed = False
+
+        async def save_failing_once(projection_name: str, key: str, data: dict) -> None:
+            # Fail the first write of the metrics record itself: any other
+            # record the handler wrote before it has already landed.
+            nonlocal failed
+            if key == DashboardMetricsProjection.METRICS_KEY and not failed:
+                failed = True
+                raise RuntimeError("store unavailable")
+            await save(projection_name, key, data)
+
+        memory_store.save = save_failing_once  # type: ignore[method-assign]
+        try:
+            with pytest.raises(RuntimeError):
+                await apply()
+            await apply()  # the coordinator retries the unacknowledged event
+        finally:
+            memory_store.save = save  # type: ignore[method-assign]
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == expected
+
+    @pytest.mark.asyncio
+    async def test_rebuild_clears_archived_markers(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        """A VERSION-bump rebuild replays from scratch; no archive survives it."""
+        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_archived(_archived("wf-1"))
+        await projection.clear_all_data()
+
+        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_updated(_reinstalled("wf-1"))
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_workflows == 1
+
+
+def _artifact(artifact_id: str, size_bytes: int) -> dict:
+    """An ArtifactCreated payload as the dispatch paths deliver it."""
+    return ArtifactCreatedEvent(
+        artifact_id=artifact_id,
+        workflow_id="wf-1",
+        phase_id="p1",
+        artifact_type=ArtifactType.RESEARCH_SUMMARY,
+        content_type=ContentType.TEXT_PLAIN,
+        content="x",
+        content_hash="h",
+        size_bytes=size_bytes,
+    ).model_dump()
+
+
+class TestTotalArtifactBytes:
+    """#2274: total_artifact_bytes sums ArtifactCreated.size_bytes."""
+
+    @pytest.mark.asyncio
+    async def test_sizes_sum(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        await projection.on_artifact_created(_artifact("a-1", 1200))
+        await projection.on_artifact_created(_artifact("a-2", 34))
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_artifacts == 2
+        assert result.total_artifact_bytes == 1234
+
+    @pytest.mark.asyncio
+    async def test_payload_without_size_counts_the_artifact_and_adds_zero(
+        self,
+        projection: DashboardMetricsProjection,
+        handler: GetDashboardMetricsHandler,
+    ):
+        """An older stored payload with no size_bytes key never raises."""
+        await projection.on_artifact_created(_artifact("a-1", 500))
+        await projection.on_artifact_created({"artifact_id": "a-old"})
+
+        result = await handler.handle(GetDashboardMetricsQuery())
+        assert result.total_artifacts == 2
+        assert result.total_artifact_bytes == 500

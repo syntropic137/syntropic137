@@ -289,6 +289,37 @@ class TestRequiresReposPreflightGating:
         ]
 
     @pytest.mark.asyncio
+    async def test_no_repo_rejection_tells_the_author_how_to_opt_out(self) -> None:
+        """#1050: unset requires_repos means True (ADR-058), so a research-style
+        workflow that omitted it lands here. The 422 must name both ways out."""
+        from fastapi import HTTPException
+
+        from syn_api.routes.executions.commands import (
+            ExecuteWorkflowRequest,
+            _validate_execution_request,
+        )
+
+        wf = self._make_workflow(repo_url="", requires_repos=True)
+        with (
+            patch(
+                "syn_api.routes.executions.commands.get_workflow_repo",
+                return_value=MagicMock(get_by_id=AsyncMock(return_value=wf)),
+            ),
+            patch(
+                "syn_api.routes.executions.commands.ensure_connected",
+                new=AsyncMock(),
+            ),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await _validate_execution_request("wf-1", ExecuteWorkflowRequest(repos=[]))
+
+        assert exc_info.value.status_code == 422
+        detail = str(exc_info.value.detail)
+        assert "requires_repos: false" in detail
+        assert "-R" in detail
+        assert "ADR-058" in detail
+
+    @pytest.mark.asyncio
     async def test_validate_all_repos_noop_on_empty_list(self) -> None:
         """_validate_all_repos_access with empty list should be a no-op."""
         from syn_api.routes.executions.repo_access import _validate_all_repos_access

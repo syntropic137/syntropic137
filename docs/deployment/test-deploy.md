@@ -35,12 +35,22 @@ one that touches the running host.
 hard gate at each one, and aborts loudly on the first that fails:
 
 ```bash
-just pit-stop 0.29.1-beta.5 --stage-only   # bump, build, verify, ship, repoint: safe while runs are in flight
+just pit-stop 0.29.1-beta.5 --stage-only   # bump, build, verify, ship, stage the pins: safe while runs are in flight
 just pit-stop 0.29.1-beta.5 --swap-only    # wait for the drain, recreate api + gateway, verify
 just pit-stop 0.29.1-beta.5                # both, in one go
 just pit-stop 0.29.1-beta.5 --dry-run      # echo every mutating command; still run the read-only checks
 just pit-stop 0.29.1-beta.5 --service gateway   # the gateway alone: no gate, no drain, no probe
+just pit-stop 0.29.1-beta.5 --service api       # the API alone: no gate, no drain; needs the Run Queue on
 ```
+
+**`--service api` swaps the API alone (#1310).** With the Run Queue on, runs
+live in the executor, so nothing is gated or drained and `compose up -d --no-deps
+api` leaves them running. It refuses unless the Run Queue is on, `syn137-executor`
+is running and the new image has the executor's event epoch. Verify reads back
+that the executor is the same container. The probe still runs, unless every
+execution slot is taken, when it is skipped and says so. **`--service all`**
+keeps its drain and, on a host with an executor, recreates it too: use it for
+an event epoch bump.
 
 **`--service gateway` swaps the gateway alone (#1310).** One image is built,
 shipped and repointed (`pit_stop_repoint.py --service gateway` leaves the
@@ -125,10 +135,42 @@ old file is kept beside it as `docker-compose.syntropic137.yaml.bak-<pin>`,
 where `<pin>` is the old `syn-api` tag (`bak-v0.33.1`) or the first 12 hex of
 its digest (`bak-sha256-bf783882d031`). Anything else - a variable pin, no pin,
 two `syn-api` lines - aborts `stage` before the host is touched. The new file
-is written beside the deployed one and checked against the staged sha256
-before anything else happens. Only then is the backup taken and the new file
-renamed into place, so a transfer cut short leaves the deployed compose as it
-was.
+is written beside the deployed one and checked against the staged sha256, so a
+transfer cut short stages nothing.
+
+**`stage` never touches the live compose (#1511).** The repointed file is
+`docker-compose.syntropic137.yaml.pit-stop-staged`; the swap moves it over
+`docker-compose.syntropic137.yaml` after the gate and the drain, taking the
+`.bak-<pin>` backup then. So between `--stage-only` and `--swap-only` a routine
+`docker compose up -d api` (to load a rotated credential, say) still starts the
+build that was running. Before #1511 it started the staged one, undrained and
+unverified, and beta.6 aborted on every start that way. If the live compose is
+edited after the stage, the swap refuses rather than move the older staged file
+over the edit: stage again.
+
+**`stage` refuses a compose that has drifted from the ref's (#1511).** Before
+anything is built, the deployed compose is compared with
+`docker/docker-compose.syntropic137.yaml` at `--ref`, every `image:` line cut
+to its image name (pins are not drift) and comments and blank lines ignored.
+Any other difference aborts the pit stop and prints the diff: a pit stop only
+moves pins, so a new image whose startup needs a new volume, env var or socket
+proxy policy would be deployed without it. Bring the deployed compose up to
+date by hand (keep its pins), then run the pit stop again. The same check runs
+again on the file `stage` actually repoints, so an edit made on the host during
+the build cannot slip past it. There is no flag to stage the published compose
+wholesale, and no way to compare against any file but `--ref`'s: the release
+asset the host was installed from lacks exactly the config a newer image needs.
+
+**One drift is applied, not refused: added `KEY: null` env keys (#2154).** When
+every difference is an env key that `--ref`'s compose adds inside an
+`environment:` map as exactly `KEY: null`, the pit stop adds those lines
+itself before the check: a null passthrough forwards only the host's `.env`,
+unset for a key the host has never had, so the setting's default applies, as on
+a fresh install. It prints the diff, refuses if the file changed since it was
+read, backs it up to `<compose>.bak-<ts>-pitstop-keys`, writes with a sha256
+check and reads it back. `--dry-run` prints the diff and writes nothing. A
+valued key (`""`, `~`, `${X}`, a number), a removed or changed line, or a key
+outside an `environment:` map is still refused, and still needs the owner.
 
 The sections below remain the reference for what each stage does and why.
 

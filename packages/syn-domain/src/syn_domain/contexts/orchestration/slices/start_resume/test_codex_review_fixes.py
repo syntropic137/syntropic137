@@ -691,6 +691,8 @@ def _phase(phase_id: str, order: int) -> ExecutablePhase:
 
 
 class _Parent:
+    resume_withdrawn = False
+
     def resume_start_command(self) -> StartResumeCommand:
         return StartResumeCommand(
             execution_id="exec-child",

@@ -146,6 +146,11 @@ def _run(tmp: Path, api: str, *flags: str, password: str = _PASSWORD) -> _Run:
     refuse = f'#!/bin/sh\necho "$(basename "$0") $*" >> {tmp}/touched\nexit 1\n'
     for tool in ("docker", "ssh", "just"):
         (bin_dir / tool).write_text(refuse)
+    # The one read a host answers: it has no executor. Not recorded as touched.
+    (bin_dir / "ssh").write_text(
+        '#!/bin/sh\ncase "$*" in *"docker ps -aq"*) exit 0 ;; esac\n'
+        + refuse.removeprefix("#!/bin/sh\n")
+    )
     # The repository is a fake one in tmp, so no path can fetch or add a worktree for real.
     (bin_dir / "git").write_text(
         f'#!/bin/sh\ncase "$*" in *--git-common-dir*) echo {tmp}/repo/.git; exit 0 ;; esac\n'
@@ -245,13 +250,16 @@ def test_an_active_probe_workflow_lets_the_pit_stop_go_on(
     tmp_path: Path, fake_api: tuple[_Api, str]
 ) -> None:
     """Dry run: the precheck passes and the stages after it start. The fake
-    ssh then refuses to read the compose file, which is where this one ends."""
+    git then refuses to show the published compose, the next precheck's read
+    (#1511), which is where this one ends."""
     state, api = fake_api
     state.workflows = [_summary(f"{_PROBE}0", archived=True), _summary(_PROBE, archived=False)]
     run = _run(tmp_path, api, "--dry-run")
     assert f"probe workflow {_PROBE}: active" in run.proc.stdout
-    assert "prepare:" in run.proc.stdout
-    assert "could not read the deployed compose file" in run.proc.stderr
+    assert "precheck: the deployed compose is origin/main's published compose" in run.proc.stdout
+    assert (
+        "could not read docker/docker-compose.syntropic137.yaml at origin/main" in run.proc.stderr
+    )
     assert "probe workflow" not in run.proc.stderr
     assert all(method == "GET" for method, _ in state.requests)
     _password_stayed_secret(run, state)
@@ -282,5 +290,5 @@ def test_a_run_that_dispatches_no_probe_does_not_check_for_one(
     state, api = fake_api
     state.workflows = [_summary(_PROBE, archived=True)]
     run = _run(tmp_path, api, "--dry-run", flag)
-    assert "prepare:" in run.proc.stdout
+    assert "precheck: the deployed compose is origin/main's published compose" in run.proc.stdout
     assert not any(path.startswith("/api/v1/workflows") for _, path in state.requests)

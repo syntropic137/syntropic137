@@ -44,14 +44,26 @@ Two judges answer one question: does a blocking finding identify THIS defect?
 
 - **Keyword judge** (always; deterministic, offline): one blocking finding
   names an expected file and has a word from every `expected.keywords` group.
-- **LLM judge** (`score --llm-judge`; needs the platform's `ANTHROPIC_API_KEY`
-  setting, from the environment or `.env`): a pinned model at temperature 0
-  (`claude-sonnet-4-6`; the 4.7+/5.x models reject temperature 0) is given the
-  case's root cause (`expected.defect`, required: the judge refuses a case
-  without it), the expected files and keyword concepts, and the blocking
-  findings, and
-  answers `match`, `no_match` or `unclear`, quoting the finding it matched. A
-  `match` whose quote is not in any finding is turned into `unclear`.
+- **LLM judge** (`score --llm-judge`; runs through Claude Code headless,
+  `claude -p`, on the CLI's own OAuth login, so `claude` must be on PATH and
+  logged in with `claude auth login`): the transport is agentic-workspace's
+  `ClaudeHeadless` (`lib/agentic-workspace/lib/python/agentic_isolation/agentic_isolation/harnesses/claude/headless.py`),
+  which strips API-key and cloud-provider variables from the CLI's environment,
+  refuses to answer unless `claude auth status` reports a first-party OAuth
+  login with no API key source, and never calls the Messages API with a key.
+  This repo's `HeadlessJudgeClient` (`scripts/eval_suite.py`) refuses any model
+  outside `JUDGE_MODELS` before the CLI starts and turns every transport
+  failure into a `JudgeTransportError`, which fails the judgement: a failed
+  call is never a verdict. A pinned model (`claude-sonnet-5-5`,
+  at a pinned effort, `medium`) is given the case's root cause (`expected.defect`,
+  required: the judge refuses a case without it), the expected files and
+  keyword concepts, and the blocking findings, and answers `match`, `no_match`
+  or `unclear` as one JSON object, quoting the finding it matched.
+  The 5.x models reject temperature 0, so the judge is asked three times and
+  the verdict is the majority; no majority is `unclear`. A `match` whose quote
+  is not in any finding counts as an `unclear` answer before the vote. Scores
+  judged before prompt v4 (`claude-sonnet-4-6` at temperature 0) carry a
+  different scorer version and are not comparable.
 
 **Headline rule:** caught = blocked AND (keyword match OR LLM `match`).
 `unclear` is not caught. Both judges' catch rates are printed beside the

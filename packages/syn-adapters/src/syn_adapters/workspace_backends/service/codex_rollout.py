@@ -14,8 +14,9 @@ be on this machine. Per the boundary rule in AGENTS.md that knowledge tracks
 the codex CLI, so restating it here would drift the next time codex moves a
 directory - silently, and into a field that reads as evidence.
 
-WHAT the records mean stays in the domain: this hands back exactly what was
-written and ``model_from_rollout`` reads it.
+HOW a rollout spells its model is codex's format too, so it is read here, by
+``model_from_rollout`` (#1424). The domain receives a ``CodexRolloutReading``
+and never the records.
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ from typing import TYPE_CHECKING
 
 from agentic_isolation.harnesses.codex.transcripts import CodexTranscriptSource
 from agentic_isolation.providers.base import ExecuteResult
+
+from syn_adapters.session_store.codex_rollout_model import model_from_rollout
+from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutReading
 
 if TYPE_CHECKING:
     from agentic_isolation.harnesses import ExecFn
@@ -151,3 +155,19 @@ async def read_codex_rollout(
         len(extraction.transcripts),
     )
     return None
+
+
+async def read_codex_rollout_model(
+    workspace: ManagedWorkspace,
+    native_session_id: str,
+) -> CodexRolloutReading | None:
+    """What the rollout under ``native_session_id`` says ran, or None if unread.
+
+    Keeps the two outcomes ``read_codex_rollout`` keeps apart: ``None`` means
+    the rollout could not be read, a reading with no model means it was read
+    and names no single model.
+    """
+    document = await read_codex_rollout(workspace, native_session_id)
+    if document is None:
+        return None
+    return CodexRolloutReading(model=model_from_rollout(document))

@@ -38,6 +38,7 @@ from event_sourcing import (
     ProjectionStore,
 )
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_names import NOT_A_BRANCH
 from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
     CancelledWorkQuarantinedEvent,
 )
@@ -239,7 +240,9 @@ class QuarantineNoticeProcessManager(ProcessManager):
         q = notice.quarantined
         if q.pull_request is not None:
             return q.pull_request
-        if self._branches is None or "/" not in q.repository:
+        # A stand-in such as `(detached HEAD)` names no ref, so no PR can be
+        # open from it: asking GitHub 404s on every tick, forever (#1870).
+        if self._branches is None or "/" not in q.repository or q.branch in NOT_A_BRANCH:
             return None
         reading = await self._branches.read_branch(q.repository, q.branch)
         return reading.open_pull_request
@@ -276,8 +279,8 @@ class QuarantineNoticeProcessManager(ProcessManager):
         await self._store.save(self.PROJECTION_NAME, notice.key, notice.model_dump(mode="json"))
 
     def get_idempotency_key(self, todo_item: dict[str, str | int | float | bool | None]) -> str:
-        """One notice per (execution, phase, repository)."""
-        return str(todo_item.get("key", ""))
+        """One notice per (execution, phase, repository): the `key` every stored row carries."""
+        return str(todo_item["key"])
 
     async def clear_all_data(self) -> None:
         if self._store is not None:

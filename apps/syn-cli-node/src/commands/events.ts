@@ -7,9 +7,9 @@ import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/com
 import { CLIError } from "../framework/errors.js";
 import { api, unwrap } from "../client/typed.js";
 import type { components } from "../generated/api-types.js";
-import { print, printError, printDim } from "../output/console.js";
+import { print, printError, printDim, printUnpricedNote } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED } from "../output/ansi.js";
-import { formatCost, formatDuration, formatTimestamp } from "../output/format.js";
+import { formatDuration, formatTimestamp } from "../output/format.js";
 import { Table } from "../output/table.js";
 
 type EventList = components["schemas"]["EventListResponse"];
@@ -166,8 +166,10 @@ const costsCommand: CommandDef = {
     print(`  Total tokens:       ${d.total_tokens.toLocaleString()}`);
     if (d.cache_creation_tokens) print(`  Cache creation:     ${d.cache_creation_tokens.toLocaleString()}`);
     if (d.cache_read_tokens) print(`  Cache read:         ${d.cache_read_tokens.toLocaleString()}`);
-    if (d.estimated_cost_usd != null)
-      print(`  Estimated cost:     ${formatCost(String(d.estimated_cost_usd))}`);
+    if (d.estimated_cost_usd != null) {
+      print(`  Estimated cost:     ${d.total_cost_display}`);
+      printUnpricedNote(d.unpriced_observation_count);
+    }
   },
 };
 

@@ -22,6 +22,8 @@ from syn_api._wiring import (
     sync_published_events_to_projections,
 )
 from syn_api.routes.workflows.phase_defs import (
+    UnknownClassificationError,
+    UnknownWorkflowTypeError,
     _build_input_declarations,
     _build_phase_defs,
     _resolve_classification,
@@ -34,7 +36,11 @@ from syn_api.types import (
     WorkflowError,
     WorkflowValidation,
 )
-from syn_domain.contexts.orchestration import PHASE_ID_PATTERN
+from syn_domain.contexts.orchestration import (
+    PHASE_ID_PATTERN,
+    WorkflowClassification,
+    WorkflowType,
+)
 from syn_shared.agents import AgentProvider
 from syn_shared.settings import get_settings
 
@@ -70,7 +76,7 @@ async def create_workflow(
     Args:
         name: Workflow name.
         workflow_type: Type (research, planning, implementation, review, deployment, custom).
-        classification: Classification (standard, advanced).
+        classification: Classification (simple, standard, complex, epic).
         repository_url: Repository URL for the workflow.
         repository_ref: Repository ref/branch.
         description: Optional description.
@@ -165,7 +171,6 @@ async def validate_yaml(
     from syn_domain.contexts.orchestration import WorkflowDefinition, validate_workflow_yaml
 
     is_valid, error_msg = validate_workflow_yaml(yaml_content)
-    warnings = _retired_field_notices(yaml_content)
 
     if is_valid:
         definition = WorkflowDefinition.from_yaml(yaml_content)
@@ -173,9 +178,8 @@ async def validate_yaml(
             WorkflowValidation(
                 valid=True,
                 name=definition.name,
-                workflow_type=definition.type,
+                workflow_type=definition.type.value,
                 phase_count=len(definition.phases),
-                warnings=warnings,
             )
         )
 
@@ -183,26 +187,8 @@ async def validate_yaml(
         WorkflowValidation(
             valid=False,
             errors=[error_msg] if error_msg else ["Unknown validation error"],
-            warnings=warnings,
         )
     )
-
-
-def _retired_field_notices(yaml_content: str) -> list[str]:
-    """What the author should be told about retired keys in ``yaml_content``.
-
-    The one place notices are derived from text, and it never raises: YAML that
-    does not parse is reported by validation, not here, so a syntax error stays
-    an invalid result rather than becoming a 500.
-    """
-    import yaml
-
-    from syn_domain.contexts.orchestration import retired_field_notices
-
-    try:
-        return retired_field_notices(yaml.safe_load(yaml_content))
-    except yaml.YAMLError:
-        return []
 
 
 def _classify_workflow_error(error_msg: str) -> WorkflowError:
@@ -285,8 +271,20 @@ class CreateWorkflowRequest(BaseModel):
         pattern=PHASE_ID_PATTERN,
     )
     name: str
-    workflow_type: str = "custom"
-    classification: str = "standard"
+    workflow_type: str = Field(
+        default=WorkflowType.CUSTOM.value,
+        description=(
+            f"Workflow type, case-insensitive: {', '.join(WorkflowType)}. "
+            "An unknown value is refused with 422 (#2290)."
+        ),
+    )
+    classification: str = Field(
+        default=WorkflowClassification.STANDARD.value,
+        description=(
+            f"Workflow classification, case-insensitive: {', '.join(WorkflowClassification)}. "
+            "An unknown value is refused with 422 (#2286)."
+        ),
+    )
     repository_url: str = ""
     repository_ref: str = "main"
     description: str | None = None
@@ -329,6 +327,18 @@ class CreateWorkflowRequest(BaseModel):
         default=False,
         description="Overwrite an already-installed matching version.",
     )
+
+    @field_validator("classification")
+    @classmethod
+    def _validate_classification(cls, value: str) -> str:
+        """Refuse an unknown classification at the boundary; store the canonical spelling."""
+        return _resolve_classification(value).value
+
+    @field_validator("workflow_type")
+    @classmethod
+    def _validate_workflow_type(cls, value: str) -> str:
+        """Refuse an unknown workflow type at the boundary; store the canonical spelling."""
+        return _resolve_workflow_type(value).value
 
 
 class ValidateYamlRequest(BaseModel):
@@ -651,8 +661,6 @@ class _YamlCreateOutcome(BaseModel):
     requires_repos: bool
     changed: bool = True
     """False when the package was already installed byte-identical (#822)."""
-    warnings: tuple[str, ...] = ()
-    """Notices for the author, reported whether or not anything changed."""
 
 
 async def create_workflow_from_yaml(
@@ -672,7 +680,9 @@ async def create_workflow_from_yaml(
     ``name`` and ``workflow_id`` when supplied.
 
     Raises ``ValueError`` on malformed YAML or unresolved ``prompt_file:``
-    references (no base_dir is available server-side). Raises
+    references (no base_dir is available server-side), and its subclass
+    ``UnknownClassificationError`` for a classification outside the enum, and
+    ``UnknownWorkflowTypeError`` for a ``type`` outside the enum. Raises
     ``ClaudePluginError`` (any subclass) if a referenced claude plugin is
     not yet present in the lock projection -- per the #726 Phase A design
     the API does not fetch; the CLI must register plugins via
@@ -681,6 +691,7 @@ async def create_workflow_from_yaml(
     """
     import yaml
     from event_sourcing.core.errors import ConcurrencyConflictError, StreamAlreadyExistsError
+    from pydantic import ValidationError
 
     from syn_api._wiring import get_claude_plugin_resolution_service
     from syn_domain.contexts.orchestration import (
@@ -694,7 +705,17 @@ async def create_workflow_from_yaml(
         definition = WorkflowDefinition.from_yaml(yaml_content)
     except yaml.YAMLError as e:
         raise ValueError(f"Malformed YAML: {e}") from e
-    warnings = tuple(_retired_field_notices(yaml_content))
+    except ValidationError as e:
+        # The JSON route refuses an unknown classification (#2286) or
+        # workflow type (#2290) with 422; the package install entrance must
+        # not answer the same mistake with 400. Other schema errors keep
+        # their existing 400.
+        for error in e.errors():
+            if error["loc"] == ("classification",):
+                raise UnknownClassificationError(error["input"]) from e
+            if error["loc"] == ("type",):
+                raise UnknownWorkflowTypeError(error["input"]) from e
+        raise
 
     # Implicit fetch: any claude_plugins ref the YAML declares must be
     # present in the lock projection before we register the workflow.
@@ -752,7 +773,6 @@ async def create_workflow_from_yaml(
             classification=command.classification.value,
             repository_url=command.repository_url,
             requires_repos=command.requires_repos,
-            warnings=warnings,
         )
     )
 
@@ -832,6 +852,8 @@ async def create_workflow_from_yaml_endpoint(
         # Stable error_code (claude_plugin_unreachable, etc.) so CLI/dashboard
         # can render actionable messages without string sniffing.
         raise http_exception_for_claude_plugin_error(e) from e
+    except (UnknownClassificationError, UnknownWorkflowTypeError) as e:
+        raise HTTPException(status_code=422, detail=f"Invalid workflow YAML: {e}") from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid workflow YAML: {e}") from e
 
@@ -848,5 +870,7 @@ async def create_workflow_from_yaml_endpoint(
         repository_url=outcome.repository_url,
         requires_repos=outcome.requires_repos,
         status="created" if outcome.changed else "unchanged",
-        warnings=list(outcome.warnings),
+        # Install produces no notices today; the field stays for API
+        # compatibility (#2100).
+        warnings=[],
     )

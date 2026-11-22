@@ -35,6 +35,7 @@ from syn_domain.contexts.orchestration import (
     StartStatus,
 )
 from syn_shared.display import EM_DASH
+from syn_shared.display.formatters import UNPRICED
 from syn_shared.observed_model import format_observed_model
 
 
@@ -125,6 +126,16 @@ class PhaseExecutionInfo(BaseModel):
     ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
     fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models this phase was observed running that are NOT in ``cost_by_model``
+    because nothing priced them: no rate and no SDK cost (#1743).
+
+    They ran - a delegate on a model with no pricing entry is still a model the
+    phase used - but carry no cost, never a fabricated $0. Render each beside
+    the cost split with ``unpriced_model_cost_display``.
+    """
+    unpriced_model_cost_display: str = UNPRICED
+    """What to show in place of a cost for each of ``unpriced_models``."""
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
     the store reported them.
@@ -528,6 +539,12 @@ class ExecutionSummaryResponse(BaseModel):
     dashboard with nothing to quote falls back to showing the measurement
     alone, which is the state #1392 was opened about.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63), as on the detail.
+
+    `blocked` on a `completed` run means it completed with unresolved findings.
+    Null for a run that reviewed nothing or has not completed, and for every
+    queued start. Filter on it with `?review_verdict=` (#1630)."""
     repos: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     """The execution's current tags, normalised and sorted (#967)."""
@@ -538,6 +555,14 @@ class ExecutionSummaryResponse(BaseModel):
     """The execution that resumed this one. A run is resumed at most once, so
     this is one id or None (#1881)."""
     repos_display: str | None = None
+    task: str | None = None
+    """What this run was asked to do, in full: the same value, from the same
+    derivation, as ``task`` on ``GET /executions/{id}`` (#1075). None when it
+    was asked nothing, and for a queued start, which has no read model yet.
+    The run's other ``inputs`` are deliberately not listed."""
+    task_display: str | None = None
+    """``task`` as one line of at most 80 characters, ellipsised, for a list row.
+    None exactly when ``task`` is None or blank."""
     eval: ExecutionEvalRunResponse | None = None
     """The eval this execution is a current run of, with its verdict. Null in no eval.
 

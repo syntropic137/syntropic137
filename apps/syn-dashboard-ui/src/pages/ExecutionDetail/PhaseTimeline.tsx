@@ -3,6 +3,7 @@ import { Clock, DollarSign, Layers, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { Card, CardContent, CardHeader, ObservedModel, PhaseStartPins, SkillUseLine } from '../../components'
+import { CapturePhaseIndicator, type DegradedPhase } from '../../components/capture'
 import { TokenInOut } from '../../components/TokenInOut'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
@@ -14,7 +15,21 @@ import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 import { PlannedPhaseCard } from './PlannedPhaseCard'
 import './SessionInventory.css'
 
-function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, string> }) {
+/**
+ * A phase's cost split, plus the models it ran that nothing priced (#1743).
+ *
+ * An unpriced model has no cost to put in the split, so it is listed after it
+ * with the backend's label instead of a fabricated $0.
+ */
+function PhaseModelBreakdown({
+  costByModel,
+  unpricedModels,
+  unpricedLabel,
+}: {
+  costByModel: Record<string, string>
+  unpricedModels: string[]
+  unpricedLabel: string
+}) {
   const entries = Object.entries(costByModel)
     .map(([model, cost]) => ({ model, cost: parseFloat(cost) }))
     .sort((a, b) => b.cost - a.cost)
@@ -38,6 +53,12 @@ function PhaseModelBreakdown({ costByModel }: { costByModel: Record<string, stri
           </div>
         )
       })}
+      {unpricedModels.map((model) => (
+        <div key={model} className="flex items-center justify-between text-[10px]">
+          <span className="font-mono text-[var(--color-text-muted)]">{costByModelKeyLabel(model)}</span>
+          <span className="text-[var(--color-text-secondary)]">{unpricedLabel}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -112,8 +133,13 @@ function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: 
         requested={phase.requested_model}
         className="mt-1 text-[10px] text-[var(--color-text-secondary)]"
       />
-      {phase.cost_by_model && Object.keys(phase.cost_by_model).length > 0 && (
-        <PhaseModelBreakdown costByModel={phase.cost_by_model} />
+      {(Object.keys(phase.cost_by_model ?? {}).length > 0 ||
+        (phase.unpriced_models ?? []).length > 0) && (
+        <PhaseModelBreakdown
+          costByModel={phase.cost_by_model ?? {}}
+          unpricedModels={phase.unpriced_models ?? []}
+          unpricedLabel={phase.unpriced_model_cost_display ?? ''}
+        />
       )}
       <div className="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
         {/*
@@ -188,9 +214,11 @@ interface PhaseTimelineProps {
    */
   execution: ExecutionDetailResponse
   now: number
+  /** Phases whose workspace ran with capture degraded (#1516); none by default. */
+  captureDegraded?: readonly DegradedPhase[]
 }
 
-export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
+export function PhaseTimeline({ execution, now, captureDegraded = [] }: PhaseTimelineProps) {
   // `phases` is what ran here and carries the metrics; `phase_plan` is every
   // phase the run declared, in order, with where each stands (feedback
   // cee46909). The timeline walks the plan so what is left is visible, and
@@ -198,6 +226,7 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
   const phases = execution.phases
   const plan = execution.phase_plan
   const ran = new Map(phases.map((p) => [p.phase_id, p]))
+  const degradedByPhase = new Map(captureDegraded.map((d) => [d.phaseId, d]))
   // Read from the execution, not from the phases below. Lane 1 leaves a running
   // phase's counts at 0, so a roll-up summed from the cards reported "0 tokens"
   // for the whole of a live run - directly under a headline card already
@@ -267,6 +296,8 @@ export function PhaseTimeline({ execution, now }: PhaseTimelineProps) {
                 {phase ? (
                   <div className="phase-with-inventory">
                     <PhaseCard phase={phase} tone={phaseTone(phase)} now={now} />
+                    {/* Outside the card, like the pins: the card is a link. */}
+                    <CapturePhaseIndicator degraded={degradedByPhase.get(phase.phase_id)} />
                     {/* Outside the card: the card is a link, and this expands in place. */}
                     <PhaseStartPins pins={phase.pinned_at_start} status={phase.start_pins_status} />
                     <SkillUseLine use={phase.skill_use} />

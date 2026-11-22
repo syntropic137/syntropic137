@@ -34,6 +34,7 @@ task: |
   visible still holds a pause, but only for a bound:
   `AdmissionGate(port, drain_timeout=<seconds>)`, and a pause that runs out of
   it raises a new `AdmissionDrainTimeoutError` (exported from the same module)
-  and does not write the flag.
+  and does not write the flag. That error has an `unsettled` attribute: the
+  number (int) of admitted starts that had not settled when the bound ran out.
 hidden_tests:
   - packages/syn-domain/src/syn_domain/contexts/_shared/test_1617_a_queued_ticket_does_not_hold_the_pause.py

@@ -1,8 +1,9 @@
 """The reason texts codex's own failures are reported under.
 
 Split out of ``CodexStreamProcessor`` (#1825) so the stream processor stays a
-stream processor: these are the spellings `upstream_failure` recognises, and
-the stdout login-fault filter that produces one of them.
+stream processor: the spellings codex's failures are reported under, and the
+stdout login-fault filter that produces one of them. What KIND of fault each
+is, is agentic-workspace's classifier's call (#1605), not this module's.
 """
 
 from __future__ import annotations
@@ -86,12 +87,10 @@ def codex_fault_reason(message: str) -> str:
     """The reason text codex's own words about a failed turn are reported under.
 
     A function rather than an f-string at the one call site because it is not
-    only written here: `busy_upstream` has to RECOGNISE a specific sentence
-    codex says about its own capacity, and it can only do that against the
-    exact spelling this produces. Two copies of that spelling would drift the
-    first time either the prefix or the truncation changed, and the failure
-    would be silent - a phase that stopped being retried, with nothing to read
-    but the reason it was never retried for.
+    only written here: the upstream failure reader knows a reason is codex's
+    by the prefix this writes with an empty message. Two copies of that prefix
+    would drift the first time either changed, and the failure would be
+    silent - codex's faults read as claude's, and a busy codex never retried.
     """
     return f"codex reported: {message[:_MAX_FAULT_LINE_LEN]}"
 
@@ -99,9 +98,9 @@ def codex_fault_reason(message: str) -> str:
 def codex_login_fault_reason(status: str, line: str) -> str:
     """The reason text a codex CLI login fault on stdout is reported under.
 
-    A function for the same reason as `codex_fault_reason`: the upstream
-    failure reader recognises this shape as `auth` by the prefix this writes
-    with an empty `line`, so the two cannot drift apart.
+    Spelled with claude's auth label, so agentic-workspace's claude
+    classifier, which reads every reason not on codex's fault line, reads
+    it as `auth` (#1605).
     """
     label = api_error_label(ApiErrorType.AUTHENTICATION, status)
     return f"{label}: codex CLI login - {line[:_MAX_FAULT_LINE_LEN]}"

@@ -367,13 +367,14 @@ class TestTheFailurePathLeaksNothingAndBoundsEverything:
         """
         import syn_api._wiring as wiring
         from syn_api.routes.executions import commands
+        from syn_api.services import skill_preflight
 
         async def _hangs() -> object:
             await asyncio.sleep(30)
             return _Resolver()
 
         monkeypatch.setattr(wiring, "get_skill_resolution_service", _hangs)
-        monkeypatch.setattr(commands, "_SKILL_PREFLIGHT_TIMEOUT_SECONDS", 0.05)
+        monkeypatch.setattr(skill_preflight, "SKILL_PREFLIGHT_TIMEOUT_SECONDS", 0.05)
         wf = _Workflow([_Phase("research", skills=(_Ref("architecture"),))])
 
         async with asyncio.timeout(5):  # the test itself must not hang

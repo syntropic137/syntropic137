@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import pytest
 
+from syn_adapters.projection_stores import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions import (
     CanonicalUsageQueryService,
     CostCalculator,
@@ -65,17 +66,6 @@ MIXED: tuple[TokenUsageData, ...] = (
 )
 
 
-class _Store[RowT]:
-    def __init__(self) -> None:
-        self._rows: dict[tuple[str, str], RowT] = {}
-
-    async def save(self, name: str, key: str, value: RowT) -> None:
-        self._rows[(name, key)] = value
-
-    async def get(self, name: str, key: str) -> RowT | None:
-        return self._rows.get((name, key))
-
-
 @pytest.fixture
 async def event_store(test_infrastructure):
     from syn_adapters.events import AgentEventStore
@@ -115,7 +105,7 @@ async def test_session_cost_agrees_with_replay(event_store) -> None:
     execution_id = f"exec-{uuid4()}"
     await _write(event_store, session_id, execution_id)
 
-    projection = SessionCostProjection(store=_Store())  # type: ignore[arg-type]
+    projection = SessionCostProjection(store=InMemoryProjectionStore())
     await _replay(projection, session_id, execution_id)
     replayed = await projection.get_session_cost(session_id)
     assert replayed is not None
@@ -137,7 +127,7 @@ async def test_execution_cost_agrees_with_replay(event_store) -> None:
     session_id = f"sess-{uuid4()}"
     await _write(event_store, session_id, execution_id)
 
-    projection = ExecutionCostProjection(store=_Store())  # type: ignore[arg-type]
+    projection = ExecutionCostProjection(store=InMemoryProjectionStore())
     await _replay(projection, session_id, execution_id)
     replayed = await projection.get_execution_cost(execution_id)
     assert replayed is not None
@@ -217,7 +207,7 @@ async def test_a_null_cost_summary_after_turns_costs_what_replay_does(event_stor
         "data": summary,
     }
 
-    session_replay = SessionCostProjection(store=_Store())  # type: ignore[arg-type]
+    session_replay = SessionCostProjection(store=InMemoryProjectionStore())
     await _replay(session_replay, session_id, execution_id)
     await session_replay.on_session_summary(summary_event)
     replayed = await session_replay.get_session_cost(session_id)
@@ -228,7 +218,7 @@ async def test_a_null_cost_summary_after_turns_costs_what_replay_does(event_stor
     assert queried.cost_by_model == replayed.cost_by_model
     assert queried.unpriced_observation_count == replayed.unpriced_observation_count
 
-    execution_replay = ExecutionCostProjection(store=_Store())  # type: ignore[arg-type]
+    execution_replay = ExecutionCostProjection(store=InMemoryProjectionStore())
     await _replay(execution_replay, session_id, execution_id)
     await execution_replay.on_session_summary(summary_event)
     replayed_execution = await execution_replay.get_execution_cost(execution_id)

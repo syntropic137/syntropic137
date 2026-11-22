@@ -37,6 +37,7 @@ _LIST_ARGS: Mapping[str, object] = {
     "tag": None,
     "eval_id": None,
     "in_eval": None,
+    "review_verdict": None,
     "page": 1,
     "page_size": 50,
 }

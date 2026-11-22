@@ -27,6 +27,22 @@ from syn_domain.contexts.orchestration.domain.read_models import WorkflowSummary
 from syn_domain.contexts.orchestration.domain.read_models.workflow_summary import declared_skills
 from syn_domain.pagination import matches_search
 
+DEFAULT_ORDER = "-created_at"
+
+#: The fields ``query`` accepts in ``order_by``. The store does the ordering,
+#: over the whole filtered collection, numbers numerically (#1843); this list
+#: only keeps an arbitrary key out of it. Anything else means DEFAULT_ORDER.
+SORTABLE_FIELDS: frozenset[str] = frozenset(
+    {"runs_count", "name", "workflow_type", "phase_count", "created_at"}
+)
+
+
+def _store_order(order_by: str | None) -> str:
+    """``order_by`` if it names a sortable field, else ``DEFAULT_ORDER``."""
+    if order_by and order_by.removeprefix("-") in SORTABLE_FIELDS:
+        return order_by
+    return DEFAULT_ORDER
+
 
 class WorkflowListProjection(RecordedTimeProjection):
     """Builds workflow TEMPLATE list read model from events.
@@ -89,6 +105,10 @@ class WorkflowListProjection(RecordedTimeProjection):
             summary.id,
             summary.to_dict(),
         )
+
+    # Events stored before the rename (WorkflowTemplateAggregate still applies
+    # them), so they reach the read model in production and tests alike (#2265).
+    on_workflow_created = on_workflow_template_created
 
     async def on_workflow_template_updated(self, event_data: dict) -> None:
         """Handle WorkflowTemplateUpdated - refresh the summary (issue #822).
@@ -184,7 +204,7 @@ class WorkflowListProjection(RecordedTimeProjection):
         workflow_type_filter: str | None = None,
         limit: int = 100,
         offset: int = 0,
-        order_by: str = "-created_at",
+        order_by: str | None = None,
         include_archived: bool = False,
         search: str | None = None,
     ) -> list[WorkflowSummary]:
@@ -194,14 +214,18 @@ class WorkflowListProjection(RecordedTimeProjection):
             workflow_type_filter: Filter by workflow type
             limit: Maximum results
             offset: Pagination offset
-            order_by: Sort field (prefix with - for descending)
+            order_by: Sort field (prefix with - for descending). Applied to
+                the whole filtered collection before the page is cut; an
+                unknown field or None means ``DEFAULT_ORDER``.
             include_archived: If True, include archived templates. Defaults to False.
             search: Case-insensitive substring matched against name and id.
 
         Returns:
             List of matching WorkflowSummary objects
         """
-        matching = await self._matching(workflow_type_filter, include_archived, search, order_by)
+        matching = await self._matching(
+            workflow_type_filter, include_archived, search, _store_order(order_by)
+        )
         return matching[offset : offset + limit]
 
     async def count(

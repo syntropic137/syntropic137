@@ -32,6 +32,14 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from syn_collector.collector.otlp_envelope import (
+    OtlpLogRecord,
+    OtlpLogsRequest,
+    OtlpMetricsRequest,
+    OtlpNumberDataPoint,
+    OtlpScopeMetrics,
+    attributes_to_dict,
+)
 from syn_collector.events.types import CollectedEvent, EventType
 
 logger = logging.getLogger(__name__)
@@ -78,14 +86,6 @@ def _otlp_event_id(session_id: str, metric_name: str, timestamp: str, index: int
     return hashlib.sha256(content.encode()).hexdigest()[:32]
 
 
-def _extract_session_id(resource_attrs: list[dict[str, Any]]) -> str:
-    """Extract session ID from OTel resource attributes."""
-    for attr in resource_attrs:
-        if attr.get("key") == "session.id":
-            return str(attr.get("value", {}).get("stringValue", "unknown"))
-    return "unknown"
-
-
 def _timestamp_from_nanos(timestamp_ns: int | str) -> datetime:
     """Convert nanosecond timestamp to datetime."""
     ns = int(timestamp_ns)
@@ -94,37 +94,15 @@ def _timestamp_from_nanos(timestamp_ns: int | str) -> datetime:
     return datetime.now(UTC)
 
 
-def _extract_data_points(metric: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract data points from any metric type (gauge, sum, histogram)."""
-    for key in ("gauge", "sum", "histogram"):
-        section = metric.get(key)
-        if section:
-            return section.get("data_points", section.get("dataPoints", []))
-    return []
-
-
-def _attr_value(value_obj: dict[str, Any]) -> str | int | float | bool:
-    """Extract a scalar value from an OTel attribute value wrapper."""
-    for key in ("stringValue", "intValue", "doubleValue", "boolValue"):
-        if key in value_obj:
-            return value_obj[key]  # type: ignore[no-any-return]
-    return ""
-
-
 def _datapoint_to_event(
-    dp: dict[str, Any],
+    dp: OtlpNumberDataPoint,
     index: int,
     session_id: str,
     metric_name: str,
 ) -> CollectedEvent:
     """Convert a single OTLP data point into a CollectedEvent."""
-    timestamp_ns = dp.get("time_unix_nano", dp.get("timeUnixNano", 0))
+    timestamp_ns = dp.time_unix_nano
     timestamp = _timestamp_from_nanos(timestamp_ns)
-
-    value = dp.get("asDouble", dp.get("asInt", dp.get("as_double", dp.get("as_int", 0))))
-    attributes = {
-        attr.get("key", ""): _attr_value(attr.get("value", {})) for attr in dp.get("attributes", [])
-    }
 
     return CollectedEvent(
         event_id=_otlp_event_id(session_id, metric_name, str(timestamp_ns), index),
@@ -134,19 +112,14 @@ def _datapoint_to_event(
         data={
             "source": "otlp",
             "metric_name": metric_name,
-            "value": value,
-            **attributes,
+            "value": dp.value,
+            **attributes_to_dict(dp.attributes),
         },
     )
 
 
-def _get(d: dict[str, Any], snake: str, camel: str) -> Any:  # noqa: ANN401
-    """Get a value by snake_case key, falling back to camelCase."""
-    return d.get(snake, d.get(camel, []))
-
-
 def _collect_known_datapoints(
-    scope_metrics_list: list[dict[str, Any]],
+    scope_metrics_list: list[OtlpScopeMetrics],
     session_id: str,
     start_index: int,
 ) -> list[CollectedEvent]:
@@ -154,11 +127,11 @@ def _collect_known_datapoints(
     events: list[CollectedEvent] = []
     idx = start_index
     for scope_metrics in scope_metrics_list:
-        for metric in scope_metrics.get("metrics", []):
-            metric_name = metric.get("name", "")
+        for metric in scope_metrics.metrics:
+            metric_name = metric.name
             if metric_name not in KNOWN_METRICS:
                 continue
-            for dp in _extract_data_points(metric):
+            for dp in metric.data_points():
                 events.append(_datapoint_to_event(dp, idx, session_id, metric_name))
                 idx += 1
     return events
@@ -171,7 +144,8 @@ def parse_otlp_metrics(payload: dict[str, Any]) -> list[CollectedEvent]:
     them to CollectedEvents that flow through the existing pipeline.
 
     Args:
-        payload: OTLP JSON metrics payload (ExportMetricsServiceRequest).
+        payload: OTLP JSON metrics payload (ExportMetricsServiceRequest),
+            raw from the request body; wrapped in the typed envelope views here.
 
     Returns:
         List of CollectedEvent instances for known metrics.
@@ -179,11 +153,10 @@ def parse_otlp_metrics(payload: dict[str, Any]) -> list[CollectedEvent]:
     events: list[CollectedEvent] = []
     dp_index = 0
 
-    for resource_metrics in _get(payload, "resource_metrics", "resourceMetrics"):
-        resource = resource_metrics.get("resource", {})
-        session_id = _extract_session_id(resource.get("attributes", []))
-        scope_list = _get(resource_metrics, "scope_metrics", "scopeMetrics")
-        batch = _collect_known_datapoints(scope_list, session_id, dp_index)
+    request = OtlpMetricsRequest(payload)
+    for resource_metrics in request.resource_metrics:
+        session_id = resource_metrics.resource.session_id()
+        batch = _collect_known_datapoints(resource_metrics.scope_metrics, session_id, dp_index)
         dp_index += len(batch)
         events.extend(batch)
 
@@ -191,7 +164,7 @@ def parse_otlp_metrics(payload: dict[str, Any]) -> list[CollectedEvent]:
 
 
 def _parse_log_record(
-    log_record: dict[str, Any],
+    log_record: OtlpLogRecord,
     index: int,
     session_id: str,
 ) -> CollectedEvent:
@@ -200,15 +173,12 @@ def _parse_log_record(
     Structured log events (e.g. claude_code.api_request) are mapped to
     specific EventTypes. Unknown events fall back to OTLP_LOG.
     """
-    timestamp_ns = log_record.get("time_unix_nano", log_record.get("timeUnixNano", 0))
+    timestamp_ns = log_record.time_unix_nano
     timestamp = _timestamp_from_nanos(timestamp_ns)
-    severity = log_record.get("severity_text", log_record.get("severityText", "INFO"))
+    severity = log_record.severity_text
 
     # Extract event name from log record attributes (Claude Code sets event.name)
-    log_attrs = {
-        attr.get("key", ""): _attr_value(attr.get("value", {}))
-        for attr in log_record.get("attributes", [])
-    }
+    log_attrs = attributes_to_dict(log_record.attributes)
     event_name = str(log_attrs.get("event.name", ""))
     event_type = _LOG_EVENT_TO_EVENT_TYPE.get(event_name, EventType.OTLP_LOG)
 
@@ -218,7 +188,7 @@ def _parse_log_record(
     if event_type != EventType.OTLP_LOG:
         data: dict[str, Any] = {"source": "otlp", **log_attrs}
     else:
-        body = log_record.get("body", {}).get("stringValue", "")
+        body = log_record.body.string_value("")
         bounded_attrs: dict[str, str | int | float | bool] = {}
         for k, v in list(log_attrs.items())[:50]:
             bounded_attrs[k] = v[:500] if isinstance(v, str) else v
@@ -246,7 +216,8 @@ def parse_otlp_logs(payload: dict[str, Any]) -> list[CollectedEvent]:
     tool_result, user_prompt) and falls back to OTLP_LOG for unknowns.
 
     Args:
-        payload: OTLP JSON logs payload (ExportLogsServiceRequest).
+        payload: OTLP JSON logs payload (ExportLogsServiceRequest),
+            raw from the request body; wrapped in the typed envelope views here.
 
     Returns:
         List of CollectedEvent instances.
@@ -254,12 +225,12 @@ def parse_otlp_logs(payload: dict[str, Any]) -> list[CollectedEvent]:
     events: list[CollectedEvent] = []
     log_index = 0
 
-    for resource_logs in _get(payload, "resource_logs", "resourceLogs"):
-        resource = resource_logs.get("resource", {})
-        session_id = _extract_session_id(resource.get("attributes", []))
+    request = OtlpLogsRequest(payload)
+    for resource_logs in request.resource_logs:
+        session_id = resource_logs.resource.session_id()
 
-        for scope_logs in _get(resource_logs, "scope_logs", "scopeLogs"):
-            for log_record in _get(scope_logs, "log_records", "logRecords"):
+        for scope_logs in resource_logs.scope_logs:
+            for log_record in scope_logs.log_records:
                 events.append(_parse_log_record(log_record, log_index, session_id))
                 log_index += 1
 

@@ -527,6 +527,20 @@ _BY_EXECUTION = ("execution_id",)
 #: Adding a row here is a review decision, not a formality: the bound is checked
 #: against the SQL, the prose is not checked by anything.
 _DECLARED: Mapping[ScanIdentity, Declaration] = {
+    # /metrics' coverage count (#897). The totals themselves read the usage
+    # rollup; this runs only when some turn-priced work has no rate.
+    **_declared(
+        f"{_DOMAIN}/agent_sessions/slices/canonical_totals/query_service.py",
+        {
+            "_UNPRICED_TURNS_QUERY": _segment_discard(
+                "Token-reporting turns of the summary-less sessions in an unpriced canonical "
+                "group, per model. Read here because the rollup counts zero-token turns too. "
+                "Pinned to those sessions and to their day span; runs only when an unrated "
+                "model has turn-priced work, so priced history never reaches it. Nothing "
+                "bounds how many such sessions there are."
+            ),
+        },
+    ),
     # The read path #1338 is about. Pins the segmentby column AND caps the ids
     # per round-trip; neither fact limits the events inside a session.
     **_declared(

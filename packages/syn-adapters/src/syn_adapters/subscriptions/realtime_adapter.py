@@ -170,7 +170,8 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
 
 class OrganizationListAdapter(_NamespacedProjectionAdapter):
     PROJECTION_NAME: ClassVar[str] = "organization_list"
-    VERSION: ClassVar[int] = 1
+    # v2 (#2303): RepoDeregistered decrements repo_count; rebuild to drop stale counts.
+    VERSION: ClassVar[int] = 2
     _SUBSCRIBED: ClassVar[set[str]] = {
         "organization.OrganizationCreated",
         "organization.OrganizationUpdated",
@@ -178,12 +179,14 @@ class OrganizationListAdapter(_NamespacedProjectionAdapter):
         "organization.SystemCreated",
         "organization.SystemDeleted",
         "organization.RepoRegistered",
+        "organization.RepoDeregistered",
     }
 
 
 class SystemListAdapter(_NamespacedProjectionAdapter):
     PROJECTION_NAME: ClassVar[str] = "system_list"
-    VERSION: ClassVar[int] = 1
+    # v2 (#2300): RepoDeregistered decrements repo_count; rebuild to drop stale counts.
+    VERSION: ClassVar[int] = 2
     _SUBSCRIBED: ClassVar[set[str]] = {
         "organization.SystemCreated",
         "organization.SystemUpdated",
@@ -191,16 +194,19 @@ class SystemListAdapter(_NamespacedProjectionAdapter):
         "organization.RepoRegistered",
         "organization.RepoAssignedToSystem",
         "organization.RepoUnassignedFromSystem",
+        "organization.RepoDeregistered",
     }
 
 
 class RepoListAdapter(_NamespacedProjectionAdapter):
     PROJECTION_NAME: ClassVar[str] = "repo_list"
-    VERSION: ClassVar[int] = 1
+    # v2 (#2300): RepoDeregistered sets is_deregistered; rebuild to hide stale repos.
+    VERSION: ClassVar[int] = 2
     _SUBSCRIBED: ClassVar[set[str]] = {
         "organization.RepoRegistered",
         "organization.RepoAssignedToSystem",
         "organization.RepoUnassignedFromSystem",
+        "organization.RepoDeregistered",
     }
 
 

@@ -81,6 +81,62 @@ _PAIRS: tuple[tuple[str, tuple[str, str], tuple[tuple[str, str], ...]], ...] = (
         (("syn_api.types", "EvalVariantResponse"),),
     ),
     (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_trials",
+            "CohortKey",
+        ),
+        (("syn_api.types", "EvalCohortKeyResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_trial_metrics",
+            "CaseMetrics",
+        ),
+        (("syn_api.types", "EvalCaseMetricsResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_sets",
+            "Coverage",
+        ),
+        (("syn_api.types", "EvalSetCoverageResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_sets",
+            "CohortSummary",
+        ),
+        (("syn_api.types", "EvalSetCohortResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_sets",
+            "RosterCase",
+        ),
+        (("syn_api.types", "EvalRosterCaseResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_set_comparison",
+            "PairedComparison",
+        ),
+        (("syn_api.types", "EvalSetComparisonResponse"),),
+    ),
+    (
+        "eval_sets.py",
+        (
+            "syn_domain.contexts.orchestration.domain.read_models.eval_set_comparison",
+            "Interval",
+        ),
+        (("syn_api.types", "EvalIntervalResponse"),),
+    ),
+    (
         "trends.py",
         (
             "syn_domain.contexts.orchestration.domain.read_models.eval_runs",
@@ -105,6 +161,9 @@ _PAIRS: tuple[tuple[str, tuple[str, str], tuple[tuple[str, str], ...]], ...] = (
 _NO_PAIR: dict[str, str] = {
     "sessions.py": "TODO(#1040): SessionSummary -> SessionDetail -> SessionResponse is the same shape and belongs here; adding it needs its own exception review",
     "workflows/queries.py": "WorkflowDetail maps through per-phase builders, not a flat copy",
+    "insights.py": "/insights/cost sums many ExecutionCost rows into one GlobalCostResponse, not a flat copy; its coverage hop is pinned by apps/syn-api/tests/test_897_insights_cost_reports_unpriced_work.py",
+    "_cost_rollup.py": "sums many ExecutionCost rows into one CostRollup for the insights, repo and system cost responses, not a flat copy; its coverage hop is pinned by apps/syn-api/tests/test_897_repo_and_system_cost_from_execution_cost.py",
+    "metrics.py": "GET /metrics sums many ExecutionCost rows into one MetricsResponse total (through _cost_rollup) and into per-phase sums, not a flat copy; its coverage hop is pinned by apps/syn-api/tests/test_897_metrics_reports_unpriced_work.py",
 }
 
 #: Fields the destination deliberately does not take from the read model, keyed

@@ -109,7 +109,11 @@ def signals(monkeypatch: pytest.MonkeyPatch) -> InMemorySignalQueueAdapter:
     queue = InMemorySignalQueueAdapter()
     controller = ExecutionController(wiring.get_workflow_execution_repository(), queue)
     monkeypatch.setattr(control, "get_controller", lambda: controller)
-    monkeypatch.setattr(wiring, "get_artifact_query", _NoArtifacts)
+
+    async def _query() -> _NoArtifacts:
+        return _NoArtifacts()
+
+    monkeypatch.setattr(wiring, "get_artifact_query", _query)
     return queue
 
 
@@ -267,7 +271,11 @@ class TestAPrefixDuringTheRebuild:
             del reason
             asked.append(execution_id)
             return control.ControlResponse(
-                success=True, execution_id=EXECUTION, state="cancelled", message="withdrawn"
+                success=True,
+                execution_id=EXECUTION,
+                state="cancelled",
+                applied=True,
+                message="withdrawn",
             )
 
         monkeypatch.setattr(control, "_withdraw_queued", _withdraw)

@@ -7,10 +7,12 @@ not run here; V7/V7b are E2E.
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_api.services import dead_host_reaper
 from syn_api.services.dead_host_reaper import DockerDeadHostReaper
 from syn_domain.contexts.orchestration.ports import FencedRun
 
@@ -29,16 +31,17 @@ def _no_guard() -> object:
         yield guard
 
 
-def _ps(stdout: bytes) -> MagicMock:
+def _ps(stdout: bytes, returncode: int = 0) -> MagicMock:
     proc = MagicMock()
     proc.communicate = AsyncMock(return_value=(stdout, b""))
+    proc.returncode = returncode
     return proc
 
 
 async def test_both_selectors_are_narrowed_to_the_dead_host_and_the_run() -> None:
     spawn = AsyncMock(side_effect=[_ps(b""), _ps(b"")])
     with patch("syn_api.services.reconciliation.asyncio.create_subprocess_exec", new=spawn):
-        assert await DockerDeadHostReaper().reap(_RUN) is True
+        assert await DockerDeadHostReaper().reap(_RUN.executor_id, _RUN.execution_id) is True
 
     calls = [call.args for call in spawn.await_args_list]
     assert len(calls) == 2
@@ -59,4 +62,29 @@ async def test_an_unfinished_reap_is_not_reported_complete() -> None:
     timed_out.wait = AsyncMock()
     spawn = AsyncMock(side_effect=[timed_out, _ps(b"")])
     with patch("syn_api.services.reconciliation.asyncio.create_subprocess_exec", new=spawn):
-        assert await DockerDeadHostReaper().reap(_RUN) is False
+        assert await DockerDeadHostReaper().reap(_RUN.executor_id, _RUN.execution_id) is False
+
+
+def _info(stdout: str) -> MagicMock:
+    return MagicMock(return_value=subprocess.CompletedProcess(["docker"], 0, stdout, ""))
+
+
+def test_the_reap_scope_is_the_docker_engine_id() -> None:
+    dead_host_reaper._engine_id.cache_clear()
+    run = _info("ABCD:EF01:engine\n")
+    with patch("syn_api.services.dead_host_reaper.subprocess.run", new=run):
+        assert DockerDeadHostReaper().scope() == "ABCD:EF01:engine"
+        assert DockerDeadHostReaper().scope() == "ABCD:EF01:engine"
+    assert run.call_args.args[0] == ["docker", "info", "--format", "{{.ID}}"]
+    assert run.call_count == 1  # read once: it is the scope every budget row records
+    dead_host_reaper._engine_id.cache_clear()
+
+
+def test_an_empty_engine_id_refuses_to_name_a_scope() -> None:
+    dead_host_reaper._engine_id.cache_clear()
+    with (
+        patch("syn_api.services.dead_host_reaper.subprocess.run", new=_info("\n")),
+        pytest.raises(RuntimeError, match="no engine ID"),
+    ):
+        DockerDeadHostReaper().scope()
+    dead_host_reaper._engine_id.cache_clear()

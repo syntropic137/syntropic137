@@ -32,6 +32,9 @@ from syn_domain.contexts.artifacts._shared import (
     compute_content_hash,
     primary_text,
 )
+from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+    MAX_INLINE_TEXT_BYTES,
+)
 from syn_domain.contexts.artifacts.domain.commands.DeleteArtifactCommand import (
     DeleteArtifactCommand,
 )
@@ -73,6 +76,7 @@ from syn_domain.contexts.artifacts.slices.upload_artifact import (
 )
 
 __all__ = [
+    "MAX_INLINE_TEXT_BYTES",
     "MIN_ARTIFACT_CONTENT_LENGTH",
     "UNREPORTED_AGENT",
     "AgentIdentity",

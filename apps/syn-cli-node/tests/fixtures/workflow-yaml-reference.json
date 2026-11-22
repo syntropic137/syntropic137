@@ -87,6 +87,52 @@
       ],
       "document_sha256": "99f32a9ed4d9809a13e0ae1fa48bb1369154e8a0eba3e83ef69635a98ae51059"
     },
+    "workflows/dreamship/implement-v6/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "review",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/review.md"
+        },
+        {
+          "id": "remediate",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/remediate.md"
+        }
+      ],
+      "document_sha256": "64f78f6d0b83ad00405b68bf9ae8bc3641c1c0e0d42553872fbbfd451e24fb5f"
+    },
+    "workflows/dreamship/implement-v7/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "review",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/review.md"
+        },
+        {
+          "id": "remediate",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/remediate.md"
+        }
+      ],
+      "document_sha256": "422060e85e1968ccd6bfed5d124781affdc99403f3a32645750bf95f4008f93f"
+    },
     "workflows/evals/implement-pinned/workflow.yaml": {
       "phases": [
         {
@@ -97,6 +143,39 @@
         }
       ],
       "document_sha256": "6930cd72d4831a5d15bfd72b2a8a7e2a83d74468a400397a6c8af44ae218c625"
+    },
+    "workflows/evals/implement-pinned-sonnet/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        }
+      ],
+      "document_sha256": "906f7f2c68a184cd19824da87d0847ea83397c95c90ee35148349068ab930fe0"
+    },
+    "workflows/evals/implement-pinned-sonnet-v2/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        }
+      ],
+      "document_sha256": "14e6d7f11e7ca4fc7d047d0c9c15f3119654c5b3eed9e241cbdbc8cd98259e1f"
+    },
+    "workflows/evals/implement-pinned-v2/workflow.yaml": {
+      "phases": [
+        {
+          "id": "implement",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        }
+      ],
+      "document_sha256": "2e94d88e9c5706c5737fba40dd0e525c322d30b06c74dd4e14817e5b74b14f09"
     },
     "workflows/evals/verify-pinned/workflow.yaml": {
       "phases": [
@@ -152,6 +231,17 @@
         }
       ],
       "document_sha256": "f65bd5f8331c9134d9083df8cde2dae95c6fbaf08614ec20f7cec2c759c8bca7"
+    },
+    "workflows/evals/verify-pinned-codex-gpt-6-1-sol/workflow.yaml": {
+      "phases": [
+        {
+          "id": "verify",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        }
+      ],
+      "document_sha256": "3e8c3cc0d0f416a535efe7c5a9d28e2071527af862c21a8b66ec51bfcc7c1227"
     },
     "workflows/evals/verify-pinned-codex-gpt-6-luna/workflow.yaml": {
       "phases": [
@@ -258,7 +348,7 @@
           "prompt_file": null
         }
       ],
-      "document_sha256": "71672b09c2d1123cb9affb2c2f7d27532d44e0c138fc3b64c73b194c0df69c78"
+      "document_sha256": "91256895fe02da79841185ee06432f92e3ffd5985a79e2630629ff3f2e6f86e5"
     },
     "workflows/examples/multi-agent-programmatic.yaml": {
       "phases": [
@@ -574,7 +664,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "b4cef3ed8b99ffb9dae414b233b426a0f96e4f5fe204f7f09031cc50fb98e001"
+      "document_sha256": "3eba268fbc08341004e353165e83b8722a6c5455e6c7ff499cdbe9844e501296"
     },
     "workflows/sdlc/implement-v4-precheck/workflow.yaml": {
       "phases": [
@@ -627,7 +717,113 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "bfc4e057fbc453d9078c095c57e060881c959c9d1d25163d8dbe1e93a353ca62"
+      "document_sha256": "1c21e0750fc69f56313c2386523a76f28d6c1b1c4795d2d1d6f714d33c2439bd"
+    },
+    "workflows/sdlc/implement-v4-precheck-sonnet-fix/workflow.yaml": {
+      "phases": [
+        {
+          "id": "premise",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/premise.md"
+        },
+        {
+          "id": "implement",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "verify",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "fix",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/fix.md"
+        },
+        {
+          "id": "reverify",
+          "order": 5,
+          "model": null,
+          "prompt_file": "phases/reverify.md"
+        },
+        {
+          "id": "fix_2",
+          "order": 6,
+          "model": null,
+          "prompt_file": "phases/fix_2.md"
+        },
+        {
+          "id": "reverify_2",
+          "order": 7,
+          "model": null,
+          "prompt_file": "phases/reverify_2.md"
+        },
+        {
+          "id": "finalize_pr",
+          "order": 8,
+          "model": null,
+          "prompt_file": "phases/finalize_pr.md"
+        }
+      ],
+      "document_sha256": "191834ed8f9929c525918dfbe6190e9e290a7e9b5c3d02f1a6ae5ef43f032457"
+    },
+    "workflows/sdlc/implement-v7/workflow.yaml": {
+      "phases": [
+        {
+          "id": "premise",
+          "order": 1,
+          "model": null,
+          "prompt_file": "phases/premise.md"
+        },
+        {
+          "id": "implement",
+          "order": 2,
+          "model": null,
+          "prompt_file": "phases/implement.md"
+        },
+        {
+          "id": "verify",
+          "order": 3,
+          "model": null,
+          "prompt_file": "phases/verify.md"
+        },
+        {
+          "id": "fix",
+          "order": 4,
+          "model": null,
+          "prompt_file": "phases/fix.md"
+        },
+        {
+          "id": "reverify",
+          "order": 5,
+          "model": null,
+          "prompt_file": "phases/reverify.md"
+        },
+        {
+          "id": "fix_2",
+          "order": 6,
+          "model": null,
+          "prompt_file": "phases/fix_2.md"
+        },
+        {
+          "id": "reverify_2",
+          "order": 7,
+          "model": null,
+          "prompt_file": "phases/reverify_2.md"
+        },
+        {
+          "id": "finalize_pr",
+          "order": 8,
+          "model": null,
+          "prompt_file": "phases/finalize_pr.md"
+        }
+      ],
+      "document_sha256": "49060fa7c19dc16038ff3bb94d19175c3260d5d9522b15f34182bc4cc21c48f1"
     },
     "workflows/sdlc/pr-review/workflow.yaml": {
       "phases": [
@@ -836,7 +1032,7 @@
           "prompt_file": "phases/file.md"
         }
       ],
-      "document_sha256": "1796f9be153216abc60862f8eaf888e64f05608b159fe08268d540f92d60b0ee"
+      "document_sha256": "ccebff119d587b57ad6fc008c89d5fb7ffa2a95a73007cea35525ee3e6f118fa"
     },
     "workflows/sdlc/reverify-pr/workflow.yaml": {
       "phases": [
@@ -883,7 +1079,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "c064bc041f7d92e3b88ab1291a3addbcdd7c756ed9c3bff915c65b9aaafb689f"
+      "document_sha256": "31668cd6696f0850ce6b4a17fa20f5f79d4afe61514f69cbf784037231d10bc7"
     },
     "workflows/triggers/ci-fix.yaml": {
       "phases": [

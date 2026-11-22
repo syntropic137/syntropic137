@@ -179,7 +179,11 @@ class CostSplitBasis(StrEnum):
 
 @dataclass(frozen=True)
 class TokenTypeCost:
-    """A cost in USD split by the kind of token it was spent on."""
+    """A cost in USD split by the kind of token it was spent on.
+
+    ``cache_creation_usd`` is every cache write, 5-minute and 1-hour alike: the
+    two differ in rate, not in kind, so they are priced apart and summed here.
+    """
 
     input_usd: Decimal = Decimal("0")
     output_usd: Decimal = Decimal("0")
@@ -225,6 +229,33 @@ class TokenTypeCost:
 
 
 @dataclass(frozen=True)
+class CacheWrites:
+    """Cache writes split by the rate each is billed at (#2145).
+
+    A 1-hour write costs more than a 5-minute one (2x input against 1.25x), so
+    pricing needs the split, not the total: pass ``five_minute`` as
+    ``cache_creation`` and ``one_hour`` as ``cache_creation_1h``.
+    """
+
+    five_minute: int
+    one_hour: int
+
+    @classmethod
+    def from_recorded(cls, total: int, one_hour: int = 0) -> CacheWrites:
+        """Split a recorded row's cache writes: ``total`` of every TTL, ``one_hour`` of it 1-hour.
+
+        A ``TOKEN_USAGE`` row stores the total in ``cache_creation_tokens`` and
+        the 1-hour share beside it in ``cache_creation_1h_tokens`` (#2145 B2a).
+        A row written before that has no share, so ``one_hour`` is 0 and every
+        write is 5-minute, exactly as it was always priced. A share outside
+        ``0..total`` cannot be true of one row, so it is clamped: the cost of a
+        bad row never exceeds pricing all of its writes at the 1-hour rate.
+        """
+        one_hour = min(max(one_hour, 0), max(total, 0))
+        return cls(five_minute=max(total, 0) - one_hour, one_hour=one_hour)
+
+
+@dataclass(frozen=True)
 class ModelPricing:
     """Pricing for an LLM model, in USD per million tokens."""
 
@@ -232,7 +263,10 @@ class ModelPricing:
     input_per_million: Decimal
     output_per_million: Decimal
     cache_creation_per_million: Decimal
+    """The 5-minute cache-write rate: what ``cache_creation`` tokens cost."""
     cache_read_per_million: Decimal
+    cache_creation_1h_per_million: Decimal
+    """The 1-hour cache-write rate: what ``cache_creation_1h`` tokens cost."""
 
     def calculate_cost(
         self,
@@ -240,14 +274,23 @@ class ModelPricing:
         output_tokens: int,
         cache_creation: int = 0,
         cache_read: int = 0,
+        *,
+        cache_creation_1h: int = 0,
     ) -> Decimal:
         """Calculate cost from token counts.
+
+        ``cache_creation`` counts 5-minute cache writes and ``cache_creation_1h``
+        1-hour ones; each is priced at its own rate.
 
         Returns:
             Total cost in USD.
         """
         return self.cost_by_token_type(
-            input_tokens, output_tokens, cache_creation, cache_read
+            input_tokens,
+            output_tokens,
+            cache_creation,
+            cache_read,
+            cache_creation_1h=cache_creation_1h,
         ).total
 
     def cost_by_token_type(
@@ -256,16 +299,22 @@ class ModelPricing:
         output_tokens: int,
         cache_creation: int = 0,
         cache_read: int = 0,
+        *,
+        cache_creation_1h: int = 0,
     ) -> TokenTypeCost:
         """The same cost as ``calculate_cost``, split by token type.
 
         ``calculate_cost`` is defined as this split's total, so the two cannot
-        disagree.
+        disagree. Both kinds of cache write land in ``cache_creation_usd``.
         """
         return TokenTypeCost(
             input_usd=Decimal(input_tokens) * self.input_per_million / _MILLION,
             output_usd=Decimal(output_tokens) * self.output_per_million / _MILLION,
-            cache_creation_usd=Decimal(cache_creation) * self.cache_creation_per_million / _MILLION,
+            cache_creation_usd=(
+                Decimal(cache_creation) * self.cache_creation_per_million
+                + Decimal(cache_creation_1h) * self.cache_creation_1h_per_million
+            )
+            / _MILLION,
             cache_read_usd=Decimal(cache_read) * self.cache_read_per_million / _MILLION,
         )
 
@@ -282,8 +331,15 @@ class ModelPricing:
 #   - Cache read:                 0.10x
 # Opus 5.5 and Sonnet 5.5 break the cache-read one: both read at 0.05x of input
 # ($0.20 / $0.10), set explicitly from the vendor page rather than derived.
-# The table carries one cache-write rate, the 5-min one; a 1-hour cache write
-# (Opus 5.5: $8.00) is not modelled and would be under-priced.
+#
+# 1-hour cache write: 2x base input on EVERY Claude row (Opus 5.5: $8.00, not
+# the $5.00 5-min rate). Set explicitly per row, never derived, so a row whose
+# vendor breaks the multiplier cannot silently inherit it. OpenAI publishes no
+# 1-hour write; the OpenAI rows set it equal to their cache-write rate, so a
+# count that ever reached them would never be priced at zero.
+# Only the live phase cost limiter feeds a 1-hour count so far (#2145 slice
+# B1); recorded costs are priced from stored totals at the 5-min rate until
+# the stored observation carries the split (slice B2).
 # ---------------------------------------------------------------------------
 
 MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
@@ -297,6 +353,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("20.00"),
         cache_creation_per_million=Decimal("5.00"),
         cache_read_per_million=Decimal("0.20"),
+        cache_creation_1h_per_million=Decimal("8.00"),
     ),
     # Sonnet 5.5: $2 in / $2.50 5-min cache write / $0.10 cache read / $10 out
     # per MTok - exactly half Opus 5.5 on every modelled rate. Read 2026-10-07:
@@ -309,13 +366,13 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
     # what's-new page ("cache reads ... cost $0.10 ... half the Claude Sonnet 5
     # rate") and anthropic.com/pricing say $0.10. $0.10 is taken because it is
     # the stated 0.05x of $2 input and the $0.20 row is identical to Sonnet 5's.
-    # 1-hour cache write ($4.00) is not modelled, as for Opus 5.5.
     ModelId.CLAUDE_SONNET_5_5: ModelPricing(
         model_id=ModelId.CLAUDE_SONNET_5_5,
         input_per_million=Decimal("2.00"),
         output_per_million=Decimal("10.00"),
         cache_creation_per_million=Decimal("2.50"),
         cache_read_per_million=Decimal("0.10"),
+        cache_creation_1h_per_million=Decimal("4.00"),
     ),
     # Haiku 5.5: $0.10 in / $0.50 out per MTok for prompts up to 100K tokens
     # ($0.50 / $2.50 beyond; that tier is not modelled, so a long prompt is
@@ -329,6 +386,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("0.50"),
         cache_creation_per_million=Decimal("0.125"),
         cache_read_per_million=Decimal("0.01"),
+        cache_creation_1h_per_million=Decimal("0.20"),
     ),
     # GPT-6.1-Sol (codex slug `gpt-6.1-sol`, the `gpt-sol` target since
     # 2026-10-06): $2 in / $0.10 cached / $2.50 cache write / $10 out per
@@ -344,6 +402,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("10.00"),
         cache_creation_per_million=Decimal("2.50"),
         cache_read_per_million=Decimal("0.10"),
+        cache_creation_1h_per_million=Decimal("2.50"),
     ),
     # GPT-6-Sol (codex slug `gpt-6-sol`): $2 in / $0.20 cached / $10 out per
     # MTok, SHORT-CONTEXT Standard tier; the long-context rate was not
@@ -356,6 +415,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("10.00"),
         cache_creation_per_million=Decimal("2.50"),
         cache_read_per_million=Decimal("0.20"),
+        cache_creation_1h_per_million=Decimal("2.50"),
     ),
     # GPT-6-Luna (codex slug `gpt-6-luna`): $0.10 in / $0.01 cached / $0.125
     # cache write / $0.50 out per MTok, SHORT-CONTEXT (<=272K input) Standard
@@ -370,6 +430,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("0.50"),
         cache_creation_per_million=Decimal("0.125"),
         cache_read_per_million=Decimal("0.01"),
+        cache_creation_1h_per_million=Decimal("0.125"),
     ),
     # --- ADR-067 phase 0 generation ---
     # ANTHROPIC ROWS ONLY: verified 2026-08-16 against the vendor pricing pages
@@ -387,6 +448,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("25.00"),
         cache_creation_per_million=Decimal("6.25"),
         cache_read_per_million=Decimal("0.50"),
+        cache_creation_1h_per_million=Decimal("10.00"),
     ),
     ModelId.CLAUDE_SONNET_5: ModelPricing(
         model_id=ModelId.CLAUDE_SONNET_5,
@@ -394,6 +456,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("10.00"),
         cache_creation_per_million=Decimal("2.50"),
         cache_read_per_million=Decimal("0.20"),
+        cache_creation_1h_per_million=Decimal("4.00"),
     ),
     ModelId.CLAUDE_FABLE_5: ModelPricing(
         model_id=ModelId.CLAUDE_FABLE_5,
@@ -401,6 +464,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("50.00"),
         cache_creation_per_million=Decimal("12.50"),
         cache_read_per_million=Decimal("1.00"),
+        cache_creation_1h_per_million=Decimal("20.00"),
     ),
     ModelId.CLAUDE_HAIKU_4_5: ModelPricing(
         model_id=ModelId.CLAUDE_HAIKU_4_5,
@@ -408,6 +472,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("5.00"),
         cache_creation_per_million=Decimal("1.25"),
         cache_read_per_million=Decimal("0.10"),
+        cache_creation_1h_per_million=Decimal("2.00"),
     ),
     # The model a ChatGPT-account codex login actually runs. Distinct from the
     # legacy GPT_5_6 entry below, which codex rejects under that auth mode.
@@ -417,6 +482,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=_GPT_5_6_CODEX_OUTPUT_PER_MILLION,
         cache_creation_per_million=_GPT_5_6_CODEX_CACHE_WRITE_PER_MILLION,
         cache_read_per_million=_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION,
+        cache_creation_1h_per_million=_GPT_5_6_CODEX_CACHE_WRITE_PER_MILLION,
     ),
     # Short-context rates, same source and caveats as Sol above.
     ModelId.GPT_5_6_TERRA: ModelPricing(
@@ -425,6 +491,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("12.00"),
         cache_creation_per_million=Decimal("2.50"),
         cache_read_per_million=Decimal("0.20"),
+        cache_creation_1h_per_million=Decimal("2.50"),
     ),
     ModelId.GPT_5_6_LUNA: ModelPricing(
         model_id=ModelId.GPT_5_6_LUNA,
@@ -432,6 +499,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("1.20"),
         cache_creation_per_million=Decimal("0.25"),
         cache_read_per_million=Decimal("0.02"),
+        cache_creation_1h_per_million=Decimal("0.25"),
     ),
     # --- Previous generation (kept: historical sessions reference these) ---
     ModelId.CLAUDE_OPUS_4_5: ModelPricing(
@@ -440,6 +508,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("25.00"),
         cache_creation_per_million=Decimal("6.25"),
         cache_read_per_million=Decimal("0.50"),
+        cache_creation_1h_per_million=Decimal("10.00"),
     ),
     ModelId.CLAUDE_SONNET_4_5: ModelPricing(
         model_id=ModelId.CLAUDE_SONNET_4_5,
@@ -447,6 +516,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("15.00"),
         cache_creation_per_million=Decimal("3.75"),
         cache_read_per_million=Decimal("0.30"),
+        cache_creation_1h_per_million=Decimal("6.00"),
     ),
     # --- OpenAI Codex family (legacy) ---
     ModelId.GPT_5_6: ModelPricing(
@@ -455,6 +525,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=_GPT_5_6_CODEX_OUTPUT_PER_MILLION,
         cache_creation_per_million=_GPT_5_6_CODEX_CACHE_WRITE_PER_MILLION,
         cache_read_per_million=_GPT_5_6_CODEX_CACHED_INPUT_PER_MILLION,
+        cache_creation_1h_per_million=_GPT_5_6_CODEX_CACHE_WRITE_PER_MILLION,
     ),
     # --- Claude 4.x family ---
     ModelId.CLAUDE_OPUS_4: ModelPricing(
@@ -463,6 +534,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("75.00"),
         cache_creation_per_million=Decimal("18.75"),
         cache_read_per_million=Decimal("1.50"),
+        cache_creation_1h_per_million=Decimal("30.00"),
     ),
     ModelId.CLAUDE_SONNET_4: ModelPricing(
         model_id=ModelId.CLAUDE_SONNET_4,
@@ -470,6 +542,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("15.00"),
         cache_creation_per_million=Decimal("3.75"),
         cache_read_per_million=Decimal("0.30"),
+        cache_creation_1h_per_million=Decimal("6.00"),
     ),
     # --- Claude 3.5 family ---
     ModelId.CLAUDE_SONNET_3_5: ModelPricing(
@@ -478,6 +551,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("15.00"),
         cache_creation_per_million=Decimal("3.75"),
         cache_read_per_million=Decimal("0.30"),
+        cache_creation_1h_per_million=Decimal("6.00"),
     ),
     ModelId.CLAUDE_HAIKU_3_5: ModelPricing(
         model_id=ModelId.CLAUDE_HAIKU_3_5,
@@ -488,6 +562,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("4.00"),
         cache_creation_per_million=Decimal("1.00"),
         cache_read_per_million=Decimal("0.08"),
+        cache_creation_1h_per_million=Decimal("1.60"),
     ),
     # --- Claude 3 family (legacy) ---
     ModelId.CLAUDE_OPUS_3: ModelPricing(
@@ -496,6 +571,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("75.00"),
         cache_creation_per_million=Decimal("18.75"),
         cache_read_per_million=Decimal("1.50"),
+        cache_creation_1h_per_million=Decimal("30.00"),
     ),
     ModelId.CLAUDE_HAIKU_3: ModelPricing(
         model_id=ModelId.CLAUDE_HAIKU_3,
@@ -503,6 +579,7 @@ MODEL_PRICING_TABLE: dict[ModelId, ModelPricing] = {
         output_per_million=Decimal("1.25"),
         cache_creation_per_million=Decimal("0.30"),
         cache_read_per_million=Decimal("0.03"),
+        cache_creation_1h_per_million=Decimal("0.50"),
     ),
 }
 
@@ -596,6 +673,7 @@ def price_tokens(
     cache_creation: int = 0,
     cache_read: int = 0,
     *,
+    cache_creation_1h: int = 0,
     context: str = "",
 ) -> PricedAmount:
     """Price token usage, or say why it could not be priced.
@@ -608,10 +686,12 @@ def price_tokens(
     Args:
         model: Recorded model id or alias. ``None`` when the harness reported
             no model (codex does not report one on the wire).
+        cache_creation: 5-minute cache writes.
+        cache_creation_1h: 1-hour cache writes, priced at their own rate.
         context: Optional identifier (session id, execution id) for the log
             line, so an unpriced run can be traced back to its source.
     """
-    if input_tokens == 0 and output_tokens == 0 and cache_creation == 0 and cache_read == 0:
+    if not (input_tokens or output_tokens or cache_creation or cache_read or cache_creation_1h):
         # Zero tokens cost zero at every rate, so no rate is needed to answer.
         # Resolving the model first made a no-token observation with no model
         # report as UNPRICED - claiming we cannot say what it cost, when we can
@@ -622,10 +702,11 @@ def price_tokens(
 
     if not model:
         logger.warning(
-            "unpriced token usage: no model recorded (in=%d out=%d cache_creation=%d cache_read=%d) %s",
+            "unpriced token usage: no model recorded (in=%d out=%d cache_creation=%d cache_creation_1h=%d cache_read=%d) %s",
             input_tokens,
             output_tokens,
             cache_creation,
+            cache_creation_1h,
             cache_read,
             context,
         )
@@ -634,17 +715,24 @@ def price_tokens(
     pricing = resolve_model_pricing(model)
     if pricing is None:
         logger.warning(
-            "unpriced token usage: no rate for model %r (in=%d out=%d cache_creation=%d cache_read=%d) %s",
+            "unpriced token usage: no rate for model %r (in=%d out=%d cache_creation=%d cache_creation_1h=%d cache_read=%d) %s",
             model,
             input_tokens,
             output_tokens,
             cache_creation,
+            cache_creation_1h,
             cache_read,
             context,
         )
         return PricedAmount.unpriced(PricingStatus.UNPRICED_NO_RATE, model=model)
 
-    cost = pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read)
+    cost = pricing.calculate_cost(
+        input_tokens,
+        output_tokens,
+        cache_creation,
+        cache_read,
+        cache_creation_1h=cache_creation_1h,
+    )
     status = (
         PricingStatus.PLACEHOLDER
         if pricing.model_id in PLACEHOLDER_PRICED_MODELS
@@ -676,6 +764,8 @@ def calculate_cost(
     model: str,
     cache_creation: int = 0,
     cache_read: int = 0,
+    *,
+    cache_creation_1h: int = 0,
 ) -> Decimal:
     """Calculate cost for token usage, raising when the model has no rate.
 
@@ -692,7 +782,13 @@ def calculate_cost(
         UnknownModelPricingError: If no rate exists for ``model``.
     """
     pricing = require_model_pricing(model)
-    return pricing.calculate_cost(input_tokens, output_tokens, cache_creation, cache_read)
+    return pricing.calculate_cost(
+        input_tokens,
+        output_tokens,
+        cache_creation,
+        cache_read,
+        cache_creation_1h=cache_creation_1h,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -857,6 +953,7 @@ __all__ = [
     "PLACEHOLDER_PRICED_MODELS",
     "VENDOR_COST_QUANTUM",
     "CacheRateMultipliers",
+    "CacheWrites",
     "CostSplitBasis",
     "ModelPricing",
     "PricedAmount",

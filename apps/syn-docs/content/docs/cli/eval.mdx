@@ -135,6 +135,32 @@ syn eval runs <eval-id> [options]
 
 ---
 
+## `syn eval set`
+
+pass@k, pass^k and flakiness of every cohort over an eval set's roster
+
+```bash
+syn eval set [options]
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--suite` | `text` | --- | The eval set: evals tagged suite:&lt;suite&gt; |
+| `--suite-version` | `text` | --- | The roster version: suite-version:&lt;n&gt; |
+| `--k` | `text` | --- | Trials per case the figures are computed over |
+| `--split` | `text` | --- | Keep only cases of this split, e.g. holdout |
+| `--json` | `boolean` | `false` | Print the API response as JSON |
+
+**Examples:**
+
+```bash
+syn eval set --suite verifier-seed-v1 --suite-version 8 --k 3 --split holdout
+```
+
+---
+
 ## `syn eval show`
 
 Show an eval: goal, baseline and run tally

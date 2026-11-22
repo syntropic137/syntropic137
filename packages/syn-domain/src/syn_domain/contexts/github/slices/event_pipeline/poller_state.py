@@ -42,6 +42,9 @@ class PollerState:
 
     mode: PollerMode = field(default=PollerMode.ACTIVE_POLLING)
     consecutive_errors: int = field(default=0)
+    unresolved_triggers: int = field(default=0)
+    """Active triggers skipped last cycle because their repository has no
+    ``owner/name`` (a ``repo-…`` id with no Repo record, #1870)."""
 
     def update_mode(self, webhook_stale: bool) -> None:
         """Transition mode based on webhook health."""

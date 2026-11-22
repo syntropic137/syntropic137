@@ -49,6 +49,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     SavedWork,
     describe_observed_branches,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.phase_capture import (
+    record_phase_capability,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_delegate_import import (
     capture_and_import_phase,
     close_phase_workspaces,
@@ -71,6 +74,9 @@ if TYPE_CHECKING:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.agent_sessions.delegate_usage import SessionStorePort
     from syn_domain.contexts.agent_sessions.import_ledger import ImportLedgerPort
+    from syn_domain.contexts.agent_sessions.ports.TranscriptUsageReaderPort import (
+        TranscriptUsageReader,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.errors import ObservedBranches
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
         ObservabilityRecorder,
@@ -186,11 +192,13 @@ class PhaseRuntimes:
         *,
         capture_port: SessionCapturePort | None,
         session_store: SessionStorePort | None,
+        transcript_reader: TranscriptUsageReader | None = None,
         writer: ObservabilityRecorder | None,
         ledger: ImportLedgerPort | None,
     ) -> None:
         self._capture_port = capture_port
         self._session_store = session_store
+        self._transcript_reader = transcript_reader
         self._writer = writer
         self._ledger = ledger
         self._by_execution: dict[str, PhaseRuntime] = {}
@@ -210,6 +218,7 @@ class PhaseRuntimes:
             runtime = PhaseRuntime(
                 capture_port=self._capture_port,
                 session_store=self._session_store,
+                transcript_reader=self._transcript_reader,
                 writer=self._writer,
                 ledger=self._ledger,
             )
@@ -251,6 +260,7 @@ class PhaseRuntime:
         *,
         capture_port: SessionCapturePort | None,
         session_store: SessionStorePort | None,
+        transcript_reader: TranscriptUsageReader | None = None,
         writer: ObservabilityRecorder | None,
         ledger: ImportLedgerPort | None,
         starting_points: PhaseStartingPoints | None = None,
@@ -262,6 +272,7 @@ class PhaseRuntime:
         # deployment without a session store simply imports no delegates; it
         # must never be a reason a phase fails.
         self._session_store = session_store
+        self._transcript_reader = transcript_reader
         self._writer = writer
         self._ledger = ledger
 
@@ -349,11 +360,15 @@ class PhaseRuntime:
         self,
         phase_id: str,
         *,
-        session_manager: SessionLifecycleManager,
+        session_manager: SessionLifecycleManager | None,
         started_at: datetime,
     ) -> None:
-        """Take charge of a phase whose session has opened but has no workspace yet."""
-        self._session_managers[phase_id] = session_manager
+        """Take charge of a phase whose session has opened but has no workspace yet.
+
+        None for a command phase: it runs no agent, so it has no session (ADR-078 D3).
+        """
+        if session_manager is not None:
+            self._session_managers[phase_id] = session_manager
         self._started_at[phase_id] = started_at
 
     def attach_workspace(
@@ -443,6 +458,27 @@ class PhaseRuntime:
             started_at=self._started_at.get(phase_id, datetime.now(UTC)),
             session_manager=self._session_managers.get(phase_id),
             fallback=self._fallbacks.get(phase_id),
+        )
+
+    async def record_launch(self, phase_id: str) -> None:
+        """Record what is known about this phase's workspace as its agent launches.
+
+        Both rows are Lane 2 and both need the session id `launch` just set.
+        """
+        await self.record_runtime(phase_id)
+        await self.record_capability(phase_id)
+
+    async def record_capability(self, phase_id: str) -> None:
+        """Record the session-store capability's start-up verdict (Lane 2, #1516).
+
+        Call after `launch`, like `record_runtime` and for its reason: the
+        session id is known, and a phase that fails afterwards keeps the row.
+        """
+        await record_phase_capability(
+            self._capture_port,
+            self._workspaces.get(phase_id),
+            session_id=self._session_ids.get(phase_id, ""),
+            phase_id=phase_id,
         )
 
     async def record_runtime(self, phase_id: str) -> None:
@@ -586,6 +622,7 @@ class PhaseRuntime:
             self._capture_port,
             workspace,
             session_store=self._session_store,
+            transcript_reader=self._transcript_reader,
             writer=self._writer,
             leader_native_ids=self._leader_native_ids,
             session_id=session_id,
@@ -621,6 +658,7 @@ class PhaseRuntime:
             self._capture_port,
             workspace,
             session_store=self._session_store,
+            transcript_reader=self._transcript_reader,
             writer=self._writer,
             leader_native_ids=self._leader_native_ids,
             session_id=session_id,
@@ -747,6 +785,7 @@ class PhaseRuntime:
             leader_native_ids=self._leader_native_ids,
             capture_port=self._capture_port,
             session_store=self._session_store,
+            transcript_reader=self._transcript_reader,
             writer=self._writer,
             ledger=self._ledger,
         )

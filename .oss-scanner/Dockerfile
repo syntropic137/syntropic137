@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Same uv the production API image uses (infra/docker/images/syn-api/Dockerfile).
-COPY --from=ghcr.io/astral-sh/uv:0.10.6 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff /uv /uvx /usr/local/bin/
 
 # Keep uv's interpreter and cache inside the image so nothing is fetched at scan time.
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \

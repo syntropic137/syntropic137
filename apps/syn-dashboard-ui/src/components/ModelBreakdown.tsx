@@ -51,6 +51,12 @@ export interface ModelBreakdownProps {
    * not that the work was free (#890).
    */
   unpricedObservationCount: number | null | undefined
+  /**
+   * Models that ran but nothing priced (#1743), listed after the split with
+   * `unpricedLabel` (backend text) in place of a cost, never as $0.
+   */
+  unpricedModels?: string[]
+  unpricedLabel?: string
   /** Override the card heading. Defaults to "Cost by Model". */
   title?: string
   subtitle?: string
@@ -60,6 +66,8 @@ export function ModelBreakdown({
   costByModel,
   totalCost,
   unpricedObservationCount,
+  unpricedModels = [],
+  unpricedLabel = '',
   title = 'Cost by Model',
   subtitle = 'Breakdown by model used',
 }: ModelBreakdownProps) {
@@ -71,7 +79,7 @@ export function ModelBreakdown({
     .filter((e): e is { model: string; exact: ExactUsd } => e.exact !== null && e.exact > 0n)
     .sort((a, b) => (a.exact === b.exact ? 0 : a.exact < b.exact ? 1 : -1))
 
-  if (exactEntries.length === 0) return null
+  if (exactEntries.length === 0 && unpricedModels.length === 0) return null
 
   const attributedExact = sumExactUsd(exactEntries.map((e) => e.exact))
   const scopeTotal = parseExactUsd(totalCost)
@@ -156,6 +164,14 @@ export function ModelBreakdown({
               </div>
             </div>
           )}
+          {unpricedModels.map((model) => (
+            <div key={model} className="flex items-center justify-between text-sm">
+              <span className="font-mono text-xs text-[var(--color-text-secondary)]">
+                {costByModelKeyLabel(model)}
+              </span>
+              <span className="text-xs text-[var(--color-text-muted)]">{unpricedLabel}</span>
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>

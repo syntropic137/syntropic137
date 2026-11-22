@@ -115,7 +115,7 @@
     writeViewer(SEEN_RUNS_STORAGE_KEY, JSON.stringify(seenRuns))
   }
   const outcomes = $derived(outcomeCounts(metrics.data?.execution_status_counts))
-  const executionsTotal = $derived(runs.data?.total ?? metrics.data?.total_workflows ?? 0)
+  const executionsTotal = $derived(runs.data?.total ?? 0)
   const mix = $derived(tokenMix(metrics.data))
 
   // ---- Outcomes range (feedback 9587ce0c): /metrics has no time window, so a

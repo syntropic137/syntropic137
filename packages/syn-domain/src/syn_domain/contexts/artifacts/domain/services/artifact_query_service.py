@@ -62,9 +62,24 @@ def _is_binary(artifact: ArtifactSummary) -> bool:
         return False
 
 
+def _in_storage_only(artifact: ArtifactSummary) -> bool:
+    """Whether the row's content is in object storage and not in the read model.
+
+    Binary always (#990); text when it was too large to embed in its event
+    (#2042), which the event marks with an empty ``content`` and a storage_uri.
+    """
+    return _is_binary(artifact) or (not artifact.content and artifact.storage_uri is not None)
+
+
 def _has_content(artifact: ArtifactSummary) -> bool:
     """Whether the row stands for a file that can be handed forward."""
-    return bool(artifact.content) or _is_binary(artifact)
+    return bool(artifact.content) or _in_storage_only(artifact)
+
+
+def _is_prompt_text(artifact: ArtifactSummary) -> bool:
+    """Whether the row can be substituted into a prompt: text with content,
+    inline or, when too large to embed (#2042), in object storage only."""
+    return not _is_binary(artifact) and _has_content(artifact)
 
 
 def _injection_rank(artifact: ArtifactSummary) -> tuple[int, int, datetime, str]:
@@ -213,22 +228,22 @@ class ArtifactQueryService:
         return files
 
     async def _content_of(self, row: ArtifactSummary) -> str | bytes | None:
-        if not _is_binary(row):
+        if not _in_storage_only(row):
             return row.content
         if self._content_storage is None:
             logger.warning(
-                "Binary artifact %s (%s) not handed forward: no object storage wired",
+                "Artifact %s (%s) not handed forward: its content is in object storage "
+                "and none is wired",
                 row.id,
                 row.source_path,
             )
             return None
         try:
-            return await self._content_storage.download(row.id, storage_uri=row.storage_uri)
+            data = await self._content_storage.download(row.id, storage_uri=row.storage_uri)
         except ArtifactStorageError as err:
-            logger.warning(
-                "Binary artifact %s (%s) not handed forward: %s", row.id, row.source_path, err
-            )
+            logger.warning("Artifact %s (%s) not handed forward: %s", row.id, row.source_path, err)
             return None
+        return data if _is_binary(row) else data.decode("utf-8")
 
     async def get_by_execution(
         self,
@@ -276,13 +291,18 @@ class ArtifactQueryService:
             # rejects it (min_length=1), the live cache skips it, and the
             # multi-file path skips it -- so the alias must too, or a
             # legacy/corrupt row could win here and appear nowhere else.
-            if not artifact.content:
+            if not _is_prompt_text(artifact):
                 continue
             incumbent = best.get(phase_id)
             if incumbent is None or _injection_rank(artifact) < _injection_rank(incumbent):
                 best[phase_id] = artifact
 
-        return {phase_id: a.content for phase_id, a in best.items() if a.content}
+        contents: dict[str, str] = {}
+        for phase_id, artifact in best.items():
+            content = await self._content_of(artifact)
+            if isinstance(content, str):
+                contents[phase_id] = content
+        return contents
 
     async def get_files_for_phase_injection(
         self,

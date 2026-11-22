@@ -1,4 +1,4 @@
-<!-- Shown when a route's chunk fails to load (offline, or a deploy replaced the chunk). -->
+<!-- Shown when a route's chunk fails to load and lib/chunkReload did not reload: offline, or still failing after one reload. -->
 <script lang="ts">
   let { error }: { error: unknown } = $props()
   const message = $derived(error instanceof Error ? error.message : String(error))

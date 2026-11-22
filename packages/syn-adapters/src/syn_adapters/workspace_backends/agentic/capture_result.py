@@ -168,6 +168,7 @@ class AuthoritativeCapture(BaseModel):
         return self.state in (
             CaptureState.INCOMPLETE,
             CaptureState.FAILED,
+            CaptureState.DEGRADED,
             CaptureState.UNKNOWN,
         )
 

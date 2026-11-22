@@ -217,6 +217,14 @@ CREATE TABLE IF NOT EXISTS session_capture_deletion_checkpoints (
     capture_id TEXT NOT NULL,
     PRIMARY KEY(source_instance_id,destination_id,producer_id,capture_id)
 );
+-- #2107: each destination's deletion outbox is purged once, before its first
+-- drain by a build that never propagates automatic expiry.
+CREATE TABLE IF NOT EXISTS session_capture_deletion_outbox_purges (
+    source_instance_id TEXT NOT NULL,
+    destination_id TEXT NOT NULL,
+    purged_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY(source_instance_id,destination_id)
+);
 CREATE INDEX IF NOT EXISTS session_capture_catalog_archive
     ON session_capture_catalog(source_instance_id,(payload->'archive'->>'sha256'));
 
@@ -324,3 +332,15 @@ CREATE TABLE IF NOT EXISTS session_capture_outbox_retirements (
 CREATE INDEX IF NOT EXISTS session_capture_spools_run_unsettled
     ON session_capture_spools(source_instance_id,(payload->'run'->>'execution_id'))
     WHERE settled_at IS NULL;
+
+-- The request each run last scheduled, written under the run's scheduling guard
+-- before the job's request is saved (#2254). The job projection lags the
+-- schedule; this row does not. The whole command is kept so a save whose
+-- outcome is unknown is retried as the same job, never replaced by a newer one.
+CREATE TABLE IF NOT EXISTS session_inventory_schedules (
+    source_instance_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    command JSONB NOT NULL,
+    PRIMARY KEY (source_instance_id, execution_id)
+);

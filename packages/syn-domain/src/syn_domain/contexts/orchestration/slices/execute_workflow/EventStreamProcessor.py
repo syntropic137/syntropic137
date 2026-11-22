@@ -14,11 +14,13 @@ import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum, StrEnum, auto
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, TypeGuard
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
 from agentic_events.types import ClaudeToolName, EventType
+from agentic_isolation.harnesses.claude import classify_upstream_failure
 
 from syn_domain.contexts.orchestration.slices.execute_workflow.announced_model import (
     announced_model_from,
@@ -51,6 +53,7 @@ from syn_shared.delegation import (
     looks_like_delegation_command,
 )
 from syn_shared.events import VALID_EVENT_TYPES
+from syn_shared.pricing import CacheWrites
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -158,10 +161,32 @@ def _format_anthropic_error(error_obj: dict[str, object], prefix: str) -> str:
     label = api_error_label(error_type)
     http_code = _http_code_from_prefix(prefix)
     if http_code:
-        return api_error_label(error_type, http_code)
+        with_status = api_error_label(error_type, http_code)
+        with_message = f"{with_status}: {message}"
+        return with_message if message and _says_more(with_message, with_status) else with_status
     if message and message.lower() != label.lower():
         return api_error_with_message(error_type, message)
     return label
+
+
+def _says_more(with_message: str, without: str) -> bool:
+    """Whether the API's message changes what kind of fault the reason reads as (#1605).
+
+    The status alone usually says it all, so the message is dropped for a
+    short reason. Not when the message is the fault: a weekly limit arrives as
+    a 429 whose message is the quota sentence and its reset, and dropping it
+    turns a quota into a retried rate limit. Which messages matter is the
+    harness classifier's call, never a string matched here.
+    """
+    observed_at = datetime.now(UTC)
+    kinds = {
+        failure.kind if failure is not None else None
+        for failure in (
+            classify_upstream_failure(reason, observed_at=observed_at)
+            for reason in (with_message, without)
+        )
+    }
+    return len(kinds) > 1
 
 
 def _parse_json_error(text: str) -> str | None:
@@ -209,18 +234,59 @@ def _extract_error_reason(raw: str) -> str:
 
 
 class ClaudeUsageBlock(TypedDict, total=False):
-    """The cumulative usage block a claude CLI ``result`` line carries.
+    """The usage block a claude CLI line carries: per turn, or cumulative on ``result``.
 
     Harness knowledge, and it stays here rather than in the domain vocabulary:
     these are the CLI's key names, and they change when Anthropic ships a new
     CLI, not when we decide what usage means. ``total=False`` because a result
     event may omit any of them and the reader defaults each to zero.
+
+    ``cache_creation`` splits ``cache_creation_input_tokens`` by cache TTL
+    (``ephemeral_1h_input_tokens`` / ``ephemeral_5m_input_tokens``). Older CLIs
+    omit it. Read it only through ``cache_writes_from_claude_usage``.
     """
 
     input_tokens: int
     output_tokens: int
     cache_creation_input_tokens: int
     cache_read_input_tokens: int
+    cache_creation: Mapping[str, int]
+
+
+def _is_count(value: object) -> TypeGuard[int]:
+    """A non-negative ``int`` that is not a ``bool``: a token count as the CLI sends it."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def cache_writes_from_claude_usage(usage: ClaudeUsageBlock) -> CacheWrites:
+    """Split ``cache_creation_input_tokens`` using the CLI's per-TTL breakdown.
+
+    With no breakdown (an older CLI) every write is 5-minute, which is how
+    they were all priced before. A breakdown that disagrees with the total
+    is logged and treated the same way: it cannot be trusted, and pricing
+    the total at the old rate is no worse than it was.
+    """
+    total = usage.get("cache_creation_input_tokens", 0)
+    split = usage.get("cache_creation")
+    if split is None:
+        return CacheWrites(five_minute=total, one_hour=0)
+    # The value came from json.loads, so the TypedDict is a claim, not a check.
+    # Counts must be real ints: ``True == 1`` and ``99.0 == 99`` would pass a
+    # numeric comparison and price a malformed split at the premium rate.
+    if _is_count(total) and isinstance(split, Mapping):
+        one_hour = split.get("ephemeral_1h_input_tokens", 0)
+        if _is_count(one_hour) and one_hour <= total:
+            five_minute = total - one_hour
+            reported_5m = split.get("ephemeral_5m_input_tokens", five_minute)
+            if _is_count(reported_5m) and reported_5m == five_minute:
+                return CacheWrites(five_minute=five_minute, one_hour=one_hour)
+    logger.warning(
+        "cache_creation split %r disagrees with cache_creation_input_tokens=%r;"
+        " pricing all cache writes at the 5-minute rate",
+        split,
+        total,
+    )
+    return CacheWrites(five_minute=total, one_hour=0)
 
 
 class ClaudeResultLine(TypedDict, total=False):
@@ -824,7 +890,7 @@ class EventStreamProcessor:
         if msg_id and msg_id in self._seen_message_ids:
             return
 
-        usage = message.get("usage") or {}
+        usage: ClaudeUsageBlock = message.get("usage") or {}
         if not usage:
             return
 
@@ -838,20 +904,26 @@ class EventStreamProcessor:
             # The model THIS message names, not the session's: a subagent turn
             # on another model is priced as that model, not as the leader.
             turn_model = announced_model_from(message.get("model"))
+            # Parsed once: the stored row and the limiter must agree on the split.
+            cache_writes = cache_writes_from_claude_usage(usage)
+            # The row keeps the TOTAL and carries the 1-hour share beside it
+            # (#2145 B2a); the limiter prices each share at its own rate.
             await self._collector.record_token_usage(
                 input_tokens,
                 output_tokens,
                 cache_creation,
                 cache_read,
                 model=turn_model,
+                cache_creation_1h=cache_writes.one_hour,
             )
             spend(
                 self._cost_limit,
                 turn_model,
                 input_tokens,
                 output_tokens,
-                cache_creation,
+                cache_writes.five_minute,
                 cache_read,
+                cache_creation_1h=cache_writes.one_hour,
             )
             logger.info(
                 "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",

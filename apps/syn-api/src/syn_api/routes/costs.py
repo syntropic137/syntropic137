@@ -9,13 +9,20 @@ store, which is empty for cost data. See #532 for the architectural rationale.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from itertools import chain
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from syn_api._wiring import ensure_connected, get_execution_cost_query, get_session_cost_query
-from syn_api.model_identity import CostModelKey, cost_by_observed_model
+from syn_api.model_identity import (
+    CostModelKey,
+    ObservedModelId,
+    cost_by_observed_model,
+    observed_model_ids,
+)
+from syn_api.routes._cost_rollup import roll_up_costs
 from syn_api.types import (
     CostSummary,
     Err,
@@ -25,7 +32,9 @@ from syn_api.types import (
     Ok,
     Result,
     SessionCostData,
+    SessionCostEntry,
 )
+from syn_shared.display.formatters import EM_DASH, UNPRICED
 
 if TYPE_CHECKING:
     from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
@@ -115,6 +124,15 @@ class ExecutionCostResponse(BaseModel):
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
     """Cost per REPORTED model id; ``unattributed-model`` holds cost whose model
     no harness reported. Never keyed by an alias (ADR-067 D9)."""
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models this execution was observed running that are NOT in
+    ``cost_by_model`` because nothing priced them: no rate and no SDK cost (#1743).
+
+    They ran, but carry no cost, never a fabricated $0. Render each beside the
+    cost split with ``unpriced_model_cost_display``.
+    """
+    unpriced_model_cost_display: str = UNPRICED
+    """What to show in place of a cost for each of ``unpriced_models``."""
     cost_by_tool: dict[str, str] = Field(default_factory=dict)
     is_complete: bool = False
     unpriced_observation_count: int = 0
@@ -132,12 +150,28 @@ class CostSummaryResponse(BaseModel):
     """Summary of all costs across sessions/executions."""
 
     total_cost_usd: Decimal = Decimal("0")
+    total_cost_display: str = EM_DASH
+    """``total_cost_usd`` as clients should show it: ``unpriced`` or
+    ``>=$X (partial)`` when ``unpriced_observation_count`` is non-zero (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations across the summed executions that carried no usable rate
+    and so added nothing to ``total_cost_usd``.
+
+    Non-zero means the total is INCOMPLETE, not that the work was free (#890).
+    """
     total_sessions: int = 0
     total_executions: int = 0
     total_tokens: int = 0
     total_tool_calls: int = 0
     top_models: list[ModelCostEntry] = Field(default_factory=list)
-    top_sessions: list[dict[str, Any]] = Field(default_factory=list)
+    top_sessions: list[SessionCostEntry] = Field(
+        default_factory=list,
+        description=(
+            "The most expensive completed sessions with a reported cost, most"
+            " expensive first. Sessions still in progress, and completed sessions"
+            " whose summary reports no cost, are not ranked."
+        ),
+    )
 
 
 # =============================================================================
@@ -185,8 +219,12 @@ def execution_cost_to_data(c: ExecutionCost) -> ExecutionCostData:
 
     ``total_tokens`` comes straight from the read model property, which sums
     all four token components - the same figure the executions read model
-    reports under the same name (issue #873).
+    reports under the same name (issue #873). ``unpriced_models`` carries the
+    identity the money split cannot: models observed in any phase that priced
+    to nothing (#1743).
     """
+    priced = cost_by_observed_model(c.cost_by_model)
+    observed = observed_model_ids(chain.from_iterable(c.observed_models_by_phase.values()))
     return ExecutionCostData(
         execution_id=c.execution_id,
         workflow_id=c.workflow_id,
@@ -205,7 +243,8 @@ def execution_cost_to_data(c: ExecutionCost) -> ExecutionCostData:
         duration_ms=c.duration_ms,
         cost_by_phase=c.cost_by_phase,
         unpriced_by_phase=c.unpriced_by_phase,
-        cost_by_model=cost_by_observed_model(c.cost_by_model),
+        cost_by_model=priced,
+        unpriced_models=[m for m in observed if m not in priced],
         cost_by_tool=c.cost_by_tool,
         is_complete=c.is_complete,
         unpriced_observation_count=c.unpriced_observation_count,
@@ -317,36 +356,58 @@ async def get_execution_cost(
         return Err(MetricsError.QUERY_FAILED, message=str(e))
 
 
+TOP_N = 5
+"""How many models and sessions ``get_cost_summary`` ranks (#701, #2228)."""
+
+
 async def get_cost_summary() -> Result[CostSummary, MetricsError]:
     """Get overall cost summary across all executions.
 
     Uses ExecutionCostQueryService (TimescaleDB) for reads. See #532.
+    ``top_models`` ranks the same execution rows the totals are summed from,
+    most expensive first, ``TOP_N`` of them (#701).
 
-    Args:
+    ``top_sessions`` is ranked in SQL by the session cost query service, not by
+    sorting ``list_all()``: that loads every session and only sees the newest
+    500 summaries, so it can miss the most expensive one (#2228).
     """
     await ensure_connected()
     try:
-        query_svc = get_execution_cost_query()
-        all_costs = await query_svc.list_all()
-
-        total_cost = Decimal(str(sum(c.total_cost_usd for c in (all_costs or []))))
-        total_tokens = sum(c.total_tokens for c in (all_costs or []))
-        total_sessions = sum(c.session_count for c in (all_costs or []))
-        total_tool_calls = sum(c.tool_calls for c in (all_costs or []))
+        all_costs = await get_execution_cost_query().list_all()
+        totals = roll_up_costs(all_costs)
 
         return Ok(
             CostSummary(
-                total_cost_usd=total_cost,
-                total_sessions=total_sessions,
-                total_executions=len(all_costs or []),
-                total_tokens=total_tokens,
-                total_tool_calls=total_tool_calls,
-                top_models=[],
-                top_sessions=[],
+                total_cost_usd=Decimal(totals.total_cost_usd),
+                total_cost_display=totals.total_cost_display,
+                unpriced_observation_count=totals.unpriced_observation_count,
+                total_sessions=sum(c.session_count for c in all_costs),
+                total_executions=totals.execution_count,
+                total_tokens=totals.total_tokens,
+                total_tool_calls=sum(c.tool_calls for c in all_costs),
+                top_models=_top_models(all_costs),
+                top_sessions=[
+                    SessionCostEntry(
+                        session_id=c.session_id,
+                        total_cost_usd=Decimal(str(c.total_cost_usd)),
+                        total_tokens=c.total_tokens,
+                    )
+                    for c in await get_session_cost_query().top_by_cost(TOP_N)
+                ],
             )
         )
     except Exception as e:
         return Err(MetricsError.QUERY_FAILED, message=str(e))
+
+
+def _top_models(costs: list[ExecutionCost]) -> list[ModelCostEntry]:
+    """Sum each model's cost across executions and keep the ``TOP_N`` largest."""
+    by_model: dict[str, Decimal] = {}
+    for c in costs:
+        for model, cost in c.cost_by_model.items():
+            by_model[model] = by_model.get(model, Decimal("0")) + cost
+    ranked = sorted(by_model.items(), key=lambda kv: kv[1], reverse=True)[:TOP_N]
+    return [ModelCostEntry(model=model, cost_usd=cost) for model, cost in ranked]
 
 
 # =============================================================================
@@ -406,6 +467,7 @@ def _execution_cost_to_api(c: ExecutionCostData) -> ExecutionCostResponse:
         cost_by_phase={k: str(v) for k, v in (c.cost_by_phase or {}).items()},
         unpriced_by_phase={k: int(v) for k, v in (c.unpriced_by_phase or {}).items()},
         cost_by_model={k: str(v) for k, v in (c.cost_by_model or {}).items()},
+        unpriced_models=list(c.unpriced_models),
         cost_by_tool={k: str(v) for k, v in (c.cost_by_tool or {}).items()},
         is_complete=c.is_complete,
         unpriced_observation_count=c.unpriced_observation_count,
@@ -530,10 +592,12 @@ async def get_cost_summary_endpoint() -> CostSummaryResponse:
     s = result.value
     return CostSummaryResponse(
         total_cost_usd=Decimal(str(s.total_cost_usd)),
+        total_cost_display=s.total_cost_display,
+        unpriced_observation_count=s.unpriced_observation_count,
         total_sessions=s.total_sessions,
         total_executions=s.total_executions,
         total_tokens=s.total_tokens,
         total_tool_calls=s.total_tool_calls,
         top_models=list(s.top_models),
-        top_sessions=s.top_sessions,
+        top_sessions=list(s.top_sessions),
     )

@@ -98,6 +98,8 @@ from syn_domain.contexts.orchestration import (
     ReviewVerdict,
     SideEffectStatus,
     TagSet,
+    TrialExclusion,
+    TrialOutcome,
     Verdict,
 )
 
@@ -300,6 +302,9 @@ class TriggerError(StrEnum):
     ALREADY_DELETED = "already_deleted"
     PRESET_NOT_FOUND = "preset_not_found"
     WORKFLOW_NOT_FOUND = "workflow_not_found"
+    WORKFLOW_AMBIGUOUS = "workflow_ambiguous"
+    """The workflow ID is a prefix of more than one workflow (#642). Refused
+    rather than guessed at: the trigger would fire the wrong one later."""
     STORE_UNAVAILABLE = "store_unavailable"
     """The event store could not be read, so existence is UNKNOWN.
 
@@ -308,6 +313,31 @@ class TriggerError(StrEnum):
     workflow does not exist" - a confident wrong answer a caller would act on.
     The store now raises instead, and this code carries the difference through
     to the caller rather than collapsing it back into not-found."""
+    GITHUB_NOT_CONFIGURED = "github_not_configured"
+    """No GitHub App on this server, so a trigger on a repository could never
+    fire. Registration is refused rather than stored silently dead (#1864)."""
+    NO_INSTALLATION = "no_installation"
+    """The GitHub App is configured but no installation covers the repository
+    (#1864). Same consequence as GITHUB_NOT_CONFIGURED; a different fix."""
+    REPOSITORY_UNRESOLVED = "repository_unresolved"
+    """The repository is neither a known `repo-*` ID nor `owner/name`, so no
+    installation can even be looked up for it (#1864)."""
+    GITHUB_UNAVAILABLE = "github_unavailable"
+    """GitHub could not be asked which installation covers the repository
+    (outage, rate limit). Transient: the same request may succeed later."""
+
+
+class TriggerErrorResponse(BaseModel):
+    """Why a trigger was not created. Nothing is stored when this is returned.
+
+    `detail` stays a plain string, as FastAPI's own errors are, so every client
+    that prints `detail` prints the server's words (#1864).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    detail: str = Field(description="Human-readable reason, with the next step.")
+    code: TriggerError = Field(description="Machine-readable reason.")
 
 
 class OrganizationError(StrEnum):
@@ -496,28 +526,6 @@ class UpdateTriggerRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class WorkflowSummary(BaseModel):
-    """Summary of a workflow template for list views."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    name: str
-    workflow_type: str
-    classification: str
-    phase_count: int
-    description: str | None = None
-    created_at: datetime | None = None
-    runs_count: int = 0
-    is_archived: bool = False
-    requires_repos: bool = True
-    tags: list[str] = Field(default_factory=list)
-    """The workflow's tags, normalised and sorted (#967). Future runs inherit them."""
-    """Whether this workflow requires repository access at execution time (ADR-058 #666)."""
-    skills: list[DeclaredSkillResponse] = Field(default_factory=list)
-    """Every distinct skill the workflow's phases declare, first-declared first."""
-
-
 class InputDeclarationResponse(BaseModel):
     """Input declaration within a workflow template."""
 
@@ -561,6 +569,27 @@ class FallbackAgentResponse(BaseModel):
 
     provider: str
     model: str | None = None
+
+
+class PhaseResourcesResponse(BaseModel):
+    """What a phase's workspace asks for beyond the deployment default (okrs-51p.30)."""
+
+    memory_mb: int | None = None
+    """Workspace memory in MB; None means SYN_WORKSPACE_MEMORY_LIMIT_MB."""
+
+    pids_limit: int | None = None
+    """Workspace process and thread limit; None means SYN_WORKSPACE_PIDS_LIMIT."""
+
+
+class CommandStepResponse(BaseModel):
+    """One fixed shell step of a command phase (ADR-078)."""
+
+    name: str
+    run: str
+    """Executed as ``sh -c <run>`` in ``/workspace``; never templated."""
+    timeout_seconds: int | None = None
+    """None: whatever remains of the phase's budget."""
+    allow_failure: bool = False
 
 
 class PhaseDefinitionResponse(BaseModel):
@@ -612,6 +641,12 @@ class PhaseDefinitionResponse(BaseModel):
     can launch runs into a named eval and score them."""
     # PC-116: the phase fails when it reports no review_verdict.
     requires_verdict: bool = False
+    kind: Literal["agent", "command"] = "agent"
+    """What runs this phase (ADR-078): an agent, or ``commands`` at 0 tokens."""
+    commands: list[CommandStepResponse] = Field(default_factory=list)
+    """A command phase's ordered steps; empty on an agent phase."""
+    resources: PhaseResourcesResponse = Field(default_factory=PhaseResourcesResponse)
+    """What this phase's workspace asks for (okrs-51p.30). Empty: the default."""
     sandbox: str = DEFAULT_PHASE_SANDBOX
     claude_plugins: list[PhaseRefResponse] = Field(default_factory=list)
     skills: list[PhaseRefResponse] = Field(default_factory=list)
@@ -751,7 +786,11 @@ class ExecutionSummary(BaseModel):
     total_output_tokens: int = 0
     total_cache_creation_tokens: int = 0
     total_cache_read_tokens: int = 0
-    total_cost_usd: Decimal | str = Decimal("0")
+    total_cost_usd: Decimal = Decimal("0")
+    """USD, exact. Pydantic serialises ``Decimal`` as a JSON string
+    (``"0.11584"``), never a float, so no precision is lost on the wire and
+    clients parse it as a decimal. Every cost model here shares this contract
+    (#1433)."""
     unpriced_observation_count: int = 0
     """Observations that carried no usable rate and so added nothing to the total.
 
@@ -801,6 +840,9 @@ class ExecutionSummary(BaseModel):
     not tell, and which is the one report that moves the classification - to
     `unclassified`, withdrawing the claim that anything was established.
     """
+    review_verdict: ReviewVerdict | None = None
+    """The last review verdict the run reported (PC-63), as on `ExecutionDetail`.
+    On the summary so a list can be filtered certified from blocked (#1630)."""
     repos: list[str]
     """Full GitHub URLs of repositories cloned for this execution (ADR-058)."""
     tags: list[str] = Field(default_factory=list)
@@ -809,6 +851,8 @@ class ExecutionSummary(BaseModel):
     """The execution this run resumed, or None for a fresh run (#1881)."""
     resumed_as: str | None = None
     """The execution that resumed this one, or None. At most one (#1881)."""
+    task: str | None = None
+    """What this run was asked to do, or None if it was asked nothing (#1075)."""
 
 
 class ExecutionDetail(BaseModel):
@@ -824,7 +868,11 @@ class ExecutionDetail(BaseModel):
     total_output_tokens: int = 0
     total_cache_creation_tokens: int = 0
     total_cache_read_tokens: int = 0
-    total_cost_usd: Decimal | str = Decimal("0")
+    total_cost_usd: Decimal = Decimal("0")
+    """USD, exact. Pydantic serialises ``Decimal`` as a JSON string
+    (``"0.11584"``), never a float, so no precision is lost on the wire and
+    clients parse it as a decimal. Every cost model here shares this contract
+    (#1433)."""
     unpriced_observation_count: int = 0
     """Observations that carried no usable rate and so added nothing to the total.
 
@@ -958,6 +1006,10 @@ class SessionSummary(BaseModel):
     cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
+    """USD, exact. Pydantic serialises ``Decimal`` as a JSON string
+    (``"0.11584"``), never a float, so no precision is lost on the wire and
+    clients parse it as a decimal. Every cost model here shares this contract
+    (#1433)."""
     started_at: datetime | None = None
     completed_at: datetime | None = None
     #: The model the workflow ASKED for, from SessionStarted. Never what ran;
@@ -978,6 +1030,9 @@ class ArtifactSummary(BaseModel):
     #: as filtered on, because a filter a client cannot verify is what the
     #: silent drop looked like from outside.
     execution_id: str | None = None
+    #: Which agent session produced it (#975). Reported for the same reason as
+    #: execution_id: the list filters on it, so the rows must show it.
+    session_id: str | None = None
     phase_id: str | None = None
     artifact_type: str = ""
     title: str | None = None
@@ -997,7 +1052,7 @@ class ArtifactSummary(BaseModel):
 
 
 class AddTagsRequest(BaseModel):
-    """Tags to add to an execution or a workflow. Adds only: never replaces the set."""
+    """Tags to add to an execution, a workflow or an eval. Adds only: never replaces the set."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1019,12 +1074,46 @@ class ExecutionTagsResponse(BaseModel):
     """The tags it launched with. A record of the launch: no edit ever changes it."""
 
 
+class RecordedPush(BaseModel):
+    """One push a phase's own workspace made, as `PhaseCommitPushed` recorded it (#1544)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    phase_id: str
+    repository: str
+    """The clone's directory name, as the workspace's push hook reported it."""
+    branch: str
+    sha: str
+
+
+class ExecutionPushesResponse(BaseModel):
+    """Every push this execution's phases recorded, read from the aggregate, not a projection.
+
+    In the order they were recorded. Empty means no `PhaseCommitPushed` event
+    exists for the execution, which is not the same as "nothing was pushed":
+    a push the hook did not report is not here.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    execution_id: str
+    pushes: list[RecordedPush]
+
+
 class WorkflowTagsResponse(BaseModel):
     """A workflow's tags after an edit, read from the aggregate, not a projection."""
 
     workflow_id: str
     tags: list[str]
     """The workflow's tags, normalised and sorted. Future runs inherit them."""
+
+
+class EvalTagsResponse(BaseModel):
+    """An eval's tags after an edit, read from the aggregate, not a projection (#2108)."""
+
+    eval_id: str
+    tags: list[str]
+    """The eval's tags, normalised and sorted."""
 
 
 class AttachEvalRequest(BaseModel):
@@ -1268,6 +1357,8 @@ class EvalRunResponse(BaseModel):
     scored_at: str | None
     judge_model: ObservedModelId | None = None
     """The model that judged the run; null for a deterministic scorer or an older score."""
+    trial_result: TrialOutcome | TrialExclusion | None = None
+    """What the run counts as in its cohort (#2108): an outcome, or why it is no trial."""
 
 
 class EvalRunListResponse(BaseModel):
@@ -1526,6 +1617,194 @@ class ReadModelStatus(BaseModel):
     )
 
 
+class _EvalTrialsModel(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class EvalBoundsResponse(_EvalTrialsModel):
+    """A figure with every infra error a fail (lower) and every one a pass (upper)."""
+
+    lower: float
+    upper: float
+    display: str
+    """e.g. ``"40% to 90%"``."""
+
+
+class EvalCohortKeyResponse(_EvalTrialsModel):
+    """The trials of one roster that share a declared treatment and scoring protocol."""
+
+    suite_version: str
+    workflow_id: str
+    workflow_version: str
+    """``""`` when unrecorded: unrecorded runs group together."""
+    models_digest: str
+    """``models_digest`` of the suite's declared models map (32 hex of sha256), from the ``models:`` launch tag."""
+    scorer_protocol: str
+
+
+class EvalCaseMetricsResponse(_EvalTrialsModel):
+    """One case's pass@k, pass^k and flakiness in one cohort (#2108).
+
+    Computed by the domain; a client never recomputes them.
+    """
+
+    eval_id: str
+    k: int
+    n: int
+    """Judged trials (pass + fail). Infra errors and pending are not in n."""
+    c: int
+    """Passing trials."""
+    pending: int
+    infra_error_count: int
+    base_mismatch_count: int
+    """Runs excluded: they started from a checkout that is not the eval's baseline."""
+    treatment_mismatch_count: int
+    """Runs excluded: a phase ran a model other than its declared one."""
+    trials_short: int
+    """Trials still to launch to reach k; in-flight trials are reserved. 0 once exhausted."""
+    exhausted: bool
+    """Infra errors reached k: the harness launches no more for this case."""
+    complete: bool
+    """At least k judged trials: the case has a conditional metric."""
+    never_launched: bool
+    pass_at_k: float | None
+    """Conditional over judged trials; null while the case is short."""
+    pass_at_k_display: str
+    pass_hat_k: float | None
+    pass_hat_k_display: str
+    flaky: bool | None
+    pass_at_k_bounds: EvalBoundsResponse
+    pass_hat_k_bounds: EvalBoundsResponse
+
+
+class EvalCaseCohortResponse(_EvalTrialsModel):
+    """One eval's figures in one cohort."""
+
+    cohort: EvalCohortKeyResponse
+    metrics: EvalCaseMetricsResponse
+
+
+class EvalRosterCaseResponse(_EvalTrialsModel):
+    eval_id: str
+    split: str | None
+    """Null when the eval carries no split tag, or conflicting ones."""
+    polarity: str | None
+    """``defect`` or ``clean``; null when untagged or conflicting."""
+
+
+class EvalSetCoverageResponse(_EvalTrialsModel):
+    """How much of the roster a cohort has judged."""
+
+    roster_size: int
+    complete: int
+    short: int
+    """Launched, but fewer than k judged trials."""
+    never_launched: int
+
+
+class EvalImageManifestResponse(_EvalTrialsModel):
+    """A workspace image's ``version.json`` as a trial's phase read it (#1913)."""
+
+    provider: str
+    provider_version: str
+    components: dict[str, str]
+    build_commit: str
+    built_at: str
+    manifest_digest: str
+    """Hash of the manifest.yaml used for the build. Not an OCI image digest."""
+
+
+class EvalSetCohortResponse(_EvalTrialsModel):
+    """One cohort's figures over one roster (#2108, plan section 7).
+
+    The means cover complete cases only and are descriptive; decisions read
+    the roster-wide bounds, where a short or never-launched case is 0 in the
+    lower bound and 1 in the upper.
+    """
+
+    cohort: EvalCohortKeyResponse
+    k: int
+    cases: list[EvalCaseMetricsResponse]
+    """One per rostered case, in roster order; a never-launched case has zero counts."""
+    coverage: EvalSetCoverageResponse
+    mean_pass_at_k: float | None
+    mean_pass_at_k_display: str
+    mean_pass_hat_k: float | None
+    mean_pass_hat_k_display: str
+    flakiness: float | None
+    """mean pass@k - mean pass^k."""
+    partial: bool
+    """The means cover fewer than every rostered case: descriptive, never a decision."""
+    flaky_cases: list[str]
+    pass_at_k_bounds: EvalBoundsResponse
+    pass_hat_k_bounds: EvalBoundsResponse
+    infra_error_count: int
+    infra_share: float | None
+    """Infra errors over resolved trials; null when nothing resolved."""
+    base_mismatch_count: int
+    treatment_mismatch_count: int
+    image_manifests: list[EvalImageManifestResponse]
+    """Every distinct image manifest the cohort's trials read."""
+    trials_without_image_manifest: int
+    """Trials no phase of which read a manifest: absent, unreadable, or never provisioned."""
+
+
+class EvalIntervalResponse(_EvalTrialsModel):
+    """A 95% paired bootstrap percentile interval on a difference in means."""
+
+    estimate: float
+    low: float
+    high: float
+
+
+class EvalSetComparisonResponse(_EvalTrialsModel):
+    """A paired A/B of the roster's two cohorts (#2108, plan section 11).
+
+    The estimand is each case's pass^k from its first k judged trials.
+    """
+
+    a: EvalCohortKeyResponse
+    b: EvalCohortKeyResponse
+    k: int
+    paired_cases: list[str]
+    short_cases: list[str]
+    """Fewer than k judged trials in either cohort: out of the pair."""
+    coverage_complete: bool
+    """Every rostered case is paired; otherwise the call is inconclusive."""
+    a_only: int
+    b_only: int
+    both: int
+    neither: int
+    mcnemar_p: float
+    """Exact two-sided McNemar p over the discordant cases; 1.0 when there are none."""
+    difference: EvalIntervalResponse | None
+    """Mean pass^k A - B over the paired cases; null when no case is paired."""
+    a_lower_minus_b_upper: EvalIntervalResponse | None
+    """Whole roster, the assignment most adverse to A."""
+    a_upper_minus_b_lower: EvalIntervalResponse | None
+
+
+class EvalSetMetricsResponse(_EvalTrialsModel):
+    """An eval set's roster and what each cohort scored over it (#2108).
+
+    Every figure comes from the domain read model at query time.
+    """
+
+    suite: str
+    version: str
+    split: str | None
+    k: int
+    roster: list[EvalRosterCaseResponse]
+    cohorts: list[EvalSetCohortResponse]
+    """One block per cohort that launched into this roster version, in key order."""
+    comparison: EvalSetComparisonResponse | None
+    """Present exactly when two cohorts launched into the roster."""
+    not_a_trial_count: int
+    """Member runs of rostered cases that belong to no cohort: attached, or launch tags missing."""
+    isolation: Literal["unproven"] = "unproven"
+    """Whether a trial could read another's results. Unproven until #2056."""
+
+
 class EvalDetailResponse(EvalResponse):
     """One eval, as `GET /evals/{eval_id}` returns it.
 
@@ -1536,6 +1815,8 @@ class EvalDetailResponse(EvalResponse):
 
     read_model_status: ReadModelStatus | None = None
     """Whether the evals read model is rebuilding."""
+    cohorts: list[EvalCaseCohortResponse] | None = None
+    """This eval's trial figures in every cohort it has trials in, when asked with ``k``."""
 
 
 class EvalListResponse(BaseModel):
@@ -1622,6 +1903,7 @@ class TriggerSummary(BaseModel):
     status: str
     fire_count: int = 0
     created_at: datetime | None = None
+    unable_to_fire_reason: str | None = None
 
 
 class TriggerDetail(BaseModel):
@@ -1642,6 +1924,7 @@ class TriggerDetail(BaseModel):
     installation_id: str = ""
     created_by: str = ""
     last_fired_at: datetime | None = None
+    unable_to_fire_reason: str | None = None
 
 
 class TriggerHistoryEntry(BaseModel):
@@ -1695,7 +1978,7 @@ class WorkflowValidation(BaseModel):
     phase_count: int = 0
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    """Notices that never make the file invalid, e.g. a retired key it still carries."""
+    """Notices that never make the file invalid."""
 
 
 # ---------------------------------------------------------------------------
@@ -2243,6 +2526,8 @@ class PhaseExecution(BaseModel):
     ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
     fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models the phase ran that nothing priced, so absent from ``cost_by_model`` (#1743)."""
     agent_session_ids: list[str] | None = None
     """The agent-native session ids this phase's capture confirmed, in the order
     the store reported them.
@@ -2328,7 +2613,11 @@ class ExecutionDetailFull(BaseModel):
     """Every phase the run declared, in order, with where each stands. Counts
     the same phases ``total_phases`` does; ``phases`` is only the ones that ran."""
     total_tokens: int = 0
-    total_cost_usd: Decimal | str = Decimal("0")
+    total_cost_usd: Decimal = Decimal("0")
+    """USD, exact. Pydantic serialises ``Decimal`` as a JSON string
+    (``"0.11584"``), never a float, so no precision is lost on the wire and
+    clients parse it as a decimal. Every cost model here shares this contract
+    (#1433)."""
     unpriced_observation_count: int = 0
     total_duration_seconds: float | None
     """Wall-clock seconds across the execution's phases, including any still
@@ -2447,7 +2736,7 @@ class ExecutionDetailFull(BaseModel):
 
 
 class ControlResult(BaseModel):
-    """Result of a control command (pause/resume/cancel/inject)."""
+    """Result of a control command (cancel)."""
 
     success: bool
     execution_id: str
@@ -2593,19 +2882,15 @@ class ArtifactDetail(BaseModel):
 
 
 class DashboardMetrics(BaseModel):
-    """Aggregated dashboard metrics."""
+    """The dashboard projection's counts that GET /metrics reads (#2272).
 
-    total_workflows: int = 0
-    completed_workflows: int = 0
-    failed_workflows: int = 0
-    total_sessions: int = 0
-    total_input_tokens: int = 0
-    total_output_tokens: int = 0
-    total_cache_creation_tokens: int = 0
-    total_cache_read_tokens: int = 0
-    total_tokens: int = 0
-    total_cost_usd: Decimal = Decimal("0")
-    total_artifacts: int = 0
+    Execution, session, token and cost totals come from their own read models.
+    """
+
+    total_workflows: int = Field(
+        default=0,
+        description="Workflow templates that are not archived; matches the default total of GET /workflows",
+    )
     total_artifact_bytes: int = 0
 
 
@@ -2697,6 +2982,8 @@ class ExecutionCostData(BaseModel):
     amount; a phase in neither genuinely had no spend (#890).
     """
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    unpriced_models: list[ObservedModelId] = Field(default_factory=list)
+    """Models the execution ran that nothing priced, so absent from ``cost_by_model`` (#1743)."""
     cost_by_tool: dict = Field(default_factory=dict)
     is_complete: bool = False
     unpriced_observation_count: int = 0
@@ -2717,17 +3004,41 @@ class ModelCostEntry(BaseModel):
     cost_usd: Decimal = Decimal("0")
 
 
+class SessionCostEntry(BaseModel):
+    """One session's share of a cost total.
+
+    Field names are the ones ``SessionCostResponse`` uses for the same values.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    session_id: str
+    total_cost_usd: Decimal = Decimal("0")
+    total_tokens: int = 0
+    """All four token components (issue #873)."""
+
+
 class CostSummary(BaseModel):
     """Overall cost summary across all executions."""
 
     total_cost_usd: Decimal = Decimal("0")
+    total_cost_display: str = EM_DASH
+    """``total_cost_usd`` rendered with its coverage (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations that added nothing to ``total_cost_usd`` because nothing
+    priced them; non-zero means the total is a lower bound (#890)."""
     total_sessions: int = 0
     total_executions: int = 0
     total_tokens: int = 0
     """Sum of all four token components across executions (issue #873)."""
     total_tool_calls: int = 0
     top_models: list[ModelCostEntry] = Field(default_factory=list)
-    top_sessions: list[dict] = Field(default_factory=list)
+    top_sessions: list[SessionCostEntry] = Field(default_factory=list)
+    """Completed sessions with a reported cost, most expensive first (#2228).
+
+    In-progress sessions and summaries without ``total_cost_usd`` are not
+    ranked: their cost is priced from token rows, which SQL cannot order by.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -3204,6 +3515,52 @@ class DiskSpaceHealth(BaseModel):
     )
 
 
+class EventPollerHealth(BaseModel):
+    """What the GitHub Events API poller could not poll, as /health reports it (#1870)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    unresolved_triggers: int = Field(
+        description="Active triggers the last poll cycle skipped because their repository "
+        "resolves to no GitHub owner/name, e.g. a syn137 repo id with no Repo record. Each "
+        "is logged once, with its trigger id, when first seen; this is the only signal after."
+    )
+
+
+class SessionStoreHealth(BaseModel):
+    """Size and growth of the host session archive, as /health reports it (#2107).
+
+    Measured by walking the archive directory at most once per cache window,
+    off the event loop. Informational: it never degrades /health.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str = Field(description="The archive directory, SYN_SESSION_INVENTORY_ARCHIVE_DIR.")
+    measured_at: datetime = Field(description="When the directory was walked (UTC).")
+    stored_bytes: int = Field(
+        description="Allocated bytes (st_blocks) of every file in the archive directory, as the disk sees "
+        "them: compressed objects, splice references, markers and temporaries."
+    )
+    object_count: int = Field(description="Full transcript objects, compressed or not.")
+    reference_count: int = Field(
+        description="Older revisions stored as splice references to a newer object."
+    )
+    added_bytes_24h: int = Field(
+        description="Current allocated bytes of objects and references first archived in the "
+        "last 24 hours, by file mtime. Bytes since deleted are not counted."
+    )
+    added_bytes_per_day_7d: int = Field(
+        description="The same over the last 7 days, divided by 7: the daily growth rate."
+    )
+    filesystem_free_bytes: int = Field(description="Bytes available on the archive's filesystem.")
+    days_until_full: float | None = Field(
+        description="filesystem_free_bytes / added_bytes_per_day_7d; null when nothing was "
+        "added in the last 7 days."
+    )
+    detail: str = Field(description="One line for an operator: size, growth and runway.")
+
+
 class DbPoolHealth(BaseModel):
     """One Postgres connection pool in this API process, at the moment of asking (#1583).
 
@@ -3302,6 +3659,17 @@ class HealthResponse(_OmitsAbsentFields):
         "this process or the Run Queue (#1715). Omitted before startup has sized it, "
         "and when the Run Queue cannot be read.",
     )
+    session_store: SessionStoreHealth | None = Field(
+        default=None,
+        description="Size and growth of the session archive (#2107). Omitted when the "
+        "archive directory does not exist or could not be measured, and until the "
+        "first background measurement completes.",
+    )
+    event_poller: EventPollerHealth | None = Field(
+        default=None,
+        description="The GitHub Events API poller (#1870). Omitted when it is not running, "
+        "e.g. with no GitHub App configured or polling disabled.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3354,7 +3722,7 @@ class RepoHealthResponse(BaseModel):
 
     Note: ``recent_cost_usd`` is accumulated from WorkflowCompleted/Failed events
     since the projection was last reset — it is not a fixed time window and may
-    differ from ``RepoCostResponse.total_cost_usd`` which is a TimescaleDB total.
+    differ from ``RepoCostResponse.total_cost_usd``, which sums ``ExecutionCost`` (#897).
     """
 
     repo_id: str = ""
@@ -3370,11 +3738,19 @@ class RepoHealthResponse(BaseModel):
 
 
 class RepoCostResponse(BaseModel):
-    """Per-repo cost breakdown by workflow and model."""
+    """Per-repo cost breakdown by workflow and model, summed from ``ExecutionCost``
+    exactly as ``/insights/cost`` sums it (#897)."""
 
     repo_id: str = ""
     repo_full_name: str = ""
     total_cost_usd: str = "0"
+    total_cost_display: str = "$0.00"
+    """``total_cost_usd`` as ``format_cost`` renders it: ``unpriced`` when nothing
+    was priced, ``>=$X (partial)`` when some was (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations across these executions that carried no usable rate and so
+    added nothing to the total. Non-zero means the cost is INCOMPLETE, not that
+    the work was free (#890)."""
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -3501,12 +3877,20 @@ class SystemStatusResponse(BaseModel):
 
 
 class SystemCostResponse(BaseModel):
-    """System-wide cost breakdown by repo, workflow, and model."""
+    """System-wide cost breakdown by repo, workflow, and model, summed from
+    ``ExecutionCost`` exactly as ``/insights/cost?system_id=`` sums it (#897)."""
 
     system_id: str = ""
     system_name: str = ""
     organization_id: str = ""
     total_cost_usd: str = "0"
+    total_cost_display: str = "$0.00"
+    """``total_cost_usd`` as ``format_cost`` renders it: ``unpriced`` when nothing
+    was priced, ``>=$X (partial)`` when some was (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations across these executions that carried no usable rate and so
+    added nothing to the total. Non-zero means the cost is INCOMPLETE, not that
+    the work was free (#890)."""
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -3680,6 +4064,13 @@ class GlobalCostResponse(BaseModel):
     system_name: str = ""
     organization_id: str = ""
     total_cost_usd: str = "0"
+    total_cost_display: str = "$0.00"
+    """``total_cost_usd`` as ``format_cost`` renders it: ``unpriced`` when nothing
+    was priced, ``>=$X (partial)`` when some was (#897)."""
+    unpriced_observation_count: int = 0
+    """Observations across these executions that carried no usable rate and so
+    added nothing to the total. Non-zero means the cost is INCOMPLETE, not that
+    the work was free (#890)."""
     total_tokens: int = 0
     """Sum of input, output, cache creation and cache read tokens (issue #873)."""
     total_input_tokens: int = 0
@@ -3688,7 +4079,11 @@ class GlobalCostResponse(BaseModel):
     total_cache_read_tokens: int = 0
     cost_by_repo: dict[str, str] = Field(default_factory=dict)
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
+    unpriced_by_workflow: dict[str, int] = Field(default_factory=dict)
+    """Per-workflow count of observations that could not be priced. A workflow
+    listed here has a ``cost_by_workflow`` entry that is only a lower bound."""
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
+    """Priced spend only: the source has no per-model unpriced count."""
     execution_count: int = 0
 
 
@@ -3794,6 +4189,43 @@ class CaptureStatusEntry(BaseModel):
     `sessions` array), which is NOT the same as [] meaning it confirmed none.
     """
 
+    capability_status: Literal["ready", "degraded", "failed"] | None = None
+    """The session-store capability's start-up verdict: ready, degraded or failed.
+
+    null when the workspace recorded none (capture not active, or an image
+    predating the capability status row) or it could not be read. A degraded
+    start is why `state` reads "degraded": the workspace ran with capture off.
+    """
+
+    failed_checks: list[str] = Field(default_factory=list)
+    """The capability checks that failed at start, e.g. ["store_reachable"]."""
+
+    doctor_exit: int | None = None
+    """The capability doctor's exit code at start, when a verdict was recorded."""
+
+    capture_status_display: str
+    """Human-readable verdict, e.g. "Capture degraded: store_reachable failed"."""
+
+
+class CapabilityStatusEntry(BaseModel):
+    """One workspace's session-store capability verdict, recorded at agent launch.
+
+    Recorded at START (#1516), so a degraded workspace is visible while its
+    phase runs and stays visible if the phase never reaches teardown. Only
+    returned for an execution-filtered read.
+    """
+
+    execution_id: str | None = None
+    phase_id: str | None = None
+    workspace_id: str | None = None
+    capability: str
+    """The capability the verdict is for, e.g. "session-store"."""
+    status: Literal["ready", "degraded", "failed"]
+    failed_checks: list[str] = Field(default_factory=list)
+    doctor_exit: int = 0
+    capability_status_display: str
+    """Human-readable verdict, e.g. "Capture degraded: store_reachable failed"."""
+
 
 class CaptureStatusResponse(BaseModel):
     """Recorded capture verdicts, newest first."""
@@ -3822,6 +4254,13 @@ class CaptureStatusResponse(BaseModel):
     """
 
     entries: list[CaptureStatusEntry] = Field(default_factory=list)
+
+    capabilities: list[CapabilityStatusEntry] = Field(default_factory=list)
+    """Start-up capability verdicts for the requested execution, newest first.
+
+    Empty unless `execution_id` was given, and empty when no session store is
+    configured. Independent of `entries`: these exist from agent launch on.
+    """
 
 
 class SessionTokenMetrics(BaseModel):
@@ -4224,7 +4663,7 @@ INSUFFICIENT = "insufficient"
 """Rendered for a percentile computed over fewer phases than it needs."""
 
 
-def _format_bytes(n: float) -> str:
+def format_bytes(n: float) -> str:
     for unit, size in (("GiB", 1 << 30), ("MiB", 1 << 20), ("KiB", 1 << 10)):
         if n >= size:
             return f"{n / size:.1f} {unit}"
@@ -4241,7 +4680,7 @@ def _display(
     if kind == "cost":
         return format_cost(Decimal(str(value)))
     if kind == "bytes":
-        return _format_bytes(value)
+        return format_bytes(value)
     if kind == "seconds":
         return f"{value:.1f}s"
     return f"{value:.2f}"

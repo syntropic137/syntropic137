@@ -22,11 +22,13 @@ async def initialize_session_inventory() -> Result[None, LifecycleError]:
 
     try:
         await initialize_inventory_runtime()
-    except Exception:
+    except Exception as e:
         logger.exception("Durable session inventory initialization failed")
+        # The cause rides in the message: under a restart loop the traceback
+        # above scrolls out of `docker logs --tail`, the abort line does not (#1511).
         return Err(
             LifecycleError.CONNECTION_FAILED,
-            message="Durable session inventory initialization failed",
+            message=f"Durable session inventory initialization failed: {type(e).__name__}: {e}",
         )
     return Ok(None)
 

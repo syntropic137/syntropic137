@@ -189,6 +189,7 @@ class _ExecutionList:
         tags: object,
         eval_id: str | None,
         in_eval: bool | None,
+        review_verdict: object,
         offset: int,
         limit: int | None,
     ) -> Page[WorkflowExecutionSummary]:

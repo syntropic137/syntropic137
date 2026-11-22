@@ -11,6 +11,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration import FilesRefusedError
+from syn_domain.contexts.orchestration._shared.command_phase import COMMAND_TAIL_BYTES
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     TokenType,
     WorkspaceStatus,
@@ -31,7 +33,10 @@ if TYPE_CHECKING:
         SetupPhaseSecrets,
     )
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
-    from syn_domain.contexts.agent_sessions import RolloutDocument
+    from syn_domain.contexts.orchestration._shared.command_phase import BoundedCommandResult
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
+        ImageManifestReading,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationHandle,
@@ -42,6 +47,7 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
         WorkspaceAggregate,
     )
+    from syn_domain.contexts.orchestration.ports.CodexRolloutPort import CodexRolloutReading
 
 from syn_adapters.workspace_backends.agentic.credential_scrubber import (
     CredentialScrubber,
@@ -49,7 +55,7 @@ from syn_adapters.workspace_backends.agentic.credential_scrubber import (
 )
 from syn_adapters.workspace_backends.agentic.credentials import names_a_credential
 from syn_adapters.workspace_backends.dependency_seed import seed_dependency_caches
-from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout
+from syn_adapters.workspace_backends.service.codex_rollout import read_codex_rollout_model
 from syn_adapters.workspace_backends.service.credential_keeper import keep_credential_fresh
 from syn_adapters.workspace_backends.service.git_credential_renewal import (
     CredentialSource,
@@ -84,6 +90,10 @@ class ManagedWorkspace:
     isolation_handle: IsolationHandle
     sidecar_handle: SidecarHandle | None
     _service: WorkspaceService = field(repr=False)
+    #: The image manifest read when the workspace was provisioned (#1913),
+    #: carried onto the phase's persisted provisioning event. None only for a
+    #: workspace built without provisioning one, as tests do.
+    image_manifest: ImageManifestReading | None = None
     _tokens_injected: bool = False
     #: How this workspace's git credential was minted, recorded by the setup
     #: phase so it can be minted AGAIN later (#1393). None until the setup
@@ -205,6 +215,36 @@ class ManagedWorkspace:
         async for line in stream:  # type: ignore[attr-defined]
             yield line
 
+    async def run_bounded(
+        self,
+        command: list[str],
+        *,
+        timeout_seconds: int,
+        working_directory: str | None = None,
+        tail_bytes: int = COMMAND_TAIL_BYTES,
+        phase_deadline: datetime | None = None,
+    ) -> BoundedCommandResult:
+        """Run a command phase's step to its end, keeping a bounded scrubbed tail (ADR-078 D3).
+
+        The phase's platform grant rides on it as on ``stream``, so a referee
+        step under ``platform_access: eval`` can score a run, and it dies with
+        the phase. Everything the workload holds is withheld from the tail.
+        """
+        environment: dict[str, str] | None = None
+        if self.platform_grant is not None:
+            await self._bound_platform_grant_to_phase(phase_deadline)
+            environment = dict(self.platform_grant.env)
+            self.withhold(v for k, v in environment.items() if names_a_credential(k))
+        return await self._service._event_stream.run_bounded(
+            self.isolation_handle,
+            command,
+            timeout_seconds=timeout_seconds,
+            working_directory=working_directory,
+            environment=environment,
+            tail_bytes=tail_bytes,
+            withheld=self._withheld_values,
+        )
+
     async def _bound_platform_grant_to_phase(self, deadline: datetime | None) -> None:
         """The API token expires with the phase, not only when teardown revokes it."""
         tokens = self._service._platform_tokens
@@ -214,11 +254,12 @@ class ManagedWorkspace:
 
     @property
     def last_stream_exit_code(self) -> int | None:
-        """Exit code from the most recent stream() call.
+        """Exit code from this workspace's most recent stream() call.
 
-        Returns None if no stream has completed yet.
+        Returns None if no stream has completed here yet. Never another
+        workspace's: the event stream is shared by the whole service (#980).
         """
-        return self._service._event_stream.last_exit_code
+        return self._service._event_stream.exit_code_of(self.isolation_handle)
 
     async def inject_tokens(
         self,
@@ -281,16 +322,25 @@ class ManagedWorkspace:
 
         Returns:
             List of (relative_path, content) tuples
+
+        Raises:
+            FilesRefusedError: entries were refused; it carries the files read
+                and each refusal, for the caller's policy to decide.
         """
         pats = patterns or ["artifacts/**/*"]
-        collected = await self._service._isolation.copy_from(
-            self.isolation_handle,
-            pats,
-            base_path=base_path,
-        )
         # A file the agent wrote can hold whatever it printed, so it leaves the
-        # workspace through the same scrubber as the stream (#1927).
+        # workspace through the same scrubber as the stream (#1927), the files
+        # a refusal carries included.
         scrubber = CredentialScrubber(self._withheld_values())
+        try:
+            collected = await self._service._isolation.copy_from(
+                self.isolation_handle,
+                pats,
+                base_path=base_path,
+            )
+        except FilesRefusedError as e:
+            files = tuple((path, scrub_bytes(scrubber, content)) for path, content in e.files)
+            raise FilesRefusedError(files, e.refused) from e
         return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
 
     async def run_setup_phase(
@@ -423,17 +473,17 @@ class ManagedWorkspace:
         """
         await clear_secrets(self)
 
-    async def codex_rollout(self, native_session_id: str) -> RolloutDocument | None:
-        """The rollout codex wrote for this session, or None if it cannot be read.
+    async def codex_rollout_model(self, native_session_id: str) -> CodexRolloutReading | None:
+        """What the rollout codex wrote for this session says, or None if unread.
 
         Satisfies ``CodexRolloutPort``. Lives on the workspace because the file
         is INSIDE this container and outlives nothing: once the workspace is
         torn down the only copy of what model codex ran is gone (#1284).
 
-        Delegates to codex_rollout.read_codex_rollout(). See that module for
-        why the codex layout is not restated there.
+        Delegates to codex_rollout.read_codex_rollout_model(). See that module
+        for why the codex layout is not restated there.
         """
-        return await read_codex_rollout(self, native_session_id)
+        return await read_codex_rollout_model(self, native_session_id)
 
     async def interrupt(self) -> bool:
         """Stop the agent this workspace is streaming; True once it is confirmed over.

@@ -43,6 +43,7 @@ from syn_domain.contexts.orchestration.ports.ClaudePluginStoragePort import (
 )
 from syn_domain.contexts.orchestration.ports.CodexRolloutPort import (
     CodexRolloutPort,
+    CodexRolloutReading,
 )
 from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
     DelegationAttempt,
@@ -52,6 +53,9 @@ from syn_domain.contexts.orchestration.ports.DelegationEvidencePort import (
 )
 from syn_domain.contexts.orchestration.ports.EvidenceRunnerPort import (
     EvidenceRunnerPort,
+)
+from syn_domain.contexts.orchestration.ports.ExecutionLifecycleSinkPort import (
+    ExecutionLifecycleSinkPort,
 )
 from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
     DEFAULT_EXECUTOR_POOL,
@@ -65,8 +69,11 @@ from syn_domain.contexts.orchestration.ports.ExecutionRunQueuePort import (
     IsolationLevel,
     OpeningSweep,
     PoolDefinitionConflict,
+    ProviderId,
+    ReapScope,
     RunCounts,
     RunLeaseLost,
+    RunWorkload,
     StreamPresence,
 )
 from syn_domain.contexts.orchestration.ports.GlobalClaudePluginRegistryRepositoryPort import (
@@ -109,11 +116,13 @@ __all__ = [
     "ClaudePluginRegistrationRepositoryPort",
     "ClaudePluginStoragePort",
     "CodexRolloutPort",
+    "CodexRolloutReading",
     "DelegationAttempt",
     "DelegationEvidencePort",
     "DelegationEvidenceUnavailableError",
     "DelegationOutcome",
     "EvidenceRunnerPort",
+    "ExecutionLifecycleSinkPort",
     "ExecutionRunQueue",
     "ExecutionStreamProbe",
     "ExecutorHost",
@@ -124,12 +133,15 @@ __all__ = [
     "ObservabilityServicePort",
     "OpeningSweep",
     "PoolDefinitionConflict",
+    "ProviderId",
+    "ReapScope",
     "RemoteBranchPort",
     "RemoteBranchReading",
     "RemoteBranchWriterPort",
     "RemoteTreePort",
     "RunCounts",
     "RunLeaseLost",
+    "RunWorkload",
     "SessionRepositoryPort",
     "SourceCommitResolverPort",
     "StoredClaudePluginTree",

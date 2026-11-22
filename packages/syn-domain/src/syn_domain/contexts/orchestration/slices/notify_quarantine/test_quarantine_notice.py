@@ -17,6 +17,7 @@ from syn_domain.contexts.agent_sessions import InventoryReconciliationSweepEvent
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     RemoteBranchReading,
 )
+from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_names import NOT_A_BRANCH
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     CancelExecutionCommand,
     FailExecutionCommand,
@@ -45,6 +46,7 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.execution_journal
 from syn_domain.contexts.orchestration.slices.notify_quarantine import (
     QuarantineNoticeProcessManager,
 )
+from syn_domain.contexts.orchestration.slices.notify_quarantine.value_objects import read_notice
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -83,14 +85,22 @@ class _Commenter:
 @dataclass
 class _Forge:
     open_pr: int | None = None
+    reads: list[str] = field(default_factory=list)
 
     async def read_branch(self, repository: str, branch: str) -> RemoteBranchReading:
+        self.reads.append(branch)
         return RemoteBranchReading(
             repository=repository, branch=branch, readable=True, open_pull_request=self.open_pr
         )
 
 
-def _failed(*, commit: str = SHA, pull_request: int | None = 42, nonce: int = 1) -> EventEnvelope:
+def _failed(
+    *,
+    commit: str = SHA,
+    pull_request: int | None = 42,
+    nonce: int = 1,
+    branch: str = "feat/thing",
+) -> EventEnvelope:
     """The event as the aggregate builds it, so a hop that drops the refs fails here."""
     command = FailExecutionCommand(
         execution_id="exec-q1",
@@ -103,7 +113,7 @@ def _failed(*, commit: str = SHA, pull_request: int | None = 42, nonce: int = 1)
         quarantined=(
             QuarantinedRef(
                 repository="acme/widget",
-                branch="feat/thing",
+                branch=branch,
                 ref=REF,
                 commit=commit,
                 commit_count=2,
@@ -141,6 +151,26 @@ async def test_replaying_the_quarantine_posts_nothing() -> None:
         await manager.handle_event(_failed(), MemoryCheckpointStore())
     # handle_event is all a catch-up replay ever calls.
     assert commenter.posts == 0 and commenter.edits == 0
+
+
+@pytest.mark.asyncio
+async def test_each_stored_row_carries_its_own_idempotency_key() -> None:
+    store = InMemoryProjectionStore()
+    manager = QuarantineNoticeProcessManager(commenter=_Commenter(), store=store)
+    first = _failed()
+    second = EventEnvelope(
+        event=first.event.model_copy(update={"execution_id": "exec-q2"}),
+        metadata=first.metadata.model_copy(update={"global_nonce": 2}),
+    )
+    for envelope in (first, second):
+        await manager.handle_event(envelope, MemoryCheckpointStore())
+
+    rows = await store.get_all(manager.PROJECTION_NAME)
+    keys = {manager.get_idempotency_key(row) for row in rows}
+    assert keys == {"exec-q1:implement:acme/widget", "exec-q2:implement:acme/widget"}
+    # A row saved before the key was dumped still reads; a disagreeing key does not.
+    assert read_notice({k: v for k, v in rows[0].items() if k != "key"}) is not None
+    assert read_notice({**rows[0], "key": "exec-q9:implement:acme/widget"}) is None
 
 
 @pytest.mark.asyncio
@@ -182,6 +212,21 @@ async def test_with_no_pr_yet_it_posts_once_one_opens() -> None:
     forge.open_pr = 42
     assert await manager.process_pending() == 1
     assert commenter.posts == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stand_in", sorted(NOT_A_BRANCH))
+async def test_a_stand_in_branch_is_never_looked_up(stand_in: str) -> None:
+    # #1870: the stand-in is persisted on the event where a branch goes. Asked
+    # for, GitHub 404'd on every clock tick; a forge that WOULD answer with a PR
+    # proves the lookup is skipped, not merely unanswered.
+    forge = _Forge(open_pr=42)
+    manager, commenter = _manager(forge)
+    await manager.handle_event(_failed(pull_request=None, branch=stand_in), MemoryCheckpointStore())
+    for _ in range(3):
+        assert await manager.process_pending() == 0
+    assert forge.reads == []
+    assert commenter.posts == 0
 
 
 @pytest.mark.asyncio

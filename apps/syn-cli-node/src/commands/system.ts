@@ -6,7 +6,7 @@
 import { CommandGroup, type CommandDef, type ParsedArgs } from "../framework/command.js";
 import { CLIError } from "../framework/errors.js";
 import { api, unwrap } from "../client/typed.js";
-import { print, printError, printDim, printSuccess } from "../output/console.js";
+import { print, printError, printDim, printSuccess, printUnpricedNote } from "../output/console.js";
 import { style, BOLD, CYAN, DIM, GREEN, RED, YELLOW } from "../output/ansi.js";
 import { formatCost, formatDuration, formatStatus, formatTimestamp, formatTokens } from "../output/format.js";
 import { Table } from "../output/table.js";
@@ -188,7 +188,8 @@ const costCommand: CommandDef = {
     const d = unwrap(await api.GET("/systems/{system_id}/cost", { params: { path: { system_id: id } } }), "Get system cost");
 
     print(`${style("System Costs:", BOLD)} ${id}`);
-    print(`  Total cost:  ${formatCost(d.total_cost_usd)}`);
+    print(`  Total cost:  ${d.total_cost_display}`);
+    printUnpricedNote(d.unpriced_observation_count);
     print(`  Tokens:      ${formatTokens(d.total_tokens)}`);
 
     const byRepo = d.cost_by_repo ?? {};

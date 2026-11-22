@@ -16,6 +16,9 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.agentic.capability_verdict import (
+        CapabilityVerdict,
+    )
     from syn_adapters.workspace_backends.agentic.capture_result import (
         AuthoritativeCapture,
     )
@@ -26,7 +29,7 @@ if TYPE_CHECKING:
         ManagedWorkspace,
     )
 
-__all__ = ["capture_phase_session"]
+__all__ = ["capture_phase_session", "record_phase_capability"]
 
 logger = logging.getLogger(__name__)
 
@@ -100,3 +103,32 @@ async def _record(
         # gap rather than a silent success.
         expect_sessions=True,
     )
+
+
+async def record_phase_capability(
+    capture: SessionCapturePort | None,
+    workspace: ManagedWorkspace | None,
+    *,
+    session_id: str,
+    phase_id: str,
+) -> CapabilityVerdict | None:
+    """Record how this phase's session store came up, as its agent launches (#1516).
+
+    At launch rather than at teardown: the verdict is a fact about the start,
+    so a degraded workspace should read as degraded while its agent runs, and
+    a phase that dies before teardown must not take the explanation with it.
+    Fail-open for the reason `capture_phase_session` is.
+    """
+    if capture is None or workspace is None or not session_id:
+        return None
+    try:
+        return await capture.record_capability(
+            workspace.execute,
+            session_id=session_id,
+            execution_id=workspace.execution_id,
+            workspace_id=workspace.workspace_id,
+            phase_id=phase_id,
+        )
+    except Exception:
+        logger.exception("Capability status read failed for phase %s; continuing", phase_id)
+        return None

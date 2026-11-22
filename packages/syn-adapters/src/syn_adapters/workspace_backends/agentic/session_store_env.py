@@ -66,7 +66,7 @@ from syn_shared.env_constants import (
     ENV_AGENTIC_SESSION_STORE_SPOOL,
     ENV_AGENTIC_SESSION_STORE_TAGS,
     ENV_AGENTIC_SESSION_STORE_URL,
-    SESSION_STORE_CONTRACT_ENV_VARS,
+    SESSION_STORE_RESERVED_ENV_VARS,
 )
 
 if TYPE_CHECKING:
@@ -382,7 +382,7 @@ def apply_session_store_env(
     """
     environment = dict(caller_environment)
 
-    reserved_from_caller = sorted(SESSION_STORE_CONTRACT_ENV_VARS & environment.keys())
+    reserved_from_caller = sorted(SESSION_STORE_RESERVED_ENV_VARS & environment.keys())
     if reserved_from_caller:
         for key in reserved_from_caller:
             del environment[key]

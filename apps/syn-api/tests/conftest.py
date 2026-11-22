@@ -45,3 +45,41 @@ def _fresh_repo_listing_cache() -> None:
     from syn_api.services.github_repo_listing_cache import reset_repo_listing_cache
 
     reset_repo_listing_cache()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_workspace_memory_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test sizes the process ledger from its own settings.
+
+    It is a process singleton sized on first use, so without this a test that
+    sets ``SYN_WORKSPACE_MEMORY_LIMIT_MB`` leaves a ledger of that size for
+    whichever test the worker runs next.
+    """
+    monkeypatch.setattr("syn_api._wiring_workspace_memory._ledger_singleton", None)
+
+
+GITHUB_TEST_INSTALLATION_ID = "inst-from-github-app"
+
+
+class _InstalledEverywhere:
+    """A GitHub App installed on every repository it is asked about."""
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    async def get_installation_for_repo(self, repo_full_name: str) -> str:
+        self.asked.append(repo_full_name)
+        return GITHUB_TEST_INSTALLATION_ID
+
+
+@pytest.fixture
+def github_installation_resolves(monkeypatch: pytest.MonkeyPatch) -> _InstalledEverywhere:
+    """Trigger creation resolves an installation, as on a server with the App set up.
+
+    Without it a test server has no GitHub App, and creating a trigger on a
+    repository is refused because it could never fire (#1864). Tests about
+    triggers themselves, rather than about that refusal, use this.
+    """
+    app = _InstalledEverywhere()
+    monkeypatch.setattr("syn_adapters.github.client.get_github_client", lambda: app)
+    return app

@@ -18,7 +18,7 @@ export type ResourceName =
   | 'listTriggers' | 'getTrigger' | 'getTriggerHistory'
   | 'listRepos' | 'listSystems' | 'lookUpAppAccess'
   | 'listSessionCosts' | 'getSessionCost' | 'listExecutionCosts' | 'getExecutionCost' | 'getCostSummary'
-  | 'getMetrics' | 'getToolTimeline' | 'getTokenMetrics' | 'getConversationLog' | 'getSSEHealth' | 'getFeatures' | 'getBuildInfo'
+  | 'getMetrics' | 'getToolTimeline' | 'getTokenMetrics' | 'getConversationLog' | 'getSSEHealth' | 'getFeatures' | 'getBuildInfo' | 'getHealth'
   | 'getContributionHeatmap'
   | 'getEvalTrend' | 'getWorkflowTrend' | 'getWorkflowTrends'
   | 'getWorkflowLatestOutputs'

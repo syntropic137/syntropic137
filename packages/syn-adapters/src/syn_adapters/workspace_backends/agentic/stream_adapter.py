@@ -17,7 +17,9 @@ import logging
 import math
 import posixpath
 import signal
+import time
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from agentic_isolation.contract import (
@@ -29,8 +31,15 @@ from agentic_isolation.contract import (
 )
 
 from syn_adapters.diagnostics import capture_signal_death
+from syn_adapters.workspace_backends.agentic.bounded_output import BoundedOutput
 from syn_adapters.workspace_backends.agentic.credential_scrubber import CredentialScrubber
-from syn_domain.contexts.orchestration import announce_as, mint_wrapper_name
+from syn_domain.contexts.orchestration import (
+    COMMAND_TAIL_BYTES,
+    BoundedCommandResult,
+    CommandTerminal,
+    announce_as,
+    mint_wrapper_name,
+)
 from syn_shared.diagnostics import SignalDeath, name_exit_status
 
 if TYPE_CHECKING:
@@ -129,6 +138,36 @@ def _refreshed(scrubber: CredentialScrubber, current: tuple[str, ...]) -> Creden
     return scrubber if scrubber.covers(current) else CredentialScrubber(current)
 
 
+def _elapsed_ms(started: float) -> int:
+    return max(0, round((time.monotonic() - started) * 1000))
+
+
+def _bounded_result(
+    status: OperationStatus, output: BoundedOutput, *, duration_ms: int
+) -> BoundedCommandResult:
+    """How a bounded command ended, as a typed terminal and never as an exit code alone.
+
+    ``lost`` and a ``failed`` with no exit status are the platform failing to
+    run the command, not the command saying no (ADR-078 D5).
+    """
+    exit_code = _exit_code_of(status)
+    if status.state == "timed_out":
+        terminal = CommandTerminal.TIMED_OUT
+    elif status.state == "cancelled":
+        terminal = CommandTerminal.INTERRUPTED
+    elif status.state in ("succeeded", "failed") and exit_code is not None:
+        terminal = CommandTerminal.EXITED
+    else:
+        terminal = CommandTerminal.FAILED_TO_START
+    return BoundedCommandResult(
+        terminal=terminal,
+        exit_code=exit_code if terminal is CommandTerminal.EXITED else None,
+        duration_ms=duration_ms,
+        tail=output.tail,
+        dropped_bytes=output.dropped_bytes,
+    )
+
+
 class LineDecoder:
     """Turns observation pages into lines, whatever a page boundary splits.
 
@@ -172,45 +211,58 @@ class OperationHost(Protocol):
     @property
     def credentials(self) -> WorkspaceCredentials: ...
 
+    @property
+    def shares_host_kernel(self) -> bool: ...
+
+
+@dataclass
+class _StreamOutcome:
+    """How one stream ended, filled in as it runs: owned by that stream alone (#980)."""
+
+    exit_code: int | None = None
+    signal_death: SignalDeath | None = None
+    lost_bytes: int = 0
+
 
 class AgenticEventStreamAdapter:
     """Implements EventStreamPort on agentic-workspace's provider operation contract."""
 
     def __init__(self, host: OperationHost) -> None:
         self._host = host
-        self._last_exit_code: int | None = None
-        self._last_signal_death: SignalDeath | None = None
-        self._last_lost_bytes: int | None = None
         # Keyed by workspace: one adapter serves every workspace of its service.
         self._running: dict[str, tuple[SupportsOperations, OperationRef]] = {}
+        # Keyed the same way, and for the same reason: a stream's outcome is
+        # its workspace's, never the adapter's, or a concurrent phase reads
+        # another phase's exit code (#980).
+        self._outcomes: dict[str, _StreamOutcome] = {}
 
-    @property
-    def last_signal_death(self) -> SignalDeath | None:
-        """Why the most recent stream() call's process was KILLED, if it was.
+    def exit_code_of(self, handle: IsolationHandle) -> int | None:
+        """Exit code from the most recent stream() in ``handle``'s workspace.
 
-        Paired with :attr:`last_exit_code` and read the same way: it belongs to
-        the last stream and is replaced by the next. None means the process was
-        not killed by a signal, or that no stream has run.
+        Returns None if no stream there has completed yet.
         """
-        return self._last_signal_death
+        outcome = self._outcomes.get(handle.isolation_id)
+        return outcome.exit_code if outcome is not None else None
 
-    @property
-    def last_exit_code(self) -> int | None:
-        """Exit code from the most recent stream() call.
+    def signal_death_of(self, handle: IsolationHandle) -> SignalDeath | None:
+        """Why the most recent stream() in ``handle``'s workspace was KILLED, if it was.
 
-        Returns None if no stream has completed yet.
+        Paired with :meth:`exit_code_of` and read the same way: it belongs to
+        that workspace's last stream and is replaced by the next. None means
+        the process was not killed by a signal, or that no stream has run.
         """
-        return self._last_exit_code
+        outcome = self._outcomes.get(handle.isolation_id)
+        return outcome.signal_death if outcome is not None else None
 
-    @property
-    def last_observation_lost_bytes(self) -> int | None:
-        """Output the provider evicted before the last stream read it.
+    def lost_bytes_of(self, handle: IsolationHandle) -> int | None:
+        """Output the provider evicted before ``handle``'s last stream read it.
 
         0 when nothing was lost, -1 when the provider reported a gap of unknown
-        size, None when no stream has run. Never silently zero: a gap is also
-        logged at ERROR the moment it is seen.
+        size, None when no stream has run there. Never silently zero: a gap is
+        also logged at ERROR the moment it is seen.
         """
-        return self._last_lost_bytes
+        outcome = self._outcomes.get(handle.isolation_id)
+        return outcome.lost_bytes if outcome is not None else None
 
     async def stream(
         self,
@@ -254,6 +306,60 @@ class AgenticEventStreamAdapter:
         arrives EMBEDDED inside stream-json tool_result content, which
         WorkflowExecutionEngine scans; it is never a separate channel.
         """
+        # Replaced, not reset: a settle still running for this workspace's
+        # previous stream writes to the object it was given, not to this one.
+        outcome = self._outcomes[handle.isolation_id] = _StreamOutcome()
+        provider, ref, spec, secrets = await self._start(
+            handle,
+            command,
+            timeout_seconds=timeout_seconds,
+            working_directory=working_directory,
+            environment=environment,
+            wrapper_name=wrapper_name,
+            withheld=withheld,
+        )
+        self._running[handle.isolation_id] = (provider, ref)
+        try:
+            async for line in self._observe(
+                provider, ref, secrets, spec.launch_marker.line, outcome
+            ):
+                yield line
+            status = await provider.status(ref)
+        except BaseException:
+            # The reader stopped early, was cancelled, or observation failed:
+            # the operation must not outlive the stream nobody is reading. The
+            # primary failure stays primary - a cancel or settle that also
+            # fails is logged with its cause, never raised in its place.
+            try:
+                await self._settle(
+                    await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS),
+                    spec,
+                    CredentialScrubber(secrets()),
+                    outcome,
+                )
+            except Exception:
+                logger.exception(
+                    "Cancelling stream operation %s after it stopped also failed",
+                    ref.operation_id,
+                )
+            raise
+        finally:
+            if self._running.get(handle.isolation_id) == (provider, ref):
+                del self._running[handle.isolation_id]
+        await self._settle(status, spec, CredentialScrubber(secrets()), outcome)
+
+    async def _start(
+        self,
+        handle: IsolationHandle,
+        command: list[str],
+        *,
+        timeout_seconds: int | None,
+        working_directory: str | None,
+        environment: dict[str, str] | None,
+        wrapper_name: str | None,
+        withheld: Callable[[], Iterable[str]] | None,
+    ) -> tuple[SupportsOperations, OperationRef, OperationSpec, Callable[[], tuple[str, ...]]]:
+        """Start ``command`` as an operation; return it and the secret set to withhold."""
         workspace = self._host.workspace(handle.isolation_id)
         if workspace is None:
             raise RuntimeError(f"Workspace not found: {handle.isolation_id}")
@@ -276,9 +382,6 @@ class AgenticEventStreamAdapter:
                 timeout_seconds=_timeout_seconds(timeout_seconds),
                 metadata={},
             )
-            self._last_exit_code = None
-            self._last_signal_death = None
-            self._last_lost_bytes = 0
             ref = await provider.start(workspace, spec)
         finally:
             # Resolved during start, or never needed when the spec or the start
@@ -296,32 +399,80 @@ class AgenticEventStreamAdapter:
             CredentialScrubber(secrets()).scrub(str(command)),
         )
 
+        return provider, ref, spec, secrets
+
+    async def run_bounded(
+        self,
+        handle: IsolationHandle,
+        command: list[str],
+        *,
+        timeout_seconds: int,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
+        tail_bytes: int = COMMAND_TAIL_BYTES,
+        withheld: Callable[[], Iterable[str]] | None = None,
+    ) -> BoundedCommandResult:
+        """Run ``command`` to its end, keeping a scrubbed tail of its output (ADR-078 D3).
+
+        Unlike ``stream`` it never yields: the output is consumed as raw pages
+        into a ``BoundedOutput``, so memory stays bounded whatever the command
+        prints, and the terminal state is returned beside the exit code rather
+        than folded into it. ``cancel_running`` stops it like a stream, and it
+        then ends ``interrupted``.
+        """
+        started = time.monotonic()
+        try:
+            provider, ref, spec, secrets = await self._start(
+                handle,
+                command,
+                timeout_seconds=timeout_seconds,
+                working_directory=working_directory,
+                environment=environment,
+                wrapper_name=None,
+                withheld=withheld,
+            )
+        except Exception:
+            logger.exception("Bounded command did not start in workspace %s", handle.isolation_id)
+            return BoundedCommandResult(
+                terminal=CommandTerminal.FAILED_TO_START, duration_ms=_elapsed_ms(started)
+            )
+        output = BoundedOutput(tail_bytes, launch_line=spec.launch_marker.line)
         self._running[handle.isolation_id] = (provider, ref)
         try:
-            async for line in self._observe(provider, ref, secrets, spec.launch_marker.line):
-                yield line
-            status = await provider.status(ref)
+            status = await self._observe_bounded(provider, ref, secrets, output)
         except BaseException:
-            # The reader stopped early, was cancelled, or observation failed:
-            # the operation must not outlive the stream nobody is reading. The
-            # primary failure stays primary - a cancel or settle that also
-            # fails is logged with its cause, never raised in its place.
             try:
-                await self._settle(
-                    await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS),
-                    spec,
-                    CredentialScrubber(secrets()),
-                )
+                await provider.cancel(ref, grace_seconds=_CANCEL_GRACE_SECONDS)
             except Exception:
-                logger.exception(
-                    "Cancelling stream operation %s after it stopped also failed",
-                    ref.operation_id,
-                )
+                logger.exception("Cancelling bounded operation %s also failed", ref.operation_id)
             raise
         finally:
             if self._running.get(handle.isolation_id) == (provider, ref):
                 del self._running[handle.isolation_id]
-        await self._settle(status, spec, CredentialScrubber(secrets()))
+        return _bounded_result(status, output, duration_ms=_elapsed_ms(started))
+
+    async def _observe_bounded(
+        self,
+        provider: SupportsOperations,
+        ref: OperationRef,
+        secrets: Callable[[], Iterable[str]],
+        output: BoundedOutput,
+    ) -> OperationStatus:
+        """Feed every page into ``output`` until the operation ends; return how it ended."""
+        scrubber = CredentialScrubber()
+        cursor: str | None = None
+        while True:
+            page = await provider.observe(
+                ref, cursor=cursor, max_bytes=_PAGE_BYTES, wait_seconds=_OBSERVE_WAIT_SECONDS
+            )
+            scrubber = _refreshed(scrubber, tuple(secrets()))
+            if isinstance(page.gap, ObservationGap):
+                output.gap(page.gap.lost_bytes)
+            output.feed(base64.b64decode(page.data_b64), scrubber)
+            if page.complete:
+                output.finish(scrubber)
+                return await provider.status(ref)
+            cursor = page.next_cursor
 
     async def cancel_running(self, handle: IsolationHandle) -> bool:
         """Stop the operation streaming in ``handle``'s workspace; True once it is over.
@@ -365,6 +516,7 @@ class AgenticEventStreamAdapter:
         ref: OperationRef,
         secrets: Callable[[], Iterable[str]],
         launch_line: str,
+        outcome: _StreamOutcome,
     ) -> AsyncIterator[str]:
         """Yield the operation's output as scrubbed lines.
 
@@ -387,7 +539,7 @@ class AgenticEventStreamAdapter:
             # from the next page on.
             scrubber = _refreshed(scrubber, tuple(secrets()))
             if isinstance(page.gap, ObservationGap):
-                self._record_gap(page.gap, decoder.gap(), ref)
+                _record_gap(outcome, page.gap, decoder.gap(), ref)
             lines = decoder.feed(base64.b64decode(page.data_b64))
             if page.complete:
                 lines = [*lines, *decoder.finish()]
@@ -397,21 +549,12 @@ class AgenticEventStreamAdapter:
                 return
             cursor = page.next_cursor
 
-    def _record_gap(self, gap: ObservationGap, severed_chars: int, ref: OperationRef) -> None:
-        if gap.lost_bytes is None or self._last_lost_bytes == -1:
-            self._last_lost_bytes = -1
-        else:
-            self._last_lost_bytes = (self._last_lost_bytes or 0) + gap.lost_bytes
-        logger.error(
-            "Agent output LOST before it was read (operation=%s): %s bytes evicted by the "
-            "provider, %d chars of a severed line dropped. Events in that span are missing.",
-            ref.operation_id,
-            "an unknown number of" if gap.lost_bytes is None else gap.lost_bytes,
-            severed_chars,
-        )
-
     async def _settle(
-        self, status: OperationStatus, spec: OperationSpec, scrubber: CredentialScrubber
+        self,
+        status: OperationStatus,
+        spec: OperationSpec,
+        scrubber: CredentialScrubber,
+        outcome: _StreamOutcome,
     ) -> None:
         timed_out = status.state == "timed_out"
         reported = _exit_code_of(status)
@@ -423,19 +566,21 @@ class AgenticEventStreamAdapter:
                 exit_code,
                 status.ref.operation_id,
             )
-        self._last_exit_code = exit_code
+        outcome.exit_code = exit_code
         # THE MOMENT OF DEATH for the agent process itself - the shape that
         # takes a whole phase with tokens=0+0 and no terminal event (#1295,
         # #1319). The argv is the spec's, and the agent's command line can
         # still name a value it was given, so it is scrubbed first (#1927).
-        self._last_signal_death = await capture_signal_death(
-            [scrubber.scrub(arg) for arg in spec.argv], exit_code
+        outcome.signal_death = await capture_signal_death(
+            [scrubber.scrub(arg) for arg in spec.argv],
+            exit_code,
+            host_kernel=self._host.shares_host_kernel,
         )
-        if self._last_signal_death is not None:
+        if outcome.signal_death is not None:
             logger.error(
                 "Agent process died on a signal (operation=%s):\n%s",
                 status.ref.operation_id,
-                self._last_signal_death.describe(),
+                outcome.signal_death.describe(),
             )
         elif exit_code and exit_code != 0:
             logger.warning(
@@ -443,3 +588,19 @@ class AgenticEventStreamAdapter:
                 name_exit_status(exit_code),
                 status.ref.operation_id,
             )
+
+
+def _record_gap(
+    outcome: _StreamOutcome, gap: ObservationGap, severed_chars: int, ref: OperationRef
+) -> None:
+    if gap.lost_bytes is None or outcome.lost_bytes == -1:
+        outcome.lost_bytes = -1
+    else:
+        outcome.lost_bytes += gap.lost_bytes
+    logger.error(
+        "Agent output LOST before it was read (operation=%s): %s bytes evicted by the "
+        "provider, %d chars of a severed line dropped. Events in that span are missing.",
+        ref.operation_id,
+        "an unknown number of" if gap.lost_bytes is None else gap.lost_bytes,
+        severed_chars,
+    )

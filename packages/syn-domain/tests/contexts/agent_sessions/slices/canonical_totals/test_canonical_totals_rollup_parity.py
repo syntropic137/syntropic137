@@ -218,6 +218,11 @@ async def seeded(test_infrastructure) -> AsyncIterator[Seeded]:
             await pool.close()
 
 
+#: Fields the post-E1 totals carry that the frozen pre-E1 specification never
+#: had. Each needs its own proof elsewhere; this list is the conscious record.
+_FIELDS_ADDED_AFTER_E1 = ("unpriced_observation_count",)
+
+
 async def _assert_same_totals(pool: asyncpg.Pool, execution_ids: set[str] | None) -> object:
     """Run both reads, compare every field, and hand back the old totals."""
     from syn_domain.contexts.agent_sessions import CanonicalUsageQueryService, CostCalculator
@@ -225,7 +230,14 @@ async def _assert_same_totals(pool: asyncpg.Pool, execution_ids: set[str] | None
     new = await CanonicalUsageQueryService(pool, CostCalculator()).totals(execution_ids)
     old = await LegacyCanonicalUsageQueryService(pool, CostCalculator()).totals(execution_ids)
     names = [f.name for f in dataclasses.fields(old)]
-    assert names == [f.name for f in dataclasses.fields(new)]
+    new_names = [f.name for f in dataclasses.fields(new)]
+    # The frozen legacy read is the specification for every field it has, and
+    # each one must still match. A field added after E1 has no legacy twin, so
+    # it is named here on purpose: adding another one must fail until someone
+    # decides how it is proven (#897 added the observation count, which #2338
+    # pins against its own fixtures).
+    assert [n for n in new_names if n not in names] == list(_FIELDS_ADDED_AFTER_E1)
+    assert [n for n in new_names if n in names] == names
     differing = {
         name: (getattr(old, name), getattr(new, name))
         for name in names
@@ -244,6 +256,12 @@ async def test_unfiltered_totals_match_field_by_field(seeded: Seeded) -> None:
     assert old.cache_read_tokens > 0
     assert old.cost_usd > 0
     assert old.unpriced_tokens > 0
+    # The seed has a model with no rate card and real tokens, so the new read
+    # must report unpriced work too - a zero here would be the #890 lie.
+    from syn_domain.contexts.agent_sessions import CanonicalUsageQueryService, CostCalculator
+
+    new = await CanonicalUsageQueryService(seeded.pool, CostCalculator()).totals(None)
+    assert new.unpriced_observation_count > 0
 
 
 @pytest.mark.parametrize("workflow", sorted(WORKFLOWS))
