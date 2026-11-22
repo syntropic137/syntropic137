@@ -6,6 +6,7 @@ Provides global overview, cost breakdown, and contribution heatmap queries.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date  # noqa: TC003 — needed at runtime for FastAPI Query params
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,7 @@ from syn_api.types import (
     HeatmapDayBucketResponse,
     SystemOverviewEntryResponse,
 )
+from syn_shared.display import format_cost
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -211,6 +213,20 @@ async def get_global_cost_endpoint(
     return await get_global_cost(system_id=system_id)
 
 
+def _heatmap_cost_display(breakdowns: Sequence[dict[str, float]]) -> str:
+    """Render the summed ``cost_usd`` of heatmap buckets, incomplete if any had unpriced work.
+
+    The heatmap counts unpriced *tokens* per day, not unpriced observations, so
+    there is no observation count to hand ``format_cost``. Its contract only
+    distinguishes zero from non-zero, so a positive ``unpriced_tokens`` anywhere
+    in ``breakdowns`` is passed as a count of 1: ``unpriced`` when nothing was
+    priced, ``>=$X (partial)`` when some was (#897, ADR-067 D5).
+    """
+    cost_usd = math.fsum(b.get("cost_usd", 0.0) for b in breakdowns)
+    any_unpriced = any(b.get("unpriced_tokens", 0.0) > 0 for b in breakdowns)
+    return format_cost(cost_usd, 1 if any_unpriced else 0)
+
+
 @router.get("/contribution-heatmap", response_model=ContributionHeatmapResponse)
 async def get_contribution_heatmap_endpoint(
     organization_id: str | None = Query(None),
@@ -231,19 +247,22 @@ async def get_contribution_heatmap_endpoint(
             metric=metric,
         )
         days_raw = data.get("days", [])
+        breakdowns: list[dict[str, float]] = [d.get("breakdown", {}) for d in days_raw]
         return ContributionHeatmapResponse(
             metric=data.get("metric", "sessions"),
             start_date=data.get("start_date", ""),
             end_date=data.get("end_date", ""),
             total=data.get("total", 0.0),
+            total_cost_display=_heatmap_cost_display(breakdowns),
             days=[
                 HeatmapDayBucketResponse(
                     date=d.get("date", ""),
                     count=d.get("count", 0.0),
-                    breakdown=d.get("breakdown", {}),
+                    breakdown=breakdown,
+                    cost_display=_heatmap_cost_display([breakdown]),
                     failed=d.get("failed", 0),
                 )
-                for d in days_raw
+                for d, breakdown in zip(days_raw, breakdowns, strict=True)
             ],
             filter=data.get("filter", {}),
         )
