@@ -25140,6 +25140,15 @@
             ],
             "title": "Cost Usd"
           },
+          "cost_display": {
+            "type": "string",
+            "title": "Cost Display"
+          },
+          "unpriced_observation_count": {
+            "type": "integer",
+            "title": "Unpriced Observation Count",
+            "default": 0
+          },
           "guard_name": {
             "type": "string",
             "title": "Guard Name",
@@ -25152,6 +25161,9 @@
           }
         },
         "type": "object",
+        "required": [
+          "cost_display"
+        ],
         "title": "TriggerHistoryEntryResponse",
         "description": "Single entry in a trigger-specific history response."
       },

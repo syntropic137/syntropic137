@@ -1939,6 +1939,10 @@ class TriggerHistoryEntry(BaseModel):
     fired_at: datetime | None = None
     status: str = "dispatched"
     cost_usd: float | None = None
+    """The execution's Lane 2 cost, read at query time; ``None`` when there is none."""
+    cost_display: str
+    """``cost_usd`` as ``format_cost`` renders it, coverage included."""
+    unpriced_observation_count: int = 0
     guard_name: str = ""
     block_reason: str = ""
 
@@ -3997,6 +4001,10 @@ class TriggerHistoryEntryResponse(BaseModel):
     pr_number: int | None = None
     status: str = "dispatched"
     cost_usd: float | None = None
+    cost_display: str
+    """What the firing's execution cost, rendered: an em dash when it has none,
+    and marked unpriced or partial when ``unpriced_observation_count`` says so."""
+    unpriced_observation_count: int = 0
     guard_name: str = ""
     block_reason: str = ""
 

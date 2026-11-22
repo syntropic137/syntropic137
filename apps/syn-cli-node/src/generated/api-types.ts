@@ -10436,6 +10436,13 @@ export interface components {
             status: string;
             /** Cost Usd */
             cost_usd?: number | null;
+            /** Cost Display */
+            cost_display: string;
+            /**
+             * Unpriced Observation Count
+             * @default 0
+             */
+            unpriced_observation_count: number;
             /**
              * Guard Name
              * @default
