@@ -5,12 +5,22 @@ its 90 s Lease lapse, and a reconciler closed the succeeded run as interrupted.
 Here the teardown the host does after the drain, the reap before the close,
 takes several TTLs, against the real in-memory Run Queue: the host's own
 reconciler, running every loop turn, is what fences a lapsed Lease.
+
+Time is virtual. The queue's clock, the host's monotonic clock, the host's loop
+sleep, the LeaseKeeper's renewal sleep and the slow reap all read one
+``_VirtualTime``, which advances only to the next sleeper's deadline once every
+task has gone idle. Nothing sleeps on the wall clock, so a slow CI runner
+cannot expire a Lease the code renewed (a 60 ms wall-clock TTL did, Codex
+review). The production timing is used: 90 s TTL, renewal every 30 s.
 """
 
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+import heapq
+import itertools
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -25,17 +35,57 @@ from syn_domain.contexts.orchestration.ports import (
     StreamPresence,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 pytestmark = pytest.mark.unit
 
 _HOST = ExecutorHost(
     reap_scope="daemon-1", host_id="h-teardown", container_id="c", generation="g", epoch=1
 )
-_TIMING = HostTiming(
-    loop_interval=timedelta(milliseconds=5),
-    lease_ttl=timedelta(milliseconds=60),
-    turn_budget=timedelta(milliseconds=4),
-)
+_TIMING = HostTiming()  # production defaults: 5 s loop, 90 s TTL, renewal every 30 s
 _TEARDOWN = 4 * _TIMING.lease_ttl.total_seconds()
+#: Event-loop passes that let every runnable task reach its next await. The
+#: queue and fakes do no I/O, so a handful suffices; this is generous.
+_SETTLE = 50
+
+
+class _VirtualTime:
+    """One clock for queue, host, keeper and reap; it moves only when all are idle."""
+
+    def __init__(self) -> None:
+        self.mono = 0.0
+        self._origin = datetime(2026, 11, 22, tzinfo=UTC)
+        self._sleepers: list[tuple[float, int, asyncio.Future[None]]] = []
+        self._seq = itertools.count()
+
+    def now(self) -> datetime:
+        return self._origin + timedelta(seconds=self.mono)
+
+    def monotonic(self) -> float:
+        return self.mono
+
+    async def sleep(self, seconds: float) -> None:
+        wake: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        heapq.heappush(self._sleepers, (self.mono + seconds, next(self._seq), wake))
+        await wake
+
+    async def run_until(self, done: Callable[[], bool], *, limit: float) -> None:
+        """Advance to each next deadline, settling the loop in between, until ``done``."""
+        while True:
+            for _ in range(_SETTLE):
+                await asyncio.sleep(0)
+            if done():
+                return
+            while self._sleepers and self._sleepers[0][2].done():
+                heapq.heappop(self._sleepers)  # a cancelled sleeper
+            if not self._sleepers:
+                raise AssertionError("nothing left to wake, and the condition never held")
+            deadline, _, wake = heapq.heappop(self._sleepers)
+            self.mono = max(self.mono, deadline)
+            if self.mono > limit:
+                raise AssertionError(f"still waiting at virtual t={self.mono:.0f}s")
+            wake.set_result(None)
 
 
 class _Drainer:
@@ -46,11 +96,12 @@ class _Drainer:
 class _SlowTeardown:
     """A reap that shows the run's resources gone only after several Lease TTLs."""
 
-    def __init__(self) -> None:
+    def __init__(self, time: _VirtualTime) -> None:
+        self._time = time
         self.reaped: list[str] = []
 
     async def reap(self, executor_id: str, execution_id: str) -> bool:
-        await asyncio.sleep(_TEARDOWN)
+        await self._time.sleep(_TEARDOWN)
         self.reaped.append(execution_id)
         return True
 
@@ -69,10 +120,11 @@ class _Streams:
 
 
 async def test_a_teardown_longer_than_the_lease_ttl_is_neither_fenced_nor_interrupted() -> None:
-    queue = InMemoryExecutionRunQueue(lease_ttl=_TIMING.lease_ttl)
+    time = _VirtualTime()
+    queue = InMemoryExecutionRunQueue(lease_ttl=_TIMING.lease_ttl, clock=time.now)
     assert await queue.reserve("e1", 1, is_resume=False)
     await queue.mark_admitted("e1")
-    teardown, interrupter = _SlowTeardown(), _Interrupter()
+    teardown, interrupter = _SlowTeardown(time), _Interrupter()
     host = ExecutionHost(
         queue,
         _HOST,
@@ -82,19 +134,25 @@ async def test_a_teardown_longer_than_the_lease_ttl_is_neither_fenced_nor_interr
         interrupter=interrupter,
         streams=_Streams(),
         timing=_TIMING,
+        sleep=time.sleep,
+        clock=time.monotonic,
     )
-    loop = asyncio.create_task(host.run_until_drained())
-    async with asyncio.timeout(10 * _TEARDOWN):  # hang guard
-        while not teardown.reaped:
-            await asyncio.sleep(0.005)
-    host.drain()
-    await asyncio.wait_for(loop, 10 * _TEARDOWN)
+    loop = asyncio.create_task(host.run_until_drained(), name="execution-host")
+    async with asyncio.timeout(30):  # hang guard on the wall clock, never a pacing sleep
+        await time.run_until(lambda: bool(teardown.reaped), limit=10 * _TEARDOWN)
+        # Several more loop turns, so a reconciler would fence a lapsed Lease now.
+        settle_until = time.mono + 2 * _TIMING.lease_ttl.total_seconds()
+        await time.run_until(lambda: time.mono >= settle_until, limit=10 * _TEARDOWN)
+        host.drain()
+        await time.run_until(loop.done, limit=20 * _TEARDOWN)
+    await loop
 
     counts = await queue.in_use()
     assert interrupter.interrupted == []
     assert (counts.fencing, counts.reaped, counts.interrupted) == (0, 0, 0)
     assert counts.done == 1
     assert teardown.reaped == ["e1"]
+    assert time.mono >= _TEARDOWN  # the teardown really outlasted the Lease TTL
 
 
 class _RenewalBehindTheClose:

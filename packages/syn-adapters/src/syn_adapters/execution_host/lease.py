@@ -50,8 +50,11 @@ class LeaseKeeper:
                 await self._queue.renew(self._run)
             except RunLeaseLost:
                 if work.done():
-                    # The renewal raced the close that ended the work: the row
-                    # is released, not taken, so there is nothing to fence.
+                    # The work ended while this renewal was in flight, most
+                    # often because its close released the row. Whatever ended
+                    # it (close, an exception, a cancellation), nothing is left
+                    # under the claim to cancel, so this is not reported as a
+                    # loss; a row left claimed is still fenced by a reconciler.
                     return
                 self.lost = True
                 logger.warning(
