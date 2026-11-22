@@ -112,6 +112,33 @@ describe("costs commands", () => {
     expect(out).toContain("$1.50");
   });
 
+  // 1,500 of 4,000 cache-write tokens at the 1-hour TTL: values no default could produce (#2145).
+  it("session detail shows the 1-hour share beside the cache-write total", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        session_id: "sess-1", total_cost_usd: "1.50", total_tokens: 24000, input_tokens: 15000,
+        output_tokens: 5000, cache_creation_tokens: 4000, cache_creation_1h_tokens: 1500,
+        tool_calls: 20, turns: 10, duration_ms: 60000, started_at: "2026-01-01T00:00:00Z",
+      }),
+    );
+    await costsGroup.getCommand("session")!.handler({ positionals: ["sess-1"], values: {} });
+    expect(stdout()).toMatch(/Cache Write:.* 4\.0K \(1h: 1\.5K\)\n/);
+  });
+
+  it("execution detail shows the 1-hour share beside the cache-write total", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({ ...executionCost({}, "0"), cache_creation_tokens: 4000, cache_creation_1h_tokens: 1500 }),
+    );
+    await costsGroup.getCommand("execution")!.handler({ positionals: ["exec-1"], values: {} });
+    expect(stdout()).toMatch(/Cache Write:.* 4\.0K \(1h: 1\.5K\)\n/);
+  });
+
+  it("execution detail shows a zero 1-hour share when the response predates the field", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ ...executionCost({}, "0"), cache_creation_tokens: 4000 }));
+    await costsGroup.getCommand("execution")!.handler({ positionals: ["exec-1"], values: {} });
+    expect(stdout()).toMatch(/Cache Write:.* 4\.0K \(1h: 0\)\n/);
+  });
+
   it("session detail renders the unattributed bucket as unknown", async () => {
     mockFetch.mockResolvedValue(
       jsonResponse({

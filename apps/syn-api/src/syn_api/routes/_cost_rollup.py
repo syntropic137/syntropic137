@@ -41,6 +41,7 @@ class CostRollup:
     total_input_tokens: int
     total_output_tokens: int
     total_cache_creation_tokens: int
+    total_cache_creation_1h_tokens: int
     total_cache_read_tokens: int
     cost_by_repo: dict[str, str]
     cost_by_workflow: dict[str, str]
@@ -55,6 +56,7 @@ class _Totals:
     input: int = 0
     output: int = 0
     cache_creation: int = 0
+    cache_creation_1h: int = 0
     cache_read: int = 0
     unpriced: int = 0
     by_repo: dict[str, Decimal] = field(default_factory=dict)
@@ -67,6 +69,7 @@ class _Totals:
         self.input += c.input_tokens
         self.output += c.output_tokens
         self.cache_creation += c.cache_creation_tokens
+        self.cache_creation_1h += c.cache_creation_1h_tokens
         self.cache_read += c.cache_read_tokens
         self.unpriced += c.unpriced_observation_count
         for repo in sorted(correlation.repos) if correlation else ():
@@ -119,6 +122,7 @@ def roll_up_costs(
         total_input_tokens=t.input,
         total_output_tokens=t.output,
         total_cache_creation_tokens=t.cache_creation,
+        total_cache_creation_1h_tokens=t.cache_creation_1h,
         total_cache_read_tokens=t.cache_read,
         cost_by_repo={k: str(v) for k, v in t.by_repo.items()},
         cost_by_workflow={k: str(v) for k, v in t.by_workflow.items()},

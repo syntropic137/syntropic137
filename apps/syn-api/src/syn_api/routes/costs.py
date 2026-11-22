@@ -63,6 +63,9 @@ class SessionCostResponse(BaseModel):
     output_tokens: int = 0
     total_tokens: int = 0
     cache_creation_tokens: int = 0
+    cache_creation_1h_tokens: int = 0
+    """The 1-hour share of ``cache_creation_tokens``, which stays the total of every
+    TTL; the 5-minute share is the difference (#2145)."""
     cache_read_tokens: int = 0
     tool_calls: int = 0
     turns: int = 0
@@ -110,6 +113,9 @@ class ExecutionCostResponse(BaseModel):
     output_tokens: int = 0
     total_tokens: int = 0
     cache_creation_tokens: int = 0
+    cache_creation_1h_tokens: int = 0
+    """The 1-hour share of ``cache_creation_tokens``, which stays the total of every
+    TTL; the 5-minute share is the difference (#2145)."""
     cache_read_tokens: int = 0
     tool_calls: int = 0
     turns: int = 0
@@ -198,6 +204,7 @@ def session_cost_to_data(c: SessionCost) -> SessionCostData:
         output_tokens=c.output_tokens,
         total_tokens=c.total_tokens,
         cache_creation_tokens=c.cache_creation_tokens,
+        cache_creation_1h_tokens=c.cache_creation_1h_tokens,
         cache_read_tokens=c.cache_read_tokens,
         tool_calls=c.tool_calls,
         turns=c.turns,
@@ -237,6 +244,7 @@ def execution_cost_to_data(c: ExecutionCost) -> ExecutionCostData:
         output_tokens=c.output_tokens,
         total_tokens=c.total_tokens,
         cache_creation_tokens=c.cache_creation_tokens,
+        cache_creation_1h_tokens=c.cache_creation_1h_tokens,
         cache_read_tokens=c.cache_read_tokens,
         tool_calls=c.tool_calls,
         turns=c.turns,
@@ -430,6 +438,7 @@ def _session_cost_to_api(c: SessionCostData) -> SessionCostResponse:
         output_tokens=c.output_tokens,
         total_tokens=c.total_tokens,
         cache_creation_tokens=c.cache_creation_tokens,
+        cache_creation_1h_tokens=c.cache_creation_1h_tokens,
         cache_read_tokens=c.cache_read_tokens,
         tool_calls=c.tool_calls,
         turns=c.turns,
@@ -460,6 +469,7 @@ def _execution_cost_to_api(c: ExecutionCostData) -> ExecutionCostResponse:
         output_tokens=c.output_tokens,
         total_tokens=c.total_tokens,
         cache_creation_tokens=c.cache_creation_tokens,
+        cache_creation_1h_tokens=c.cache_creation_1h_tokens,
         cache_read_tokens=c.cache_read_tokens,
         tool_calls=c.tool_calls,
         turns=c.turns,

@@ -89,6 +89,7 @@ def _aggregate_costs(
         total_input_tokens=rollup.total_input_tokens,
         total_output_tokens=rollup.total_output_tokens,
         total_cache_creation_tokens=rollup.total_cache_creation_tokens,
+        total_cache_creation_1h_tokens=rollup.total_cache_creation_1h_tokens,
         total_cache_read_tokens=rollup.total_cache_read_tokens,
         cost_by_workflow=rollup.cost_by_workflow,
         unpriced_by_workflow=rollup.unpriced_by_workflow,
