@@ -48,6 +48,8 @@ function failedRun(
     total_phases: 2,
     total_tokens: 100,
     total_cost_usd: 0,
+    total_cost_display: '$0.00',
+    unpriced_observation_count: 0,
     failure_classification,
   }
 }

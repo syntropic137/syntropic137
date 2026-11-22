@@ -26,6 +26,8 @@ const metrics: MetricsResponse = {
   total_cache_read_tokens: 9_680_000_000,
   total_tokens: 10_008_606_679,
   total_cost_usd: 0,
+  total_cost_display: '$0.00',
+  unpriced_observation_count: 0,
   total_artifacts: 0,
   total_artifact_bytes: 0,
   phases: [],

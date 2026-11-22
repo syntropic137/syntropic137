@@ -1,11 +1,12 @@
 import { clsx } from 'clsx'
 import { ArrowRight, type LucideIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 interface MetricCardProps {
   title: string
   value: string | number
-  subtitle?: string
+  subtitle?: ReactNode
   icon?: LucideIcon
   trend?: {
     value: number
@@ -69,7 +70,7 @@ interface CardBodyProps {
   value: string | number
   displayValue: string | number
   valueClass: string
-  subtitle?: string
+  subtitle?: ReactNode
   Icon?: LucideIcon
   iconColors: { icon: string; iconBg: string }
   trend?: { value: number; isPositive: boolean }
