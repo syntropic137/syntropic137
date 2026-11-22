@@ -1,0 +1,276 @@
+"""/metrics usage totals EXACTLY as they were read before #2341.
+
+FROZEN. DO NOT EDIT, DO NOT REFACTOR, DO NOT TIDY.
+
+A verbatim copy of
+
+    packages/syn-domain/.../agent_sessions/slices/canonical_totals/query_service.py
+
+as it stood on main at 753d4bb6d, the base #2341 branched from: the reader
+that named every summary-less session in its totals statement. It imports
+the live canonical_usage and recorded_model_rows helpers because #2341 did not
+change them; it changed only this module.
+
+It exists so test_metrics_summary_less_sessions_at_scale.py can serve /metrics
+from the old read and the new one against one database and compare the whole
+response. #2341 was a change of cost, and a change of cost that changes an
+answer is a bug. If this file ever needs to change to keep that test passing,
+the change under test altered a RESULT: explain it, do not edit this.
+
+Only the module docstring, the class and the totals dataclass were renamed.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import asyncpg
+
+    from syn_domain.contexts.agent_sessions.canonical_usage import PricingResolver
+
+from syn_domain import agent_event_span
+from syn_domain.contexts.agent_sessions.canonical_usage import (
+    CANONICAL_MODEL_COLUMNS,
+    price_canonical_row,
+    rollup_usage_sources,
+)
+from syn_domain.contexts.agent_sessions.recorded_model_rows import (
+    HAS_REQUESTED_MODEL_COLUMN,
+    REQUESTED_MODEL_COLUMN,
+    ModelRow,
+    recorded_model_group_by,
+    recorded_model_select,
+    zero_usage_group_by,
+)
+from syn_domain.storable_text import pg_safe
+from syn_shared.events import TOKEN_USAGE
+from syn_shared.pricing import canonical_cost_usd
+
+# All-time totals are read from the usage rollup, never from agent_events.
+#
+# Read from agent_events they were a scan of every usage row ever recorded:
+# the hypertable is compressed and segmented by session_id, and nothing here
+# names a session, so every compressed chunk was decompressed and every JSONB
+# blob parsed, on every dashboard load (1.9s live, 3.0s with a workflow
+# filter). The rollup holds one row per summary and one per (session, model)
+# of turns, so this grows with sessions, not with telemetry. The decision
+# between summary and turns is still CANONICAL_USAGE_DECISION_CTE's - the one
+# the heatmap applies - so the card and the heatmap agree by construction.
+_EXECUTION_FILTER = "execution_id = ANY($1)"
+
+# Grouped by model AND cost-nullness for the same reason every other canonical
+# query is: a group mixing priced and unpriced rows prices some of its tokens
+# and not others, and reports the shortfall as though it were cheap (#788).
+#
+# The last two columns are what an UNPRICED group's observation count is made
+# of (#897), read from the same rows as its money. A summary that won its
+# session is one observation. A session with no summary contributes its turns,
+# and the rollup's ``observations`` counts zero-token turns too - a priced zero
+# at any rate (#890) - so those sessions are named, and their turns are counted
+# by ``_UNPRICED_TURNS_QUERY`` only when the group turns out to be unpriced.
+_TOTALS_QUERY = """
+WITH {sources}
+SELECT
+    {model_columns},
+    SUM(vendor_cost_usd) AS vendor_cost_usd,
+    SUM(input_tokens) AS input_tokens,
+    SUM(output_tokens) AS output_tokens,
+    SUM(cache_creation_tokens) AS cache_creation_tokens,
+    SUM(cache_read_tokens) AS cache_read_tokens,
+    COUNT(*) FILTER (
+        WHERE session_id IN (SELECT session_id FROM priced_summary)
+    ) AS summary_observations,
+    ARRAY_AGG(session_id) FILTER (
+        WHERE session_id NOT IN (SELECT session_id FROM priced_summary)
+    ) AS turn_sessions
+FROM canonical_usage
+GROUP BY {model_columns}, (vendor_cost_usd IS NULL)
+"""
+
+# The turns of the sessions above that reported tokens, per model. Read from
+# agent_events because the rollup cannot tell a zero-token turn from any other,
+# and narrowed by session_id - the hypertable's segment key - and the span
+# those sessions have telemetry on, so it opens only their segments. It runs
+# only when some turn-priced work has no rate, which priced history never has.
+_UNPRICED_TURNS_QUERY = f"""
+SELECT
+    {recorded_model_select()},
+    COUNT(*) AS observations
+FROM agent_events
+WHERE event_type = '{TOKEN_USAGE}'
+  AND session_id = ANY($1)
+  AND time >= $2 AND time < $3
+  AND NOT {zero_usage_group_by()}
+  AND {{where}}
+GROUP BY {recorded_model_group_by()}
+"""
+
+# The execution filter, at the position ``_UNPRICED_TURNS_QUERY`` binds it.
+_UNPRICED_TURNS_EXECUTION_FILTER = "execution_id = ANY($4)"
+
+type _ModelKey = tuple[object, object, bool]
+"""A row's three model columns, as the canonical query groups on them."""
+
+
+def _model_key(row: ModelRow) -> _ModelKey:
+    return (
+        row.get("model"),
+        row.get(REQUESTED_MODEL_COLUMN),
+        bool(row.get(HAS_REQUESTED_MODEL_COLUMN)),
+    )
+
+
+# Counts every session the canonical source knows about, including ones that
+# produced no tokens. `canonical_usage` only carries sessions with usage rows,
+# so a session that failed before the agent ran would be missed by counting
+# there - which is exactly how two different session counts arose.
+#
+# Asked of agent_event_day_rollup, which has a row for every (day, session,
+# execution) that emitted ANY event - the same population a COUNT(DISTINCT)
+# over agent_events saw, at one row per session-day instead of one per event.
+_SESSION_COUNT_QUERY = """
+SELECT COUNT(DISTINCT session_id) AS sessions
+FROM agent_event_day_rollup
+WHERE {where}
+"""
+
+
+@dataclass(frozen=True)
+class PreBoundCanonicalTotals:
+    """Every token and dollar the canonical source knows about."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    cost_usd: Decimal = Decimal("0")
+    unpriced_tokens: int = 0
+    unpriced_observation_count: int = 0
+    """Observations behind ``unpriced_tokens``: the work ``cost_usd`` could not
+    price, counted from the same rows. Non-zero means the cost is a lower bound,
+    not that the work was free (#890, #897)."""
+    sessions: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        """Sum of the four buckets. Safe because they are disjoint."""
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_tokens
+            + self.cache_read_tokens
+        )
+
+
+class PreBoundCanonicalUsageQueryService:
+    """Reads system-wide totals from the canonical usage definition."""
+
+    def __init__(self, pool: asyncpg.Pool, cost_calculator: PricingResolver) -> None:
+        """Takes the resolver rather than importing one.
+
+        CostCalculator lives in the session_cost slice; importing it here
+        would be a cross-slice dependency, which VSA forbids. The composition
+        root supplies it.
+        """
+        self._pool = pool
+        self._cost_calculator = cost_calculator
+
+    @staticmethod
+    def _render(template: str, filtered: bool) -> str:
+        where = _EXECUTION_FILTER if filtered else "TRUE"
+        return template.format(
+            sources=rollup_usage_sources(where),
+            model_columns=CANONICAL_MODEL_COLUMNS,
+            where=where,
+        )
+
+    async def totals(self, execution_ids: set[str] | None = None) -> PreBoundCanonicalTotals:
+        """Canonical totals, optionally narrowed to a set of executions.
+
+        agent_events holds every id in its stored (sanitised) form, because
+        AgentEvent's validator applies pg_safe on the way in. A read binds text
+        against those columns, so it has to ask for the same spelling or it
+        matches nothing and reports that as "nothing was recorded" (#1241).
+        The usage rollup copies its ids from those rows, so the same holds.
+        """
+        filtered = execution_ids is not None
+        totals_sql = self._render(_TOTALS_QUERY, filtered)
+        sessions_sql = self._render(_SESSION_COUNT_QUERY, filtered)
+        args = [[pg_safe(eid) for eid in execution_ids]] if execution_ids is not None else []
+
+        # One snapshot for both reads (#983), so the tokens and the session
+        # count describe the same moment: two autocommit statements could
+        # report a new session's tokens without the session, or the reverse.
+        async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            rows = await conn.fetch(totals_sql, *args)
+            session_row = await conn.fetchrow(sessions_sql, *args)
+
+            input_tokens = output_tokens = cache_creation = cache_read = 0
+            unpriced = unpriced_observations = 0
+            cost = Decimal("0")
+            unpriced_turn_models: set[_ModelKey] = set()
+            unpriced_turn_sessions: set[str] = set()
+            for row in rows:
+                input_tokens += int(row["input_tokens"])
+                output_tokens += int(row["output_tokens"])
+                cache_creation += int(row["cache_creation_tokens"])
+                cache_read += int(row["cache_read_tokens"])
+                row_cost = price_canonical_row(row, self._cost_calculator)
+                cost += row_cost.cost
+                unpriced += row_cost.unpriced_tokens
+                if row_cost.unpriced_tokens:
+                    unpriced_observations += int(row["summary_observations"] or 0)
+                    turn_sessions = row["turn_sessions"] or []
+                    if turn_sessions:
+                        unpriced_turn_models.add(_model_key(row))
+                        unpriced_turn_sessions.update(turn_sessions)
+            unpriced_observations += await self._unpriced_turns(
+                conn,  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+                unpriced_turn_models,
+                unpriced_turn_sessions,
+                filtered,
+                args,
+            )
+
+        return PreBoundCanonicalTotals(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation_tokens=cache_creation,
+            cache_read_tokens=cache_read,
+            # A Decimal sum keeps its operands' exponent; report the canonical form.
+            cost_usd=canonical_cost_usd(cost),
+            unpriced_tokens=unpriced,
+            unpriced_observation_count=unpriced_observations,
+            sessions=int(session_row["sessions"]) if session_row else 0,
+        )
+
+    @staticmethod
+    async def _unpriced_turns(
+        conn: agent_event_span.SpanConnection,
+        models: set[_ModelKey],
+        session_ids: set[str],
+        filtered: bool,
+        args: list[list[str]],
+    ) -> int:
+        """Turns that reported tokens, on these unpriced models, in these sessions.
+
+        ``session_ids`` holds every summary-less session of an unpriced group,
+        so a session can also carry turns on a model that WAS priced; those are
+        dropped by model here rather than counted as unpriced.
+        """
+        if not models:
+            return 0
+        sessions = sorted(session_ids)
+        span = await agent_event_span.for_sessions(conn, sessions)
+        where = _UNPRICED_TURNS_EXECUTION_FILTER if filtered else "TRUE"
+        rows = await conn.fetch(
+            _UNPRICED_TURNS_QUERY.format(where=where), sessions, span.lower, span.upper, *args
+        )
+        return sum(
+            int(row["observations"])  # type: ignore[arg-type]  # a COUNT(*) column
+            for row in rows
+            if _model_key(row) in models  # type: ignore[arg-type]  # asyncpg Record reads by name
+        )

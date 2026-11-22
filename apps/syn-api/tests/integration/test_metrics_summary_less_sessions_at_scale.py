@@ -8,9 +8,9 @@ two in three on rated models and one in three on a model with no rate, each
 with two turns that reported tokens and one that reported none (#890).
 
 It holds /metrics, global and scoped, to the latency gate's budgets - never
-raised - and its coverage and money to the values the seed implies, which are
-what the reader reported before #2341 changed how it names those sessions.
-Same tier as the gate: `integration`, not run on PRs into main.
+raised - its coverage and money to the values the seed implies, and its whole
+response to what the reader frozen from before #2341 serves for the same
+database. Same tier as the gate: `integration`, not run on PRs into main.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_shared.events import SESSION_STARTED, TOKEN_USAGE
 from syn_shared.pricing import canonical_cost_usd
 
+from .legacy_canonical_totals_pre_2341 import PreBoundCanonicalUsageQueryService
 from .test_dashboard_latency_budget import (
     _COLUMNS,
     DAYS,
@@ -45,6 +46,8 @@ from .test_dashboard_latency_budget import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from .test_dashboard_latency_budget import Endpoint
 
 pytestmark = pytest.mark.integration
 
@@ -155,8 +158,28 @@ async def app_with_summary_less_sessions(
         await store.close()
 
 
+async def _served_before_2341(
+    client: httpx.AsyncClient, endpoint: Endpoint, monkeypatch: pytest.MonkeyPatch
+) -> object:
+    """The whole /metrics body, with the totals read as they were before #2341."""
+    from syn_api import _wiring
+    from syn_api.routes import metrics as metrics_route
+    from syn_domain.contexts.agent_sessions import CostCalculator
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            metrics_route,
+            "get_canonical_usage_query",
+            lambda: PreBoundCanonicalUsageQueryService(
+                pool=_wiring._timescale_pool(), cost_calculator=CostCalculator()
+            ),
+        )
+        return (await client.get(endpoint.path, params=endpoint.params)).json()
+
+
 async def test_metrics_holds_its_budget_and_its_numbers_with_summary_less_sessions(
     app_with_summary_less_sessions: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = app_with_summary_less_sessions
     every_execution = {_execution(n) for n in range(EXECUTIONS)}
@@ -165,6 +188,8 @@ async def test_metrics_holds_its_budget_and_its_numbers_with_summary_less_sessio
 
     for endpoint, executions in zip(metrics, (every_execution, gated), strict=True):
         body = (await client.get(endpoint.path, params=endpoint.params)).json()
+        before = await _served_before_2341(client, endpoint, monkeypatch)
+        assert body == before, (endpoint.name, body, before)
         tokens, cost, unpriced = _expected(executions)
         assert unpriced > 0, endpoint.name  # the scope holds unpriced work to count
         assert body["unpriced_observation_count"] == unpriced, (endpoint.name, body)
