@@ -261,9 +261,8 @@ async def get_trigger_history(
     history: list[TriggerHistoryEntry] = []
     for e in entries:
         # The projection's stored cost_usd is never written; the cost is the
-        # execution's, read from Lane 2 now. A blocked firing has no execution.
-        stored = costs.get(pg_safe(e.execution_id)) if costs and e.execution_id else None
-        priced = stored if stored is not None and stored.has_cost_data else None
+        # execution's, read from Lane 2 now.
+        priced = _priced_cost(costs, e.execution_id)
         cost = priced.total_cost_usd if priced is not None else None
         unpriced = priced.unpriced_observation_count if priced is not None else 0
         history.append(
@@ -284,6 +283,18 @@ async def get_trigger_history(
             )
         )
     return Ok(history)
+
+
+def _priced_cost(costs: dict[str, ExecutionCost] | None, execution_id: str) -> ExecutionCost | None:
+    """A firing's execution cost, or ``None`` when there is nothing to show.
+
+    Nothing to show: a blocked firing (no execution), an execution with no cost
+    data yet, or a cost read that failed.
+    """
+    if not costs or not execution_id:
+        return None
+    stored = costs.get(pg_safe(execution_id))
+    return stored if stored is not None and stored.has_cost_data else None
 
 
 async def _execution_costs(execution_ids: list[str]) -> dict[str, ExecutionCost] | None:
