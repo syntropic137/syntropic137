@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/insights.py b/apps/syn-api/src/syn_api/routes/insights.py
+index d660065fa..0d0ef80de 100644
+--- a/apps/syn-api/src/syn_api/routes/insights.py
++++ b/apps/syn-api/src/syn_api/routes/insights.py
+@@ -253,7 +253,7 @@ async def get_contribution_heatmap_endpoint(
+             start_date=data.get("start_date", ""),
+             end_date=data.get("end_date", ""),
+             total=data.get("total", 0.0),
+-            total_cost_display=_heatmap_cost_display(breakdowns),
++            total_cost_display=_heatmap_cost_display(breakdowns[:1]),
+             days=[
+                 HeatmapDayBucketResponse(
+                     date=d.get("date", ""),
