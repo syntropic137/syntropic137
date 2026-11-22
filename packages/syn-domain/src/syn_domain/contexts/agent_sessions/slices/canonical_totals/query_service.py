@@ -57,8 +57,10 @@ _EXECUTION_FILTER = "execution_id = ANY($1)"
 # of (#897), read from the same rows as its money. A summary that won its
 # session is one observation. A session with no summary contributes its turns,
 # and the rollup's ``observations`` counts zero-token turns too - a priced zero
-# at any rate (#890) - so those sessions are named, and their turns are counted
-# by ``_UNPRICED_TURNS_QUERY`` only when the group turns out to be unpriced.
+# at any rate (#890) - so those sessions are counted here, and named by
+# ``_UNPRICED_TURN_SESSIONS_QUERY`` only when the group turns out to be
+# unpriced. Naming them here shipped every summary-less session of every
+# rate-priced group on every poll, to be thrown away (#2341).
 _TOTALS_QUERY = """
 WITH {sources}
 SELECT
@@ -71,11 +73,28 @@ SELECT
     COUNT(*) FILTER (
         WHERE session_id IN (SELECT session_id FROM priced_summary)
     ) AS summary_observations,
-    ARRAY_AGG(session_id) FILTER (
+    COUNT(*) FILTER (
         WHERE session_id NOT IN (SELECT session_id FROM priced_summary)
-    ) AS turn_sessions
+    ) AS turn_session_count
 FROM canonical_usage
 GROUP BY {model_columns}, (vendor_cost_usd IS NULL)
+"""
+
+# The summary-less sessions of the groups pricing found unpriced, and of no
+# other group. Whether a model has a rate is decided in Python, so the groups
+# are bound by their three model columns, after the execution filter's $1
+# when there is one. NOT DISTINCT, because a missing model is the commonest
+# unpriced group and NULL = NULL matches nothing.
+_UNPRICED_TURN_SESSIONS_QUERY = f"""
+WITH {{sources}}
+SELECT DISTINCT canonical_usage.session_id
+FROM canonical_usage
+JOIN unnest({{keys}}) AS unpriced({CANONICAL_MODEL_COLUMNS})
+  ON canonical_usage.model IS NOT DISTINCT FROM unpriced.model
+ AND canonical_usage.{REQUESTED_MODEL_COLUMN} IS NOT DISTINCT FROM unpriced.{REQUESTED_MODEL_COLUMN}
+ AND canonical_usage.{HAS_REQUESTED_MODEL_COLUMN} = unpriced.{HAS_REQUESTED_MODEL_COLUMN}
+WHERE canonical_usage.vendor_cost_usd IS NULL
+  AND canonical_usage.session_id NOT IN (SELECT session_id FROM priced_summary)
 """
 
 # The turns of the sessions above that reported tokens, per model. Read from
@@ -167,12 +186,13 @@ class CanonicalUsageQueryService:
         self._cost_calculator = cost_calculator
 
     @staticmethod
-    def _render(template: str, filtered: bool) -> str:
+    def _render(template: str, filtered: bool, **fields: str) -> str:
         where = _EXECUTION_FILTER if filtered else "TRUE"
         return template.format(
             sources=rollup_usage_sources(where),
             model_columns=CANONICAL_MODEL_COLUMNS,
             where=where,
+            **fields,
         )
 
     async def totals(self, execution_ids: set[str] | None = None) -> CanonicalTotals:
@@ -200,7 +220,6 @@ class CanonicalUsageQueryService:
             unpriced = unpriced_observations = 0
             cost = Decimal("0")
             unpriced_turn_models: set[_ModelKey] = set()
-            unpriced_turn_sessions: set[str] = set()
             for row in rows:
                 input_tokens += int(row["input_tokens"])
                 output_tokens += int(row["output_tokens"])
@@ -211,14 +230,11 @@ class CanonicalUsageQueryService:
                 unpriced += row_cost.unpriced_tokens
                 if row_cost.unpriced_tokens:
                     unpriced_observations += int(row["summary_observations"] or 0)
-                    turn_sessions = row["turn_sessions"] or []
-                    if turn_sessions:
+                    if row["turn_session_count"]:
                         unpriced_turn_models.add(_model_key(row))
-                        unpriced_turn_sessions.update(turn_sessions)
             unpriced_observations += await self._unpriced_turns(
                 conn,  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
                 unpriced_turn_models,
-                unpriced_turn_sessions,
                 filtered,
                 args,
             )
@@ -235,23 +251,37 @@ class CanonicalUsageQueryService:
             sessions=int(session_row["sessions"]) if session_row else 0,
         )
 
-    @staticmethod
+    @classmethod
     async def _unpriced_turns(
+        cls,
         conn: agent_event_span.SpanConnection,
         models: set[_ModelKey],
-        session_ids: set[str],
         filtered: bool,
         args: list[list[str]],
     ) -> int:
-        """Turns that reported tokens, on these unpriced models, in these sessions.
+        """Turns that reported tokens, on these unpriced models, in their sessions.
 
-        ``session_ids`` holds every summary-less session of an unpriced group,
-        so a session can also carry turns on a model that WAS priced; those are
+        The sessions are every summary-less session of an unpriced group, so a
+        session can also carry turns on a model that WAS priced; those are
         dropped by model here rather than counted as unpriced.
         """
         if not models:
             return 0
-        sessions = sorted(session_ids)
+        keys = sorted(models, key=repr)
+        first = len(args) + 1
+        sessions_sql = cls._render(
+            _UNPRICED_TURN_SESSIONS_QUERY,
+            filtered,
+            keys=f"${first}::text[], ${first + 1}::text[], ${first + 2}::boolean[]",
+        )
+        session_rows = await conn.fetch(
+            sessions_sql,
+            *args,
+            [key[0] for key in keys],
+            [key[1] for key in keys],
+            [key[2] for key in keys],
+        )
+        sessions = sorted(str(row["session_id"]) for row in session_rows)
         span = await agent_event_span.for_sessions(conn, sessions)
         where = _UNPRICED_TURNS_EXECUTION_FILTER if filtered else "TRUE"
         rows = await conn.fetch(

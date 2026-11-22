@@ -53,6 +53,8 @@ def _group(
         "cache_creation_tokens": 0,
         "cache_read_tokens": 0,
         "summary_observations": summary_observations,
+        "turn_session_count": len(turn_sessions or []),
+        # Not a column: what the session read answers for this group.
         "turn_sessions": turn_sessions,
     }
 
@@ -72,10 +74,26 @@ class _Conn:
     totals: list[dict[str, _Cell]]
     turns: list[dict[str, _Cell]] = field(default_factory=list)
     turn_reads: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
+    session_reads: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
+
+    def _sessions_of(self, *keys: object) -> list[dict[str, _Cell]]:
+        """The summary-less sessions of the groups bound by their model columns."""
+        bound = set(zip(*keys, strict=True))  # type: ignore[call-overload]  # three parallel lists
+        return [
+            {"session_id": session}
+            for row in self.totals
+            if row["vendor_cost_usd"] is None
+            and (row["model"], row[REQUESTED_MODEL_COLUMN], row[HAS_REQUESTED_MODEL_COLUMN])
+            in bound
+            for session in row["turn_sessions"] or []  # type: ignore[union-attr]  # list[str] | None
+        ]
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, _Cell]]:
         if "summary_observations" in query:
             return self.totals
+        if "JOIN unnest(" in query:
+            self.session_reads.append((query, args))
+            return self._sessions_of(*args[-3:])
         if "AS observations" in query:
             self.turn_reads.append((query, args))
             return self.turns
