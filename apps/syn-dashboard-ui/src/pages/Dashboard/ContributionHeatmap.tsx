@@ -5,33 +5,27 @@ import { ResponsiveCalendar } from '@nivo/calendar'
 
 import { API_BASE, fetchJSON } from '../../api/base'
 import { Card, CardContent, CardHeader } from '../../components'
+import type { components } from '../../generated/api-types'
 import { formatTokenBreakdown, formatTokens } from '../../utils/formatters'
 
 // --- Types ---
 
-interface HeatmapDayBucket {
-  date: string
-  count: number
-  breakdown: {
-    sessions: number
-    executions: number
-    commits: number
-    cost_usd: number
-    tokens: number
-    input_tokens: number
-    output_tokens: number
-    cache_creation_tokens: number
-    cache_read_tokens: number
-  }
+type Schemas = components['schemas']
+
+/** The breakdown keys the heatmap reads. The schema types `breakdown` as an open map. */
+interface HeatmapBreakdown {
+  sessions: number
+  executions: number
+  commits: number
+  input_tokens: number
+  output_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
 }
 
-interface ContributionHeatmapResult {
-  metric: string
-  start_date: string
-  end_date: string
-  total: number
-  days: HeatmapDayBucket[]
-}
+type HeatmapDayBucket = Omit<Schemas['HeatmapDayBucketResponse'], 'breakdown'> & { breakdown: HeatmapBreakdown }
+
+type ContributionHeatmapResult = Omit<Schemas['ContributionHeatmapResponse'], 'days'> & { days: HeatmapDayBucket[] }
 
 // --- API ---
 
@@ -106,7 +100,7 @@ function HeatmapTooltip({ day, bucket }: { day: string; bucket: HeatmapDayBucket
       <div className="my-1.5 border-t border-[var(--color-border)]" />
       <div className="flex justify-between">
         <span className="text-[var(--color-text-muted)]">Cost</span>
-        <span className="font-mono font-semibold text-emerald-400">${b.cost_usd.toFixed(2)}</span>
+        <span className="font-mono font-semibold text-emerald-400">{bucket.cost_display}</span>
       </div>
     </div>
   )
@@ -132,15 +126,14 @@ function TooltipRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function SummaryStats({ days }: { days: HeatmapDayBucket[] }) {
+function SummaryStats({ days, totalCostDisplay }: { days: HeatmapDayBucket[]; totalCostDisplay: string }) {
   const totals = useMemo(() => {
-    const t = { sessions: 0, executions: 0, commits: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0, active_days: 0 }
+    const t = { sessions: 0, executions: 0, commits: 0, input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0, active_days: 0 }
     for (const d of days) {
       if (d.count > 0) t.active_days++
       t.sessions += d.breakdown.sessions
       t.executions += d.breakdown.executions
       t.commits += d.breakdown.commits
-      t.cost_usd += d.breakdown.cost_usd
       t.input_tokens += d.breakdown.input_tokens
       t.output_tokens += d.breakdown.output_tokens
       t.cache_creation_tokens += d.breakdown.cache_creation_tokens
@@ -157,7 +150,7 @@ function SummaryStats({ days }: { days: HeatmapDayBucket[] }) {
       <StatCard label="Executions" value={String(totals.executions)} />
       <StatCard label="Commits" value={String(totals.commits)} />
       <StatCard label="Active days" value={String(totals.active_days)} />
-      <StatCard label="Total cost" value={`$${totals.cost_usd.toFixed(2)}`} color="text-emerald-400" />
+      <StatCard label="Total cost" value={totalCostDisplay} color="text-emerald-400" />
       <StatCard
         label="Total tokens"
         value={formatTokens(totalTokens)}
@@ -223,7 +216,9 @@ function HeatmapLegend() {
 
 // --- Main Heatmap ---
 
-function HeatmapChart({ days, startDate, endDate }: { days: HeatmapDayBucket[]; startDate: string; endDate: string }) {
+function HeatmapChart({ days, startDate, endDate, totalCostDisplay }: {
+  days: HeatmapDayBucket[]; startDate: string; endDate: string; totalCostDisplay: string
+}) {
   const yearRanges = useMemo(() => buildYearRanges(days), [days])
   const [selectedRange, setSelectedRange] = useState(0)
   const range = yearRanges[selectedRange] ?? { from: startDate, to: endDate }
@@ -253,7 +248,7 @@ function HeatmapChart({ days, startDate, endDate }: { days: HeatmapDayBucket[]; 
 
   return (
     <div>
-      <SummaryStats days={days} />
+      <SummaryStats days={days} totalCostDisplay={totalCostDisplay} />
       <div className="flex">
         <YearSelector labels={yearRanges.map((r) => r.label)} selectedIndex={selectedRange} onSelect={setSelectedRange} />
         <div className="min-w-[700px] flex-1">
@@ -320,7 +315,12 @@ export function ContributionHeatmap() {
           </div>
         )}
         {data && !loading && !error && (
-          <HeatmapChart days={data.days} startDate={data.start_date} endDate={data.end_date} />
+          <HeatmapChart
+            days={data.days}
+            startDate={data.start_date}
+            endDate={data.end_date}
+            totalCostDisplay={data.total_cost_display}
+          />
         )}
       </CardContent>
     </Card>
