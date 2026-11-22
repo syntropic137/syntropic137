@@ -4833,6 +4833,11 @@ export interface components {
              */
             cache_creation_tokens: number;
             /**
+             * Cache Creation 1H Tokens
+             * @default 0
+             */
+            cache_creation_1h_tokens: number;
+            /**
              * Cache Read Tokens
              * @default 0
              */
@@ -6070,6 +6075,11 @@ export interface components {
              * @default 0
              */
             total_cache_creation_tokens: number;
+            /**
+             * Total Cache Creation 1H Tokens
+             * @default 0
+             */
+            total_cache_creation_1h_tokens: number;
             /**
              * Total Cache Read Tokens
              * @default 0
@@ -8518,6 +8528,11 @@ export interface components {
              * @default 0
              */
             cache_creation_tokens: number;
+            /**
+             * Cache Creation 1H Tokens
+             * @default 0
+             */
+            cache_creation_1h_tokens: number;
             /**
              * Cache Read Tokens
              * @default 0

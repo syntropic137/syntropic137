@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/routes/costs.py b/apps/syn-api/src/syn_api/routes/costs.py
+index b7cb6e806..0b643058e 100644
+--- a/apps/syn-api/src/syn_api/routes/costs.py
++++ b/apps/syn-api/src/syn_api/routes/costs.py
+@@ -469,7 +469,6 @@ def _execution_cost_to_api(c: ExecutionCostData) -> ExecutionCostResponse:
+         output_tokens=c.output_tokens,
+         total_tokens=c.total_tokens,
+         cache_creation_tokens=c.cache_creation_tokens,
+-        cache_creation_1h_tokens=c.cache_creation_1h_tokens,
+         cache_read_tokens=c.cache_read_tokens,
+         tool_calls=c.tool_calls,
+         turns=c.turns,

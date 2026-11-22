@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/routes/costs.py b/apps/syn-api/src/syn_api/routes/costs.py
+index b7cb6e806..e5a5a98e9 100644
+--- a/apps/syn-api/src/syn_api/routes/costs.py
++++ b/apps/syn-api/src/syn_api/routes/costs.py
+@@ -204,7 +204,6 @@ def session_cost_to_data(c: SessionCost) -> SessionCostData:
+         output_tokens=c.output_tokens,
+         total_tokens=c.total_tokens,
+         cache_creation_tokens=c.cache_creation_tokens,
+-        cache_creation_1h_tokens=c.cache_creation_1h_tokens,
+         cache_read_tokens=c.cache_read_tokens,
+         tool_calls=c.tool_calls,
+         turns=c.turns,
