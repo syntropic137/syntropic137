@@ -1,3 +1,4 @@
+import type { components } from '../generated/api-types'
 import { API_BASE, fetchJSON } from './base'
 
 export interface TriggerSummary {
@@ -19,16 +20,7 @@ export interface TriggerDetail extends TriggerSummary {
   created_by: string
 }
 
-export interface TriggerHistoryEntry {
-  fired_at: string | null
-  execution_id: string | null
-  webhook_delivery_id?: string | null
-  event_type: string | null
-  pr_number: number | null
-  status: string | null
-  cost_usd?: number | null
-  trigger_id?: string
-}
+export type TriggerHistoryEntry = components['schemas']['TriggerHistoryEntryResponse']
 
 export async function listTriggers(params?: {
   repository?: string
