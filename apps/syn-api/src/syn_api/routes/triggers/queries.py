@@ -262,7 +262,7 @@ async def get_trigger_history(
     for e in entries:
         # The projection's stored cost_usd is never written; the cost is the
         # execution's, read from Lane 2 now. A blocked firing has no execution.
-        stored = costs.get(pg_safe(e.execution_id)) if e.execution_id else None
+        stored = costs.get(pg_safe(e.execution_id)) if costs and e.execution_id else None
         priced = stored if stored is not None and stored.has_cost_data else None
         cost = priced.total_cost_usd if priced is not None else None
         unpriced = priced.unpriced_observation_count if priced is not None else 0
@@ -286,11 +286,12 @@ async def get_trigger_history(
     return Ok(history)
 
 
-async def _execution_costs(execution_ids: list[str]) -> dict[str, ExecutionCost]:
+async def _execution_costs(execution_ids: list[str]) -> dict[str, ExecutionCost] | None:
     """Each execution's Lane 2 cost, by stored (``pg_safe``) id, in one batched read.
 
-    Fails soft, as the eval run list does: history whose cost cannot be read is
-    reported as history with no cost data, never as an error.
+    ``None`` when the read failed, as distinct from ``{}`` (nothing to price, or
+    nothing priced yet). Fails soft, as the eval run list does: the caller shows
+    history whose cost cannot be read as history with no cost, never an error.
     """
     if not execution_ids:
         return {}
@@ -298,7 +299,7 @@ async def _execution_costs(execution_ids: list[str]) -> dict[str, ExecutionCost]
         read = await get_projection_mgr().execution_cost.list_costs_for_ids(execution_ids)
     except Exception:
         logger.debug("Failed to load execution costs for trigger history", exc_info=True)
-        return {}
+        return None
     return {cost.execution_id: cost for cost in read.costs}
 
 
