@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from syn_api.types import TriggerHistoryEntryResponse, TriggerHistoryResponse
 from syn_domain.contexts.github.domain.read_models.trigger_history_entry import (
     TriggerHistoryEntry,
 )
@@ -127,10 +128,11 @@ async def client() -> AsyncIterator[AsyncClient]:
         yield c
 
 
-async def _entries(client: AsyncClient) -> dict[str, dict[str, object]]:
+async def _entries(client: AsyncClient) -> dict[str, TriggerHistoryEntryResponse]:
     response = await client.get(f"/triggers/{TRIGGER}/history")
     assert response.status_code == 200, response.text
-    return {e["execution_id"]: e for e in response.json()["entries"]}
+    body = TriggerHistoryResponse.model_validate(response.json())
+    return {e.execution_id: e for e in body.entries}
 
 
 async def test_priced_firing_reports_its_execution_cost(
@@ -141,9 +143,9 @@ async def test_priced_firing_reports_its_execution_cost(
 
     entry = (await _entries(client))["exec-a"]
 
-    assert entry["cost_usd"] == 1.25
-    assert entry["cost_display"] == "$1.25"
-    assert entry["unpriced_observation_count"] == 0
+    assert entry.cost_usd == 1.25
+    assert entry.cost_display == "$1.25"
+    assert entry.unpriced_observation_count == 0
 
 
 async def test_partially_unpriced_firing_says_the_cost_is_a_lower_bound(
@@ -154,10 +156,10 @@ async def test_partially_unpriced_firing_says_the_cost_is_a_lower_bound(
 
     entries = await _entries(client)
 
-    assert entries["exec-partial"]["cost_display"] == ">=$0.40 (partial)"
-    assert entries["exec-partial"]["unpriced_observation_count"] == 3
-    assert entries["exec-unpriced"]["cost_display"] == UNPRICED
-    assert entries["exec-unpriced"]["unpriced_observation_count"] == 2
+    assert entries["exec-partial"].cost_display == ">=$0.40 (partial)"
+    assert entries["exec-partial"].unpriced_observation_count == 3
+    assert entries["exec-unpriced"].cost_display == UNPRICED
+    assert entries["exec-unpriced"].unpriced_observation_count == 2
 
 
 async def test_blocked_firing_and_unknown_execution_have_no_cost(
@@ -169,9 +171,9 @@ async def test_blocked_firing_and_unknown_execution_have_no_cost(
     entries = await _entries(client)
 
     for entry in entries.values():
-        assert entry["cost_usd"] is None
-        assert entry["cost_display"] == EM_DASH
-        assert entry["unpriced_observation_count"] == 0
+        assert entry.cost_usd is None
+        assert entry.cost_display == EM_DASH
+        assert entry.unpriced_observation_count == 0
     assert lane2.calls == [["exec-no-cost-yet"]]
 
 
@@ -184,8 +186,8 @@ async def test_cost_read_failure_returns_history_without_cost(
 
     entry = (await _entries(client))["exec-a"]
 
-    assert entry["cost_usd"] is None
-    assert entry["cost_display"] == EM_DASH
+    assert entry.cost_usd is None
+    assert entry.cost_display == EM_DASH
 
 
 async def test_whole_page_is_priced_in_one_batched_read(
@@ -199,4 +201,4 @@ async def test_whole_page_is_priced_in_one_batched_read(
 
     assert len(lane2.calls) == 1
     assert sorted(lane2.calls[0]) == sorted(ids)
-    assert {e["cost_display"] for e in entries.values()} == {"$0.50"}
+    assert {e.cost_display for e in entries.values()} == {"$0.50"}
