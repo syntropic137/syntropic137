@@ -664,32 +664,33 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 #                  Previous pins, for the record: claude-cli 14eeb7c5,
 #                  omni-agent 01e3c15f, toolchain 885be5de, all from
 #                  agentic-workspace be32a683 (release PR #80).
-# AGENTIC-WORKSPACE TEARDOWN DELETES READ-ONLY DIRS, 2026-11-09 (#1932, #2095).
-# Taken from release-branch run 42567831910 ("Release Workspace Images", push
-# to release; attempt 4 succeeded after GitHub release-download 504s) of
-# agentic-workspace 41f9176d (release PR #126, after #125), the commit
-# lib/agentic-workspace pins. Each digest below is what
-# `docker buildx imagetools inspect --format '{{.Manifest.Digest}}'` returns
-# for the full-commit tag 41f9176d1dba9cff1e27a5559ad4590845212a10, media type
-# application/vnd.oci.image.index.v1+json (the INDEX, amd64 + arm64). Every
-# image carries agentic.image.channel=release and revision 41f9176d on both
-# platforms, and `cosign verify` (v3.1.3) passes for each against
-# AGENTIC_WORKSPACE_IDENTITY_REGEXP with the GitHub Actions OIDC issuer. This
-# release carries AW #125 only: Docker teardown restores owner rwx on
-# directories the agent left read-only (0555, e.g. pytest garbage and Go
-# module caches) and retries the delete once, so the workspace dir is no
-# longer retained with PermissionError(13). That fix is host-side Python; the
-# images are rebuilt only because the gitlink must equal the commit they were
-# built from. Manifest versions did not move.
+# AGENTIC-WORKSPACE WORKSPACE DELETE OFF THE EVENT LOOP, 2026-11-22 (#2345).
+# Taken from release-branch run 45030149084 ("Release Workspace Images", push
+# to release, success) of agentic-workspace 032bac05 (release PR #129, after
+# #127 and #128), the commit lib/agentic-workspace pins. Each digest below is
+# what `docker buildx imagetools inspect --format '{{.Manifest.Digest}}'`
+# returns for the full-commit tag 032bac054aebbf1377858d1fc04c61150a590449,
+# media type application/vnd.oci.image.index.v1+json (the INDEX, amd64 +
+# arm64). Every image carries agentic.image.channel=release and revision
+# 032bac05 on both platforms, and `cosign verify` (v3.1.3) passes for each
+# against AGENTIC_WORKSPACE_IDENTITY_REGEXP with the GitHub Actions OIDC
+# issuer. This release carries AW #127 (and #128, tests only): Docker teardown
+# deletes the workspace directory on a worker thread, so a large delete no
+# longer blocks the event loop and starves the executor's lease renewal. That
+# fix is host-side Python; the images are rebuilt only because the gitlink
+# must equal the commit they were built from. Manifest versions did not move.
 #
-# omni-agent       499ab441, omni-agent manifest 1.16.0.
-# toolchain        a0d3b42f, built FROM omni 499ab441 in the same run (label
+# omni-agent       2f9dc73d, omni-agent manifest 1.16.0.
+# toolchain        f7848893, built FROM omni 2f9dc73d in the same run (label
 #                  org.opencontainers.image.base.digest), toolchain manifest
 #                  1.8.0.
-# claude-cli       7148d6e2, claude-cli manifest 2.4.0.
-# scripted-agent   5a320146 (record only; not a provider pin, #1918 PR 3).
+# claude-cli       bd53b216, claude-cli manifest 2.4.0.
+# scripted-agent   3c517149 (record only; not a provider pin, #1918 PR 3).
 #
-#                  Previous pins, for the record: claude-cli a28cd5f5,
+#                  Previous pins, for the record: claude-cli 7148d6e2,
+#                  omni-agent 499ab441, toolchain a0d3b42f, scripted-agent
+#                  5a320146, all from agentic-workspace 41f9176d (release PR
+#                  #126). Before that claude-cli a28cd5f5,
 #                  omni-agent 5b1a9c6f, toolchain 036463fb, scripted-agent
 #                  fffc35ec, all from agentic-workspace e9f8a919 (release PR
 #                  #123). Before that claude-cli c7541116,
@@ -704,13 +705,13 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:7148d6e2014c29b98dba40f7234583e5c65f664e0f215571edd70cdcc3cd85eb"
+            "sha256:bd53b216cd34637e4fa698efe3d340c8cdc8eaac62888750bb72e7f14e5fbcb5"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:499ab4419a116e32dffaf3e20793de2db64c3f6753a8a9b599bf5b345a8ee173"
+            "sha256:2f9dc73db244987da4d7d770c7c20a06438b765c9f6041dd30341ba1937e44e8"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:a0d3b42fafb36116a31c8d17f022ace99bee18bbc9d4002b4037fce513309335"
+            "sha256:f78488938160215808a4ec55156952f31297fa959814d57fb3c7da9c725f57b7"
         ),
     }
 )
@@ -854,4 +855,5 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:23d33218080ba5557af95f9591b869b6f22419647601b7ddc502c14f4c38cfb7",  # f569e864 (#2149)
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:2d617e6c7c3431464b555387f58adf80d4c8f90bbbf87c130614617f1b804a47",  # 7f75a681 (#2166)
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:036463fb3ed9ca0eb26bf6546d0f14914b92a88ed3a0c6efdf165ebef51e3f43",  # e49fd5d5 (#2185)
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:a0d3b42fafb36116a31c8d17f022ace99bee18bbc9d4002b4037fce513309335",  # 69b62e19 (#2218)
 )
