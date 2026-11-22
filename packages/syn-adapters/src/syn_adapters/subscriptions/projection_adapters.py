@@ -12,7 +12,7 @@ and CamelCase event type names.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from agentic_logging import get_logger
 from event_sourcing import (
@@ -50,6 +50,12 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+class _RebuildableProjection(Protocol):
+    """A wrapped projection that can delete the data it stores."""
+
+    async def clear_all_data(self) -> None: ...
+
+
 class _ObservationProjectionAdapter(CheckpointedProjection):
     """Base adapter for plain-class projections that handle observation events.
 
@@ -57,14 +63,20 @@ class _ObservationProjectionAdapter(CheckpointedProjection):
     Subclasses may override ``_resolve_handler_name`` to customize the
     event-type-to-method mapping (e.g. when multiple event types route
     to the same handler like ``on_agent_observation``).
+
+    A version rebuild clears through the wrapped projection, so no adapter
+    inherits ESP's no-op ``clear_all_data`` and replays onto stale rows.
     """
 
     PROJECTION_NAME: ClassVar[str]
     VERSION: ClassVar[int]
     _SUBSCRIBED: ClassVar[set[str]]
 
-    def __init__(self, projection: object) -> None:
+    def __init__(self, projection: _RebuildableProjection) -> None:
         self._projection = projection
+
+    async def clear_all_data(self) -> None:
+        await self._projection.clear_all_data()
 
     def get_name(self) -> str:
         return self.PROJECTION_NAME
@@ -145,20 +157,9 @@ _COST_HANDLER_MAP: dict[str, str] = {
 
 
 class _CostProjectionAdapter(_ObservationProjectionAdapter):
-    """Shared routing and rebuild clearing for the two cost projections.
-
-    Their stored documents are running totals, so a version rebuild must
-    delete them before replay or every observation is counted twice.
-    """
+    """Shared routing for the two cost projections."""
 
     _SUBSCRIBED: ClassVar[set[str]] = set(_COST_HANDLER_MAP.keys())
-
-    def __init__(self, projection: ExecutionCostProjection | SessionCostProjection) -> None:
-        super().__init__(projection)
-        self._cost_projection = projection
-
-    async def clear_all_data(self) -> None:
-        await self._cost_projection.clear_all_data()
 
     def _resolve_handler_name(self, event_type: str) -> str:
         return _COST_HANDLER_MAP.get(event_type, f"on_{_camel_to_snake(event_type)}")

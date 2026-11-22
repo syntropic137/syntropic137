@@ -1,7 +1,7 @@
 import { FileText, GitBranch, Play, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import { MetricCard } from '../../components'
+import { CostWithCoverage, MetricCard } from '../../components'
 import type { MetricsResponse, WorkflowExecutionSummary, WorkflowResponse } from '../../types'
 
 interface WorkflowMetricsProps {
@@ -37,7 +37,14 @@ export function WorkflowMetrics({ workflow, metrics, artifactCount, executions, 
         title="Total Tokens"
         value={metrics?.total_tokens.toLocaleString() ?? 0}
         icon={Zap}
-        subtitle={`$${Number(metrics?.total_cost_usd ?? 0).toFixed(4)}`}
+        subtitle={
+          metrics && (
+            <CostWithCoverage
+              display={metrics.total_cost_display}
+              unpricedObservationCount={metrics.unpriced_observation_count}
+            />
+          )
+        }
       />
       <MetricCard
         title="Artifacts"

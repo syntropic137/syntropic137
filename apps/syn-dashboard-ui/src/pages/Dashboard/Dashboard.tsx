@@ -6,7 +6,15 @@ import {
   Zap,
 } from 'lucide-react'
 
-import { Card, CardContent, CardHeader, EventFeed, MetricCard, PageLoader } from '../../components'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CostWithCoverage,
+  EventFeed,
+  MetricCard,
+  PageLoader,
+} from '../../components'
 import { useDashboardData } from '../../hooks/useDashboardData'
 import { ContributionHeatmap } from './ContributionHeatmap'
 import { DashboardCharts, WorkflowStatusChart } from './DashboardCharts'
@@ -61,7 +69,14 @@ export function Dashboard() {
           title="Total Tokens"
           value={metrics?.total_tokens.toLocaleString() ?? 0}
           icon={Zap}
-          subtitle={`$${Number(metrics?.total_cost_usd ?? 0).toFixed(4)}`}
+          subtitle={
+            metrics && (
+              <CostWithCoverage
+                display={metrics.total_cost_display}
+                unpricedObservationCount={metrics.unpriced_observation_count}
+              />
+            )
+          }
         />
         <MetricCard
           title="Artifacts"

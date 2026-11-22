@@ -269,6 +269,10 @@ export interface MetricsResponse {
   /** Input + output + cache creation + cache read. */
   total_tokens: number
   total_cost_usd: number
+  /** The cost as the API renders it, coverage included: show this, never format `total_cost_usd` (#897). */
+  total_cost_display: string
+  /** Observations with no usable rate. Non-zero means the total omits real work (#890). */
+  unpriced_observation_count: number
   total_artifacts: number
   total_artifact_bytes: number
   phases: PhaseMetrics[]
@@ -320,6 +324,10 @@ export interface WorkflowExecutionSummary {
   phase_progress: PhaseProgressInfo
   total_tokens: number
   total_cost_usd: number
+  /** The cost as the API renders it, coverage included: show this, never format `total_cost_usd` (#897). */
+  total_cost_display: string
+  /** Observations with no usable rate. Non-zero means the total omits real work (#890). */
+  unpriced_observation_count: number
   /**
    * Why a `failed` run failed, as `ExecutionRunSummary` now carries it (#1367).
    *

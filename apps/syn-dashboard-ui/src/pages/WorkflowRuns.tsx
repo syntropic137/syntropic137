@@ -2,7 +2,15 @@ import { clsx } from 'clsx'
 import { ArrowLeft, Play, Zap } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { Card, CardContent, CardHeader, EmptyState, PageLoader, StatusBadge } from '../components'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CostWithCoverage,
+  EmptyState,
+  PageLoader,
+  StatusBadge,
+} from '../components'
 import { useWorkflowRuns } from '../hooks/useWorkflowRuns'
 import type { WorkflowExecutionSummary } from '../types'
 import { REFUSED, TASK_FAILED, outcomeTone } from '../utils/executionOutcome'
@@ -48,7 +56,10 @@ function RunRow({ exec }: { exec: WorkflowExecutionSummary }) {
       <div className="text-sm text-[var(--color-text-secondary)]">
         {exec.total_tokens.toLocaleString()}
         <span className="text-xs text-[var(--color-text-muted)] ml-1">
-          (${Number(exec.total_cost_usd).toFixed(4)})
+          <CostWithCoverage
+            display={exec.total_cost_display}
+            unpricedObservationCount={exec.unpriced_observation_count}
+          />
         </span>
       </div>
       <div className="text-sm text-[var(--color-text-secondary)]">
