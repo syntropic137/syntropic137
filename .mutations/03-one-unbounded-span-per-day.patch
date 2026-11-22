@@ -1,0 +1,17 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+index 7f2f085b8..e3c08c84d 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+@@ -317,11 +317,7 @@ class CanonicalUsageQueryService:
+         params: list[object] = []
+         for n, row in enumerate(days):
+             day = row["day"]
+-            span = (
+-                agent_event_span.EventSpan.of_days(day, day)
+-                if isinstance(day, date)
+-                else agent_event_span.EventSpan.unbounded()
+-            )
++            span = agent_event_span.EventSpan.unbounded()
+             branches.append(
+                 _PARAMETER.sub(
+                     lambda m, n=n: f"${int(m.group(1)) + 3 * n}", _UNPRICED_TURNS_DAY
