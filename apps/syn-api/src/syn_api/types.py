@@ -4093,6 +4093,9 @@ class HeatmapDayBucketResponse(BaseModel):
     date: str
     count: float = 0.0
     breakdown: dict[str, float] = Field(default_factory=dict)
+    cost_display: str
+    """``breakdown["cost_usd"]`` as ``format_cost`` renders it: ``unpriced`` or
+    ``>=$X (partial)`` when ``breakdown["unpriced_tokens"]`` is non-zero (#897)."""
     failed: int = 0
     """Executions that ended failed on this UTC day (status ``failed``, by
     ``completed_at``), from the workflow_executions read model. Also in
@@ -4106,6 +4109,9 @@ class ContributionHeatmapResponse(BaseModel):
     start_date: str
     end_date: str
     total: float = 0.0
+    total_cost_display: str
+    """The summed ``cost_usd`` of ``days``, rendered the same way as each day's
+    ``cost_display``: incomplete if any day had unpriced tokens (#897)."""
     days: list[HeatmapDayBucketResponse] = Field(default_factory=list)
     filter: dict[str, str | None] = Field(default_factory=dict)
 
