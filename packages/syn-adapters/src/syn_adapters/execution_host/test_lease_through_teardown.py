@@ -15,11 +15,13 @@ from datetime import timedelta
 import pytest
 
 from syn_adapters.execution_host import ExecutionHost, HostTiming
+from syn_adapters.execution_host.lease import LeaseKeeper
 from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
 from syn_domain.contexts.orchestration.ports import (
     ClaimedRun,
     ExecutorHost,
     FencedRun,
+    RunLeaseLost,
     StreamPresence,
 )
 
@@ -93,3 +95,37 @@ async def test_a_teardown_longer_than_the_lease_ttl_is_neither_fenced_nor_interr
     assert (counts.fencing, counts.reaped, counts.interrupted) == (0, 0, 0)
     assert counts.done == 1
     assert teardown.reaped == ["e1"]
+
+
+class _RenewalBehindTheClose:
+    """A renewal that reaches the store just after the close released the row."""
+
+    def __init__(self) -> None:
+        self.released = asyncio.Event()
+
+    async def renew(self, run: ClaimedRun) -> None:
+        await self.released.wait()
+        raise RunLeaseLost(f"{run.execution_id} is no longer claimed")
+
+    async def close(self) -> None:
+        self.released.set()
+
+
+async def test_a_renewal_refused_because_the_close_released_the_row_is_not_a_lost_lease() -> None:
+    queue = _RenewalBehindTheClose()
+    claimed = ClaimedRun(
+        execution_id="e1", executor_id=_HOST.host_id, token=1, is_resume=False, pool_id="default"
+    )
+    lease = LeaseKeeper(queue, claimed, 0)  # type: ignore[arg-type]  # renew is all it calls
+
+    async def work() -> object:
+        for _ in range(3):  # let the renewal start before the close
+            await asyncio.sleep(0)
+        await queue.close()
+        return None
+
+    drained = asyncio.create_task(work())
+    async with asyncio.timeout(1):  # hang guard
+        await asyncio.gather(drained, lease.hold(drained))
+
+    assert not lease.lost

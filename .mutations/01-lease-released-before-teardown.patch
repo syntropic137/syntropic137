@@ -1,0 +1,45 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/host.py b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+index f7164a158..15f46dc2c 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/host.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/host.py
+@@ -256,32 +256,23 @@ class ExecutionHost:
+ 
+     async def _drive(self, claimed: ClaimedRun) -> None:
+         lease = LeaseKeeper(self._queue, claimed, self._timing.renew_every, sleep=self._sleep)
+-        work: asyncio.Task[object] = asyncio.create_task(self._drain_and_close(claimed))
+-        keeper = asyncio.create_task(lease.hold(work), name=f"lease:{claimed.execution_id}")
++        drain: asyncio.Task[object] = asyncio.create_task(self._drainer.run_claimed(claimed))
++        keeper = asyncio.create_task(lease.hold(drain), name=f"lease:{claimed.execution_id}")
+         try:
+-            await work
++            await drain
+         except asyncio.CancelledError:
+             if not lease.lost:
+                 raise
+-        finally:
+-            keeper.cancel()
+-            with contextlib.suppress(asyncio.CancelledError):
+-                await keeper
+-
+-    async def _drain_and_close(self, claimed: ClaimedRun) -> None:
+-        """Everything done under the claim; ``_drive`` keeps the Lease until it returns.
+-
+-        The reap before the close is teardown too, and can be slow: a Lease
+-        let lapse there is fenced by a reconciler and the run interrupted,
+-        though its outcome is already recorded (#2345).
+-        """
+-        try:
+-            await self._drainer.run_claimed(claimed)
++            return
+         except Exception:
+             # No terminal event can be shown recorded, so the row stays claimed:
+             # its Lease expires and a reconciler interrupts it (D5 A).
+             logger.exception("Claimed run %s escaped its drain", claimed.execution_id)
+             return
++        finally:
++            keeper.cancel()
++            with contextlib.suppress(asyncio.CancelledError):
++                await keeper
+         if not await self._released(claimed):
+             # A drain can return normally over resources it could not remove, a
+             # failed delete or a create whose response was lost. Closing would

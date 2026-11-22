@@ -1,0 +1,15 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_host/lease.py b/packages/syn-adapters/src/syn_adapters/execution_host/lease.py
+index 5919efa77..033fd093d 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_host/lease.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_host/lease.py
+@@ -49,10 +49,6 @@ class LeaseKeeper:
+             try:
+                 await self._queue.renew(self._run)
+             except RunLeaseLost:
+-                if work.done():
+-                    # The renewal raced the close that ended the work: the row
+-                    # is released, not taken, so there is nothing to fence.
+-                    return
+                 self.lost = True
+                 logger.warning(
+                     "Lease on %s lost: self-fencing, the run takes the interruption path",
