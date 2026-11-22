@@ -54,3 +54,17 @@ export const COST_COVERAGE_CASES: CostCoverageCase[] = [
 
 /** Any coverage note at all, for asserting there is none. */
 export const ANY_UNPRICED_NOTE = /unpriced observation/
+
+/**
+ * A fully priced sub-cent total. The API rounds it to the payable unit; a
+ * client formatting the dollars itself prints `$0.004000` instead, so this is
+ * the case that catches a fully priced figure re-formatted on the client.
+ */
+export const SUB_CENT_CASE: CostCoverageCase = {
+  name: 'priced below a cent',
+  total_cost_usd: '0.004',
+  total_cost_display: '<$0.01',
+  unpriced_observation_count: 0,
+  shows: '<$0.01',
+  note: null,
+}

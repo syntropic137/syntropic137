@@ -447,6 +447,8 @@ export interface PhaseExecutionDetail {
   /** Nullable: the API returns null when the duration is genuinely unknown. */
   duration_seconds: number | null
   cost_usd: number
+  /** The cost as the API renders it, coverage included: show this, never format `cost_usd` (#897). */
+  cost_display: components['schemas']['PhaseExecutionInfo']['cost_display']
   /**
    * Observations that carried no usable rate and so added nothing to the total.
    *
@@ -542,6 +544,8 @@ export interface ExecutionDetailResponse {
   total_cache_read_tokens: number
   total_tokens: number
   total_cost_usd: number
+  /** The cost as the API renders it, coverage included: show this, never format `total_cost_usd` (#897). */
+  total_cost_display: components['schemas']['ExecutionDetailResponse']['total_cost_display']
   /**
    * Observations that carried no usable rate and so added nothing to the total.
    *
