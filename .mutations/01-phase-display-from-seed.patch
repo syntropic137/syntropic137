@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/executions/phase_mapping.py b/apps/syn-api/src/syn_api/routes/executions/phase_mapping.py
+index 68e244d16..beaa28d29 100644
+--- a/apps/syn-api/src/syn_api/routes/executions/phase_mapping.py
++++ b/apps/syn-api/src/syn_api/routes/executions/phase_mapping.py
+@@ -406,7 +406,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
+         unpriced_observation_count=phase.unpriced_observation_count,
+         # Built here, not on PhaseExecution: `_enrich_costs` sets the cost
+         # after that model is constructed, so a display set there is stale.
+-        cost_display=format_cost(phase.cost_usd, phase.unpriced_observation_count),
++        cost_display=format_cost(Decimal("0"), 0),
+         started_at=str(phase.started_at) if phase.started_at else None,
+         completed_at=str(phase.completed_at) if phase.completed_at else None,
+         model=phase.model,
