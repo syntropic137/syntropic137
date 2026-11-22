@@ -53,6 +53,8 @@ def _group(
         "cache_creation_tokens": 0,
         "cache_read_tokens": 0,
         "summary_observations": summary_observations,
+        "turn_session_count": len(turn_sessions or []),
+        # Not a column: what the session read answers for this group.
         "turn_sessions": turn_sessions,
     }
 
@@ -72,14 +74,34 @@ class _Conn:
     totals: list[dict[str, _Cell]]
     turns: list[dict[str, _Cell]] = field(default_factory=list)
     turn_reads: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
+    session_reads: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
+
+    def _sessions_of(self, *keys: object) -> list[dict[str, _Cell]]:
+        """The summary-less sessions of the groups bound by their model columns.
+
+        All under one NULL day: the day rollup has seen none of them.
+        """
+        bound = set(zip(*keys, strict=True))  # type: ignore[call-overload]  # three parallel lists
+        sessions = [
+            session
+            for row in self.totals
+            if row["vendor_cost_usd"] is None
+            and (row["model"], row[REQUESTED_MODEL_COLUMN], row[HAS_REQUESTED_MODEL_COLUMN])
+            in bound
+            for session in row["turn_sessions"] or []  # type: ignore[union-attr]  # list[str] | None
+        ]
+        return [{"day": None, "sessions": sessions}] if sessions else []
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, _Cell]]:
         if "summary_observations" in query:
             return self.totals
+        if "JOIN unnest(" in query:
+            self.session_reads.append((query, args))
+            return self._sessions_of(*args[-3:])
         if "AS observations" in query:
             self.turn_reads.append((query, args))
             return self.turns
-        return []  # the span lookup: no days known, so unbounded
+        return []
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, _Cell]:
         return {"sessions": 1}
@@ -193,4 +215,4 @@ def test_zero_token_turns_are_not_counted() -> None:
     The rollup's ``observations`` counts it, which is why the count is read
     from agent_events with this predicate rather than from the rollup.
     """
-    assert f"AND NOT {zero_usage_group_by()}" in query_service._UNPRICED_TURNS_QUERY
+    assert f"AND NOT {zero_usage_group_by()}" in query_service._UNPRICED_TURNS_DAY

@@ -11,6 +11,10 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ## [Unreleased]
 
+### Added
+
+- The dashboard's contribution heatmap no longer shows an incomplete cost as a full dollar amount. The daily tooltip and the "Total cost" card now show `unpriced`, or `>=$X (partial)`, when some of that day's or that window's usage could not be priced. The API returns these as `cost_display` on each day and `total_cost_display` for the window. (#897) (#2352)
+
 ## [1.0.6] - 2026-11-21
 
 ### Added

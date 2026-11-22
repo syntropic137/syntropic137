@@ -21,7 +21,7 @@ afterEach(() => configureClient({ fixtures: false }))
 
 describe('contribution heatmap fixture contract', () => {
   it('reads the bucket fields from the generated API model', () => {
-    expect(schemaProps(apiTypes, 'HeatmapDayBucketResponse').sort()).toEqual(['breakdown', 'count', 'date', 'failed'])
+    expect(schemaProps(apiTypes, 'HeatmapDayBucketResponse').sort()).toEqual(['breakdown', 'cost_display', 'count', 'date', 'failed'])
   })
 
   it('sends only fields HeatmapDayBucketResponse declares, failed among them', async () => {

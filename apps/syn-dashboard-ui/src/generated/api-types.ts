@@ -3300,6 +3300,8 @@ export interface components {
              * @default 0
              */
             total: number;
+            /** Total Cost Display */
+            total_cost_display: string;
             /** Days */
             days?: components["schemas"]["HeatmapDayBucketResponse"][];
             /** Filter */
@@ -6221,6 +6223,8 @@ export interface components {
             breakdown?: {
                 [key: string]: number;
             };
+            /** Cost Display */
+            cost_display: string;
             /**
              * Failed
              * @default 0
