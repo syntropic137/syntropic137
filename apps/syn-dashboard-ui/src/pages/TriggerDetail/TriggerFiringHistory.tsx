@@ -30,9 +30,7 @@ function HistoryRow({ entry, idx }: { entry: TriggerHistoryEntry; idx: number })
                 PR {entry.pr_number}
               </span>
             )}
-            {entry.cost_usd != null && (
-              <span>${Number(entry.cost_usd).toFixed(4)}</span>
-            )}
+            <span data-testid="firing-cost">{entry.cost_display}</span>
           </div>
         </div>
       </div>

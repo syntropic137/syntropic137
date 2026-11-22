@@ -164,6 +164,7 @@ _NO_PAIR: dict[str, str] = {
     "insights.py": "/insights/cost sums many ExecutionCost rows into one GlobalCostResponse, not a flat copy; its coverage hop is pinned by apps/syn-api/tests/test_897_insights_cost_reports_unpriced_work.py",
     "_cost_rollup.py": "sums many ExecutionCost rows into one CostRollup for the insights, repo and system cost responses, not a flat copy; its coverage hop is pinned by apps/syn-api/tests/test_897_repo_and_system_cost_from_execution_cost.py",
     "metrics.py": "GET /metrics sums many ExecutionCost rows into one MetricsResponse total (through _cost_rollup) and into per-phase sums, not a flat copy; its coverage hop is pinned by apps/syn-api/tests/test_897_metrics_reports_unpriced_work.py",
+    "triggers/queries.py": "trigger history reads ExecutionCost only for a firing's total and coverage, rendered into cost_display on TriggerHistoryEntryResponse, not a flat copy; its coverage hop is pinned by apps/syn-api/tests/test_897_trigger_history_cost.py",
 }
 
 #: Fields the destination deliberately does not take from the read model, keyed

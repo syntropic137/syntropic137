@@ -17,7 +17,11 @@ logger = logging.getLogger(__name__)
 
 
 class LeaseKeeper:
-    """Renews ``run`` every ``every`` seconds while ``drain`` runs, and cancels it on loss.
+    """Renews ``run`` every ``every`` seconds while ``work`` runs, and cancels it on loss.
+
+    ``work`` is everything the host does under the claim, the drain and the
+    teardown checks after it up to the close: a Lease that lapses in any of
+    it lets a reconciler fence a run whose outcome is already recorded (#2345).
 
     A failed renewal for any reason other than ``RunLeaseLost`` (the store is
     briefly unreachable) is retried at the next tick: the Lease is either still
@@ -39,18 +43,25 @@ class LeaseKeeper:
         self._every = every
         self.lost = False
 
-    async def hold(self, drain: asyncio.Task[object]) -> None:
-        while not drain.done():
+    async def hold(self, work: asyncio.Task[object]) -> None:
+        while not work.done():
             await self._sleep(self._every)
             try:
                 await self._queue.renew(self._run)
             except RunLeaseLost:
+                if work.done():
+                    # The work ended while this renewal was in flight, most
+                    # often because its close released the row. Whatever ended
+                    # it (close, an exception, a cancellation), nothing is left
+                    # under the claim to cancel, so this is not reported as a
+                    # loss; a row left claimed is still fenced by a reconciler.
+                    return
                 self.lost = True
                 logger.warning(
                     "Lease on %s lost: self-fencing, the run takes the interruption path",
                     self._run.execution_id,
                 )
-                drain.cancel()
+                work.cancel()
                 return
             except Exception:
                 logger.exception("Renewing the lease on %s failed", self._run.execution_id)
