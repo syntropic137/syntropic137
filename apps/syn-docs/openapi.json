@@ -9873,6 +9873,10 @@
             "title": "Total",
             "default": 0.0
           },
+          "total_cost_display": {
+            "type": "string",
+            "title": "Total Cost Display"
+          },
           "days": {
             "items": {
               "$ref": "#/components/schemas/HeatmapDayBucketResponse"
@@ -9899,7 +9903,8 @@
         "required": [
           "metric",
           "start_date",
-          "end_date"
+          "end_date",
+          "total_cost_display"
         ],
         "title": "ContributionHeatmapResponse",
         "description": "Contribution heatmap data."
@@ -16837,6 +16842,10 @@
             "type": "object",
             "title": "Breakdown"
           },
+          "cost_display": {
+            "type": "string",
+            "title": "Cost Display"
+          },
           "failed": {
             "type": "integer",
             "title": "Failed",
@@ -16845,7 +16854,8 @@
         },
         "type": "object",
         "required": [
-          "date"
+          "date",
+          "cost_display"
         ],
         "title": "HeatmapDayBucketResponse",
         "description": "Single day's aggregated activity."
