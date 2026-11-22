@@ -39,6 +39,7 @@ from syn_domain.contexts.orchestration.slices.execution_cost.query_service impor
     ExecutionCostQueryService,
     ExecutionCostsForIds,
 )
+from syn_domain.storable_text import pg_safe
 from syn_shared.agents import ModelId
 from syn_shared.display.formatters import EM_DASH, UNPRICED, format_cost
 
@@ -89,7 +90,9 @@ class _ExecutionCosts:
         self.calls.append(list(execution_ids))
         if self.fail:
             raise RuntimeError("timescale unavailable")
-        wanted = set(execution_ids)
+        # As the real reader: ids are bound in their stored (pg_safe) form and
+        # each cost comes back keyed by that form, not by the raw id asked for.
+        wanted = {pg_safe(i) for i in execution_ids}
         return ExecutionCostsForIds(
             costs=[c for c in self.costs if c.execution_id in wanted], tool_calls={}
         )
@@ -343,3 +346,21 @@ async def test_global_history_reads_no_cost_however_many_triggers(
     assert response.status_code == 200, response.text
     assert len(TriggerHistoryListResponse.model_validate(response.json()).entries) == 1
     assert lane2.calls == []
+
+
+async def test_firing_whose_execution_id_is_not_storable_still_finds_its_cost(
+    client: AsyncClient, lane2: _ExecutionCosts, history: _History
+) -> None:
+    # Lane 2 keys a cost by the stored form of the id. A raw id carrying a NUL
+    # is never stored as spelled, so looking it up raw would read "no cost".
+    raw = "exec-nul\x00id"
+    assert pg_safe(raw) != raw
+    history.entries = [_firing(raw)]
+    lane2.costs = [_cost(pg_safe(raw), "0.75")]
+
+    response = await client.get(f"/triggers/{TRIGGER}/history")
+    assert response.status_code == 200, response.text
+    (entry,) = TriggerHistoryResponse.model_validate(response.json()).entries
+
+    assert entry.cost_display == "$0.75"
+    assert entry.cost_usd == 0.75
