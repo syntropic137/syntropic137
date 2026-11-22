@@ -51,7 +51,9 @@ def _stub_costs(
 async def test_a_sessions_1h_writes_reach_the_response(monkeypatch: pytest.MonkeyPatch) -> None:
     from syn_api.routes.costs import list_session_costs_endpoint
 
-    cost = SessionCost(session_id="sess-1", cache_creation_tokens=4096, cache_creation_1h_tokens=1500)
+    cost = SessionCost(
+        session_id="sess-1", cache_creation_tokens=4096, cache_creation_1h_tokens=1500
+    )
     _stub_costs(monkeypatch, sessions=[cost])
 
     [response] = await list_session_costs_endpoint(execution_id=None, limit=50)
@@ -66,7 +68,9 @@ async def test_an_executions_1h_writes_reach_the_response(
 ) -> None:
     from syn_api.routes.costs import list_execution_costs_endpoint
 
-    cost = ExecutionCost(execution_id="exec-1", cache_creation_tokens=4096, cache_creation_1h_tokens=1500)
+    cost = ExecutionCost(
+        execution_id="exec-1", cache_creation_tokens=4096, cache_creation_1h_tokens=1500
+    )
     _stub_costs(monkeypatch, executions=[cost])
 
     [response] = await list_execution_costs_endpoint(limit=50)
