@@ -25,6 +25,7 @@ from syn_domain.contexts.orchestration import (
     read_record,
     read_start_record,
 )
+from syn_shared.display import EM_DASH
 
 from .models import ExecutionDetailResponse, ExecutionStartQueueInfo, ExecutionSummaryResponse
 
@@ -229,6 +230,9 @@ async def not_yet_started(
         total_cache_creation_tokens=0,
         total_cache_read_tokens=0,
         total_tokens=0,
+        # No cost has been incurred or measured yet: the same em dash the
+        # list row for this start shows, not a "$0.00" that reads as free.
+        total_cost_display=EM_DASH,
         review_verdict=None,
         delegation_failure=None,
         quarantined_refs=[],
