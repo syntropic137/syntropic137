@@ -28,6 +28,9 @@ from syn_domain.storable_text import pg_safe
 from syn_shared.display.formatters import format_cost
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.github.domain.read_models.trigger_history_entry import (
+        TriggerHistoryEntry as DomainHistoryEntry,
+    )
     from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
         ExecutionCost,
     )
@@ -242,11 +245,10 @@ async def get_trigger(
     )
 
 
-async def get_trigger_history(
-    trigger_id: str,
-    limit: int = 50,
-) -> Result[list[TriggerHistoryEntry], TriggerError]:
-    """Get execution history for a trigger rule."""
+async def _read_trigger_history(
+    trigger_id: str, limit: int
+) -> Result[list[DomainHistoryEntry], TriggerError]:
+    """A trigger's firings as the projection stores them, without cost."""
     from syn_domain.contexts.github import GetTriggerHistoryQuery, get_trigger_history_handler
 
     try:
@@ -254,8 +256,18 @@ async def get_trigger_history(
     except ValueError as e:
         return Err(TriggerError.INVALID_INPUT, message=str(e))
 
-    handler = get_trigger_history_handler()
-    entries = await handler.handle(query)
+    return Ok(await get_trigger_history_handler().handle(query))
+
+
+async def get_trigger_history(
+    trigger_id: str,
+    limit: int = 50,
+) -> Result[list[TriggerHistoryEntry], TriggerError]:
+    """Get execution history for a trigger rule."""
+    read = await _read_trigger_history(trigger_id, limit)
+    if isinstance(read, Err):
+        return read
+    entries = read.value
     costs = await _execution_costs([e.execution_id for e in entries if e.execution_id])
 
     history: list[TriggerHistoryEntry] = []
@@ -289,12 +301,14 @@ def _priced_cost(costs: dict[str, ExecutionCost] | None, execution_id: str) -> E
     """A firing's execution cost, or ``None`` when there is nothing to show.
 
     Nothing to show: a blocked firing (no execution), an execution with no cost
-    data yet, or a cost read that failed.
+    recorded yet, or a cost read that failed. Every row the reader returns is
+    shown, including a cache-only or summary-only one: ``has_cost_data`` is
+    the executions list's fallback predicate and would erase measured spend
+    and its unpriced count here, where there is no fallback to prefer.
     """
     if not costs or not execution_id:
         return None
-    stored = costs.get(pg_safe(execution_id))
-    return stored if stored is not None and stored.has_cost_data else None
+    return costs.get(pg_safe(execution_id))
 
 
 async def _execution_costs(execution_ids: list[str]) -> dict[str, ExecutionCost] | None:
@@ -344,7 +358,9 @@ async def _collect_history_entries(
     """Collect history entries across all triggers."""
     all_entries: list[TriggerHistoryListEntry] = []
     for t in triggers:
-        hist = await get_trigger_history(trigger_id=t.trigger_id, limit=limit)
+        # The global list carries no cost, so it reads the projection alone:
+        # pricing here would cost one Lane 2 read per trigger, for nothing.
+        hist = await _read_trigger_history(t.trigger_id, limit)
         if isinstance(hist, Err):
             continue
         all_entries.extend(
