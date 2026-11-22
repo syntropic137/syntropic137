@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 
 from syn_adapters.projection_stores.prefix_match import format_ambiguous_error
-from syn_api._wiring import ensure_connected, get_trigger_store
+from syn_api._wiring import ensure_connected, get_projection_mgr, get_trigger_store
 from syn_api.types import (
     Err,
     Ok,
@@ -24,6 +24,16 @@ from syn_api.types import (
     TriggerListResponse,
     TriggerSummary,
 )
+from syn_domain.storable_text import pg_safe
+from syn_shared.display.formatters import format_cost
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.github.domain.read_models.trigger_history_entry import (
+        TriggerHistoryEntry as DomainHistoryEntry,
+    )
+    from syn_domain.contexts.orchestration.domain.read_models.execution_cost import (
+        ExecutionCost,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -235,11 +245,10 @@ async def get_trigger(
     )
 
 
-async def get_trigger_history(
-    trigger_id: str,
-    limit: int = 50,
-) -> Result[list[TriggerHistoryEntry], TriggerError]:
-    """Get execution history for a trigger rule."""
+async def _read_trigger_history(
+    trigger_id: str, limit: int
+) -> Result[list[DomainHistoryEntry], TriggerError]:
+    """A trigger's firings as the projection stores them, without cost."""
     from syn_domain.contexts.github import GetTriggerHistoryQuery, get_trigger_history_handler
 
     try:
@@ -247,11 +256,28 @@ async def get_trigger_history(
     except ValueError as e:
         return Err(TriggerError.INVALID_INPUT, message=str(e))
 
-    handler = get_trigger_history_handler()
-    entries = await handler.handle(query)
+    return Ok(await get_trigger_history_handler().handle(query))
 
-    return Ok(
-        [
+
+async def get_trigger_history(
+    trigger_id: str,
+    limit: int = 50,
+) -> Result[list[TriggerHistoryEntry], TriggerError]:
+    """Get execution history for a trigger rule."""
+    read = await _read_trigger_history(trigger_id, limit)
+    if isinstance(read, Err):
+        return read
+    entries = read.value
+    costs = await _execution_costs([e.execution_id for e in entries if e.execution_id])
+
+    history: list[TriggerHistoryEntry] = []
+    for e in entries:
+        # The projection's stored cost_usd is never written; the cost is the
+        # execution's, read from Lane 2 now.
+        priced = _priced_cost(costs, e.execution_id)
+        cost = priced.total_cost_usd if priced is not None else None
+        unpriced = priced.unpriced_observation_count if priced is not None else 0
+        history.append(
             TriggerHistoryEntry(
                 trigger_id=e.trigger_id,
                 execution_id=e.execution_id,
@@ -261,13 +287,45 @@ async def get_trigger_history(
                 pr_number=e.pr_number,
                 fired_at=e.fired_at,
                 status=e.status,
-                cost_usd=e.cost_usd,
+                cost_usd=float(cost) if cost is not None else None,
+                cost_display=format_cost(cost, unpriced),
+                unpriced_observation_count=unpriced,
                 guard_name=e.guard_name,
                 block_reason=e.block_reason,
             )
-            for e in entries
-        ]
-    )
+        )
+    return Ok(history)
+
+
+def _priced_cost(costs: dict[str, ExecutionCost] | None, execution_id: str) -> ExecutionCost | None:
+    """A firing's execution cost, or ``None`` when there is nothing to show.
+
+    Nothing to show: a blocked firing (no execution), an execution with no cost
+    recorded yet, or a cost read that failed. Every row the reader returns is
+    shown, including a cache-only or summary-only one: ``has_cost_data`` is
+    the executions list's fallback predicate and would erase measured spend
+    and its unpriced count here, where there is no fallback to prefer.
+    """
+    if not costs or not execution_id:
+        return None
+    return costs.get(pg_safe(execution_id))
+
+
+async def _execution_costs(execution_ids: list[str]) -> dict[str, ExecutionCost] | None:
+    """Each execution's Lane 2 cost, by stored (``pg_safe``) id, in one batched read.
+
+    ``None`` when the read failed, as distinct from ``{}`` (nothing to price, or
+    nothing priced yet). Fails soft, as the eval run list does: the caller shows
+    history whose cost cannot be read as history with no cost, never an error.
+    """
+    if not execution_ids:
+        return {}
+    try:
+        read = await get_projection_mgr().execution_cost.list_costs_for_ids(execution_ids)
+    except Exception:
+        logger.debug("Failed to load execution costs for trigger history", exc_info=True)
+        return None
+    return {cost.execution_id: cost for cost in read.costs}
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +358,9 @@ async def _collect_history_entries(
     """Collect history entries across all triggers."""
     all_entries: list[TriggerHistoryListEntry] = []
     for t in triggers:
-        hist = await get_trigger_history(trigger_id=t.trigger_id, limit=limit)
+        # The global list carries no cost, so it reads the projection alone:
+        # pricing here would cost one Lane 2 read per trigger, for nothing.
+        hist = await _read_trigger_history(t.trigger_id, limit)
         if isinstance(hist, Err):
             continue
         all_entries.extend(
@@ -365,6 +425,8 @@ async def get_trigger_history_endpoint(
                 pr_number=e.pr_number,
                 status=e.status,
                 cost_usd=e.cost_usd,
+                cost_display=e.cost_display,
+                unpriced_observation_count=e.unpriced_observation_count,
                 guard_name=e.guard_name,
                 block_reason=e.block_reason,
             )
