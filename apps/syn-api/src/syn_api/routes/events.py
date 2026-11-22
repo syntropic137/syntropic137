@@ -78,6 +78,9 @@ class CostSummaryResponse(BaseModel):
     output_tokens: int = 0
     total_tokens: int = 0
     cache_creation_tokens: int = 0
+    cache_creation_1h_tokens: int = 0
+    """The 1-hour share of ``cache_creation_tokens``, which stays the total of every
+    TTL; the 5-minute share is the difference (#2145)."""
     cache_read_tokens: int = 0
     estimated_cost_usd: Decimal | None = None
     total_cost_display: str = EM_DASH
@@ -405,6 +408,7 @@ class TokenMetrics:
     output_tokens: int
     total_tokens: int
     cache_creation_tokens: int
+    cache_creation_1h_tokens: int
     cache_read_tokens: int
     total_cost_usd: Decimal
     unpriced_observation_count: int
@@ -423,6 +427,7 @@ async def _get_session_token_metrics(
             output_tokens=cost.output_tokens,
             total_tokens=cost.total_tokens,
             cache_creation_tokens=cost.cache_creation_tokens,
+            cache_creation_1h_tokens=cost.cache_creation_1h_tokens,
             cache_read_tokens=cost.cache_read_tokens,
             total_cost_usd=cost.total_cost_usd,
             unpriced_observation_count=cost.unpriced_observation_count,
@@ -443,6 +448,7 @@ async def _get_execution_token_metrics(
             output_tokens=exec_cost.output_tokens,
             total_tokens=exec_cost.total_tokens,
             cache_creation_tokens=exec_cost.cache_creation_tokens,
+            cache_creation_1h_tokens=exec_cost.cache_creation_1h_tokens,
             cache_read_tokens=exec_cost.cache_read_tokens,
             total_cost_usd=exec_cost.total_cost_usd,
             unpriced_observation_count=exec_cost.unpriced_observation_count,
@@ -606,6 +612,7 @@ async def get_session_costs_endpoint(session_id: str) -> CostSummaryResponse:
         output_tokens=m.output_tokens,
         total_tokens=m.total_tokens,
         cache_creation_tokens=m.cache_creation_tokens,
+        cache_creation_1h_tokens=m.cache_creation_1h_tokens,
         cache_read_tokens=m.cache_read_tokens,
         estimated_cost_usd=estimated_cost_usd,
         total_cost_display=format_cost(estimated_cost_usd, m.unpriced_observation_count),

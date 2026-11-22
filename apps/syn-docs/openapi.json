@@ -13663,6 +13663,11 @@
             "title": "Cache Creation Tokens",
             "default": 0
           },
+          "cache_creation_1h_tokens": {
+            "type": "integer",
+            "title": "Cache Creation 1H Tokens",
+            "default": 0
+          },
           "cache_read_tokens": {
             "type": "integer",
             "title": "Cache Read Tokens",
@@ -16578,6 +16583,11 @@
           "total_cache_creation_tokens": {
             "type": "integer",
             "title": "Total Cache Creation Tokens",
+            "default": 0
+          },
+          "total_cache_creation_1h_tokens": {
+            "type": "integer",
+            "title": "Total Cache Creation 1H Tokens",
             "default": 0
           },
           "total_cache_read_tokens": {
@@ -21345,6 +21355,11 @@
           "cache_creation_tokens": {
             "type": "integer",
             "title": "Cache Creation Tokens",
+            "default": 0
+          },
+          "cache_creation_1h_tokens": {
+            "type": "integer",
+            "title": "Cache Creation 1H Tokens",
             "default": 0
           },
           "cache_read_tokens": {
@@ -26657,6 +26672,11 @@
           "cache_creation_tokens": {
             "type": "integer",
             "title": "Cache Creation Tokens",
+            "default": 0
+          },
+          "cache_creation_1h_tokens": {
+            "type": "integer",
+            "title": "Cache Creation 1H Tokens",
             "default": 0
           },
           "cache_read_tokens": {

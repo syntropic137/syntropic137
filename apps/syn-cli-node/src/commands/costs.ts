@@ -17,6 +17,11 @@ function safeCost(v: string): string {
   try { return formatCost(v); } catch { return v; }
 }
 
+// The total covers every cache TTL; the 1-hour share is priced at its own rate (#2145).
+function formatCacheWrite(total: number, oneHour: number | undefined): string {
+  return `${formatTokens(total)} (1h: ${formatTokens(oneHour ?? 0)})`;
+}
+
 const summaryCommand: CommandDef = {
   name: "summary",
   description: "Show aggregated cost summary",
@@ -110,7 +115,7 @@ const sessionDetailCommand: CommandDef = {
     print(`  ${style("Cost:", BOLD)} ${formatCostWithCoverage(s.total_cost_usd, s.unpriced_observation_count)}`);
     printUnpricedNote(s.unpriced_observation_count);
     print(`  ${style("Tokens:", BOLD)} ${formatTokens(s.total_tokens)} (in: ${formatTokens(s.input_tokens)}, out: ${formatTokens(s.output_tokens)})`);
-    if (s.cache_creation_tokens) print(`  ${style("Cache Write:", BOLD)} ${formatTokens(s.cache_creation_tokens)}`);
+    if (s.cache_creation_tokens) print(`  ${style("Cache Write:", BOLD)} ${formatCacheWrite(s.cache_creation_tokens, s.cache_creation_1h_tokens)}`);
     if (s.cache_read_tokens) print(`  ${style("Cache Read:", BOLD)}  ${formatTokens(s.cache_read_tokens)}`);
     print(`  ${style("Tool Calls:", BOLD)} ${s.tool_calls}  ${style("Turns:", BOLD)} ${s.turns}`);
     print(`  ${style("Duration:", BOLD)} ${formatDuration(s.duration_ms)}`);
@@ -166,7 +171,7 @@ const executionDetailCommand: CommandDef = {
     printUnpricedNote(e.unpriced_observation_count);
     print(`  ${style("Sessions:", BOLD)} ${e.session_count}`);
     print(`  ${style("Tokens:", BOLD)} ${formatTokens(e.total_tokens)} (in: ${formatTokens(e.input_tokens)}, out: ${formatTokens(e.output_tokens)})`);
-    if (e.cache_creation_tokens) print(`  ${style("Cache Write:", BOLD)} ${formatTokens(e.cache_creation_tokens)}`);
+    if (e.cache_creation_tokens) print(`  ${style("Cache Write:", BOLD)} ${formatCacheWrite(e.cache_creation_tokens, e.cache_creation_1h_tokens)}`);
     if (e.cache_read_tokens) print(`  ${style("Cache Read:", BOLD)}  ${formatTokens(e.cache_read_tokens)}`);
     print(`  ${style("Duration:", BOLD)} ${formatDuration(e.duration_ms)}`);
     print(`  ${style("Started:", BOLD)} ${formatTimestamp(e.started_at)}`);

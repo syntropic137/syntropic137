@@ -2924,6 +2924,9 @@ class SessionCostData(BaseModel):
     cost stayed correct, because pricing reads the cache fields directly.
     """
     cache_creation_tokens: int = 0
+    cache_creation_1h_tokens: int = 0
+    """The 1-hour share of ``cache_creation_tokens``, which stays the total of every
+    TTL; the 5-minute share is the difference (#2145)."""
     cache_read_tokens: int = 0
     tool_calls: int = 0
     turns: int = 0
@@ -2974,6 +2977,9 @@ class ExecutionCostData(BaseModel):
     # back to its `= 0` defaults. An execution reported 0 cache reads and 0 tool
     # calls while its own sessions reported 144,640 and 11.
     cache_creation_tokens: int = 0
+    cache_creation_1h_tokens: int = 0
+    """The 1-hour share of ``cache_creation_tokens``, which stays the total of every
+    TTL; the 5-minute share is the difference (#2145)."""
     cache_read_tokens: int = 0
     tool_calls: int = 0
     turns: int = 0
@@ -4084,6 +4090,9 @@ class GlobalCostResponse(BaseModel):
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_cache_creation_tokens: int = 0
+    total_cache_creation_1h_tokens: int = 0
+    """The 1-hour share of ``total_cache_creation_tokens``, which stays the total of
+    every TTL; the 5-minute share is the difference (#2145)."""
     total_cache_read_tokens: int = 0
     cost_by_repo: dict[str, str] = Field(default_factory=dict)
     cost_by_workflow: dict[str, str] = Field(default_factory=dict)
