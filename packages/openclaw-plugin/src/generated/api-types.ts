@@ -11111,6 +11111,11 @@ export interface components {
              */
             cache_creation_tokens: number;
             /**
+             * Cache Creation 1H Tokens
+             * @default 0
+             */
+            cache_creation_1h_tokens: number;
+            /**
              * Cache Read Tokens
              * @default 0
              */

@@ -26664,6 +26664,11 @@
             "title": "Cache Creation Tokens",
             "default": 0
           },
+          "cache_creation_1h_tokens": {
+            "type": "integer",
+            "title": "Cache Creation 1H Tokens",
+            "default": 0
+          },
           "cache_read_tokens": {
             "type": "integer",
             "title": "Cache Read Tokens",

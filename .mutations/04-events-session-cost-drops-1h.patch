@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/routes/events.py b/apps/syn-api/src/syn_api/routes/events.py
+index ef7060f8a..f6f3b1bc1 100644
+--- a/apps/syn-api/src/syn_api/routes/events.py
++++ b/apps/syn-api/src/syn_api/routes/events.py
+@@ -612,7 +612,6 @@ async def get_session_costs_endpoint(session_id: str) -> CostSummaryResponse:
+         output_tokens=m.output_tokens,
+         total_tokens=m.total_tokens,
+         cache_creation_tokens=m.cache_creation_tokens,
+-        cache_creation_1h_tokens=m.cache_creation_1h_tokens,
+         cache_read_tokens=m.cache_read_tokens,
+         estimated_cost_usd=estimated_cost_usd,
+         total_cost_display=format_cost(estimated_cost_usd, m.unpriced_observation_count),

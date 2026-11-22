@@ -13,11 +13,15 @@ as 0 rather than passing by coincidence.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pytest
 
 from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
+
+if TYPE_CHECKING:
+    from syn_api.routes.events import CostSummaryResponse as SessionCostSummaryResponse
 
 pytestmark = pytest.mark.unit
 
@@ -119,3 +123,64 @@ async def test_the_global_cost_sums_the_1h_share(monkeypatch: pytest.MonkeyPatch
 
     assert response.total_cache_creation_tokens == 5796
     assert response.total_cache_creation_1h_tokens == 1750
+
+
+@dataclass
+class _StubSessionCostProjection:
+    cost: SessionCost
+
+    async def get_session_cost(self, session_id: str) -> SessionCost | None:
+        return self.cost if session_id == self.cost.session_id else None
+
+
+@dataclass
+class _StubManager:
+    session_cost: _StubSessionCostProjection
+    store: object = None
+
+
+async def _events_session_costs(
+    monkeypatch: pytest.MonkeyPatch, cost: SessionCost
+) -> SessionCostSummaryResponse:
+    """``GET /events/sessions/{id}/costs``, the route ``syn events costs`` reads."""
+    from syn_api import prefix_resolver
+    from syn_api.routes import events
+
+    async def _resolve(_store: object, _ns: str, partial_id: str, _entity: str) -> str:
+        return partial_id
+
+    manager = _StubManager(_StubSessionCostProjection(cost))
+    monkeypatch.setattr(events, "ensure_connected", _connected)
+    monkeypatch.setattr(events, "get_projection_mgr", lambda: manager)
+    monkeypatch.setattr(prefix_resolver, "resolve_or_raise", _resolve)
+    return await events.get_session_costs_endpoint(cost.session_id)
+
+
+@pytest.mark.asyncio
+async def test_the_events_session_cost_carries_the_1h_share(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The events route has its own ``CostSummaryResponse``, built via ``TokenMetrics``."""
+    response = await _events_session_costs(
+        monkeypatch,
+        SessionCost(session_id="sess-1", cache_creation_tokens=4096, cache_creation_1h_tokens=1500),
+    )
+    # The wire shape, which is what the CLI and dashboard read.
+    body = response.model_dump(mode="json")
+
+    assert body["cache_creation_tokens"] == 4096
+    assert body["cache_creation_1h_tokens"] == 1500
+
+
+@pytest.mark.asyncio
+async def test_the_events_session_cost_of_an_older_row_reports_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = await _events_session_costs(
+        monkeypatch,
+        SessionCost.from_dict({"session_id": "sess-old", "cache_creation_tokens": 4096}),
+    )
+    body = response.model_dump(mode="json")
+
+    assert body["cache_creation_tokens"] == 4096
+    assert body["cache_creation_1h_tokens"] == 0
