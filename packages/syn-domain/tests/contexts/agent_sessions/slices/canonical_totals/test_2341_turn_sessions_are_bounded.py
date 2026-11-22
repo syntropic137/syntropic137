@@ -15,6 +15,7 @@ import pytest
 from .test_897_canonical_totals_coverage import (
     RATED,
     UNRATED,
+    _Cell,
     _Conn,
     _group,
     _service,
@@ -29,10 +30,10 @@ class _RecordingConn(_Conn):
 
     totals_query: str = ""
 
-    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:  # type: ignore[override]
+    async def fetch(self, query: str, *args: object) -> list[dict[str, _Cell]]:
         if "summary_observations" in query:
             self.totals_query = query
-        return await super().fetch(query, *args)  # type: ignore[return-value]
+        return await super().fetch(query, *args)
 
 
 def _summary_less(prefix: str, n: int) -> list[str]:
