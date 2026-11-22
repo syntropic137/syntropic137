@@ -111,6 +111,18 @@ const SAMPLE_DAYS: Row[] = [
   ['2026-10-05', 6, 4, 2, 0.66, 45600, 17100, 68400, 438900, 0],
 ]
 
+/**
+ * `format_cost` for a fully priced figure, as the API renders `cost_display`
+ * (syn_shared/display/formatters.py). No fixture row has unpriced tokens, so
+ * the partial and unpriced states never arise here.
+ */
+function pricedCost(usd: number): string {
+  if (usd === 0) return '$0.00'
+  if (usd < 0.01) return '<$0.01'
+  if (usd >= 1000) return `$${(usd / 1000).toFixed(1)}k`
+  return `$${usd.toFixed(2)}`
+}
+
 function day(r: Row): HeatmapDay {
   const [date, sessions, executions, commits, cost, input, output, cacheWrite, cacheRead, failed] = r
   return {
@@ -127,7 +139,9 @@ function day(r: Row): HeatmapDay {
       cache_creation_tokens: cacheWrite,
       cache_read_tokens: cacheRead,
       failed,
+      unpriced_tokens: 0,
     },
+    cost_display: pricedCost(cost),
     failed,
   }
 }
@@ -140,6 +154,7 @@ export const insightRoutes: FixtureRoute[] = [
     const start = query.get('start_date') ?? '2025-10-08'
     const end = query.get('end_date') ?? today()
     const inRange = ALL.filter((d) => d.date >= start && d.date <= end && d.date <= today())
-    return { metric: query.get('metric') ?? 'sessions', start_date: start, end_date: end, total: inRange.reduce((n, d) => n + d.count, 0), days: inRange }
+    const cost = inRange.reduce((n, d) => n + (d.breakdown?.cost_usd ?? 0), 0)
+    return { metric: query.get('metric') ?? 'sessions', start_date: start, end_date: end, total: inRange.reduce((n, d) => n + d.count, 0), total_cost_display: pricedCost(cost), days: inRange }
   }),
 ]
