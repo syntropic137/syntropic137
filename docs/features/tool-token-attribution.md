@@ -105,7 +105,8 @@ Response includes:
 
 The dashboard has no component that renders these fields. The former
 `ToolCostBreakdown` and `SessionCostCard` were removed (#897) because they
-formatted dollars without cost coverage, showing unpriced work as `$0.00`.
+formatted dollars without cost coverage, showing unpriced work as a zero
+dollar amount.
 Read `tokens_by_tool` and `cost_by_tool_tokens` from
 `GET /api/costs/sessions/{session_id}`.
 
