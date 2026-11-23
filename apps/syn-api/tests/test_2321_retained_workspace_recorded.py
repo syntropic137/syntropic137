@@ -213,4 +213,3 @@ async def test_an_orphan_whose_record_fails_is_still_kept(
 
     assert cleared is not None
     assert [d.workspace_id for d in cleared] == ["ws-clean"]
-

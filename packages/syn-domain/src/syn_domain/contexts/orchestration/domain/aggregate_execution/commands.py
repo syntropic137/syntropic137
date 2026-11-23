@@ -28,9 +28,6 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
         ImageManifestReading,
     )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_retention import (
-        RetainedReason,
-    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
         SourceCommit,
@@ -48,6 +45,9 @@ if TYPE_CHECKING:
         ReportedFailureReason,
         ReviewVerdict,
         SideEffectStatus,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_retention import (
+        RetainedReason,
     )
     from syn_shared.upstream_failure import UpstreamFailureKind
 

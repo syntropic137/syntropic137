@@ -336,15 +336,15 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.orphaned_workspac
     judge_owner,
     remove_reclaimed_dir,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.retained_workspace_record import (
-    RetainedWorkspaceRecorder,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     InheritanceUnavailableError,
     inherited_outputs,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.retained_workspace_record import (
+    RetainedWorkspaceRecorder,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
     SalvagedPhase,

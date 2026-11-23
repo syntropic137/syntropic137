@@ -96,6 +96,9 @@ from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent im
 from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
     PhaseStartedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseWorkspaceRetainedEvent import (
+    PhaseWorkspaceRetainedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.TokensInjectedEvent import (
     TokensInjectedEvent,
 )
@@ -137,9 +140,6 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceCreatingEvent impo
 )
 from syn_domain.contexts.orchestration.domain.events.WorkspaceDestroyedEvent import (
     WorkspaceDestroyedEvent,
-)
-from syn_domain.contexts.orchestration.domain.events.PhaseWorkspaceRetainedEvent import (
-    PhaseWorkspaceRetainedEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.WorkspaceDestroyingEvent import (
     WorkspaceDestroyingEvent,

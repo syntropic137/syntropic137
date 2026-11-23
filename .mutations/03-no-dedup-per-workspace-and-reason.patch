@@ -1,8 +1,8 @@
-diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
-index fb423bb14..f700ca1c6 100644
---- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
-+++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
-@@ -800,8 +800,6 @@ class WorkflowExecutionAggregate(
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/workspace_retention_handlers.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/workspace_retention_handlers.py
+index 983f20e09..60783d68a 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/workspace_retention_handlers.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/workspace_retention_handlers.py
+@@ -63,8 +63,6 @@ class WorkspaceRetentionHandlers:
          if command.reason not in WORK_UNPROVEN:
              msg = f"{command.reason.value} says nothing about the work; it is not retained work"
              raise ValueError(msg)
