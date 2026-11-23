@@ -26,7 +26,7 @@ import type { ExecutionDetailResponse, FailureClassification, ReportedFailureRea
 import { type ExactUsd, exactUsdToString, parseExactUsd } from '../../utils/exactUsd'
 import { executionTokenTotals } from '../../utils/executionTokens'
 import { isPlatformFailure, reportedFailureNote } from '../../utils/executionOutcome'
-import { formatCostWithCoverage, formatDurationFromRange } from '../../utils/formatters'
+import { formatDurationFromRange } from '../../utils/formatters'
 import { ArtifactSection } from './ArtifactSection'
 import { SessionInventory } from './SessionInventory'
 import { PhaseTimeline } from './PhaseTimeline'
@@ -296,10 +296,7 @@ function ExecutionMetricsGrid({
       />
       <MetricCard
         title="Total Cost"
-        value={formatCostWithCoverage(
-          Number(execution.total_cost_usd),
-          execution.unpriced_observation_count
-        )}
+        value={execution.total_cost_display}
         icon={DollarSign}
         color="warning"
         scrollToId={hasCostByModel ? 'cost-by-model' : undefined}

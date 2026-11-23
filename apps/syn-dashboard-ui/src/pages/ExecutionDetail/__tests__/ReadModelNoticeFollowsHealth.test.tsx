@@ -56,6 +56,7 @@ function completedExecution(readModelStatus: ReadModelStatus | null) {
     total_cache_read_tokens: 0,
     total_tokens: 0,
     total_cost_usd: 0,
+    total_cost_display: '$0.00',
     unpriced_observation_count: 0,
     artifact_ids: [],
     error_message: null,
