@@ -107,6 +107,13 @@ _EVENT_TYPE = re.compile(r"\bevent_type\b", re.I)
 #: sessions is whatever the other side yields, which is not a value the planner
 #: can use to discard segments.
 _PINNED = r"\b(?:\w+\.)?{col}\s*(?:=|<>|!=)\s*(?:any\s*\(\s*)?\$\d+"
+#: ``unnest($1::text[], $2::timestamptz[]) AS alias(a, b)``: a row source whose
+#: every column is a bound parameter. ``alias.a`` is then ``$1``'s values - a
+#: set the planner has in hand - so a predicate correlated to it pins as surely
+#: as ``= ANY($1)`` does. Only an unnest of nothing but parameters qualifies;
+#: a column of a table, a subquery or a CTE is a join and pins nothing.
+_BOUND_UNNEST = re.compile(r"\bunnest\s*\(([^()]*)\)\s+(?:as\s+)?(\w+)\s*\(([^()]*)\)", re.I)
+_BOUND_ARRAY = re.compile(r"^\s*(\$\d+)(?:\s*::\s*[\w\[\]]+)?\s*$")
 #: What an unresolvable f-string placeholder renders as. Bare, so it reads as
 #: one opaque SQL token wherever it lands - including inside quotes.
 _OPAQUE = "_unresolved_"
@@ -456,6 +463,26 @@ def _restricted_by(predicate: str) -> tuple[str, ...]:
     )
 
 
+def _bound_unnest_columns(sql: str) -> dict[str, str]:
+    """``alias.column`` -> the ``$n`` it unnests, for unnests of bound parameters only."""
+    bound: dict[str, str] = {}
+    for match in _BOUND_UNNEST.finditer(sql):
+        arrays = [_BOUND_ARRAY.match(arg) for arg in match.group(1).split(",")]
+        columns = [column.strip() for column in match.group(3).split(",")]
+        if len(arrays) != len(columns) or not all(arrays):
+            continue
+        for column, array in zip(columns, arrays, strict=True):
+            bound[f"{match.group(2)}.{column}".lower()] = array.group(1)  # type: ignore[union-attr]  # all() above
+    return bound
+
+
+def _resolve_bound_columns(predicate: str, bound: Mapping[str, str]) -> str:
+    """The predicate with each bound unnest column read as the parameter it comes from."""
+    for reference, parameter in bound.items():
+        predicate = re.sub(rf"\b{re.escape(reference)}\b", parameter, predicate, flags=re.I)
+    return predicate
+
+
 def discover_event_type_scans(roots: Sequence[Path], *, relative_to: Path) -> list[DiscoveredScan]:
     """Every ``agent_events`` statement under ``roots`` that filters on event_type.
 
@@ -474,8 +501,11 @@ def discover_event_type_scans(roots: Sequence[Path], *, relative_to: Path) -> li
             if not _TABLE_REF.search(sql):
                 continue
             depths = _depths(sql)
+            bound = _bound_unnest_columns(sql)
             for reference in _TABLE_REF.finditer(sql):
-                predicate = _row_selecting_predicate(_statement_of(sql, depths, reference.start()))
+                predicate = _resolve_bound_columns(
+                    _row_selecting_predicate(_statement_of(sql, depths, reference.start())), bound
+                )
                 if not _EVENT_TYPE.search(predicate):
                     continue
                 found.append(
@@ -532,15 +562,13 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
     **_declared(
         f"{_DOMAIN}/agent_sessions/slices/canonical_totals/query_service.py",
         {
-            "_UNPRICED_TURNS_QUERY": _full_scan(
+            "_UNPRICED_TURNS_QUERY": _segment_discard(
                 "Token-reporting turns of the summary-less sessions in an unpriced canonical "
                 "group, one LATERAL probe per (session, UTC day) of a bound unnest. Read here "
                 "because the rollup counts zero-token turns too. Each probe pins session_id and "
-                "the day's bounds, but to the unnest's columns rather than to a $n, so this "
-                "parser cannot see the pin and counts it as none (#2341). Whether TimescaleDB "
-                "discards the other sessions' segments per probe is the integration lane's "
-                "EXPLAIN to settle, not a text pass's. Runs only when an unrated model has "
-                "turn-priced work, so priced history never reaches it."
+                "the day's bounds to the unnest's columns, which are $1-$3 (#2341). Runs only "
+                "when a model pricing left unpriced has turn-priced work, so priced history "
+                "never reaches it. Nothing bounds how many such sessions there are."
             ),
         },
     ),
@@ -843,7 +871,7 @@ def test_the_number_of_unpinned_statements_is_the_number_we_have_accepted() -> N
     the conversation.
     """
     unpinned = [scan for scan in _production_scans() if not scan.discards_segments]
-    assert len(unpinned) == 24, "\n" + "\n".join(
+    assert len(unpinned) == 23, "\n" + "\n".join(
         f"{scan.identity}: {scan.predicate}" for scan in unpinned
     )
 
@@ -861,6 +889,24 @@ def test_the_session_cost_read_path_still_pins_the_segmentby_column() -> None:
     assert all(scan.discards_segments for scan in scans), [
         (str(scan.identity), scan.predicate) for scan in scans
     ]
+
+
+def test_the_unpriced_turns_read_pins_its_session_and_both_day_bounds() -> None:
+    """The /metrics turns read reaches agent_events one (session, UTC day) at a time (#2341).
+
+    Its pins arrive through the bound unnest, so losing the session pin makes
+    it a full segment scan, and losing either day bound reads that session's
+    whole history on every probe.
+    """
+    module = f"{_DOMAIN}/agent_sessions/slices/canonical_totals/query_service.py"
+    [scan] = [
+        scan
+        for scan in _production_scans()
+        if scan.identity == ScanIdentity(module, "_UNPRICED_TURNS_QUERY")
+    ]
+    assert scan.discards_segments, scan.predicate
+    assert re.search(r"\btime >= \$2\b", scan.predicate), scan.predicate
+    assert re.search(r"\btime < \$3\b", scan.predicate), scan.predicate
 
 
 # --- What the gate asserts about itself --------------------------------------
@@ -954,3 +1000,38 @@ def test_a_second_statement_under_one_symbol_raises_that_symbol_s_count(
         "\n" + "\n".join(findings)
     )
     assert not gate_findings(scans, {identity: _full_scan("Correct.", statements=2)})
+
+
+_LATERAL_SCAN = (
+    "SELECT COUNT(*)\n"
+    "FROM {source}\n"
+    "JOIN LATERAL (\n"
+    "    SELECT data FROM agent_events\n"
+    "    WHERE event_type = 'token_usage'\n"
+    "      AND agent_events.session_id = probe.session_id\n"
+    ") AS turns ON TRUE"
+)
+
+
+@pytest.mark.parametrize(
+    ("source", "pinned"),
+    [
+        # Every column a bound parameter: probe.session_id is $1's values.
+        ("unnest($1::text[], $2::timestamptz[]) AS probe(session_id, lower_bound)", True),
+        ("unnest($1) probe(session_id)", True),
+        # A table's column is whatever the table holds: a join, not a pin.
+        ("workflow_sessions AS probe", False),
+        # An unnest of anything but parameters is the same join, spelled differently.
+        ("unnest(ARRAY(SELECT session_id FROM sessions)) AS probe(session_id)", False),
+        ("unnest(sessions.ids, $2::timestamptz[]) AS probe(session_id, lower_bound)", False),
+    ],
+)
+def test_only_an_unnest_of_bound_parameters_pins_a_correlated_session(
+    tmp_path: Path, source: str, pinned: bool
+) -> None:
+    """A correlated id pins only when what it is correlated to is a bound parameter."""
+    _fixture(tmp_path, "lateral", {"_PROBE_QUERY": _LATERAL_SCAN.format(source=source)})
+
+    [scan] = discover_event_type_scans([tmp_path], relative_to=tmp_path)
+
+    assert scan.discards_segments is pinned, scan.predicate
