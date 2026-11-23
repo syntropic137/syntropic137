@@ -1,8 +1,8 @@
-diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/workspace_retention_handlers.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/workspace_retention_handlers.py
-index 983f20e09..d56024f45 100644
---- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/workspace_retention_handlers.py
-+++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/workspace_retention_handlers.py
-@@ -65,7 +65,7 @@ class WorkspaceRetentionHandlers:
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/retention_handlers.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/retention_handlers.py
+index c17875d45..486a8d74c 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/retention_handlers.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/retention_handlers.py
+@@ -73,7 +73,7 @@ class WorkspaceRetentionHandlers:
              raise ValueError(msg)
          if (command.workspace_handle, command.reason) in self._retained:
              return

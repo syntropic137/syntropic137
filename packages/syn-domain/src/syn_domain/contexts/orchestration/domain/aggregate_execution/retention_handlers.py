@@ -9,6 +9,7 @@ ever reaches a run that has ended, and the startup guard one that was running.
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from event_sourcing import command_handler, event_sourcing_handler
@@ -21,6 +22,8 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_rete
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from event_sourcing import DomainEvent
 
     from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
@@ -34,19 +37,24 @@ if TYPE_CHECKING:
 class WorkspaceRetentionHandlers:
     """Retained-workspace handlers over the aggregate's own replayed state."""
 
-    #: Each (workspace, reason) already recorded as retained. A frozenset,
-    #: replaced on apply, so the class default is never shared and mutated.
+    # Both replaced, never mutated, so the class defaults are never shared state.
+    #: The phase each provisioned workspace was for: the guards cannot know it.
+    _workspace_phases: Mapping[str, str] = MappingProxyType({})
+    #: Each (workspace, reason) already recorded as retained.
     _retained: frozenset[tuple[str, RetainedReason]] = frozenset()
 
     if TYPE_CHECKING:
         # Owned and initialised by `WorkflowExecutionAggregate`.
-        _workspace_phases: dict[str, str]
         _workflow_id: str | None
 
         @property
         def id(self) -> str | None: ...
 
         def _apply(self, event: DomainEvent) -> None: ...
+
+    def _provisioned_for(self, workspace_id: str, phase_id: str) -> None:
+        """Remember which phase a replayed `WorkspaceProvisionedForPhase` was for."""
+        self._workspace_phases = {**self._workspace_phases, workspace_id: phase_id}
 
     @command_handler("RecordWorkspaceRetainedCommand")
     def record_workspace_retained(self, command: RecordWorkspaceRetainedCommand) -> None:
