@@ -101,9 +101,7 @@ async def test_phase_metrics_display_is_format_cost_per_phase() -> None:
         )
     cost = ExecutionCost(
         execution_id="exec-1",
-        cost_by_phase={
-            phase_ids[name]: case.usd for name, case in COVERAGE.items() if case.usd
-        },
+        cost_by_phase={phase_ids[name]: case.usd for name, case in COVERAGE.items() if case.usd},
         unpriced_by_phase={
             phase_ids[name]: case.unpriced for name, case in COVERAGE.items() if case.unpriced
         },
