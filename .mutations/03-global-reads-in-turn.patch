@@ -1,0 +1,21 @@
+diff --git a/apps/syn-api/src/syn_api/routes/metrics.py b/apps/syn-api/src/syn_api/routes/metrics.py
+index 158d256aa..d42097f78 100644
+--- a/apps/syn-api/src/syn_api/routes/metrics.py
++++ b/apps/syn-api/src/syn_api/routes/metrics.py
+@@ -457,12 +457,10 @@ async def get_metrics_endpoint(
+             # time of the slowest rather than the sum (#2341). gather re-raises
+             # the first MetricsUnavailableError; the others finish and are
+             # discarded, so a 503 is still a 503.
+-            status_counts, total_sessions, total_artifacts, totals = await asyncio.gather(
+-                _execution_status_counts(None),
+-                _session_count(None),
+-                _artifact_count(None),
+-                _canonical_totals(None),
+-            )
++            status_counts = await _execution_status_counts(None)
++            total_sessions = await _session_count(None)
++            total_artifacts = await _artifact_count(None)
++            totals = await _canonical_totals(None)
+             phases = []
+     except MetricsUnavailableError as exc:
+         raise HTTPException(status_code=503, detail=str(exc)) from exc
