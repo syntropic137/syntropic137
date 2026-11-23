@@ -241,6 +241,20 @@ async def test_the_execution_serves_the_card_text(monkeypatch: pytest.MonkeyPatc
     assert body.unattributed_cost_display == "$2.06"
 
 
+@pytest.mark.anyio
+async def test_each_phase_serves_its_own_card_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Slice O: the phase card's per-model text, read off the served JSON."""
+    body = await _served_execution(monkeypatch)
+    phases = {p.phase_id: p for p in body.phases}
+
+    assert phases[PLAN].cost_by_model_display == {OPUS: "$0.31", SOL: "$0.10"}
+    assert phases[IMPLEMENT].cost_by_model_display == {OPUS: "$0.13", SONNET: "<$0.01"}
+    for phase in body.phases:
+        assert phase.cost_by_model_display == {
+            model: format_cost(Decimal(cost)) for model, cost in phase.cost_by_model.items()
+        }
+
+
 # -- GET /sessions/{id} --------------------------------------------------------
 
 
