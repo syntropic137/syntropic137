@@ -8,7 +8,7 @@ import { TokenInOut } from '../../components/TokenInOut'
 import type { ExecutionDetailResponse } from '../../types'
 import { executionTokenTotals, phaseTokenTotals } from '../../utils/executionTokens'
 import { REFUSED, outcomeTone, reportedFailureNote } from '../../utils/executionOutcome'
-import { formatCostWithCoverage, formatTokens, liveDurationSeconds } from '../../utils/formatters'
+import { formatTokens, liveDurationSeconds } from '../../utils/formatters'
 import { costByModelKeyLabel } from '../../utils/modelLabels'
 import { sessionInventoryHref } from '../../utils/sessionInventoryLinks'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
@@ -152,9 +152,7 @@ function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: 
           {tokens.settled ? formatTokens(tokens.total) : `${formatTokens(tokens.total)} so far`}
         </span>
         <span className="text-[var(--color-border)]">&middot;</span>
-        <span>
-          {formatCostWithCoverage(Number(phase.cost_usd), phase.unpriced_observation_count)}
-        </span>
+        <span>{phase.cost_display}</span>
         <span className="text-[var(--color-border)]">&middot;</span>
         <span>{duration}</span>
       </div>
@@ -241,9 +239,9 @@ export function PhaseTimeline({ execution, now, captureDegraded = [] }: PhaseTim
   // The unpriced count has to come from the same level for the same reason:
   // unpriced_by_phase is empty on that path too, so the #890 coverage signal
   // was zeroed out exactly when it was needed and the zero rendered as a
-  // precise figure rather than as "unpriced".
-  const totalCost = Number(execution.total_cost_usd)
-  const totalUnpriced = execution.unpriced_observation_count
+  // precise figure rather than as "unpriced". total_cost_display is built by
+  // the API from exactly that execution-level pair (#897).
+  const totalCostDisplay = execution.total_cost_display
   // Duration, unlike cost, IS folded from the cards - deliberately. A running
   // phase's duration is derived live from started_at by the same helper the
   // card uses, so the phases are a true reading here and folding them keeps the
@@ -276,7 +274,7 @@ export function PhaseTimeline({ execution, now, captureDegraded = [] }: PhaseTim
           <span className="text-[var(--color-border)]">|</span>
           <div className="flex items-center gap-1.5">
             <DollarSign className="h-4 w-4 text-[var(--color-text-muted)]" />
-            <span>{formatCostWithCoverage(totalCost, totalUnpriced)}</span>
+            <span>{totalCostDisplay}</span>
           </div>
           <span className="text-[var(--color-border)]">|</span>
           <div className="flex items-center gap-1.5">

@@ -19,6 +19,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ExecutionDetailResponse } from '../../../types'
 import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
+import { COST_COVERAGE_CASES, SUB_CENT_CASE, executionCost } from '../../../test/costCoverageFixtures'
 
 const useExecutionData = vi.fn()
 
@@ -54,7 +55,8 @@ function midPhaseExecution(
         cache_creation_tokens: 0,
         cache_read_tokens: 0,
         duration_seconds: 0,
-        cost_usd: 0,
+        cost_usd: '0',
+        cost_display: '$0.00',
         unpriced_observation_count: 0,
         started_at: new Date().toISOString(),
         completed_at: null,
@@ -67,7 +69,8 @@ function midPhaseExecution(
     total_cache_creation_tokens: 0,
     total_cache_read_tokens: 0,
     total_tokens: 1_234_567,
-    total_cost_usd: 4.25,
+    total_cost_usd: '4.25',
+    total_cost_display: '$4.25',
     unpriced_observation_count: 0,
     artifact_ids: [],
     error_message: null,
@@ -256,5 +259,14 @@ describe('ExecutionDetail cost-by-model against the execution total (#1048)', ()
     // parts have to add up to the headline.
     expect(card.getByText('not yet attributed')).toBeTruthy()
     expect(card.getByText('$3.25')).toBeTruthy()
+  })
+})
+
+describe('ExecutionDetail Total Cost card', () => {
+  // The API owns the cost wording (#897). Each display string is one the
+  // client formatter cannot produce from the numbers beside it.
+  it.each([...COST_COVERAGE_CASES, SUB_CENT_CASE])('shows the API display string verbatim when $name', (c) => {
+    renderExecution(midPhaseExecution(executionCost(c)))
+    expect(metricCard('Total Cost').value).toBe(c.shows)
   })
 })

@@ -90,6 +90,8 @@ class PhaseExecutionInfo(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
+    cost_display: str
+    """``cost_usd`` as a client shows it, coverage included: ``format_cost`` (#897)."""
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
@@ -351,6 +353,8 @@ class ExecutionDetailResponse(BaseModel):
 
     Non-zero means the cost is INCOMPLETE, not that the work was free (#890).
     """
+    total_cost_display: str
+    """``total_cost_usd`` as a client shows it, coverage included: ``format_cost`` (#897)."""
     cache_read_rate_display: str | None = None
     """How cache READS are billed relative to fresh input, e.g. ``"0.05x rate"``.
 

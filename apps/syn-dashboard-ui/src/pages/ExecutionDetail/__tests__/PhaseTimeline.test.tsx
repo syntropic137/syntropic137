@@ -1,5 +1,5 @@
 /**
- * The Phase Pipeline header must not report unpriced work as $0.0000 (#890),
+ * The Phase Pipeline shows the cost text the API renders (#897), never its own,
  * and must not report a live run's tokens as 0 (#1048).
  *
  * The per-phase cards were fixed first; the header roll-up is a SECOND consumer
@@ -19,6 +19,13 @@ import { describe, expect, it } from 'vitest'
 import { PhaseTimeline } from '../PhaseTimeline'
 import type { ExecutionDetailResponse } from '../../../types'
 import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
+import {
+  COST_COVERAGE_CASES,
+  DISTINCT_EXECUTION_COST,
+  SUB_CENT_CASE,
+  executionCost,
+  phaseCost,
+} from '../../../test/costCoverageFixtures'
 
 type Phase = ExecutionDetailResponse['phases'][number]
 
@@ -34,7 +41,8 @@ function phase(overrides: Partial<Phase> & { phase_id: string }): Phase {
     cache_creation_tokens: 0,
     cache_read_tokens: 0,
     duration_seconds: 1,
-    cost_usd: 0,
+    cost_usd: '0',
+    cost_display: '$0.00',
     unpriced_observation_count: 0,
     started_at: null,
     completed_at: null,
@@ -69,7 +77,8 @@ function execution(
     total_cache_creation_tokens: 0,
     total_cache_read_tokens: 0,
     total_tokens: 0,
-    total_cost_usd: 0,
+    total_cost_usd: '0',
+    total_cost_display: '$0.00',
     unpriced_observation_count: 0,
     artifact_ids: [],
     error_message: null,
@@ -93,63 +102,37 @@ function headerStrip(): string {
   return strip?.textContent ?? ''
 }
 
-describe('PhaseTimeline cost roll-up', () => {
-  // Every fixture sets the execution-level cost to a figure the phases cannot
-  // produce. On the live path the domain hands back an empty cost_by_phase map,
-  // so each phase is seeded cost_usd=0 while the execution total is real - a
-  // roll-up summed from the cards prints "$0.000000" under a $0.42 headline.
-  it('reports the execution total, not the sum of the phase cards', () => {
-    // The exact shape from the report: one phase, seeded 0, live total $0.42.
-    renderTimeline([phase({ phase_id: 'implement', cost_usd: 0 })], {
-      total_cost_usd: 0.42,
-    })
-    expect(headerStrip()).toContain('$0.42')
-    expect(headerStrip()).not.toContain('$0.000000')
+describe('PhaseTimeline cost text', () => {
+  // The API owns the wording (#897): every display string below is one the
+  // client formatter cannot produce from the numbers beside it, so a surface
+  // that formats the dollars itself again cannot pass.
+  it.each([...COST_COVERAGE_CASES, SUB_CENT_CASE])('shows the execution total verbatim when $name', (c) => {
+    renderTimeline([phase({ phase_id: 'implement' })], executionCost(c))
+    expect(headerStrip()).toContain(c.shows)
   })
 
-  it('follows the execution even when the phases carry costs of their own', () => {
-    // Phases sum to $4.00; the execution says $6.25. Only one of those is the
-    // figure the Total Cost card shows, and the header must agree with it.
+  it('follows the execution, not the phases, for the header total (#1048)', () => {
+    // On the live path each phase is seeded 0 while the execution total is
+    // real; a roll-up summed from the cards reports the cards, not the run.
     renderTimeline(
       [
-        phase({ phase_id: 'plan', cost_usd: 1.5 }),
-        phase({ phase_id: 'build', cost_usd: 2.5 }),
+        phase({ phase_id: 'plan', cost_usd: '1.5', cost_display: '$1.50' }),
+        phase({ phase_id: 'build', cost_usd: '2.5', cost_display: '$2.50' }),
       ],
-      { total_cost_usd: 6.25 },
+      { total_cost_usd: '6.25', total_cost_display: '$6.25' },
     )
     expect(headerStrip()).toContain('$6.25')
     expect(headerStrip()).not.toContain('$4.00')
-    expect(headerStrip()).not.toContain('unpriced')
   })
 
-  it('says unpriced, not $0.000000, when nothing could be priced', () => {
-    // The #890 coverage signal lives at execution level too: unpriced_by_phase
-    // is empty on the live path, so a count summed from the phases reads 0 and
-    // the zero cost renders as a confident figure.
-    renderTimeline([phase({ phase_id: 'plan', unpriced_observation_count: 0 })], {
-      total_cost_usd: 0,
-      unpriced_observation_count: 11,
-    })
-    expect(headerStrip()).toContain('unpriced')
-    expect(headerStrip()).not.toContain('$0.000000')
-  })
-
-  it('marks a mixed total as a lower bound rather than a complete figure', () => {
-    renderTimeline([phase({ phase_id: 'plan', unpriced_observation_count: 0 })], {
-      total_cost_usd: 3,
-      unpriced_observation_count: 9,
-    })
-    const text = headerStrip()
-    expect(text).toContain('(partial)')
-    expect(text).toContain('$3.00')
-  })
-
-  it('treats a genuinely free priced execution as $0, not unpriced', () => {
-    renderTimeline([phase({ phase_id: 'plan' })], {
-      total_cost_usd: 0,
-      unpriced_observation_count: 0,
-    })
-    expect(headerStrip()).not.toContain('unpriced')
+  it.each([...COST_COVERAGE_CASES, SUB_CENT_CASE])('shows each phase card cost verbatim when $name', (c) => {
+    const { container } = renderTimeline(
+      [phase({ phase_id: 'plan', ...phaseCost(c) })],
+      DISTINCT_EXECUTION_COST,
+    )
+    // The header carries a different string, so the match can only be the card.
+    expect(headerStrip()).not.toContain(c.shows)
+    expect(container.textContent).toContain(c.shows)
   })
 })
 

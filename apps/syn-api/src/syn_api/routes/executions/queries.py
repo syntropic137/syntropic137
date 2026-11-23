@@ -898,6 +898,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         ),
         total_cost_usd=detail.total_cost_usd,
         unpriced_observation_count=detail.unpriced_observation_count,
+        total_cost_display=format_cost(detail.total_cost_usd, detail.unpriced_observation_count),
         cache_read_rate_display=cache_rates.cache_read_rate_display,
         cache_write_rate_display=cache_rates.cache_write_rate_display,
         artifact_ids=artifact_ids,

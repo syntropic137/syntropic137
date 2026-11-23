@@ -110,6 +110,7 @@ from syn_domain.contexts.orchestration.slices.start_resume.value_objects import 
 from syn_domain.testing.fake_agent_handler import A_DELIVERABLE, FakeAgentExecutionHandler
 from syn_domain.testing.fake_session_repository import FakeSessionRepository
 from syn_domain.testing.stored_replay import stored_envelopes
+from syn_shared.display import EM_DASH
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
@@ -677,6 +678,9 @@ class TestAQueuedStartIsVisible:
         shown = [await world.shown(e) for e in queued]
 
         assert {s.status for s in shown} == {"queued"}
+        # Nothing has been measured yet: the list row's em dash, not a "$0.00"
+        # that reads as a free run (#897).
+        assert {s.total_cost_display for s in shown} == {EM_DASH}
         positions = []
         for detail in shown:
             assert detail.start_queue is not None

@@ -39,7 +39,7 @@ from syn_api.types import (
     StartPinsStatus,
     ToolOperation,
 )
-from syn_shared.display import resolve_duration_seconds
+from syn_shared.display import format_cost, resolve_duration_seconds
 
 from .models import (
     PhaseExecutionInfo,
@@ -404,6 +404,9 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         duration_seconds=phase.duration_seconds,
         cost_usd=Decimal(str(phase.cost_usd)),
         unpriced_observation_count=phase.unpriced_observation_count,
+        # Built here, not on PhaseExecution: `_enrich_costs` sets the cost
+        # after that model is constructed, so a display set there is stale.
+        cost_display=format_cost(phase.cost_usd, phase.unpriced_observation_count),
         started_at=str(phase.started_at) if phase.started_at else None,
         completed_at=str(phase.completed_at) if phase.completed_at else None,
         model=phase.model,

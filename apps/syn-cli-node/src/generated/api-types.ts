@@ -4946,6 +4946,8 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /** Total Cost Display */
+            total_cost_display: string;
             /** Cache Read Rate Display */
             cache_read_rate_display?: string | null;
             /** Cache Write Rate Display */
@@ -7078,6 +7080,8 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /** Cost Display */
+            cost_display: string;
             /** Started At */
             started_at?: string | null;
             /** Completed At */

@@ -33,6 +33,7 @@ function phase(overrides: Partial<Phase>): Phase {
     cache_read_tokens: 0,
     duration_seconds: 1,
     cost_usd: 0,
+    cost_display: '$0.00',
     unpriced_observation_count: 0,
     started_at: null,
     completed_at: null,
@@ -60,6 +61,7 @@ function renderPhases(phases: Phase[]) {
     total_cache_read_tokens: 0,
     total_tokens: 0,
     total_cost_usd: 0,
+    total_cost_display: '$0.00',
     unpriced_observation_count: 0,
   } as unknown as ExecutionDetailResponse
   return render(
