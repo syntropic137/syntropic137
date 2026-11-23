@@ -10,13 +10,14 @@ construction rather than by coincidence.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import asyncpg
 
     from syn_domain.contexts.agent_sessions.canonical_usage import PricingResolver
@@ -24,7 +25,9 @@ if TYPE_CHECKING:
 from syn_domain import agent_event_span
 from syn_domain.contexts.agent_sessions.canonical_usage import (
     CANONICAL_MODEL_COLUMNS,
+    TURN_USAGE_ROLLUP_TABLE,
     price_canonical_row,
+    rate_for_row,
     rollup_usage_sources,
 )
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
@@ -51,45 +54,46 @@ from syn_shared.pricing import canonical_cost_usd
 # the heatmap applies - so the card and the heatmap agree by construction.
 _EXECUTION_FILTER = "execution_id = ANY($1)"
 
+# The turn models that have no rate, decided BEFORE the totals statement, so
+# that statement can name their summary-less sessions itself. Read from the
+# turn rollup alone, which is the canonical CTE's turn_usage source without the
+# decision: one row per (session, execution, model), so it grows with sessions.
+#
+# A superset of what pricing the groups would find: it includes a model whose
+# group reports no tokens, and turns of sessions a summary superseded. Neither
+# changes a count. The sessions are still those the decision left summary-less,
+# and a model whose turns all reported zero has none the turns read counts.
+_TURN_MODELS_QUERY = f"""
+SELECT DISTINCT {CANONICAL_MODEL_COLUMNS}
+FROM {TURN_USAGE_ROLLUP_TABLE}
+WHERE {{where}}
+"""
+
 # Grouped by model AND cost-nullness for the same reason every other canonical
 # query is: a group mixing priced and unpriced rows prices some of its tokens
 # and not others, and reports the shortfall as though it were cheap (#788).
 #
-# The last two columns are what an UNPRICED group's observation count is made
-# of (#897), read from the same rows as its money. A summary that won its
+# summary_observations is what an UNPRICED group's observation count is made
+# of (#897), read from the same rows as its money: a summary that won its
 # session is one observation. A session with no summary contributes its turns,
 # and the rollup's ``observations`` counts zero-token turns too - a priced zero
-# at any rate (#890) - so those sessions are counted here, and named by
-# ``_UNPRICED_TURN_DAYS_QUERY`` only when the group turns out to be
-# unpriced. Naming them here shipped every summary-less session of every
-# rate-priced group on every poll, to be thrown away (#2341).
-_TOTALS_QUERY = """
-WITH {sources}
-SELECT
-    {model_columns},
-    SUM(vendor_cost_usd) AS vendor_cost_usd,
-    SUM(input_tokens) AS input_tokens,
-    SUM(output_tokens) AS output_tokens,
-    SUM(cache_creation_tokens) AS cache_creation_tokens,
-    SUM(cache_read_tokens) AS cache_read_tokens,
-    COUNT(*) FILTER (
-        WHERE session_id IN (SELECT session_id FROM priced_summary)
-    ) AS summary_observations,
-    COUNT(*) FILTER (
-        WHERE session_id NOT IN (SELECT session_id FROM priced_summary)
-    ) AS turn_session_count
-FROM canonical_usage
-GROUP BY {model_columns}, (vendor_cost_usd IS NULL)
-"""
+# at any rate (#890) - so those turns are read from agent_events instead.
+#
+# The rows after UNION ALL name those sessions, by the UTC days they have
+# telemetry on, for the unrated turn models bound after the execution filter's
+# $1 and no other: naming every summary-less session here shipped those of
+# every rate-priced group on every poll, to be thrown away (#2341). They come
+# from this statement, not a second one, so the canonical CTE is evaluated once
+# per request. A second statement re-evaluated it whole, and the transaction is
+# READ ONLY, so there is nowhere to keep it between two. A listing row is the
+# one with ``sessions``; its group columns are NULL, and a totals row's
+# ``sessions`` is. NOT DISTINCT, because a missing model is the commonest
+# unpriced group and NULL = NULL matches nothing. A session the day rollup has
+# never seen comes back under a NULL day, which reads it unbounded, as
+# agent_event_span does.
+_NO_GROUP = ", ".join("NULL" for _ in CANONICAL_MODEL_COLUMNS.split(","))
 
-# The summary-less sessions of the groups pricing found unpriced, and of no
-# other group, by the UTC days they have telemetry on. Whether a model has a
-# rate is decided in Python, so the groups are bound by their three model
-# columns, after the execution filter's $1 when there is one. NOT DISTINCT,
-# because a missing model is the commonest unpriced group and NULL = NULL
-# matches nothing. A session the day rollup has never seen comes back under a
-# NULL day, which reads it unbounded, as agent_event_span does.
-_UNPRICED_TURN_DAYS_QUERY = f"""
+_TOTALS_QUERY = f"""
 WITH {{sources}},
 unpriced_sessions AS (
     SELECT DISTINCT canonical_usage.session_id
@@ -101,7 +105,25 @@ unpriced_sessions AS (
     WHERE canonical_usage.vendor_cost_usd IS NULL
       AND canonical_usage.session_id NOT IN (SELECT session_id FROM priced_summary)
 )
-SELECT day_rollup.day, ARRAY_AGG(DISTINCT unpriced_sessions.session_id) AS sessions
+SELECT
+    {CANONICAL_MODEL_COLUMNS},
+    SUM(vendor_cost_usd) AS vendor_cost_usd,
+    SUM(input_tokens) AS input_tokens,
+    SUM(output_tokens) AS output_tokens,
+    SUM(cache_creation_tokens) AS cache_creation_tokens,
+    SUM(cache_read_tokens) AS cache_read_tokens,
+    COUNT(*) FILTER (
+        WHERE session_id IN (SELECT session_id FROM priced_summary)
+    ) AS summary_observations,
+    NULL::date AS day,
+    NULL::text[] AS sessions
+FROM canonical_usage
+GROUP BY {CANONICAL_MODEL_COLUMNS}, (vendor_cost_usd IS NULL)
+UNION ALL
+SELECT
+    {_NO_GROUP}, NULL, NULL, NULL, NULL, NULL, NULL,
+    day_rollup.day,
+    ARRAY_AGG(DISTINCT unpriced_sessions.session_id)
 FROM unpriced_sessions
 LEFT JOIN agent_event_day_rollup AS day_rollup USING (session_id)
 GROUP BY day_rollup.day
@@ -110,37 +132,38 @@ GROUP BY day_rollup.day
 # The turns of the sessions above that reported tokens, per model. Read from
 # agent_events because the rollup cannot tell a zero-token turn from any other.
 #
-# One branch per UTC day, each naming that day's sessions - session_id is the
-# hypertable's segment key - and that day's bounds as constants, so each
-# branch plans and opens one chunk. Measured at #2341's scale (2,000 unpriced
-# sessions over 91 daily chunks): ONE statement naming every session over the
-# whole span spent ~700ms PLANNING, estimating the 2,000-id array against each
-# chunk's statistics, then seq-scanned every chunk; the per-day branches do
-# work proportional to the sessions, not sessions x chunks. It runs only when
-# some turn-priced work has no rate, which priced history never has.
-_UNPRICED_TURNS_DAY = f"""
-    SELECT data
-    FROM agent_events
-    WHERE event_type = '{TOKEN_USAGE}'
-      AND session_id = ANY($1)
-      AND time >= $2 AND time < $3
-      AND NOT {zero_usage_group_by()}
-      AND {{where}}"""
-
+# ONE statement, ONE agent_events reference, whatever the day count: each
+# (session, day) pair is a row of the unnest, and the lateral reads that
+# session - the hypertable's segment key - within that day's bounds, which
+# TimescaleDB excludes chunks by at run time. Measured at #2341's scale (2,000
+# unpriced sessions over 91 daily chunks): naming every session in one
+# ``session_id = ANY`` over the whole span spent ~700ms PLANNING, estimating the
+# array against each chunk. One UNION ALL branch per day fixed that, but
+# planned every branch against every chunk under force_custom_plan - 29ms of
+# planning for 7ms of execution over 16 days - and its text grew with the days.
+# Here the text and the plan's shape are fixed. It runs only when some
+# turn-priced work has no rate, which priced history never has.
 _UNPRICED_TURNS_QUERY = f"""
 SELECT
     {recorded_model_select()},
     COUNT(*) AS observations
-FROM ({{days}}
-) AS turns
+FROM unnest($1::text[], $2::timestamptz[], $3::timestamptz[])
+    AS session_day(session_id, lower_bound, upper_bound)
+JOIN LATERAL (
+    SELECT agent_events.data
+    FROM agent_events
+    WHERE agent_events.event_type = '{TOKEN_USAGE}'
+      AND agent_events.session_id = session_day.session_id
+      AND agent_events.time >= session_day.lower_bound
+      AND agent_events.time < session_day.upper_bound
+      AND NOT {zero_usage_group_by()}
+      AND {{where}}
+) AS turns ON TRUE
 GROUP BY {recorded_model_group_by()}
 """
 
-# Each branch's own $1-$3, renumbered to its place in the statement.
-_PARAMETER = re.compile(r"\$(\d+)")
-
-# The execution filter, bound after every day's three parameters.
-_UNPRICED_TURNS_EXECUTION_FILTER = "execution_id = ANY(${position})"
+# The execution filter, bound after the three unnest arrays.
+_UNPRICED_TURNS_EXECUTION_FILTER = "execution_id = ANY($4)"
 
 type _ModelKey = tuple[object, object, bool]
 """A row's three model columns, as the canonical query groups on them."""
@@ -229,22 +252,42 @@ class CanonicalUsageQueryService:
         The usage rollup copies its ids from those rows, so the same holds.
         """
         filtered = execution_ids is not None
-        totals_sql = self._render(_TOTALS_QUERY, filtered)
         sessions_sql = self._render(_SESSION_COUNT_QUERY, filtered)
         args = [[pg_safe(eid) for eid in execution_ids]] if execution_ids is not None else []
 
-        # One snapshot for both reads (#983), so the tokens and the session
+        # One snapshot for every read (#983), so the tokens and the session
         # count describe the same moment: two autocommit statements could
         # report a new session's tokens without the session, or the reverse.
         async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
-            rows = await conn.fetch(totals_sql, *args)
+            models_sql = self._render(_TURN_MODELS_QUERY, filtered)
+            unrated = {
+                _model_key(row)
+                for row in await conn.fetch(models_sql, *args)
+                if rate_for_row(row, self._cost_calculator) is None  # type: ignore[arg-type]  # asyncpg Record reads by name
+            }
+            keys = sorted(unrated, key=repr)
+            first = len(args) + 1
+            totals_sql = self._render(
+                _TOTALS_QUERY,
+                filtered,
+                keys=f"${first}::text[], ${first + 1}::text[], ${first + 2}::boolean[]",
+            )
+            rows = await conn.fetch(
+                totals_sql,
+                *args,
+                [key[0] for key in keys],
+                [key[1] for key in keys],
+                [key[2] for key in keys],
+            )
             session_row = await conn.fetchrow(sessions_sql, *args)
 
             input_tokens = output_tokens = cache_creation = cache_read = 0
             unpriced = unpriced_observations = 0
             cost = Decimal("0")
-            unpriced_turn_models: set[_ModelKey] = set()
+            unpriced_days = [row for row in rows if row["sessions"] is not None]
             for row in rows:
+                if row["sessions"] is not None:
+                    continue
                 input_tokens += int(row["input_tokens"])
                 output_tokens += int(row["output_tokens"])
                 cache_creation += int(row["cache_creation_tokens"])
@@ -254,12 +297,10 @@ class CanonicalUsageQueryService:
                 unpriced += row_cost.unpriced_tokens
                 if row_cost.unpriced_tokens:
                     unpriced_observations += int(row["summary_observations"] or 0)
-                    if row["turn_session_count"]:
-                        unpriced_turn_models.add(_model_key(row))
             unpriced_observations += await self._unpriced_turns(
                 conn,  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
-                unpriced_turn_models,
-                filtered,
+                unrated,
+                unpriced_days,
                 args,
             )
 
@@ -275,63 +316,38 @@ class CanonicalUsageQueryService:
             sessions=int(session_row["sessions"]) if session_row else 0,
         )
 
-    @classmethod
+    @staticmethod
     async def _unpriced_turns(
-        cls,
         conn: agent_event_span.SpanConnection,
         models: set[_ModelKey],
-        filtered: bool,
+        days: Sequence[agent_event_span.SpanRow],
         args: list[list[str]],
     ) -> int:
-        """Turns that reported tokens, on these unpriced models, in their sessions.
+        """Turns that reported tokens, on these unrated models, in these sessions.
 
-        The sessions are every summary-less session of an unpriced group, so a
-        session can also carry turns on a model that WAS priced; those are
-        dropped by model here rather than counted as unpriced.
+        ``days`` are the totals statement's listing rows. A session can also
+        carry turns on a model that WAS priced; those are dropped by model here
+        rather than counted as unpriced.
         """
-        if not models:
+        if not days:
             return 0
-        keys = sorted(models, key=repr)
-        first = len(args) + 1
-        days_sql = cls._render(
-            _UNPRICED_TURN_DAYS_QUERY,
-            filtered,
-            keys=f"${first}::text[], ${first + 1}::text[], ${first + 2}::boolean[]",
-        )
-        day_rows = await conn.fetch(
-            days_sql,
-            *args,
-            [key[0] for key in keys],
-            [key[1] for key in keys],
-            [key[2] for key in keys],
-        )
-        if not day_rows:
-            return 0
-        days = sorted(day_rows, key=lambda row: str(row["day"]))
-        where = (
-            _UNPRICED_TURNS_EXECUTION_FILTER.format(position=3 * len(days) + 1)
-            if filtered
-            else "TRUE"
-        )
-        branches: list[str] = []
-        params: list[object] = []
-        for n, row in enumerate(days):
+        sessions: list[str] = []
+        lower: list[datetime] = []
+        upper: list[datetime] = []
+        for row in sorted(days, key=lambda row: str(row["day"])):
             day = row["day"]
             span = (
                 agent_event_span.EventSpan.of_days(day, day)
                 if isinstance(day, date)
                 else agent_event_span.EventSpan.unbounded()
             )
-            branches.append(
-                _PARAMETER.sub(
-                    lambda m, n=n: f"${int(m.group(1)) + 3 * n}", _UNPRICED_TURNS_DAY
-                ).format(where=where)
-            )
-            params += [sorted(str(s) for s in row["sessions"]), span.lower, span.upper]  # type: ignore[union-attr]  # an ARRAY_AGG column
+            for session in sorted(str(s) for s in row["sessions"]):  # type: ignore[attr-defined]  # an ARRAY_AGG column
+                sessions.append(session)
+                lower.append(span.lower)
+                upper.append(span.upper)
+        where = _UNPRICED_TURNS_EXECUTION_FILTER if args else "TRUE"
         rows = await conn.fetch(
-            _UNPRICED_TURNS_QUERY.format(days="\n    UNION ALL".join(branches)),
-            *params,
-            *args,
+            _UNPRICED_TURNS_QUERY.format(where=where), sessions, lower, upper, *args
         )
         return sum(
             int(row["observations"])  # type: ignore[arg-type]  # a COUNT(*) column
