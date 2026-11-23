@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+index 5ee04475c..793e82a1e 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+@@ -160,7 +160,7 @@ JOIN LATERAL (
+     SELECT agent_events.data
+     FROM agent_events
+     WHERE agent_events.event_type = '{TOKEN_USAGE}'
+-      AND agent_events.session_id = session_day.session_id
++      -- MUTANT: the probe no longer pins its session.
+       AND agent_events.time >= session_day.lower_bound
+       AND agent_events.time < session_day.upper_bound
+       AND NOT {zero_usage_group_by()}
