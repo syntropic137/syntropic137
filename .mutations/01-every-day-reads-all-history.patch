@@ -1,13 +1,13 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
-index 0724408bf..399e4322a 100644
+index 98bc20c6c..6f6356a55 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
-@@ -356,7 +356,7 @@ class CanonicalUsageQueryService:
-             day = row["day"]
+@@ -382,7 +382,7 @@ class CanonicalUsageQueryService:
+         for n, day in enumerate(ordered):
              span = (
                  agent_event_span.EventSpan.of_days(day, day)
--                if isinstance(day, date)
-+                if isinstance(day, date) and False
+-                if day is not None
++                if day is not None and False
                  else agent_event_span.EventSpan.unbounded()
              )
              branches.append(

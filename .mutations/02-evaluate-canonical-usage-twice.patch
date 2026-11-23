@@ -1,8 +1,8 @@
 diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
-index 9a1148e07..ff8b5ef23 100644
+index 98bc20c6c..d007987b3 100644
 --- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
 +++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
-@@ -267,13 +267,19 @@ class CanonicalUsageQueryService:
+@@ -277,13 +277,19 @@ class CanonicalUsageQueryService:
                  filtered,
                  keys=f"${first}::text[], ${first + 1}::text[], ${first + 2}::boolean[]",
              )
@@ -27,5 +27,5 @@ index 9a1148e07..ff8b5ef23 100644
 +                if row["sessions"] is not None
 +            ]
              session_row = await conn.fetchrow(sessions_sql, *args)
-             groups = self._sum_groups(row for row in rows if row["sessions"] is None)
-             turns = await self._unpriced_turns(
+             groups, unpriced_models = self._sum_groups(
+                 row for row in rows if row["sessions"] is None
