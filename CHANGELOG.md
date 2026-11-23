@@ -17,6 +17,10 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - The session detail "Total Cost" card and each phase in the workflow phase pipeline now show the API's cost text (`unpriced`, `>=$X (partial)` or `<$0.01`), returned as `total_cost_display` on the session and `cost_display` on each phase metric. (#897) (#2359)
 - The execution detail API now returns the execution's per-model cost split as `cost_by_model`, and the execution and session detail APIs return each model's cost text as `cost_by_model_display` and the "not yet attributed" remainder as `unattributed_cost_display`. (#897) (#2360)
 
+### Fixed
+
+- Global `/metrics` evaluates canonical usage once per request and runs its independent reads concurrently, keeping the per-day unpriced-turns read that excludes chunks. (#2341)
+
 ## [1.0.6] - 2026-11-21
 
 ### Added

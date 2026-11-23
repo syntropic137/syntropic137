@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Protocol
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     HAS_REQUESTED_MODEL_COLUMN,
     REQUESTED_MODEL_COLUMN,
+    ModelRow,
     recorded_model_from_row,
     recorded_model_group_by,
     recorded_model_select,
@@ -286,6 +287,15 @@ class RowCost:
     unpriced_tokens: int
 
 
+def rate_for_row(row: ModelRow, calculator: PricingResolver) -> Pricing | None:
+    """The rate a row's tokens are priced at, or None when its model has none.
+
+    Priced as what ran when it was reported, else as what was requested - the
+    rate a legacy alias row has always been priced at (ADR-067).
+    """
+    return calculator.resolve_pricing(recorded_model_from_row(row).pricing_model)
+
+
 def price_canonical_row(row: Mapping[str, object], calculator: PricingResolver) -> RowCost:
     """Cost one canonical usage row, vendor-reported first.
 
@@ -310,10 +320,7 @@ def price_canonical_row(row: Mapping[str, object], calculator: PricingResolver) 
     cache_creation = int(row["cache_creation_tokens"])  # type: ignore[arg-type]
     cache_read = int(row["cache_read_tokens"])  # type: ignore[arg-type]
 
-    # Priced as what ran when it was reported, else as what was requested -
-    # the rate a legacy alias row has always been priced at (ADR-067).
-    model = recorded_model_from_row(row).pricing_model
-    pricing = calculator.resolve_pricing(model)
+    pricing = rate_for_row(row, calculator)
     if pricing is None:
         return RowCost(Decimal("0"), input_tokens + output_tokens + cache_creation + cache_read)
     return RowCost(
