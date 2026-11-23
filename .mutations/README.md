@@ -7,5 +7,6 @@ Tests: `apps/syn-api/tests/test_897_execution_detail_cost_display.py apps/syn-ap
 | `01-phase-display-from-seed.patch` | phase `cost_display` built from the pre-enrichment seed, not `_enrich_costs`' value | `test_each_phase_reads_as_its_enriched_cost_not_its_seed` |
 | `02-total-display-drops-coverage.patch` | execution `total_cost_display` ignores the unpriced count | `test_the_execution_total_reads_as_format_cost_renders_it` (partly / all unpriced) |
 | `03-queued-start-reads-free.patch` | a queued start reports `$0.00` instead of an em dash | `TestAQueuedStartIsVisible` |
+| `04-phase-display-drops-coverage-when-priced.patch` | a phase with a positive cost drops its own unpriced count | `test_each_phase_reads_as_its_enriched_cost_not_its_seed` (partly unpriced within a phase) |
 
 Locally (workspace, no Docker) each patch was applied and the named tests failed; reverted, they pass.

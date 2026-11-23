@@ -70,6 +70,17 @@ CASES = [
         total_unpriced=9,
         total_shows=">=$3.50 (partial)",
     ),
+    # Priced and unpriced observations in the SAME phase: the phase card must
+    # carry its own partial marker, not only the execution total.
+    _Coverage(
+        name="partly unpriced within a phase",
+        cost_by_phase={PLAN: Decimal("3.5"), IMPLEMENT: Decimal("1.5")},
+        unpriced_by_phase={PLAN: 9},
+        phase_shows={PLAN: ">=$3.50 (partial)", IMPLEMENT: "$1.50"},
+        total=Decimal("5"),
+        total_unpriced=9,
+        total_shows=">=$5.00 (partial)",
+    ),
     _Coverage(
         name="all unpriced",
         cost_by_phase={},
