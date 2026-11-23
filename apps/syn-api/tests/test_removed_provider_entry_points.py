@@ -64,8 +64,10 @@ def test_agent_command_raises_for_an_unknown_provider() -> None:
 
 @pytest.mark.unit
 def test_agent_command_still_builds_both_headless_providers() -> None:
-    assert _build_agent_command(_phase(AgentProvider.CLAUDE), "x")[0] == "claude"
-    assert _build_agent_command(_phase(AgentProvider.CODEX), "x")[0] == "codex"
+    # argv[4] is the harness: argv[:4] is the wrapper that puts the prompt on
+    # its stdin (#2355).
+    assert _build_agent_command(_phase(AgentProvider.CLAUDE), "x").argv[4] == "claude"
+    assert _build_agent_command(_phase(AgentProvider.CODEX), "x").argv[4] == "codex"
 
 
 @pytest.mark.unit

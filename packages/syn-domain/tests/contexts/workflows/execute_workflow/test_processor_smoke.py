@@ -25,6 +25,7 @@ import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -112,8 +113,8 @@ async def _noop_prompt_builder(
     return "smoke test prompt"
 
 
-def _noop_command_builder(phase: ExecutablePhase, prompt: str) -> list[str]:
-    return ["echo", "smoke-test-agent"]
+def _noop_command_builder(phase: ExecutablePhase, prompt: str) -> AgentLaunch:
+    return AgentLaunch(("echo", "smoke-test-agent"))
 
 
 #: What a phase that answers a question and stops ends on: a real answer,

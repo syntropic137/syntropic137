@@ -81,7 +81,6 @@ def _tools_in_argv(phase_id: str) -> list[str]:
             order=phase.order,
             agent_config=_build_agent_config_from_phase(stored),
         ),
-        "PROMPT",
     )
     assert "--tools" in argv, f"phase '{phase_id}' reached the CLI with no tool restriction at all"
     return argv[argv.index("--tools") + 1].split(",")

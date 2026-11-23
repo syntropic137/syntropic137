@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
     ImageManifestContent,
@@ -112,7 +113,7 @@ async def _provisioned_with(reading: ImageManifestReading, execution_id: str) ->
     handler = WorkspaceProvisionHandler(
         workspace_service=service,
         prompt_builder=AsyncMock(return_value="Do the task"),
-        command_builder=MagicMock(return_value=["claude", "--print", "Do the task"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude", "--print", "Do the task"))),
     )
     with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as secrets:
         secrets.create = AsyncMock(return_value=MagicMock())

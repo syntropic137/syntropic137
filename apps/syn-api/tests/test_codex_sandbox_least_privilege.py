@@ -54,7 +54,7 @@ class TestDefaultIsLeastPrivilege:
         accident. A phase wanting less authority declares it today.
         """
         assert DEFAULT_PHASE_SANDBOX is PhaseSandbox.FULL_ACCESS
-        argv = _build_codex_command("prompt", "gpt-5.6-sol")
+        argv = _build_codex_command("gpt-5.6-sol")
         assert _sandbox_arg(argv) == "danger-full-access"
 
     def test_a_phase_can_ask_for_less_than_the_default(self) -> None:
@@ -64,7 +64,7 @@ class TestDefaultIsLeastPrivilege:
         a phase that declares ``read-only`` gets it, on every model.
         """
         for model in (None, "gpt-5.6-sol", "haiku"):
-            argv = _build_codex_command("prompt", model, PhaseSandbox.READ_ONLY)
+            argv = _build_codex_command(model, PhaseSandbox.READ_ONLY)
             assert _sandbox_arg(argv) == "read-only"
 
 
@@ -78,7 +78,7 @@ class TestDeclaredLevelIsHonoured:
         ],
     )
     def test_each_level_maps_to_its_codex_flag(self, level: PhaseSandbox, expected: str) -> None:
-        assert _sandbox_arg(_build_codex_command("p", "gpt-5.6-sol", level)) == expected
+        assert _sandbox_arg(_build_codex_command("gpt-5.6-sol", level)) == expected
 
     def test_every_level_has_a_flag(self) -> None:
         """A new member without a mapping would KeyError at execution time."""
@@ -130,7 +130,7 @@ class TestTheConfigHopKeepsIt:
         assert (
             _sandbox_arg(
                 _build_codex_command(
-                    "p", "gpt-5.6-sol", _resolve_sandbox(config.sandbox, phase_id="verify")
+                    "gpt-5.6-sol", _resolve_sandbox(config.sandbox, phase_id="verify")
                 )
             )
             == "read-only"
@@ -208,7 +208,6 @@ phases:
         assert phase.sandbox == "workspace-write", "dropped between YAML and PhaseDefinition"
 
         argv = _build_codex_command(
-            "check the work",
             phase.model,
             _resolve_sandbox(phase.sandbox, phase_id=phase.phase_id),
         )

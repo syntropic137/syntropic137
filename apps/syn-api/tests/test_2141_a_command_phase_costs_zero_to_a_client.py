@@ -22,6 +22,7 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.workspace_backends.memory import MemoryEventStreamAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_api.routes.executions.phase_mapping import _map_phase_detail, _map_phase_to_response
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration._shared.command_phase import (
     BoundedCommandResult,
     CommandStep,
@@ -164,7 +165,7 @@ async def _run(exit_codes: dict[str, int], lane2: _Lane2 | None = None) -> _Stre
         observability_writer=lane2,
         controller=None,
         prompt_builder=AsyncMock(return_value=""),
-        command_builder=MagicMock(return_value=[]),
+        command_builder=MagicMock(return_value=AgentLaunch(())),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         agent_handler=None,
     )

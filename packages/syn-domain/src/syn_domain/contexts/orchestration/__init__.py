@@ -287,6 +287,7 @@ from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWor
 from syn_domain.contexts.orchestration.slices.detach_execution_from_eval import (
     DetachExecutionFromEvalHandler,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch import AgentLaunch
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     AGENT_LAUNCH_MARKER,
     announce_as,
@@ -458,6 +459,7 @@ __all__ = [
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
     "AgentExecutionResult",
+    "AgentLaunch",
     # A phase's own verdict on itself - the type of `StreamResult.verdict` (#1256)
     "AgentVerdict",
     "ArchiveEvalHandler",

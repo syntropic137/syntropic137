@@ -39,6 +39,7 @@ from syn_api.routes.executions.phase_mapping import _map_phase_detail, _map_phas
 from syn_domain.contexts.orchestration import (
     AgentExecutionCompletedCommand,
     AgentExecutionResult,
+    AgentLaunch,
     AgentVerdict,
     PhaseUsage,
     StreamResult,
@@ -144,7 +145,7 @@ def _a_processor(stream: _Stream) -> WorkflowExecutionProcessor:
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="prompt"),
-        command_builder=MagicMock(return_value=["claude"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude",))),
         todo_projection=_NoTodoList(),  # pyright: ignore[reportArgumentType]
     )
 
