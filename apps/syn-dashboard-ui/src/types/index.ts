@@ -155,7 +155,8 @@ export interface SessionResponse {
   cache_creation_tokens: number
   cache_read_tokens: number
   total_tokens: number
-  total_cost_usd: number
+  /** Decimal string, as the API serializes it. */
+  total_cost_usd: components['schemas']['SessionResponse']['total_cost_usd']
   /** `total_cost_usd` as the API's `format_cost` words it, with its coverage. Render verbatim (#897). */
   total_cost_display: components['schemas']['SessionResponse']['total_cost_display']
   /**

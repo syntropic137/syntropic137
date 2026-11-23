@@ -2,9 +2,10 @@
  * Cost by Model shows observed ids verbatim and the unattributed bucket as
  * "unknown model" (ADR-067 D9), never the raw key and never a shortened id.
  *
- * Every dollar figure is the API's text (#897): fixtures carry display strings
- * no client formatter would produce from the amounts beside them, so a figure
- * re-formatted in the browser cannot pass.
+ * Every dollar figure is the API's text (#897). The verbatim tests carry
+ * sentinel strings (`API-*`) no formatter produces, so a figure re-formatted in
+ * the browser cannot pass. Every other fixture carries what the API's
+ * `format_cost` sends for the amounts beside it.
  */
 
 import { render, screen } from '@testing-library/react'
@@ -71,11 +72,12 @@ describe('ModelBreakdown', () => {
     renderScope({
       cost_by_model: { 'claude-opus-5-5': '0.30566780000000005', 'gpt-6-sol': '0.1324232' },
       total_cost_usd: '0.43809100000000005',
-      total_cost_display: '$0.4381',
-      cost_by_model_display: { 'claude-opus-5-5': '$0.3057', 'gpt-6-sol': '$0.1324' },
+      total_cost_display: '$0.44',
+      cost_by_model_display: { 'claude-opus-5-5': '$0.31', 'gpt-6-sol': '$0.13' },
       unattributed_cost_display: null,
     })
-    expect(rowText('gpt-6-sol')).toContain('$0.1324')
+    expect(rowText('claude-opus-5-5')).toContain('$0.31')
+    expect(rowText('gpt-6-sol')).toContain('$0.13')
     expect(screen.queryByText('not yet attributed')).toBeNull()
   })
 
@@ -83,8 +85,9 @@ describe('ModelBreakdown', () => {
     renderScope({
       cost_by_model: { 'claude-opus-5-5': '0.3', 'gpt-6-sol': '0.1' },
       total_cost_usd: '0.4',
-      total_cost_display: '$0.4000',
-      cost_by_model_display: { 'claude-opus-5-5': '$0.3000' },
+      total_cost_display: '$0.40',
+      // Deliberately missing gpt-6-sol: the defensive fallback, not a producer shape.
+      cost_by_model_display: { 'claude-opus-5-5': '$0.30' },
       unattributed_cost_display: null,
     })
     const row = rowText('gpt-6-sol')
@@ -108,8 +111,8 @@ describe('ModelBreakdown', () => {
     renderScope({
       cost_by_model: { [UNATTRIBUTED_MODEL_KEY]: '0.2', 'claude-opus-5-5': '0.3' },
       total_cost_usd: '0.5',
-      total_cost_display: '$0.5000',
-      cost_by_model_display: { [UNATTRIBUTED_MODEL_KEY]: '$0.2000', 'claude-opus-5-5': '$0.3000' },
+      total_cost_display: '$0.50',
+      cost_by_model_display: { [UNATTRIBUTED_MODEL_KEY]: '$0.20', 'claude-opus-5-5': '$0.30' },
       unattributed_cost_display: null,
     })
     expect(screen.getByText(UNATTRIBUTED_MODEL_LABEL)).toBeTruthy()
@@ -120,8 +123,8 @@ describe('ModelBreakdown', () => {
     renderScope({
       cost_by_model: { 'claude-sonnet-5-20260101': '0.3' },
       total_cost_usd: '0.3',
-      total_cost_display: '$0.3000',
-      cost_by_model_display: { 'claude-sonnet-5-20260101': '$0.3000' },
+      total_cost_display: '$0.30',
+      cost_by_model_display: { 'claude-sonnet-5-20260101': '$0.30' },
       unattributed_cost_display: null,
     })
     expect(screen.getByText('claude-sonnet-5-20260101')).toBeTruthy()
@@ -133,8 +136,8 @@ describe('ModelBreakdown', () => {
       <ModelBreakdown
         costByModel={{ 'gpt-5.6-sol': '0.19' }}
         totalCost="0.19"
-        totalCostDisplay="≥$0.1900 (partial)"
-        costByModelDisplay={{ 'gpt-5.6-sol': '$0.1900' }}
+        totalCostDisplay=">=$0.19 (partial)"
+        costByModelDisplay={{ 'gpt-5.6-sol': '$0.19' }}
         unattributedCostDisplay={null}
         unpricedModels={['acme-reasoner-7b']}
         unpricedLabel="unpriced"
