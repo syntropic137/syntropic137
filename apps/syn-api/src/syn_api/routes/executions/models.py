@@ -355,6 +355,25 @@ class ExecutionDetailResponse(BaseModel):
     """
     total_cost_display: str
     """``total_cost_usd`` as a client shows it, coverage included: ``format_cost`` (#897)."""
+    cost_by_model: dict[CostModelKey, str]
+    """Each phase's ``cost_by_model`` summed per model, exactly, as decimal strings.
+
+    The rule is ``sum_cost_by_model``'s, the one the dashboard applied in the
+    browser: unparseable values skipped, zero and negative kept. It is the split
+    of the phases that have one, NOT the execution's cost: a running phase's map
+    is empty, so mid-run it accounts for less than ``total_cost_usd``, and
+    ``unattributed_cost_display`` says by how much.
+    """
+    cost_by_model_display: dict[CostModelKey, str]
+    """``format_cost`` of each ``cost_by_model`` value: priced spend only (#897)."""
+    unattributed_cost_display: str | None
+    """``format_cost`` of what ``total_cost_usd`` holds beyond the positive
+    ``cost_by_model`` values, or ``None`` when that is under half a micro-dollar.
+
+    The model breakdown card's "not yet attributed" row, by its rule: basis =
+    ``max(total_cost_usd, attributed)``, remainder = basis - attributed, in
+    exact decimal. See ``syn_api.cost_by_model_display``.
+    """
     cache_read_rate_display: str | None = None
     """How cache READS are billed relative to fresh input, e.g. ``"0.05x rate"``.
 
