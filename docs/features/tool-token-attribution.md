@@ -103,31 +103,12 @@ Response includes:
 
 ## UI Components
 
-### ToolCostBreakdown
-
-A React component that displays a bar chart of token usage by tool:
-
-```tsx
-import { ToolCostBreakdown } from '@/components'
-
-<ToolCostBreakdown
-  tokensByTool={sessionCost.tokens_by_tool}
-  costByToolTokens={sessionCost.cost_by_tool_tokens}
-  maxTools={5}  // Show top 5 tools
-/>
-```
-
-### SessionCostCard with Tool Tokens
-
-Enable tool token display in the SessionCostCard:
-
-```tsx
-<SessionCostCard
-  cost={sessionCost}
-  showBreakdown={true}
-  showToolTokens={true}  // Enable tool token breakdown
-/>
-```
+The dashboard has no component that renders these fields. The former
+`ToolCostBreakdown` and `SessionCostCard` were removed (#897) because they
+formatted dollars without cost coverage, showing unpriced work as a zero
+dollar amount.
+Read `tokens_by_tool` and `cost_by_tool_tokens` from
+`GET /api/costs/sessions/{session_id}`.
 
 ## Interpreting the Data
 
