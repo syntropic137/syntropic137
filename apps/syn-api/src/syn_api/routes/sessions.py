@@ -284,7 +284,9 @@ class SessionResponse(BaseModel):
     total_tokens: int = 0
     total_tokens_display: str = "0"
     total_cost_usd: Decimal = Decimal("0")
-    total_cost_display: str = EM_DASH
+    total_cost_display: str
+    """``total_cost_usd`` as ``format_cost`` renders it with
+    ``unpriced_observation_count``; clients show it verbatim (#897)."""
     unpriced_observation_count: int = 0
     """Observations that carried no usable rate and so added nothing to the total.
 

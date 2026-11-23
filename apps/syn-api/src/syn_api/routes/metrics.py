@@ -74,6 +74,10 @@ class PhaseMetrics(BaseModel):
     Non-zero means ``cost_usd`` is incomplete: a lower bound, not the total. A
     phase with ``cost_usd == 0`` and a non-zero count is UNKNOWN, not free.
     """
+    cost_display: str
+    """``cost_usd`` as ``format_cost`` renders it with ``unpriced_observation_count``,
+    so a client shows this verbatim rather than formatting dollars itself (#897).
+    Says nothing about ``cost_in_progress``; that flag stays separate."""
     cost_in_progress: bool = False
     """True while any execution still has this phase open.
 
@@ -254,10 +258,9 @@ async def _build_phase_metrics(
                 input_tokens=phase.input_tokens,
                 output_tokens=phase.output_tokens,
                 total_tokens=phase.total_tokens,
-                cost_usd=costs.get(phase.phase_id, _NO_PHASE_COST).cost_usd,
-                unpriced_observation_count=costs.get(
-                    phase.phase_id, _NO_PHASE_COST
-                ).unpriced_observation_count,
+                cost_usd=cost.cost_usd,
+                unpriced_observation_count=cost.unpriced_observation_count,
+                cost_display=format_cost(cost.cost_usd, cost.unpriced_observation_count),
                 cost_in_progress=bool(phase.active_runs),
                 # Resolved at read time, by the phase itself: a running phase
                 # has no recorded duration to read back, and the 0.0 this used
@@ -267,6 +270,7 @@ async def _build_phase_metrics(
                 artifact_count=phase.artifact_count,
             )
             for phase in phases.values()
+            for cost in (costs.get(phase.phase_id, _NO_PHASE_COST),)
         ]
     except Exception:
         logger.debug("Could not build phase metrics for workflow %s", workflow_id, exc_info=True)
