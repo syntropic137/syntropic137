@@ -155,7 +155,8 @@ export interface SessionResponse {
   cache_creation_tokens: number
   cache_read_tokens: number
   total_tokens: number
-  total_cost_usd: number
+  /** Decimal string, as the API serializes it. */
+  total_cost_usd: components['schemas']['SessionResponse']['total_cost_usd']
   /** `total_cost_usd` as the API's `format_cost` words it, with its coverage. Render verbatim (#897). */
   total_cost_display: components['schemas']['SessionResponse']['total_cost_display']
   /**
@@ -165,6 +166,10 @@ export interface SessionResponse {
    */
   unpriced_observation_count: number
   cost_by_model: Record<string, string>
+  /** `format_cost` of each `cost_by_model` value. Render verbatim (#897). */
+  cost_by_model_display: components['schemas']['SessionResponse']['cost_by_model_display']
+  /** What the total holds beyond `cost_by_model`, or null when there is nothing to show (#897). */
+  unattributed_cost_display: components['schemas']['SessionResponse']['unattributed_cost_display']
   operations: OperationInfo[]
   started_at: string | null
   completed_at: string | null
@@ -552,6 +557,16 @@ export interface ExecutionDetailResponse {
   total_cost_usd: components['schemas']['ExecutionDetailResponse']['total_cost_usd']
   /** The cost as the API renders it, coverage included: show this, never format `total_cost_usd` (#897). */
   total_cost_display: components['schemas']['ExecutionDetailResponse']['total_cost_display']
+  /**
+   * Each phase's `cost_by_model` summed per model, by the API. The split of the
+   * phases that have one, NOT the execution's cost: a running phase's map is
+   * empty, so mid-run it accounts for less than `total_cost_usd`.
+   */
+  cost_by_model: components['schemas']['ExecutionDetailResponse']['cost_by_model']
+  /** `format_cost` of each `cost_by_model` value. Render verbatim (#897). */
+  cost_by_model_display: components['schemas']['ExecutionDetailResponse']['cost_by_model_display']
+  /** What `total_cost_usd` holds beyond `cost_by_model`, or null when there is nothing to show (#897). */
+  unattributed_cost_display: components['schemas']['ExecutionDetailResponse']['unattributed_cost_display']
   /**
    * Observations that carried no usable rate and so added nothing to the total.
    *

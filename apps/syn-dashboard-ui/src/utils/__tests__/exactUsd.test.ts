@@ -56,7 +56,7 @@ describe('exact subtraction of the live execution', () => {
 })
 
 describe('isVisibleCost', () => {
-  it('hides what formatCost would print as $0.000000', () => {
+  it('hides a remainder under half a micro-dollar', () => {
     expect(isVisibleCost(parse('0.0000004'))).toBe(false)
     expect(isVisibleCost(parse('-0.5'))).toBe(false)
   })

@@ -57,7 +57,7 @@ export function sumExactUsd(values: Iterable<ExactUsd>): ExactUsd {
   return total
 }
 
-/** Back to a plain number, for widths, percentages and `formatCost`. */
+/** Back to a plain number, for widths and percentages. */
 export function exactUsdToNumber(value: ExactUsd): number {
   // Via the decimal string, so the result is the nearest double to the exact
   // value rather than the product of two already-rounded conversions.
@@ -74,10 +74,10 @@ export function exactUsdToString(value: ExactUsd): string {
 }
 
 /**
- * The smallest amount `formatCost` can show as non-zero.
- *
- * It prints sub-cent values to 6 decimal places, so anything under half a
- * micro-dollar rounds to "$0.000000" - a row that says nothing.
+ * Half a micro-dollar: a remainder below it is rounding between two sums of
+ * the same money, not spend. The API applies the same threshold before it
+ * sends `unattributed_cost_display` (`COST_DISPLAY_RESOLUTION` in
+ * `syn_api/cost_by_model_display.py`).
  */
 export const COST_DISPLAY_RESOLUTION: ExactUsd = ONE / 1_000_000n / 2n
 
