@@ -28,21 +28,18 @@ from agentic_isolation.contract import OperationError
 from agentic_isolation.providers.base import SupportsOperations
 from agentic_isolation.providers.base import Workspace as ProviderWorkspace
 from agentic_isolation.providers.capabilities import SupportsFileTransfer, TransferRoot
-from agentic_isolation.providers.file_transfer import ReadFilesResult, ReadLimits
 from agentic_isolation.providers.operation_spool import OperationFailure
 
 from syn_adapters.diagnostics import capture_signal_death
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
-    MAX_COLLECTION_BYTES,
-    MAX_COLLECTION_ENTRIES,
-    MAX_DIRECTORY_DEPTH,
     check_workspace_health,
     copy_files_to_workspace,
+    remaining_read_limits,
 )
 from syn_adapters.workspace_backends.agentic.cpu_hints import with_cpu_hints
 from syn_adapters.workspace_backends.agentic.credential_scrubber import (
     CredentialScrubber,
-    scrub_bytes,
+    scrub_files,
 )
 from syn_adapters.workspace_backends.agentic.credentials import WorkspaceCredentials
 
@@ -82,7 +79,6 @@ from syn_shared.env_constants import (
     ENV_SYN_WORKSPACE_CONTAINER_DIR,
     ENV_SYN_WORKSPACE_HOST_DIR,
 )
-from syn_shared.settings import get_settings
 from syn_shared.settings.workspace_images import DEFAULT_WORKSPACE_IMAGE
 
 if TYPE_CHECKING:
@@ -91,6 +87,7 @@ if TYPE_CHECKING:
     from agentic_isolation import AgenticWorkspace
     from agentic_isolation.contract import FinalizationOutcome
     from agentic_isolation.providers.base import CredentialResolver, Workspace, WorkspaceProvider
+    from agentic_isolation.providers.file_transfer import ReadFilesResult
 
     from syn_domain.contexts.orchestration import (
         WorkspaceCredentialPolicy,
@@ -303,6 +300,15 @@ class AgenticIsolationAdapter:
             )
         )
         self._workspaces: dict[str, AgenticWorkspace] = {}
+        # Bytes each workspace's reads have brought into this process. A
+        # workspace serves one phase, so this is the phase's collection
+        # budget spent, however many times the phase reads (#1552).
+        self._collected_bytes: dict[str, int] = {}
+        # One read at a time per workspace, from reading what is left of the
+        # budget to recording what was spent: two reads in flight would each
+        # be handed the whole remainder, and the later write would drop the
+        # earlier's count.
+        self._collection_locks: dict[str, asyncio.Lock] = {}
 
     @property
     def credential_policy(self) -> WorkspaceCredentialPolicy:
@@ -612,6 +618,8 @@ class AgenticIsolationAdapter:
             )
             raise WorkspaceTeardownError(failure, usage)
         self._workspaces.pop(handle.isolation_id, None)
+        self._collected_bytes.pop(handle.isolation_id, None)
+        self._collection_locks.pop(handle.isolation_id, None)
         return usage
 
     async def execute(
@@ -733,7 +741,8 @@ class AgenticIsolationAdapter:
         Every root of every backend, Docker's `/workspace` included (#1913):
         the provider walks and reads inside the workspace, refusing links,
         special files and anything past `collection_read_limits()`, and names
-        each refusal. The host bind mount could only log what it skipped, so
+        each refusal. The byte budget is the phase's, not the call's: every
+        read of one workspace draws on the same SYN_EXECUTION_COLLECTION_MAX_MB. The host bind mount could only log what it skipped, so
         a refusal there was a file that silently went missing.
 
         Raises `FilesRefusedError` when anything asked for was refused; the
@@ -744,7 +753,8 @@ class AgenticIsolationAdapter:
         """
         files, refused = await self._read_through_provider(handle, patterns, base_path)
         scrubber = CredentialScrubber(self.credentials.withheld(()))
-        scrubbed = tuple((path, scrub_bytes(scrubber, content)) for path, content in files)
+        scrubbed, unscrubbable = scrub_files(scrubber, files)
+        refused = (*refused, *unscrubbable)
         if refused:
             raise FilesRefusedError(scrubbed, refused)
         return list(scrubbed)
@@ -763,26 +773,25 @@ class AgenticIsolationAdapter:
             msg = f"cannot read files from {base_path!r}: not a transfer root"
             raise ValueError(msg)
         root = cast("TransferRoot", base_path)
-        result: ReadFilesResult = await self._provider.read_files(
-            workspace, patterns, base_path=root, limits=collection_read_limits()
-        )
+        lock = self._collection_locks.setdefault(handle.isolation_id, asyncio.Lock())
+        async with lock:
+            spent = self._collected_bytes.get(handle.isolation_id, 0)
+            limits = remaining_read_limits(spent)
+            if limits is None:
+                # The phase has read its whole budget: nothing more is read, and
+                # every pattern asked for is refused by name rather than missing.
+                refusals = tuple(
+                    FileRefusal(path=p, reason="total_bytes_exceeded") for p in patterns
+                )
+                return (), refusals
+            result: ReadFilesResult = await self._provider.read_files(
+                workspace, patterns, base_path=root, limits=limits
+            )
+            self._collected_bytes[handle.isolation_id] = spent + sum(
+                len(content) for _, content in result.files
+            )
         refused = tuple(FileRefusal(path=r.path, reason=r.reason) for r in result.refused)
         return result.files, refused
-
-
-def collection_read_limits() -> ReadLimits:
-    """The budget for one read, chosen to match what the host-mount read allowed.
-
-    The same per-file cap as artifact storage, and the same collection-wide
-    bytes, entries and depth the bind-mount walk was bounded by, so moving
-    Docker onto the provider read does not move where a collection is cut off.
-    """
-    return ReadLimits(
-        max_total_bytes=MAX_COLLECTION_BYTES,
-        max_file_bytes=get_settings().storage.max_file_size_bytes,
-        max_entries=MAX_COLLECTION_ENTRIES,
-        max_depth=MAX_DIRECTORY_DEPTH,
-    )
 
 
 def _teardown_failure(outcome: FinalizationOutcome) -> TeardownFailure | None:

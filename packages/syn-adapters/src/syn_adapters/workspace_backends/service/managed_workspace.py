@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
 from syn_adapters.workspace_backends.agentic.credential_scrubber import (
     CredentialScrubber,
-    scrub_bytes,
+    scrub_files,
 )
 from syn_adapters.workspace_backends.agentic.credentials import names_a_credential
 from syn_adapters.workspace_backends.dependency_seed import seed_dependency_caches
@@ -339,9 +339,12 @@ class ManagedWorkspace:
                 base_path=base_path,
             )
         except FilesRefusedError as e:
-            files = tuple((path, scrub_bytes(scrubber, content)) for path, content in e.files)
-            raise FilesRefusedError(files, e.refused) from e
-        return [(path, scrub_bytes(scrubber, content)) for path, content in collected]
+            files, unscrubbable = scrub_files(scrubber, e.files)
+            raise FilesRefusedError(files, (*e.refused, *unscrubbable)) from e
+        files, unscrubbable = scrub_files(scrubber, collected)
+        if unscrubbable:
+            raise FilesRefusedError(files, unscrubbable)
+        return list(files)
 
     async def run_setup_phase(
         self,

@@ -207,7 +207,12 @@ class InfraSettings(BaseSettings):
             " 20 (the north star's current tier), which comes to 2g. 96MiB is a"
             " pessimistic allowance (~40-55MiB was observed in #1552), not a"
             " measured slope (#1717). If you raise SYN_EXECUTION_MAX_CONCURRENT"
-            " above 20, raise this to 128 + 96 x that many MiB."
+            " above 20, raise this to 128 + 96 x that many MiB. Artifact"
+            " collection is held inside that allowance by"
+            " SYN_EXECUTION_COLLECTION_MAX_MB (default 4, grown by scrubbing to"
+            " at most 1.125^2 x 4 = 5.07MiB and held up to 6 times over per run,"
+            " plus one 8x scrub peak per process):"
+            " 128 + 20 x (55 + 6 x 5.07) + 8 x 4 = 1868MiB, under 2g."
         ),
     )
     api_cpu_limit: str = Field(

@@ -155,6 +155,8 @@ def _adapter(report: TeardownReport) -> tuple[AgenticIsolationAdapter, _Provider
     adapter = object.__new__(AgenticIsolationAdapter)
     workspace = object()
     adapter._workspaces = {"iso-1": workspace}  # type: ignore[assignment]
+    adapter._collected_bytes = {}
+    adapter._collection_locks = {}
     provider = _Provider(report)
     adapter._provider = provider  # type: ignore[assignment]
     return adapter, provider
@@ -337,6 +339,8 @@ async def test_an_incomplete_teardown_keeps_the_handle_so_a_retry_reaches_the_pr
     adapter = object.__new__(AgenticIsolationAdapter)
     workspace = object()
     adapter._workspaces = {"iso-1": workspace}  # type: ignore[assignment]
+    adapter._collected_bytes = {}
+    adapter._collection_locks = {}
     provider = _ThenCompletes(first)
     adapter._provider = provider  # type: ignore[assignment]
 
