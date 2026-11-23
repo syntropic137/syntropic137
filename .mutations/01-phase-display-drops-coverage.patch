@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/metrics.py b/apps/syn-api/src/syn_api/routes/metrics.py
+index ffcd42e41..3ffd985ee 100644
+--- a/apps/syn-api/src/syn_api/routes/metrics.py
++++ b/apps/syn-api/src/syn_api/routes/metrics.py
+@@ -260,7 +260,7 @@ async def _build_phase_metrics(
+                 total_tokens=phase.total_tokens,
+                 cost_usd=cost.cost_usd,
+                 unpriced_observation_count=cost.unpriced_observation_count,
+-                cost_display=format_cost(cost.cost_usd, cost.unpriced_observation_count),
++                cost_display=format_cost(cost.cost_usd, 0),
+                 cost_in_progress=bool(phase.active_runs),
+                 # Resolved at read time, by the phase itself: a running phase
+                 # has no recorded duration to read back, and the 0.0 this used

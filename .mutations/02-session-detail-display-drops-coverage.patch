@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/routes/sessions.py b/apps/syn-api/src/syn_api/routes/sessions.py
+index 849d67f9c..caa5b7247 100644
+--- a/apps/syn-api/src/syn_api/routes/sessions.py
++++ b/apps/syn-api/src/syn_api/routes/sessions.py
+@@ -1069,7 +1069,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
+         total_tokens=detail.total_tokens,
+         total_tokens_display=format_tokens(detail.total_tokens),
+         total_cost_usd=total_cost,
+-        total_cost_display=format_cost(total_cost, detail.unpriced_observation_count),
++        total_cost_display=format_cost(total_cost, 0),
+         unpriced_observation_count=detail.unpriced_observation_count,
+         cost_by_model=detail.cost_by_model,
+         cost_by_token_type=detail.cost_by_token_type,
