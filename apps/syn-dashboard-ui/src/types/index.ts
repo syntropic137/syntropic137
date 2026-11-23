@@ -156,6 +156,8 @@ export interface SessionResponse {
   cache_read_tokens: number
   total_tokens: number
   total_cost_usd: number
+  /** `total_cost_usd` as the API's `format_cost` words it, with its coverage. Render verbatim (#897). */
+  total_cost_display: components['schemas']['SessionResponse']['total_cost_display']
   /**
    * Observations that carried no usable rate and so added nothing to the total.
    *
@@ -239,6 +241,8 @@ export interface PhaseMetrics {
    * Non-zero means `cost_usd` is INCOMPLETE, not that the work was free (#890).
    */
   unpriced_observation_count: number
+  /** `cost_usd` as the API's `format_cost` words it, with its coverage. Render verbatim (#897). */
+  cost_display: components['schemas']['PhaseMetrics']['cost_display']
   /** True while a run of this phase is open: `cost_usd` is a lower bound "so far" (#1048). */
   cost_in_progress: boolean
   /** Nullable: the API returns null when the duration is genuinely unknown. */

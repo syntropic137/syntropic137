@@ -7,7 +7,6 @@ import { PhaseModelBadge } from '../../components/PhaseModelBadge'
 import { SkillRefList } from '../../components/SkillRefList'
 import { providerLabel } from '../../constants/agentProviders'
 import type { PhaseDefinition, PhaseMetrics } from '../../types'
-import { formatCostWithCoverage } from '../../utils/formatters'
 import { defaultPhaseStyle } from './workflowConstants'
 
 /**
@@ -34,9 +33,9 @@ function PhaseMetricLine({ metric }: { metric: PhaseMetrics }) {
   return (
     <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
       <span>{metric.total_tokens.toLocaleString()} tok</span>
-      {/* Unpriced work must not read as a confident $0 (#890); a running phase's cost is a lower bound (#1048). */}
+      {/* The API words the cost and its coverage (#890, #897); a running phase's cost is a lower bound (#1048). */}
       <span title={metric.cost_in_progress ? 'Counted so far; this phase is still running' : undefined}>
-        {formatCostWithCoverage(metric.cost_usd, metric.unpriced_observation_count)}
+        {metric.cost_display}
         {metric.cost_in_progress ? ' so far' : ''}
       </span>
     </div>
