@@ -13870,6 +13870,31 @@
             "type": "string",
             "title": "Total Cost Display"
           },
+          "cost_by_model": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Model"
+          },
+          "cost_by_model_display": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Model Display"
+          },
+          "unattributed_cost_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unattributed Cost Display"
+          },
           "cache_read_rate_display": {
             "anyOf": [
               {
@@ -14128,6 +14153,9 @@
           "total_cache_read_tokens",
           "total_tokens",
           "total_cost_display",
+          "cost_by_model",
+          "cost_by_model_display",
+          "unattributed_cost_display",
           "skill_use"
         ],
         "title": "ExecutionDetailResponse"
@@ -22397,6 +22425,24 @@
             "type": "object",
             "title": "Cost By Model"
           },
+          "cost_by_model_display": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Model Display"
+          },
+          "unattributed_cost_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unattributed Cost Display"
+          },
           "cost_by_token_type": {
             "anyOf": [
               {
@@ -22508,6 +22554,8 @@
           "requested_model",
           "status",
           "total_cost_display",
+          "cost_by_model_display",
+          "unattributed_cost_display",
           "agent_model_display"
         ],
         "title": "SessionResponse",

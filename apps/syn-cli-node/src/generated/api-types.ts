@@ -4948,6 +4948,16 @@ export interface components {
             unpriced_observation_count: number;
             /** Total Cost Display */
             total_cost_display: string;
+            /** Cost By Model */
+            cost_by_model: {
+                [key: string]: string;
+            };
+            /** Cost By Model Display */
+            cost_by_model_display: {
+                [key: string]: string;
+            };
+            /** Unattributed Cost Display */
+            unattributed_cost_display: string | null;
             /** Cache Read Rate Display */
             cache_read_rate_display?: string | null;
             /** Cache Write Rate Display */
@@ -8969,6 +8979,12 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Cost By Model Display */
+            cost_by_model_display: {
+                [key: string]: string;
+            };
+            /** Unattributed Cost Display */
+            unattributed_cost_display: string | null;
             cost_by_token_type?: components["schemas"]["TokenTypeCostResponse"] | null;
             /** Cache Read Rate Display */
             cache_read_rate_display?: string | null;

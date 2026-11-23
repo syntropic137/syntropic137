@@ -233,6 +233,10 @@ async def not_yet_started(
         # No cost has been incurred or measured yet: the same em dash the
         # list row for this start shows, not a "$0.00" that reads as free.
         total_cost_display=EM_DASH,
+        # No phase has run, so nothing to split and nothing left over.
+        cost_by_model={},
+        cost_by_model_display={},
+        unattributed_cost_display=None,
         review_verdict=None,
         delegation_failure=None,
         quarantined_refs=[],
