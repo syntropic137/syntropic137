@@ -24,6 +24,7 @@ from syn_api._wiring import (
     sync_published_events_to_projections,
 )
 from syn_api.cache_rate_display import cache_rate_display
+from syn_api.cost_by_model_display import model_breakdown_text
 from syn_api.list_query import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
@@ -295,6 +296,16 @@ class SessionResponse(BaseModel):
     than printing a dollar figure they cannot back up (issue #890).
     """
     cost_by_model: dict[CostModelKey, Decimal] = Field(default_factory=dict)
+    cost_by_model_display: dict[CostModelKey, str]
+    """``format_cost`` of each ``cost_by_model`` value: priced spend only (#897)."""
+    unattributed_cost_display: str | None
+    """``format_cost`` of what ``total_cost_usd`` holds beyond the positive
+    ``cost_by_model`` values, or ``None`` when that is under half a micro-dollar.
+
+    The model breakdown card's "not yet attributed" row, by its rule: basis =
+    ``max(total_cost_usd, attributed)``, remainder = basis - attributed, in
+    exact decimal. See ``syn_api.cost_by_model_display``.
+    """
     cost_by_token_type: TokenTypeCostResponse | None = None
     """``total_cost_usd`` split into input, output, cache write and cache read.
 
@@ -1037,6 +1048,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         {detail.agent_model} if detail.agent_model else set()
     )
     cache_rates = cache_rate_display(session_models)
+    breakdown = model_breakdown_text(detail.cost_by_model, total_cost)
     phase_names = await _load_phase_names({detail.execution_id} if detail.execution_id else set())
     phase_name = _phase_name(phase_names, detail.execution_id, detail.phase_id)
     return SessionResponse(
@@ -1072,6 +1084,8 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         total_cost_display=format_cost(total_cost, detail.unpriced_observation_count),
         unpriced_observation_count=detail.unpriced_observation_count,
         cost_by_model=detail.cost_by_model,
+        cost_by_model_display=breakdown.cost_by_model_display,
+        unattributed_cost_display=breakdown.unattributed_cost_display,
         cost_by_token_type=detail.cost_by_token_type,
         cache_read_rate_display=cache_rates.cache_read_rate_display,
         cache_write_rate_display=cache_rates.cache_write_rate_display,
