@@ -30,7 +30,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
-from syn_api.cost_by_model_display import cost_by_model_display, sum_cost_by_model
+from syn_api.cost_by_model_display import model_breakdown_text, sum_cost_by_model
 from syn_api.routes.executions.models import ExecutionDetailResponse
 from syn_api.routes.sessions import SessionResponse
 from syn_api.types import Ok, SessionDetail
@@ -82,13 +82,13 @@ def test_the_sum_matches_aggregate_cost_by_model() -> None:
 
 
 def test_the_unattributed_remainder_matches_model_breakdown() -> None:
-    shown = cost_by_model_display(TS_AGGREGATE, PARITY_TOTAL)
+    shown = model_breakdown_text(TS_AGGREGATE, PARITY_TOTAL)
 
     assert shown.unattributed_cost_display == format_cost(TS_UNATTRIBUTED) == "$0.11"
 
 
 def test_each_model_reads_as_format_cost_renders_it() -> None:
-    shown = cost_by_model_display(TS_AGGREGATE, PARITY_TOTAL)
+    shown = model_breakdown_text(TS_AGGREGATE, PARITY_TOTAL)
 
     assert shown.cost_by_model_display == {
         OPUS: "$0.44",
@@ -103,7 +103,7 @@ def test_each_model_reads_as_format_cost_renders_it() -> None:
 def test_decimal_values_render_the_same_as_their_text() -> None:
     as_decimals = {model: Decimal(text) for model, text in TS_AGGREGATE.items()}
 
-    assert cost_by_model_display(as_decimals, PARITY_TOTAL) == cost_by_model_display(
+    assert model_breakdown_text(as_decimals, PARITY_TOTAL) == model_breakdown_text(
         TS_AGGREGATE, PARITY_TOTAL
     )
 
@@ -112,11 +112,11 @@ def test_no_split_is_empty_and_the_whole_total_is_unattributed() -> None:
     assert sum_cost_by_model([]) == {}
     assert sum_cost_by_model([{}, {}]) == {}
 
-    shown = cost_by_model_display({}, Decimal("2.5"))
+    shown = model_breakdown_text({}, Decimal("2.5"))
 
     assert shown.cost_by_model_display == {}
     assert shown.unattributed_cost_display == "$2.50"
-    assert cost_by_model_display({}, Decimal("0")).unattributed_cost_display is None
+    assert model_breakdown_text({}, Decimal("0")).unattributed_cost_display is None
 
 
 @pytest.mark.parametrize(
@@ -138,7 +138,7 @@ def test_no_split_is_empty_and_the_whole_total_is_unattributed() -> None:
 def test_unattributed_is_text_only_when_the_card_shows_a_row(
     split: dict[str, str], total: Decimal, expected: str | None
 ) -> None:
-    assert cost_by_model_display(split, total).unattributed_cost_display == expected
+    assert model_breakdown_text(split, total).unattributed_cost_display == expected
 
 
 # -- GET /executions/{id} ------------------------------------------------------

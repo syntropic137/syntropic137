@@ -7,7 +7,7 @@ arithmetic, moved behind the API so every client reads the same figures:
 
 - ``sum_cost_by_model`` is ``aggregateCostByModel`` in
   ``apps/syn-dashboard-ui/src/pages/ExecutionDetail/ExecutionDetail.tsx``;
-- ``cost_by_model_display`` is the reconciliation in
+- ``model_breakdown_text`` is the reconciliation in
   ``apps/syn-dashboard-ui/src/components/ModelBreakdown.tsx``, rendered with
   ``format_cost``.
 
@@ -83,7 +83,7 @@ def sum_cost_by_model(maps: Iterable[Mapping[CostModelKey, str]]) -> dict[CostMo
 
     This is the per-model split of the phases that have one, NOT the scope's
     cost. A running phase's map is empty, so mid-run the sum accounts for less
-    than the total, and ``cost_by_model_display`` reports the difference.
+    than the total, and ``model_breakdown_text`` reports the difference.
     """
     with localcontext() as ctx:
         ctx.prec = _PRECISION
@@ -107,10 +107,10 @@ class CostByModelDisplay:
     draws a row only for a positive cost."""
     unattributed_cost_display: str | None
     """What the total holds that no model accounts for, or ``None`` when that
-    is nothing the card would show. See ``cost_by_model_display``."""
+    is nothing the card would show. See ``model_breakdown_text``."""
 
 
-def cost_by_model_display(
+def model_breakdown_text(
     cost_by_model: Mapping[CostModelKey, Decimal] | Mapping[CostModelKey, str],
     total_cost_usd: Decimal,
 ) -> CostByModelDisplay:

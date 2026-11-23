@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api._wiring_admission import get_execution_budget
 from syn_api.cache_rate_display import cache_rate_display
-from syn_api.cost_by_model_display import cost_by_model_display, sum_cost_by_model
+from syn_api.cost_by_model_display import model_breakdown_text, sum_cost_by_model
 from syn_api.list_query import MAX_PAGE_SIZE, WindowBound, parse_statuses
 from syn_api.model_identity import cost_by_observed_model, observed_model_ids
 from syn_api.services.read_model_status import read_model_status
@@ -869,7 +869,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
     cache_rates = cache_rate_display(_models_run(phases))
     cost_by_model = sum_cost_by_model(p.cost_by_model for p in phases)
-    breakdown = cost_by_model_display(cost_by_model, detail.total_cost_usd)
+    breakdown = model_breakdown_text(cost_by_model, detail.total_cost_usd)
     lineage = await ResumeLineage.of(
         detail.resumed_from,
         detail.resumed_as,

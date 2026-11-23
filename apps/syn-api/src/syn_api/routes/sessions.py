@@ -24,7 +24,7 @@ from syn_api._wiring import (
     sync_published_events_to_projections,
 )
 from syn_api.cache_rate_display import cache_rate_display
-from syn_api.cost_by_model_display import cost_by_model_display
+from syn_api.cost_by_model_display import model_breakdown_text
 from syn_api.list_query import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
@@ -1046,7 +1046,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         {detail.agent_model} if detail.agent_model else set()
     )
     cache_rates = cache_rate_display(session_models)
-    breakdown = cost_by_model_display(detail.cost_by_model, total_cost)
+    breakdown = model_breakdown_text(detail.cost_by_model, total_cost)
     phase_names = await _load_phase_names({detail.execution_id} if detail.execution_id else set())
     phase_name = _phase_name(phase_names, detail.execution_id, detail.phase_id)
     return SessionResponse(
