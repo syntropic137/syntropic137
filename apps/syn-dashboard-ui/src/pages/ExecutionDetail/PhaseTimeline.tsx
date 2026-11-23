@@ -13,6 +13,7 @@ import { costByModelKeyLabel } from '../../utils/modelLabels'
 import { sessionInventoryHref } from '../../utils/sessionInventoryLinks'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 import { PlannedPhaseCard } from './PlannedPhaseCard'
+import type { ExecutionWithCost } from './withCostFields'
 import './SessionInventory.css'
 
 /**
@@ -216,7 +217,7 @@ interface PhaseTimelineProps {
    * Passing the execution keeps that choice inside this component, so a caller
    * cannot render the timeline against a total derived some other way.
    */
-  execution: ExecutionDetailResponse
+  execution: ExecutionWithCost
   now: number
   /** Phases whose workspace ran with capture degraded (#1516); none by default. */
   captureDegraded?: readonly DegradedPhase[]
