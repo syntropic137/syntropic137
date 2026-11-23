@@ -28,7 +28,7 @@ class PhaseWorkspaceRetainedEvent(DomainEvent):
 
     workflow_id: str
     execution_id: str
-    phase_id: str | None
+    phase_id: str | None = None
     workspace_handle: str
     reason: RetainedReason
     detail: str
