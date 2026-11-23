@@ -128,6 +128,12 @@ class PhaseExecutionInfo(BaseModel):
     ``fallback_agent`` on capacity, quota or a content refusal; ``requested_model`` is then the
     fallback's model. Null when nothing recorded it."""
     cost_by_model: dict[CostModelKey, str] = Field(default_factory=dict)
+    cost_by_model_display: dict[CostModelKey, str] = Field(default_factory=dict)
+    """``format_cost`` of each ``cost_by_model`` value: priced spend only (#897).
+
+    The phase card renders this text verbatim beside each model's bar; a model
+    with no entry here shows a dash, never a number the browser formatted.
+    """
     unpriced_models: list[ObservedModelId] = Field(default_factory=list)
     """Models this phase was observed running that are NOT in ``cost_by_model``
     because nothing priced them: no rate and no SDK cost (#1743).
