@@ -336,6 +336,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.orphaned_workspac
     judge_owner,
     remove_reclaimed_dir,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.retained_workspace_record import (
+    RetainedWorkspaceRecorder,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict import (
     AgentVerdict,
 )
@@ -600,6 +603,7 @@ __all__ = [
     "ResumeStarter",
     "Retained",
     "RetainedReason",
+    "RetainedWorkspaceRecorder",
     "ReviewVerdict",
     "SalvagedPhase",
     "SecurityPolicy",

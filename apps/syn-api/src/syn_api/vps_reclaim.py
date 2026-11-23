@@ -386,6 +386,7 @@ def production_reclaimer(gate: QuiescenceGate, options: RunOptions) -> Workspace
     """The automatic reclaimer's predicate over standalone read models, as root."""
     from syn_adapters.projection_stores import get_projection_store
     from syn_adapters.session_inventory.postgres_spools import PostgresCaptureSpools
+    from syn_adapters.storage.repositories import get_workflow_execution_repository
     from syn_adapters.workspace_backends.orphaned import workspace_base_dir, workspace_host_dir
     from syn_adapters.workspace_backends.remote_refs import GitLsRemote, github_app_credential
     from syn_adapters.workspace_backends.stale_dirs import (
@@ -402,6 +403,7 @@ def production_reclaimer(gate: QuiescenceGate, options: RunOptions) -> Workspace
     from syn_domain.contexts.agent_sessions.slices.list_sessions.projection import (
         SessionListProjection,
     )
+    from syn_domain.contexts.orchestration import RetainedWorkspaceRecorder
     from syn_domain.contexts.orchestration.slices.list_executions.projection import (
         WorkflowExecutionListProjection,
     )
@@ -442,6 +444,7 @@ def production_reclaimer(gate: QuiescenceGate, options: RunOptions) -> Workspace
         read_models_rebuilding=gate.completeness,
         pass_budget_seconds=options.budget_seconds,
         dry_run=not options.apply,
+        recorder=RetainedWorkspaceRecorder(get_workflow_execution_repository),
     )
 
 

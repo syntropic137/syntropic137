@@ -138,6 +138,9 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceCreatingEvent impo
 from syn_domain.contexts.orchestration.domain.events.WorkspaceDestroyedEvent import (
     WorkspaceDestroyedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseWorkspaceRetainedEvent import (
+    PhaseWorkspaceRetainedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkspaceDestroyingEvent import (
     WorkspaceDestroyingEvent,
 )
@@ -182,6 +185,7 @@ __all__ = [
     "PhaseCompletedEvent",
     "PhaseRetryScheduledEvent",
     "PhaseStartedEvent",
+    "PhaseWorkspaceRetainedEvent",
     "TokensInjectedEvent",
     "WorkflowCompletedEvent",
     "WorkflowDefaultEvalSetEvent",

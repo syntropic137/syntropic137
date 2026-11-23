@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
         ImageManifestReading,
     )
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_retention import (
+        RetainedReason,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
         ResumeOrigin,
         SourceCommit,
@@ -380,6 +383,26 @@ class RecordCancelledWorkCommand:
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.quarantined = quarantined
+
+
+class RecordWorkspaceRetainedCommand:
+    """Command to record a workspace kept because its work is unproven (#2321).
+
+    ``workspace_handle`` is the workspace id. The guards do not know the
+    phase; the aggregate reads it off its own stream.
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        workspace_handle: str,
+        reason: RetainedReason,
+        detail: str,
+    ) -> None:
+        self.aggregate_id = execution_id
+        self.workspace_handle = workspace_handle
+        self.reason = reason
+        self.detail = detail
 
 
 class InterruptExecutionCommand:

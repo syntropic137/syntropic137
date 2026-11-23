@@ -68,7 +68,7 @@ def _orphan(log: list[str], *, reachable: bool = True) -> OrphanedWorkspace:
 
 async def _reclaim(orphan: OrphanedWorkspace, remover: _Remover) -> bool:
     reclaimable = await guard_orphaned_workspace(orphan)
-    return reclaimable is not None and remove_reclaimed_dir(reclaimable, remover)
+    return isinstance(reclaimable, ReclaimableDir) and remove_reclaimed_dir(reclaimable, remover)
 
 
 async def test_a_clean_orphan_is_deleted_and_only_after_the_guard_walked_it() -> None:

@@ -40,6 +40,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
     RecordCancelledWorkCommand,
     RecordPhaseCommandsCommand,
     RecordPhasePushCommand,
+    RecordWorkspaceRetainedCommand,
     ResumeExecutionCommand,
     RetryPhaseCommand,
     StartExecutionCommand,
@@ -80,6 +81,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_even
     completed_event,
     failed_event,
     started_event,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_retention import (
+    WORK_UNPROVEN,
+    RetainedReason,
+    retained_event,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.own_pushes import (
     push_event,
@@ -165,6 +171,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.CancelledWorkQuarantinedEvent import (
         CancelledWorkQuarantinedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.PhaseWorkspaceRetainedEvent import (
+        PhaseWorkspaceRetainedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.ExecutionAttachedToEvalEvent import (
         ExecutionAttachedToEvalEvent,
@@ -278,6 +287,11 @@ class WorkflowExecutionAggregate(
         #: Why the replayed phase list is not a total order (#1455), if it is not.
         self._phase_order_conflict: str | None = None
         self._current_phase_workspace_id: str | None = None
+        #: The phase each provisioned workspace was for, so a kept workspace
+        #: names its phase though the guard that kept it cannot (#2321).
+        self._workspace_phases: dict[str, str] = {}
+        #: Each (workspace, reason) already recorded as retained (#2321).
+        self._retained: set[tuple[str, RetainedReason]] = set()
         #: What each RUNNING phase's agent left behind, keyed by phase.
         #:
         #: Replayed state, not a cache. The salvage (#1195, #1300) turns this
@@ -774,6 +788,23 @@ class WorkflowExecutionAggregate(
         if command.quarantined and not self._cancelled_work_recorded:
             self._apply(cancelled_work_event(command, self._workflow_id or ""))
 
+    @command_handler("RecordWorkspaceRetainedCommand")
+    def record_workspace_retained(self, command: RecordWorkspaceRetainedCommand) -> None:
+        """Record a workspace kept because its work is unproven, in any status (#2321).
+
+        No event when this workspace was already recorded for this reason: a
+        reclaim pass that keeps it again is the same fact."""
+        if self.id is None:
+            msg = "Execution does not exist"
+            raise ValueError(msg)
+        if command.reason not in WORK_UNPROVEN:
+            msg = f"{command.reason.value} says nothing about the work; it is not retained work"
+            raise ValueError(msg)
+        if (command.workspace_handle, command.reason) in self._retained:
+            return
+        phase_id = self._workspace_phases.get(command.workspace_handle)
+        self._apply(retained_event(command, self._workflow_id or "", phase_id))
+
     @command_handler("AddExecutionTagsCommand")
     def add_tags(self, command: AddExecutionTagsCommand) -> None:
         """Add tags to the current set. None new, no event."""
@@ -990,6 +1021,7 @@ class WorkflowExecutionAggregate(
     def on_workspace_provisioned_for_phase(self, event: WorkspaceProvisionedForPhaseEvent) -> None:
         """Apply WorkspaceProvisionedForPhaseEvent."""
         self._current_phase_workspace_id = evt(event, "workspace_id")
+        self._workspace_phases[evt(event, "workspace_id")] = evt(event, "phase_id")
         if self._starting_checkout is None:
             self._starting_checkout = read_source_commits(evt(event, "checked_out_commits"))
         reading = read_image_manifest(evt(event, "image_manifest"))
@@ -1065,6 +1097,11 @@ class WorkflowExecutionAggregate(
     def on_cancelled_work_quarantined(self, _event: CancelledWorkQuarantinedEvent) -> None:
         """Apply CancelledWorkQuarantinedEvent. A fact for the PR, recorded once."""
         self._cancelled_work_recorded = True
+
+    @event_sourcing_handler("PhaseWorkspaceRetained")
+    def on_phase_workspace_retained(self, event: PhaseWorkspaceRetainedEvent) -> None:
+        """Apply PhaseWorkspaceRetainedEvent. A fact about the work, recorded once."""
+        self._retained.add((evt(event, "workspace_handle"), RetainedReason(evt(event, "reason"))))
 
     @event_sourcing_handler("ExecutionTagsAdded")
     def on_execution_tags_added(self, event: ExecutionTagsAddedEvent) -> None:
