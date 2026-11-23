@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/reconciliation.py b/apps/syn-api/src/syn_api/services/reconciliation.py
+index 9484ef7d7..4a0c849b2 100644
+--- a/apps/syn-api/src/syn_api/services/reconciliation.py
++++ b/apps/syn-api/src/syn_api/services/reconciliation.py
+@@ -470,7 +470,7 @@ async def _guard_orphaned_workspaces(*narrower: str) -> list[ReclaimableDir] | N
+         verdict = await guard_orphaned_workspace(orphan)
+         if isinstance(verdict, Retained):
+             # Kept already; the record only says so on the run (#2321).
+-            await recorder.record(orphan.execution_id, orphan.workspace_id, verdict)
++            pass
+         else:
+             cleared.append(verdict)
+     return cleared

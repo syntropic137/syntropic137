@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
+index fb423bb14..f700ca1c6 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
+@@ -800,8 +800,6 @@ class WorkflowExecutionAggregate(
+         if command.reason not in WORK_UNPROVEN:
+             msg = f"{command.reason.value} says nothing about the work; it is not retained work"
+             raise ValueError(msg)
+-        if (command.workspace_handle, command.reason) in self._retained:
+-            return
+         phase_id = self._workspace_phases.get(command.workspace_handle)
+         self._apply(retained_event(command, self._workflow_id or "", phase_id))
+ 

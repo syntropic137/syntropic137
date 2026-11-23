@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+index 540052bca..c0a00b86f 100644
+--- a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
++++ b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+@@ -305,7 +305,7 @@ class WorkspaceDirReclaimer:
+         verdict = await guard_stale_workspace_dir(stale, self.git, self.remotes)
+         if isinstance(verdict, Retained) and stale.execution_id and self.recorder:
+             # Kept already; the record only says so on the run (#2321).
+-            await self.recorder.record(stale.execution_id, stale.workspace_id, verdict)
++            pass
+         return verdict
+ 
+     async def _reclaim(

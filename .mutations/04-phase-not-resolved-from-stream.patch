@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
+index fb423bb14..f7170ab42 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py
+@@ -802,7 +802,7 @@ class WorkflowExecutionAggregate(
+             raise ValueError(msg)
+         if (command.workspace_handle, command.reason) in self._retained:
+             return
+-        phase_id = self._workspace_phases.get(command.workspace_handle)
++        phase_id = None
+         self._apply(retained_event(command, self._workflow_id or "", phase_id))
+ 
+     @command_handler("AddExecutionTagsCommand")

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/PhaseWorkspaceRetainedEvent.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/PhaseWorkspaceRetainedEvent.py
+index 97713a009..6398c1db3 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/PhaseWorkspaceRetainedEvent.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/PhaseWorkspaceRetainedEvent.py
+@@ -28,7 +28,7 @@ class PhaseWorkspaceRetainedEvent(DomainEvent):
+ 
+     workflow_id: str
+     execution_id: str
+-    phase_id: str | None = None
++    phase_id: str | None
+     workspace_handle: str
+     reason: RetainedReason
+     detail: str

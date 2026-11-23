@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/orphaned_workspace.py b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/orphaned_workspace.py
+index 6473bb9aa..860707de2 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/orphaned_workspace.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/orphaned_workspace.py
+@@ -403,7 +403,7 @@ def _at_risk(saved: SavedWork) -> Retained | None:
+     unsaved = [f"{r.repo}/{path}" for r in saved.quarantined for path in r.unsaved_submodules]
+     if unsaved:
+         return Retained(
+-            RetainedReason.SUBMODULE_STORE_UNPROVEN,
++            RetainedReason.UNPUSHED_UNPROVEN,
+             "Submodule work no quarantine push carries, only as a gitlink: " + ", ".join(unsaved),
+         )
+     if any(r.pushed_ref is None for r in saved.quarantined):
