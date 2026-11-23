@@ -7193,6 +7193,8 @@ export interface components {
              * @default 0
              */
             unpriced_observation_count: number;
+            /** Cost Display */
+            cost_display: string;
             /**
              * Cost In Progress
              * @default false
@@ -8966,10 +8968,7 @@ export interface components {
              * @default 0
              */
             total_cost_usd: string;
-            /**
-             * Total Cost Display
-             * @default —
-             */
+            /** Total Cost Display */
             total_cost_display: string;
             /**
              * Unpriced Observation Count

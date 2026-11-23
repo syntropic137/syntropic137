@@ -19111,6 +19111,10 @@
             "title": "Unpriced Observation Count",
             "default": 0
           },
+          "cost_display": {
+            "type": "string",
+            "title": "Cost Display"
+          },
           "cost_in_progress": {
             "type": "boolean",
             "title": "Cost In Progress",
@@ -19137,7 +19141,8 @@
         "required": [
           "phase_id",
           "phase_name",
-          "status"
+          "status",
+          "cost_display"
         ],
         "title": "PhaseMetrics",
         "description": "Metrics for a single phase."
@@ -22405,8 +22410,7 @@
           },
           "total_cost_display": {
             "type": "string",
-            "title": "Total Cost Display",
-            "default": "\u2014"
+            "title": "Total Cost Display"
           },
           "unpriced_observation_count": {
             "type": "integer",
@@ -22549,6 +22553,7 @@
           "agent_model",
           "requested_model",
           "status",
+          "total_cost_display",
           "cost_by_model_display",
           "unattributed_cost_display",
           "agent_model_display"

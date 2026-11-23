@@ -11,6 +11,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { COST_COVERAGE_CASES } from '../../../test/costCoverageFixtures'
 import type { PhaseDefinition, PhaseMetrics } from '../../../types'
 import { PhasePipeline } from '../PhasePipeline'
 
@@ -52,6 +53,7 @@ function metric(overrides: Partial<PhaseMetrics> & { phase_id: string }): PhaseM
     total_tokens: 68233,
     cost_usd: '0',
     unpriced_observation_count: 0,
+    cost_display: '$0.00',
     cost_in_progress: false,
     duration_seconds: 26.6,
     artifact_count: 1,
@@ -75,57 +77,67 @@ describe('workflow Phase Pipeline card', () => {
     expect(screen.getByText('sonnet')).toBeTruthy()
   })
 
-  it('renders a priced phase cost from its decimal string', () => {
-    render(
-      <PhasePipeline
-        phases={[PLAN]}
-        phaseMetrics={[metric({ phase_id: 'plan', cost_usd: '0.30566780000000005' })]}
-      />,
-    )
-    expect(screen.getByText('$0.3057')).toBeTruthy()
-  })
-
-  it('says unpriced, not $0.0000, when nothing in the phase could be priced', () => {
+  // The API words the cost (`format_cost`, #897). Only the partial case and
+  // the sub-cent case below are worded differently by the client (U+2265,
+  // four or six decimals); those are the ones that catch a regression.
+  it.each(COST_COVERAGE_CASES)('shows the API cost text verbatim when $name', (c) => {
     const { container } = render(
       <PhasePipeline
         phases={[IMPLEMENT]}
-        phaseMetrics={[metric({ phase_id: 'implement', cost_usd: '0', unpriced_observation_count: 4 })]}
+        phaseMetrics={[
+          metric({
+            phase_id: 'implement',
+            cost_usd: c.total_cost_usd,
+            unpriced_observation_count: c.unpriced_observation_count,
+            cost_display: c.total_cost_display,
+          }),
+        ]}
       />,
     )
-    expect(screen.getByText('unpriced')).toBeTruthy()
+    expect(screen.getByText(c.shows)).toBeTruthy()
+    expect(container.textContent).not.toContain('$1.2500')
     expect(container.textContent).not.toContain('$0.0000')
-  })
-
-  it('marks a partly-priced phase as a lower bound', () => {
-    render(
-      <PhasePipeline
-        phases={[IMPLEMENT]}
-        phaseMetrics={[metric({ phase_id: 'implement', cost_usd: '0.1324232', unpriced_observation_count: 2 })]}
-      />,
-    )
-    expect(screen.getByText('≥$0.1324 (partial)')).toBeTruthy()
   })
 
   it('marks a running phase cost as counted so far, not settled', () => {
     render(
       <PhasePipeline
         phases={[IMPLEMENT]}
-        phaseMetrics={[metric({ phase_id: 'implement', status: 'running', cost_usd: '0.1324232', cost_in_progress: true })]}
+        phaseMetrics={[
+          metric({
+            phase_id: 'implement',
+            status: 'running',
+            cost_usd: '0.1324232',
+            cost_display: '$0.13',
+            cost_in_progress: true,
+          }),
+        ]}
       />,
     )
     const cost = screen.getByTitle('Counted so far; this phase is still running')
-    expect(cost.textContent).toBe('$0.1324 so far')
+    expect(cost.textContent).toBe('$0.13 so far')
   })
 
   it('shows a settled phase cost without the so-far marker', () => {
     render(
       <PhasePipeline
         phases={[IMPLEMENT]}
-        phaseMetrics={[metric({ phase_id: 'implement', cost_usd: '0.1324232' })]}
+        phaseMetrics={[metric({ phase_id: 'implement', cost_usd: '0.1324232', cost_display: '$0.13' })]}
       />,
     )
-    expect(screen.getByText('$0.1324')).toBeTruthy()
+    expect(screen.getByText('$0.13')).toBeTruthy()
     expect(screen.queryByText(/so far/)).toBeNull()
+  })
+
+  it('shows a sub-cent phase cost as the API words it, not as six decimals', () => {
+    // The client would render '$0.004000'; the API says '<$0.01' (format_cost).
+    render(
+      <PhasePipeline
+        phases={[IMPLEMENT]}
+        phaseMetrics={[metric({ phase_id: 'implement', cost_usd: '0.004', cost_display: '<$0.01' })]}
+      />,
+    )
+    expect(screen.getByText('<$0.01')).toBeTruthy()
   })
 
   it('lists each declared skill with its repo, short SHA and a link to that version', () => {
