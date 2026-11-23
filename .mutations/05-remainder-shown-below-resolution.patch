@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/cost_by_model_display.py b/apps/syn-api/src/syn_api/cost_by_model_display.py
+index 7daf10bd2..1212bde43 100644
+--- a/apps/syn-api/src/syn_api/cost_by_model_display.py
++++ b/apps/syn-api/src/syn_api/cost_by_model_display.py
+@@ -139,6 +139,6 @@ def model_breakdown_text(
+     return CostByModelDisplay(
+         cost_by_model_display=displays,
+         unattributed_cost_display=(
+-            format_cost(remainder) if remainder >= COST_DISPLAY_RESOLUTION else None
++            format_cost(remainder) if remainder > 0 else None
+         ),
+     )

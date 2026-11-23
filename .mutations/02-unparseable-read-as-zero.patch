@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/cost_by_model_display.py b/apps/syn-api/src/syn_api/cost_by_model_display.py
+index 7daf10bd2..974af7f6e 100644
+--- a/apps/syn-api/src/syn_api/cost_by_model_display.py
++++ b/apps/syn-api/src/syn_api/cost_by_model_display.py
+@@ -92,7 +92,7 @@ def sum_cost_by_model(maps: Iterable[Mapping[CostModelKey, str]]) -> dict[CostMo
+             for model, text in costs.items():
+                 cost = _exact_usd(text)
+                 if cost is None:
+-                    continue
++                    cost = Decimal(0)
+                 totals[model] = totals.get(model, Decimal(0)) + cost
+     return {model: _exact_usd_text(total) for model, total in totals.items()}
+ 
