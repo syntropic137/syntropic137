@@ -19,7 +19,13 @@ import { describe, expect, it } from 'vitest'
 import { PhaseTimeline } from '../PhaseTimeline'
 import type { ExecutionDetailResponse } from '../../../types'
 import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
-import { COST_COVERAGE_CASES, SUB_CENT_CASE } from '../../../test/costCoverageFixtures'
+import {
+  COST_COVERAGE_CASES,
+  DISTINCT_EXECUTION_COST,
+  SUB_CENT_CASE,
+  executionCost,
+  phaseCost,
+} from '../../../test/costCoverageFixtures'
 
 type Phase = ExecutionDetailResponse['phases'][number]
 
@@ -35,7 +41,7 @@ function phase(overrides: Partial<Phase> & { phase_id: string }): Phase {
     cache_creation_tokens: 0,
     cache_read_tokens: 0,
     duration_seconds: 1,
-    cost_usd: 0,
+    cost_usd: '0',
     cost_display: '$0.00',
     unpriced_observation_count: 0,
     started_at: null,
@@ -71,7 +77,7 @@ function execution(
     total_cache_creation_tokens: 0,
     total_cache_read_tokens: 0,
     total_tokens: 0,
-    total_cost_usd: 0,
+    total_cost_usd: '0',
     total_cost_display: '$0.00',
     unpriced_observation_count: 0,
     artifact_ids: [],
@@ -101,11 +107,7 @@ describe('PhaseTimeline cost text', () => {
   // client formatter cannot produce from the numbers beside it, so a surface
   // that formats the dollars itself again cannot pass.
   it.each([...COST_COVERAGE_CASES, SUB_CENT_CASE])('shows the execution total verbatim when $name', (c) => {
-    renderTimeline([phase({ phase_id: 'implement', cost_usd: 0, cost_display: '$0.00' })], {
-      total_cost_usd: Number(c.total_cost_usd),
-      total_cost_display: c.total_cost_display,
-      unpriced_observation_count: c.unpriced_observation_count,
-    })
+    renderTimeline([phase({ phase_id: 'implement' })], executionCost(c))
     expect(headerStrip()).toContain(c.shows)
   })
 
@@ -114,10 +116,10 @@ describe('PhaseTimeline cost text', () => {
     // real; a roll-up summed from the cards reports the cards, not the run.
     renderTimeline(
       [
-        phase({ phase_id: 'plan', cost_usd: 1.5, cost_display: '$1.50' }),
-        phase({ phase_id: 'build', cost_usd: 2.5, cost_display: '$2.50' }),
+        phase({ phase_id: 'plan', cost_usd: '1.5', cost_display: '$1.50' }),
+        phase({ phase_id: 'build', cost_usd: '2.5', cost_display: '$2.50' }),
       ],
-      { total_cost_usd: 6.25, total_cost_display: '$6.25' },
+      { total_cost_usd: '6.25', total_cost_display: '$6.25' },
     )
     expect(headerStrip()).toContain('$6.25')
     expect(headerStrip()).not.toContain('$4.00')
@@ -125,15 +127,8 @@ describe('PhaseTimeline cost text', () => {
 
   it.each([...COST_COVERAGE_CASES, SUB_CENT_CASE])('shows each phase card cost verbatim when $name', (c) => {
     const { container } = renderTimeline(
-      [
-        phase({
-          phase_id: 'plan',
-          cost_usd: Number(c.total_cost_usd),
-          unpriced_observation_count: c.unpriced_observation_count,
-          cost_display: c.total_cost_display,
-        }),
-      ],
-      { total_cost_display: 'execution-total' },
+      [phase({ phase_id: 'plan', ...phaseCost(c) })],
+      DISTINCT_EXECUTION_COST,
     )
     // The header carries a different string, so the match can only be the card.
     expect(headerStrip()).not.toContain(c.shows)

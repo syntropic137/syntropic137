@@ -68,3 +68,44 @@ export const SUB_CENT_CASE: CostCoverageCase = {
   shows: '<$0.01',
   note: null,
 }
+
+/**
+ * The execution detail route's own cost fields (#897 slice L), typed from the
+ * schemas it serves: `total_cost_usd` and `cost_usd` arrive as Decimal strings.
+ */
+export type ExecutionCostWire = Pick<
+  components['schemas']['ExecutionDetailResponse'],
+  'total_cost_usd' | 'total_cost_display' | 'unpriced_observation_count'
+>
+export type PhaseCostWire = Pick<
+  components['schemas']['PhaseExecutionInfo'],
+  'cost_usd' | 'cost_display' | 'unpriced_observation_count'
+>
+
+/** A coverage case as `ExecutionDetailResponse` carries it. */
+export function executionCost(c: CostCoverageCase): ExecutionCostWire {
+  return {
+    total_cost_usd: c.total_cost_usd,
+    total_cost_display: c.total_cost_display,
+    unpriced_observation_count: c.unpriced_observation_count,
+  }
+}
+
+/** A coverage case as one `PhaseExecutionInfo` carries it. */
+export function phaseCost(c: CostCoverageCase): PhaseCostWire {
+  return {
+    cost_usd: c.total_cost_usd,
+    cost_display: c.total_cost_display,
+    unpriced_observation_count: c.unpriced_observation_count,
+  }
+}
+
+/**
+ * A real execution total whose display contains none of the cases' `shows`,
+ * so a match on a phase card cannot come from the header above it.
+ */
+export const DISTINCT_EXECUTION_COST: ExecutionCostWire = {
+  total_cost_usd: '99',
+  total_cost_display: '$99.00',
+  unpriced_observation_count: 0,
+}
