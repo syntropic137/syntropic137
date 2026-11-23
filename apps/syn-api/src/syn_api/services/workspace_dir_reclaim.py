@@ -61,7 +61,6 @@ if TYPE_CHECKING:
         HostWorkspaceGit,
         OwnerExecution,
         RemoteRefs,
-        RetainedWorkspaceRecorder,
     )
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
         WorkflowExecutionSummary,
@@ -160,9 +159,6 @@ class WorkspaceDirReclaimer:
         default=lambda: _known_whole()
     )
     dry_run: bool = False
-    #: Puts each directory the guard kept for unproven work on its execution's
-    #: stream (#2321). None records nothing: a test that does not ask for it.
-    recorder: RetainedWorkspaceRecorder | None = None
 
     async def run_once(self) -> ReclaimPass:
         """Judge every directory; reclaim the ones that lose nothing. Never raises."""
@@ -302,11 +298,7 @@ class WorkspaceDirReclaimer:
         stale = await self.judge(listing, containers)
         if isinstance(stale, Retained):
             return stale
-        verdict = await guard_stale_workspace_dir(stale, self.git, self.remotes)
-        if isinstance(verdict, Retained) and stale.execution_id and self.recorder:
-            # Kept already; the record only says so on the run (#2321).
-            await self.recorder.record(stale.execution_id, stale.workspace_id, verdict)
-        return verdict
+        return await guard_stale_workspace_dir(stale, self.git, self.remotes)
 
     async def _reclaim(
         self, listing: WorkspaceDirListing, containers: list[ContainerMounts], deadline: float
@@ -739,7 +731,6 @@ async def _capture_unproven(execution_id: str) -> str | None:
 def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
     """The production wiring: docker, the read models, host git, the real remote."""
     from syn_adapters.projection_stores import get_projection_store
-    from syn_adapters.storage.repositories import get_workflow_execution_repository
     from syn_adapters.workspace_backends.orphaned import workspace_base_dir, workspace_host_dir
     from syn_adapters.workspace_backends.remote_refs import GitLsRemote, github_app_credential
     from syn_adapters.workspace_backends.stale_dirs import (
@@ -748,7 +739,6 @@ def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
         own_container_id,
         scan_workspace_dirs,
     )
-    from syn_domain.contexts.orchestration import RetainedWorkspaceRecorder
     from syn_domain.contexts.orchestration.slices.workspace_ownership.projection import (
         WorkspaceOwnershipProjection,
     )
@@ -773,7 +763,6 @@ def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
         paused=_maintenance_paused,
         read_models_rebuilding=_reclaim_inputs_rebuilding,
         dry_run=disk.reclaim_dry_run,
-        recorder=RetainedWorkspaceRecorder(get_workflow_execution_repository),
     )
 
 

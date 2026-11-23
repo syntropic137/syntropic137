@@ -15,10 +15,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_rete
 class PhaseWorkspaceRetainedEvent(DomainEvent):
     """A workspace of this execution was KEPT: the guard could not prove its work safe.
 
-    Written by whichever guard made the keep decision - the orphan guard at
-    startup or the stale-directory reclaimer - so the run, not only a log
-    line, says where work may still be. Recorded once per workspace and
-    reason; a reclaim pass that keeps it again adds nothing.
+    Written by the orphan guard at startup when it keeps a directory, so the
+    run, not only a log line, says where work may still be. Recorded once per
+    workspace and reason; keeping it again adds nothing. The stale-directory
+    reclaimer does not write it: the janitor never writes the event store
+    (#1983).
 
     ``workspace_handle`` is the workspace id: host-independent, never a path
     or a container id, which are infrastructure and gone after a restart.

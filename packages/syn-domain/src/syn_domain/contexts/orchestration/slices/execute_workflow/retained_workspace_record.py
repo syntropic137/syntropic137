@@ -4,9 +4,8 @@ THE KEEP COMES FIRST. A guard that could not prove a workspace's work safe has
 already decided to keep its directory, and nothing here may undo that: this
 only records the decision. So `record` never raises. A store that is down, an
 execution with no stream, an aggregate that refuses - each is logged and the
-directory stays, which costs only disk. The stale-directory reclaimer keeps a
-directory again on every pass, so a record lost to a failure is offered again
-on the next one, and the aggregate turns every repeat into no event.
+directory stays, which costs only disk. The aggregate turns a repeat of the
+same keep into no event, so offering one again is always safe.
 
 Only the reasons that say the work is unproven (`WORK_UNPROVEN`) are
 recorded. A workspace still mounted or not yet settled is not retained work,

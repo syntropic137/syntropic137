@@ -1830,9 +1830,10 @@ failure; /health counts each reason.
 **Retained Workspace** (`PhaseWorkspaceRetained`, #2321) is the domain fact that
 a guard kept an Execution's workspace because it could not prove its **work**
 safe, so the directory may hold the last copy. It is recorded on the
-`WorkflowExecution` aggregate, in any status, by the stale-directory reclaimer
-and by the startup guard of an **Orphaned Workspace**; a keep with no owning
-Execution (`unowned`) has nowhere to be recorded. Only the work reasons count
+`WorkflowExecution` aggregate, in any status, by the startup guard of an
+**Orphaned Workspace**. The stale-directory reclaimer does NOT record it: the
+janitor never writes the event store (#1983), so its keeps stay counted on
+/health only until that decision is revisited (#2321). Only the work reasons count
 (`WORK_UNPROVEN`): `unreadable`, `dirty`, `unversioned`, `stash`,
 `unpushed_unproven`, `submodule_store_unproven` and `unreachable_objects`. The
 others (`not_terminal`, `mounted`, `capture_unknown`, `identity_changed`,
@@ -1845,8 +1846,7 @@ It names the workspace by its id (`workspace_handle`), never a host path or a
 container id, and its Phase from the Execution's own
 `WorkspaceProvisionedForPhase`, because neither guard knows the Phase; a
 workspace the stream never provisioned names no Phase. It is recorded once per
-workspace and reason: a reclaim pass that keeps the same directory again adds
-nothing. Recording never stops the keep: a failure is logged and the directory
+workspace and reason: keeping the same workspace again adds nothing. Recording never stops the keep: a failure is logged and the directory
 stays.
 
 **Unclear:** whether a Retained Workspace that a later pass reclaims (the work

@@ -3,8 +3,8 @@
 A mixin of `WorkflowExecutionAggregate`, which is the only class that may use
 it, as `file_refusal_handlers` is: the handlers are discovered on the
 aggregate's class and run against its state. The fact they record is about a
-workspace the guard kept, so it is accepted in every status: the reclaimer only
-ever reaches a run that has ended, and the startup guard one that was running.
+workspace the guard kept, so it is accepted in every status: the startup guard
+reaches a run whose process died, whatever status it was left in.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class WorkspaceRetentionHandlers:
         """Record a workspace kept because its work is unproven, in any status.
 
         No event when this workspace was already recorded for this reason: a
-        reclaim pass that keeps it again is the same fact. The phase is the one
+        guard that keeps it again states the same fact. The phase is the one
         this run's own stream provisioned the workspace for; the guards that
         keep it cannot know it.
         """
