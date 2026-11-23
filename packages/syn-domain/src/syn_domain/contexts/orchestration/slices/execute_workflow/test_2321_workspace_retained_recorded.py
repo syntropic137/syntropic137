@@ -44,10 +44,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.retained_workspac
 
 pytestmark = pytest.mark.unit
 
+#: Shared with the API-side consumer tests, which drive the real guards over it.
 EXECUTION = "exec-2321"
 
 
-class _Stream:
+class JsonStream:
     """One execution's stream, stored as JSON and replayed into a fresh aggregate."""
 
     def __init__(self) -> None:
@@ -77,9 +78,9 @@ class _Stream:
         return [e.event for e in self.events if isinstance(e.event, PhaseWorkspaceRetainedEvent)]
 
 
-async def _started(*, cancelled: bool = False) -> _Stream:
+async def started_stream(*, cancelled: bool = False) -> JsonStream:
     """An execution whose phase `build` was provisioned workspace `ws-build`."""
-    stream = _Stream()
+    stream = JsonStream()
     aggregate = WorkflowExecutionAggregate()
     aggregate.start_execution(
         StartExecutionCommand(
@@ -114,7 +115,7 @@ async def _started(*, cancelled: bool = False) -> _Stream:
 async def test_a_kept_workspace_is_one_event_naming_its_phase_and_reason(
     reason: RetainedReason,
 ) -> None:
-    stream = await _started()
+    stream = await started_stream()
     recorder = RetainedWorkspaceRecorder(lambda: stream)
 
     await recorder.record(EXECUTION, "ws-build", Retained(reason, f"why: {reason.value}"))
@@ -131,7 +132,7 @@ async def test_a_kept_workspace_is_one_event_naming_its_phase_and_reason(
 
 async def test_a_pass_that_keeps_it_again_adds_nothing_even_after_a_restart() -> None:
     """The reclaimer keeps the same directory on every pass; the stream says it once."""
-    stream = await _started()
+    stream = await started_stream()
     recorder = RetainedWorkspaceRecorder(lambda: stream)
     dirty = Retained(RetainedReason.DIRTY, "app has uncommitted changes")
 
@@ -144,7 +145,7 @@ async def test_a_pass_that_keeps_it_again_adds_nothing_even_after_a_restart() ->
 
 async def test_it_is_accepted_after_the_run_ended() -> None:
     """A reclaimer only ever reaches a terminal run, so terminal must accept it."""
-    stream = await _started(cancelled=True)
+    stream = await started_stream(cancelled=True)
 
     await RetainedWorkspaceRecorder(lambda: stream).record(
         EXECUTION, "ws-build", Retained(RetainedReason.UNPUSHED_UNPROVEN, "2 commits")
@@ -154,7 +155,7 @@ async def test_it_is_accepted_after_the_run_ended() -> None:
 
 
 async def test_a_workspace_the_stream_never_provisioned_names_no_phase() -> None:
-    stream = await _started()
+    stream = await started_stream()
 
     await RetainedWorkspaceRecorder(lambda: stream).record(
         EXECUTION, "ws-other", Retained(RetainedReason.UNVERSIONED, "1 file")
@@ -170,7 +171,7 @@ async def test_a_workspace_the_stream_never_provisioned_names_no_phase() -> None
 async def test_a_keep_that_says_nothing_about_the_work_is_not_recorded(
     reason: RetainedReason,
 ) -> None:
-    stream = await _started()
+    stream = await started_stream()
 
     await RetainedWorkspaceRecorder(lambda: stream).record(
         EXECUTION, "ws-build", Retained(reason, "eligibility, not work")
@@ -181,7 +182,7 @@ async def test_a_keep_that_says_nothing_about_the_work_is_not_recorded(
 
 
 async def test_the_aggregate_refuses_a_reason_that_is_not_about_the_work() -> None:
-    aggregate = await (await _started()).get_by_id(EXECUTION)
+    aggregate = await (await started_stream()).get_by_id(EXECUTION)
     assert aggregate is not None
     with pytest.raises(ValueError, match="mounted"):
         aggregate.record_workspace_retained(
@@ -197,13 +198,13 @@ class _Refusing:
         raise AssertionError("never reached")
 
 
-def _unopenable() -> _Stream:
+def _unopenable() -> JsonStream:
     raise RuntimeError("no event store configured")
 
 
 @pytest.mark.parametrize(
     "repository",
-    [_Refusing, _unopenable, _Stream],
+    [_Refusing, _unopenable, JsonStream],
     ids=["store-down", "store-unopenable", "no-stream"],
 )
 async def test_a_recording_failure_never_raises_into_the_guard(
