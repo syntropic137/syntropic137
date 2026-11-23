@@ -470,6 +470,8 @@ export interface PhaseExecutionDetail {
   model_display: string
   /** Keyed by observed model id, or UNATTRIBUTED_MODEL_KEY. */
   cost_by_model: Record<string, string>
+  /** Each priced model's cost as the API renders it, keyed like cost_by_model. Render verbatim (#897). */
+  cost_by_model_display?: components['schemas']['PhaseExecutionInfo']['cost_by_model_display']
   /** Models the phase ran that nothing priced, so absent from cost_by_model (#1743). */
   unpriced_models?: string[]
   /** What to show in place of a cost for each of unpriced_models. Render verbatim. */
