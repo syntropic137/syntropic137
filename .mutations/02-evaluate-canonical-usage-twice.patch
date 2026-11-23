@@ -1,0 +1,31 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+index 2809e4fc6..9852c7eff 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+@@ -272,13 +272,19 @@ class CanonicalUsageQueryService:
+                 filtered,
+                 keys=f"${first}::text[], ${first + 1}::text[], ${first + 2}::boolean[]",
+             )
+-            rows = await conn.fetch(
+-                totals_sql,
+-                *args,
+-                [key[0] for key in keys],
+-                [key[1] for key in keys],
+-                [key[2] for key in keys],
+-            )
++            # MUTANT: the totals list nothing; a second evaluation lists the sessions.
++            rows = await conn.fetch(totals_sql, *args, [], [], [])
++            rows = [row for row in rows if row["sessions"] is None] + [
++                row
++                for row in await conn.fetch(
++                    totals_sql,
++                    *args,
++                    [key[0] for key in keys],
++                    [key[1] for key in keys],
++                    [key[2] for key in keys],
++                )
++                if row["sessions"] is not None
++            ]
+             session_row = await conn.fetchrow(sessions_sql, *args)
+ 
+             input_tokens = output_tokens = cache_creation = cache_read = 0

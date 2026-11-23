@@ -1,0 +1,55 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+index 2809e4fc6..2dc34164d 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+@@ -331,23 +331,40 @@ class CanonicalUsageQueryService:
+         """
+         if not days:
+             return 0
+-        sessions: list[str] = []
+-        lower: list[datetime] = []
+-        upper: list[datetime] = []
+-        for row in sorted(days, key=lambda row: str(row["day"])):
++        # MUTANT: one UNION ALL branch per UTC day, each naming agent_events.
++        ordered = sorted(days, key=lambda row: str(row["day"]))
++        where = f"execution_id = ANY(${3 * len(ordered) + 1})" if args else "TRUE"
++        branches: list[str] = []
++        params: list[object] = []
++        for n, row in enumerate(ordered):
+             day = row["day"]
+             span = (
+                 agent_event_span.EventSpan.of_days(day, day)
+                 if isinstance(day, date)
+                 else agent_event_span.EventSpan.unbounded()
+             )
+-            for session in sorted(str(s) for s in row["sessions"]):  # type: ignore[attr-defined]  # an ARRAY_AGG column
+-                sessions.append(session)
+-                lower.append(span.lower)
+-                upper.append(span.upper)
+-        where = _UNPRICED_TURNS_EXECUTION_FILTER if args else "TRUE"
++            branches.append(
++                f"""
++    SELECT data
++    FROM agent_events
++    WHERE event_type = '{TOKEN_USAGE}'
++      AND session_id = ANY(${3 * n + 1})
++      AND time >= ${3 * n + 2} AND time < ${3 * n + 3}
++      AND NOT {zero_usage_group_by()}
++      AND {where}"""
++            )
++            params += [sorted(str(s) for s in row["sessions"]), span.lower, span.upper]  # type: ignore[attr-defined]
+         rows = await conn.fetch(
+-            _UNPRICED_TURNS_QUERY.format(where=where), sessions, lower, upper, *args
++            f"""
++SELECT
++    {recorded_model_select()},
++    COUNT(*) AS observations
++FROM ({"\n    UNION ALL".join(branches)}
++) AS turns
++GROUP BY {recorded_model_group_by()}
++""",
++            *params,
++            *args,
+         )
+         return sum(
+             int(row["observations"])  # type: ignore[arg-type]  # a COUNT(*) column

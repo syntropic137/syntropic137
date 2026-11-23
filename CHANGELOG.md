@@ -16,6 +16,10 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - The dashboard's contribution heatmap no longer shows an incomplete cost as a full dollar amount. The daily tooltip and the "Total cost" card now show `unpriced`, or `>=$X (partial)`, when some of that day's or that window's usage could not be priced. The API returns these as `cost_display` on each day and `total_cost_display` for the window. (#897) (#2352)
 - The session detail "Total Cost" card and each phase in the workflow phase pipeline now show the API's cost text (`unpriced`, `>=$X (partial)` or `<$0.01`), returned as `total_cost_display` on the session and `cost_display` on each phase metric. (#897) (#2359)
 
+### Fixed
+
+- Global `/metrics` evaluates canonical usage once per request and reads unpriced turns in one fixed-shape statement instead of one branch per day. (#2341)
+
 ## [1.0.6] - 2026-11-21
 
 ### Added
