@@ -33,6 +33,8 @@ function session(overrides: Partial<SessionResponse>): SessionResponse {
     total_cost_display: '$0.00',
     unpriced_observation_count: 0,
     cost_by_model: {},
+    cost_by_model_display: {},
+    unattributed_cost_display: null,
     operations: [],
     started_at: null,
     completed_at: null,
@@ -69,5 +71,27 @@ describe('session Total Cost card', () => {
       <SessionMetrics session={session({ total_cost_usd: 0.004, total_cost_display: '<$0.01' })} now={0} />,
     )
     expect(screen.getByText('<$0.01')).toBeTruthy()
+  })
+})
+
+describe('session Cost by Model card', () => {
+  it("renders the session's own cost text verbatim (#897)", () => {
+    // Display strings no client formatter produces from these amounts.
+    const { container } = render(
+      <SessionMetrics
+        session={session({
+          total_cost_usd: 0.5,
+          total_cost_display: 'SESSION-TOTAL',
+          cost_by_model: { 'claude-opus-5-5': '0.3' },
+          cost_by_model_display: { 'claude-opus-5-5': 'SESSION-OPUS' },
+          unattributed_cost_display: 'SESSION-REMAINDER',
+        })}
+        now={0}
+      />,
+    )
+    const card = container.querySelector('#cost-by-model')
+    expect(card?.textContent).toContain('SESSION-TOTAL')
+    expect(card?.textContent).toContain('SESSION-OPUS')
+    expect(card?.textContent).toContain('SESSION-REMAINDER')
   })
 })

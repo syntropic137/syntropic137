@@ -71,6 +71,9 @@ function midPhaseExecution(
     total_tokens: 1_234_567,
     total_cost_usd: '4.25',
     total_cost_display: '$4.25',
+    cost_by_model: {},
+    cost_by_model_display: {},
+    unattributed_cost_display: null,
     unpriced_observation_count: 0,
     artifact_ids: [],
     error_message: null,
@@ -238,7 +241,8 @@ describe('ExecutionDetail cost-by-model against the execution total (#1048)', ()
   it('does not present a partial per-model breakdown as the execution total', () => {
     // One phase has landed and carries a $1.00 model row; the execution has
     // actually cost $4.25 so far. The card used to sum its own rows and label
-    // that "total", contradicting the Total Cost card directly above it.
+    // that "total", contradicting the Total Cost card directly above it. The
+    // API now sums the phases and words the remainder (#897).
     const execution = midPhaseExecution({
       phases: [
         {
@@ -247,6 +251,9 @@ describe('ExecutionDetail cost-by-model against the execution total (#1048)', ()
           cost_by_model: { 'claude-sonnet-5-20250101': '1.00' },
         },
       ],
+      cost_by_model: { 'claude-sonnet-5-20250101': '1.00' },
+      cost_by_model_display: { 'claude-sonnet-5-20250101': '$1.00' },
+      unattributed_cost_display: '$3.25',
     })
     const { container } = renderExecution(execution)
 
