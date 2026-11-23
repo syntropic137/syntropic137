@@ -53,8 +53,11 @@ def _group(
         "cache_creation_tokens": 0,
         "cache_read_tokens": 0,
         "summary_observations": summary_observations,
-        "turn_session_count": len(turn_sessions or []),
-        # Not a column: what the session read answers for this group.
+        # A totals row, not one of the statement's session listing rows.
+        "day": None,
+        "sessions": None,
+        # Not a column: the group's summary-less sessions, which the statement
+        # lists only when its model is bound as unrated.
         "turn_sessions": turn_sessions,
     }
 
@@ -73,37 +76,54 @@ def _turns(model: str, observations: int) -> dict[str, _Cell]:
 class _Conn:
     totals: list[dict[str, _Cell]]
     turns: list[dict[str, _Cell]] = field(default_factory=list)
+    statements: list[str] = field(default_factory=list)
     turn_reads: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     session_reads: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
 
-    def _sessions_of(self, *keys: object) -> list[dict[str, _Cell]]:
-        """The summary-less sessions of the groups bound by their model columns.
+    def _turn_models(self) -> list[dict[str, _Cell]]:
+        """Every model the turn rollup holds: those of the groups with turn sessions."""
+        return [
+            {key: row[key] for key in ("model", REQUESTED_MODEL_COLUMN, HAS_REQUESTED_MODEL_COLUMN)}
+            for row in self.totals
+            if row["vendor_cost_usd"] is None and row["turn_sessions"]
+        ]
 
-        All under one NULL day: the day rollup has seen none of them.
+    def _sessions_of(self, *keys: object) -> list[dict[str, _Cell]]:
+        """The listing rows: summary-less sessions of the groups bound by their model columns.
+
+        One per bound model, all under one NULL day: the day rollup has seen
+        none of them.
         """
         bound = set(zip(*keys, strict=True))  # type: ignore[call-overload]  # three parallel lists
-        sessions = [
-            session
+        return [
+            {
+                "model": row["model"],
+                REQUESTED_MODEL_COLUMN: row[REQUESTED_MODEL_COLUMN],
+                HAS_REQUESTED_MODEL_COLUMN: row[HAS_REQUESTED_MODEL_COLUMN],
+                "day": None,
+                "sessions": row["turn_sessions"],
+            }
             for row in self.totals
             if row["vendor_cost_usd"] is None
+            and row["turn_sessions"]
             and (row["model"], row[REQUESTED_MODEL_COLUMN], row[HAS_REQUESTED_MODEL_COLUMN])
             in bound
-            for session in row["turn_sessions"] or []  # type: ignore[union-attr]  # list[str] | None
         ]
-        return [{"day": None, "sessions": sessions}] if sessions else []
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, _Cell]]:
+        self.statements.append(query)
         if "summary_observations" in query:
-            return self.totals
-        if "JOIN unnest(" in query:
             self.session_reads.append((query, args))
-            return self._sessions_of(*args[-3:])
+            return self.totals + self._sessions_of(*args[-3:])
+        if "SELECT DISTINCT model" in query:
+            return self._turn_models()
         if "AS observations" in query:
             self.turn_reads.append((query, args))
             return self.turns
         return []
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, _Cell]:
+        self.statements.append(query)
         return {"sessions": 1}
 
     async def execute(self, query: str, *args: object) -> str:

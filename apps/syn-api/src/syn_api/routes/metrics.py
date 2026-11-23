@@ -5,6 +5,7 @@ Provides aggregated dashboard metrics with optional per-phase breakdown.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
@@ -442,15 +443,26 @@ async def get_metrics_endpoint(
     # disagree (#1843). Template and artifact-byte counts stay on the
     # projection: the artifact list has no byte sum to read instead.
     try:
-        status_counts = await _execution_status_counts(workflow_id)
-        total_sessions = await _session_count(workflow_id)
-        total_artifacts = await _artifact_count(workflow_id)
         if workflow_id:
+            status_counts = await _execution_status_counts(workflow_id)
+            total_sessions = await _session_count(workflow_id)
+            total_artifacts = await _artifact_count(workflow_id)
             execution_ids = await _workflow_execution_ids(workflow_id)
             totals = await _canonical_totals(execution_ids)
             phases = await _build_phase_metrics(workflow_id, await _execution_costs(execution_ids))
         else:
-            totals = await _canonical_totals(None)
+            # The global reads share nothing: each takes its own pooled
+            # connection and, where it needs one, its own snapshot, so running
+            # them together returns what running them in turn would, in the
+            # time of the slowest rather than the sum (#2341). gather re-raises
+            # the first MetricsUnavailableError; the others finish and are
+            # discarded, so a 503 is still a 503.
+            status_counts, total_sessions, total_artifacts, totals = await asyncio.gather(
+                _execution_status_counts(None),
+                _session_count(None),
+                _artifact_count(None),
+                _canonical_totals(None),
+            )
             phases = []
     except MetricsUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

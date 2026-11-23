@@ -18,6 +18,10 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 - The execution detail API now returns the execution's per-model cost split as `cost_by_model`, and the execution and session detail APIs return each model's cost text as `cost_by_model_display` and the "not yet attributed" remainder as `unattributed_cost_display`. (#897) (#2360)
 - The "Cost by Model" card on the execution and session detail pages now shows the API's cost text for the total, each model and the "not yet attributed" remainder, so it matches the CLI and the rest of the dashboard. (#897) (#2362)
 
+### Fixed
+
+- Global `/metrics` evaluates canonical usage once per request and runs its independent reads concurrently, keeping the per-day unpriced-turns read that excludes chunks. (#2341)
+
 ## [1.0.6] - 2026-11-21
 
 ### Added
