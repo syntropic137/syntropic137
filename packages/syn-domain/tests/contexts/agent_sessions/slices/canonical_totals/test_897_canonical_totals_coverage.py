@@ -91,18 +91,24 @@ class _Conn:
     def _sessions_of(self, *keys: object) -> list[dict[str, _Cell]]:
         """The listing rows: summary-less sessions of the groups bound by their model columns.
 
-        All under one NULL day: the day rollup has seen none of them.
+        One per bound model, all under one NULL day: the day rollup has seen
+        none of them.
         """
         bound = set(zip(*keys, strict=True))  # type: ignore[call-overload]  # three parallel lists
-        sessions = [
-            session
+        return [
+            {
+                "model": row["model"],
+                REQUESTED_MODEL_COLUMN: row[REQUESTED_MODEL_COLUMN],
+                HAS_REQUESTED_MODEL_COLUMN: row[HAS_REQUESTED_MODEL_COLUMN],
+                "day": None,
+                "sessions": row["turn_sessions"],
+            }
             for row in self.totals
             if row["vendor_cost_usd"] is None
+            and row["turn_sessions"]
             and (row["model"], row[REQUESTED_MODEL_COLUMN], row[HAS_REQUESTED_MODEL_COLUMN])
             in bound
-            for session in row["turn_sessions"] or []  # type: ignore[union-attr]  # list[str] | None
         ]
-        return [{"day": None, "sessions": sessions}] if sessions else []
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, _Cell]]:
         self.statements.append(query)

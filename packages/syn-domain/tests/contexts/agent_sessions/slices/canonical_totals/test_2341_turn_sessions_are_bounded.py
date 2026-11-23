@@ -10,11 +10,22 @@ actually sends, through the #897 double.
 
 from __future__ import annotations
 
+import dataclasses
+import importlib.util
+import sys
 from datetime import UTC, date, datetime
+from functools import cache
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from syn_domain.agent_event_span import UNBOUNDED_LOWER, UNBOUNDED_UPPER
+from syn_domain.contexts.agent_sessions import CostCalculator
+from syn_domain.contexts.agent_sessions.recorded_model_rows import (
+    HAS_REQUESTED_MODEL_COLUMN,
+    REQUESTED_MODEL_COLUMN,
+)
 
 from .test_897_canonical_totals_coverage import (
     RATED,
@@ -22,11 +33,36 @@ from .test_897_canonical_totals_coverage import (
     _Cell,
     _Conn,
     _group,
+    _Pool,
     _service,
     _turns,
 )
 
+if TYPE_CHECKING:
+    from types import ModuleType
+
 pytestmark = pytest.mark.unit
+
+_MODEL_KEYS = (REQUESTED_MODEL_COLUMN, HAS_REQUESTED_MODEL_COLUMN)
+
+# The reader /metrics served before #2341, kept verbatim beside the scale test
+# that compares whole responses against it. Loaded by path: it lives in the
+# syn-api integration suite, which no unit module can import by name.
+_FROZEN_PATH = (
+    Path(__file__).resolve().parents[7]
+    / "apps/syn-api/tests/integration/legacy_canonical_totals_pre_2341.py"
+)
+
+
+@cache
+def _frozen_reader() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("legacy_canonical_totals_pre_2341", _FROZEN_PATH)
+    assert spec is not None and spec.loader is not None, _FROZEN_PATH
+    module = importlib.util.module_from_spec(spec)
+    # Its dataclasses resolve their annotations through sys.modules.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 class _RecordingConn(_Conn):
@@ -109,7 +145,8 @@ def _day_conn(days: list[dict[str, _Cell | date]]) -> _DayConn:
         totals=[_group(UNRATED, vendor_cost=None, summary_observations=0, turn_sessions=["x"])],
         turns=[_turns(UNRATED, 7)],
     )
-    conn.days = days
+    model = {key: _turns(UNRATED, 0)[key] for key in ("model", *_MODEL_KEYS)}
+    conn.days = [{**model, **day} for day in days]
     return conn
 
 
@@ -185,4 +222,73 @@ async def test_canonical_usage_is_evaluated_once_per_request(
     evaluations = [query for query in conn.statements if _CANONICAL_USAGE_CTE in query]
     assert len(evaluations) == 1, conn.statements
     [(_query, turn_args)] = conn.turn_reads
+    assert turn_args[0] == ["u-1"]
+
+
+def _zero_total(model: str, sessions: list[str]) -> dict[str, _Cell]:
+    """An unpriced group whose tokens sum to nothing."""
+    group = _group(model, vendor_cost=None, summary_observations=0, turn_sessions=sessions)
+    group["input_tokens"] = group["output_tokens"] = 0
+    return group
+
+
+@pytest.mark.parametrize(
+    "nonzero_turns",
+    [
+        # Signed counts are accepted on the way in: +5 and -5 are two turns
+        # that each reported tokens, in a group whose total is zero.
+        2,
+        # Two turns that reported nothing.
+        0,
+    ],
+)
+@pytest.mark.parametrize("execution_ids", [None, {"exec-1"}])
+async def test_a_zero_total_unrated_group_counts_as_the_frozen_reader_counts(
+    nonzero_turns: int, execution_ids: set[str] | None
+) -> None:
+    """A group pricing leaves nothing unpriced never had its turns read (#2341).
+
+    Binding every unrated model before the totals come back named this group's
+    sessions too, and counting them reported 2 observations behind 0 unpriced
+    tokens, where the reader /metrics served before reported 0.
+    """
+    totals = [_zero_total(UNRATED, ["zero-sum"])]
+    turns = [_turns(UNRATED, nonzero_turns)]
+    candidate = _Conn(totals=totals, turns=turns)
+    frozen = _Conn(totals=totals, turns=turns)
+
+    actual = await _service(candidate).totals(execution_ids=execution_ids)
+    before = (
+        await _frozen_reader()
+        .PreBoundCanonicalUsageQueryService(_Pool(frozen), CostCalculator())
+        .totals(execution_ids=execution_ids)
+    )
+
+    assert dataclasses.asdict(actual) == dataclasses.asdict(before)
+    assert actual.unpriced_observation_count == 0
+    # Nothing is left to count, so agent_events is not read at all.
+    assert candidate.turn_reads == []
+
+
+async def test_only_an_unpriced_groups_sessions_are_read_beside_a_zero_total_one() -> None:
+    """The listing is per model: a zero-total model's sessions stay out of the read."""
+    other = "mystery-model-2"
+    totals = [
+        _zero_total(other, ["zero-only"]),
+        _group(UNRATED, vendor_cost=None, summary_observations=1, turn_sessions=["u-1"]),
+    ]
+    turns = [_turns(UNRATED, 3), _turns(other, 2)]
+    candidate = _Conn(totals=totals, turns=turns)
+    frozen = _Conn(totals=totals, turns=turns)
+
+    actual = await _service(candidate).totals()
+    before = (
+        await _frozen_reader()
+        .PreBoundCanonicalUsageQueryService(_Pool(frozen), CostCalculator())
+        .totals()
+    )
+
+    assert dataclasses.asdict(actual) == dataclasses.asdict(before)
+    assert actual.unpriced_observation_count == 1 + 3
+    [(_query, turn_args)] = candidate.turn_reads
     assert turn_args[0] == ["u-1"]
