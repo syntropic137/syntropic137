@@ -23,7 +23,6 @@ import { useExecutionData } from '../../hooks'
 import { useExecutionCapture } from '../../hooks/useExecutionCapture'
 import { useReadModelStatus } from '../../hooks/useReadPathHealth'
 import type { ExecutionDetailResponse, FailureClassification, ReportedFailureReason } from '../../types'
-import { type ExactUsd, exactUsdToString, parseExactUsd } from '../../utils/exactUsd'
 import { executionTokenTotals } from '../../utils/executionTokens'
 import { isPlatformFailure, reportedFailureNote } from '../../utils/executionOutcome'
 import { formatDurationFromRange } from '../../utils/formatters'
@@ -60,29 +59,6 @@ function ReposPanel({ repos }: { repos: string[] }) {
       </ul>
     </div>
   )
-}
-
-/**
- * Per-model costs summed across the phases.
- *
- * This is the only per-model source there is: `ExecutionDetailResponse` has no
- * execution-level `cost_by_model`, and the domain leaves a running phase's map
- * empty, so mid-run this accounts for less than `total_cost_usd` -- often for
- * nothing at all. The card is given the execution's own total alongside it and
- * reconciles the two; do not treat this sum as the execution's cost.
- */
-function aggregateCostByModel(phases: Phase[]): Record<string, string> {
-  // Summed exactly: the card downstream reconciles this against the
-  // execution's decimal total, and float sums are what made that disagree.
-  const totals = new Map<string, ExactUsd>()
-  for (const phase of phases) {
-    for (const [model, costStr] of Object.entries(phase.cost_by_model ?? {})) {
-      const cost = parseExactUsd(costStr)
-      if (cost === null) continue
-      totals.set(model, (totals.get(model) ?? 0n) + cost)
-    }
-  }
-  return Object.fromEntries(Array.from(totals.entries()).map(([m, v]) => [m, exactUsdToString(v)]))
 }
 
 /**
@@ -340,8 +316,7 @@ export function ExecutionDetail() {
     { label: execution.workflow_name || execution.workflow_id, href: `/workflows/${execution.workflow_id}` },
     { label: `Execution ${execution.workflow_execution_id.slice(0, 8)}` },
   ]
-  const aggregatedCostByModel = aggregateCostByModel(execution.phases)
-  const unpricedModels = aggregateUnpricedModels(execution.phases, aggregatedCostByModel)
+  const unpricedModels = aggregateUnpricedModels(execution.phases, execution.cost_by_model)
   const tokens = executionTokenTotals(execution)
 
   return (
@@ -362,7 +337,7 @@ export function ExecutionDetail() {
       <SkillUseOverview use={execution.skill_use} />
       <ExecutionMetricsGrid
         execution={execution}
-        hasCostByModel={Object.keys(aggregatedCostByModel).length > 0}
+        hasCostByModel={Object.keys(execution.cost_by_model).length > 0}
       />
       <section id="token-breakdown">
         <TokenBreakdown
@@ -375,12 +350,14 @@ export function ExecutionDetail() {
           cacheWriteRateDisplay={execution.cache_write_rate_display}
         />
       </section>
-      {(Object.keys(aggregatedCostByModel).length > 0 || unpricedModels.models.length > 0) && (
+      {(Object.keys(execution.cost_by_model).length > 0 || unpricedModels.models.length > 0) && (
         <section id="cost-by-model">
           <ModelBreakdown
-            costByModel={aggregatedCostByModel}
+            costByModel={execution.cost_by_model}
             totalCost={execution.total_cost_usd}
-            unpricedObservationCount={execution.unpriced_observation_count}
+            totalCostDisplay={execution.total_cost_display}
+            costByModelDisplay={execution.cost_by_model_display}
+            unattributedCostDisplay={execution.unattributed_cost_display}
             unpricedModels={unpricedModels.models}
             unpricedLabel={unpricedModels.label}
           />

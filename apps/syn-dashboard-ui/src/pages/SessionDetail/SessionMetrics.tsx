@@ -59,7 +59,9 @@ export function SessionMetrics({
           <ModelBreakdown
             costByModel={session.cost_by_model}
             totalCost={session.total_cost_usd}
-            unpricedObservationCount={session.unpriced_observation_count}
+            totalCostDisplay={session.total_cost_display}
+            costByModelDisplay={session.cost_by_model_display}
+            unattributedCostDisplay={session.unattributed_cost_display}
           />
         </section>
       )}

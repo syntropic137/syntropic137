@@ -6,6 +6,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
+import type { components } from '../../../generated/api-types'
 import { COST_COVERAGE_CASES } from '../../../test/costCoverageFixtures'
 import type { SessionResponse } from '../../../types'
 import { SessionMetrics } from '../SessionMetrics'
@@ -29,10 +30,12 @@ function session(overrides: Partial<SessionResponse>): SessionResponse {
     cache_creation_tokens: 0,
     cache_read_tokens: 0,
     total_tokens: 0,
-    total_cost_usd: 0,
+    total_cost_usd: '0',
     total_cost_display: '$0.00',
     unpriced_observation_count: 0,
     cost_by_model: {},
+    cost_by_model_display: {},
+    unattributed_cost_display: null,
     operations: [],
     started_at: null,
     completed_at: null,
@@ -51,7 +54,7 @@ describe('session Total Cost card', () => {
     const { container } = render(
       <SessionMetrics
         session={session({
-          total_cost_usd: Number(c.total_cost_usd),
+          total_cost_usd: c.total_cost_usd,
           total_cost_display: c.total_cost_display,
           unpriced_observation_count: c.unpriced_observation_count,
         })}
@@ -66,8 +69,30 @@ describe('session Total Cost card', () => {
   it('shows a sub-cent cost as the API words it, not as six decimals', () => {
     // The client would render '$0.004000'; the API says '<$0.01' (format_cost).
     render(
-      <SessionMetrics session={session({ total_cost_usd: 0.004, total_cost_display: '<$0.01' })} now={0} />,
+      <SessionMetrics session={session({ total_cost_usd: '0.004', total_cost_display: '<$0.01' })} now={0} />,
     )
     expect(screen.getByText('<$0.01')).toBeTruthy()
+  })
+})
+
+describe('session Cost by Model card', () => {
+  it("renders the session's own cost text verbatim (#897)", () => {
+    // Sentinel display strings no formatter produces, checked against the
+    // generated schema: they can only reach the card by being passed through.
+    const wire = {
+      total_cost_usd: '0.5',
+      total_cost_display: 'SESSION-TOTAL',
+      cost_by_model: { 'claude-opus-5-5': '0.3' },
+      cost_by_model_display: { 'claude-opus-5-5': 'SESSION-OPUS' },
+      unattributed_cost_display: 'SESSION-REMAINDER',
+    } satisfies Pick<
+      components['schemas']['SessionResponse'],
+      'total_cost_usd' | 'total_cost_display' | 'cost_by_model' | 'cost_by_model_display' | 'unattributed_cost_display'
+    >
+    const { container } = render(<SessionMetrics session={session(wire)} now={0} />)
+    const card = container.querySelector('#cost-by-model')
+    expect(card?.textContent).toContain('SESSION-TOTAL')
+    expect(card?.textContent).toContain('SESSION-OPUS')
+    expect(card?.textContent).toContain('SESSION-REMAINDER')
   })
 })
