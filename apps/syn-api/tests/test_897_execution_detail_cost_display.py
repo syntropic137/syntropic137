@@ -24,6 +24,7 @@ from decimal import Decimal
 import pytest
 
 from syn_adapters.projection_stores import InMemoryProjectionStore
+from syn_api.routes.executions.models import ExecutionDetailResponse
 from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
@@ -96,7 +97,7 @@ class _Manager:
     execution_cost: _ExecutionCostProjection
 
 
-async def _served(monkeypatch: pytest.MonkeyPatch, case: _Coverage) -> dict[str, object]:
+async def _served(monkeypatch: pytest.MonkeyPatch, case: _Coverage) -> ExecutionDetailResponse:
     store = InMemoryProjectionStore()
     detail = WorkflowExecutionDetailProjection(store)
     await detail.on_workflow_execution_started(
@@ -143,8 +144,8 @@ async def _served(monkeypatch: pytest.MonkeyPatch, case: _Coverage) -> dict[str,
     monkeypatch.setattr(queries, "get_projection_mgr", lambda: manager)
     monkeypatch.setattr(_wiring, "get_projection_mgr", lambda: manager)
     response = await queries.get_execution_endpoint(EXECUTION_ID)
-    # As a client receives it: serialised, not the in-process model.
-    return response.model_dump(mode="json")
+    # As a client receives it: through JSON, not the in-process model.
+    return ExecutionDetailResponse.model_validate_json(response.model_dump_json())
 
 
 @pytest.mark.anyio
@@ -154,8 +155,8 @@ async def test_the_execution_total_reads_as_format_cost_renders_it(
 ) -> None:
     body = await _served(monkeypatch, case)
 
-    assert body["total_cost_display"] == case.total_shows
-    assert body["total_cost_display"] == format_cost(case.total, case.total_unpriced)
+    assert body.total_cost_display == case.total_shows
+    assert body.total_cost_display == format_cost(case.total, case.total_unpriced)
 
 
 @pytest.mark.anyio
@@ -164,14 +165,6 @@ async def test_each_phase_reads_as_its_enriched_cost_not_its_seed(
     monkeypatch: pytest.MonkeyPatch, case: _Coverage
 ) -> None:
     body = await _served(monkeypatch, case)
-    phases = body["phases"]
-    assert isinstance(phases, list)
-
-    shown: dict[str, object] = {}
-    for phase in phases:
-        assert isinstance(phase, dict)
-        shown[str(phase["phase_id"])] = phase["cost_display"]
-        assert phase["cost_display"] == format_cost(
-            Decimal(str(phase["cost_usd"])), int(phase["unpriced_observation_count"])
-        )
-    assert shown == case.phase_shows
+    for phase in body.phases:
+        assert phase.cost_display == format_cost(phase.cost_usd, phase.unpriced_observation_count)
+    assert {p.phase_id: p.cost_display for p in body.phases} == case.phase_shows
