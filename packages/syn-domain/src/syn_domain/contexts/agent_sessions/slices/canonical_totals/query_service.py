@@ -10,8 +10,9 @@ construction rather than by coincidence.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -132,38 +133,40 @@ GROUP BY day_rollup.day
 # The turns of the sessions above that reported tokens, per model. Read from
 # agent_events because the rollup cannot tell a zero-token turn from any other.
 #
-# ONE statement, ONE agent_events reference, whatever the day count: each
-# (session, day) pair is a row of the unnest, and the lateral reads that
-# session - the hypertable's segment key - within that day's bounds, which
-# TimescaleDB excludes chunks by at run time. Measured at #2341's scale (2,000
-# unpriced sessions over 91 daily chunks): naming every session in one
-# ``session_id = ANY`` over the whole span spent ~700ms PLANNING, estimating the
-# array against each chunk. One UNION ALL branch per day fixed that, but
-# planned every branch against every chunk under force_custom_plan - 29ms of
-# planning for 7ms of execution over 16 days - and its text grew with the days.
-# Here the text and the plan's shape are fixed. It runs only when some
-# turn-priced work has no rate, which priced history never has.
+# One UNION ALL branch per UTC day: each names only that day's sessions within
+# that day's bounds, so the planner excludes every other chunk and each branch
+# plans and opens one chunk. Measured at #2341's scale (2,000 unpriced sessions
+# over 91 daily chunks, warm connections): ONE statement naming every session
+# in one ``session_id = ANY`` over the whole span spent ~260-700ms PLANNING,
+# estimating the 2,000-id array against each chunk; an ``unnest`` JOIN LATERAL
+# was flattened into a merge join that sorted every token_usage row (~83ms);
+# the per-day branches take ~12ms (5ms planning, 5ms execution). A cold
+# connection's EXPLAIN inflates their planning several-fold - measure warm.
+# It runs only when some turn-priced work has no rate, which priced history
+# never has.
+_UNPRICED_TURNS_DAY = f"""
+    SELECT data
+    FROM agent_events
+    WHERE event_type = '{TOKEN_USAGE}'
+      AND session_id = ANY($1)
+      AND time >= $2 AND time < $3
+      AND NOT {zero_usage_group_by()}
+      AND {{where}}"""
+
 _UNPRICED_TURNS_QUERY = f"""
 SELECT
     {recorded_model_select()},
     COUNT(*) AS observations
-FROM unnest($1::text[], $2::timestamptz[], $3::timestamptz[])
-    AS session_day(session_id, lower_bound, upper_bound)
-JOIN LATERAL (
-    SELECT agent_events.data
-    FROM agent_events
-    WHERE agent_events.event_type = '{TOKEN_USAGE}'
-      AND agent_events.session_id = session_day.session_id
-      AND agent_events.time >= session_day.lower_bound
-      AND agent_events.time < session_day.upper_bound
-      AND NOT {zero_usage_group_by()}
-      AND {{where}}
-) AS turns ON TRUE
+FROM ({{days}}
+) AS turns
 GROUP BY {recorded_model_group_by()}
 """
 
-# The execution filter, bound after the three unnest arrays.
-_UNPRICED_TURNS_EXECUTION_FILTER = "execution_id = ANY($4)"
+# Each branch's own $1-$3, renumbered to its place in the statement.
+_PARAMETER = re.compile(r"\$(\d+)")
+
+# The execution filter, bound after every day's three parameters.
+_UNPRICED_TURNS_EXECUTION_FILTER = "execution_id = ANY(${position})"
 
 type _ModelKey = tuple[object, object, bool]
 """A row's three model columns, as the canonical query groups on them."""
@@ -341,23 +344,31 @@ class CanonicalUsageQueryService:
         """
         if not days:
             return 0
-        sessions: list[str] = []
-        lower: list[datetime] = []
-        upper: list[datetime] = []
-        for row in sorted(days, key=lambda row: str(row["day"])):
+        ordered = sorted(days, key=lambda row: str(row["day"]))
+        where = (
+            _UNPRICED_TURNS_EXECUTION_FILTER.format(position=3 * len(ordered) + 1)
+            if args
+            else "TRUE"
+        )
+        branches: list[str] = []
+        params: list[object] = []
+        for n, row in enumerate(ordered):
             day = row["day"]
             span = (
                 agent_event_span.EventSpan.of_days(day, day)
                 if isinstance(day, date)
                 else agent_event_span.EventSpan.unbounded()
             )
-            for session in sorted(str(s) for s in row["sessions"]):  # type: ignore[attr-defined]  # an ARRAY_AGG column
-                sessions.append(session)
-                lower.append(span.lower)
-                upper.append(span.upper)
-        where = _UNPRICED_TURNS_EXECUTION_FILTER if args else "TRUE"
+            branches.append(
+                _PARAMETER.sub(
+                    lambda m, n=n: f"${int(m.group(1)) + 3 * n}", _UNPRICED_TURNS_DAY
+                ).format(where=where)
+            )
+            params += [sorted(str(s) for s in row["sessions"]), span.lower, span.upper]  # type: ignore[attr-defined]  # an ARRAY_AGG column
         rows = await conn.fetch(
-            _UNPRICED_TURNS_QUERY.format(where=where), sessions, lower, upper, *args
+            _UNPRICED_TURNS_QUERY.format(days="\n    UNION ALL".join(branches)),
+            *params,
+            *args,
         )
         return sum(
             int(row["observations"])  # type: ignore[arg-type]  # a COUNT(*) column

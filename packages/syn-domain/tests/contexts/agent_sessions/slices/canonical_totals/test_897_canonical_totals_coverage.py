@@ -229,4 +229,4 @@ def test_zero_token_turns_are_not_counted() -> None:
     The rollup's ``observations`` counts it, which is why the count is read
     from agent_events with this predicate rather than from the rollup.
     """
-    assert f"AND NOT {zero_usage_group_by()}" in query_service._UNPRICED_TURNS_QUERY
+    assert f"AND NOT {zero_usage_group_by()}" in query_service._UNPRICED_TURNS_DAY

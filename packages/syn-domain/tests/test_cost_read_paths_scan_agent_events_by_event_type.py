@@ -532,15 +532,12 @@ _DECLARED: Mapping[ScanIdentity, Declaration] = {
     **_declared(
         f"{_DOMAIN}/agent_sessions/slices/canonical_totals/query_service.py",
         {
-            "_UNPRICED_TURNS_QUERY": _full_scan(
+            "_UNPRICED_TURNS_DAY": _segment_discard(
                 "Token-reporting turns of the summary-less sessions in an unpriced canonical "
-                "group, one LATERAL probe per (session, UTC day) of a bound unnest. Read here "
-                "because the rollup counts zero-token turns too. Each probe pins session_id and "
-                "the day's bounds, but to the unnest's columns rather than to a $n, so this "
-                "parser cannot see the pin and counts it as none (#2341). Whether TimescaleDB "
-                "discards the other sessions' segments per probe is the integration lane's "
-                "EXPLAIN to settle, not a text pass's. Runs only when an unrated model has "
-                "turn-priced work, so priced history never reaches it."
+                "group, one UTC day per branch. Read here because the rollup counts zero-token "
+                "turns too. Pinned to that day's sessions and bounds; runs only when an unrated "
+                "model has turn-priced work, so priced history never reaches it. Nothing "
+                "bounds how many such sessions there are."
             ),
         },
     ),
@@ -843,7 +840,7 @@ def test_the_number_of_unpinned_statements_is_the_number_we_have_accepted() -> N
     the conversation.
     """
     unpinned = [scan for scan in _production_scans() if not scan.discards_segments]
-    assert len(unpinned) == 24, "\n" + "\n".join(
+    assert len(unpinned) == 23, "\n" + "\n".join(
         f"{scan.identity}: {scan.predicate}" for scan in unpinned
     )
 

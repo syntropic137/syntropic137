@@ -10,13 +10,11 @@ actually sends, through the #897 double.
 
 from __future__ import annotations
 
-import re
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 
 import pytest
 
 from syn_domain.agent_event_span import UNBOUNDED_LOWER, UNBOUNDED_UPPER
-from syn_domain.contexts.agent_sessions.slices.canonical_totals import query_service
 
 from .test_897_canonical_totals_coverage import (
     RATED,
@@ -115,7 +113,15 @@ def _day_conn(days: list[dict[str, _Cell | date]]) -> _DayConn:
     return conn
 
 
-async def test_each_session_day_is_read_within_its_own_day() -> None:
+async def test_each_day_reads_only_its_own_sessions_and_chunk() -> None:
+    """One branch per UTC day, each pinned to that day's sessions and bounds (#2341).
+
+    The branches are what let the planner exclude every other chunk. One
+    statement naming every session over the whole span planned for
+    ~260-700ms; an unnest JOIN LATERAL was flattened into a merge join over
+    every token_usage row (~83ms); the branches take ~12ms, measured warm on
+    the integration scale dataset.
+    """
     conn = _day_conn(
         [
             {"day": date(2026, 10, 2), "sessions": ["c", "b"]},
@@ -128,53 +134,24 @@ async def test_each_session_day_is_read_within_its_own_day() -> None:
 
     assert totals.unpriced_observation_count == 7
     [(query, args)] = conn.turn_reads
-    assert "execution_id = ANY($4)" in query
+    assert query.count("UNION ALL") == 2
+    for n in range(3):
+        assert f"session_id = ANY(${3 * n + 1})" in query
+        assert f"time >= ${3 * n + 2} AND time < ${3 * n + 3}" in query
+    assert query.count("execution_id = ANY($10)") == 3
     assert args == (
-        ["a", "b", "c", "unseen"],
-        [
-            datetime(2026, 9, 30, tzinfo=UTC),
-            datetime(2026, 10, 2, tzinfo=UTC),
-            datetime(2026, 10, 2, tzinfo=UTC),
-            # The rollup never saw it: read unbounded, never dropped.
-            UNBOUNDED_LOWER,
-        ],
-        [
-            datetime(2026, 10, 1, tzinfo=UTC),
-            datetime(2026, 10, 3, tzinfo=UTC),
-            datetime(2026, 10, 3, tzinfo=UTC),
-            UNBOUNDED_UPPER,
-        ],
+        ["a"],
+        datetime(2026, 9, 30, tzinfo=UTC),
+        datetime(2026, 10, 1, tzinfo=UTC),
+        ["b", "c"],
+        datetime(2026, 10, 2, tzinfo=UTC),
+        datetime(2026, 10, 3, tzinfo=UTC),
+        # The rollup never saw it: read unbounded, never dropped.
+        ["unseen"],
+        UNBOUNDED_LOWER,
+        UNBOUNDED_UPPER,
         ["exec-1"],
     )
-
-
-_AGENT_EVENTS = re.compile(r"\b(?:from|join)\s+agent_events\b", re.IGNORECASE)
-
-
-@pytest.mark.parametrize("day_count", [1, 16, 91])
-async def test_the_turns_read_names_agent_events_once_whatever_the_day_count(
-    day_count: int,
-) -> None:
-    """One agent_events reference and one text, so planning does not grow with days.
-
-    One UNION ALL branch per day re-planned every branch against every chunk
-    under force_custom_plan: 29ms of planning for 7ms of execution at 16 days,
-    and a text that varied with the day count (#2341).
-    """
-    conn = _day_conn(
-        [
-            {"day": date(2026, 1, 1) + timedelta(days=n), "sessions": [f"s-{n}"]}
-            for n in range(day_count)
-        ]
-    )
-
-    await _service(conn).totals()
-
-    [(query, args)] = conn.turn_reads
-    assert len(_AGENT_EVENTS.findall(query)) == 1, query
-    assert query == query_service._UNPRICED_TURNS_QUERY.format(where="TRUE")
-    assert len(args) == 3
-    assert len(args[0]) == day_count  # type: ignore[arg-type]  # a list of session ids
 
 
 _CANONICAL_USAGE_CTE = "canonical_usage AS ("

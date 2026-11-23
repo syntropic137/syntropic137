@@ -18,7 +18,7 @@ Releases before 0.33.1 are described in [GitHub releases](https://github.com/syn
 
 ### Fixed
 
-- Global `/metrics` evaluates canonical usage once per request and reads unpriced turns in one fixed-shape statement instead of one branch per day. (#2341)
+- Global `/metrics` evaluates canonical usage once per request and runs its independent reads concurrently, keeping the per-day unpriced-turns read that excludes chunks. (#2341)
 
 ## [1.0.6] - 2026-11-21
 
