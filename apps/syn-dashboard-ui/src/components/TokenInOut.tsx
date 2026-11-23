@@ -7,8 +7,8 @@
  * already counts fresh + cache write + cache read. In = those three; Out =
  * generated output only.
  *
- * One component for the phase cards, the execution cost summary and the
- * session cost card, so the grouping cannot drift between them again.
+ * One component for every In/Out token split (today the phase cards), so the
+ * grouping cannot drift between surfaces again.
  */
 
 import { formatTokens } from '../utils/formatters'
