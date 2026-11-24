@@ -3,8 +3,9 @@ import { Code, Eye, FileText } from 'lucide-react'
 
 import { Card, CardContent, CardHeader } from '../../components'
 import { MarkdownViewer } from '../../components/MarkdownViewer'
+import { artifactRawUrl } from '../../api/artifacts'
 import type { ArtifactResponse } from '../../types'
-import { isMarkdown } from './artifactUtils'
+import { isBinary, isImage, isMarkdown } from './artifactUtils'
 
 interface ArtifactContentViewerProps {
   artifact: ArtifactResponse
@@ -56,6 +57,30 @@ function ContentPreview({
   artifact: ArtifactResponse
   viewMode: 'rendered' | 'raw'
 }) {
+  // Binary content is null in the JSON detail; the browser reads the bytes.
+  if (isImage(artifact)) {
+    return (
+      <div className="p-4 min-w-0">
+        <img
+          src={artifactRawUrl(artifact.id)}
+          alt={artifact.title ?? `Artifact ${artifact.id.slice(0, 12)}`}
+          className="max-w-full h-auto"
+        />
+      </div>
+    )
+  }
+
+  if (isBinary(artifact)) {
+    return (
+      <div className="p-8 text-center">
+        <FileText className="mx-auto h-8 w-8 text-[var(--color-text-muted)]" />
+        <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+          No preview for {artifact.content_type}. Use Download to open it.
+        </p>
+      </div>
+    )
+  }
+
   if (!artifact.content) {
     return (
       <div className="p-8 text-center">
