@@ -25,7 +25,11 @@ import 'just/landing.just'
 # Docker Compose shorthand variables
 compose := "docker compose -f docker/docker-compose.yaml"
 compose_dev := compose + " -f docker/docker-compose.dev.yaml"
-compose_test := compose + " -f docker/docker-compose.test.yaml"
+# Its own project (#2370): without -p the test override inherits the dev file's
+# `name:`, so `down -v` here removed the dev stack and its volumes.
+compose_test := compose + " -f docker/docker-compose.test.yaml -p syntropic137_test"
+# The services the test override defines (ADR-034); the rest are dev-only.
+test_stack_services := "timescaledb event-store collector minio redis"
 compose_selfhost := compose + " -f docker/docker-compose.selfhost.yaml"
 compose_selfhost_cf := compose_selfhost + " -f docker/docker-compose.cloudflare.yaml"
 compose_dev_cf := compose_dev + " -f docker/docker-compose.dev-cloudflare.yaml"
@@ -898,10 +902,31 @@ test-debt:
 # See ADR-034: Test Infrastructure Architecture
 
 # Start test stack (ephemeral, ports +10000 from dev)
-test-stack:
+test-stack: test-stack-check-legacy
     @echo "🧪 Starting test stack..."
-    {{compose_test}} up -d --build
+    {{compose_test}} up -d --build {{test_stack_services}}
     @echo "✅ Test stack running on ports 15432, 18080, 55051, 19000, 16379"
+
+# Refuse to start while syn-test-* containers or syn-test-network from before
+# #2370 (when the test stack shared the dev compose project) still hold the
+# fixed names. Read-only: it changes nothing. Cleaning them up is a one-time
+# manual step, because no automatic rule can prove a resource is test-only.
+[private]
+test-stack-check-legacy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    legacy=$(docker ps -a --filter name='^syn-test-' --format '{{{{.Names}} {{{{.Label "com.docker.compose.project"}}' \
+      | awk '$2 != "syntropic137_test" {print $1}')
+    net=$(docker network ls --filter name='^syn-test-network$' --format '{{{{.Label "com.docker.compose.project"}}')
+    if [ -n "$legacy" ] || { [ -n "$net" ] && [ "$net" != "syntropic137_test" ]; }; then
+      echo "❌ A test stack from before #2370 is still present; nothing was changed." >&2
+      [ -z "$legacy" ] || echo "   Containers outside the syntropic137_test project: $legacy" >&2
+      [ -z "$net" ] || [ "$net" = "syntropic137_test" ] || echo "   syn-test-network belongs to compose project '$net'" >&2
+      echo "   One-time cleanup (check each name first; never 'down -v' the dev project):" >&2
+      echo "     docker stop <name> && docker rm <name>     # each syn-test-* listed above" >&2
+      echo "     docker network rm syn-test-network          # after detaching anything still on it" >&2
+      exit 1
+    fi
 
 # Stop test stack
 test-stack-stop:
