@@ -31,6 +31,7 @@ from syn_adapters.workspace_backends.agentic.capture_observation import (
     SESSION_CAPTURE_OBSERVATION,
     read_agent_session_ids,
 )
+from syn_api.cost_by_model_display import model_breakdown_text
 from syn_api.model_identity import cost_by_observed_model, observed_model_of
 from syn_api.types import (
     BranchObservationInfo,
@@ -379,6 +380,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         )
         for op in (phase.operations or [])
     ]
+    cost_by_model = {k: str(v) for k, v in phase.cost_by_model.items()}
     return PhaseExecutionInfo(
         phase_id=phase.phase_id,
         name=phase.name,
@@ -412,7 +414,11 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         model=phase.model,
         requested_model=phase.requested_model,
         agent_provider=phase.agent_provider,
-        cost_by_model={k: str(v) for k, v in phase.cost_by_model.items()},
+        cost_by_model=cost_by_model,
+        # Built here for the reason `cost_display` is: after `_enrich_costs` (#897).
+        cost_by_model_display=model_breakdown_text(
+            cost_by_model, Decimal(str(phase.cost_usd))
+        ).cost_by_model_display,
         unpriced_models=phase.unpriced_models,
         # Same model, passed through rather than rebuilt: this constructor is
         # the hop that has dropped a field twice (#891, #1176), and a phase

@@ -13,11 +13,12 @@
  * nothing.
  */
 
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { PhaseTimeline } from '../PhaseTimeline'
 import type { ExecutionDetailResponse } from '../../../types'
+import type { components } from '../../../generated/api-types'
 import { withPlanOfPhases } from '../../../test/phasePlanFixtures'
 import {
   COST_COVERAGE_CASES,
@@ -133,6 +134,36 @@ describe('PhaseTimeline cost text', () => {
     // The header carries a different string, so the match can only be the card.
     expect(headerStrip()).not.toContain(c.shows)
     expect(container.textContent).toContain(c.shows)
+  })
+})
+
+describe('PhaseTimeline per-model cost text (#897 slice O)', () => {
+  // As the API serves them: `cost_by_model_display` is `format_cost` of each
+  // value. A browser formatter would print $0.3057 and $0.0000 for these.
+  const costByModel: components['schemas']['PhaseExecutionInfo']['cost_by_model'] = {
+    'claude-opus-5-5': '0.30566780000000005',
+    'claude-sonnet-5': '0.0000001',
+    'gpt-6-sol': '0.1',
+  }
+  const costByModelDisplay: components['schemas']['PhaseExecutionInfo']['cost_by_model_display'] = {
+    'claude-opus-5-5': '$0.31',
+    'claude-sonnet-5': '<$0.01',
+  }
+
+  /** The cost text on the breakdown row whose label is `model`. */
+  function rowCost(model: string): string {
+    return screen.getByText(model).nextElementSibling?.textContent ?? ''
+  }
+
+  it('renders each model the API priced verbatim, and a dash where it sent none', () => {
+    renderTimeline([
+      phase({ phase_id: 'plan', cost_by_model: costByModel, cost_by_model_display: costByModelDisplay }),
+    ])
+    expect(rowCost('claude-opus-5-5')).toMatch(/^\$0\.31 · \d+%$/)
+    expect(rowCost('claude-sonnet-5')).toMatch(/^<\$0\.01 · \d+%$/)
+    // Missing from the display map: never a number the browser formatted.
+    expect(rowCost('gpt-6-sol')).toMatch(/^— · \d+%$/)
+    expect(document.body.textContent).not.toMatch(/\$0\.\d{4}/)
   })
 })
 
