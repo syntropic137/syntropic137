@@ -36,6 +36,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -1284,7 +1285,7 @@ class _PhaseRun:
             observability_writer=None,
             controller=None,
             prompt_builder=AsyncMock(return_value="prompt"),
-            command_builder=MagicMock(return_value=["claude"]),
+            command_builder=MagicMock(return_value=AgentLaunch(("claude",))),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
             owed_cancelled_work=owed_cancelled_work,  # type: ignore[arg-type]
         )

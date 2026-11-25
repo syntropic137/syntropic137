@@ -19,6 +19,7 @@ from event_sourcing.client.memory import MemoryEventStoreClient
 from syn_adapters.execution_runs import PostgresExecutionRunQueue
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.storage.repositories import RepositoryAdapter
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
 )
@@ -80,7 +81,7 @@ async def test_a_start_returns_with_its_row_admitted_and_its_start_event_durable
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="p"),
-        command_builder=MagicMock(return_value=["claude"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude",))),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         run_queue=PostgresExecutionRunQueue(pool),
     )
@@ -149,7 +150,7 @@ async def test_a_durable_start_reloads_through_a_fresh_event_store_client(
             observability_writer=None,
             controller=None,
             prompt_builder=AsyncMock(return_value="p"),
-            command_builder=MagicMock(return_value=["claude"]),
+            command_builder=MagicMock(return_value=AgentLaunch(("claude",))),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
             run_queue=PostgresExecutionRunQueue(pool),
         )

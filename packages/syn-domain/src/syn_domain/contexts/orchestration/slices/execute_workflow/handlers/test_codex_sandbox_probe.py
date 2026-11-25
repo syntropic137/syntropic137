@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -162,7 +163,7 @@ async def test_provisioning_runs_the_probe_and_refuses_the_phase() -> None:
     handler = WorkspaceProvisionHandler(
         workspace_service=service,
         prompt_builder=_prompt,
-        command_builder=lambda _phase, prompt: ["codex", "exec", prompt],
+        command_builder=lambda _phase, prompt: AgentLaunch(("codex", "exec", prompt)),
     )
     todo = TodoItem(execution_id="exec-1", action=TodoAction.PROVISION_WORKSPACE, phase_id="review")
     with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as secrets:

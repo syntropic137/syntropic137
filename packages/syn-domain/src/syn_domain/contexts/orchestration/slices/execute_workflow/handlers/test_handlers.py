@@ -16,6 +16,7 @@ import pytest
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.artifacts import UNREPORTED_AGENT
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
     TodoAction,
     TodoItem,
@@ -975,8 +976,8 @@ async def _provisioned_files(
     async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
         return "Do the task"
 
-    def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-        return ["claude", "--print", prompt]
+    def fake_command_builder(_phase: object, prompt: str) -> AgentLaunch:
+        return AgentLaunch(("claude", "--print", prompt))
 
     handler = WorkspaceProvisionHandler(
         workspace_service=workspace_service,
@@ -1293,8 +1294,8 @@ class TestWorkspaceProvisionHandler:
         async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
             return "Do the task"
 
-        def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-            return ["claude", "--print", prompt]
+        def fake_command_builder(_phase: object, prompt: str) -> AgentLaunch:
+            return AgentLaunch(("claude", "--print", prompt))
 
         handler = WorkspaceProvisionHandler(
             workspace_service=workspace_service,
@@ -1377,8 +1378,8 @@ class TestWorkspaceProvisionHandler:
         async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
             return "Do the task"
 
-        def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-            return ["claude", "--print", prompt]
+        def fake_command_builder(_phase: object, prompt: str) -> AgentLaunch:
+            return AgentLaunch(("claude", "--print", prompt))
 
         handler = WorkspaceProvisionHandler(
             workspace_service=workspace_service,
@@ -1481,8 +1482,8 @@ class TestWorkspaceProvisionHandler:
         async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
             return "Do the task"
 
-        def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-            return ["claude", "--print", prompt]
+        def fake_command_builder(_phase: object, prompt: str) -> AgentLaunch:
+            return AgentLaunch(("claude", "--print", prompt))
 
         handler = WorkspaceProvisionHandler(
             workspace_service=workspace_service,
@@ -1713,8 +1714,8 @@ class TestWorkspaceProvisionClaudePlugins:
         async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
             return "Do the task"
 
-        def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-            return ["claude", "--print", prompt]
+        def fake_command_builder(_phase: object, prompt: str) -> AgentLaunch:
+            return AgentLaunch(("claude", "--print", prompt))
 
         materializer = AsyncMock()
         materializer.fetch_for_workspace = AsyncMock(
@@ -1805,8 +1806,8 @@ class TestWorkspaceProvisionClaudePlugins:
         async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
             return "Do the task"
 
-        def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-            return ["claude", "--print", prompt]
+        def fake_command_builder(_phase: object, prompt: str) -> AgentLaunch:
+            return AgentLaunch(("claude", "--print", prompt))
 
         materializer = AsyncMock()
         materializer.fetch_for_workspace = AsyncMock(return_value=[])
@@ -1869,8 +1870,8 @@ def _make_skill_provision_handler(
     async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
         return "Do the task"
 
-    def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-        return ["claude", "--print", prompt]
+    def fake_command_builder(_phase: object, prompt: str) -> AgentLaunch:
+        return AgentLaunch(("claude", "--print", prompt))
 
     handler = WorkspaceProvisionHandler(
         workspace_service=workspace_service,

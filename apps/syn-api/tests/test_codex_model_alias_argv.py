@@ -23,24 +23,25 @@ def _model_flag(cmd: list[str]) -> str | None:
 
 
 def test_gpt_sol_is_sent_as_gpt_6_1_sol() -> None:
-    cmd = _build_codex_command("p", CodexModelAlias.GPT_SOL)
+    cmd = _build_codex_command(CodexModelAlias.GPT_SOL)
     assert _model_flag(cmd) == ModelId.GPT_6_1_SOL
     assert CodexModelAlias.GPT_SOL not in cmd
 
 
 def test_every_codex_alias_is_translated() -> None:
     for alias in CodexModelAlias:
-        assert _model_flag(_build_codex_command("p", alias)) != alias
+        assert _model_flag(_build_codex_command(alias)) != alias
 
 
 def test_a_concrete_slug_is_forwarded_unchanged() -> None:
-    assert _model_flag(_build_codex_command("p", ModelId.GPT_5_6_SOL)) == ModelId.GPT_5_6_SOL
+    assert _model_flag(_build_codex_command(ModelId.GPT_5_6_SOL)) == ModelId.GPT_5_6_SOL
 
 
 def test_a_claude_alias_is_still_never_forwarded() -> None:
-    assert _model_flag(_build_codex_command("p", ModelAlias.OPUS)) is None
+    assert _model_flag(_build_codex_command(ModelAlias.OPUS)) is None
 
 
-def test_the_prompt_stays_last() -> None:
-    cmd = _build_codex_command("do it", CodexModelAlias.GPT_SOL)
-    assert cmd[-1] == "do it"
+def test_the_prompt_is_read_from_stdin() -> None:
+    """`-` is codex's "read the task from stdin": no prompt in argv (#2355)."""
+    cmd = _build_codex_command(CodexModelAlias.GPT_SOL)
+    assert cmd[-1] == "-"

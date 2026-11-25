@@ -45,7 +45,7 @@ class TestAvailabilityNotAutoApproval:
     def test_declared_tools_emit_the_availability_flag(self) -> None:
         from syn_api._wiring_agent_command import _build_claude_command
 
-        cmd = _build_claude_command(_phase([ToolName.BASH, ToolName.READ]), "prompt")
+        cmd = _build_claude_command(_phase([ToolName.BASH, ToolName.READ]))
 
         assert "--tools" in cmd, "must restrict availability, not merely auto-approve"
         assert "--allowedTools" not in cmd
@@ -54,7 +54,7 @@ class TestAvailabilityNotAutoApproval:
         """`--tools` takes one list; repeating the flag keeps only the last."""
         from syn_api._wiring_agent_command import _build_claude_command
 
-        cmd = _build_claude_command(_phase([ToolName.BASH, ToolName.READ]), "prompt")
+        cmd = _build_claude_command(_phase([ToolName.BASH, ToolName.READ]))
 
         assert cmd.count("--tools") == 1
         assert cmd[cmd.index("--tools") + 1] == "Bash,Read"
@@ -63,7 +63,7 @@ class TestAvailabilityNotAutoApproval:
         """Omitting the field must not silently become "no tools at all"."""
         from syn_api._wiring_agent_command import _build_claude_command
 
-        cmd = _build_claude_command(_phase([]), "prompt")
+        cmd = _build_claude_command(_phase([]))
 
         assert "--tools" not in cmd
 
@@ -83,7 +83,7 @@ class TestCodexRefusesWhatItCannotHonour:
 
         cmd = _build_agent_command(_phase([], provider=AgentProvider.CODEX), "p")
 
-        assert cmd[:2] == ["codex", "exec"]
+        assert cmd.argv[4:6] == ("codex", "exec")  # argv[:4] is the stdin wrapper (#2355)
 
 
 class TestPromptCarriesTheGrant:
