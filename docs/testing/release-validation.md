@@ -3202,75 +3202,70 @@ Expected: `proxy 200`. Then navigate Playwright to `http://127.0.0.1:8138`.
 
 ---
 
-## 9. Claude Code Plugin Validation
+## 9. Agent Skills Validation
 
 Run this section **after Section 8** (so sessions and executions from Section 6 exist for
-`/syn-observe` and `/syn-executions show`).
+the observing and execution skills to read).
 
-> **Prerequisite:** `claude` CLI must be available. If the plugin is not yet installed:
+The Syntropic137 agent skills come from `syntropic137/syntropic137-skills` (pinned here
+as `lib/syntropic137-skills`) and serve both Claude Code and Codex. They replace the
+deprecated Claude Code plugin (`syntropic137-claude-plugin`, being removed in #1831).
+Install steps are in `apps/syn-docs/content/docs/guide/agent-skills.mdx`.
+
+> **Prerequisite:** `claude` and/or `codex` on `PATH`. If the skills are not yet installed:
 > ```bash
-> claude plugin install syntropic137
+> npx @syntropic137/setup skills
 > ```
-> The plugin connects to `http://localhost:8137` by default - the same selfhost stack
-> used in Sections 0–8.
+> The skills use the `syn` CLI and the HTTP API at `http://localhost:8137` - the same
+> selfhost stack used in Sections 0–8.
 
-### Plugin update (always run first)
+### Skills update (always run first)
 
 ```bash
-claude plugin marketplace update syntropic137
-claude plugin update syntropic137@syntropic137
+npx @syntropic137/setup skills update
+npx @syntropic137/setup skills status
 ```
 
 - [ ] Update completes without errors
-- [ ] Plugin version matches expected release version
+- [ ] `status` lists every skill in `lib/syntropic137-skills/skills/` for each agent found
+- [ ] The deprecated plugin is not also installed (`claude plugin list` shows no
+      `syntropic137@syntropic137`); if it is, `skills` offers to remove it
 
-### Slash command smoke tests
-
-| Command | What to verify |
-|---------|---------------|
-| `/syn-health` | Returns healthy status for `http://localhost:8137` |
-| `/syn-status` | Lists all `syn137-*` containers with healthy status |
-| `/syn-sessions list` | Returns session list (may be empty on fresh stack) |
-| `/syn-costs summary` | Returns cost summary (may be zero on fresh stack) |
-| `/syn-metrics` | Returns aggregated metrics without errors |
-| `/syn-workflows list` | Returns workflows on the stack |
-| `/syn-workflows search` | Returns marketplace results |
-| `/syn-executions list` | Returns execution list (may be empty) |
-| `/syn-marketplace list` | Shows registered marketplace sources |
-| `/syn-triggers list` | Returns trigger list (may be empty) |
-| `/syn-run <workflow-id>` | Starts an execution (after workflows exist from Section 6) |
-| `/syn-observe <session-id> events` | Returns event timeline for a session from Section 6 |
-| `/syn-setup` | Onboarding guidance; must not reference removed commands or stale ports |
-
-- [ ] All commands above return results without errors
-- [ ] No commands reference deprecated field names (`window_cost_usd`) or removed subcommands (`syn workflow installed` - renamed to `syn workflow packages`)
+> **No slash commands.** The skills repo is skills-only by design (its README, "Skills
+> only"): there is no `commands/` directory, and Codex has no slash commands. The old
+> `/syn-*` command smoke tests belonged to the deprecated plugin and are not part of
+> release validation. The CLI surface they wrapped is covered in §4.
 
 ### Skill validation
 
-Invoke these skills and verify they give correct guidance:
+Agents load a skill when the request matches it. Ask each question in Claude Code (and in
+Codex, if installed) and verify the guidance is correct. Every skill in
+`lib/syntropic137-skills/skills/` must appear here - the 2026-08-21 section 9.5 sweep
+found eight plugin skills that did not, which means nobody had checked whether they
+still described commands that exist.
 
-- [ ] **`execution-control` skill**: Walk through cancel/resume guidance - `resume` is resume-from-failure, NOT the deleted pause-resume
-- [ ] **`observability` skill**: Query tool timeline for a session from Section 6 - session output uses server-rendered `*_display` fields (`total_cost_display`, `total_tokens_display`, `agent_model_display`, `duration_display`) per ADR-064, not client-formatted numbers
-- [ ] **`marketplace` skill**: Workflow install/list guidance uses `syn workflow packages` (not `syn workflow installed`) with a note that `syn workflow list` shows the live stack
+```bash
+ls lib/syntropic137-skills/skills/
+```
 
-The plugin ships more skills than the three above. Every skill in
-`lib/syntropic137-claude-plugin/skills/` must appear here - the 2026-08-21
-section 9.5 sweep found eight that did not, which means nobody had checked
-whether they still described commands that exist.
-
-- [ ] **`setup`**: onboarding steps match the current `npx` flow and ports
-- [ ] **`syn-workflow`**: create/run/inspect guidance matches current flags
-- [ ] **`workflow-management`**: lifecycle guidance; no `syn workflow installed`
-- [ ] **`syn-marketplace`**: matches the `marketplace` skill, no drift between the pair
-- [ ] **`syn-triggers`**: uses `max_attempts` (not `max_fires`) and names the safety guards
-- [ ] **`syn-control`**: cancel/inject/stop flags match `syn control --help`; no pause or resume
-- [ ] **`syn-insights`**: references endpoints that exist and cost fields that are current
-- [ ] **`syn-repo`**: repo add/assign guidance matches `syn repo --help`
-- [ ] **`organization`**: org/system/repo hierarchy guidance is current
-- [ ] **`github-automation`**: references `syn github repos` and real trigger presets
-- [ ] **`platform-ops`**: operational guidance names real containers and real ports
-- [ ] **`troubleshooting-workflow-failures`**: the failure modes it names still exist,
-      and the diagnostics it suggests still work
+- [ ] **`execution-control`**: cancel/resume guidance - `resume` is resume-from-failure,
+      NOT the deleted pause-resume; cancel/stop flags match `syn control --help`
+- [ ] **`observing-sessions`**: tool timeline and cost for a session from Section 6 use
+      server-rendered `*_display` fields (`total_cost_display`, `total_tokens_display`,
+      `agent_model_display`, `duration_display`) per ADR-064, not client-formatted numbers
+- [ ] **`workflow-marketplace`**: install/list guidance uses `syn workflow packages` (not
+      `syn workflow installed`) with a note that `syn workflow list` shows the live stack
+- [ ] **`syn-workflow`**: find/run/register guidance matches current `syn workflow` flags
+- [ ] **`authoring-workflows`**: workflow YAML guidance matches
+      `schemas/plugin/workflow.schema.json`, including both `claude` and `codex` agents
+- [ ] **`github-triggers`**: uses `max_attempts` (not `max_fires`), names the safety
+      guards, and references real trigger presets
+- [ ] **`organization-hierarchy`**: org/system/repo guidance matches `syn org`,
+      `syn system` and `syn repo --help`
+- [ ] **`discovering-run-sessions`**: lists every session of an execution from Section 6
+      and says whether the list is complete
+- [ ] **`mining-session-logs`**: the commands and endpoints it uses still exist
+- [ ] **`syntropic137-docs`**: the documentation pages it points to exist
 
 > **A skill that names a removed command is worse than a missing skill.** It
 > reads as authoritative and sends the user somewhere that no longer exists.
@@ -3281,7 +3276,7 @@ whether they still described commands that exist.
 ### Clean state note
 
 `syn workflow packages` reads local CLI history (`~/.syntropic137/workflows/installed.json`), not
-the stack. Clear it before a clean-slate plugin validation:
+the stack. Clear it before a clean-slate skills validation:
 
 ```bash
 rm -f ~/.syntropic137/workflows/installed.json
@@ -3334,8 +3329,7 @@ grep -rn "registerCommand\|name:" apps/syn-cli-node/src/registry.ts | head -60
 
 - [ ] Every command group in `registry.ts` appears in §4 or the feature matrix
 - [ ] Commands referenced here still exist with the same flag signatures
-- [ ] Every slash command in `lib/syntropic137-claude-plugin/commands/` is in §9
-- [ ] Every skill in `lib/syntropic137-claude-plugin/skills/` is in §9
+- [ ] Every skill in `lib/syntropic137-skills/skills/` is in §9
 
 ### Schema currency check
 

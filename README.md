@@ -268,7 +268,8 @@ syntropic137/
 ├── lib/                         # Git submodules (our own projects)
 │   ├── agentic-workspace/       # Workspace images, isolation providers, event recording
 │   ├── event-sourcing-platform/ # Rust event store, Python SDK, VSA tool
-│   ├── syntropic137-claude-plugin/ # Claude Code plugin
+│   ├── syntropic137-skills/     # Agent skills for Claude Code and Codex
+│   ├── syntropic137-claude-plugin/ # Claude Code plugin (deprecated, being removed, #1831)
 │   └── agent-paradise-standards-system/ # Architecture fitness functions
 ├── infra/                       # Setup wizard, secrets, deployment scripts
 ├── docker/                      # Compose files (base, dev, selfhost, test, cloudflare)
