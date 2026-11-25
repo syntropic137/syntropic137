@@ -41,7 +41,7 @@ from syn_adapters.storage.repositories import EventStoreExecutionEventStream, Re
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_domain.contexts.agent_sessions import AgentSessionAggregate
 from syn_domain.contexts.artifacts import ArtifactAggregate
-from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH
+from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH, AgentLaunch
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -108,8 +108,8 @@ async def _prompt(*_args: object, **_kwargs: object) -> str:
     return "three-phase prompt"
 
 
-def _command(*_args: object, **_kwargs: object) -> list[str]:
-    return ["echo", "agent"]
+def _command(*_args: object, **_kwargs: object) -> AgentLaunch:
+    return AgentLaunch(("echo", "agent"))
 
 
 def _phase_of(event: DomainEvent) -> str | None:

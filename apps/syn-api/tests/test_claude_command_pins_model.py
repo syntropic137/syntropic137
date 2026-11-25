@@ -40,13 +40,13 @@ def _model_flag(argv: list[str]) -> str:
 def test_alias_is_launched_as_its_explicit_id(declared: str, launched: str) -> None:
     from syn_api._wiring_agent_command import _build_claude_command
 
-    assert _model_flag(_build_claude_command(_phase(declared), "hi")) == launched
+    assert _model_flag(_build_claude_command(_phase(declared))) == launched
 
 
 def test_explicit_allowed_id_is_launched_unchanged() -> None:
     from syn_api._wiring_agent_command import _build_claude_command
 
-    argv = _build_claude_command(_phase(ModelId.CLAUDE_SONNET_5), "hi")
+    argv = _build_claude_command(_phase(ModelId.CLAUDE_SONNET_5))
     assert _model_flag(argv) == "claude-sonnet-5"
 
 
@@ -56,7 +56,7 @@ def test_retired_model_is_refused_at_launch() -> None:
 
     phase = _phase(ModelId.CLAUDE_SONNET_4_5)  # constructing it must still work
     with pytest.raises(RetiredModelError, match="claude-sonnet-4-5-20250929"):
-        _build_claude_command(phase, "hi")
+        _build_claude_command(phase)
 
 
 @pytest.mark.parametrize(
@@ -69,4 +69,4 @@ def test_retired_model_in_another_case_is_refused_at_launch(model: str) -> None:
     from syn_api._wiring_agent_command import _build_claude_command
 
     with pytest.raises(RetiredModelError):
-        _build_claude_command(_phase(model), "hi")
+        _build_claude_command(_phase(model))

@@ -16,6 +16,8 @@ from __future__ import annotations
 import importlib
 import os
 
+from syn_domain.contexts.orchestration import AgentLaunch
+
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from pathlib import Path
@@ -130,7 +132,7 @@ class _World:
             observability_writer=None,
             controller=None,
             prompt_builder=AsyncMock(return_value="test prompt"),
-            command_builder=MagicMock(return_value=["claude"]),
+            command_builder=MagicMock(return_value=AgentLaunch(("claude",))),
             todo_projection=ExecutionTodoProjection(store=shared_todos or self.todos),  # type: ignore[arg-type]
             run_queue=self.queue if queued else None,
             execution_events=EventStoreExecutionEventStream(self.store),

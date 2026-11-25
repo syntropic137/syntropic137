@@ -34,6 +34,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     CancelExecutionCommand,
@@ -118,7 +119,7 @@ def _make_processor() -> WorkflowExecutionProcessor:
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="prompt"),
-        command_builder=MagicMock(return_value=["claude"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude",))),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
     )
 

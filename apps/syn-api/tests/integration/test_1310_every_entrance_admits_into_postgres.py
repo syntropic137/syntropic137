@@ -44,7 +44,7 @@ from syn_api.routes.executions import commands, keyed_start
 from syn_api.routes.executions.commands import ExecuteWorkflowRequest
 from syn_domain.contexts._shared import AdmissionGate
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
-from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH
+from syn_domain.contexts.orchestration import ORCHESTRATION_EVENT_EPOCH, AgentLaunch
 from syn_domain.contexts.orchestration._shared.eval_choice import EvalSelection, LaunchEval
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -169,7 +169,7 @@ class _Infra:
             observability_writer=None,
             controller=None,
             prompt_builder=AsyncMock(return_value="test prompt"),
-            command_builder=MagicMock(return_value=["claude"]),
+            command_builder=MagicMock(return_value=AgentLaunch(("claude",))),
             todo_projection=ExecutionTodoProjection(store=shared_todos or self.todos),  # type: ignore[arg-type]
             run_queue=self.queue if queued else None,
             execution_events=EventStoreExecutionEventStream(await self.client()),
