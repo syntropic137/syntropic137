@@ -915,25 +915,47 @@ test-stack: test-stack-migrate-legacy
 test-stack-migrate-legacy:
     #!/usr/bin/env bash
     set -euo pipefail
-    legacy=$(docker ps -a --filter name='^syn-test-' --format '{{{{.Names}} {{{{.Label "com.docker.compose.project"}}' \
-      | awk '$2 != "syntropic137_test" {print $1}')
+    # True only for a container compose created from docker-compose.test.yaml:
+    # the name alone is not proof (#2371 review).
+    from_test_compose() {
+      case "$(docker inspect "$1" --format '{{{{index .Config.Labels "com.docker.compose.project.config_files"}}')" in
+        *docker-compose.test.yaml*) return 0 ;;
+        *) return 1 ;;
+      esac
+    }
+    legacy=""
+    for c in $(docker ps -a --filter name='^syn-test-' --format '{{{{.Names}}'); do
+      project=$(docker inspect "$c" --format '{{{{index .Config.Labels "com.docker.compose.project"}}')
+      if [ "$project" != "syntropic137_test" ] && from_test_compose "$c"; then
+        legacy="$legacy $c"
+      fi
+    done
     if [ -n "$legacy" ]; then
-      echo "🧹 Removing test containers left in another compose project: $legacy"
+      echo "🧹 Removing test containers left in another compose project:$legacy"
       docker stop $legacy >/dev/null
       docker rm $legacy >/dev/null
     fi
-    net_project=$(docker network inspect syn-test-network --format '{{{{index .Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+    # By ID from here on, so a network recreated mid-run is never the one removed.
+    net_id=$(docker network ls --filter name='^syn-test-network$' --format '{{{{.ID}}')
+    [ -n "$net_id" ] || exit 0
+    net_project=$(docker network inspect "$net_id" --format '{{{{index .Labels "com.docker.compose.project"}}')
     if [ -n "$net_project" ] && [ "$net_project" != "syntropic137_test" ]; then
-      # Detach whatever is still on it (the old recipe also started dev-only
-      # services there). Detach only: never stop or remove a container that is
-      # not syn-test-*; those were removed above.
-      attached=$(docker network inspect syn-test-network --format '{{{{range .Containers}}{{{{.Name}} {{{{end}}')
+      attached=$(docker network inspect "$net_id" --format '{{{{range .Containers}}{{{{.Name}} {{{{end}}')
+      # Check everything before changing anything: one container that a
+      # test-stack run did not start leaves the network exactly as it is.
       for c in $attached; do
-        echo "🔌 Disconnecting $c from the legacy syn-test-network"
-        docker network disconnect syn-test-network "$c"
+        if ! from_test_compose "$c"; then
+          echo "❌ $c is on the legacy syn-test-network but was not started from docker-compose.test.yaml." >&2
+          echo "   Nothing was changed. Detach it yourself (docker network disconnect syn-test-network $c), then rerun." >&2
+          exit 1
+        fi
+      done
+      for c in $attached; do
+        echo "🔌 Disconnecting $c (a legacy test-stack container) from syn-test-network"
+        docker network disconnect "$net_id" "$c"
       done
       echo "🧹 Removing syn-test-network left in compose project $net_project"
-      docker network rm syn-test-network >/dev/null
+      docker network rm "$net_id" >/dev/null
     fi
 
 # Stop test stack
