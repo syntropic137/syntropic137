@@ -184,7 +184,7 @@ _NOT_A_CHECK: dict[str, frozenset[str]] = {
             "test-stack",
             "test-stack-down",
             "test-stack-logs",
-            "test-stack-migrate-legacy",
+            "test-stack-check-legacy",
             "test-stack-restart",
             "test-stack-stop",
             "env-down",

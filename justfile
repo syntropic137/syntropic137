@@ -902,60 +902,30 @@ test-debt:
 # See ADR-034: Test Infrastructure Architecture
 
 # Start test stack (ephemeral, ports +10000 from dev)
-test-stack: test-stack-migrate-legacy
+test-stack: test-stack-check-legacy
     @echo "🧪 Starting test stack..."
     {{compose_test}} up -d --build {{test_stack_services}}
     @echo "✅ Test stack running on ports 15432, 18080, 55051, 19000, 16379"
 
-# Remove syn-test-* containers and syn-test-network left by a stack created
-# before #2370, when it shared the dev compose project. They hold the fixed names
-# the new project needs. Containers and the network only: never `down -v` on the
-# old project, which is the dev stack.
+# Refuse to start while syn-test-* containers or syn-test-network from before
+# #2370 (when the test stack shared the dev compose project) still hold the
+# fixed names. Read-only: it changes nothing. Cleaning them up is a one-time
+# manual step, because no automatic rule can prove a resource is test-only.
 [private]
-test-stack-migrate-legacy:
+test-stack-check-legacy:
     #!/usr/bin/env bash
     set -euo pipefail
-    # True only for a container compose created from docker-compose.test.yaml:
-    # the name alone is not proof (#2371 review).
-    from_test_compose() {
-      case "$(docker inspect "$1" --format '{{{{index .Config.Labels "com.docker.compose.project.config_files"}}')" in
-        *docker-compose.test.yaml*) return 0 ;;
-        *) return 1 ;;
-      esac
-    }
-    legacy=""
-    for c in $(docker ps -a --filter name='^syn-test-' --format '{{{{.Names}}'); do
-      project=$(docker inspect "$c" --format '{{{{index .Config.Labels "com.docker.compose.project"}}')
-      if [ "$project" != "syntropic137_test" ] && from_test_compose "$c"; then
-        legacy="$legacy $c"
-      fi
-    done
-    if [ -n "$legacy" ]; then
-      echo "🧹 Removing test containers left in another compose project:$legacy"
-      docker stop $legacy >/dev/null
-      docker rm $legacy >/dev/null
-    fi
-    # By ID from here on, so a network recreated mid-run is never the one removed.
-    net_id=$(docker network ls --filter name='^syn-test-network$' --format '{{{{.ID}}')
-    [ -n "$net_id" ] || exit 0
-    net_project=$(docker network inspect "$net_id" --format '{{{{index .Labels "com.docker.compose.project"}}')
-    if [ -n "$net_project" ] && [ "$net_project" != "syntropic137_test" ]; then
-      attached=$(docker network inspect "$net_id" --format '{{{{range .Containers}}{{{{.Name}} {{{{end}}')
-      # Check everything before changing anything: one container that a
-      # test-stack run did not start leaves the network exactly as it is.
-      for c in $attached; do
-        if ! from_test_compose "$c"; then
-          echo "❌ $c is on the legacy syn-test-network but was not started from docker-compose.test.yaml." >&2
-          echo "   Nothing was changed. Detach it yourself (docker network disconnect syn-test-network $c), then rerun." >&2
-          exit 1
-        fi
-      done
-      for c in $attached; do
-        echo "🔌 Disconnecting $c (a legacy test-stack container) from syn-test-network"
-        docker network disconnect "$net_id" "$c"
-      done
-      echo "🧹 Removing syn-test-network left in compose project $net_project"
-      docker network rm "$net_id" >/dev/null
+    legacy=$(docker ps -a --filter name='^syn-test-' --format '{{{{.Names}} {{{{.Label "com.docker.compose.project"}}' \
+      | awk '$2 != "syntropic137_test" {print $1}')
+    net=$(docker network ls --filter name='^syn-test-network$' --format '{{{{.Label "com.docker.compose.project"}}')
+    if [ -n "$legacy" ] || { [ -n "$net" ] && [ "$net" != "syntropic137_test" ]; }; then
+      echo "❌ A test stack from before #2370 is still present; nothing was changed." >&2
+      [ -z "$legacy" ] || echo "   Containers outside the syntropic137_test project: $legacy" >&2
+      [ -z "$net" ] || [ "$net" = "syntropic137_test" ] || echo "   syn-test-network belongs to compose project '$net'" >&2
+      echo "   One-time cleanup (check each name first; never 'down -v' the dev project):" >&2
+      echo "     docker stop <name> && docker rm <name>     # each syn-test-* listed above" >&2
+      echo "     docker network rm syn-test-network          # after detaching anything still on it" >&2
+      exit 1
     fi
 
 # Stop test stack
