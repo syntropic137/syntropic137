@@ -8,8 +8,9 @@ import {
   Image,
 } from 'lucide-react'
 
+import { artifactRawUrl } from '../../api/artifacts'
 import type { ArtifactResponse } from '../../types'
-import { formatSize } from './artifactUtils'
+import { formatSize, isBinary } from './artifactUtils'
 
 const artifactIcons: Record<string, typeof FileText> = {
   code: FileCode,
@@ -18,6 +19,9 @@ const artifactIcons: Record<string, typeof FileText> = {
   markdown: FileText,
   json: FileCode,
 }
+
+const downloadClassName =
+  'inline-flex items-center gap-2 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]'
 
 interface ArtifactHeaderProps {
   artifact: ArtifactResponse
@@ -70,13 +74,22 @@ export function ArtifactHeader({ artifact, copied, onCopy, onDownload }: Artifac
               </>
             )}
           </button>
-          <button
-            onClick={onDownload}
-            className="inline-flex items-center gap-2 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
-          >
-            <Download className="h-4 w-4" />
-            Download
-          </button>
+          {isBinary(artifact) ? (
+            // The stored bytes, as served; a Blob of `content` has no bytes to hold.
+            <a
+              href={artifactRawUrl(artifact.id)}
+              download={artifact.title ?? ''}
+              className={downloadClassName}
+            >
+              <Download className="h-4 w-4" />
+              Download
+            </a>
+          ) : (
+            <button onClick={onDownload} className={downloadClassName}>
+              <Download className="h-4 w-4" />
+              Download
+            </button>
+          )}
         </div>
       </div>
     </div>

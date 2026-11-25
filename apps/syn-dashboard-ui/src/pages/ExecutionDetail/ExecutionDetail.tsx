@@ -29,6 +29,7 @@ import { formatDurationFromRange } from '../../utils/formatters'
 import { ArtifactSection } from './ArtifactSection'
 import { SessionInventory } from './SessionInventory'
 import { PhaseTimeline } from './PhaseTimeline'
+import { type ExecutionWithCost, withCostFields } from './withCostFields'
 
 type Phase = ExecutionDetailResponse['phases'][number]
 
@@ -238,7 +239,7 @@ function ExecutionMetricsGrid({
   execution,
   hasCostByModel,
 }: {
-  execution: ExecutionDetailResponse
+  execution: ExecutionWithCost
   hasCostByModel: boolean
 }) {
   // The API's progress, not a count of `phases` over `total_phases`: `phases`
@@ -284,21 +285,21 @@ function ExecutionMetricsGrid({
 export function ExecutionDetail() {
   const { executionId } = useParams<{ executionId: string }>()
   const navigate = useNavigate()
-  const { execution, artifactDetails, loading, error, isConnected, now, refreshExecution } =
+  const { execution: received, artifactDetails, loading, error, isConnected, now, refreshExecution } =
     useExecutionData(executionId)
   // From /health once measured, so a 404 while the detail read model replays
   // can say why, and a terminal execution's snapshot cannot outlive catch-up.
-  const rebuilding = useReadModelStatus('workflow_execution_details', execution?.read_model_status)
+  const rebuilding = useReadModelStatus('workflow_execution_details', received?.read_model_status)
   // Called before the early returns below, like every hook here; it waits for
   // the id and follows the status, so it re-reads as the run finishes (#1516).
-  const captureDegraded = useExecutionCapture(executionId ?? '', execution?.status ?? '')
+  const captureDegraded = useExecutionCapture(executionId ?? '', received?.status ?? '')
 
   if (loading) return <PageLoader />
 
   // Only the absence of data is a dead end. `error` on its own means the most
   // recent refresh failed, which the header reports without throwing away an
   // execution the page already has (#1048).
-  if (!execution) {
+  if (!received) {
     return (
       <Card>
         <ReadModelNotice status={rebuilding} />
@@ -312,6 +313,7 @@ export function ExecutionDetail() {
     )
   }
 
+  const execution = withCostFields(received)
   const breadcrumbs: BreadcrumbItem[] = [
     { label: execution.workflow_name || execution.workflow_id, href: `/workflows/${execution.workflow_id}` },
     { label: `Execution ${execution.workflow_execution_id.slice(0, 8)}` },

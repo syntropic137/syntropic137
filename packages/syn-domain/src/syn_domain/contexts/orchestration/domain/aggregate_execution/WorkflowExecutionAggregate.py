@@ -20,6 +20,7 @@ from event_sourcing import (
 
 from syn_domain.contexts.orchestration._shared.file_transfer import FileRefusal, read_refusals
 from syn_domain.contexts.orchestration._shared.phase_order import refuse_phase_order_conflict
+from syn_domain.contexts.orchestration.domain.aggregate_execution import retention_handlers
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     LeftBranches,
     PushedCommit,
@@ -237,7 +238,10 @@ logger = logging.getLogger(__name__)
 
 @aggregate("WorkflowExecution")
 class WorkflowExecutionAggregate(
-    AggregateRoot["WorkflowExecutionStartedEvent"], EvidenceGateHandlers, FileRefusalHandlers
+    AggregateRoot["WorkflowExecutionStartedEvent"],
+    EvidenceGateHandlers,
+    FileRefusalHandlers,
+    retention_handlers.WorkspaceRetentionHandlers,
 ):
     """Aggregate for tracking workflow execution lifecycle."""
 
@@ -277,7 +281,6 @@ class WorkflowExecutionAggregate(
         self._phase_order_map: dict[str, int] = {}
         #: Why the replayed phase list is not a total order (#1455), if it is not.
         self._phase_order_conflict: str | None = None
-        self._current_phase_workspace_id: str | None = None
         #: What each RUNNING phase's agent left behind, keyed by phase.
         #:
         #: Replayed state, not a cache. The salvage (#1195, #1300) turns this
@@ -989,7 +992,7 @@ class WorkflowExecutionAggregate(
     @event_sourcing_handler("WorkspaceProvisionedForPhase")
     def on_workspace_provisioned_for_phase(self, event: WorkspaceProvisionedForPhaseEvent) -> None:
         """Apply WorkspaceProvisionedForPhaseEvent."""
-        self._current_phase_workspace_id = evt(event, "workspace_id")
+        self._provisioned_for(evt(event, "workspace_id"), evt(event, "phase_id"))
         if self._starting_checkout is None:
             self._starting_checkout = read_source_commits(evt(event, "checked_out_commits"))
         reading = read_image_manifest(evt(event, "image_manifest"))

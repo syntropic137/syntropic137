@@ -96,6 +96,9 @@ from syn_domain.contexts.orchestration.domain.events.PhaseRetryScheduledEvent im
 from syn_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
     PhaseStartedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.PhaseWorkspaceRetainedEvent import (
+    PhaseWorkspaceRetainedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.TokensInjectedEvent import (
     TokensInjectedEvent,
 )
@@ -182,6 +185,7 @@ __all__ = [
     "PhaseCompletedEvent",
     "PhaseRetryScheduledEvent",
     "PhaseStartedEvent",
+    "PhaseWorkspaceRetainedEvent",
     "TokensInjectedEvent",
     "WorkflowCompletedEvent",
     "WorkflowDefaultEvalSetEvent",
