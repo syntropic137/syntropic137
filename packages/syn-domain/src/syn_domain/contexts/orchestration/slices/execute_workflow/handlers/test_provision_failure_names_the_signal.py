@@ -86,7 +86,7 @@ async def test_the_handler_names_the_signal() -> None:
     handler = WorkspaceProvisionHandler(
         workspace_service=_workspace_service_whose_setup_returns(SEGFAULTED_SETUP),
         prompt_builder=fake_prompt_builder,
-        command_builder=lambda _phase, prompt: ["claude", "--print", prompt],
+        command_builder=lambda _phase, prompt: AgentLaunch(("claude", "--print", prompt)),
     )
 
     with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as mock_secrets:
