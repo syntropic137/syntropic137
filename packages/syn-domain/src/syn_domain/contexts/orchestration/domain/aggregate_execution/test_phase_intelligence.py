@@ -147,14 +147,14 @@ class TestProvisionWorkspaceCompleted:
         assert new_events[0].phase_id == "p-1"
         assert new_events[0].workspace_id == "ws-123"
 
-    def test_tracks_current_workspace_id(self) -> None:
-        """Aggregate state tracks current workspace ID."""
+    def test_tracks_which_phase_each_workspace_was_for(self) -> None:
+        """Aggregate state maps each provisioned workspace to its phase (#2321)."""
         agg = _make_started_aggregate(phase_definitions=TWO_PHASE_DEFS)
         cmd = ProvisionWorkspaceCompletedCommand(
             execution_id="exec-1", phase_id="p-1", workspace_id="ws-123"
         )
         agg._handle_command(cmd)
-        assert agg._current_phase_workspace_id == "ws-123"
+        assert agg._workspace_phases == {"ws-123": "p-1"}
 
     def test_rejected_when_not_running(self) -> None:
         """Provision rejected when execution is not RUNNING."""

@@ -160,7 +160,7 @@ async def test_the_status_bound_is_still_a_bound_and_still_says_so(
     with caplog.at_level(logging.INFO):
         reclaimable = await guard_orphaned_workspace(_orphan(workspace))
 
-    assert (reclaimable is not None) is reclaimed
+    assert isinstance(reclaimable, ReclaimableDir) is reclaimed
     if reclaimed:
         return
     kept = [r.getMessage() for r in caplog.records if "Keeping orphaned workspace" in r.message]
@@ -209,7 +209,7 @@ async def test_modified_and_untracked_files_are_still_work_under_a_slow_status(
         f"expected the v1 and v2 statuses both to run, saw bounds {workspace.bounds}"
     )
     # Quarantined and landed, so only now is the directory reclaimable.
-    assert reclaimable is not None
+    assert isinstance(reclaimable, ReclaimableDir)
 
 
 @pytest.mark.parametrize(
@@ -237,7 +237,7 @@ async def test_work_inside_a_submodule_keeps_the_directory_under_a_slow_status(
 
     reclaimable = await guard_orphaned_workspace(_orphan(workspace))
 
-    assert reclaimable is None, (
+    assert not isinstance(reclaimable, ReclaimableDir), (
         f"{change} work in a submodule was offered for deletion after a "
         f"{_COLD_WALK_SECONDS}s status (bounds {workspace.bounds}), though no push carried it"
     )

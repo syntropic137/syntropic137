@@ -344,6 +344,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff im
     InheritanceUnavailableError,
     inherited_outputs,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.retained_workspace_record import (
+    RetainedWorkspaceRecorder,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
     SalvagedPhase,
     salvage_stranded_phase,
@@ -602,6 +605,7 @@ __all__ = [
     "ResumeStarter",
     "Retained",
     "RetainedReason",
+    "RetainedWorkspaceRecorder",
     "ReviewVerdict",
     "SalvagedPhase",
     "SecurityPolicy",

@@ -448,8 +448,13 @@ async def _guard_orphaned_workspaces(*narrower: str) -> list[ReclaimableDir] | N
     be listed - "found none" and "could not look" are different answers. Never
     raises: either way nothing uncleared is deleted, which costs only disk.
     """
+    from syn_adapters.storage.repositories import get_workflow_execution_repository
     from syn_adapters.workspace_backends.orphaned import find_orphaned_workspaces
-    from syn_domain.contexts.orchestration import guard_orphaned_workspace
+    from syn_domain.contexts.orchestration import (
+        Retained,
+        RetainedWorkspaceRecorder,
+        guard_orphaned_workspace,
+    )
 
     try:
         ids = await _docker_ps_ids("name=agentic-ws-", *narrower)
@@ -459,11 +464,15 @@ async def _guard_orphaned_workspaces(*narrower: str) -> list[ReclaimableDir] | N
             "Could not list orphaned workspaces to guard; keeping their directories", exc_info=True
         )
         return None
+    recorder = RetainedWorkspaceRecorder(get_workflow_execution_repository)
     cleared: list[ReclaimableDir] = []
     for orphan in orphans:
-        reclaimable = await guard_orphaned_workspace(orphan)
-        if reclaimable is not None:
-            cleared.append(reclaimable)
+        verdict = await guard_orphaned_workspace(orphan)
+        if isinstance(verdict, Retained):
+            # Kept already; the record only says so on the run (#2321).
+            await recorder.record(orphan.execution_id, orphan.workspace_id, verdict)
+        else:
+            cleared.append(verdict)
     return cleared
 
 
