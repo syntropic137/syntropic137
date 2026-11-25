@@ -924,14 +924,14 @@ test-stack-migrate-legacy:
     fi
     net_project=$(docker network inspect syn-test-network --format '{{{{index .Labels "com.docker.compose.project"}}' 2>/dev/null || true)
     if [ -n "$net_project" ] && [ "$net_project" != "syntropic137_test" ]; then
-      # Only a test-stack run attaches containers to this network, so whatever is
-      # still on it (the old recipe started dev-only services too) is legacy.
+      # Detach whatever is still on it (the old recipe also started dev-only
+      # services there). Detach only: never stop or remove a container that is
+      # not syn-test-*; those were removed above.
       attached=$(docker network inspect syn-test-network --format '{{{{range .Containers}}{{{{.Name}} {{{{end}}')
-      if [ -n "${attached// }" ]; then
-        echo "🧹 Removing containers still on the legacy syn-test-network: $attached"
-        docker stop $attached >/dev/null
-        docker rm $attached >/dev/null
-      fi
+      for c in $attached; do
+        echo "🔌 Disconnecting $c from the legacy syn-test-network"
+        docker network disconnect syn-test-network "$c"
+      done
       echo "🧹 Removing syn-test-network left in compose project $net_project"
       docker network rm syn-test-network >/dev/null
     fi
