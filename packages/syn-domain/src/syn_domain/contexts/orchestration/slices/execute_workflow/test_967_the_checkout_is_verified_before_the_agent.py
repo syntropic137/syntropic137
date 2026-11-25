@@ -27,6 +27,7 @@ from event_sourcing import (
 from pydantic import ValidationError
 
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestValueObjects import (
     ImageManifestReading,
@@ -151,7 +152,7 @@ async def _provision(
             heads, branch_head=branch_head, contains_pin=contains_pin, attached_to=attached_to
         ),
         prompt_builder=AsyncMock(return_value="Do the task"),
-        command_builder=MagicMock(return_value=["claude", "--print", "Do the task"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude", "--print", "Do the task"))),
     )
     with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as secrets:
         secrets.create = AsyncMock(return_value=MagicMock())
@@ -280,7 +281,7 @@ async def test_a_mismatch_fails_the_run_before_any_agent_runs() -> None:
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="Do the task"),
-        command_builder=MagicMock(return_value=["claude", "--print", "Do the task"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude", "--print", "Do the task"))),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         agent_handler=agent,
     )
@@ -404,7 +405,7 @@ async def _run_continuing(attached_to: str) -> tuple[str, AsyncMock]:
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="Do the task"),
-        command_builder=MagicMock(return_value=["claude", "--print", "Do the task"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude", "--print", "Do the task"))),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         agent_handler=agent,
     )

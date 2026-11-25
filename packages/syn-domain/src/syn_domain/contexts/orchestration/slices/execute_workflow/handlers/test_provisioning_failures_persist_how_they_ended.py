@@ -31,6 +31,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration._shared.resolved_skill import ResolvedSkill
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
@@ -154,7 +155,7 @@ async def _run(
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="Do the task"),
-        command_builder=MagicMock(return_value=["claude", "--print", "Do the task"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude", "--print", "Do the task"))),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         skill_materializer=skill_materializer,
     )

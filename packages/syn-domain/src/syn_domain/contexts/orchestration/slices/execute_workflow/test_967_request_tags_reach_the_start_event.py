@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import os
 
+from syn_domain.contexts.orchestration import AgentLaunch
+
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 from pathlib import Path
@@ -114,7 +116,7 @@ class _World:
             observability_writer=None,
             controller=None,
             prompt_builder=AsyncMock(return_value="test prompt"),
-            command_builder=MagicMock(return_value=["claude"]),
+            command_builder=MagicMock(return_value=AgentLaunch(("claude",))),
             todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
         )
         self.handler = ExecuteWorkflowHandler(

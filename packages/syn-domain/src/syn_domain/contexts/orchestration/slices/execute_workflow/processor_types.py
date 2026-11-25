@@ -14,6 +14,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     QuarantinedRef,
     ReportedFailureReason,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch import AgentLaunch
 from syn_domain.repository import Repository
 from syn_shared.agents import AgentRunner
 
@@ -91,7 +92,7 @@ PromptBuilder = Callable[
     Awaitable[str],
 ]
 
-CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
+CommandBuilder = Callable[[ExecutablePhase, str], AgentLaunch]
 Runner = AgentRunner
 
 
