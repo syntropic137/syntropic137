@@ -21,6 +21,7 @@ from event_sourcing import StreamAlreadyExistsError
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactSummary, PhaseOutputFile
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -167,9 +168,9 @@ class _Provisioned:
         return phase.prompt_template
 
 
-def _command(phase: ExecutablePhase, prompt: str) -> list[str]:
+def _command(phase: ExecutablePhase, prompt: str) -> AgentLaunch:
     del phase
-    return ["echo", prompt]
+    return AgentLaunch(("echo", prompt))
 
 
 def _processor(

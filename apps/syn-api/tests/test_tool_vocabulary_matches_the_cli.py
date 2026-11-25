@@ -152,7 +152,7 @@ def _probe_argv(declared: str) -> list[str]:
         order=1,
         agent_config=AgentConfiguration(model=_UNBILLABLE_MODEL, allowed_tools=(declared,)),
     )
-    return _build_claude_command(phase, "say ok")
+    return _build_claude_command(phase)
 
 
 def _probe_init_line(declared: str) -> _CliInitLine:
@@ -179,6 +179,8 @@ def _probe_init_line(declared: str) -> _CliInitLine:
             "docker",
             "run",
             "--rm",
+            # The prompt is on stdin, as in production (#2355).
+            "--interactive",
             # An invalid key, not an absent one: the CLI reads the grant out
             # before it authenticates, and a key that is present-but-wrong
             # keeps it from trying to open an interactive login.
@@ -189,10 +191,14 @@ def _probe_init_line(declared: str) -> _CliInitLine:
             DEFAULT_WORKSPACE_IMAGE,
             *_probe_argv(declared)[1:],  # argv[0] is "claude", now the entrypoint
         ],
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+    if process.stdin is not None:
+        process.stdin.write("say ok")
+        process.stdin.close()
     # A hard stop, because the loop below blocks on a line that a wedged
     # container would never send.
     watchdog = threading.Timer(_PROBE_TIMEOUT_SECONDS, process.kill)

@@ -109,7 +109,6 @@ def _resolve_sandbox(declared: str | None, *, phase_id: str) -> PhaseSandbox:
 
 
 def _build_codex_command(
-    prompt: str,
     model: str | None,
     sandbox: PhaseSandbox = DEFAULT_PHASE_SANDBOX,
 ) -> list[str]:
@@ -136,5 +135,7 @@ def _build_codex_command(
     ]
     if _is_codex_model(model):
         cmd.extend(["--model", resolve_codex_model_alias(model)])
-    cmd.append(prompt)
+    # `-`: read the task from stdin. The prompt is never in argv (#2355); see
+    # `_prompt_on_stdin` in `_wiring_agent_command`.
+    cmd.append("-")
     return cmd

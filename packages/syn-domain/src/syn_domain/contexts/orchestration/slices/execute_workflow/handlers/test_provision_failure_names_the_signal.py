@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
@@ -85,7 +86,7 @@ async def test_the_handler_names_the_signal() -> None:
     handler = WorkspaceProvisionHandler(
         workspace_service=_workspace_service_whose_setup_returns(SEGFAULTED_SETUP),
         prompt_builder=fake_prompt_builder,
-        command_builder=lambda _phase, prompt: ["claude", "--print", prompt],
+        command_builder=lambda _phase, prompt: AgentLaunch(("claude", "--print", prompt)),
     )
 
     with patch("syn_adapters.workspace_backends.service.SetupPhaseSecrets") as mock_secrets:
@@ -150,7 +151,7 @@ async def test_the_execution_record_an_operator_reads_names_the_signal(
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="Do the task"),
-        command_builder=MagicMock(return_value=["claude", "--print", "Do the task"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude", "--print", "Do the task"))),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
     )
     processor._journal._repository.save = AsyncMock()

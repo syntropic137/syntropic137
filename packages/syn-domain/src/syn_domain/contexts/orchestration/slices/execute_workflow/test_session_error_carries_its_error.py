@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_shared.events import SESSION_ERROR
 
 if TYPE_CHECKING:
@@ -119,7 +120,7 @@ def _processor():
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="prompt"),
-        command_builder=MagicMock(return_value=["claude"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude",))),
         # The failure path never reads the to-do list; the constructor only
         # asserts it is not None. Keeping it a double keeps this domain test
         # free of an adapters import.

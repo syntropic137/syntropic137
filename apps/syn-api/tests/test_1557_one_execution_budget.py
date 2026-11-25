@@ -35,6 +35,8 @@ from event_sourcing.core.event import EventEnvelope, EventMetadata
 from event_sourcing.stores.memory_checkpoint import MemoryCheckpointStore
 from fastapi import BackgroundTasks, HTTPException
 
+from syn_domain.contexts.orchestration import AgentLaunch
+
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 import syn_adapters.storage.repositories as repositories
@@ -360,9 +362,9 @@ async def _build_prompt(*args: object, **kwargs: object) -> str:
     return "prompt"
 
 
-def _command(phase: ExecutablePhase, prompt: str) -> list[str]:
+def _command(phase: ExecutablePhase, prompt: str) -> AgentLaunch:
     del phase
-    return ["echo", prompt]
+    return AgentLaunch(("echo", prompt))
 
 
 def _processor(executions: _Executions, agent: _HeldAgent) -> WorkflowExecutionProcessor:

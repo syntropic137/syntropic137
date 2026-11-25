@@ -31,6 +31,7 @@ from event_sourcing import StreamAlreadyExistsError
 from syn_adapters.maintenance import InMemoryMaintenanceAdapter
 from syn_adapters.workspace_backends.service import WorkspaceBackend, WorkspaceService
 from syn_domain.contexts._shared import AdmissionGate, AdmissionTicket, carrying
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -110,9 +111,9 @@ async def _noop_prompt_builder(
     return "never reached"
 
 
-def _noop_command_builder(phase: ExecutablePhase, prompt: str) -> list[str]:
+def _noop_command_builder(phase: ExecutablePhase, prompt: str) -> AgentLaunch:
     del phase, prompt
-    return ["true"]
+    return AgentLaunch(("true",))
 
 
 def _processor(repository: _Recorded, todos: _SuspendedTodoList) -> WorkflowExecutionProcessor:

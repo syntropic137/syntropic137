@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -66,7 +67,7 @@ async def test_codex_agent_env_holds_no_codex_credential(allow_delegation: bool)
     handler = WorkspaceProvisionHandler(
         workspace_service=MagicMock(),
         prompt_builder=AsyncMock(return_value="review it"),
-        command_builder=lambda _phase, prompt: ["codex", "exec", prompt],
+        command_builder=lambda _phase, prompt: AgentLaunch(("codex", "exec", prompt)),
     )
 
     command, env = await handler._launch_for(

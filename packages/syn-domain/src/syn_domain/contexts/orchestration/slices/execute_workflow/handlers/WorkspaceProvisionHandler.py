@@ -28,6 +28,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch import AgentLaunch
 from syn_domain.contexts.orchestration.slices.execute_workflow.checkout_verification import (
     verify_provisioned_checkout,
 )
@@ -142,7 +143,7 @@ PromptBuilder = Callable[
     [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, object]],
     Awaitable[str],
 ]
-CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
+CommandBuilder = Callable[[ExecutablePhase, str], AgentLaunch]
 
 
 def _auth_staging_for(provider: str, allow_delegation: bool) -> tuple[bool, bool]:
@@ -750,7 +751,8 @@ class WorkspaceProvisionHandler:
         effective_repos: list[str],
     ) -> tuple[list[str], dict[str, str]]:
         """The command and env that run ``phase`` on its own ``agent_config``."""
-        claude_cmd = self._command_builder(phase, prompt)
+        launch = self._command_builder(phase, prompt)
+        claude_cmd = list(launch.argv)
         # `--plugin-dir` is a claude-only flag; appending it to a `codex exec`
         # argv (after the prompt) produces an invalid command, so restrict the
         # plugin-dir augmentation to the claude headless path.
@@ -777,6 +779,9 @@ class WorkspaceProvisionHandler:
         # fixes. It is provider-independent, and this is the single point both
         # providers pass through on their way to `workspace.stream(...)`.
         agent_env.update(repo_identity_env(effective_repos))
+        # Last, so nothing above can shadow it: the prompt reaches the harness
+        # on stdin from here, never through its argv (#2355).
+        agent_env.update(launch.environment)
         return claude_cmd, agent_env
 
     @staticmethod

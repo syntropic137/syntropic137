@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     PhaseDefinition,
@@ -71,7 +72,7 @@ def _make_processor() -> WorkflowExecutionProcessor:
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="test prompt"),
-        command_builder=MagicMock(return_value=["claude", "--model", "haiku"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude", "--model", "haiku"))),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
     )
 

@@ -12,6 +12,7 @@ import pytest
 
 from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.agent_sessions import SessionInvocationState
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration.slices.execute_workflow.cancel_teardown import (
     record_cancel_and_release,
 )
@@ -66,7 +67,7 @@ def _make_processor(artifact_repository: object | None = None) -> WorkflowExecut
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="test prompt"),
-        command_builder=MagicMock(return_value=["claude", "--model", "haiku"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude", "--model", "haiku"))),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
     )
 
