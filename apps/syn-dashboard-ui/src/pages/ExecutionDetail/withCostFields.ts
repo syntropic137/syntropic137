@@ -2,7 +2,7 @@
  * The execution detail with its cost fields filled in, read once at the page
  * boundary.
  *
- * An API that predates #897 / #2360 (<=1.0.6) does not send the execution's
+ * An API that predates #897 / #2360 does not send the execution's
  * `total_cost_display`, `cost_by_model`, `cost_by_model_display` or
  * `unattributed_cost_display`. A newer dashboard in front of it (a rolling
  * deploy, a pinned gateway, a local UI against the VPS) used to throw on the
