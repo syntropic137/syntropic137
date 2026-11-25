@@ -902,10 +902,39 @@ test-debt:
 # See ADR-034: Test Infrastructure Architecture
 
 # Start test stack (ephemeral, ports +10000 from dev)
-test-stack:
+test-stack: test-stack-migrate-legacy
     @echo "🧪 Starting test stack..."
     {{compose_test}} up -d --build {{test_stack_services}}
     @echo "✅ Test stack running on ports 15432, 18080, 55051, 19000, 16379"
+
+# Remove syn-test-* containers and syn-test-network left by a stack created
+# before #2370, when it shared the dev compose project. They hold the fixed names
+# the new project needs. Containers and the network only: never `down -v` on the
+# old project, which is the dev stack.
+[private]
+test-stack-migrate-legacy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    legacy=$(docker ps -a --filter name='^syn-test-' --format '{{{{.Names}} {{{{.Label "com.docker.compose.project"}}' \
+      | awk '$2 != "syntropic137_test" {print $1}')
+    if [ -n "$legacy" ]; then
+      echo "🧹 Removing test containers left in another compose project: $legacy"
+      docker stop $legacy >/dev/null
+      docker rm $legacy >/dev/null
+    fi
+    net_project=$(docker network inspect syn-test-network --format '{{{{index .Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+    if [ -n "$net_project" ] && [ "$net_project" != "syntropic137_test" ]; then
+      # Only a test-stack run attaches containers to this network, so whatever is
+      # still on it (the old recipe started dev-only services too) is legacy.
+      attached=$(docker network inspect syn-test-network --format '{{{{range .Containers}}{{{{.Name}} {{{{end}}')
+      if [ -n "${attached// }" ]; then
+        echo "🧹 Removing containers still on the legacy syn-test-network: $attached"
+        docker stop $attached >/dev/null
+        docker rm $attached >/dev/null
+      fi
+      echo "🧹 Removing syn-test-network left in compose project $net_project"
+      docker network rm syn-test-network >/dev/null
+    fi
 
 # Stop test stack
 test-stack-stop:
