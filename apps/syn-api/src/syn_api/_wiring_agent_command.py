@@ -16,6 +16,7 @@ from syn_api._codex_command import (
     _resolve_sandbox,
     apply_tool_policy_to_prompt,
 )
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_shared.agents import (
     AgentProvider,
     UnsupportedAgentProviderError,
@@ -33,11 +34,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _build_claude_command(
-    phase: ExecutablePhase,
-    prompt: str,
-) -> list[str]:
-    """Build the Claude CLI command for agent execution."""
+def _build_claude_command(phase: ExecutablePhase) -> list[str]:
+    """Build the Claude CLI flags for agent execution. The prompt is NOT here.
+
+    It reaches the CLI on stdin through `_prompt_on_stdin` (#2355): `-p` with
+    no positional prompt reads the task from stdin.
+    """
     # `AgentConfiguration.model` is typed `str | None`, but a claude-provider
     # phase always resolves a concrete model (the persisted template default,
     # else syn_shared.agents.DEFAULT_CLAUDE_MODEL), so `None` here would
@@ -63,7 +65,6 @@ def _build_claude_command(
         "stream-json",
         "--dangerously-skip-permissions",
         "-p",
-        prompt,
     ]
 
     # `--tools` is AVAILABILITY; `--allowedTools` is auto-approval. We emitted
@@ -75,31 +76,51 @@ def _build_claude_command(
     #                       built-in set. Use "" to disable all tools ...
     #
     # ONE flag with a comma-joined list, not the flag repeated. `--tools` is
-    # VARIADIC (`<tools...>`), which has two consequences:
-    #
-    #   1. Repeating it keeps only the last occurrence, so the flag-per-tool
-    #      form would have restricted every phase to its last-declared tool.
-    #   2. It is GREEDY - it swallows any positional that follows it. Verified
-    #      against claude 2.1.251:
-    #        $ claude -p --tools Bash,Read "say ok"
-    #        Error: Input must be provided either through stdin or as a prompt
-    #               argument when using --print
-    #      The prompt was eaten as a tool name.
-    #
-    # ORDERING IS THEREFORE LOAD-BEARING: `-p <prompt>` must come BEFORE
-    # `--tools`. Moving this extend() earlier breaks every claude phase, with
-    # an error that names stdin rather than argument order. Pinned by
-    # test_the_prompt_must_precede_the_variadic_tools_flag.
+    # VARIADIC (`<tools...>`): repeating it keeps only the last occurrence, so
+    # the flag-per-tool form would have restricted every phase to its
+    # last-declared tool. It is also GREEDY and swallows any positional that
+    # follows it; while the prompt was a positional this made argument order
+    # load-bearing. The prompt now arrives on stdin (#2355), so nothing
+    # positional follows, and the `--plugin-dir` flags appended later end it.
     if phase.agent_config.allowed_tools:
         cmd.extend(["--tools", ",".join(phase.agent_config.allowed_tools)])
 
     return cmd
 
 
+#: Carries the prompt from the platform to the launch wrapper. The wrapper
+#: unsets it before the harness starts, so neither the harness nor anything the
+#: agent runs inherits it.
+PROMPT_ENV = "SYN_AGENT_PROMPT"
+
+#: `sh -c` script: move the prompt from the environment onto the harness's
+#: stdin. `printf` is a builtin, so the prompt is never an argv either; `"$@"`
+#: is the harness argv, flags only. The pipeline's status is the harness's.
+_PROMPT_ON_STDIN = f'p=${PROMPT_ENV}; unset {PROMPT_ENV}; printf "%s" "$p" | "$@"'
+
+#: `$0` of the wrapper shell, so a process listing names what it is.
+_WRAPPER_ARGV0 = "syn-agent-prompt"
+
+
+def _prompt_on_stdin(harness_argv: list[str], prompt: str) -> AgentLaunch:
+    """Launch ``harness_argv`` with ``prompt`` on its stdin, never in any argv.
+
+    A harness argv is readable by every process in the workspace through
+    ``/proc/<pid>/cmdline``. With the prompt in it, ``ps aux | grep <a command
+    the task names>`` found the harness, and an agent cleaning up its own stray
+    ``pytest`` SIGTERMed itself (#2355). Both CLIs read the task from stdin:
+    ``claude -p`` given no positional prompt, ``codex exec -``.
+    """
+    return AgentLaunch(
+        argv=("sh", "-c", _PROMPT_ON_STDIN, _WRAPPER_ARGV0, *harness_argv),
+        environment={PROMPT_ENV: prompt},
+    )
+
+
 def _build_agent_command(
     phase: ExecutablePhase,
     prompt: str,
-) -> list[str]:
+) -> AgentLaunch:
     """Build the command selected by the phase provider.
 
     Exhaustive on purpose: every known provider is named, and anything else
@@ -122,13 +143,15 @@ def _build_agent_command(
                 phase_id=phase.phase_id,
                 declared=list(phase.agent_config.allowed_tools),
             )
-        return _build_codex_command(
+        return _prompt_on_stdin(
+            _build_codex_command(
+                phase.agent_config.model,
+                _resolve_sandbox(phase.agent_config.sandbox, phase_id=phase.phase_id),
+            ),
             scoped_prompt,
-            phase.agent_config.model,
-            _resolve_sandbox(phase.agent_config.sandbox, phase_id=phase.phase_id),
         )
     if provider is AgentProvider.CLAUDE:
-        return _build_claude_command(phase, scoped_prompt)
+        return _prompt_on_stdin(_build_claude_command(phase), scoped_prompt)
     raise UnsupportedAgentProviderError(provider, phase_id=phase.phase_id)
 
 

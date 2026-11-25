@@ -41,9 +41,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkspaceRetentionValueObjects import (
+    RetainedReason,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (
     save_unpushed_work,
 )
@@ -101,7 +103,7 @@ class WorkspaceDirRemover(Protocol):
     def remove(self, host_dir: str) -> None: ...
 
 
-async def guard_orphaned_workspace(orphan: OrphanedWorkspace) -> ReclaimableDir | None:
+async def guard_orphaned_workspace(orphan: OrphanedWorkspace) -> ReclaimableDir | Retained:
     """Rescue what the orphan holds; return its directory only if nothing is at risk.
 
     Never raises for a failure: `save_unpushed_work` already turns every one
@@ -115,15 +117,16 @@ async def guard_orphaned_workspace(orphan: OrphanedWorkspace) -> ReclaimableDir 
         # otherwise for an orphan.
         delivers_repo_changes=True,
     )
-    if _anything_at_risk(saved):
+    at_risk = _at_risk(saved)
+    if at_risk is not None:
         logger.error(
             "Keeping orphaned workspace directory %s (execution %s): its work could not "
             "all be shown safe, so these files may be the last copy. %s",
             orphan.host_dir,
             orphan.execution_id,
-            saved.unreadable or _at_risk_detail(saved),
+            at_risk.detail,
         )
-        return None
+        return at_risk
     if saved.quarantined:
         logger.warning(
             "Orphaned workspace %s held unpushed work; it was quarantined under "
@@ -133,45 +136,6 @@ async def guard_orphaned_workspace(orphan: OrphanedWorkspace) -> ReclaimableDir 
             orphan.quarantine_phase,
         )
     return ReclaimableDir(host_dir=orphan.host_dir, workspace_id=orphan.workspace_id)
-
-
-class RetainedReason(StrEnum):
-    """Why a stale workspace directory was kept (#1983). Kept is not failed.
-
-    Each names the one proof that could not be made. /health counts them, so
-    an operator sees what the disk is holding and why, not one opaque number.
-    """
-
-    #: No owner, or more than one: nothing says whose work it is.
-    UNOWNED = "unowned"
-    #: The owning Execution is not terminal, has no record, or ended under
-    #: the settle period ago.
-    NOT_TERMINAL = "not_terminal"
-    #: A container in any state, of any name, binds the directory or below it.
-    MOUNTED = "mounted"
-    #: Some part of the directory, or of a repository in it, could not be read.
-    UNREADABLE = "unreadable"
-    #: A repository has a change its HEAD does not hold.
-    DIRTY = "dirty"
-    #: A file no repository can reproduce, outside every proven cache.
-    UNVERSIONED = "unversioned"
-    #: A repository holds a stash.
-    STASH = "stash"
-    #: A commit could not be shown on the remote the Execution names.
-    UNPUSHED_UNPROVEN = "unpushed_unproven"
-    #: A repository's git directory holds submodule stores (``modules/``),
-    #: which nothing here proves pushed: a deinitialized submodule's objects
-    #: live there and nowhere else.
-    SUBMODULE_STORE_UNPROVEN = "submodule_store_unproven"
-    #: The object store holds an object no ref reaches: a blob staged and reset
-    #: away, a dropped commit. Its content may exist nowhere else.
-    UNREACHABLE_OBJECTS = "unreachable_objects"
-    #: Session capture may still be inside the directory.
-    CAPTURE_UNKNOWN = "capture_unknown"
-    #: The directory was replaced or moved between the check and the delete.
-    IDENTITY_CHANGED = "identity_changed"
-    #: Every proof held, and the delete itself failed.
-    DELETE_FAILED = "delete_failed"
 
 
 @dataclass(frozen=True)
@@ -431,17 +395,17 @@ def remove_reclaimed_dir(
     return True
 
 
-def _anything_at_risk(saved: SavedWork) -> bool:
-    """Whether deleting now could lose work: an unfinished walk, a refused push,
+def _at_risk(saved: SavedWork) -> Retained | None:
+    """What deleting now could lose, or None: an unfinished walk, a refused push,
     or a submodule worked in, which no quarantine push carries (#1678)."""
-    return saved.unreadable is not None or any(
-        r.pushed_ref is None or r.unsaved_submodules for r in saved.quarantined
-    )
-
-
-def _at_risk_detail(saved: SavedWork) -> str:
-    """Which records `_anything_at_risk` kept the directory for, when the walk finished."""
+    if saved.unreadable is not None:
+        return Retained(RetainedReason.UNREADABLE, saved.unreadable)
     unsaved = [f"{r.repo}/{path}" for r in saved.quarantined for path in r.unsaved_submodules]
     if unsaved:
-        return "Submodule work no quarantine push carries, only as a gitlink: " + ", ".join(unsaved)
-    return "A quarantine push was refused."
+        return Retained(
+            RetainedReason.SUBMODULE_STORE_UNPROVEN,
+            "Submodule work no quarantine push carries, only as a gitlink: " + ", ".join(unsaved),
+        )
+    if any(r.pushed_ref is None for r in saved.quarantined):
+        return Retained(RetainedReason.UNPUSHED_UNPROVEN, "A quarantine push was refused.")
+    return None

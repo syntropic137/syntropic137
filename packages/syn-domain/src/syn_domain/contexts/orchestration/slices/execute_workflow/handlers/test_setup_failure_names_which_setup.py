@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     AgentConfiguration,
@@ -70,8 +71,8 @@ async def _provision_error_message(setup_result: ExecutionResult) -> str:
     async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
         return "Do the task"
 
-    def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-        return ["claude", "--print", prompt]
+    def fake_command_builder(_phase: object, prompt: str) -> AgentLaunch:
+        return AgentLaunch(("claude", "--print", prompt))
 
     handler = WorkspaceProvisionHandler(
         workspace_service=_workspace_service_whose_setup_returns(setup_result),
@@ -176,7 +177,7 @@ async def test_the_execution_record_an_operator_reads_names_the_setup_and_the_ph
         observability_writer=None,
         controller=None,
         prompt_builder=AsyncMock(return_value="Do the task"),
-        command_builder=MagicMock(return_value=["claude", "--print", "Do the task"]),
+        command_builder=MagicMock(return_value=AgentLaunch(("claude", "--print", "Do the task"))),
         todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
     )
     processor._journal._repository.save = AsyncMock()

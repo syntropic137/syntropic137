@@ -39,7 +39,11 @@ from syn_adapters.github.client import GitHubAppError
 from syn_adapters.github.remote_branch_reader import GitHubRemoteBranchReader
 from syn_adapters.workspace_backends.memory.memory_adapter import MemoryIsolationAdapter
 from syn_adapters.workspace_backends.service.pinned_checkout import pinned_heads
-from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
+from syn_api._wiring_agent_command import (
+    PROMPT_ENV,
+    _build_agent_command,
+    _build_workspace_prompt,
+)
 from syn_domain.contexts._shared.repository_ref import RepositoryRef
 from syn_domain.contexts.orchestration.domain.aggregate_execution.branch_continuation import (
     AbandonedBranch,
@@ -287,8 +291,9 @@ class _Acts(_ReadsItsSetup):
         cost_limit: PhaseCostLimit | None = None,
         on_push: PushObserver | None = None,
     ) -> AgentExecutionResult:
-        # The prompt is one argv element of the production command.
-        prompt = "\n".join(claude_cmd)
+        # The production command carries no prompt in argv (#2355): the launch
+        # environment does, and the harness reads it on stdin.
+        prompt = agent_env[PROMPT_ENV]
         self.prompts[todo.phase_id or ""] = prompt
         if self.act is not None:
             await self.act(todo.phase_id or "", prompt, workspace)

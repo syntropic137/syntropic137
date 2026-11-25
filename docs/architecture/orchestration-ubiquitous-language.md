@@ -1815,8 +1815,9 @@ inside, no container of any name or state binding it, a settled terminal
 owner whose captures all went to spool volumes, clean, unstashed, nothing
 unversioned outside proven caches, and every commit shown by `git ls-remote`
 on a repository the Execution names. Nothing is archived first. Each deletion
-is logged as `WorkspaceReclaimed` with its size. It is housekeeping, not
-domain state: no event, no aggregate.
+is logged as `WorkspaceReclaimed` with its size. Reclaiming is housekeeping,
+not domain state: a deletion has no event and no aggregate. Keeping one for
+unproven work does (see **Retained Workspace** below, #2321).
 
 **Retained** (`Retained`, `RetainedReason`) is the outcome of a directory a
 reclaim pass kept, with the one proof that failed: `unowned`, `not_terminal`,
@@ -1825,6 +1826,32 @@ reclaim pass kept, with the one proof that failed: `unowned`, `not_terminal`,
 (any object no ref or reflog reaches: a staged-then-reset blob, a dropped commit),
 `capture_unknown`, `identity_changed` or `delete_failed`. Retained is not a
 failure; /health counts each reason.
+
+**Retained Workspace** (`PhaseWorkspaceRetained`, #2321) is the domain fact that
+a guard kept an Execution's workspace because it could not prove its **work**
+safe, so the directory may hold the last copy. It is recorded on the
+`WorkflowExecution` aggregate, in any status, by the startup guard of an
+**Orphaned Workspace**. The stale-directory reclaimer does NOT record it: the
+janitor never writes the event store (#1983), so its keeps stay counted on
+/health only until that decision is revisited (#2321). Only the work reasons count
+(`WORK_UNPROVEN`): `unreadable`, `dirty`, `unversioned`, `stash`,
+`unpushed_unproven`, `submodule_store_unproven` and `unreachable_objects`. The
+others (`not_terminal`, `mounted`, `capture_unknown`, `identity_changed`,
+`delete_failed`) say "not yet" or "it moved", not "the work is unproven", and
+are only counted. An orphan's keep is named the same way: a walk that could not
+finish is `unreadable`, a refused quarantine push `unpushed_unproven`, and
+submodule work no quarantine push carries `submodule_store_unproven`.
+
+It names the workspace by its id (`workspace_handle`), never a host path or a
+container id, and its Phase from the Execution's own
+`WorkspaceProvisionedForPhase`, because neither guard knows the Phase; a
+workspace the stream never provisioned names no Phase. It is recorded once per
+workspace and reason: keeping the same workspace again adds nothing. Recording never stops the keep: a failure is logged and the directory
+stays.
+
+**Unclear:** whether a Retained Workspace that a later pass reclaims (the work
+was pushed afterwards, say) should be closed by a second fact. Slice A records
+only the keep; #2321 tracks the read side.
 
 **Claim** is the rename of a directory to `.reclaiming-<workspace id>` before
 it is judged the second time, so nothing can reach it at its workspace path.

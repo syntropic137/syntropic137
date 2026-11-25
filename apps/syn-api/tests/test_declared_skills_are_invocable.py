@@ -77,7 +77,7 @@ async def _claude_commands(template: _Template) -> dict[str, list[str]]:
 
     phases = await _handler()._get_executable_phases(cast("object", template))  # type: ignore[arg-type]
     return {
-        p.phase_id: _build_claude_command(p, "prompt")
+        p.phase_id: _build_claude_command(p)
         for p in phases
         if p.agent_config.provider == AgentProvider.CLAUDE
     }

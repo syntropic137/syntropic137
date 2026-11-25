@@ -46,6 +46,7 @@ from syn_adapters.storage.in_memory_skill_repositories import (
 from syn_adapters.storage.skill_storage.factory import get_test_skill_storage
 from syn_api.services.skill_materializer import SkillMaterializer
 from syn_api.services.skill_resolution_service import SkillResolutionService
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -282,8 +283,8 @@ async def _provision(phase: ExecutablePhase, storage: object) -> AsyncMock:
     async def fake_prompt_builder(*_args: object, **_kwargs: object) -> str:
         return "Go."
 
-    def fake_command_builder(_phase: object, prompt: str) -> list[str]:
-        return ["claude", "--print", prompt]
+    def fake_command_builder(_phase: object, prompt: str) -> AgentLaunch:
+        return AgentLaunch(("claude", "--print", prompt))
 
     handler = WorkspaceProvisionHandler(
         workspace_service=workspace_service,

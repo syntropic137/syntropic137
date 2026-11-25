@@ -55,7 +55,11 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 from syn_adapters.workspace_backends.service.setup_phase_secrets import _GitHubAuth
-from syn_api._wiring_agent_command import _build_agent_command, _build_workspace_prompt
+from syn_api._wiring_agent_command import (
+    PROMPT_ENV,
+    _build_agent_command,
+    _build_workspace_prompt,
+)
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration._shared.workflow_definition import WorkflowDefinition
 from syn_domain.contexts.orchestration._shared.yaml_to_command import (
@@ -226,15 +230,11 @@ class _Provisioned:
     def prompt(self) -> str:
         """The prompt as the agent receives it, whichever harness runs the phase.
 
-        Claude carries it behind ``-p``, read positionally off the flag rather
-        than taken as the last element because the tool grant is appended
-        after it. Codex - which `verify` runs on - takes it as the trailing
-        positional argument instead. Both are the SAME string, one hop past
-        the prompt builder, which is the hop worth asserting on.
+        Both harnesses read it on stdin from the launch environment, never from
+        argv (#2355). It is the SAME string one hop past the prompt builder,
+        which is the hop worth asserting on.
         """
-        if "-p" in self.argv:
-            return self.argv[self.argv.index("-p") + 1]
-        return self.argv[-1]
+        return self.agent_env[PROMPT_ENV]
 
 
 async def _provision(phase: ExecutablePhase, *, completed: dict[str, str]) -> _Provisioned:

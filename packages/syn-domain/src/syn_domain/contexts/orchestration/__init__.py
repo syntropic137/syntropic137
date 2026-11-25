@@ -287,6 +287,7 @@ from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWor
 from syn_domain.contexts.orchestration.slices.detach_execution_from_eval import (
     DetachExecutionFromEvalHandler,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch import AgentLaunch
 from syn_domain.contexts.orchestration.slices.execute_workflow.agent_launch_observation import (
     AGENT_LAUNCH_MARKER,
     announce_as,
@@ -342,6 +343,9 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.phase_verdict imp
 from syn_domain.contexts.orchestration.slices.execute_workflow.resume_handoff import (
     InheritanceUnavailableError,
     inherited_outputs,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.retained_workspace_record import (
+    RetainedWorkspaceRecorder,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.stranded_salvage import (
     SalvagedPhase,
@@ -458,6 +462,7 @@ __all__ = [
     # Test support types (used by syn_domain.testing)
     "AgentExecutionCompletedCommand",
     "AgentExecutionResult",
+    "AgentLaunch",
     # A phase's own verdict on itself - the type of `StreamResult.verdict` (#1256)
     "AgentVerdict",
     "ArchiveEvalHandler",
@@ -600,6 +605,7 @@ __all__ = [
     "ResumeStarter",
     "Retained",
     "RetainedReason",
+    "RetainedWorkspaceRecorder",
     "ReviewVerdict",
     "SalvagedPhase",
     "SecurityPolicy",

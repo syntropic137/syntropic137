@@ -76,6 +76,7 @@ from syn_domain.contexts.agent_sessions import SessionStatus
 from syn_domain.contexts.orchestration import (
     AgentExecutionCompletedCommand,
     AgentExecutionResult,
+    AgentLaunch,
     AgentVerdict,
     StreamResult,
     SubagentTracker,
@@ -454,8 +455,8 @@ class _APromptNamingItsRun:
         return f"prompt for {execution_id}"
 
 
-def _echo_the_prompt(phase: ExecutablePhase, prompt: str) -> list[str]:
-    return ["echo", prompt]
+def _echo_the_prompt(phase: ExecutablePhase, prompt: str) -> AgentLaunch:
+    return AgentLaunch(("echo", prompt))
 
 
 def _the_phase() -> list[ExecutablePhase]:

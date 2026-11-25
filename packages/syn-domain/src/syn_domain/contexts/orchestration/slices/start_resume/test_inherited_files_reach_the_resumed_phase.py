@@ -48,6 +48,7 @@ from syn_domain.contexts.artifacts.domain.services.artifact_query_service import
 from syn_domain.contexts.artifacts.slices.list_artifacts.projection import (
     ArtifactListProjection,
 )
+from syn_domain.contexts.orchestration import AgentLaunch
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import evt
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
     read_admitted_resume,
@@ -307,9 +308,9 @@ async def _prompt(
     return phase.prompt_template
 
 
-def _command(phase: ExecutablePhase, prompt: str) -> list[str]:
+def _command(phase: ExecutablePhase, prompt: str) -> AgentLaunch:
     del phase
-    return ["echo", prompt]
+    return AgentLaunch(("echo", prompt))
 
 
 def _processor(
