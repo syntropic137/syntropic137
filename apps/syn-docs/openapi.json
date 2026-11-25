@@ -18934,6 +18934,13 @@
             "type": "object",
             "title": "Cost By Model"
           },
+          "cost_by_model_display": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cost By Model Display"
+          },
           "unpriced_models": {
             "items": {
               "type": "string"

@@ -7088,6 +7088,10 @@ export interface components {
             cost_by_model?: {
                 [key: string]: string;
             };
+            /** Cost By Model Display */
+            cost_by_model_display?: {
+                [key: string]: string;
+            };
             /** Unpriced Models */
             unpriced_models?: string[];
             /**

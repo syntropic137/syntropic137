@@ -20,13 +20,18 @@ import './SessionInventory.css'
  *
  * An unpriced model has no cost to put in the split, so it is listed after it
  * with the backend's label instead of a fabricated $0.
+ *
+ * Each row's dollar text is the API's `cost_by_model_display`, verbatim (#897);
+ * the numeric `costByModel` only orders the rows and sizes the bars.
  */
 function PhaseModelBreakdown({
   costByModel,
+  costByModelDisplay,
   unpricedModels,
   unpricedLabel,
 }: {
   costByModel: Record<string, string>
+  costByModelDisplay: Record<string, string>
   unpricedModels: string[]
   unpricedLabel: string
 }) {
@@ -44,7 +49,7 @@ function PhaseModelBreakdown({
             <div className="flex items-center justify-between text-[10px]">
               <span className="font-mono text-[var(--color-text-muted)]">{costByModelKeyLabel(model)}</span>
               <span className="text-[var(--color-text-secondary)]">
-                ${cost.toFixed(4)} &middot; {pct.toFixed(0)}%
+                {costByModelDisplay[model] ?? '—'} &middot; {pct.toFixed(0)}%
               </span>
             </div>
             <div className="h-1 bg-[var(--color-surface-elevated)] rounded-full overflow-hidden">
@@ -137,6 +142,7 @@ function PhaseCardBody({ phase, tone, now }: { phase: Phase; tone: string; now: 
         (phase.unpriced_models ?? []).length > 0) && (
         <PhaseModelBreakdown
           costByModel={phase.cost_by_model ?? {}}
+          costByModelDisplay={phase.cost_by_model_display ?? {}}
           unpricedModels={phase.unpriced_models ?? []}
           unpricedLabel={phase.unpriced_model_cost_display ?? ''}
         />
