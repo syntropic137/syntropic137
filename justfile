@@ -25,7 +25,11 @@ import 'just/landing.just'
 # Docker Compose shorthand variables
 compose := "docker compose -f docker/docker-compose.yaml"
 compose_dev := compose + " -f docker/docker-compose.dev.yaml"
-compose_test := compose + " -f docker/docker-compose.test.yaml"
+# Its own project (#2370): without -p the test override inherits the dev file's
+# `name:`, so `down -v` here removed the dev stack and its volumes.
+compose_test := compose + " -f docker/docker-compose.test.yaml -p syntropic137_test"
+# The services the test override defines (ADR-034); the rest are dev-only.
+test_stack_services := "timescaledb event-store collector minio redis"
 compose_selfhost := compose + " -f docker/docker-compose.selfhost.yaml"
 compose_selfhost_cf := compose_selfhost + " -f docker/docker-compose.cloudflare.yaml"
 compose_dev_cf := compose_dev + " -f docker/docker-compose.dev-cloudflare.yaml"
@@ -900,7 +904,7 @@ test-debt:
 # Start test stack (ephemeral, ports +10000 from dev)
 test-stack:
     @echo "🧪 Starting test stack..."
-    {{compose_test}} up -d --build
+    {{compose_test}} up -d --build {{test_stack_services}}
     @echo "✅ Test stack running on ports 15432, 18080, 55051, 19000, 16379"
 
 # Stop test stack
