@@ -86,3 +86,8 @@ export async function getArtifactContent(
 ): Promise<{ artifact_id: string; content: string | null; content_type: string }> {
   return fetchJSON(`${API_BASE}/artifacts/${artifactId}/content`)
 }
+
+/** Where the stored bytes are served, under the artifact's own content type. */
+export function artifactRawUrl(artifactId: string): string {
+  return `${API_BASE}/artifacts/${encodeURIComponent(artifactId)}/raw`
+}
