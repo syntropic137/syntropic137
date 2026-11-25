@@ -46,7 +46,7 @@ if TYPE_CHECKING:
         ReviewVerdict,
         SideEffectStatus,
     )
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_retention import (
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkspaceRetentionValueObjects import (
         RetainedReason,
     )
     from syn_shared.upstream_failure import UpstreamFailureKind

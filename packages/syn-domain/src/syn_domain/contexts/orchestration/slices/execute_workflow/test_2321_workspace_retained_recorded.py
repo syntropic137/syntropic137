@@ -21,7 +21,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.commands impor
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     WorkflowExecutionAggregate,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_retention import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkspaceRetentionValueObjects import (
     WORK_UNPROVEN,
     RetainedReason,
 )

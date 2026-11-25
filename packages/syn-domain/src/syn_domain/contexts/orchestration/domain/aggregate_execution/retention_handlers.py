@@ -16,9 +16,11 @@ from event_sourcing import command_handler, event_sourcing_handler
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.replay import evt
 from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_retention import (
+    retained_event,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkspaceRetentionValueObjects import (
     WORK_UNPROVEN,
     RetainedReason,
-    retained_event,
 )
 
 if TYPE_CHECKING:

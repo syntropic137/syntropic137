@@ -6,7 +6,7 @@ from datetime import datetime  # noqa: TC003 - needed at runtime for Pydantic
 
 from event_sourcing import DomainEvent, event
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_retention import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkspaceRetentionValueObjects import (
     RetainedReason,  # noqa: TC001 - needed at runtime for Pydantic
 )
 

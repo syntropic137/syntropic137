@@ -43,7 +43,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_retention import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkspaceRetentionValueObjects import (
     RetainedReason,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.unpushed_work_guard import (

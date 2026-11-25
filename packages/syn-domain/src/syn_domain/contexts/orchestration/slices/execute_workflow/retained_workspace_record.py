@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
     RecordWorkspaceRetainedCommand,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_execution.workspace_retention import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkspaceRetentionValueObjects import (
     WORK_UNPROVEN,
 )
 
