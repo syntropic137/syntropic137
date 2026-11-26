@@ -1,0 +1,26 @@
+diff --git a/apps/syn-dashboard-ui/fixtures/screenshot.json b/apps/syn-dashboard-ui/fixtures/screenshot.json
+index 87bd05c88..c63f1e5ff 100644
+--- a/apps/syn-dashboard-ui/fixtures/screenshot.json
++++ b/apps/syn-dashboard-ui/fixtures/screenshot.json
+@@ -310,7 +310,7 @@
+           "input_tokens": 263510,
+           "output_tokens": 35470,
+           "cache_creation_tokens": 61600,
+-          "cache_read_tokens": 1122500,
++          "cache_read_tokens": 0,
+           "unpriced_tokens": 65300
+         },
+         "cost_display": ">=$3.55 (partial)",
+diff --git a/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts b/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
+index 3189105b4..91c0e3ab2 100644
+--- a/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
++++ b/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
+@@ -975,7 +975,7 @@ const HEATMAP_DAYS: Schemas['HeatmapDayBucketResponse'][] = [
+       input_tokens: METRICS.total_input_tokens,
+       output_tokens: METRICS.total_output_tokens,
+       cache_creation_tokens: METRICS.total_cache_creation_tokens,
+-      cache_read_tokens: METRICS.total_cache_read_tokens,
++      cache_read_tokens: 0,
+       // The review phase's codex tokens were not priced (_heatmap_cost_display).
+       unpriced_tokens: COMPLETED_PHASES[2].total_tokens,
+     },

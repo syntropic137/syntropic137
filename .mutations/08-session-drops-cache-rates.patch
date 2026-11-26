@@ -1,0 +1,71 @@
+diff --git a/apps/syn-dashboard-ui/fixtures/screenshot.json b/apps/syn-dashboard-ui/fixtures/screenshot.json
+index 87bd05c88..cb06c1640 100644
+--- a/apps/syn-dashboard-ui/fixtures/screenshot.json
++++ b/apps/syn-dashboard-ui/fixtures/screenshot.json
+@@ -1250,8 +1250,6 @@
+       "claude-opus-5-5": "$1.84"
+     },
+     "unattributed_cost_display": null,
+-    "cache_read_rate_display": "0.05x rate",
+-    "cache_write_rate_display": "1.25x rate",
+     "operations": [
+       {
+         "operation_id": "op-1",
+@@ -1332,8 +1330,6 @@
+       "claude-sonnet-5-5": "$0.42"
+     },
+     "unattributed_cost_display": null,
+-    "cache_read_rate_display": "0.05x rate",
+-    "cache_write_rate_display": "1.25x rate",
+     "operations": []
+   },
+   "/api/v1/sessions/sess-review-0c5d": {
+@@ -1375,8 +1371,6 @@
+     "cost_by_model": {},
+     "cost_by_model_display": {},
+     "unattributed_cost_display": null,
+-    "cache_read_rate_display": null,
+-    "cache_write_rate_display": null,
+     "operations": []
+   },
+   "/api/v1/sessions/sess-plan-1f9b": {
+@@ -1422,8 +1416,6 @@
+       "claude-opus-5-5": "$0.97"
+     },
+     "unattributed_cost_display": null,
+-    "cache_read_rate_display": "0.05x rate",
+-    "cache_write_rate_display": "1.25x rate",
+     "operations": []
+   },
+   "/api/v1/sessions/sess-impl-1f9b": {
+@@ -1469,8 +1461,6 @@
+       "claude-sonnet-5-5": "$0.11"
+     },
+     "unattributed_cost_display": null,
+-    "cache_read_rate_display": "0.05x rate",
+-    "cache_write_rate_display": "1.25x rate",
+     "operations": [],
+     "error_message": "just preflight-agent failed: 2 fitness checks red"
+   },
+@@ -1512,8 +1502,6 @@
+     "cost_by_model": {},
+     "cost_by_model_display": {},
+     "unattributed_cost_display": "$0.21",
+-    "cache_read_rate_display": null,
+-    "cache_write_rate_display": null,
+     "operations": []
+   },
+   "/api/v1/artifacts": {
+diff --git a/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts b/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
+index 3189105b4..637a59da9 100644
+--- a/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
++++ b/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
+@@ -660,7 +660,7 @@ function sessionDetailOf(seed: SessionSeed): Schemas['SessionResponse'] {
+     cost_by_model_display: p.cost_by_model_display ?? {},
+     unattributed_cost_display: unattributedOf(p.cost_by_model ?? {}, p.cost_usd),
+     // routes/sessions.py picks the models the same way `_models_run` does.
+-    ...cacheRatesOf(modelsRun([p])),
++
+     operations: seed.id === PLAN_SESSION_ID ? PLAN_OPERATIONS : [],
+     error_message: p.error_message,
+   }

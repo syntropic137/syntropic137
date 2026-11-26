@@ -1,0 +1,41 @@
+diff --git a/apps/syn-dashboard-ui/fixtures/screenshot.json b/apps/syn-dashboard-ui/fixtures/screenshot.json
+index 87bd05c88..c45e16f6c 100644
+--- a/apps/syn-dashboard-ui/fixtures/screenshot.json
++++ b/apps/syn-dashboard-ui/fixtures/screenshot.json
+@@ -59,9 +59,9 @@
+         "input_tokens": 78310,
+         "output_tokens": 10020,
+         "total_tokens": 420230,
+-        "cost_usd": "3.02",
++        "cost_usd": "0.97",
+         "unpriced_observation_count": 0,
+-        "cost_display": "$3.02",
++        "cost_display": "$0.97",
+         "cost_in_progress": true,
+         "duration_seconds": 742,
+         "artifact_count": 1
+@@ -73,9 +73,9 @@
+         "input_tokens": 102300,
+         "output_tokens": 18950,
+         "total_tokens": 973450,
+-        "cost_usd": "0.53",
++        "cost_usd": "0.11",
+         "unpriced_observation_count": 0,
+-        "cost_display": "$0.53",
++        "cost_display": "$0.11",
+         "cost_in_progress": false,
+         "duration_seconds": 1407,
+         "artifact_count": 1
+diff --git a/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts b/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
+index 3189105b4..572e0bcfb 100644
+--- a/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
++++ b/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
+@@ -860,7 +860,7 @@ function phaseMetricsOf(phase_id: string, phase_name: string): Schemas['PhaseMet
+   const live = runs.filter((p) => p.status === 'running')
+   const settled = finished.at(-1)?.status ?? 'failed'
+   const inFlight = live.reduce((n, p) => n + (Date.parse(WORLD_NOW) - Date.parse(p.started_at ?? WORLD_NOW)) / 1000, 0)
+-  const cents = runs.reduce((n, p) => n + Math.round(Number(p.cost_usd) * 100), 0)
++  const cents = runs.slice(0, 1).reduce((n, p) => n + Math.round(Number(p.cost_usd) * 100), 0)
+   const unpriced = runs.reduce((n, p) => n + p.unpriced_observation_count, 0)
+   return {
+     phase_id,
