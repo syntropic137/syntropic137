@@ -295,16 +295,17 @@ class WorkspaceDirReclaimer:
 
     async def _guarded(
         self, listing: WorkspaceDirListing, containers: list[ContainerMounts]
-    ) -> ReclaimableDir | Retained:
+    ) -> tuple[ReclaimableDir | Retained, str | None]:
+        """The guard's verdict, and the owner it was judged for, if one was resolved."""
         from syn_domain.contexts.orchestration import guard_stale_workspace_dir
 
         stale = await self.judge(listing, containers)
         if isinstance(stale, Retained):
-            return stale
+            return stale, stale.execution_id if isinstance(stale, _OwnersKeep) else None
         verdict = await guard_stale_workspace_dir(stale, self.git, self.remotes)
         if isinstance(verdict, Retained):
-            return _owners_keep(verdict, stale.execution_id)
-        return verdict
+            return _owners_keep(verdict, stale.execution_id), stale.execution_id
+        return verdict, stale.execution_id
 
     async def _reclaim(
         self, listing: WorkspaceDirListing, containers: list[ContainerMounts], deadline: float
@@ -318,7 +319,7 @@ class WorkspaceDirReclaimer:
 
         if is_being_deleted(listing.host_dir):
             return await self._resume_delete(listing, deadline)
-        verdict = await self._guarded(listing, containers)
+        verdict, owner = await self._guarded(listing, containers)
         if isinstance(verdict, Retained) or self.dry_run:
             await self._put_back(listing.host_dir)
             _log_outcome(listing, verdict, dry_run=self.dry_run)
@@ -332,12 +333,12 @@ class WorkspaceDirReclaimer:
         except OSError as exc:
             kept = Retained(RetainedReason.IDENTITY_CHANGED, f"could not claim it ({exc})")
             _log_outcome(listing, kept)
-            return kept
+            return _owned(kept, owner)
         again = await self._judge_claimed(listing, claimed)
         if isinstance(again, Retained):
             await self._put_back(claimed)
             _log_outcome(listing, again)
-            return again
+            return _owned(again, owner)
         stop = await self._stop_before_destroying()
         if stop is not None:
             await self._put_back(claimed)
@@ -350,14 +351,15 @@ class WorkspaceDirReclaimer:
             await self._put_back(claimed)
             kept = Retained(RetainedReason.IDENTITY_CHANGED, f"could not mark it ({exc})")
             _log_outcome(listing, kept)
-            return kept
+            return _owned(kept, owner)
         stop = await self._stop_before_destroying()
         if stop is not None:
             return stop  # authorized and marked: the next pass resumes it
         # Judged at the claimed path; logged under the path it was found at.
-        return await self._finish_delete(
+        done = await self._finish_delete(
             listing, replace(again, host_dir=listing.host_dir), marked, listing.identity, deadline
         )
+        return _owned(done, owner) if isinstance(done, Retained) else done
 
     async def _resume_delete(
         self, listing: WorkspaceDirListing, deadline: float
@@ -466,7 +468,7 @@ class WorkspaceDirReclaimer:
         listing = next((x for x in listings if x.host_dir == claimed), None)
         if listing is None or listing.identity != before.identity:
             return Retained(RetainedReason.IDENTITY_CHANGED, "it was replaced under the claim")
-        verdict = await self._guarded(listing, containers)
+        verdict, _owner = await self._guarded(listing, containers)
         if isinstance(verdict, Retained):
             return verdict
         return verdict if self.is_live() else catching_up
@@ -490,6 +492,13 @@ class _OwnersKeep(Retained):
 
 def _owners_keep(kept: Retained, execution_id: str | None) -> Retained:
     return _OwnersKeep(kept.reason, kept.detail, execution_id)
+
+
+def _owned(kept: Retained, owner: str | None) -> Retained:
+    """A keep made once ``owner`` was resolved still names it, unless it names its own."""
+    if isinstance(kept, _OwnersKeep) or owner is None:
+        return kept
+    return _owners_keep(kept, owner)
 
 
 @dataclass(frozen=True)

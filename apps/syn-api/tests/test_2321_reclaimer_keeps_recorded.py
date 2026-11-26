@@ -124,22 +124,28 @@ def _reclaimer(
 async def _passes(
     reclaimer: WorkspaceDirReclaimer, observer: PassObserver, count: int
 ) -> list[ReclaimPass]:
-    """Run the live clock until ``count`` passes reached ``observer``; return them."""
+    """Run the live clock until ``observer`` has finished ``count`` passes; return them.
+
+    The clock awaits its observer, so holding the last call holds the clock:
+    no further pass can run before it is cancelled.
+    """
     seen: list[ReclaimPass] = []
     done = asyncio.Event()
 
     async def observed(result: ReclaimPass, /) -> None:
         seen.append(result)
-        if len(seen) >= count:
-            done.set()
-        await observer(result)
+        try:
+            await observer(result)
+        finally:
+            if len(seen) == count:
+                done.set()
+                await asyncio.Event().wait()
 
     task = asyncio.create_task(
         reclaim_on_a_clock(reclaimer, is_live=lambda: True, interval_seconds=0.01, on_pass=observed)
     )
     try:
         await asyncio.wait_for(done.wait(), timeout=30)
-        await asyncio.sleep(0.05)  # the last observer call finishes recording
     finally:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -201,18 +207,56 @@ async def test_a_keep_made_before_the_owner_was_known_records_nothing(
     assert ws.exists()
 
 
-def _unopenable() -> JsonStream:
-    raise RuntimeError("no event store configured")
+async def test_a_keep_made_under_the_claim_names_the_owner_resolved_before_it(
+    base: Path, tmp_path: Path
+) -> None:
+    """A clean, owned dir is claimed; looking again fails, so it is kept, still owned."""
+    ws = _dirty_workspace(base, tmp_path)
+    _git(ws / "repos" / "app", "checkout", "--", "README.md")
+    stream = await started_stream()
+    observer = record_reclaim_keeps(RetainedWorkspaceRecorder(lambda: stream))
+    scans = 0
+
+    def scan_fails_under_the_claim(base_dir: str) -> list[WorkspaceDirListing]:
+        nonlocal scans
+        scans += 1
+        if scans % 2 == 0:  # each pass scans once, then once more under the claim
+            raise OSError("base dir unreadable")
+        return scan_workspace_dirs(base_dir)
+
+    reclaimer = _reclaimer(base, tmp_path, scan_fails_under_the_claim)
+    passes = await _passes(reclaimer, observer, 2)
+
+    assert scans == 4
+    for p in passes:
+        assert [(k.workspace_id, k.reason, k.execution_id) for k in p.retained] == [
+            (WORKSPACE, RetainedReason.UNREADABLE, EXECUTION)
+        ]
+    [event] = stream.retained()
+    assert (event.execution_id, event.workspace_handle, event.reason) == (
+        EXECUTION,
+        WORKSPACE,
+        RetainedReason.UNREADABLE,
+    )
+    assert ws.exists()
 
 
 async def test_a_recording_failure_leaves_the_clock_running_and_the_dir_kept(
     base: Path, tmp_path: Path
 ) -> None:
     ws = _dirty_workspace(base, tmp_path)
-    observer = record_reclaim_keeps(RetainedWorkspaceRecorder(_unopenable))
+    attempts = 0
+
+    def unopenable() -> JsonStream:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("no event store configured")
+
+    observer = record_reclaim_keeps(RetainedWorkspaceRecorder(unopenable))
 
     passes = await _passes(_reclaimer(base, tmp_path), observer, 2)
 
+    assert attempts == 2
     assert [len(p.retained) for p in passes] == [1, 1]
     assert ws.exists()
 
