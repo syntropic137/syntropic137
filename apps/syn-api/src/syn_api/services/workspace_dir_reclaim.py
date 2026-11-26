@@ -280,14 +280,20 @@ class WorkspaceDirReclaimer:
     async def _judge_owner(
         self, listing: WorkspaceDirListing
     ) -> StaleWorkspaceDir | ReclaimableDir | Retained:
-        from syn_domain.contexts.orchestration import judge_owner
-
         try:
             owners = await self.workspace_owners(listing.workspace_id)
         except Exception as exc:
             return Retained(RetainedReason.UNOWNED, f"ownership unreadable: {_described(exc)}")
         if not owners and self.unowned_repo_free_after_seconds is not None:
             return await self._judge_unowned(listing, self.unowned_repo_free_after_seconds)
+        return await self._judge_owned(listing, owners)
+
+    async def _judge_owned(
+        self, listing: WorkspaceDirListing, owners: set[str]
+    ) -> StaleWorkspaceDir | Retained:
+        """The owner clauses: exactly one, terminal and settled, its capture proven."""
+        from syn_domain.contexts.orchestration import judge_owner
+
         record = None
         if len(owners) == 1:
             try:
