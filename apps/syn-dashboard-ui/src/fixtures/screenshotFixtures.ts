@@ -849,19 +849,69 @@ const WORKFLOW_HISTORY: Schemas['ExecutionHistoryResponse'] = {
   total_executions: 0,
 }
 
-const HEATMAP_DAYS: Schemas['HeatmapDayBucketResponse'][] = [
-  { date: '2026-11-23', count: 2, breakdown: {}, cost_display: '$0.00', failed: 0 },
-  { date: '2026-11-24', count: 5, breakdown: {}, cost_display: '$0.00', failed: 1 },
-  { date: '2026-11-25', count: 3, breakdown: {}, cost_display: '$0.00', failed: 0 },
-  { date: '2026-11-26', count: SESSION_SEEDS.length, breakdown: {}, cost_display: '$0.00', failed: 1 },
-]
+interface HeatmapDay {
+  date: string
+  sessions: number
+  executions: number
+  commits: number
+  failed: number
+  costUsd: number
+  costDisplay: string
+  inputTokens: number
+  outputTokens: number
+  unpricedTokens: number
+}
+
+/** A day bucket with every key `_EMPTY_BREAKDOWN` (TimescaleHeatmapQuery.py) sends. */
+function heatmapDay(d: HeatmapDay): Schemas['HeatmapDayBucketResponse'] {
+  return {
+    date: d.date,
+    count: d.sessions,
+    breakdown: {
+      sessions: d.sessions,
+      executions: d.executions,
+      commits: d.commits,
+      cost_usd: d.costUsd,
+      tokens: d.inputTokens + d.outputTokens,
+      input_tokens: d.inputTokens,
+      output_tokens: d.outputTokens,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
+      unpriced_tokens: d.unpricedTokens,
+    },
+    cost_display: d.costDisplay,
+    failed: d.failed,
+  }
+}
+
+const HEATMAP_DAYS = [
+  { date: '2026-11-23', sessions: 2, executions: 1, commits: 3, failed: 0, costUsd: 0.88, costDisplay: '$0.88' },
+  { date: '2026-11-24', sessions: 5, executions: 2, commits: 6, failed: 1, costUsd: 2.4, costDisplay: '$2.40' },
+  { date: '2026-11-25', sessions: 3, executions: 1, commits: 2, failed: 0, costUsd: 1.12, costDisplay: '$1.12' },
+].map((d) => heatmapDay({ ...d, inputTokens: 40000 * d.sessions, outputTokens: 5000 * d.sessions, unpricedTokens: 0 }))
+  .concat(
+    heatmapDay({
+      date: '2026-11-26',
+      sessions: SESSION_SEEDS.length,
+      executions: DETAILS.length,
+      commits: RECENT_COMMITS.events.length,
+      failed: 1,
+      costUsd: 3.55,
+      // The review phase's codex tokens were not priced (_heatmap_cost_display).
+      costDisplay: '>=$3.55 (partial)',
+      inputTokens: ALL_TOKENS.total_input_tokens,
+      outputTokens: ALL_TOKENS.total_output_tokens,
+      unpricedTokens: 65300,
+    }),
+  )
 
 const HEATMAP: Schemas['ContributionHeatmapResponse'] = {
   metric: 'sessions',
   start_date: '2025-11-26',
   end_date: '2026-11-26',
   total: HEATMAP_DAYS.reduce((n, d) => n + d.count, 0),
-  total_cost_display: '$0.00',
+  // 0.88 + 2.40 + 1.12 + 3.55, with one partial day.
+  total_cost_display: '>=$7.95 (partial)',
   days: HEATMAP_DAYS,
   filter: {},
 }

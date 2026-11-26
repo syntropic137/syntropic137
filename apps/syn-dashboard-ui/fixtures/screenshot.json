@@ -296,34 +296,78 @@
     "start_date": "2025-11-26",
     "end_date": "2026-11-26",
     "total": 16,
-    "total_cost_display": "$0.00",
+    "total_cost_display": ">=$7.95 (partial)",
     "days": [
       {
         "date": "2026-11-23",
         "count": 2,
-        "breakdown": {},
-        "cost_display": "$0.00",
+        "breakdown": {
+          "sessions": 2,
+          "executions": 1,
+          "commits": 3,
+          "cost_usd": 0.88,
+          "tokens": 90000,
+          "input_tokens": 80000,
+          "output_tokens": 10000,
+          "cache_creation_tokens": 0,
+          "cache_read_tokens": 0,
+          "unpriced_tokens": 0
+        },
+        "cost_display": "$0.88",
         "failed": 0
       },
       {
         "date": "2026-11-24",
         "count": 5,
-        "breakdown": {},
-        "cost_display": "$0.00",
+        "breakdown": {
+          "sessions": 5,
+          "executions": 2,
+          "commits": 6,
+          "cost_usd": 2.4,
+          "tokens": 225000,
+          "input_tokens": 200000,
+          "output_tokens": 25000,
+          "cache_creation_tokens": 0,
+          "cache_read_tokens": 0,
+          "unpriced_tokens": 0
+        },
+        "cost_display": "$2.40",
         "failed": 1
       },
       {
         "date": "2026-11-25",
         "count": 3,
-        "breakdown": {},
-        "cost_display": "$0.00",
+        "breakdown": {
+          "sessions": 3,
+          "executions": 1,
+          "commits": 2,
+          "cost_usd": 1.12,
+          "tokens": 135000,
+          "input_tokens": 120000,
+          "output_tokens": 15000,
+          "cache_creation_tokens": 0,
+          "cache_read_tokens": 0,
+          "unpriced_tokens": 0
+        },
+        "cost_display": "$1.12",
         "failed": 0
       },
       {
         "date": "2026-11-26",
         "count": 6,
-        "breakdown": {},
-        "cost_display": "$0.00",
+        "breakdown": {
+          "sessions": 6,
+          "executions": 3,
+          "commits": 1,
+          "cost_usd": 3.55,
+          "tokens": 298980,
+          "input_tokens": 263510,
+          "output_tokens": 35470,
+          "cache_creation_tokens": 0,
+          "cache_read_tokens": 0,
+          "unpriced_tokens": 65300
+        },
+        "cost_display": ">=$3.55 (partial)",
         "failed": 1
       }
     ],
