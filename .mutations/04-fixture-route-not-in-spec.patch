@@ -1,0 +1,13 @@
+diff --git a/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts b/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
+index f3105b99d..975aea77d 100644
+--- a/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
++++ b/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
+@@ -953,7 +953,7 @@ export const SCREENSHOT_FIXTURES: readonly ScreenshotFixture[] = [
+     capabilities: [],
+   }),
+   fixture('/sessions', {}, SESSION_LIST),
+-  ...SESSION_SEEDS.map((seed) => fixture('/sessions/{session_id}', { session_id: seed.id }, sessionDetailOf(seed))),
++  ...SESSION_SEEDS.map((seed) => fixture('/session/{session_id}', { session_id: seed.id }, sessionDetailOf(seed))),
+   fixture('/artifacts', {}, ARTIFACT_LIST),
+   ...ARTIFACTS.map((a) => fixture('/artifacts/{artifact_id}', { artifact_id: a.id }, a)),
+ ]

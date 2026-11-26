@@ -1,0 +1,12 @@
+diff --git a/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts b/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
+index f3105b99d..af7cfc952 100644
+--- a/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
++++ b/apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts
+@@ -161,7 +161,6 @@ const COMPLETED_PHASES: Phase[] = [
+     cost_usd: '1.84',
+     cost_display: '$1.84',
+     cost_by_model: { [OPUS]: '1.84' },
+-    cost_by_model_display: { [OPUS]: '$1.84' },
+     started_at: '2026-11-26T09:00:00Z',
+     completed_at: '2026-11-26T09:04:14Z',
+     agent_provider: 'claude',
