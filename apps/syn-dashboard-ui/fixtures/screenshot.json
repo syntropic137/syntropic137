@@ -50,7 +50,51 @@
     "total_cost_display": ">=$3.55 (partial)",
     "unpriced_observation_count": 4,
     "total_artifacts": 2,
-    "total_artifact_bytes": 184630
+    "total_artifact_bytes": 184630,
+    "phases": [
+      {
+        "phase_id": "plan",
+        "phase_name": "Plan",
+        "status": "completed",
+        "input_tokens": 48210,
+        "output_tokens": 6120,
+        "total_tokens": 386230,
+        "cost_usd": "1.84",
+        "unpriced_observation_count": 0,
+        "cost_display": "$1.84",
+        "cost_in_progress": false,
+        "duration_seconds": 254,
+        "artifact_count": 1
+      },
+      {
+        "phase_id": "implement",
+        "phase_name": "Implement",
+        "status": "completed",
+        "input_tokens": 102300,
+        "output_tokens": 18950,
+        "total_tokens": 973450,
+        "cost_usd": "0.42",
+        "unpriced_observation_count": 0,
+        "cost_display": "$0.42",
+        "cost_in_progress": false,
+        "duration_seconds": 1312,
+        "artifact_count": 1
+      },
+      {
+        "phase_id": "review",
+        "phase_name": "Review",
+        "status": "completed",
+        "input_tokens": 61000,
+        "output_tokens": 4300,
+        "total_tokens": 65300,
+        "cost_usd": "0",
+        "unpriced_observation_count": 4,
+        "cost_display": "unpriced",
+        "cost_in_progress": false,
+        "duration_seconds": 406,
+        "artifact_count": 0
+      }
+    ]
   },
   "/api/v1/events/recent": {
     "events": [
@@ -147,6 +191,13 @@
         "execution_type": "sequential"
       }
     ],
+    "input_declarations": [
+      {
+        "name": "task",
+        "description": "What to change",
+        "required": true
+      }
+    ],
     "runs_count": 3,
     "repos": [
       "syntropic137/syntropic137"
@@ -233,6 +284,50 @@
     "total": 3,
     "workflow_id": "wf-sdlc-implement",
     "workflow_name": "SDLC implement"
+  },
+  "/api/v1/workflows/wf-sdlc-implement/history": {
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement",
+    "executions": [],
+    "total_executions": 0
+  },
+  "/api/v1/insights/contribution-heatmap": {
+    "metric": "sessions",
+    "start_date": "2025-11-26",
+    "end_date": "2026-11-26",
+    "total": 16,
+    "total_cost_display": "$0.00",
+    "days": [
+      {
+        "date": "2026-11-23",
+        "count": 2,
+        "breakdown": {},
+        "cost_display": "$0.00",
+        "failed": 0
+      },
+      {
+        "date": "2026-11-24",
+        "count": 5,
+        "breakdown": {},
+        "cost_display": "$0.00",
+        "failed": 1
+      },
+      {
+        "date": "2026-11-25",
+        "count": 3,
+        "breakdown": {},
+        "cost_display": "$0.00",
+        "failed": 0
+      },
+      {
+        "date": "2026-11-26",
+        "count": 6,
+        "breakdown": {},
+        "cost_display": "$0.00",
+        "failed": 1
+      }
+    ],
+    "filter": {}
   },
   "/api/v1/executions": {
     "executions": [
@@ -555,6 +650,9 @@
     "repos": [
       "syntropic137/syntropic137"
     ],
+    "tags": [],
+    "quarantined_refs": [],
+    "inputs": {},
     "task": "Add a checked-in fixture set for dashboard screenshots (#1647)",
     "skill_use": {
       "declared": [],
@@ -701,6 +799,7 @@
     },
     "unattributed_cost_display": null,
     "total_duration_seconds": 285,
+    "artifact_ids": [],
     "unknown_duration_phase_count": 0,
     "deliverable_produced": false,
     "error_message": "Phase implement failed: just preflight-agent failed: 2 fitness checks red",
@@ -709,6 +808,9 @@
     "repos": [
       "syntropic137/syntropic137"
     ],
+    "tags": [],
+    "quarantined_refs": [],
+    "inputs": {},
     "task": "Ratchet untyped-dicts in syn-api",
     "skill_use": {
       "declared": [],
@@ -799,12 +901,16 @@
     "cost_by_model": {},
     "cost_by_model_display": {},
     "unattributed_cost_display": "$0.21",
+    "artifact_ids": [],
     "unknown_duration_phase_count": 0,
     "failure_classification": "unclassified",
     "deliverable_produced": false,
     "repos": [
       "syntropic137/syntropic137"
     ],
+    "tags": [],
+    "quarantined_refs": [],
+    "inputs": {},
     "task": "Document the screenshot fixtures in the dashboard README",
     "skill_use": {
       "declared": [],
@@ -812,6 +918,84 @@
       "never_invoked": [],
       "not_known": [],
       "summary_display": "no skills declared"
+    }
+  },
+  "/api/v1/executions/exec-0c5d1e7a/session-inventory": {
+    "run": {
+      "source_instance_id": "local",
+      "execution_id": "exec-0c5d1e7a"
+    },
+    "snapshot": null,
+    "reconstruction_status": "not_started",
+    "observed_evidence_watermark": 0,
+    "later_evidence_pending": false,
+    "job_id": null,
+    "summary": {
+      "complete": false,
+      "coverage_state": "unknown",
+      "coverage_display": "unknown: no inventory revision is published yet",
+      "revision": null,
+      "distinct_sessions": null,
+      "platform_sessions": null,
+      "invocations": null,
+      "native_transcripts": null,
+      "gaps": null,
+      "namespaces": null,
+      "counts_display": "No published inventory (reconstruction not started)",
+      "remote_replication": "disabled",
+      "follow_up_command": "syn execution sessions exec-0c5d1e7a --all"
+    }
+  },
+  "/api/v1/executions/exec-1f9b2c40/session-inventory": {
+    "run": {
+      "source_instance_id": "local",
+      "execution_id": "exec-1f9b2c40"
+    },
+    "snapshot": null,
+    "reconstruction_status": "not_started",
+    "observed_evidence_watermark": 0,
+    "later_evidence_pending": false,
+    "job_id": null,
+    "summary": {
+      "complete": false,
+      "coverage_state": "unknown",
+      "coverage_display": "unknown: no inventory revision is published yet",
+      "revision": null,
+      "distinct_sessions": null,
+      "platform_sessions": null,
+      "invocations": null,
+      "native_transcripts": null,
+      "gaps": null,
+      "namespaces": null,
+      "counts_display": "No published inventory (reconstruction not started)",
+      "remote_replication": "disabled",
+      "follow_up_command": "syn execution sessions exec-1f9b2c40 --all"
+    }
+  },
+  "/api/v1/executions/exec-2a7e4d93/session-inventory": {
+    "run": {
+      "source_instance_id": "local",
+      "execution_id": "exec-2a7e4d93"
+    },
+    "snapshot": null,
+    "reconstruction_status": "not_started",
+    "observed_evidence_watermark": 0,
+    "later_evidence_pending": false,
+    "job_id": null,
+    "summary": {
+      "complete": false,
+      "coverage_state": "unknown",
+      "coverage_display": "unknown: no inventory revision is published yet",
+      "revision": null,
+      "distinct_sessions": null,
+      "platform_sessions": null,
+      "invocations": null,
+      "native_transcripts": null,
+      "gaps": null,
+      "namespaces": null,
+      "counts_display": "No published inventory (reconstruction not started)",
+      "remote_replication": "disabled",
+      "follow_up_command": "syn execution sessions exec-2a7e4d93 --all"
     }
   },
   "/api/v1/capture/status": {
@@ -1367,6 +1551,8 @@
     "content_type": "text/markdown",
     "size_bytes": 310,
     "title": "plan.md",
+    "derived_from": [],
+    "metadata": {},
     "created_at": "2026-11-26T09:04:14Z",
     "agent_provider": "claude",
     "agent_model": "claude-opus-5-5"
@@ -1382,6 +1568,10 @@
     "content_type": "image/png",
     "size_bytes": 184320,
     "title": "dashboard-1280x800.png",
+    "derived_from": [
+      "art-plan-md"
+    ],
+    "metadata": {},
     "created_at": "2026-11-26T09:26:12Z",
     "agent_provider": "claude",
     "agent_model": "claude-sonnet-5-5"

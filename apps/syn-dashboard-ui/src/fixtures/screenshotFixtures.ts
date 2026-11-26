@@ -350,6 +350,9 @@ const COMPLETED_DETAIL: Detail = {
   review_verdict: 'certified',
   reported_side_effects: 'succeeded',
   repos: [REPO],
+  tags: [],
+  quarantined_refs: [],
+  inputs: {},
   task: 'Add a checked-in fixture set for dashboard screenshots (#1647)',
   skill_use: SKILL_USE,
 }
@@ -374,12 +377,16 @@ const FAILED_DETAIL: Detail = {
   cost_by_model_display: { [OPUS]: '$0.97', [SONNET]: '$0.11' },
   unattributed_cost_display: null,
   total_duration_seconds: 285,
+  artifact_ids: [],
   unknown_duration_phase_count: 0,
   deliverable_produced: false,
   error_message: 'Phase implement failed: just preflight-agent failed: 2 fitness checks red',
   failure_classification: 'gate',
   reported_failure_reason: 'task',
   repos: [REPO],
+  tags: [],
+  quarantined_refs: [],
+  inputs: {},
   task: 'Ratchet untyped-dicts in syn-api',
   skill_use: SKILL_USE,
 }
@@ -404,10 +411,14 @@ const RUNNING_DETAIL: Detail = {
   cost_by_model_display: {},
   // The running phase's cost has no per-model split yet (model_breakdown_text).
   unattributed_cost_display: '$0.21',
+  artifact_ids: [],
   unknown_duration_phase_count: 0,
   failure_classification: 'unclassified',
   deliverable_produced: false,
   repos: [REPO],
+  tags: [],
+  quarantined_refs: [],
+  inputs: {},
   task: 'Document the screenshot fixtures in the dashboard README',
   skill_use: SKILL_USE,
 }
@@ -626,6 +637,8 @@ const MARKDOWN_ARTIFACT: Schemas['ArtifactResponse'] = {
   content_type: 'text/markdown',
   size_bytes: PLAN_MARKDOWN.length,
   title: 'plan.md',
+  derived_from: [],
+  metadata: {},
   created_at: '2026-11-26T09:04:14Z',
   agent_provider: 'claude',
   agent_model: OPUS,
@@ -643,6 +656,8 @@ const PNG_ARTIFACT: Schemas['ArtifactResponse'] = {
   content_type: 'image/png',
   size_bytes: 184320,
   title: 'dashboard-1280x800.png',
+  derived_from: [MARKDOWN_ARTIFACT_ID],
+  metadata: {},
   created_at: '2026-11-26T09:26:12Z',
   agent_provider: 'claude',
   agent_model: SONNET,
@@ -697,6 +712,7 @@ const WORKFLOW: Schemas['WorkflowResponse'] = {
     sandbox: 'full-access',
     execution_type: 'sequential',
   })),
+  input_declarations: [{ name: 'task', description: 'What to change', required: true }],
   runs_count: DETAILS.length,
   repos: [REPO],
   requires_repos: true,
@@ -766,6 +782,21 @@ const METRICS: Schemas['MetricsResponse'] = {
   unpriced_observation_count: 4,
   total_artifacts: ARTIFACTS.length,
   total_artifact_bytes: ARTIFACTS.reduce((n, a) => n + (a.size_bytes ?? 0), 0),
+  // The workflow page reads these; the query string (workflow_id) is ignored.
+  phases: COMPLETED_PHASES.map((p) => ({
+    phase_id: p.phase_id,
+    phase_name: p.name,
+    status: p.status,
+    input_tokens: p.input_tokens,
+    output_tokens: p.output_tokens,
+    total_tokens: p.total_tokens,
+    cost_usd: p.cost_usd,
+    unpriced_observation_count: p.unpriced_observation_count,
+    cost_display: p.cost_display,
+    cost_in_progress: false,
+    duration_seconds: p.duration_seconds ?? null,
+    artifact_count: p.artifact_id ? 1 : 0,
+  })),
 }
 
 const RECENT_COMMITS: Schemas['EventListResponse'] = {
@@ -783,6 +814,58 @@ const RECENT_COMMITS: Schemas['EventListResponse'] = {
   has_more: false,
 }
 
+/** `build_summary` (routes/executions/inventory_summary.py) before any revision is published. */
+function inventoryOf(executionId: string): Schemas['SessionInventoryResponse'] {
+  return {
+    run: { source_instance_id: 'local', execution_id: executionId },
+    snapshot: null,
+    reconstruction_status: 'not_started',
+    observed_evidence_watermark: 0,
+    later_evidence_pending: false,
+    job_id: null,
+    summary: {
+      complete: false,
+      coverage_state: 'unknown',
+      coverage_display: 'unknown: no inventory revision is published yet',
+      revision: null,
+      distinct_sessions: null,
+      platform_sessions: null,
+      invocations: null,
+      native_transcripts: null,
+      gaps: null,
+      namespaces: null,
+      counts_display: 'No published inventory (reconstruction not started)',
+      remote_replication: 'disabled',
+      follow_up_command: `syn execution sessions ${executionId} --all`,
+    },
+  }
+}
+
+/** The deprecated history route answers an empty list for every workflow (routes/workflows/queries.py). */
+const WORKFLOW_HISTORY: Schemas['ExecutionHistoryResponse'] = {
+  workflow_id: WORKFLOW_ID,
+  workflow_name: WORKFLOW_NAME,
+  executions: [],
+  total_executions: 0,
+}
+
+const HEATMAP_DAYS: Schemas['HeatmapDayBucketResponse'][] = [
+  { date: '2026-11-23', count: 2, breakdown: {}, cost_display: '$0.00', failed: 0 },
+  { date: '2026-11-24', count: 5, breakdown: {}, cost_display: '$0.00', failed: 1 },
+  { date: '2026-11-25', count: 3, breakdown: {}, cost_display: '$0.00', failed: 0 },
+  { date: '2026-11-26', count: SESSION_SEEDS.length, breakdown: {}, cost_display: '$0.00', failed: 1 },
+]
+
+const HEATMAP: Schemas['ContributionHeatmapResponse'] = {
+  metric: 'sessions',
+  start_date: '2025-11-26',
+  end_date: '2026-11-26',
+  total: HEATMAP_DAYS.reduce((n, d) => n + d.count, 0),
+  total_cost_display: '$0.00',
+  days: HEATMAP_DAYS,
+  filter: {},
+}
+
 // ---------------------------------------------------------------------------
 // The world.
 // ---------------------------------------------------------------------------
@@ -796,9 +879,18 @@ export const SCREENSHOT_FIXTURES: readonly ScreenshotFixture[] = [
   fixture('/workflows', {}, WORKFLOW_LIST),
   fixture('/workflows/{workflow_id}', { workflow_id: WORKFLOW_ID }, WORKFLOW),
   fixture('/workflows/{workflow_id}/runs', { workflow_id: WORKFLOW_ID }, WORKFLOW_RUNS),
+  fixture('/workflows/{workflow_id}/history', { workflow_id: WORKFLOW_ID }, WORKFLOW_HISTORY),
+  fixture('/insights/contribution-heatmap', {}, HEATMAP),
   fixture('/executions', {}, EXECUTION_LIST),
   ...DETAILS.map((d) =>
     fixture('/executions/{execution_id}', { execution_id: d.workflow_execution_id }, d),
+  ),
+  ...DETAILS.map((d) =>
+    fixture(
+      '/executions/{execution_id}/session-inventory',
+      { execution_id: d.workflow_execution_id },
+      inventoryOf(d.workflow_execution_id),
+    ),
   ),
   // The query string carries the execution id, so one answer serves all three.
   fixture('/capture/status', {}, {
