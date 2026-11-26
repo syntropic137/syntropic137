@@ -36,7 +36,9 @@ _CEILING = 1024
 
 
 def _definition(name: str) -> WorkflowDefinition:
-    return WorkflowDefinition.from_yaml((_ROOT / "workflows/sdlc" / name / "workflow.yaml").read_text())
+    return WorkflowDefinition.from_yaml(
+        (_ROOT / "workflows/sdlc" / name / "workflow.yaml").read_text()
+    )
 
 
 @pytest.mark.parametrize("name", _INSTALLED)
