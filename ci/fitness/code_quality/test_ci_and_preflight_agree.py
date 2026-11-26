@@ -92,6 +92,11 @@ _NOT_A_GATE: dict[str, str] = {
     "predeploy-check": _RUNNING,
     "e2e-smoke": _RUNNING,
     "verify-image-capabilities": "checks a BUILT image for its binaries; the release build runs it",
+    "check-setup-template": (
+        "post-release check (#1863): compares a PUBLISHED GitHub release asset with "
+        "the PUBLISHED npm package, so it needs the network, gh and npm, and a "
+        "feature branch cannot change its answer"
+    ),
     "_env-check": _LOCAL_ENV,
     "_selfhost-preflight": _LOCAL_ENV,
     "dev-doctor": _LOCAL_ENV,
