@@ -359,7 +359,7 @@ class WorkspaceDirReclaimer:
         done = await self._finish_delete(
             listing, replace(again, host_dir=listing.host_dir), marked, listing.identity, deadline
         )
-        return _owned(done, owner) if isinstance(done, Retained) else done
+        return _owned(done, owner)
 
     async def _resume_delete(
         self, listing: WorkspaceDirListing, deadline: float
@@ -494,11 +494,13 @@ def _owners_keep(kept: Retained, execution_id: str | None) -> Retained:
     return _OwnersKeep(kept.reason, kept.detail, execution_id)
 
 
-def _owned(kept: Retained, owner: str | None) -> Retained:
+def _owned(
+    outcome: ReclaimableDir | Retained | _Deferred, owner: str | None
+) -> ReclaimableDir | Retained | _Deferred:
     """A keep made once ``owner`` was resolved still names it, unless it names its own."""
-    if isinstance(kept, _OwnersKeep) or owner is None:
-        return kept
-    return _owners_keep(kept, owner)
+    if not isinstance(outcome, Retained) or isinstance(outcome, _OwnersKeep) or owner is None:
+        return outcome
+    return _owners_keep(outcome, owner)
 
 
 @dataclass(frozen=True)
