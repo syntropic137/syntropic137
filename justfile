@@ -715,6 +715,14 @@ check-event-store-pin:
 check-compose-images-public:
     @uv run python scripts/check_compose_images_public.py
 
+# Post-release check, not a gate: needs network, gh, npm and published
+# artifacts. Compares the release header and ghcr.io/syntropic137 digests of the
+# release's compose asset with the npm package's template. ARGS: --release
+# vX.Y.Z (default latest), --setup-version X.Y.Z (default npm latest).
+# The published @syntropic137/setup template must pin the release (#1863)
+check-setup-template *ARGS:
+    @uv run python scripts/check_setup_template_current.py {{ARGS}}
+
 # The generated docker-socket-proxy template (#1806) must still match the pinned
 # image's own template and pass `haproxy -c` inside that image. Needs docker.
 check-docker-proxy-haproxy:
