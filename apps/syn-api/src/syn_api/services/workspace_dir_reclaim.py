@@ -78,6 +78,9 @@ class RetainedDir:
     reason: RetainedReason
     detail: str
     size_bytes: int
+    #: The one owner the pass had resolved when it kept the directory, or None
+    #: when it kept it before ownership was known.
+    execution_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -273,7 +276,7 @@ class WorkspaceDirReclaimer:
                 )
         verdict = judge_owner(owners, record, now=self.clock(), settle_seconds=self.settle_seconds)
         if verdict is not None:
-            return verdict
+            return verdict if record is None else _owners_keep(verdict, record.execution_id)
         if record is None:  # judge_owner returns None only for a record
             return Retained(RetainedReason.NOT_TERMINAL, "no execution record")
         try:
@@ -281,7 +284,7 @@ class WorkspaceDirReclaimer:
         except Exception as exc:
             capture = f"capture records unreadable: {_described(exc)}"
         if capture is not None:
-            return Retained(RetainedReason.CAPTURE_UNKNOWN, capture)
+            return _OwnersKeep(RetainedReason.CAPTURE_UNKNOWN, capture, record.execution_id)
         return StaleWorkspaceDir(
             host_dir=listing.host_dir,
             workspace_id=listing.workspace_id,
@@ -292,13 +295,17 @@ class WorkspaceDirReclaimer:
 
     async def _guarded(
         self, listing: WorkspaceDirListing, containers: list[ContainerMounts]
-    ) -> ReclaimableDir | Retained:
+    ) -> tuple[ReclaimableDir | Retained, str | None]:
+        """The guard's verdict, and the owner it was judged for, if one was resolved."""
         from syn_domain.contexts.orchestration import guard_stale_workspace_dir
 
         stale = await self.judge(listing, containers)
         if isinstance(stale, Retained):
-            return stale
-        return await guard_stale_workspace_dir(stale, self.git, self.remotes)
+            return stale, stale.execution_id if isinstance(stale, _OwnersKeep) else None
+        verdict = await guard_stale_workspace_dir(stale, self.git, self.remotes)
+        if isinstance(verdict, Retained):
+            return _owners_keep(verdict, stale.execution_id), stale.execution_id
+        return verdict, stale.execution_id
 
     async def _reclaim(
         self, listing: WorkspaceDirListing, containers: list[ContainerMounts], deadline: float
@@ -312,7 +319,7 @@ class WorkspaceDirReclaimer:
 
         if is_being_deleted(listing.host_dir):
             return await self._resume_delete(listing, deadline)
-        verdict = await self._guarded(listing, containers)
+        verdict, owner = await self._guarded(listing, containers)
         if isinstance(verdict, Retained) or self.dry_run:
             await self._put_back(listing.host_dir)
             _log_outcome(listing, verdict, dry_run=self.dry_run)
@@ -326,12 +333,12 @@ class WorkspaceDirReclaimer:
         except OSError as exc:
             kept = Retained(RetainedReason.IDENTITY_CHANGED, f"could not claim it ({exc})")
             _log_outcome(listing, kept)
-            return kept
+            return _owned(kept, owner)
         again = await self._judge_claimed(listing, claimed)
         if isinstance(again, Retained):
             await self._put_back(claimed)
             _log_outcome(listing, again)
-            return again
+            return _owned(again, owner)
         stop = await self._stop_before_destroying()
         if stop is not None:
             await self._put_back(claimed)
@@ -344,14 +351,15 @@ class WorkspaceDirReclaimer:
             await self._put_back(claimed)
             kept = Retained(RetainedReason.IDENTITY_CHANGED, f"could not mark it ({exc})")
             _log_outcome(listing, kept)
-            return kept
+            return _owned(kept, owner)
         stop = await self._stop_before_destroying()
         if stop is not None:
             return stop  # authorized and marked: the next pass resumes it
         # Judged at the claimed path; logged under the path it was found at.
-        return await self._finish_delete(
+        done = await self._finish_delete(
             listing, replace(again, host_dir=listing.host_dir), marked, listing.identity, deadline
         )
+        return _owned(done, owner)
 
     async def _resume_delete(
         self, listing: WorkspaceDirListing, deadline: float
@@ -460,7 +468,7 @@ class WorkspaceDirReclaimer:
         listing = next((x for x in listings if x.host_dir == claimed), None)
         if listing is None or listing.identity != before.identity:
             return Retained(RetainedReason.IDENTITY_CHANGED, "it was replaced under the claim")
-        verdict = await self._guarded(listing, containers)
+        verdict, _owner = await self._guarded(listing, containers)
         if isinstance(verdict, Retained):
             return verdict
         return verdict if self.is_live() else catching_up
@@ -473,6 +481,26 @@ class WorkspaceDirReclaimer:
             logger.exception(
                 "Claimed workspace directory %s could not be put back; it stays where it is", path
             )
+
+
+@dataclass(frozen=True)
+class _OwnersKeep(Retained):
+    """A keep decided after the owner was resolved, so it names the execution."""
+
+    execution_id: str | None = None
+
+
+def _owners_keep(kept: Retained, execution_id: str | None) -> Retained:
+    return _OwnersKeep(kept.reason, kept.detail, execution_id)
+
+
+def _owned(
+    outcome: ReclaimableDir | Retained | _Deferred, owner: str | None
+) -> ReclaimableDir | Retained | _Deferred:
+    """A keep made once ``owner`` was resolved still names it, unless it names its own."""
+    if not isinstance(outcome, Retained) or isinstance(outcome, _OwnersKeep) or owner is None:
+        return outcome
+    return _owners_keep(outcome, owner)
 
 
 @dataclass(frozen=True)
@@ -522,7 +550,11 @@ class _PassTally:
         if isinstance(outcome, Retained):
             self.retained.append(
                 RetainedDir(
-                    listing.workspace_id, outcome.reason, outcome.detail, listing.size_bytes
+                    listing.workspace_id,
+                    outcome.reason,
+                    outcome.detail,
+                    listing.size_bytes,
+                    outcome.execution_id if isinstance(outcome, _OwnersKeep) else None,
                 )
             )
         elif isinstance(outcome, _Deferred):
@@ -766,17 +798,30 @@ def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
     )
 
 
+class PassObserver(Protocol):
+    """Told about each pass the clock ran (#2321).
+
+    The janitor writes no run history (#1983), so whatever records its keeps
+    is handed in by its caller.
+    """
+
+    async def __call__(self, result: ReclaimPass, /) -> None: ...
+
+
 async def reclaim_on_a_clock(
     reclaimer: WorkspaceDirReclaimer,
     *,
     is_live: Callable[[], bool],
     interval_seconds: float,
     wake: asyncio.Event | None = None,
+    on_pass: PassObserver | None = None,
 ) -> None:
     """Run a pass every ``interval_seconds``, or when ``wake`` is set; only while live.
 
     Live only: during catch-up the execution list is still being rebuilt, and
     an execution it has not replayed yet would read as not terminal at best.
+    ``on_pass`` hears each pass that ran, after it is done: what it decided
+    is final, so an observer that fails is logged and the clock goes on.
     """
     from syn_api.services.workspace_reclaim_status import reclaim_status
 
@@ -793,7 +838,13 @@ async def reclaim_on_a_clock(
                 ReclaimPass(skipped="subscriptions are catching up"), at=time.time()
             )
             continue
-        reclaim_status().record(await reclaimer.run_once(), at=time.time())
+        result = await reclaimer.run_once()
+        reclaim_status().record(result, at=time.time())
+        if on_pass is not None:
+            try:
+                await on_pass(result)
+            except Exception:
+                logger.exception("A workspace reclaim pass observer failed; the clock goes on")
 
 
 _reclaim_task: asyncio.Task[None] | None = None
@@ -804,13 +855,15 @@ class _Subscriptions(Protocol):
     def is_live(self) -> bool: ...
 
 
-def start_workspace_reclaim(subscriptions: Callable[[], _Subscriptions | None]) -> None:
+def start_workspace_reclaim(
+    subscriptions: Callable[[], _Subscriptions | None], on_pass: PassObserver | None = None
+) -> None:
     """Start the clock, once. Called after subscriptions are live.
 
     ``subscriptions`` returns the coordinator the API holds at each call, not
     the one it held at start: the clock starts once, and a recovery re-run of
     the init replaces the coordinator under it. None is not live. Low disk
-    (`disk_pressure`) wakes it between ticks.
+    (`disk_pressure`) wakes it between ticks. ``on_pass`` is handed every pass.
     """
     global _reclaim_task
     if _reclaim_task is not None and not _reclaim_task.done():
@@ -828,6 +881,7 @@ def start_workspace_reclaim(subscriptions: Callable[[], _Subscriptions | None]) 
             is_live=is_live,
             interval_seconds=get_settings().disk.reclaim_interval_minutes * 60,
             wake=pressure_event(),
+            on_pass=on_pass,
         ),
         name="workspace-dir-reclaim",
     )
