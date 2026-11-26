@@ -80,6 +80,7 @@ so a verify phase can look at a UI change instead of a human doing it:
 ```bash
 pnpm install --frozen-lockfile && pnpm build
 pnpm preview --port 4173 --strictPort &      # serves dist/
+until curl -sf http://localhost:4173/ >/dev/null; do sleep 1; done
 node scripts/screenshot.mjs http://localhost:4173/ /workspace/artifacts/output/landing.png
 node scripts/screenshot.mjs http://localhost:4173/executions out.png --viewport 390x844
 ```
@@ -115,10 +116,16 @@ dashboard metrics, and everything the app shell asks for. To screenshot a
 populated page:
 
 ```bash
-pnpm build && pnpm preview --port 4173 --strictPort &
+pnpm build
+pnpm preview --port 4173 --strictPort &
+until curl -sf http://localhost:4173/ >/dev/null; do sleep 1; done
 node scripts/screenshot.mjs http://localhost:4173/executions/exec-0c5d1e7a out.png \
   --viewport 1280x800 --fixtures fixtures/screenshot.json
 ```
+
+Build in the foreground and background only the preview: `pnpm build &&
+pnpm preview &` backgrounds the build too, and the screenshot then races a
+server that has not started. The `until` line waits for it to answer.
 
 | Page | URL path |
 | --- | --- |
