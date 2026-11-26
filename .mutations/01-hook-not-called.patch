@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+index 7d73a50e7..fcc94fac5 100644
+--- a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
++++ b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+@@ -829,7 +829,7 @@ async def reclaim_on_a_clock(
+             continue
+         result = await reclaimer.run_once()
+         reclaim_status().record(result, at=time.time())
+-        if on_pass is not None:
++        if on_pass is not None and False:
+             try:
+                 await on_pass(result)
+             except Exception:

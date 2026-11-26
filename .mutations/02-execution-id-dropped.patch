@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+index 7d73a50e7..bdec55d7e 100644
+--- a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
++++ b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+@@ -543,7 +543,7 @@ class _PassTally:
+                     outcome.reason,
+                     outcome.detail,
+                     listing.size_bytes,
+-                    outcome.execution_id if isinstance(outcome, _OwnersKeep) else None,
++                    None,
+                 )
+             )
+         elif isinstance(outcome, _Deferred):

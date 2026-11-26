@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+index 7d73a50e7..64ae21aed 100644
+--- a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
++++ b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+@@ -833,7 +833,7 @@ async def reclaim_on_a_clock(
+             try:
+                 await on_pass(result)
+             except Exception:
+-                logger.exception("A workspace reclaim pass observer failed; the clock goes on")
++                raise
+ 
+ 
+ _reclaim_task: asyncio.Task[None] | None = None
