@@ -178,6 +178,19 @@ def test_malformed_pin_beside_a_valid_one_is_a_parse_error() -> None:
         parse_template(_compose(extra=bad), "setup")
 
 
+def test_quoted_suffix_after_a_valid_pin_is_a_parse_error() -> None:
+    bad = f'  gateway:\n    image: "ghcr.io/syntropic137/syn-gateway@{_C}}}bad"\n'
+
+    with pytest.raises(TemplateParseError, match="malformed image pin"):
+        parse_template(_compose(extra=bad), "setup")
+
+
+def test_pin_in_a_flow_mapping_is_read() -> None:
+    flow = f"  gateway: {{image: ghcr.io/syntropic137/syn-gateway@{_C}}}\n"
+
+    assert parse_template(_compose(extra=flow), "setup").images["syn-gateway"] == _C
+
+
 # --- main: the fetch boundary, with only the external commands replaced --------
 
 
@@ -247,3 +260,13 @@ def test_command_that_cannot_start_is_a_fetch_error(tmp_path: Path) -> None:
     # FileNotFoundError.
     with pytest.raises(FetchError, match="could not run"):
         check._run([str(tmp_path)], tmp_path)
+
+
+def test_main_rejects_a_quoted_suffix_in_the_setup_template(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    found = _compose().replace(f'syn-api@{_A}"', f'syn-api@{_A}}}bad"')
+    _fake_commands(monkeypatch, _compose(), found.encode())
+
+    assert check.main(["--release", "v1.2.3"]) == EXIT_ERROR
+    assert "malformed image pin" in capsys.readouterr().err

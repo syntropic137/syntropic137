@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 if TYPE_CHECKING:
@@ -58,9 +59,11 @@ _PINNED_REF = re.compile(
     r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*))?"
     r"@(?P<digest>sha256:[0-9a-f]{64})"
 )
-#: Every ``ghcr.io/syntropic137`` ref that claims a digest, whole: up to the end
-#: of the YAML scalar. Each must be exactly a ``_PINNED_REF``, never a prefix.
-_DIGEST_REF = re.compile(r"ghcr\.io/syntropic137/[^\s\"'@]*@[^\s\"'}]*")
+#: A whole ``ghcr.io/syntropic137`` word of a YAML scalar. The YAML scanner, not
+#: a hand-written delimiter set, decides where the scalar ends, so a quoted
+#: suffix stays in the word and a word claiming a digest must be exactly a
+#: ``_PINNED_REF``, never a prefix of one.
+_REF_WORD = re.compile(r"ghcr\.io/syntropic137/\S*")
 
 EXIT_OK = 0
 EXIT_MISMATCH = 1
@@ -103,38 +106,37 @@ def parse_template(text: str, source: str) -> PinnedTemplate:
     header = _HEADER.match(headers[0])
     if header is None:
         raise TemplateParseError(f"{source}: malformed release header: {headers[0]!r}")
-    _reject_malformed_pins(text, source)
 
     images: dict[str, str] = {}
-    for line in text.splitlines():
-        if line.lstrip().startswith("#"):
-            continue
-        for ref in _PINNED_REF.finditer(line):
-            name, tag = ref["name"], ref["tag"]
-            pin = f"{tag}@{ref['digest']}" if tag else ref["digest"]
-            # The same image under several services is one pin; two pins for one
-            # image would make "the" expected digest a guess.
-            if images.setdefault(name, pin) != pin:
-                raise TemplateParseError(
-                    f"{source}: ghcr.io/syntropic137/{name} is pinned twice: "
-                    f"{images[name]} and {pin}"
-                )
+    for word in _ref_words(text, source):
+        if "@" not in word:
+            continue  # a tag ref, not a pin
+        ref = _PINNED_REF.fullmatch(word)
+        if ref is None:
+            raise TemplateParseError(
+                f"{source}: malformed image pin {word!r}, "
+                "expected ghcr.io/syntropic137/<name>[:tag]@sha256:<64 hex>"
+            )
+        name, tag = ref["name"], ref["tag"]
+        pin = f"{tag}@{ref['digest']}" if tag else ref["digest"]
+        # The same image under several services is one pin; two pins for one
+        # image would make "the" expected digest a guess.
+        if images.setdefault(name, pin) != pin:
+            raise TemplateParseError(
+                f"{source}: ghcr.io/syntropic137/{name} is pinned twice: {images[name]} and {pin}"
+            )
     if not images:
         raise TemplateParseError(f"{source}: no ghcr.io/syntropic137/*@sha256: image refs")
     return PinnedTemplate(release=header[1], images=images)
 
 
-def _reject_malformed_pins(text: str, source: str) -> None:
-    """A digest ref that is not a whole pin would otherwise be truncated or skipped."""
-    for line in text.splitlines():
-        if line.lstrip().startswith("#"):
-            continue
-        for ref in _DIGEST_REF.finditer(line):
-            if _PINNED_REF.fullmatch(ref[0]) is None:
-                raise TemplateParseError(
-                    f"{source}: malformed image pin {ref[0]!r}, "
-                    "expected ghcr.io/syntropic137/<name>[:tag]@sha256:<64 hex>"
-                )
+def _ref_words(text: str, source: str) -> list[str]:
+    """Every ``ghcr.io/syntropic137`` word in the template's scalars; comments are not scalars."""
+    try:
+        scalars = [t.value for t in yaml.scan(text) if isinstance(t, yaml.ScalarToken)]
+    except yaml.YAMLError as exc:
+        raise TemplateParseError(f"{source}: not valid YAML: {exc}") from exc
+    return [word for scalar in scalars for word in _REF_WORD.findall(scalar)]
 
 
 def compare(expected: PinnedTemplate, found: PinnedTemplate) -> list[Mismatch]:
