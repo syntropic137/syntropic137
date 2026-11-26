@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+index 199db0eb2..7f3c21005 100644
+--- a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
++++ b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+@@ -522,7 +522,6 @@ class WorkspaceDirReclaimer:
+         if listing is None or listing.identity != before.identity:
+             return Retained(RetainedReason.IDENTITY_CHANGED, "it was replaced under the claim")
+         # The claim's rename moved the ctime; the age is the one listed before it.
+-        listing = replace(listing, created_at=before.created_at)
+         verdict, _owner = await self._guarded(listing, containers)
+         if isinstance(verdict, Retained):
+             return verdict

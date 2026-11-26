@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+index 199db0eb2..e7a39fc47 100644
+--- a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
++++ b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+@@ -335,7 +335,7 @@ class WorkspaceDirReclaimer:
+                 f"no execution owns it and it is {age / 86400:.1f} days old, "
+                 f"under the {after_seconds / 86400:g} days set",
+             )
+-        doubt = await asyncio.to_thread(self.repository_doubt, listing.host_dir)
++        doubt = None
+         if doubt is not None:
+             return Retained(RetainedReason.UNOWNED, f"no execution owns it and {doubt}")
+         return ReclaimableDir(
