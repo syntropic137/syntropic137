@@ -1,0 +1,13 @@
+diff --git a/scripts/check_setup_template_current.py b/scripts/check_setup_template_current.py
+index 545bbff7f..62e9c7724 100644
+--- a/scripts/check_setup_template_current.py
++++ b/scripts/check_setup_template_current.py
+@@ -107,7 +107,7 @@ def parse_template(text: str, source: str) -> PinnedTemplate:
+             continue
+         for ref in _PINNED_REF.finditer(line):
+             name, tag = ref["name"], ref["tag"]
+-            pin = f"{tag}@{ref['digest']}" if tag else ref["digest"]
++            pin = ref["digest"]
+             # The same image under several services is one pin; two pins for one
+             # image would make "the" expected digest a guess.
+             if images.setdefault(name, pin) != pin:
