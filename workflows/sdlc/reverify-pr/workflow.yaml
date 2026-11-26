@@ -114,6 +114,9 @@ phases:
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/software-complexity@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/verify.md
+    # #2227: gates (preflight-agent, builds) fork past the 256 default
+    resources:
+      pids_limit: 1024
 
   - id: fix
     name: Address what verification found
@@ -140,6 +143,9 @@ phases:
       - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/fix.md
+    # #2227: gates (preflight-agent, builds) fork past the 256 default
+    resources:
+      pids_limit: 1024
 
   - id: reverify
     name: Confirm the fix closed what verification found
@@ -179,6 +185,9 @@ phases:
       - syntropic137/software-leverage-points/security@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/reverify.md
+    # #2227: gates (preflight-agent, builds) fork past the 256 default
+    resources:
+      pids_limit: 1024
 
   # BOUNDED REPAIR ROUNDS, as in implement-v3 (PC-63): two fix/reverify
   # pairs, never more (owner decision 2026-10-07; a third pair was removed,
@@ -210,6 +219,9 @@ phases:
       - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/fix_2.md
+    # #2227: gates (preflight-agent, builds) fork past the 256 default
+    resources:
+      pids_limit: 1024
 
   - id: reverify_2
     name: Confirm the fix closed what verification found (round 2)
@@ -249,6 +261,9 @@ phases:
       - syntropic137/software-leverage-points/security@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/reverify_2.md
+    # #2227: gates (preflight-agent, builds) fork past the 256 default
+    resources:
+      pids_limit: 1024
 
   - id: finalize_pr
     name: Open the pull request
