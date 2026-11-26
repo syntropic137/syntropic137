@@ -1,0 +1,1389 @@
+{
+  "/api/v1/health": {
+    "status": "healthy",
+    "mode": "full",
+    "build": {
+      "version": "1.0.6",
+      "version_status": "installed",
+      "image_tag": "v1.0.6",
+      "commit": "e7e7a2ee5",
+      "started_at": "2026-11-26T08:00:00Z",
+      "started_at_display": "2026-11-26 08:00 UTC"
+    },
+    "subscription": {
+      "status": "healthy",
+      "running": true,
+      "held_projections": [],
+      "rebuilding_read_models": []
+    }
+  },
+  "/api/v1/version": {
+    "version": "1.0.6",
+    "version_status": "installed",
+    "image_tag": "v1.0.6",
+    "commit": "e7e7a2ee5",
+    "started_at": "2026-11-26T08:00:00Z",
+    "started_at_display": "2026-11-26 08:00 UTC"
+  },
+  "/api/v1/features": {
+    "ui_feedback": false
+  },
+  "/api/v1/metrics": {
+    "total_workflows": 1,
+    "completed_workflows": 1,
+    "failed_workflows": 1,
+    "execution_status_counts": {
+      "not_started": 0,
+      "running": 1,
+      "completed": 1,
+      "failed": 1,
+      "cancelled": 0,
+      "interrupted": 0
+    },
+    "total_sessions": 6,
+    "total_input_tokens": 263510,
+    "total_output_tokens": 35470,
+    "total_cache_creation_tokens": 61600,
+    "total_cache_read_tokens": 1122500,
+    "total_tokens": 1483080,
+    "total_cost_usd": "3.55",
+    "total_cost_display": ">=$3.55 (partial)",
+    "unpriced_observation_count": 4,
+    "total_artifacts": 2,
+    "total_artifact_bytes": 184630
+  },
+  "/api/v1/events/recent": {
+    "events": [
+      {
+        "time": "2026-11-26T09:25:50Z",
+        "event_type": "git_commit",
+        "session_id": "sess-impl-0c5d",
+        "execution_id": "exec-0c5d1e7a",
+        "phase_id": "implement",
+        "data": {
+          "sha": "9d3f0a1",
+          "message": "feat(dashboard-ui): screenshot fixture world",
+          "repo": "syntropic137/syntropic137"
+        }
+      }
+    ],
+    "count": 1,
+    "has_more": false
+  },
+  "/api/v1/workflows": {
+    "workflows": [
+      {
+        "id": "wf-sdlc-implement",
+        "name": "SDLC implement",
+        "workflow_type": "sdlc",
+        "classification": "standard",
+        "description": "Plan, implement and review a change on a feature branch.",
+        "phase_count": 3,
+        "runs_count": 3,
+        "is_archived": false,
+        "requires_repos": true,
+        "tags": [
+          "sdlc"
+        ]
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "page_size": 20
+  },
+  "/api/v1/workflows/wf-sdlc-implement": {
+    "id": "wf-sdlc-implement",
+    "name": "SDLC implement",
+    "description": "Plan, implement and review a change on a feature branch.",
+    "workflow_type": "sdlc",
+    "classification": "standard",
+    "phases": [
+      {
+        "phase_id": "plan",
+        "name": "Plan",
+        "order": 0,
+        "agent_type": "claude",
+        "timeout_seconds": 3600,
+        "allow_delegation": false,
+        "require_delegation": false,
+        "clone_repos": true,
+        "delivers_repo_changes": false,
+        "platform_access": "read",
+        "requires_verdict": false,
+        "kind": "agent",
+        "sandbox": "full-access",
+        "execution_type": "sequential"
+      },
+      {
+        "phase_id": "implement",
+        "name": "Implement",
+        "order": 1,
+        "agent_type": "claude",
+        "timeout_seconds": 3600,
+        "allow_delegation": false,
+        "require_delegation": false,
+        "clone_repos": true,
+        "delivers_repo_changes": true,
+        "platform_access": "read",
+        "requires_verdict": false,
+        "kind": "agent",
+        "sandbox": "full-access",
+        "execution_type": "sequential"
+      },
+      {
+        "phase_id": "review",
+        "name": "Review",
+        "order": 2,
+        "agent_type": "claude",
+        "timeout_seconds": 3600,
+        "allow_delegation": false,
+        "require_delegation": false,
+        "clone_repos": true,
+        "delivers_repo_changes": false,
+        "platform_access": "read",
+        "requires_verdict": true,
+        "kind": "agent",
+        "sandbox": "full-access",
+        "execution_type": "sequential"
+      }
+    ],
+    "runs_count": 3,
+    "repos": [
+      "syntropic137/syntropic137"
+    ],
+    "requires_repos": true,
+    "tags": [
+      "sdlc"
+    ]
+  },
+  "/api/v1/workflows/wf-sdlc-implement/runs": {
+    "runs": [
+      {
+        "workflow_execution_id": "exec-0c5d1e7a",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "status": "completed",
+        "started_at": "2026-11-26T09:00:00Z",
+        "completed_at": "2026-11-26T09:33:06Z",
+        "completed_phases": 3,
+        "total_phases": 3,
+        "phase_progress": {
+          "completed": 3,
+          "skipped": 0,
+          "possible": 3,
+          "remaining_possible": 0,
+          "percent": 100,
+          "display": "3/3"
+        },
+        "total_tokens": 1424980,
+        "total_cost_usd": "2.26",
+        "total_cost_display": ">=$2.26 (partial)",
+        "unpriced_observation_count": 4,
+        "failure_classification": "unclassified"
+      },
+      {
+        "workflow_execution_id": "exec-1f9b2c40",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "status": "failed",
+        "started_at": "2026-11-26T07:10:00Z",
+        "completed_at": "2026-11-26T07:14:45Z",
+        "completed_phases": 1,
+        "total_phases": 3,
+        "phase_progress": {
+          "completed": 1,
+          "skipped": 0,
+          "possible": 3,
+          "remaining_possible": 2,
+          "percent": 33,
+          "display": "1/3"
+        },
+        "total_tokens": 48200,
+        "total_cost_usd": "1.08",
+        "total_cost_display": "$1.08",
+        "unpriced_observation_count": 0,
+        "error_message": "Phase implement failed: just preflight-agent failed: 2 fitness checks red",
+        "failure_classification": "gate",
+        "reported_failure_reason": "task"
+      },
+      {
+        "workflow_execution_id": "exec-2a7e4d93",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "status": "running",
+        "started_at": "2026-11-26T10:00:00Z",
+        "completed_at": null,
+        "completed_phases": 0,
+        "total_phases": 3,
+        "phase_progress": {
+          "completed": 0,
+          "skipped": 0,
+          "possible": 3,
+          "remaining_possible": 3,
+          "percent": 0,
+          "display": "0/3"
+        },
+        "total_tokens": 9900,
+        "total_cost_usd": "0.21",
+        "total_cost_display": "$0.21",
+        "unpriced_observation_count": 0,
+        "failure_classification": "unclassified"
+      }
+    ],
+    "total": 3,
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement"
+  },
+  "/api/v1/executions": {
+    "executions": [
+      {
+        "workflow_execution_id": "exec-0c5d1e7a",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "status": "completed",
+        "started_at": "2026-11-26T09:00:00Z",
+        "completed_at": "2026-11-26T09:33:06Z",
+        "completed_phases": 3,
+        "total_phases": 3,
+        "phase_progress": {
+          "completed": 3,
+          "skipped": 0,
+          "possible": 3,
+          "remaining_possible": 0,
+          "percent": 100,
+          "display": "3/3"
+        },
+        "total_tokens": 1424980,
+        "total_tokens_display": "1.4M",
+        "total_input_tokens": 211510,
+        "total_output_tokens": 29370,
+        "total_cache_creation_tokens": 61600,
+        "total_cache_read_tokens": 1122500,
+        "total_cost_usd": "2.26",
+        "total_cost_display": ">=$2.26 (partial)",
+        "unpriced_observation_count": 4,
+        "duration_seconds": 1972,
+        "duration_display": "32m 52s",
+        "tool_call_count": 212,
+        "failure_classification": "unclassified",
+        "review_verdict": "certified",
+        "repos": [
+          "syntropic137/syntropic137"
+        ],
+        "repos_display": "syntropic137/syntropic137",
+        "task": "Add a checked-in fixture set for dashboard screenshots (#1647)",
+        "task_display": "Add a checked-in fixture set for dashboard screenshots (#1647)"
+      },
+      {
+        "workflow_execution_id": "exec-1f9b2c40",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "status": "failed",
+        "started_at": "2026-11-26T07:10:00Z",
+        "completed_at": "2026-11-26T07:14:45Z",
+        "completed_phases": 1,
+        "total_phases": 3,
+        "phase_progress": {
+          "completed": 1,
+          "skipped": 0,
+          "possible": 3,
+          "remaining_possible": 2,
+          "percent": 33,
+          "display": "1/3"
+        },
+        "total_tokens": 48200,
+        "total_tokens_display": "48.2k",
+        "total_input_tokens": 42900,
+        "total_output_tokens": 5300,
+        "total_cache_creation_tokens": 0,
+        "total_cache_read_tokens": 0,
+        "total_cost_usd": "1.08",
+        "total_cost_display": "$1.08",
+        "unpriced_observation_count": 0,
+        "duration_seconds": 285,
+        "duration_display": "4m 45s",
+        "tool_call_count": 47,
+        "error_message": "Phase implement failed: just preflight-agent failed: 2 fitness checks red",
+        "failure_classification": "gate",
+        "reported_failure_reason": "task",
+        "repos": [
+          "syntropic137/syntropic137"
+        ],
+        "repos_display": "syntropic137/syntropic137",
+        "task": "Ratchet untyped-dicts in syn-api",
+        "task_display": "Ratchet untyped-dicts in syn-api"
+      },
+      {
+        "workflow_execution_id": "exec-2a7e4d93",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "status": "running",
+        "started_at": "2026-11-26T10:00:00Z",
+        "completed_at": null,
+        "completed_phases": 0,
+        "total_phases": 3,
+        "phase_progress": {
+          "completed": 0,
+          "skipped": 0,
+          "possible": 3,
+          "remaining_possible": 3,
+          "percent": 0,
+          "display": "0/3"
+        },
+        "total_tokens": 9900,
+        "total_tokens_display": "9.9k",
+        "total_input_tokens": 9100,
+        "total_output_tokens": 800,
+        "total_cache_creation_tokens": 0,
+        "total_cache_read_tokens": 0,
+        "total_cost_usd": "0.21",
+        "total_cost_display": "$0.21",
+        "unpriced_observation_count": 0,
+        "duration_seconds": null,
+        "duration_display": "—",
+        "tool_call_count": 9,
+        "failure_classification": "unclassified",
+        "repos": [
+          "syntropic137/syntropic137"
+        ],
+        "repos_display": "syntropic137/syntropic137",
+        "task": "Document the screenshot fixtures in the dashboard README",
+        "task_display": "Document the screenshot fixtures in the dashboard README"
+      }
+    ],
+    "total": 3,
+    "page": 1,
+    "page_size": 50,
+    "excluded_undated": 0,
+    "budget": {
+      "running": 1,
+      "queued": 0,
+      "limit": 20,
+      "admission_paused": false,
+      "display": "1 running / 20"
+    },
+    "status_counts": {
+      "completed": 1,
+      "failed": 1,
+      "running": 1
+    }
+  },
+  "/api/v1/executions/exec-0c5d1e7a": {
+    "workflow_execution_id": "exec-0c5d1e7a",
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement",
+    "status": "completed",
+    "started_at": "2026-11-26T09:00:00Z",
+    "completed_at": "2026-11-26T09:33:06Z",
+    "phases": [
+      {
+        "input_tokens": 48210,
+        "output_tokens": 6120,
+        "cache_creation_tokens": 21400,
+        "cache_read_tokens": 310500,
+        "total_tokens": 386230,
+        "cost_usd": "1.84",
+        "unpriced_observation_count": 0,
+        "cost_display": "$1.84",
+        "deliverable_recovered": false,
+        "start_pins_status": "unavailable",
+        "unpriced_model_cost_display": "unpriced",
+        "cost_by_model": {
+          "claude-opus-5-5": "1.84"
+        },
+        "cost_by_model_display": {
+          "claude-opus-5-5": "$1.84"
+        },
+        "requested_model": "claude-opus-5-5",
+        "model_display": "claude-opus-5-5",
+        "skill_use": {
+          "status": "observed",
+          "declared": [],
+          "invoked": [],
+          "declared_not_invoked": [],
+          "status_display": "observed",
+          "summary_display": "no skills declared"
+        },
+        "phase_id": "plan",
+        "name": "Plan",
+        "status": "completed",
+        "session_id": "sess-plan-0c5d",
+        "artifact_id": "art-plan-md",
+        "duration_seconds": 254,
+        "started_at": "2026-11-26T09:00:00Z",
+        "completed_at": "2026-11-26T09:04:14Z",
+        "agent_provider": "claude",
+        "model": "claude-opus-5-5",
+        "reported_side_effects": "none"
+      },
+      {
+        "input_tokens": 102300,
+        "output_tokens": 18950,
+        "cache_creation_tokens": 40200,
+        "cache_read_tokens": 812000,
+        "total_tokens": 973450,
+        "cost_usd": "0.42",
+        "unpriced_observation_count": 0,
+        "cost_display": "$0.42",
+        "deliverable_recovered": false,
+        "start_pins_status": "unavailable",
+        "unpriced_model_cost_display": "unpriced",
+        "cost_by_model": {
+          "claude-sonnet-5-5": "0.42"
+        },
+        "cost_by_model_display": {
+          "claude-sonnet-5-5": "$0.42"
+        },
+        "requested_model": "claude-sonnet-5-5",
+        "model_display": "claude-sonnet-5-5",
+        "skill_use": {
+          "status": "observed",
+          "declared": [],
+          "invoked": [],
+          "declared_not_invoked": [],
+          "status_display": "observed",
+          "summary_display": "no skills declared"
+        },
+        "phase_id": "implement",
+        "name": "Implement",
+        "status": "completed",
+        "session_id": "sess-impl-0c5d",
+        "artifact_id": "art-dashboard-png",
+        "duration_seconds": 1312,
+        "started_at": "2026-11-26T09:04:20Z",
+        "completed_at": "2026-11-26T09:26:12Z",
+        "agent_provider": "claude",
+        "model": "claude-sonnet-5-5",
+        "reported_side_effects": "succeeded"
+      },
+      {
+        "input_tokens": 61000,
+        "output_tokens": 4300,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 65300,
+        "cost_usd": "0",
+        "unpriced_observation_count": 4,
+        "cost_display": "unpriced",
+        "deliverable_recovered": false,
+        "start_pins_status": "unavailable",
+        "unpriced_model_cost_display": "unpriced",
+        "cost_by_model": {},
+        "cost_by_model_display": {},
+        "requested_model": "gpt-5.5-codex",
+        "model_display": "gpt-5.5-codex",
+        "skill_use": {
+          "status": "observed",
+          "declared": [],
+          "invoked": [],
+          "declared_not_invoked": [],
+          "status_display": "observed",
+          "summary_display": "no skills declared"
+        },
+        "phase_id": "review",
+        "name": "Review",
+        "status": "completed",
+        "session_id": "sess-review-0c5d",
+        "duration_seconds": 406,
+        "unpriced_models": [
+          "gpt-5.5-codex"
+        ],
+        "started_at": "2026-11-26T09:26:20Z",
+        "completed_at": "2026-11-26T09:33:06Z",
+        "agent_provider": "codex",
+        "model": "gpt-5.5-codex",
+        "reported_side_effects": "none"
+      }
+    ],
+    "total_phases": 3,
+    "completed_phases": 3,
+    "phase_progress": {
+      "completed": 3,
+      "skipped": 0,
+      "possible": 3,
+      "remaining_possible": 0,
+      "percent": 100,
+      "display": "3/3"
+    },
+    "phase_plan": [
+      {
+        "phase_id": "plan",
+        "name": "Plan",
+        "status": "completed",
+        "status_display": "completed"
+      },
+      {
+        "phase_id": "implement",
+        "name": "Implement",
+        "status": "completed",
+        "status_display": "completed"
+      },
+      {
+        "phase_id": "review",
+        "name": "Review",
+        "status": "completed",
+        "status_display": "completed"
+      }
+    ],
+    "total_input_tokens": 211510,
+    "total_output_tokens": 29370,
+    "total_cache_creation_tokens": 61600,
+    "total_cache_read_tokens": 1122500,
+    "total_tokens": 1424980,
+    "total_cost_usd": "2.26",
+    "unpriced_observation_count": 4,
+    "total_cost_display": ">=$2.26 (partial)",
+    "cost_by_model": {
+      "claude-opus-5-5": "1.84",
+      "claude-sonnet-5-5": "0.42"
+    },
+    "cost_by_model_display": {
+      "claude-opus-5-5": "$1.84",
+      "claude-sonnet-5-5": "$0.42"
+    },
+    "unattributed_cost_display": null,
+    "total_duration_seconds": 1972,
+    "unknown_duration_phase_count": 0,
+    "failure_classification": "unclassified",
+    "artifact_ids": [
+      "art-plan-md",
+      "art-dashboard-png"
+    ],
+    "deliverable_produced": true,
+    "review_verdict": "certified",
+    "reported_side_effects": "succeeded",
+    "repos": [
+      "syntropic137/syntropic137"
+    ],
+    "task": "Add a checked-in fixture set for dashboard screenshots (#1647)",
+    "skill_use": {
+      "declared": [],
+      "invoked": [],
+      "never_invoked": [],
+      "not_known": [],
+      "summary_display": "no skills declared"
+    }
+  },
+  "/api/v1/executions/exec-1f9b2c40": {
+    "workflow_execution_id": "exec-1f9b2c40",
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement",
+    "status": "failed",
+    "started_at": "2026-11-26T07:10:00Z",
+    "completed_at": "2026-11-26T07:14:45Z",
+    "phases": [
+      {
+        "input_tokens": 30100,
+        "output_tokens": 3900,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 34000,
+        "cost_usd": "0.97",
+        "unpriced_observation_count": 0,
+        "cost_display": "$0.97",
+        "deliverable_recovered": false,
+        "start_pins_status": "unavailable",
+        "unpriced_model_cost_display": "unpriced",
+        "cost_by_model": {
+          "claude-opus-5-5": "0.97"
+        },
+        "cost_by_model_display": {
+          "claude-opus-5-5": "$0.97"
+        },
+        "requested_model": "claude-opus-5-5",
+        "model_display": "claude-opus-5-5",
+        "skill_use": {
+          "status": "observed",
+          "declared": [],
+          "invoked": [],
+          "declared_not_invoked": [],
+          "status_display": "observed",
+          "summary_display": "no skills declared"
+        },
+        "phase_id": "plan",
+        "name": "Plan",
+        "status": "completed",
+        "session_id": "sess-plan-1f9b",
+        "duration_seconds": 188,
+        "started_at": "2026-11-26T07:10:00Z",
+        "completed_at": "2026-11-26T07:13:08Z",
+        "agent_provider": "claude",
+        "model": "claude-opus-5-5"
+      },
+      {
+        "input_tokens": 12800,
+        "output_tokens": 1400,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 14200,
+        "cost_usd": "0.11",
+        "unpriced_observation_count": 0,
+        "cost_display": "$0.11",
+        "deliverable_recovered": false,
+        "start_pins_status": "unavailable",
+        "unpriced_model_cost_display": "unpriced",
+        "cost_by_model": {
+          "claude-sonnet-5-5": "0.11"
+        },
+        "cost_by_model_display": {
+          "claude-sonnet-5-5": "$0.11"
+        },
+        "requested_model": "claude-sonnet-5-5",
+        "model_display": "claude-sonnet-5-5",
+        "skill_use": {
+          "status": "observed",
+          "declared": [],
+          "invoked": [],
+          "declared_not_invoked": [],
+          "status_display": "observed",
+          "summary_display": "no skills declared"
+        },
+        "phase_id": "implement",
+        "name": "Implement",
+        "status": "failed",
+        "session_id": "sess-impl-1f9b",
+        "duration_seconds": 95,
+        "started_at": "2026-11-26T07:13:10Z",
+        "completed_at": "2026-11-26T07:14:45Z",
+        "error_message": "just preflight-agent failed: 2 fitness checks red",
+        "failure_classification": "gate",
+        "reported_failure_reason": "task",
+        "exit_code": 1,
+        "agent_provider": "claude",
+        "model": "claude-sonnet-5-5"
+      }
+    ],
+    "total_phases": 3,
+    "completed_phases": 1,
+    "phase_progress": {
+      "completed": 1,
+      "skipped": 0,
+      "possible": 3,
+      "remaining_possible": 2,
+      "percent": 33,
+      "display": "1/3"
+    },
+    "phase_plan": [
+      {
+        "phase_id": "plan",
+        "name": "Plan",
+        "status": "completed",
+        "status_display": "completed"
+      },
+      {
+        "phase_id": "implement",
+        "name": "Implement",
+        "status": "failed",
+        "status_display": "failed"
+      },
+      {
+        "phase_id": "review",
+        "name": "Review",
+        "status": "not_started",
+        "status_display": "not started"
+      }
+    ],
+    "total_input_tokens": 42900,
+    "total_output_tokens": 5300,
+    "total_cache_creation_tokens": 0,
+    "total_cache_read_tokens": 0,
+    "total_tokens": 48200,
+    "total_cost_usd": "1.08",
+    "unpriced_observation_count": 0,
+    "total_cost_display": "$1.08",
+    "cost_by_model": {
+      "claude-opus-5-5": "0.97",
+      "claude-sonnet-5-5": "0.11"
+    },
+    "cost_by_model_display": {
+      "claude-opus-5-5": "$0.97",
+      "claude-sonnet-5-5": "$0.11"
+    },
+    "unattributed_cost_display": null,
+    "total_duration_seconds": 285,
+    "unknown_duration_phase_count": 0,
+    "deliverable_produced": false,
+    "error_message": "Phase implement failed: just preflight-agent failed: 2 fitness checks red",
+    "failure_classification": "gate",
+    "reported_failure_reason": "task",
+    "repos": [
+      "syntropic137/syntropic137"
+    ],
+    "task": "Ratchet untyped-dicts in syn-api",
+    "skill_use": {
+      "declared": [],
+      "invoked": [],
+      "never_invoked": [],
+      "not_known": [],
+      "summary_display": "no skills declared"
+    }
+  },
+  "/api/v1/executions/exec-2a7e4d93": {
+    "workflow_execution_id": "exec-2a7e4d93",
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement",
+    "status": "running",
+    "started_at": "2026-11-26T10:00:00Z",
+    "completed_at": null,
+    "phases": [
+      {
+        "input_tokens": 9100,
+        "output_tokens": 800,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 9900,
+        "cost_usd": "0.21",
+        "unpriced_observation_count": 0,
+        "cost_display": "$0.21",
+        "deliverable_recovered": false,
+        "start_pins_status": "unavailable",
+        "unpriced_model_cost_display": "unpriced",
+        "cost_by_model": {},
+        "cost_by_model_display": {},
+        "requested_model": "claude-opus-5-5",
+        "model_display": "claude-opus-5-5 (requested)",
+        "skill_use": {
+          "status": "observed",
+          "declared": [],
+          "invoked": [],
+          "declared_not_invoked": [],
+          "status_display": "observed",
+          "summary_display": "no skills declared"
+        },
+        "phase_id": "plan",
+        "name": "Plan",
+        "status": "running",
+        "session_id": "sess-plan-2a7e",
+        "started_at": "2026-11-26T10:00:00Z",
+        "agent_provider": "claude"
+      }
+    ],
+    "total_phases": 3,
+    "completed_phases": 0,
+    "phase_progress": {
+      "completed": 0,
+      "skipped": 0,
+      "possible": 3,
+      "remaining_possible": 3,
+      "percent": 0,
+      "display": "0/3"
+    },
+    "phase_plan": [
+      {
+        "phase_id": "plan",
+        "name": "Plan",
+        "status": "running",
+        "status_display": "running"
+      },
+      {
+        "phase_id": "implement",
+        "name": "Implement",
+        "status": "not_started",
+        "status_display": "not started"
+      },
+      {
+        "phase_id": "review",
+        "name": "Review",
+        "status": "not_started",
+        "status_display": "not started"
+      }
+    ],
+    "total_input_tokens": 9100,
+    "total_output_tokens": 800,
+    "total_cache_creation_tokens": 0,
+    "total_cache_read_tokens": 0,
+    "total_tokens": 9900,
+    "total_cost_usd": "0.21",
+    "unpriced_observation_count": 0,
+    "total_cost_display": "$0.21",
+    "cost_by_model": {},
+    "cost_by_model_display": {},
+    "unattributed_cost_display": "$0.21",
+    "unknown_duration_phase_count": 0,
+    "failure_classification": "unclassified",
+    "deliverable_produced": false,
+    "repos": [
+      "syntropic137/syntropic137"
+    ],
+    "task": "Document the screenshot fixtures in the dashboard README",
+    "skill_use": {
+      "declared": [],
+      "invoked": [],
+      "never_invoked": [],
+      "not_known": [],
+      "summary_display": "no skills declared"
+    }
+  },
+  "/api/v1/capture/status": {
+    "total": 0,
+    "needs_backfill_count": 0,
+    "unattributable_count": 0,
+    "scanned": 0,
+    "truncated": false,
+    "entries": [],
+    "capabilities": []
+  },
+  "/api/v1/sessions": {
+    "sessions": [
+      {
+        "id": "sess-plan-0c5d",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "execution_id": "exec-0c5d1e7a",
+        "phase_id": "plan",
+        "phase_name": "Plan",
+        "phase_display": "Plan",
+        "status": "completed",
+        "agent_provider": "claude",
+        "agent_model": "claude-opus-5-5",
+        "requested_model": "claude-opus-5-5",
+        "repos": [
+          "syntropic137/syntropic137"
+        ],
+        "repos_display": "syntropic137/syntropic137",
+        "input_tokens": 48210,
+        "output_tokens": 6120,
+        "cache_creation_tokens": 21400,
+        "cache_read_tokens": 310500,
+        "total_tokens": 386230,
+        "total_tokens_display": "386.2k",
+        "total_cost_usd": "1.84",
+        "total_cost_display": "$1.84",
+        "unpriced_observation_count": 0,
+        "duration_seconds": 254,
+        "duration_display": "4m 14s",
+        "started_at": "2026-11-26T09:00:00Z",
+        "completed_at": "2026-11-26T09:04:14Z",
+        "agent_model_display": "claude-opus-5-5"
+      },
+      {
+        "id": "sess-impl-0c5d",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "execution_id": "exec-0c5d1e7a",
+        "phase_id": "implement",
+        "phase_name": "Implement",
+        "phase_display": "Implement",
+        "status": "completed",
+        "agent_provider": "claude",
+        "agent_model": "claude-sonnet-5-5",
+        "requested_model": "claude-sonnet-5-5",
+        "repos": [
+          "syntropic137/syntropic137"
+        ],
+        "repos_display": "syntropic137/syntropic137",
+        "input_tokens": 102300,
+        "output_tokens": 18950,
+        "cache_creation_tokens": 40200,
+        "cache_read_tokens": 812000,
+        "total_tokens": 973450,
+        "total_tokens_display": "973.5k",
+        "total_cost_usd": "0.42",
+        "total_cost_display": "$0.42",
+        "unpriced_observation_count": 0,
+        "duration_seconds": 1312,
+        "duration_display": "21m 52s",
+        "started_at": "2026-11-26T09:04:20Z",
+        "completed_at": "2026-11-26T09:26:12Z",
+        "agent_model_display": "claude-sonnet-5-5"
+      },
+      {
+        "id": "sess-review-0c5d",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "execution_id": "exec-0c5d1e7a",
+        "phase_id": "review",
+        "phase_name": "Review",
+        "phase_display": "Review",
+        "status": "completed",
+        "agent_provider": "codex",
+        "agent_model": "gpt-5.5-codex",
+        "requested_model": "gpt-5.5-codex",
+        "repos": [
+          "syntropic137/syntropic137"
+        ],
+        "repos_display": "syntropic137/syntropic137",
+        "input_tokens": 61000,
+        "output_tokens": 4300,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 65300,
+        "total_tokens_display": "65.3k",
+        "total_cost_usd": "0",
+        "total_cost_display": "unpriced",
+        "unpriced_observation_count": 4,
+        "duration_seconds": 406,
+        "duration_display": "6m 46s",
+        "started_at": "2026-11-26T09:26:20Z",
+        "completed_at": "2026-11-26T09:33:06Z",
+        "agent_model_display": "gpt-5.5-codex"
+      },
+      {
+        "id": "sess-plan-1f9b",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "execution_id": "exec-1f9b2c40",
+        "phase_id": "plan",
+        "phase_name": "Plan",
+        "phase_display": "Plan",
+        "status": "completed",
+        "agent_provider": "claude",
+        "agent_model": "claude-opus-5-5",
+        "requested_model": "claude-opus-5-5",
+        "repos": [
+          "syntropic137/syntropic137"
+        ],
+        "repos_display": "syntropic137/syntropic137",
+        "input_tokens": 30100,
+        "output_tokens": 3900,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 34000,
+        "total_tokens_display": "34.0k",
+        "total_cost_usd": "0.97",
+        "total_cost_display": "$0.97",
+        "unpriced_observation_count": 0,
+        "duration_seconds": 188,
+        "duration_display": "3m 8s",
+        "started_at": "2026-11-26T07:10:00Z",
+        "completed_at": "2026-11-26T07:13:08Z",
+        "agent_model_display": "claude-opus-5-5"
+      },
+      {
+        "id": "sess-impl-1f9b",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "execution_id": "exec-1f9b2c40",
+        "phase_id": "implement",
+        "phase_name": "Implement",
+        "phase_display": "Implement",
+        "status": "failed",
+        "agent_provider": "claude",
+        "agent_model": "claude-sonnet-5-5",
+        "requested_model": "claude-sonnet-5-5",
+        "repos": [
+          "syntropic137/syntropic137"
+        ],
+        "repos_display": "syntropic137/syntropic137",
+        "input_tokens": 12800,
+        "output_tokens": 1400,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 14200,
+        "total_tokens_display": "14.2k",
+        "total_cost_usd": "0.11",
+        "total_cost_display": "$0.11",
+        "unpriced_observation_count": 0,
+        "duration_seconds": 95,
+        "duration_display": "1m 35s",
+        "started_at": "2026-11-26T07:13:10Z",
+        "completed_at": "2026-11-26T07:14:45Z",
+        "agent_model_display": "claude-sonnet-5-5"
+      },
+      {
+        "id": "sess-plan-2a7e",
+        "workflow_id": "wf-sdlc-implement",
+        "workflow_name": "SDLC implement",
+        "execution_id": "exec-2a7e4d93",
+        "phase_id": "plan",
+        "phase_name": "Plan",
+        "phase_display": "Plan",
+        "status": "running",
+        "agent_provider": "claude",
+        "agent_model": null,
+        "requested_model": "claude-opus-5-5",
+        "repos": [
+          "syntropic137/syntropic137"
+        ],
+        "repos_display": "syntropic137/syntropic137",
+        "input_tokens": 9100,
+        "output_tokens": 800,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 9900,
+        "total_tokens_display": "9.9k",
+        "total_cost_usd": "0.21",
+        "total_cost_display": "$0.21",
+        "unpriced_observation_count": 0,
+        "duration_seconds": null,
+        "duration_display": "—",
+        "started_at": "2026-11-26T10:00:00Z",
+        "agent_model_display": "claude-opus-5-5 (requested)"
+      }
+    ],
+    "total": 6,
+    "page": 1,
+    "page_size": 100,
+    "excluded_undated": 0,
+    "status_counts": {
+      "completed": 4,
+      "failed": 1,
+      "running": 1
+    }
+  },
+  "/api/v1/sessions/sess-plan-0c5d": {
+    "id": "sess-plan-0c5d",
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement",
+    "execution_id": "exec-0c5d1e7a",
+    "phase_id": "plan",
+    "phase_name": "Plan",
+    "phase_display": "Plan",
+    "status": "completed",
+    "agent_provider": "claude",
+    "agent_model": "claude-opus-5-5",
+    "requested_model": "claude-opus-5-5",
+    "repos": [
+      "syntropic137/syntropic137"
+    ],
+    "repos_display": "syntropic137/syntropic137",
+    "input_tokens": 48210,
+    "output_tokens": 6120,
+    "cache_creation_tokens": 21400,
+    "cache_read_tokens": 310500,
+    "total_tokens": 386230,
+    "total_tokens_display": "386.2k",
+    "total_cost_usd": "1.84",
+    "total_cost_display": "$1.84",
+    "unpriced_observation_count": 0,
+    "duration_seconds": 254,
+    "duration_display": "4m 14s",
+    "started_at": "2026-11-26T09:00:00Z",
+    "completed_at": "2026-11-26T09:04:14Z",
+    "agent_model_display": "claude-opus-5-5",
+    "milestone_id": null,
+    "agent_launch": "launched",
+    "input_tokens_display": "48.2k",
+    "output_tokens_display": "6.1k",
+    "cache_creation_tokens_display": "21.4k",
+    "cache_read_tokens_display": "310.5k",
+    "cost_by_model": {
+      "claude-opus-5-5": "1.84"
+    },
+    "cost_by_model_display": {
+      "claude-opus-5-5": "$1.84"
+    },
+    "unattributed_cost_display": null,
+    "operations": [
+      {
+        "operation_id": "op-1",
+        "operation_type": "tool_execution_completed",
+        "timestamp": "2026-11-26T09:00:12Z",
+        "duration_seconds": 0.4,
+        "success": true,
+        "tool_name": "Read",
+        "tool_use_id": "toolu_01",
+        "tool_input": {
+          "file_path": "apps/syn-dashboard-ui/scripts/screenshot.mjs"
+        }
+      },
+      {
+        "operation_id": "op-2",
+        "operation_type": "tool_execution_completed",
+        "timestamp": "2026-11-26T09:01:03Z",
+        "duration_seconds": 2.1,
+        "success": true,
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_02",
+        "tool_input": {
+          "command": "git log --oneline -3 -- apps/syn-dashboard-ui"
+        }
+      },
+      {
+        "operation_id": "op-3",
+        "operation_type": "git_commit",
+        "timestamp": "2026-11-26T09:03:40Z",
+        "success": true,
+        "git_sha": "4b1c9e2",
+        "git_message": "docs: plan for #1647 slice 1",
+        "git_branch": "feat/1647-screenshot-fixtures",
+        "git_repo": "syntropic137/syntropic137"
+      }
+    ]
+  },
+  "/api/v1/sessions/sess-impl-0c5d": {
+    "id": "sess-impl-0c5d",
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement",
+    "execution_id": "exec-0c5d1e7a",
+    "phase_id": "implement",
+    "phase_name": "Implement",
+    "phase_display": "Implement",
+    "status": "completed",
+    "agent_provider": "claude",
+    "agent_model": "claude-sonnet-5-5",
+    "requested_model": "claude-sonnet-5-5",
+    "repos": [
+      "syntropic137/syntropic137"
+    ],
+    "repos_display": "syntropic137/syntropic137",
+    "input_tokens": 102300,
+    "output_tokens": 18950,
+    "cache_creation_tokens": 40200,
+    "cache_read_tokens": 812000,
+    "total_tokens": 973450,
+    "total_tokens_display": "973.5k",
+    "total_cost_usd": "0.42",
+    "total_cost_display": "$0.42",
+    "unpriced_observation_count": 0,
+    "duration_seconds": 1312,
+    "duration_display": "21m 52s",
+    "started_at": "2026-11-26T09:04:20Z",
+    "completed_at": "2026-11-26T09:26:12Z",
+    "agent_model_display": "claude-sonnet-5-5",
+    "milestone_id": null,
+    "agent_launch": "launched",
+    "input_tokens_display": "102.3k",
+    "output_tokens_display": "18.9k",
+    "cache_creation_tokens_display": "40.2k",
+    "cache_read_tokens_display": "812.0k",
+    "cost_by_model": {
+      "claude-sonnet-5-5": "0.42"
+    },
+    "cost_by_model_display": {
+      "claude-sonnet-5-5": "$0.42"
+    },
+    "unattributed_cost_display": null,
+    "operations": []
+  },
+  "/api/v1/sessions/sess-review-0c5d": {
+    "id": "sess-review-0c5d",
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement",
+    "execution_id": "exec-0c5d1e7a",
+    "phase_id": "review",
+    "phase_name": "Review",
+    "phase_display": "Review",
+    "status": "completed",
+    "agent_provider": "codex",
+    "agent_model": "gpt-5.5-codex",
+    "requested_model": "gpt-5.5-codex",
+    "repos": [
+      "syntropic137/syntropic137"
+    ],
+    "repos_display": "syntropic137/syntropic137",
+    "input_tokens": 61000,
+    "output_tokens": 4300,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "total_tokens": 65300,
+    "total_tokens_display": "65.3k",
+    "total_cost_usd": "0",
+    "total_cost_display": "unpriced",
+    "unpriced_observation_count": 4,
+    "duration_seconds": 406,
+    "duration_display": "6m 46s",
+    "started_at": "2026-11-26T09:26:20Z",
+    "completed_at": "2026-11-26T09:33:06Z",
+    "agent_model_display": "gpt-5.5-codex",
+    "milestone_id": null,
+    "agent_launch": "launched",
+    "input_tokens_display": "61.0k",
+    "output_tokens_display": "4.3k",
+    "cache_creation_tokens_display": "0",
+    "cache_read_tokens_display": "0",
+    "cost_by_model": {},
+    "cost_by_model_display": {},
+    "unattributed_cost_display": null,
+    "operations": []
+  },
+  "/api/v1/sessions/sess-plan-1f9b": {
+    "id": "sess-plan-1f9b",
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement",
+    "execution_id": "exec-1f9b2c40",
+    "phase_id": "plan",
+    "phase_name": "Plan",
+    "phase_display": "Plan",
+    "status": "completed",
+    "agent_provider": "claude",
+    "agent_model": "claude-opus-5-5",
+    "requested_model": "claude-opus-5-5",
+    "repos": [
+      "syntropic137/syntropic137"
+    ],
+    "repos_display": "syntropic137/syntropic137",
+    "input_tokens": 30100,
+    "output_tokens": 3900,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "total_tokens": 34000,
+    "total_tokens_display": "34.0k",
+    "total_cost_usd": "0.97",
+    "total_cost_display": "$0.97",
+    "unpriced_observation_count": 0,
+    "duration_seconds": 188,
+    "duration_display": "3m 8s",
+    "started_at": "2026-11-26T07:10:00Z",
+    "completed_at": "2026-11-26T07:13:08Z",
+    "agent_model_display": "claude-opus-5-5",
+    "milestone_id": null,
+    "agent_launch": "launched",
+    "input_tokens_display": "30.1k",
+    "output_tokens_display": "3.9k",
+    "cache_creation_tokens_display": "0",
+    "cache_read_tokens_display": "0",
+    "cost_by_model": {
+      "claude-opus-5-5": "0.97"
+    },
+    "cost_by_model_display": {
+      "claude-opus-5-5": "$0.97"
+    },
+    "unattributed_cost_display": null,
+    "operations": []
+  },
+  "/api/v1/sessions/sess-impl-1f9b": {
+    "id": "sess-impl-1f9b",
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement",
+    "execution_id": "exec-1f9b2c40",
+    "phase_id": "implement",
+    "phase_name": "Implement",
+    "phase_display": "Implement",
+    "status": "failed",
+    "agent_provider": "claude",
+    "agent_model": "claude-sonnet-5-5",
+    "requested_model": "claude-sonnet-5-5",
+    "repos": [
+      "syntropic137/syntropic137"
+    ],
+    "repos_display": "syntropic137/syntropic137",
+    "input_tokens": 12800,
+    "output_tokens": 1400,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "total_tokens": 14200,
+    "total_tokens_display": "14.2k",
+    "total_cost_usd": "0.11",
+    "total_cost_display": "$0.11",
+    "unpriced_observation_count": 0,
+    "duration_seconds": 95,
+    "duration_display": "1m 35s",
+    "started_at": "2026-11-26T07:13:10Z",
+    "completed_at": "2026-11-26T07:14:45Z",
+    "agent_model_display": "claude-sonnet-5-5",
+    "milestone_id": null,
+    "agent_launch": "launched",
+    "input_tokens_display": "12.8k",
+    "output_tokens_display": "1.4k",
+    "cache_creation_tokens_display": "0",
+    "cache_read_tokens_display": "0",
+    "cost_by_model": {
+      "claude-sonnet-5-5": "0.11"
+    },
+    "cost_by_model_display": {
+      "claude-sonnet-5-5": "$0.11"
+    },
+    "unattributed_cost_display": null,
+    "operations": [],
+    "error_message": "just preflight-agent failed: 2 fitness checks red"
+  },
+  "/api/v1/sessions/sess-plan-2a7e": {
+    "id": "sess-plan-2a7e",
+    "workflow_id": "wf-sdlc-implement",
+    "workflow_name": "SDLC implement",
+    "execution_id": "exec-2a7e4d93",
+    "phase_id": "plan",
+    "phase_name": "Plan",
+    "phase_display": "Plan",
+    "status": "running",
+    "agent_provider": "claude",
+    "agent_model": null,
+    "requested_model": "claude-opus-5-5",
+    "repos": [
+      "syntropic137/syntropic137"
+    ],
+    "repos_display": "syntropic137/syntropic137",
+    "input_tokens": 9100,
+    "output_tokens": 800,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "total_tokens": 9900,
+    "total_tokens_display": "9.9k",
+    "total_cost_usd": "0.21",
+    "total_cost_display": "$0.21",
+    "unpriced_observation_count": 0,
+    "duration_seconds": null,
+    "duration_display": "—",
+    "started_at": "2026-11-26T10:00:00Z",
+    "agent_model_display": "claude-opus-5-5 (requested)",
+    "milestone_id": null,
+    "agent_launch": "launched",
+    "input_tokens_display": "9.1k",
+    "output_tokens_display": "800",
+    "cache_creation_tokens_display": "0",
+    "cache_read_tokens_display": "0",
+    "cost_by_model": {},
+    "cost_by_model_display": {},
+    "unattributed_cost_display": null,
+    "operations": []
+  },
+  "/api/v1/artifacts": {
+    "artifacts": [
+      {
+        "id": "art-plan-md",
+        "workflow_id": "wf-sdlc-implement",
+        "execution_id": "exec-0c5d1e7a",
+        "session_id": "sess-plan-0c5d",
+        "phase_id": "plan",
+        "artifact_type": "markdown",
+        "title": "plan.md",
+        "size_bytes": 310,
+        "created_at": "2026-11-26T09:04:14Z",
+        "agent_provider": "claude",
+        "agent_model": "claude-opus-5-5"
+      },
+      {
+        "id": "art-dashboard-png",
+        "workflow_id": "wf-sdlc-implement",
+        "execution_id": "exec-0c5d1e7a",
+        "session_id": "sess-impl-0c5d",
+        "phase_id": "implement",
+        "artifact_type": "image",
+        "title": "dashboard-1280x800.png",
+        "size_bytes": 184320,
+        "created_at": "2026-11-26T09:26:12Z",
+        "agent_provider": "claude",
+        "agent_model": "claude-sonnet-5-5"
+      }
+    ],
+    "total": 2,
+    "page": 1,
+    "page_size": 50,
+    "excluded_undated": 0,
+    "type_counts": {
+      "markdown": 1,
+      "image": 1
+    }
+  },
+  "/api/v1/artifacts/art-plan-md": {
+    "id": "art-plan-md",
+    "workflow_id": "wf-sdlc-implement",
+    "phase_id": "plan",
+    "session_id": "sess-plan-0c5d",
+    "artifact_type": "markdown",
+    "is_primary_deliverable": true,
+    "content": "# Plan: screenshot fixtures (#1647)\n\n1. Build one fixture world typed from the generated API types.\n2. Write it to `fixtures/screenshot.json` and check it for drift.\n3. Check every fixture route against the OpenAPI spec.\n\n| Page | Fixture |\n| --- | --- |\n| `/executions` | 3 runs |\n| `/sessions` | 6 sessions |",
+    "content_type": "text/markdown",
+    "size_bytes": 310,
+    "title": "plan.md",
+    "created_at": "2026-11-26T09:04:14Z",
+    "agent_provider": "claude",
+    "agent_model": "claude-opus-5-5"
+  },
+  "/api/v1/artifacts/art-dashboard-png": {
+    "id": "art-dashboard-png",
+    "workflow_id": "wf-sdlc-implement",
+    "phase_id": "implement",
+    "session_id": "sess-impl-0c5d",
+    "artifact_type": "image",
+    "is_primary_deliverable": false,
+    "content": null,
+    "content_type": "image/png",
+    "size_bytes": 184320,
+    "title": "dashboard-1280x800.png",
+    "created_at": "2026-11-26T09:26:12Z",
+    "agent_provider": "claude",
+    "agent_model": "claude-sonnet-5-5"
+  }
+}
