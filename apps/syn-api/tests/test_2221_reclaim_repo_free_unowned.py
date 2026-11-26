@@ -247,7 +247,8 @@ async def test_age_is_the_one_listed_before_the_claim(base: Path) -> None:
 
     def listed(at: str) -> list[WorkspaceDirListing]:
         return [
-            x if Path(x.host_dir).name.startswith(stale_dirs.CLAIM_PREFIX)
+            x
+            if Path(x.host_dir).name.startswith(stale_dirs.CLAIM_PREFIX)
             else replace(x, created_at=month_ago)
             for x in scan_workspace_dirs(at)
         ]
