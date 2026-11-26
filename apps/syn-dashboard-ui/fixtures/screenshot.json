@@ -55,15 +55,15 @@
       {
         "phase_id": "plan",
         "phase_name": "Plan",
-        "status": "completed",
-        "input_tokens": 48210,
-        "output_tokens": 6120,
-        "total_tokens": 386230,
-        "cost_usd": "1.84",
+        "status": "running",
+        "input_tokens": 78310,
+        "output_tokens": 10020,
+        "total_tokens": 420230,
+        "cost_usd": "3.02",
         "unpriced_observation_count": 0,
-        "cost_display": "$1.84",
-        "cost_in_progress": false,
-        "duration_seconds": 254,
+        "cost_display": "$3.02",
+        "cost_in_progress": true,
+        "duration_seconds": 742,
         "artifact_count": 1
       },
       {
@@ -73,11 +73,11 @@
         "input_tokens": 102300,
         "output_tokens": 18950,
         "total_tokens": 973450,
-        "cost_usd": "0.42",
+        "cost_usd": "0.53",
         "unpriced_observation_count": 0,
-        "cost_display": "$0.42",
+        "cost_display": "$0.53",
         "cost_in_progress": false,
-        "duration_seconds": 1312,
+        "duration_seconds": 1407,
         "artifact_count": 1
       },
       {
@@ -224,7 +224,7 @@
           "possible": 3,
           "remaining_possible": 0,
           "percent": 100,
-          "display": "3/3"
+          "display": "3 of 3"
         },
         "total_tokens": 1424980,
         "total_cost_usd": "2.26",
@@ -245,9 +245,9 @@
           "completed": 1,
           "skipped": 0,
           "possible": 3,
-          "remaining_possible": 2,
+          "remaining_possible": 0,
           "percent": 33,
-          "display": "1/3"
+          "display": "1 of up to 3, failed"
         },
         "total_tokens": 48200,
         "total_cost_usd": "1.08",
@@ -272,7 +272,7 @@
           "possible": 3,
           "remaining_possible": 3,
           "percent": 0,
-          "display": "0/3"
+          "display": "phase 1 of up to 3"
         },
         "total_tokens": 9900,
         "total_cost_usd": "0.21",
@@ -295,63 +295,9 @@
     "metric": "sessions",
     "start_date": "2025-11-26",
     "end_date": "2026-11-26",
-    "total": 16,
-    "total_cost_display": ">=$7.95 (partial)",
+    "total": 6,
+    "total_cost_display": ">=$3.55 (partial)",
     "days": [
-      {
-        "date": "2026-11-23",
-        "count": 2,
-        "breakdown": {
-          "sessions": 2,
-          "executions": 1,
-          "commits": 3,
-          "cost_usd": 0.88,
-          "tokens": 90000,
-          "input_tokens": 80000,
-          "output_tokens": 10000,
-          "cache_creation_tokens": 0,
-          "cache_read_tokens": 0,
-          "unpriced_tokens": 0
-        },
-        "cost_display": "$0.88",
-        "failed": 0
-      },
-      {
-        "date": "2026-11-24",
-        "count": 5,
-        "breakdown": {
-          "sessions": 5,
-          "executions": 2,
-          "commits": 6,
-          "cost_usd": 2.4,
-          "tokens": 225000,
-          "input_tokens": 200000,
-          "output_tokens": 25000,
-          "cache_creation_tokens": 0,
-          "cache_read_tokens": 0,
-          "unpriced_tokens": 0
-        },
-        "cost_display": "$2.40",
-        "failed": 1
-      },
-      {
-        "date": "2026-11-25",
-        "count": 3,
-        "breakdown": {
-          "sessions": 3,
-          "executions": 1,
-          "commits": 2,
-          "cost_usd": 1.12,
-          "tokens": 135000,
-          "input_tokens": 120000,
-          "output_tokens": 15000,
-          "cache_creation_tokens": 0,
-          "cache_read_tokens": 0,
-          "unpriced_tokens": 0
-        },
-        "cost_display": "$1.12",
-        "failed": 0
-      },
       {
         "date": "2026-11-26",
         "count": 6,
@@ -360,11 +306,11 @@
           "executions": 3,
           "commits": 1,
           "cost_usd": 3.55,
-          "tokens": 298980,
+          "tokens": 1483080,
           "input_tokens": 263510,
           "output_tokens": 35470,
-          "cache_creation_tokens": 0,
-          "cache_read_tokens": 0,
+          "cache_creation_tokens": 61600,
+          "cache_read_tokens": 1122500,
           "unpriced_tokens": 65300
         },
         "cost_display": ">=$3.55 (partial)",
@@ -390,7 +336,7 @@
           "possible": 3,
           "remaining_possible": 0,
           "percent": 100,
-          "display": "3/3"
+          "display": "3 of 3"
         },
         "total_tokens": 1424980,
         "total_tokens_display": "1.4M",
@@ -426,9 +372,9 @@
           "completed": 1,
           "skipped": 0,
           "possible": 3,
-          "remaining_possible": 2,
+          "remaining_possible": 0,
           "percent": 33,
-          "display": "1/3"
+          "display": "1 of up to 3, failed"
         },
         "total_tokens": 48200,
         "total_tokens_display": "48.2k",
@@ -467,7 +413,7 @@
           "possible": 3,
           "remaining_possible": 3,
           "percent": 0,
-          "display": "0/3"
+          "display": "phase 1 of up to 3"
         },
         "total_tokens": 9900,
         "total_tokens_display": "9.9k",
@@ -536,12 +482,13 @@
         "requested_model": "claude-opus-5-5",
         "model_display": "claude-opus-5-5",
         "skill_use": {
-          "status": "observed",
+          "status": "unavailable",
           "declared": [],
           "invoked": [],
+          "provider": null,
           "declared_not_invoked": [],
-          "status_display": "observed",
-          "summary_display": "no skills declared"
+          "status_display": "unavailable: no record for this run",
+          "summary_display": "skill use unavailable: no record for this run"
         },
         "phase_id": "plan",
         "name": "Plan",
@@ -576,12 +523,13 @@
         "requested_model": "claude-sonnet-5-5",
         "model_display": "claude-sonnet-5-5",
         "skill_use": {
-          "status": "observed",
+          "status": "unavailable",
           "declared": [],
           "invoked": [],
+          "provider": null,
           "declared_not_invoked": [],
-          "status_display": "observed",
-          "summary_display": "no skills declared"
+          "status_display": "unavailable: no record for this run",
+          "summary_display": "skill use unavailable: no record for this run"
         },
         "phase_id": "implement",
         "name": "Implement",
@@ -612,12 +560,13 @@
         "requested_model": "gpt-5.5-codex",
         "model_display": "gpt-5.5-codex",
         "skill_use": {
-          "status": "observed",
+          "status": "unavailable",
           "declared": [],
           "invoked": [],
+          "provider": null,
           "declared_not_invoked": [],
-          "status_display": "observed",
-          "summary_display": "no skills declared"
+          "status_display": "unavailable: no record for this run",
+          "summary_display": "skill use unavailable: no record for this run"
         },
         "phase_id": "review",
         "name": "Review",
@@ -642,28 +591,30 @@
       "possible": 3,
       "remaining_possible": 0,
       "percent": 100,
-      "display": "3/3"
+      "display": "3 of 3"
     },
     "phase_plan": [
       {
         "phase_id": "plan",
         "name": "Plan",
         "status": "completed",
-        "status_display": "completed"
+        "status_display": "Completed"
       },
       {
         "phase_id": "implement",
         "name": "Implement",
         "status": "completed",
-        "status_display": "completed"
+        "status_display": "Completed"
       },
       {
         "phase_id": "review",
         "name": "Review",
         "status": "completed",
-        "status_display": "completed"
+        "status_display": "Completed"
       }
     ],
+    "cache_read_rate_display": null,
+    "cache_write_rate_display": null,
     "total_input_tokens": 211510,
     "total_output_tokens": 29370,
     "total_cache_creation_tokens": 61600,
@@ -703,7 +654,7 @@
       "invoked": [],
       "never_invoked": [],
       "not_known": [],
-      "summary_display": "no skills declared"
+      "summary_display": "unavailable: no record for this run"
     }
   },
   "/api/v1/executions/exec-1f9b2c40": {
@@ -735,12 +686,13 @@
         "requested_model": "claude-opus-5-5",
         "model_display": "claude-opus-5-5",
         "skill_use": {
-          "status": "observed",
+          "status": "unavailable",
           "declared": [],
           "invoked": [],
+          "provider": null,
           "declared_not_invoked": [],
-          "status_display": "observed",
-          "summary_display": "no skills declared"
+          "status_display": "unavailable: no record for this run",
+          "summary_display": "skill use unavailable: no record for this run"
         },
         "phase_id": "plan",
         "name": "Plan",
@@ -773,12 +725,13 @@
         "requested_model": "claude-sonnet-5-5",
         "model_display": "claude-sonnet-5-5",
         "skill_use": {
-          "status": "observed",
+          "status": "unavailable",
           "declared": [],
           "invoked": [],
+          "provider": null,
           "declared_not_invoked": [],
-          "status_display": "observed",
-          "summary_display": "no skills declared"
+          "status_display": "unavailable: no record for this run",
+          "summary_display": "skill use unavailable: no record for this run"
         },
         "phase_id": "implement",
         "name": "Implement",
@@ -801,30 +754,32 @@
       "completed": 1,
       "skipped": 0,
       "possible": 3,
-      "remaining_possible": 2,
+      "remaining_possible": 0,
       "percent": 33,
-      "display": "1/3"
+      "display": "1 of up to 3, failed"
     },
     "phase_plan": [
       {
         "phase_id": "plan",
         "name": "Plan",
         "status": "completed",
-        "status_display": "completed"
+        "status_display": "Completed"
       },
       {
         "phase_id": "implement",
         "name": "Implement",
         "status": "failed",
-        "status_display": "failed"
+        "status_display": "Failed"
       },
       {
         "phase_id": "review",
         "name": "Review",
-        "status": "not_started",
-        "status_display": "not started"
+        "status": "pending",
+        "status_display": "Pending"
       }
     ],
+    "cache_read_rate_display": "0.05x rate",
+    "cache_write_rate_display": "1.25x rate",
     "total_input_tokens": 42900,
     "total_output_tokens": 5300,
     "total_cache_creation_tokens": 0,
@@ -861,7 +816,7 @@
       "invoked": [],
       "never_invoked": [],
       "not_known": [],
-      "summary_display": "no skills declared"
+      "summary_display": "unavailable: no record for this run"
     }
   },
   "/api/v1/executions/exec-2a7e4d93": {
@@ -889,12 +844,13 @@
         "requested_model": "claude-opus-5-5",
         "model_display": "claude-opus-5-5 (requested)",
         "skill_use": {
-          "status": "observed",
+          "status": "unavailable",
           "declared": [],
           "invoked": [],
+          "provider": null,
           "declared_not_invoked": [],
-          "status_display": "observed",
-          "summary_display": "no skills declared"
+          "status_display": "unavailable: no record for this run",
+          "summary_display": "skill use unavailable: no record for this run"
         },
         "phase_id": "plan",
         "name": "Plan",
@@ -912,28 +868,30 @@
       "possible": 3,
       "remaining_possible": 3,
       "percent": 0,
-      "display": "0/3"
+      "display": "phase 1 of up to 3"
     },
     "phase_plan": [
       {
         "phase_id": "plan",
         "name": "Plan",
         "status": "running",
-        "status_display": "running"
+        "status_display": "Running"
       },
       {
         "phase_id": "implement",
         "name": "Implement",
-        "status": "not_started",
-        "status_display": "not started"
+        "status": "pending",
+        "status_display": "Pending"
       },
       {
         "phase_id": "review",
         "name": "Review",
-        "status": "not_started",
-        "status_display": "not started"
+        "status": "pending",
+        "status_display": "Pending"
       }
     ],
+    "cache_read_rate_display": null,
+    "cache_write_rate_display": null,
     "total_input_tokens": 9100,
     "total_output_tokens": 800,
     "total_cache_creation_tokens": 0,
@@ -961,7 +919,7 @@
       "invoked": [],
       "never_invoked": [],
       "not_known": [],
-      "summary_display": "no skills declared"
+      "summary_display": "unavailable: no record for this run"
     }
   },
   "/api/v1/executions/exec-0c5d1e7a/session-inventory": {
@@ -1292,6 +1250,8 @@
       "claude-opus-5-5": "$1.84"
     },
     "unattributed_cost_display": null,
+    "cache_read_rate_display": "0.05x rate",
+    "cache_write_rate_display": "1.25x rate",
     "operations": [
       {
         "operation_id": "op-1",
@@ -1372,6 +1332,8 @@
       "claude-sonnet-5-5": "$0.42"
     },
     "unattributed_cost_display": null,
+    "cache_read_rate_display": "0.05x rate",
+    "cache_write_rate_display": "1.25x rate",
     "operations": []
   },
   "/api/v1/sessions/sess-review-0c5d": {
@@ -1413,6 +1375,8 @@
     "cost_by_model": {},
     "cost_by_model_display": {},
     "unattributed_cost_display": null,
+    "cache_read_rate_display": null,
+    "cache_write_rate_display": null,
     "operations": []
   },
   "/api/v1/sessions/sess-plan-1f9b": {
@@ -1458,6 +1422,8 @@
       "claude-opus-5-5": "$0.97"
     },
     "unattributed_cost_display": null,
+    "cache_read_rate_display": "0.05x rate",
+    "cache_write_rate_display": "1.25x rate",
     "operations": []
   },
   "/api/v1/sessions/sess-impl-1f9b": {
@@ -1503,6 +1469,8 @@
       "claude-sonnet-5-5": "$0.11"
     },
     "unattributed_cost_display": null,
+    "cache_read_rate_display": "0.05x rate",
+    "cache_write_rate_display": "1.25x rate",
     "operations": [],
     "error_message": "just preflight-agent failed: 2 fitness checks red"
   },
@@ -1543,7 +1511,9 @@
     "cache_read_tokens_display": "0",
     "cost_by_model": {},
     "cost_by_model_display": {},
-    "unattributed_cost_display": null,
+    "unattributed_cost_display": "$0.21",
+    "cache_read_rate_display": null,
+    "cache_write_rate_display": null,
     "operations": []
   },
   "/api/v1/artifacts": {

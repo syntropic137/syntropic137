@@ -115,13 +115,19 @@ const HEALTH: Schemas['HealthResponse'] = {
 
 type Phase = Schemas['PhaseExecutionInfo']
 
-const NO_SKILLS: Schemas['PhaseSkillUseInfo'] = {
-  status: 'observed',
+/**
+ * Every phase here has `start_pins_status: 'unavailable'` and no pins, so
+ * `summarize_skill_use(None, ...)` (routes/executions/phase_skill_use.py)
+ * answers `unavailable`: a non-use nobody measured is not reported as one.
+ */
+const SKILLS_UNAVAILABLE: Schemas['PhaseSkillUseInfo'] = {
+  status: 'unavailable',
   declared: [],
   invoked: [],
+  provider: null,
   declared_not_invoked: [],
-  status_display: 'observed',
-  summary_display: 'no skills declared',
+  status_display: 'unavailable: no record for this run',
+  summary_display: 'skill use unavailable: no record for this run',
 }
 
 function phase(overrides: Partial<Phase> & Pick<Phase, 'phase_id' | 'name' | 'status'>): Phase {
@@ -141,7 +147,7 @@ function phase(overrides: Partial<Phase> & Pick<Phase, 'phase_id' | 'name' | 'st
     cost_by_model_display: {},
     requested_model: null,
     model_display: 'unknown',
-    skill_use: NO_SKILLS,
+    skill_use: SKILLS_UNAVAILABLE,
     ...overrides,
   }
 }
@@ -281,24 +287,78 @@ const RUNNING_PHASES: Phase[] = [
 
 type Detail = Schemas['ExecutionDetailResponse']
 
+/**
+ * Cache multipliers of the price table (`cache_rate_multipliers` in
+ * syn_shared.pricing) for the models this world runs. The codex model has no
+ * rate, so it is absent, and a scope that ran it gets no label.
+ */
+const CACHE_RATES: Readonly<Record<string, { read: string; write: string }>> = {
+  [OPUS]: { read: '0.05x rate', write: '1.25x rate' },
+  [SONNET]: { read: '0.05x rate', write: '1.25x rate' },
+}
+
+/** `cache_rate_display` (syn_api/cache_rate_display.py): a label only when every model agrees on it. */
+function cacheRatesOf(models: ReadonlySet<string>): Pick<Detail, 'cache_read_rate_display' | 'cache_write_rate_display'> {
+  const rates = [...models].map((m) => CACHE_RATES[m])
+  const one = (pick: (r: { read: string; write: string }) => string): string | null => {
+    if (rates.length === 0 || rates.some((r) => r === undefined)) return null
+    const labels = new Set(rates.map((r) => (r === undefined ? '' : pick(r))))
+    return labels.size === 1 ? [...labels][0] : null
+  }
+  return { cache_read_rate_display: one((r) => r.read), cache_write_rate_display: one((r) => r.write) }
+}
+
+/** `_models_run` (routes/executions/queries.py): priced-as models, else the reported model. */
+function modelsRun(phases: readonly Phase[]): Set<string> {
+  const models = new Set<string>()
+  for (const p of phases) {
+    const priced = Object.keys(p.cost_by_model ?? {})
+    if (priced.length > 0) priced.forEach((m) => models.add(m))
+    else if (p.model) models.add(p.model)
+  }
+  return models
+}
+
+/** `unattributed_cost_display` of `model_breakdown_text` (syn_api/cost_by_model_display.py), in cents. */
+function unattributedOf(costByModel: Readonly<Record<string, string>>, totalUsd: string): string | null {
+  const cents = (usd: string) => Math.round(Number(usd) * 100)
+  const attributed = Object.values(costByModel).reduce((n, c) => n + Math.max(cents(c), 0), 0)
+  const remainder = Math.max(cents(totalUsd), attributed) - attributed
+  return remainder > 0 ? `$${(remainder / 100).toFixed(2)}` : null
+}
+
+/** `plan_phases` and `PlannedPhase.status_display` (read_models/phase_plan.py), with nothing skipped or inherited. */
 function planOf(phases: readonly Phase[]): Schemas['PlannedPhaseInfo'][] {
   return PHASES.map(({ phase_id, name }) => {
     const ran = phases.find((p) => p.phase_id === phase_id)
-    const status = ran?.status ?? 'not_started'
-    return { phase_id, name, status, status_display: status.replace('_', ' ') }
+    if (!ran) return { phase_id, name, status: 'pending', status_display: 'Pending' }
+    const words = ran.status.replace('_', ' ')
+    return { phase_id, name, status: ran.status, status_display: words.charAt(0).toUpperCase() + words.slice(1) }
   })
 }
 
-function progressOf(phases: readonly Phase[]): Schemas['PhaseProgressInfo'] {
+/** `PhaseProgress` (read_models/phase_progress.py) for a run with no skipped phases. */
+function progressOf(status: string, phases: readonly Phase[]): Schemas['PhaseProgressInfo'] {
   const completed = phases.filter((p) => p.status === 'completed').length
   const possible = PHASES.length
+  const ended = ['completed', 'failed', 'cancelled', 'interrupted'].includes(status)
+  const display =
+    status === 'completed'
+      ? `${completed} of ${possible}`
+      : ended
+        ? `${completed} of up to ${possible}, ${status}`
+        : status === 'running'
+          ? `phase ${Math.min(completed + 1, possible)} of up to ${possible}`
+          : completed === 0
+            ? 'not started'
+            : `${completed} of up to ${possible}`
   return {
     completed,
     skipped: 0,
     possible,
-    remaining_possible: possible - completed,
-    percent: Math.floor((completed * 100) / possible),
-    display: `${completed}/${possible}`,
+    remaining_possible: ended ? 0 : possible - completed,
+    percent: status === 'completed' ? 100 : Math.round((completed * 100) / possible),
+    display,
   }
 }
 
@@ -314,12 +374,13 @@ function sumTokens(phases: readonly Phase[]) {
   }
 }
 
+/** `ExecutionSkillUseSummary.of` over phases whose skill use is all unavailable. */
 const SKILL_USE: Schemas['ExecutionSkillUseSummary'] = {
   declared: [],
   invoked: [],
   never_invoked: [],
   not_known: [],
-  summary_display: 'no skills declared',
+  summary_display: 'unavailable: no record for this run',
 }
 
 const COMPLETED_DETAIL: Detail = {
@@ -332,8 +393,9 @@ const COMPLETED_DETAIL: Detail = {
   phases: COMPLETED_PHASES,
   total_phases: 3,
   completed_phases: 3,
-  phase_progress: progressOf(COMPLETED_PHASES),
+  phase_progress: progressOf('completed', COMPLETED_PHASES),
   phase_plan: planOf(COMPLETED_PHASES),
+  ...cacheRatesOf(modelsRun(COMPLETED_PHASES)),
   ...sumTokens(COMPLETED_PHASES),
   total_cost_usd: '2.26',
   unpriced_observation_count: 4,
@@ -367,8 +429,9 @@ const FAILED_DETAIL: Detail = {
   phases: FAILED_PHASES,
   total_phases: 3,
   completed_phases: 1,
-  phase_progress: progressOf(FAILED_PHASES),
+  phase_progress: progressOf('failed', FAILED_PHASES),
   phase_plan: planOf(FAILED_PHASES),
+  ...cacheRatesOf(modelsRun(FAILED_PHASES)),
   ...sumTokens(FAILED_PHASES),
   total_cost_usd: '1.08',
   unpriced_observation_count: 0,
@@ -401,8 +464,9 @@ const RUNNING_DETAIL: Detail = {
   phases: RUNNING_PHASES,
   total_phases: 3,
   completed_phases: 0,
-  phase_progress: progressOf(RUNNING_PHASES),
+  phase_progress: progressOf('running', RUNNING_PHASES),
   phase_plan: planOf(RUNNING_PHASES),
+  ...cacheRatesOf(modelsRun(RUNNING_PHASES)),
   ...sumTokens(RUNNING_PHASES),
   total_cost_usd: '0.21',
   unpriced_observation_count: 0,
@@ -594,7 +658,9 @@ function sessionDetailOf(seed: SessionSeed): Schemas['SessionResponse'] {
     cache_read_tokens_display: formatTokens(p.cache_read_tokens),
     cost_by_model: p.cost_by_model,
     cost_by_model_display: p.cost_by_model_display ?? {},
-    unattributed_cost_display: null,
+    unattributed_cost_display: unattributedOf(p.cost_by_model ?? {}, p.cost_usd),
+    // routes/sessions.py picks the models the same way `_models_run` does.
+    ...cacheRatesOf(modelsRun([p])),
     operations: seed.id === PLAN_SESSION_ID ? PLAN_OPERATIONS : [],
     error_message: p.error_message,
   }
@@ -765,6 +831,54 @@ const WORKFLOW_RUNS: Schemas['ExecutionRunListResponse'] = {
 
 const ALL_TOKENS = sumTokens(DETAILS.flatMap((d) => d.phases ?? []))
 
+/** When the world is read: five minutes into the running execution's plan phase. */
+const WORLD_NOW = '2026-11-26T10:05:00Z'
+
+/** `format_cost` (syn_shared.display.formatters) for the amounts this world holds. */
+function formatCost(cents: number, unpriced: number): string {
+  const known = `$${(cents / 100).toFixed(2)}`
+  if (unpriced <= 0) return known
+  return cents <= 0 ? 'unpriced' : `>=${known} (partial)`
+}
+
+/**
+ * One phase across EVERY execution of the workflow, as `/metrics?workflow_id=`
+ * builds it (routes/metrics.py `_build_phase_metrics`):
+ * - tokens and artifacts from completed runs only
+ *   (`WorkflowPhaseMetricsProjection.on_phase_completed`);
+ * - running while any execution still runs it, else how the latest run ended,
+ *   and the finished runs' time plus each live run's elapsed time
+ *   (`PhaseMetricsEntry.status` / `duration_seconds`);
+ * - cost summed across executions (`_phase_costs`).
+ */
+function phaseMetricsOf(phase_id: string, phase_name: string): Schemas['PhaseMetrics'] {
+  const runs = DETAILS.flatMap((d) => (d.phases ?? []).filter((p) => p.phase_id === phase_id)).sort((a, b) =>
+    (a.started_at ?? '').localeCompare(b.started_at ?? ''),
+  )
+  const completed = runs.filter((p) => p.status === 'completed')
+  const finished = runs.filter((p) => p.status !== 'running')
+  const live = runs.filter((p) => p.status === 'running')
+  const settled = finished.at(-1)?.status ?? 'failed'
+  const inFlight = live.reduce((n, p) => n + (Date.parse(WORLD_NOW) - Date.parse(p.started_at ?? WORLD_NOW)) / 1000, 0)
+  const cents = runs.reduce((n, p) => n + Math.round(Number(p.cost_usd) * 100), 0)
+  const unpriced = runs.reduce((n, p) => n + p.unpriced_observation_count, 0)
+  return {
+    phase_id,
+    phase_name,
+    status: live.length > 0 ? 'running' : settled,
+    input_tokens: completed.reduce((n, p) => n + p.input_tokens, 0),
+    output_tokens: completed.reduce((n, p) => n + p.output_tokens, 0),
+    total_tokens: completed.reduce((n, p) => n + p.total_tokens, 0),
+    // `canonical_cost_usd` writes no trailing zeros: `0`, not `0.00`.
+    cost_usd: String(cents / 100),
+    unpriced_observation_count: unpriced,
+    cost_display: formatCost(cents, unpriced),
+    cost_in_progress: live.length > 0,
+    duration_seconds: finished.reduce((n, p) => n + (p.duration_seconds ?? 0), 0) + inFlight,
+    artifact_count: completed.filter((p) => p.artifact_id).length,
+  }
+}
+
 const METRICS: Schemas['MetricsResponse'] = {
   total_workflows: 1,
   completed_workflows: 1,
@@ -783,20 +897,7 @@ const METRICS: Schemas['MetricsResponse'] = {
   total_artifacts: ARTIFACTS.length,
   total_artifact_bytes: ARTIFACTS.reduce((n, a) => n + (a.size_bytes ?? 0), 0),
   // The workflow page reads these; the query string (workflow_id) is ignored.
-  phases: COMPLETED_PHASES.map((p) => ({
-    phase_id: p.phase_id,
-    phase_name: p.name,
-    status: p.status,
-    input_tokens: p.input_tokens,
-    output_tokens: p.output_tokens,
-    total_tokens: p.total_tokens,
-    cost_usd: p.cost_usd,
-    unpriced_observation_count: p.unpriced_observation_count,
-    cost_display: p.cost_display,
-    cost_in_progress: false,
-    duration_seconds: p.duration_seconds ?? null,
-    artifact_count: p.artifact_id ? 1 : 0,
-  })),
+  phases: PHASES.map(({ phase_id, name }) => phaseMetricsOf(phase_id, name)),
 }
 
 const RECENT_COMMITS: Schemas['EventListResponse'] = {
@@ -849,69 +950,46 @@ const WORKFLOW_HISTORY: Schemas['ExecutionHistoryResponse'] = {
   total_executions: 0,
 }
 
-interface HeatmapDay {
-  date: string
-  sessions: number
-  executions: number
-  commits: number
-  failed: number
-  costUsd: number
-  costDisplay: string
-  inputTokens: number
-  outputTokens: number
-  unpricedTokens: number
-}
-
-/** A day bucket with every key `_EMPTY_BREAKDOWN` (TimescaleHeatmapQuery.py) sends. */
-function heatmapDay(d: HeatmapDay): Schemas['HeatmapDayBucketResponse'] {
-  return {
-    date: d.date,
-    count: d.sessions,
+/**
+ * The world's one day of activity, from the same canonical usage the global
+ * metrics read (#932): every session ran on 2026-11-26, so the day holds all
+ * four token categories of all of them (`_build_day_breakdown`,
+ * TimescaleHeatmapQuery.py), and its cost is the global total. There is no
+ * earlier history: a day of usage the global metrics did not count would make
+ * the dashboard quote two totals for one world.
+ */
+const HEATMAP_DAYS: Schemas['HeatmapDayBucketResponse'][] = [
+  {
+    date: '2026-11-26',
+    count: SESSION_SEEDS.length,
     breakdown: {
-      sessions: d.sessions,
-      executions: d.executions,
-      commits: d.commits,
-      cost_usd: d.costUsd,
-      tokens: d.inputTokens + d.outputTokens,
-      input_tokens: d.inputTokens,
-      output_tokens: d.outputTokens,
-      cache_creation_tokens: 0,
-      cache_read_tokens: 0,
-      unpriced_tokens: d.unpricedTokens,
-    },
-    cost_display: d.costDisplay,
-    failed: d.failed,
-  }
-}
-
-const HEATMAP_DAYS = [
-  { date: '2026-11-23', sessions: 2, executions: 1, commits: 3, failed: 0, costUsd: 0.88, costDisplay: '$0.88' },
-  { date: '2026-11-24', sessions: 5, executions: 2, commits: 6, failed: 1, costUsd: 2.4, costDisplay: '$2.40' },
-  { date: '2026-11-25', sessions: 3, executions: 1, commits: 2, failed: 0, costUsd: 1.12, costDisplay: '$1.12' },
-].map((d) => heatmapDay({ ...d, inputTokens: 40000 * d.sessions, outputTokens: 5000 * d.sessions, unpricedTokens: 0 }))
-  .concat(
-    heatmapDay({
-      date: '2026-11-26',
       sessions: SESSION_SEEDS.length,
       executions: DETAILS.length,
       commits: RECENT_COMMITS.events.length,
-      failed: 1,
-      costUsd: 3.55,
+      cost_usd: Number(METRICS.total_cost_usd),
+      tokens:
+        METRICS.total_input_tokens +
+        METRICS.total_output_tokens +
+        METRICS.total_cache_creation_tokens +
+        METRICS.total_cache_read_tokens,
+      input_tokens: METRICS.total_input_tokens,
+      output_tokens: METRICS.total_output_tokens,
+      cache_creation_tokens: METRICS.total_cache_creation_tokens,
+      cache_read_tokens: METRICS.total_cache_read_tokens,
       // The review phase's codex tokens were not priced (_heatmap_cost_display).
-      costDisplay: '>=$3.55 (partial)',
-      inputTokens: ALL_TOKENS.total_input_tokens,
-      outputTokens: ALL_TOKENS.total_output_tokens,
-      unpricedTokens: 65300,
-    }),
-  )
+      unpriced_tokens: COMPLETED_PHASES[2].total_tokens,
+    },
+    cost_display: METRICS.total_cost_display,
+    failed: 1,
+  },
+]
 
 const HEATMAP: Schemas['ContributionHeatmapResponse'] = {
   metric: 'sessions',
   start_date: '2025-11-26',
   end_date: '2026-11-26',
   total: HEATMAP_DAYS.reduce((n, d) => n + d.count, 0),
-  // 0.88 + 2.40 + 1.12 + 3.55, with one partial day.
-  total_cost_display: '>=$7.95 (partial)',
+  total_cost_display: METRICS.total_cost_display,
   days: HEATMAP_DAYS,
   filter: {},
 }
