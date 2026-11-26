@@ -26,6 +26,7 @@ type SideEffectStatus = components["schemas"]["SideEffectStatus"];
 type FailureClassification = components["schemas"]["FailureClassification"];
 type ReportedFailureReason = components["schemas"]["ReportedFailureReason"];
 type ReviewVerdict = components["schemas"]["ReviewVerdict"];
+type SourceCommit = components["schemas"]["SourceCommit"];
 
 const listCommand: CommandDef = {
   name: "list",
@@ -161,6 +162,7 @@ const showCommand: CommandDef = {
         print(`    ${style("•", CYAN)} ${name} ${style(`(${url})`, DIM)}`);
       }
     }
+    print(`  Commits:      ${formatCommits(ex.source_commits)}`);
 
     const phases = ex.phases ?? [];
     if (phases.length > 0) {
@@ -195,6 +197,13 @@ const showCommand: CommandDef = {
       }
       table.print();
 
+      // Only once a phase recorded one: on an older run every phase would
+      // repeat the "not recorded" the Commits line already says (#1004).
+      if (phases.some((p) => p.checked_out_commits != null)) {
+        print("  Checked out:");
+        for (const ph of phases) print(`    ${ph.name}: ${formatCommits(ph.checked_out_commits)}`);
+      }
+
       // Below the table, not in it: an error is a sentence, and the phase a
       // reader opens first must say why it failed, not only that it did.
       for (const ph of phases.filter((p) => p.status === "failed")) {
@@ -214,6 +223,14 @@ function formatFailure(
 ): string {
   const measured = classification ?? "unclassified";
   return reported ? `${measured} (agent reported: ${reported})` : measured;
+}
+
+/** Each repository's commit as `repo@<short sha>` (#1004). Null is a run that
+ * recorded none, never shown as "none"; a null sha was recorded unresolved. */
+function formatCommits(commits: SourceCommit[] | null | undefined): string {
+  if (commits == null) return "not recorded";
+  if (commits.length === 0) return "none";
+  return commits.map((c) => `${c.repository}@${c.sha ? c.sha.slice(0, 7) : "unresolved"}`).join(", ");
 }
 
 /** What an agent SAID about its external writes. Null is its own answer, the
