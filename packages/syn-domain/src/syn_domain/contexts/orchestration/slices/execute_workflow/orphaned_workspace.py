@@ -87,8 +87,9 @@ class OrphanedWorkspace:
 class ReclaimableDir:
     """A host directory the guard has cleared for deletion.
 
-    Construct only through `guard_orphaned_workspace`; holding one is the
-    proof that the guard ran and found nothing left at risk.
+    Construct only through `guard_orphaned_workspace`, or the reclaimer's
+    opt-in rule for an unowned directory holding no repository (#2221);
+    holding one is the proof that the guard ran and found nothing left at risk.
     """
 
     host_dir: str

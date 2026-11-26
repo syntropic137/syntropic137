@@ -442,6 +442,7 @@ def production_reclaimer(gate: QuiescenceGate, options: RunOptions) -> Workspace
         read_models_rebuilding=gate.completeness,
         pass_budget_seconds=options.budget_seconds,
         dry_run=not options.apply,
+        unowned_repo_free_after_seconds=settings.disk.unowned_repo_free_after_seconds(),
     )
 
 

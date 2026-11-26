@@ -230,6 +230,9 @@ class WorkspaceDirListing:
     unreadable: str | None = None
     #: Whether a session store exists inside, outside any pytest temp tree.
     session_store: bool = False
+    #: Epoch seconds the directory itself was made: birth time where the
+    #: platform gives one, else ctime, never mtime (`_created_at`). None is unknown.
+    created_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -397,7 +400,49 @@ def measure_workspace_dir(directory: Path) -> WorkspaceDirListing:
         identity=(stat.st_dev, stat.st_ino),
         unreadable=unreadable,
         session_store=session_store,
+        created_at=_created_at(stat),
     )
+
+
+def _created_at(stat: os.stat_result) -> float:
+    """Birth time where the platform has it, else ctime; never mtime (#2221).
+
+    An mtime is the agent's to set. A ctime is not, and only moves forward:
+    any change to the directory's own entries, mode or name (a claim's
+    rename included) resets it, so it can read a directory younger than it
+    is, never older. Linux Python 3.12 has no ``st_birthtime``: ctime it is.
+    """
+    birth = getattr(stat, "st_birthtime", None)
+    return birth if isinstance(birth, float) else stat.st_ctime
+
+
+#: Entries `repository_doubt` reads before it stops and keeps the directory.
+REPOSITORY_PROBE_MAX_ENTRIES = 500_000
+
+
+def repository_doubt(host_dir: str, max_entries: int = REPOSITORY_PROBE_MAX_ENTRIES) -> str | None:
+    """Why ``host_dir`` may hold a git repository, or None when it holds none. Blocking.
+
+    None only when a walk of all of it, within ``max_entries``, found no
+    ``.git`` of any kind - a directory, a gitfile, a linked worktree's file,
+    a link - and no bare repository's shape (``HEAD`` beside ``objects/`` and
+    ``refs/``). A walk that cannot read an entry, or that runs past
+    ``max_entries``, is doubt: "I could not look" never reads as "nothing is
+    there". Links are listed, never followed.
+    """
+    entries = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(host_dir, onerror=_raise):
+            if ".git" in dirnames or ".git" in filenames:
+                return f"a repository is at {dirpath}"
+            if "HEAD" in filenames and "objects" in dirnames and "refs" in dirnames:
+                return f"a bare repository is at {dirpath}"
+            entries += len(dirnames) + len(filenames)
+            if entries > max_entries:
+                return f"it has more than {max_entries} entries, so no repository is ruled out"
+    except OSError as exc:
+        return f"it could not be walked for repositories ({type(exc).__name__}: {exc})"
+    return None
 
 
 async def list_containers() -> list[ContainerMounts]:

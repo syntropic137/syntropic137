@@ -165,6 +165,20 @@ class DiskSettings(BaseSettings):
         ),
     )
 
+    reclaim_unowned_repo_free_after_days: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Reclaim a workspace directory no execution owns once it is at least this "
+            "many days old, but only when it holds no git repository at any depth (no "
+            ".git of any kind, no bare repository) and passes every other reclaim "
+            "clause. Age is the directory's birth time, else its ctime, never its "
+            "mtime. A directory holding a repository, owned by several executions, or "
+            "of unknown age stays retained as unowned. Unset (the default): every "
+            "unowned directory is retained (#2221)."
+        ),
+    )
+
     page_webhook_url: str = Field(
         default="",
         description=(
@@ -179,6 +193,11 @@ class DiskSettings(BaseSettings):
         return frozenset(
             name.strip() for name in self.reclaim_observer_containers.split(",") if name.strip()
         )
+
+    def unowned_repo_free_after_seconds(self) -> float | None:
+        """SYN_DISK_RECLAIM_UNOWNED_REPO_FREE_AFTER_DAYS in seconds, or None when unset."""
+        days = self.reclaim_unowned_repo_free_after_days
+        return None if days is None else days * 86400.0
 
     def admission_floor_gib(self, max_concurrent: int) -> float:
         """GiB free below which admission is refused.
