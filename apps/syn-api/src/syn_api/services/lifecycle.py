@@ -58,6 +58,7 @@ from syn_api.services.health_probes import (
 )
 from syn_api.services.process_role import current_role, resolve_previous_world, role_services
 from syn_api.services.read_path_health import _judge_read_path
+from syn_api.services.reclaim_keeps import record_reclaim_keeps
 from syn_api.services.request_latency_lifecycle import start_request_latency, stop_request_latency
 from syn_api.services.seeding import seed_offline_data
 from syn_api.services.subscription_health import render_subscription_health
@@ -768,7 +769,8 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     # #1560: freeing disk space is not an event either, so a clock asks.
     start_disk_recovery_watch()
     # PC-130: and a directory whose container is gone is reclaimed on a clock too.
-    start_workspace_reclaim(lambda: state.subscription_service)
+    # #2321: its keeps go on their runs, recorded here, never by the janitor.
+    start_workspace_reclaim(lambda: state.subscription_service, record_reclaim_keeps())
     # #1983: low disk wakes that reclaim at once, webhook or not, and pages
     # someone when a webhook is set.
     start_disk_pressure_monitor()
