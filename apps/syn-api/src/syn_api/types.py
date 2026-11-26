@@ -97,6 +97,7 @@ from syn_domain.contexts.orchestration import (
     RetainedReason,
     ReviewVerdict,
     SideEffectStatus,
+    SourceCommit,
     TagSet,
     TrialExclusion,
     TrialOutcome,
@@ -2566,6 +2567,10 @@ class PhaseExecution(BaseModel):
     `[]` here, or anywhere below, would tell an API client that a workspace was
     verifiably unchanged when in truth nothing looked.
     """
+    checked_out_commits: list[SourceCommit] | None = None
+    """Where each repository was checked out when this phase's latest workspace
+    was provisioned (#1004). Null is "not recorded" (a run before the field),
+    never an empty checkout; a `sha` of null is "recorded, not resolved"."""
     pinned_at_start: PhaseStartConfig | None = None
     """What this phase had at start: tools, skills and model (#1454).
 
@@ -2737,6 +2742,10 @@ class ExecutionDetailFull(BaseModel):
     """The execution this run resumed, or None for a fresh run (#1881)."""
     resumed_as: str | None = None
     """The execution that resumed this one, or None. At most one (#1881)."""
+    source_commits: list[SourceCommit] | None = None
+    """The commit each repository was at when this run started (#1004).
+    Null is "not recorded" (a run before the field); a `sha` of null is
+    "recorded, not resolved"."""
 
 
 class ControlResult(BaseModel):
