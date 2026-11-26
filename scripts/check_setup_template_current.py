@@ -58,6 +58,9 @@ _PINNED_REF = re.compile(
     r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*))?"
     r"@(?P<digest>sha256:[0-9a-f]{64})"
 )
+#: Every ``ghcr.io/syntropic137`` ref that claims a digest, whole: up to the end
+#: of the YAML scalar. Each must be exactly a ``_PINNED_REF``, never a prefix.
+_DIGEST_REF = re.compile(r"ghcr\.io/syntropic137/[^\s\"'@]*@[^\s\"'}]*")
 
 EXIT_OK = 0
 EXIT_MISMATCH = 1
@@ -100,6 +103,7 @@ def parse_template(text: str, source: str) -> PinnedTemplate:
     header = _HEADER.match(headers[0])
     if header is None:
         raise TemplateParseError(f"{source}: malformed release header: {headers[0]!r}")
+    _reject_malformed_pins(text, source)
 
     images: dict[str, str] = {}
     for line in text.splitlines():
@@ -118,6 +122,19 @@ def parse_template(text: str, source: str) -> PinnedTemplate:
     if not images:
         raise TemplateParseError(f"{source}: no ghcr.io/syntropic137/*@sha256: image refs")
     return PinnedTemplate(release=header[1], images=images)
+
+
+def _reject_malformed_pins(text: str, source: str) -> None:
+    """A digest ref that is not a whole pin would otherwise be truncated or skipped."""
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for ref in _DIGEST_REF.finditer(line):
+            if _PINNED_REF.fullmatch(ref[0]) is None:
+                raise TemplateParseError(
+                    f"{source}: malformed image pin {ref[0]!r}, "
+                    "expected ghcr.io/syntropic137/<name>[:tag]@sha256:<64 hex>"
+                )
 
 
 def compare(expected: PinnedTemplate, found: PinnedTemplate) -> list[Mismatch]:
@@ -158,6 +175,8 @@ def _run(command: list[str], cwd: Path, env: Mapping[str, str] | None = None) ->
         )
     except FileNotFoundError as exc:
         raise FetchError(f"'{command[0]}' is not installed or not on PATH") from exc
+    except OSError as exc:
+        raise FetchError(f"could not run '{command[0]}': {exc}") from exc
     if done.returncode != 0:
         raise FetchError(f"'{' '.join(command)}' exited {done.returncode}: {done.stderr.strip()}")
     return done.stdout
@@ -178,7 +197,10 @@ def fetch_release_template(release: str, workdir: Path) -> str:
          "--pattern", COMPOSE_ASSET, "--dir", str(dest)],
         workdir,
     )  # fmt: skip
-    return (dest / COMPOSE_ASSET).read_text()
+    try:
+        return (dest / COMPOSE_ASSET).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise FetchError(f"release {release} has no readable {COMPOSE_ASSET}: {exc}") from exc
 
 
 def fetch_setup_template(setup_version: str, workdir: Path) -> tuple[str, str]:
@@ -204,9 +226,9 @@ def fetch_setup_template(setup_version: str, workdir: Path) -> tuple[str, str]:
             member = archive.extractfile(TARBALL_TEMPLATE)
             if member is None:
                 raise FetchError(f"{TARBALL_TEMPLATE} in {tarball.name} is not a file")
-            return member.read().decode(), entries[0].version
-    except (KeyError, tarfile.TarError) as exc:
-        raise FetchError(f"{tarball.name} has no readable {TARBALL_TEMPLATE}") from exc
+            return member.read().decode("utf-8"), entries[0].version
+    except (KeyError, tarfile.TarError, OSError, UnicodeDecodeError) as exc:
+        raise FetchError(f"{tarball.name} has no readable {TARBALL_TEMPLATE}: {exc}") from exc
 
 
 def _release_arg(value: str) -> str:
@@ -228,6 +250,13 @@ def main(argv: list[str] | None = None) -> int:
             expected = parse_template(
                 fetch_release_template(release, workdir), f"release {release} {COMPOSE_ASSET}"
             )
+            # Two templates that agree on a stale header would otherwise certify
+            # whichever release was asked for.
+            if expected.release != release:
+                raise TemplateParseError(
+                    f"release {release} {COMPOSE_ASSET}: header pins {expected.release}, "
+                    f"not {release}"
+                )
             text, setup_version = fetch_setup_template(args.setup_version, workdir)
             found = parse_template(text, f"{PACKAGE}@{setup_version} {TARBALL_TEMPLATE}")
     except (FetchError, TemplateParseError) as exc:
