@@ -11,5 +11,7 @@ Tests: `scripts/tests/test_check_setup_template_current.py` (no Docker; run with
 | 05-requested-release-not-validated | a stale asset header certifies the requested release | test_requested_release_is_validated_against_asset_header |
 | 06-malformed-pin-accepted | an overlong or malformed digest is truncated or skipped | test_digest_is_not_silently_truncated, test_malformed_pin_beside_a_valid_one_is_a_parse_error |
 | 07-tarball-decode-error-escapes | a non-UTF-8 template escapes as a traceback, not exit 2 | test_bad_template_encoding_returns_exit_two |
+| 08-brace-ends-quoted-ref | `}` ends a ref, so a quoted `@sha256:<64>}bad` is truncated and accepted | test_quoted_suffix_after_a_valid_pin_is_a_parse_error, test_main_rejects_a_quoted_suffix_in_the_setup_template |
+| 09-pin-outside-scalar-counted | a pin in a trailing comment is counted without being validated | test_pin_in_a_trailing_comment_is_a_parse_error |
 
 Dispatch: `just mutation-evidence 2375 "scripts/tests/test_check_setup_template_current.py" false`

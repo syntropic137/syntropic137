@@ -1,0 +1,13 @@
+diff --git a/scripts/check_setup_template_current.py b/scripts/check_setup_template_current.py
+index 47009d66d..9229fa23c 100644
+--- a/scripts/check_setup_template_current.py
++++ b/scripts/check_setup_template_current.py
+@@ -63,7 +63,7 @@ _PINNED_REF = re.compile(
+ #: a hand-written delimiter set, decides where the scalar ends, so a quoted
+ #: suffix stays in the word and a word claiming a digest must be exactly a
+ #: ``_PINNED_REF``, never a prefix of one.
+-_REF_WORD = re.compile(r"ghcr\.io/syntropic137/\S*")
++_REF_WORD = re.compile(r"ghcr\.io/syntropic137/[^\s}]*")
+ 
+ EXIT_OK = 0
+ EXIT_MISMATCH = 1
