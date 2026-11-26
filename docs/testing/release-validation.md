@@ -679,6 +679,24 @@ npm info @syntropic137/cli version
 
 - [ ] Published version matches the release
 
+### Setup template
+
+`npx @syntropic137/setup` installs from the compose template inside the npm
+package, not from the release. The template-sync bot carries the release's
+compose into that package; this proves it did (#1863).
+
+```bash
+just check-setup-template                       # latest release vs npm latest
+just check-setup-template --release v<VERSION>  # a specific release
+```
+
+- [ ] Exits 0: the template's `# Pinned to release` header and every
+      `ghcr.io/syntropic137/*@sha256:` digest match the release's
+      `docker-compose.syntropic137.yaml` asset
+- [ ] On exit 1, the table names each image whose digest differs or is missing;
+      the setup package was not re-published for this release. Exit 2 is a
+      fetch or parse error, not a verdict
+
 ### GitHub Release
 
 ```bash
