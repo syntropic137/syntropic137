@@ -185,6 +185,14 @@ def test_quoted_suffix_after_a_valid_pin_is_a_parse_error() -> None:
         parse_template(_compose(extra=bad), "setup")
 
 
+def test_pin_in_a_trailing_comment_is_a_parse_error() -> None:
+    commented = f"    # ghcr.io/syntropic137/syn-gateway@sha256:{'a' * 65}"
+    text = _compose().replace(f"syn-collector@{_B}", f"syn-collector@{_B}{commented}")
+
+    with pytest.raises(TemplateParseError, match="not a whole image value"):
+        parse_template(text, "setup")
+
+
 def test_pin_in_a_flow_mapping_is_read() -> None:
     flow = f"  gateway: {{image: ghcr.io/syntropic137/syn-gateway@{_C}}}\n"
 

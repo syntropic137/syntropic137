@@ -106,37 +106,50 @@ def parse_template(text: str, source: str) -> PinnedTemplate:
     header = _HEADER.match(headers[0])
     if header is None:
         raise TemplateParseError(f"{source}: malformed release header: {headers[0]!r}")
+    _reject_malformed_pins(text, source)
 
     images: dict[str, str] = {}
-    for word in _ref_words(text, source):
-        if "@" not in word:
-            continue  # a tag ref, not a pin
-        ref = _PINNED_REF.fullmatch(word)
-        if ref is None:
-            raise TemplateParseError(
-                f"{source}: malformed image pin {word!r}, "
-                "expected ghcr.io/syntropic137/<name>[:tag]@sha256:<64 hex>"
-            )
-        name, tag = ref["name"], ref["tag"]
-        pin = f"{tag}@{ref['digest']}" if tag else ref["digest"]
-        # The same image under several services is one pin; two pins for one
-        # image would make "the" expected digest a guess.
-        if images.setdefault(name, pin) != pin:
-            raise TemplateParseError(
-                f"{source}: ghcr.io/syntropic137/{name} is pinned twice: {images[name]} and {pin}"
-            )
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for ref in _PINNED_REF.finditer(line):
+            name, tag = ref["name"], ref["tag"]
+            pin = f"{tag}@{ref['digest']}" if tag else ref["digest"]
+            # The same image under several services is one pin; two pins for one
+            # image would make "the" expected digest a guess.
+            if images.setdefault(name, pin) != pin:
+                raise TemplateParseError(
+                    f"{source}: ghcr.io/syntropic137/{name} is pinned twice: "
+                    f"{images[name]} and {pin}"
+                )
     if not images:
         raise TemplateParseError(f"{source}: no ghcr.io/syntropic137/*@sha256: image refs")
     return PinnedTemplate(release=header[1], images=images)
 
 
-def _ref_words(text: str, source: str) -> list[str]:
-    """Every ``ghcr.io/syntropic137`` word in the template's scalars; comments are not scalars."""
+def _reject_malformed_pins(text: str, source: str) -> None:
+    """A digest ref that is not a whole pin would otherwise be truncated or skipped."""
     try:
         scalars = [t.value for t in yaml.scan(text) if isinstance(t, yaml.ScalarToken)]
     except yaml.YAMLError as exc:
         raise TemplateParseError(f"{source}: not valid YAML: {exc}") from exc
-    return [word for scalar in scalars for word in _REF_WORD.findall(scalar)]
+    words = {word for scalar in scalars for word in _REF_WORD.findall(scalar)}
+    for word in sorted(words):
+        if "@" in word and _PINNED_REF.fullmatch(word) is None:
+            raise TemplateParseError(
+                f"{source}: malformed image pin {word!r}, "
+                "expected ghcr.io/syntropic137/<name>[:tag]@sha256:<64 hex>"
+            )
+    # Pins are read line by line; each must be one of those whole words, so a
+    # ref in a trailing comment or cut out of a longer token is never counted.
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for ref in _PINNED_REF.finditer(line):
+            if ref[0] not in words:
+                raise TemplateParseError(
+                    f"{source}: {ref[0]!r} is not a whole image value in {line.strip()!r}"
+                )
 
 
 def compare(expected: PinnedTemplate, found: PinnedTemplate) -> list[Mismatch]:
