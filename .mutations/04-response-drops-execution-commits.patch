@@ -1,0 +1,11 @@
+diff --git a/apps/syn-api/src/syn_api/routes/executions/queries.py b/apps/syn-api/src/syn_api/routes/executions/queries.py
+index 1638a4cc5..c8172a86f 100644
+--- a/apps/syn-api/src/syn_api/routes/executions/queries.py
++++ b/apps/syn-api/src/syn_api/routes/executions/queries.py
+@@ -930,6 +930,5 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
+         latest_resumed_as=lineage.latest_resumed_as,
+         resumed_from_display=lineage.resumed_from_display,
+         resumed_as_display=lineage.resumed_as_display,
+-        source_commits=detail.source_commits,
+         eval=await execution_eval_run(mgr.store, execution_id),
+     )
