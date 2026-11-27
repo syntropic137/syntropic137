@@ -213,7 +213,9 @@ them.
 If the fix touched UI files, re-take the screenshots for the routes it affects
 with the recipe in `verify.md`'s section (build, serve, then
 `node /workspace/repos/syntropic137/apps/syn-dashboard-ui/scripts/screenshot.mjs <url> /workspace/artifacts/output/<route>-<viewport>.png --viewport <WxH>`,
-the same absolute path for `apps/syn-docs/`, which has no script of its own),
+plus `--fixtures /workspace/repos/syntropic137/apps/syn-dashboard-ui/fixtures/screenshot.json`
+for a dashboard route so the page is populated (#1647), and the same absolute
+path, without fixtures, for `apps/syn-docs/`, which has no script of its own),
 open each PNG and look at it. If it did not, the first pass's screenshots still
 describe the candidate. Their PNGs are under `artifacts/input/<phase-id>/`
 byte-for-byte (#990, fixed in #1652): check each starts with `89 50 4e 47` and
