@@ -167,6 +167,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     ReportedFailureReason,
     ReviewVerdict,
     SideEffectStatus,
+    SourceCommit,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
@@ -624,6 +625,7 @@ __all__ = [
     "SkillLockedHashMismatch",
     "SkillNotRegistered",
     "SkillRef",
+    "SourceCommit",
     "StaleWorkspaceDir",
     "StartResumeHandler",
     "StartStatus",

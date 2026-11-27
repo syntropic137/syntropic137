@@ -764,6 +764,22 @@ that branch, and that head must contain the pin, or it too is a Checkout
 Mismatch. Recorded on every Phase's provisioning; the Execution's Starting
 Checkout is the first provisioning's, even when that one recorded none. (#967.)
 
+A Phase's **Checked-out Commits** are its own latest provisioning's reading of
+the same thing, served per Phase on the execution detail so a reader can see
+which commit each Phase ran on; a retried Phase reports its fresh workspace's.
+Not recorded is not the same as none: a run from before the reading served
+null, never an empty list. (#1004.)
+
+## Source Commit
+
+The commit one repository was at when an Execution started, as its start
+recorded it: its Pin for that repository, the default branch's head or an
+eval's frozen baseline. A **Source Commit** names a repository and a commit
+and nothing else: no ref is recorded, so none is shown. Its commit may be
+unresolved (recorded, but nothing could resolve it), which is a different
+statement from an Execution that recorded no Source Commits at all, as every
+run before #1457 did. The execution detail serves both apart. (#1457, #1004.)
+
 ## Continued Branch
 
 A branch a Resume Phase picks up rather than starting over: one the original's

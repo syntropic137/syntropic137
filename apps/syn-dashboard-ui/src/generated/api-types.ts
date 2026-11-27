@@ -5000,6 +5000,8 @@ export interface components {
             resumed_from?: components["schemas"]["ResumedFromInfo"] | null;
             /** Resumed As */
             resumed_as?: string | null;
+            /** Source Commits */
+            source_commits?: components["schemas"]["SourceCommit"][] | null;
             /** Latest Resumed As */
             latest_resumed_as?: string | null;
             /** Resumed From Display */
@@ -7105,6 +7107,8 @@ export interface components {
             exit_code?: number | null;
             /** Observed Branches */
             observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
+            /** Checked Out Commits */
+            checked_out_commits?: components["schemas"]["SourceCommit"][] | null;
             pinned_at_start?: components["schemas"]["PhaseStartConfig"] | null;
             /**
              * Start Pins Status
@@ -9554,6 +9558,20 @@ export interface components {
              * @default false
              */
             truncated: boolean;
+        };
+        /**
+         * SourceCommit
+         * @description The commit one repository was at when the execution started (#1457).
+         *
+         *     `sha` is None when nothing could resolve it - no GitHub access, a repository
+         *     that has since gone - and that is recorded as an honest "unknown" rather
+         *     than left out, so the repository list stays complete.
+         */
+        SourceCommit: {
+            /** Repository */
+            repository: string;
+            /** Sha */
+            sha?: string | null;
         };
         /**
          * StartPath
