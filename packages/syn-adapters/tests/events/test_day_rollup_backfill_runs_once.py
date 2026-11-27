@@ -37,6 +37,7 @@ from syn_adapters.events.schema import (
     ROLLUP_EXECUTION_INDEX_VALID_SQL,
     ROLLUP_STARTUP_UNLOCK_SQL,
     USAGE_ROLLUP_BACKFILL_SESSIONS_SQL,
+    USAGE_ROLLUP_HAS_REPORTED_COLUMN_SQL,
     USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL,
     USAGE_ROLLUP_MARK_COMPLETE_SQL,
     USAGE_ROLLUP_MARK_INCOMPLETE_SQL,
@@ -285,6 +286,11 @@ class CatalogueConnection:
             return _tgenabled_predicate_holds(sql, tgenabled)
         if sql == USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL:
             return self._usage_rollup_marked
+        if sql == USAGE_ROLLUP_HAS_REPORTED_COLUMN_SQL:
+            # This double's turn table is always the current one: the column
+            # arrives with it. The upgrade from a table without it is the
+            # parity test's (ADR-079).
+            return "agent_turn_usage_rollup" in self._relations
         msg = f"unexpected fetchval in ensure_schema(): {sql!r}"
         raise AssertionError(msg)
 
