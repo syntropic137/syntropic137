@@ -664,7 +664,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "3eba268fbc08341004e353165e83b8722a6c5455e6c7ff499cdbe9844e501296"
+      "document_sha256": "9750eec1a11a321e15b8548b0170c3521631e3c0efeb3cbd648960d256408ece"
     },
     "workflows/sdlc/implement-v4-precheck/workflow.yaml": {
       "phases": [
@@ -717,7 +717,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "1c21e0750fc69f56313c2386523a76f28d6c1b1c4795d2d1d6f714d33c2439bd"
+      "document_sha256": "c66b6b0d77d0544ea30a2c06499d6ab96c4bb3c0f4ac0e8543f85d8482fa83f5"
     },
     "workflows/sdlc/implement-v4-precheck-sonnet-fix/workflow.yaml": {
       "phases": [
@@ -770,7 +770,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "191834ed8f9929c525918dfbe6190e9e290a7e9b5c3d02f1a6ae5ef43f032457"
+      "document_sha256": "ea4cb9d154eb2ee236342fb8e7210e01e8c2997940a20b8603ae2fdf1a8c5bc7"
     },
     "workflows/sdlc/implement-v7/workflow.yaml": {
       "phases": [
@@ -823,7 +823,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "49060fa7c19dc16038ff3bb94d19175c3260d5d9522b15f34182bc4cc21c48f1"
+      "document_sha256": "2af487e5625d9b564484d387116d7d7d38badbf17f61877d345d3f3bf667362f"
     },
     "workflows/sdlc/pr-review/workflow.yaml": {
       "phases": [
@@ -1079,7 +1079,7 @@
           "prompt_file": "phases/finalize_pr.md"
         }
       ],
-      "document_sha256": "31668cd6696f0850ce6b4a17fa20f5f79d4afe61514f69cbf784037231d10bc7"
+      "document_sha256": "2307b8a9e21be640e84f830375d4fa97be84e957a9a77ebd09c77e7c9625af80"
     },
     "workflows/triggers/ci-fix.yaml": {
       "phases": [

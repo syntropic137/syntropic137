@@ -52,9 +52,7 @@ reads do not grow with history; origin/main's grow linearly with it.
 from __future__ import annotations
 
 import json
-import math
 import os
-import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -67,8 +65,10 @@ import pytest
 
 from syn_shared.events import GIT_COMMIT, SESSION_STARTED, SESSION_SUMMARY, TOKEN_USAGE
 
+from .latency_gate import Request, measure, over_budget, report
+
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
 
 pytestmark = pytest.mark.integration
 
@@ -79,8 +79,6 @@ EXECUTIONS_PER_WORKFLOW = 20
 TURNS_PER_SESSION = 300
 TOOL_EVENTS_PER_SESSION = 120
 DAYS = 90
-RUNS = 20
-WARMUP = 2
 
 GATED_WORKFLOW = "wf-0"
 
@@ -263,21 +261,16 @@ async def app_on_seeded_postgres(
         await store.close()
 
 
-async def _p95_ms(client: httpx.AsyncClient, path: str, params: dict[str, str]) -> float:
-    for _ in range(WARMUP):
-        (await client.get(path, params=params)).raise_for_status()
-    samples: list[float] = []
-    for _ in range(RUNS):
-        started = time.perf_counter()
-        response = await client.get(path, params=params)
-        samples.append((time.perf_counter() - started) * 1000)
-        response.raise_for_status()
-    samples.sort()
-    return samples[math.ceil(0.95 * len(samples)) - 1]
+def _requester(client: httpx.AsyncClient) -> Request:
+    async def request(path: str, params: Mapping[str, str]) -> None:
+        (await client.get(path, params=dict(params))).raise_for_status()
+
+    return request
 
 
 async def test_dashboard_endpoints_stay_inside_their_p95_budget(
     app_on_seeded_postgres: httpx.AsyncClient,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     client = app_on_seeded_postgres
 
@@ -290,12 +283,9 @@ async def test_dashboard_endpoints_stay_inside_their_p95_budget(
     heatmap = await client.get("/insights/contribution-heatmap", params={"metric": "sessions"})
     assert heatmap.json()["total"] == EXECUTIONS, heatmap.text
 
-    measured = {e.name: await _p95_ms(client, e.path, e.params) for e in ENDPOINTS}
-
-    table = "\n".join(
-        f"  {e.name:<32} p95 {measured[e.name]:7.1f} ms   budget {e.budget_ms:5.0f} ms"
-        for e in ENDPOINTS
-    )
-    print(f"\nlatency gate ({RUNS} runs per endpoint):\n{table}")
-    over = [e.name for e in ENDPOINTS if measured[e.name] > e.budget_ms]
+    measured = await measure(_requester(client), ENDPOINTS)
+    table = report("latency gate", ENDPOINTS, measured)
+    with capsys.disabled():  # the numbers belong in the CI log, pass or fail
+        print(f"\n{table}")
+    over = over_budget(ENDPOINTS, measured)
     assert not over, f"p95 over budget for {over}:\n{table}"
