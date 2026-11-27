@@ -5,7 +5,22 @@ import { flushSync, mount, unmount } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getExecution, listExecutions } from '@syn137/syn-ui-data'
 import { RUNS } from '@syn137/syn-ui-data/fixtures'
+import type { ExecutionDetailResponse } from '@syn137/syn-ui-data/types'
 import { startClient } from '../../lib/client'
+
+// Lets a test reshape the fixture-backed response before the page reads it.
+const reshape = vi.hoisted(() => ({ fn: null as ((d: ExecutionDetailResponse) => void) | null }))
+vi.mock('@syn137/syn-ui-data', async (importOriginal) => {
+  const data = await importOriginal<typeof import('@syn137/syn-ui-data')>()
+  return {
+    ...data,
+    getExecution: async (...args: Parameters<typeof data.getExecution>) => {
+      const d = await data.getExecution(...args)
+      reshape.fn?.(d)
+      return d
+    },
+  }
+})
 
 const settle = async () => {
   for (let i = 0; i < 20; i++) {
@@ -26,6 +41,7 @@ beforeEach(() => {
   startClient(true)
 })
 afterEach(() => {
+  reshape.fn = null
   startClient(false)
   vi.unstubAllGlobals()
 })
@@ -75,13 +91,13 @@ describe('Execution detail commits (#1004)', () => {
   // The board's canonical run is a day old, from before commits were captured.
   const older = RUNS[2]!.id
 
-  it("shows each repository's short commit for the run, the full SHA only on copy", async () => {
+  it("shows each repository's SHA raw for the run, as the API sends it, with the full SHA to copy", async () => {
     const d = await getExecution(recheckout)
     const commit = d.source_commits![0]!
     const { target, done } = await render(recheckout)
     try {
-      expect(runCommits(target)).toBe(`Commits: ${commit.repository} @ ${commit.sha!.slice(0, 7)}`)
-      expect(target.querySelector('.sky-page-header .sky-exec__commits')!.textContent).not.toContain(commit.sha!)
+      // TODO(#897): raw until SourceCommit has a `sha_display`; the short form belongs in the API.
+      expect(runCommits(target)).toBe(`Commits: ${commit.repository} @ ${commit.sha}`)
       const copy = target.querySelector<HTMLButtonElement>('.sky-page-header .sky-exec__commits button')
       expect(copy?.getAttribute('aria-label')).toBe(`Copy the full commit for ${commit.repository}`)
     } finally {
@@ -95,13 +111,29 @@ describe('Execution detail commits (#1004)', () => {
     expect(differing.sha).not.toBe(d.source_commits![0]!.sha)
     const { target, done } = await render(recheckout)
     try {
-      expect(phaseCommits(target)).toEqual([null, null, `Checked out: ${differing.repository} @ ${differing.sha!.slice(0, 7)}`])
+      expect(phaseCommits(target)).toEqual([null, null, `Checked out: ${differing.repository} @ ${differing.sha}`])
     } finally {
       done()
     }
   }, 30_000)
 
-  it('says the commit was not recorded for a run from before capture, and nothing per phase', async () => {
+  it('says a completed phase did not record its commit, under a run that recorded one', async () => {
+    reshape.fn = (d) => {
+      d.phases[0]!.checked_out_commits = null
+    }
+    const d = await getExecution(recheckout)
+    expect(d.phases[0]!.status).toBe('completed')
+    expect(d.source_commits).not.toBeNull()
+    const { target, done } = await render(recheckout)
+    try {
+      expect(phaseCommits(target)[0]).toBe('Checked out: commit not recorded (older run)')
+      expect(phaseCommits(target)[1]).toBeNull()
+    } finally {
+      done()
+    }
+  }, 30_000)
+
+  it('says the commit was not recorded for a run from before capture, once, not again per phase', async () => {
     const d = await getExecution(older)
     expect(d.source_commits).toBeNull()
     const { target, done } = await render(older)

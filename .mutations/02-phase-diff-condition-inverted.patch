@@ -1,12 +1,12 @@
 diff --git a/packages/syn-ui/skyline-core/src/screens/executions/detail.ts b/packages/syn-ui/skyline-core/src/screens/executions/detail.ts
-index 54fec3fae..d5a0dbe3b 100644
+index 6c4260553..bbcdc0368 100644
 --- a/packages/syn-ui/skyline-core/src/screens/executions/detail.ts
 +++ b/packages/syn-ui/skyline-core/src/screens/executions/detail.ts
-@@ -418,6 +418,6 @@ export function phaseCommitsView(
-   execution: readonly SourceCommitLike[] | null | undefined,
- ): CommitsView | null {
-   if (phase == null) return null
--  if (execution != null && commitKey(phase) === commitKey(execution)) return null
-+  if (execution != null && commitKey(phase) !== commitKey(execution)) return null
-   return commitsView(phase)
+@@ -416,6 +416,6 @@ export function phaseCommitsView(
+   if (execution == null) return commitsView(commits)
+   if (!commits.length) return execution.length ? commitsView(commits) : null
+   const recorded = new Set(execution.map(commitKey))
+-  const differing = commits.filter((c) => !recorded.has(commitKey(c)))
++  const differing = commits.filter((c) => recorded.has(commitKey(c)))
+   return differing.length ? commitsView(differing) : null
  }

@@ -1,10 +1,10 @@
 diff --git a/packages/syn-ui/skyline-core/src/screens/executions/detail.ts b/packages/syn-ui/skyline-core/src/screens/executions/detail.ts
-index 54fec3fae..34f231d47 100644
+index 6c4260553..cf55ffbc6 100644
 --- a/packages/syn-ui/skyline-core/src/screens/executions/detail.ts
 +++ b/packages/syn-ui/skyline-core/src/screens/executions/detail.ts
-@@ -389,7 +389,7 @@ export type CommitsView = { kind: 'commits'; lines: readonly CommitLine[] } | {
- const SHORT_SHA = 7
+@@ -386,7 +386,7 @@ export type CommitsView = { kind: 'commits'; lines: readonly CommitLine[] } | {
  
+ // TODO(#897): the SHA is shown raw because SourceCommit has no `sha_display` yet; the short form belongs in the API (#1004).
  export function commitsView(commits: readonly SourceCommitLike[] | null | undefined): CommitsView {
 -  if (commits == null) return { kind: 'absent', text: COMMITS_NOT_RECORDED }
 +  if (commits == null) return { kind: 'commits', lines: [] }

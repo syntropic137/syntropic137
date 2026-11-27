@@ -329,7 +329,7 @@
             {@const total = phaseTokens(p)}
             {@const target = phaseRowTarget(p)}
             {@const skills = phaseSkillUseText(p)}
-            {@const checkedOut = phaseCommitsView(p.checked_out_commits, d.source_commits)}
+            {@const checkedOut = phaseCommitsView(p, d.source_commits)}
             <li
               class="sky-exec__phase"
               data-linked={target.kind === 'session' ? '' : undefined}
@@ -670,7 +670,7 @@
   .sky-exec__phase-error {
     padding-left: 0;
   }
-  /* Each repository's commit, short SHA with the full one a copy away (#1004). */
+  /* Each repository's commit, with a copy button for its SHA (#1004). */
   .sky-exec__commits {
     display: flex;
     flex-wrap: wrap;

@@ -8,6 +8,6 @@ were run locally by applying each patch and running both suites:
 
 | Patch | Bug | Killed by |
 |---|---|---|
-| 01-null-commits-show-nothing | a `null` list renders no line instead of "commit not recorded (older run)" | commits.test.ts "says a run from before capture…"; detail.svelte.test.ts "says the commit was not recorded…" |
-| 02-phase-diff-condition-inverted | a phase shows its commit when it matches the run and hides it when it differs | commits.test.ts phaseCommitsView cases; detail.svelte.test.ts "shows a phase checked out at another commit…" |
-| 03-sha-truncated-wrongly | the short SHA is 8 characters, not 7 | commits.test.ts "shows the 7-character SHA…"; detail.svelte.test.ts run and phase commit lines |
+| 01-null-commits-show-nothing | a `null` list renders no line instead of "commit not recorded (older run)" | commits.test.ts null run and ran-without-recording phase; detail.svelte.test.ts completed phase with null commits, and older run |
+| 02-phase-diff-condition-inverted | a phase shows the repositories that match the run and hides the ones that differ | commits.test.ts phaseCommitsView cases, including the per-repository invariant; detail.svelte.test.ts "shows a phase checked out at another commit…" |
+| 03-sha-truncated-wrongly | the SHA is cut to 7 characters in the frontend instead of shown raw until the API has a `sha_display` (#897) | commits.test.ts "shows the SHA raw…" and phase cases; detail.svelte.test.ts run and phase commit lines |

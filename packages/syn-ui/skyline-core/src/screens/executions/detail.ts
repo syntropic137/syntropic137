@@ -369,25 +369,22 @@ export interface SourceCommitLike {
 /** What a run from before commits were captured shows in place of them (#1004). */
 export const COMMITS_NOT_RECORDED = 'commit not recorded (older run)'
 
-/** One repository and where it was: `short` is the 7-character SHA, `sha` the full one to copy; both null when unresolved. */
+/** One repository and where it was: `sha` is the full SHA, shown and copied as is; null when unresolved. */
 export interface CommitLine {
   repository: string
-  short: string | null
   sha: string | null
   text: string
 }
 
 /**
  * Where each repository was, as the page shows it: a line per repository
- * ("acme/api @ 4f2a9c1"), or one sentence when there is no line to show.
+ * ("acme/api @ <sha>"), or one sentence when there is no line to show.
  * Null (a run from before capture) and an empty list (a run that checked
  * nothing out) are both said in words, never drawn as an empty list.
  */
 export type CommitsView = { kind: 'commits'; lines: readonly CommitLine[] } | { kind: 'absent'; text: string }
 
-// TODO(#897): the 7-character SHA is worked out here because SourceCommit has no `sha_display` yet (#1004).
-const SHORT_SHA = 7
-
+// TODO(#897): the SHA is shown raw because SourceCommit has no `sha_display` yet; the short form belongs in the API (#1004).
 export function commitsView(commits: readonly SourceCommitLike[] | null | undefined): CommitsView {
   if (commits == null) return { kind: 'absent', text: COMMITS_NOT_RECORDED }
   if (!commits.length) return { kind: 'absent', text: 'no repository checked out' }
@@ -395,29 +392,30 @@ export function commitsView(commits: readonly SourceCommitLike[] | null | undefi
     kind: 'commits',
     lines: commits.map((c) => {
       const sha = c.sha || null
-      const short = sha ? sha.slice(0, SHORT_SHA) : null
-      return { repository: c.repository, short, sha, text: `${c.repository} @ ${short ?? 'unresolved'}` }
+      return { repository: c.repository, sha, text: `${c.repository} @ ${sha ?? 'unresolved'}` }
     }),
   }
 }
 
-const commitKey = (commits: readonly SourceCommitLike[]) =>
-  commits
-    .map((c) => `${c.repository}@${c.sha ?? ''}`)
-    .sort()
-    .join('\n')
+const commitKey = (c: SourceCommitLike) => `${c.repository}@${c.sha ?? ''}`
 
 /**
- * A phase's checked-out commits, only where they differ from the run's, so
- * the same SHA is not repeated on every phase. Null means say nothing: the
- * phase matches the run, or it recorded none (not provisioned yet, or the
- * run predates capture, which the run's own line already says).
+ * A phase's checked-out commits, only the repositories where it differs from
+ * the run, so the same SHA is not repeated on every phase. Null means say
+ * nothing: every repository matches the run, the phase has not started, or
+ * neither the phase nor the run recorded commits (the run's line says so).
+ * A phase that ran without recording them says so, since null is "not
+ * recorded", never "the same as the run".
  */
 export function phaseCommitsView(
-  phase: readonly SourceCommitLike[] | null | undefined,
+  phase: { status: string; checked_out_commits?: readonly SourceCommitLike[] | null },
   execution: readonly SourceCommitLike[] | null | undefined,
 ): CommitsView | null {
-  if (phase == null) return null
-  if (execution != null && commitKey(phase) === commitKey(execution)) return null
-  return commitsView(phase)
+  const commits = phase.checked_out_commits
+  if (commits == null) return execution == null || statusKind(phase.status) === 'pending' ? null : commitsView(commits)
+  if (execution == null) return commitsView(commits)
+  if (!commits.length) return execution.length ? commitsView(commits) : null
+  const recorded = new Set(execution.map(commitKey))
+  const differing = commits.filter((c) => !recorded.has(commitKey(c)))
+  return differing.length ? commitsView(differing) : null
 }
