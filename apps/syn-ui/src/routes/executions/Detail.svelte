@@ -13,6 +13,7 @@
     phaseProgressText,
     phaseRowTarget,
     canCancel,
+    commitsView,
     costRowsByModel,
     costRowsByPhase,
     isExecutionEvent,
@@ -20,6 +21,7 @@
     phaseKit,
     phaseMeta,
     phaseModelChip,
+    phaseCommitsView,
     phaseNumber,
     phaseSkillUseText,
     phaseTokenSplit,
@@ -29,7 +31,7 @@
     timelineCaption,
     usageNote,
   } from '@syn137/skyline-core/screens/executions'
-  import type { PhaseRowTarget } from '@syn137/skyline-core/screens/executions'
+  import type { CommitsView, PhaseRowTarget } from '@syn137/skyline-core/screens/executions'
   import { splitTask } from '@syn137/skyline-core/screens/prompt'
   import { Button, Callout, EmptyState, Skeleton } from '@syn137/skyline-svelte-v5'
   import { CopyButton, HarnessChip, PageHeader, PhaseBlocks, PhaseKitChips, PromptText, ProvenanceStrip, RunTiles, StatusBadge, UsageMeter } from '@syn137/skyline-svelte-v5/patterns'
@@ -127,6 +129,7 @@
     ...notStarted.map((p) => ({ name: p.name, durationMs: null, tokens: 0, tone: phaseTone(p.status), metaShort: p.status_display })),
   ])
 
+  const commits = $derived(commitsView(d?.source_commits))
   const caption = $derived(timelineCaption(phases))
   const provenance = $derived(provenanceFor(phases, inventory.data, d?.skill_use))
   const tokens = $derived(
@@ -185,6 +188,22 @@
   const notFound = $derived(exec.error instanceof ApiError && exec.error.status === 404)
   const repoName = (url: string) => url.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '')
 </script>
+
+{#snippet commitLine(view: CommitsView, lead: string)}
+  <p class="sky-exec__commits">
+    <span>{lead}</span>
+    {#if view.kind === 'absent'}
+      <span>{view.text}</span>
+    {:else}
+      {#each view.lines as c (c.repository)}
+        <span class="sky-exec__commit">
+          {c.text}
+          {#if c.sha}<CopyButton text={c.sha} label={`Copy the full commit for ${c.repository}`} copiedLabel="Copied the commit" />{/if}
+        </span>
+      {/each}
+    {/if}
+  </p>
+{/snippet}
 
 {#if exec.error && !d}
   {#if notFound}
@@ -246,6 +265,7 @@
           <span class="sky-exec__live" role="status"><span class="sky-exec__pulse" aria-hidden="true"></span>Live</span>
         {/if}
       </div>
+      {@render commitLine(commits, 'Commits:')}
     </PageHeader>
 
     {#if cancelError}
@@ -309,6 +329,7 @@
             {@const total = phaseTokens(p)}
             {@const target = phaseRowTarget(p)}
             {@const skills = phaseSkillUseText(p)}
+            {@const checkedOut = phaseCommitsView(p.checked_out_commits, d.source_commits)}
             <li
               class="sky-exec__phase"
               data-linked={target.kind === 'session' ? '' : undefined}
@@ -345,6 +366,9 @@
               </div>
               {#if skills}
                 <p class="sky-exec__phase-skills">Skills: {skills}</p>
+              {/if}
+              {#if checkedOut}
+                {@render commitLine(checkedOut, 'Checked out:')}
               {/if}
               {#if p.error_message}
                 <p class="sky-exec__phase-error">{p.error_message}</p>
@@ -642,8 +666,25 @@
   .sky-exec__phase-tokens,
   .sky-exec__phase > :global(.sky-exec__tiles),
   .sky-exec__phase-skills,
+  .sky-exec__phase > .sky-exec__commits,
   .sky-exec__phase-error {
     padding-left: 0;
+  }
+  /* Each repository's commit, short SHA with the full one a copy away (#1004). */
+  .sky-exec__commits {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ds-space-1) var(--ds-space-3);
+    margin: 0;
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+    color: var(--ds-color-text-muted);
+  }
+  .sky-exec__commit {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ds-space-1);
   }
   .sky-exec__phase-skills {
     margin: 0;
@@ -712,6 +753,7 @@
     .sky-exec__phase-tokens,
     .sky-exec__phase > :global(.sky-exec__tiles),
     .sky-exec__phase-skills,
+    .sky-exec__phase > .sky-exec__commits,
     .sky-exec__phase-error {
       padding-left: 40px;
     }
