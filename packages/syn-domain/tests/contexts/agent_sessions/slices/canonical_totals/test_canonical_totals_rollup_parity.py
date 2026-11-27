@@ -43,7 +43,10 @@ B is written by the trigger as it stood BEFORE reported_observations
 that is the only way a key can balance on observations and still owe its
 reported turns, which is what the backfill's widened keep condition is for.
 More turns on A's keys then go through the new trigger before D, so the
-reconcile subtracts reported turns the trigger already counted.
+reconcile subtracts reported turns the trigger already counted. Then an
+older build's start puts 007's function back over the column and the mark,
+turns arrive under it, and this build's next start must reconcile them.
+Turns with counts beyond int4 go through the new trigger and through D.
 
 MARKED ``integration``: CI runs it on push to main, PRs into release and the
 weekly cron, not on PRs into main.
@@ -109,6 +112,29 @@ def _turn(
         }
     )
     return Row(_T0 + timedelta(minutes=n), TOKEN_USAGE, session, execution, payload)
+
+
+def _wide_turns(batch_rows: list[Row], index: int, offset: int) -> list[Row]:
+    """Two turns beyond int4 on the key of an earlier batch's session ``index``.
+
+    The token columns are bigint, so ingest accepts both: one count above 2^31,
+    and two below it whose sum is not. The reported count must accept them too.
+    """
+    first = next(r for r in batch_rows if r.session_id.endswith(f"-sess-{index}"))
+    wide = (
+        {"input_tokens": 2**31},
+        {"output_tokens": 2**30, "cache_read_tokens": 2**30},
+    )
+    return [
+        Row(
+            _T0 + timedelta(minutes=offset + i),
+            TOKEN_USAGE,
+            first.session_id,
+            first.execution_id,
+            json.dumps({"model": _MODELS[0], **tokens}),
+        )
+        for i, tokens in enumerate(wide)
+    ]
 
 
 def _summary(
@@ -241,12 +267,24 @@ async def seeded(test_infrastructure) -> AsyncIterator[Seeded]:
                     conn, [*_batch("b", range(40, 70)), *_more_turns_on(batch_a, 1_000)]
                 )
                 await EventStoreSchema().ensure_schema(conn)  # upgrades: adds and backfills
-                await copy_rows(conn, _more_turns_on(batch_a, 1_500))
+                await copy_rows(
+                    conn, [*_more_turns_on(batch_a, 1_500), *_wide_turns(batch_a, 0, 1_500)]
+                )
+                # An older build starts, and replaces the function, not the
+                # column or the mark; then this build starts again.
+                await conn.execute(_trigger_function_before_reported_observations())
+                await copy_rows(conn, _more_turns_on(batch_a, 1_750))
+                await EventStoreSchema().ensure_schema(conn)  # reconciles that body's turns
                 await conn.execute(
                     f"ALTER TABLE agent_events DISABLE TRIGGER {USAGE_ROLLUP_TRIGGER}"
                 )
                 await copy_rows(
-                    conn, [*_batch("d", range(70, 90)), *_more_turns_on(batch_a, 2_000)]
+                    conn,
+                    [
+                        *_batch("d", range(70, 90)),
+                        *_more_turns_on(batch_a, 2_000),
+                        *_wide_turns(batch_a, 1, 2_000),
+                    ],
                 )
                 await EventStoreSchema().ensure_schema(conn)  # a disabled trigger: reconcile
                 await copy_rows(

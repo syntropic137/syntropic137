@@ -499,6 +499,26 @@ SELECT EXISTS (
 )
 """
 
+# The body of the trigger function installed now, or no row. A start of an
+# older build replaces the function and leaves the column and the mark in
+# place, so the turns ingested under it carry no reported count; only the
+# body says so (ADR-079 D5).
+USAGE_ROLLUP_INSTALLED_FUNCTION_SQL = """
+SELECT prosrc FROM pg_proc WHERE oid = to_regprocedure('agent_usage_rollup_apply()')
+"""
+USAGE_ROLLUP_TRIGGER_FUNCTION_BODY = USAGE_ROLLUP_TRIGGER_FUNCTION_SQL.split("$$")[1]
+
+
+def usage_rollup_function_is_current(installed: object) -> bool:
+    """Whether ``installed`` (``prosrc``) is this build's trigger body, modulo whitespace.
+
+    Modulo whitespace so that 011, applied by hand, counts as current too.
+    """
+    return isinstance(installed, str) and installed.split() == (
+        USAGE_ROLLUP_TRIGGER_FUNCTION_BODY.split()
+    )
+
+
 USAGE_ROLLUP_TRIGGER = "agent_events_usage_rollup"
 
 
@@ -861,7 +881,7 @@ class EventStoreSchema:
         USAGE_ROLLUP_TABLES_SQL for why the trigger's rows and the backfill's
         rows add up to every event exactly once while ingest carries on. It
         runs only when the rollup is not known complete - tables present, the
-        trigger live, AND the mark present - so a restart pays catalogue
+        trigger live, its function this build's, AND the mark present - so a restart pays catalogue
         lookups, a backfill interrupted by a crash resumes on the next start,
         and a trigger found dropped or disabled earns a full reconcile.
         """
@@ -881,10 +901,14 @@ class EventStoreSchema:
             ) is True
             # A mark written before reported_observations existed does not
             # cover it: the column arrives at 0 on every row, so the rollup is
-            # backfilled again once to fill it (ADR-079 D5).
+            # backfilled again once to fill it (ADR-079 D5). Nor does one an
+            # older build's trigger body has run under since, column or not.
             marked_complete = (
                 all(tables_exist)
                 and (await conn.fetchval(USAGE_ROLLUP_HAS_REPORTED_COLUMN_SQL)) is True
+                and usage_rollup_function_is_current(
+                    await conn.fetchval(USAGE_ROLLUP_INSTALLED_FUNCTION_SQL)
+                )
                 and (await conn.fetchval(USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL)) is True
             )
             for ddl in USAGE_ROLLUP_TABLES_SQL:

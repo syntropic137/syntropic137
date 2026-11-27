@@ -72,12 +72,17 @@ def zero_usage_group_by(data: str = "data") -> str:
     a positive observation on an unrated model, it would be priced as that
     group: unpriced, and counted in ``unpriced_observation_count``. Grouping on
     this term keeps SQL pricing what replay prices (#1420).
+
+    ``bigint``, as ``turn_usage_columns`` reads the same fields: the usage
+    rollup's trigger evaluates this on every ingested turn (ADR-079), and an
+    ``int`` cast there would abort the insert of a turn the token columns
+    accept, for one count above 2^31 or for four whose sum is.
     """
     return (
-        f"((COALESCE(({data}->>'input_tokens')::int, 0) "
-        f"+ COALESCE(({data}->>'output_tokens')::int, 0) "
-        f"+ COALESCE(({data}->>'cache_creation_tokens')::int, 0) "
-        f"+ COALESCE(({data}->>'cache_read_tokens')::int, 0)) = 0)"
+        f"((COALESCE(({data}->>'input_tokens')::bigint, 0) "
+        f"+ COALESCE(({data}->>'output_tokens')::bigint, 0) "
+        f"+ COALESCE(({data}->>'cache_creation_tokens')::bigint, 0) "
+        f"+ COALESCE(({data}->>'cache_read_tokens')::bigint, 0)) = 0)"
     )
 
 

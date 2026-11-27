@@ -61,7 +61,7 @@ BEGIN
         COALESCE((NEW.data->>'cache_creation_tokens')::bigint, 0) AS cache_creation_tokens,
         COALESCE((NEW.data->>'cache_read_tokens')::bigint, 0) AS cache_read_tokens,
             1 AS observations,
-            CASE WHEN ((COALESCE((NEW.data->>'input_tokens')::int, 0) + COALESCE((NEW.data->>'output_tokens')::int, 0) + COALESCE((NEW.data->>'cache_creation_tokens')::int, 0) + COALESCE((NEW.data->>'cache_read_tokens')::int, 0)) = 0) THEN 0 ELSE 1 END
+            CASE WHEN ((COALESCE((NEW.data->>'input_tokens')::bigint, 0) + COALESCE((NEW.data->>'output_tokens')::bigint, 0) + COALESCE((NEW.data->>'cache_creation_tokens')::bigint, 0) + COALESCE((NEW.data->>'cache_read_tokens')::bigint, 0)) = 0) THEN 0 ELSE 1 END
         ON CONFLICT ON CONSTRAINT agent_turn_usage_rollup_key DO UPDATE
         SET input_tokens = agent_turn_usage_rollup.input_tokens + EXCLUDED.input_tokens,
             output_tokens = agent_turn_usage_rollup.output_tokens + EXCLUDED.output_tokens,
@@ -130,7 +130,7 @@ FROM (
         SUM(cache_creation_tokens) AS cache_creation_tokens,
         SUM(cache_read_tokens) AS cache_read_tokens,
         COUNT(*) AS observations,
-        COUNT(*) FILTER (WHERE NOT ((COALESCE((data->>'input_tokens')::int, 0) + COALESCE((data->>'output_tokens')::int, 0) + COALESCE((data->>'cache_creation_tokens')::int, 0) + COALESCE((data->>'cache_read_tokens')::int, 0)) = 0)) AS reported_observations
+        COUNT(*) FILTER (WHERE NOT ((COALESCE((data->>'input_tokens')::bigint, 0) + COALESCE((data->>'output_tokens')::bigint, 0) + COALESCE((data->>'cache_creation_tokens')::bigint, 0) + COALESCE((data->>'cache_read_tokens')::bigint, 0)) = 0)) AS reported_observations
     FROM (
         SELECT session_id, execution_id, data, 
     COALESCE((data->>'input_tokens')::bigint, 0) AS input_tokens,
