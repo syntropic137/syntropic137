@@ -22,6 +22,7 @@ from syn_domain.contexts.agent_sessions.slices.canonical_totals.query_service im
 from .test_897_canonical_totals_coverage import (
     RATED,
     UNRATED,
+    _Cell,
     _Conn,
     _group,
     _Pool,
@@ -33,7 +34,7 @@ from .test_2341_turn_sessions_are_bounded import _frozen_reader, _zero_total
 pytestmark = pytest.mark.unit
 
 
-def _totals() -> list[dict[str, object]]:
+def _totals() -> list[dict[str, _Cell]]:
     """A priced group, an unrated model with and without a vendor cost, and a zero total."""
     return [
         _group(RATED, vendor_cost=None, summary_observations=2, turn_sessions=["r-1"]),
@@ -45,7 +46,7 @@ def _totals() -> list[dict[str, object]]:
 
 def _conn() -> _Conn:
     return _Conn(
-        totals=_totals(),  # type: ignore[arg-type]  # the #897 double's cells
+        totals=_totals(),
         turns=[_turns(UNRATED, 3), _turns("mystery-model-2", 2)],
     )
 
