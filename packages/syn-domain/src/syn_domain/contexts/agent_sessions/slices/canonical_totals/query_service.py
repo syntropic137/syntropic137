@@ -41,7 +41,7 @@ from syn_domain.contexts.agent_sessions.recorded_model_rows import (
 )
 from syn_domain.storable_text import pg_safe
 from syn_shared.events import TOKEN_USAGE
-from syn_shared.pricing import canonical_cost_usd
+from syn_shared.pricing import canonical_cost_usd, parse_vendor_cost
 
 # All-time totals are read from the usage rollup, never from agent_events.
 #
@@ -275,12 +275,11 @@ def _optional_text(value: object) -> str | None:
 
 
 def _pricing_group(row: agent_event_span.SpanRow) -> PricingGroupRow:
-    vendor_cost = row["vendor_cost_usd"]
     return PricingGroupRow(
         model=_optional_text(row["model"]),
         requested_model=_optional_text(row[REQUESTED_MODEL_COLUMN]),
         has_requested_model=bool(row[HAS_REQUESTED_MODEL_COLUMN]),
-        vendor_cost_usd=vendor_cost if isinstance(vendor_cost, Decimal) else None,
+        vendor_cost_usd=parse_vendor_cost(row["vendor_cost_usd"]),
         input_tokens=int(row["input_tokens"]),  # type: ignore[arg-type]  # a SUM(bigint) column
         output_tokens=int(row["output_tokens"]),  # type: ignore[arg-type]  # a SUM(bigint) column
         cache_creation_tokens=int(row["cache_creation_tokens"]),  # type: ignore[arg-type]  # a SUM(bigint) column
