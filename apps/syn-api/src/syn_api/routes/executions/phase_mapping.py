@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from syn_adapters.projections.manager import ProjectionManager
+    from syn_domain.contexts.orchestration import SourceCommit
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
     )
@@ -330,9 +331,7 @@ async def _map_phase_detail(
             ]
         ),
         # None stays None: "not recorded" is not an empty checkout (#1004).
-        checked_out_commits=(
-            None if phase.checked_out_commits is None else list(phase.checked_out_commits)
-        ),
+        checked_out_commits=_listed(phase.checked_out_commits),
         # The rows themselves stay a plain list: `activity.telemetry_available`
         # below is the one place that says whether this list is short because
         # nothing happened or because nothing could be read, and a second
@@ -352,6 +351,11 @@ async def _map_phase_detail(
         # get back the stall reading that #1332 is about.
         activity=summarize_phase_activity(phase, ops, elapsed_seconds=duration_seconds),
     )
+
+
+def _listed(commits: tuple[SourceCommit, ...] | None) -> list[SourceCommit] | None:
+    """The read model's commits as the API's list, None kept None (#1004)."""
+    return None if commits is None else list(commits)
 
 
 def _requested_model(phase: PhaseExecutionDetail, session_requested: str | None) -> str | None:

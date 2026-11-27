@@ -245,11 +245,7 @@ class PhaseExecutionDetail:
             "image_manifest": (
                 None if self.image_manifest is None else self.image_manifest.model_dump(mode="json")
             ),
-            "checked_out_commits": (
-                None
-                if self.checked_out_commits is None
-                else [c.model_dump(mode="json") for c in self.checked_out_commits]
-            ),
+            "checked_out_commits": _stored_commits(self.checked_out_commits),
         }
 
     @classmethod
@@ -612,12 +608,15 @@ class WorkflowExecutionDetail:
             "tags": list(self.tags),
             "inherited_tags": list(self.inherited_tags),
             "starting_checkout": [c.model_dump(mode="json") for c in self.starting_checkout],
-            "source_commits": (
-                None
-                if self.source_commits is None
-                else [c.model_dump(mode="json") for c in self.source_commits]
-            ),
+            "source_commits": _stored_commits(self.source_commits),
         }
+
+
+def _stored_commits(
+    commits: tuple[SourceCommit, ...] | None,
+) -> list[dict[str, str | None]] | None:
+    """Recorded commits as stored, None kept None: it is "not recorded" (#1004)."""
+    return None if commits is None else [c.model_dump(mode="json") for c in commits]
 
 
 def _exit_code(stored: object) -> int | None:
