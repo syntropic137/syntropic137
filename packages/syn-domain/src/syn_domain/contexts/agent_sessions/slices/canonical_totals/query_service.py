@@ -11,10 +11,10 @@ construction rather than by coincidence.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -229,6 +229,66 @@ class CanonicalTotals:
         )
 
 
+@dataclass(frozen=True)
+class PricingGroupRow:
+    """One pricing group's sums: the grain ``_sum_groups`` prices at.
+
+    A group is the three model columns and whether a vendor cost was reported
+    (#788). The field names are the canonical columns', so ``asdict`` is the
+    row ``price_canonical_row`` takes.
+    """
+
+    model: str | None
+    requested_model: str | None
+    has_requested_model: bool
+    vendor_cost_usd: Decimal | None
+    input_tokens: int
+    output_tokens: int
+    cache_creation_tokens: int
+    cache_read_tokens: int
+    summary_observations: int
+    """Winning summaries in the group: one observation each (#897)."""
+    reported_observations: int = 0
+    """Turns of the group's summary-less sessions that reported tokens. Read
+    only where pricing leaves the group's tokens unpriced, so a source may
+    leave it 0 on every other group."""
+
+
+class UsageTotalsSource(Protocol):
+    """Where the totals' pricing groups come from (ADR-079 D8).
+
+    The reader prices whatever groups it is handed, so a source can change
+    how the sums are kept without the money changing how it is decided.
+    """
+
+    async def group_rows(
+        self, snapshot: agent_event_span.SpanConnection
+    ) -> Sequence[PricingGroupRow]: ...
+
+
+def _group_key(group: PricingGroupRow) -> _ModelKey:
+    return (group.model, group.requested_model, group.has_requested_model)
+
+
+def _optional_text(value: object) -> str | None:
+    return None if value is None else str(value)
+
+
+def _pricing_group(row: agent_event_span.SpanRow) -> PricingGroupRow:
+    vendor_cost = row["vendor_cost_usd"]
+    return PricingGroupRow(
+        model=_optional_text(row["model"]),
+        requested_model=_optional_text(row[REQUESTED_MODEL_COLUMN]),
+        has_requested_model=bool(row[HAS_REQUESTED_MODEL_COLUMN]),
+        vendor_cost_usd=vendor_cost if isinstance(vendor_cost, Decimal) else None,
+        input_tokens=int(row["input_tokens"]),  # type: ignore[arg-type]  # a SUM(bigint) column
+        output_tokens=int(row["output_tokens"]),  # type: ignore[arg-type]  # a SUM(bigint) column
+        cache_creation_tokens=int(row["cache_creation_tokens"]),  # type: ignore[arg-type]  # a SUM(bigint) column
+        cache_read_tokens=int(row["cache_read_tokens"]),  # type: ignore[arg-type]  # a SUM(bigint) column
+        summary_observations=int(row["summary_observations"] or 0),  # type: ignore[arg-type]  # a COUNT(*) column
+    )
+
+
 class CanonicalUsageQueryService:
     """Reads system-wide totals from the canonical usage definition."""
 
@@ -261,82 +321,40 @@ class CanonicalUsageQueryService:
         matches nothing and reports that as "nothing was recorded" (#1241).
         The usage rollup copies its ids from those rows, so the same holds.
         """
-        filtered = execution_ids is not None
-        sessions_sql = self._render(_SESSION_COUNT_QUERY, filtered)
-        args = [[pg_safe(eid) for eid in execution_ids]] if execution_ids is not None else []
+        stored_ids = [pg_safe(eid) for eid in execution_ids] if execution_ids is not None else None
+        source: UsageTotalsSource = SessionGrainUsageSource(self._cost_calculator, stored_ids)
+        sessions_sql = self._render(_SESSION_COUNT_QUERY, stored_ids is not None)
 
         # One snapshot for every read (#983), so the tokens and the session
         # count describe the same moment: two autocommit statements could
         # report a new session's tokens without the session, or the reverse.
         async with self._pool.acquire() as conn, agent_event_span.custom_plans(conn):  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
-            unrated = await self._unrated_turn_models(conn, filtered, args)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
-            keys = sorted(unrated, key=repr)
-            first = len(args) + 1
-            totals_sql = self._render(
-                _TOTALS_QUERY,
-                filtered,
-                keys=f"${first}::text[], ${first + 1}::text[], ${first + 2}::boolean[]",
-            )
-            rows = await conn.fetch(
-                totals_sql,
-                *args,
-                [key[0] for key in keys],
-                [key[1] for key in keys],
-                [key[2] for key in keys],
-            )
-            session_row = await conn.fetchrow(sessions_sql, *args)
-            groups, unpriced_models = self._sum_groups(
-                row for row in rows if row["sessions"] is None
-            )
-            turns = await self._unpriced_turns(
-                conn,  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
-                unpriced_models,
-                [
-                    row
-                    for row in rows
-                    if row["sessions"] is not None and _model_key(row) in unpriced_models  # type: ignore[arg-type]  # asyncpg Record reads by name
-                ],
-                args,
+            groups = await source.group_rows(conn)  # type: ignore[arg-type]  # asyncpg generates PoolConnectionProxy's methods at runtime
+            session_row = await conn.fetchrow(
+                sessions_sql, *([stored_ids] if stored_ids is not None else [])
             )
 
         return replace(
-            groups,
-            unpriced_observation_count=groups.unpriced_observation_count + turns,
+            self._sum_groups(groups),
             sessions=int(session_row["sessions"]) if session_row else 0,
         )
 
-    async def _unrated_turn_models(
-        self, conn: agent_event_span.SpanConnection, filtered: bool, args: list[list[str]]
-    ) -> set[_ModelKey]:
-        """The turn models pricing has no rate for, as the totals statement binds them."""
-        rows = await conn.fetch(self._render(_TURN_MODELS_QUERY, filtered), *args)
-        return {
-            _model_key(row)  # type: ignore[arg-type]  # asyncpg Record reads by name
-            for row in rows
-            if rate_for_row(row, self._cost_calculator) is None  # type: ignore[arg-type]  # asyncpg Record reads by name
-        }
-
-    def _sum_groups(self, rows: Iterable[asyncpg.Record]) -> tuple[CanonicalTotals, set[_ModelKey]]:
-        """The totals rows priced and summed, and the models pricing left tokens unpriced.
-
-        Unpriced turns and sessions are added after, for those models only.
-        """
+    def _sum_groups(self, groups: Iterable[PricingGroupRow]) -> CanonicalTotals:
+        """The groups priced and summed, counting the observations behind unpriced tokens."""
         input_tokens = output_tokens = cache_creation = cache_read = 0
         unpriced = unpriced_observations = 0
         cost = Decimal("0")
-        unpriced_models: set[_ModelKey] = set()
-        for row in rows:
-            input_tokens += int(row["input_tokens"])
-            output_tokens += int(row["output_tokens"])
-            cache_creation += int(row["cache_creation_tokens"])
-            cache_read += int(row["cache_read_tokens"])
-            row_cost = price_canonical_row(row, self._cost_calculator)  # type: ignore[arg-type]  # asyncpg Record reads by name
+        for group in groups:
+            input_tokens += group.input_tokens
+            output_tokens += group.output_tokens
+            cache_creation += group.cache_creation_tokens
+            cache_read += group.cache_read_tokens
+            row_cost = price_canonical_row(asdict(group), self._cost_calculator)
             cost += row_cost.cost
             unpriced += row_cost.unpriced_tokens
             if row_cost.unpriced_tokens:
-                unpriced_observations += int(row["summary_observations"] or 0)
-                unpriced_models.add(_model_key(row))  # type: ignore[arg-type]  # asyncpg Record reads by name
-        totals = CanonicalTotals(
+                unpriced_observations += group.summary_observations + group.reported_observations
+        return CanonicalTotals(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cache_creation_tokens=cache_creation,
@@ -346,7 +364,75 @@ class CanonicalUsageQueryService:
             unpriced_tokens=unpriced,
             unpriced_observation_count=unpriced_observations,
         )
-        return totals, unpriced_models
+
+
+@dataclass(frozen=True)
+class SessionGrainUsageSource:
+    """Today's groups: the canonical decision over the usage rollup, per session.
+
+    Its turn rollup cannot tell a zero-token turn from any other, so a group
+    pricing leaves unpriced has its reported turns counted from agent_events,
+    for that group's summary-less sessions only (#2341).
+    """
+
+    cost_calculator: PricingResolver
+    execution_ids: Sequence[str] | None
+    """Already in their stored spelling (``pg_safe``); None reads every one."""
+
+    async def group_rows(self, snapshot: agent_event_span.SpanConnection) -> list[PricingGroupRow]:
+        args = [list(self.execution_ids)] if self.execution_ids is not None else []
+        keys = sorted(await self._unrated_turn_models(snapshot, args), key=repr)
+        first = len(args) + 1
+        rows = await snapshot.fetch(
+            self._render(
+                _TOTALS_QUERY,
+                keys=f"${first}::text[], ${first + 1}::text[], ${first + 2}::boolean[]",
+            ),
+            *args,
+            [key[0] for key in keys],
+            [key[1] for key in keys],
+            [key[2] for key in keys],
+        )
+        groups = [_pricing_group(row) for row in rows if row["sessions"] is None]
+        unpriced = {
+            _group_key(group)
+            for group in groups
+            if price_canonical_row(asdict(group), self.cost_calculator).unpriced_tokens
+        }
+        reported = await self._unpriced_turns(
+            snapshot,
+            unpriced,
+            [
+                row
+                for row in rows
+                if row["sessions"] is not None and _model_key(row) in unpriced  # type: ignore[arg-type]  # asyncpg Record reads by name
+            ],
+            args,
+        )
+        # A vendor cost always prices, so a model's turns can only be unpriced
+        # in its NULL-cost group: the one they are summed into.
+        return [
+            replace(group, reported_observations=reported.get(_group_key(group), 0))
+            if group.vendor_cost_usd is None
+            else group
+            for group in groups
+        ]
+
+    def _render(self, template: str, **fields: str) -> str:
+        return CanonicalUsageQueryService._render(  # the one rendering of the filter
+            template, self.execution_ids is not None, **fields
+        )
+
+    async def _unrated_turn_models(
+        self, conn: agent_event_span.SpanConnection, args: list[list[str]]
+    ) -> set[_ModelKey]:
+        """The turn models pricing has no rate for, as the totals statement binds them."""
+        rows = await conn.fetch(self._render(_TURN_MODELS_QUERY), *args)
+        return {
+            _model_key(row)  # type: ignore[arg-type]  # asyncpg Record reads by name
+            for row in rows
+            if rate_for_row(row, self.cost_calculator) is None  # type: ignore[arg-type]  # asyncpg Record reads by name
+        }
 
     @staticmethod
     async def _unpriced_turns(
@@ -354,8 +440,8 @@ class CanonicalUsageQueryService:
         models: set[_ModelKey],
         days: Sequence[agent_event_span.SpanRow],
         args: list[list[str]],
-    ) -> int:
-        """Turns that reported tokens, on these unpriced models, in these sessions.
+    ) -> dict[_ModelKey, int]:
+        """Turns that reported tokens, per unpriced model, in these sessions.
 
         ``days`` are the totals statement's listing rows for those models, one
         per (model, day); a session on two of them is read once per day. A
@@ -370,7 +456,7 @@ class CanonicalUsageQueryService:
                 for s in row["sessions"]  # type: ignore[attr-defined]  # an ARRAY_AGG column
             )
         if not by_day:
-            return 0
+            return {}
         ordered = sorted(by_day, key=str)
         where = (
             _UNPRICED_TURNS_EXECUTION_FILTER.format(position=3 * len(ordered) + 1)
@@ -396,8 +482,8 @@ class CanonicalUsageQueryService:
             *params,
             *args,
         )
-        return sum(
-            int(row["observations"])  # type: ignore[arg-type]  # a COUNT(*) column
+        return {
+            _model_key(row): int(row["observations"])  # type: ignore[arg-type]  # asyncpg Record reads by name
             for row in rows
             if _model_key(row) in models  # type: ignore[arg-type]  # asyncpg Record reads by name
-        )
+        }
