@@ -76,5 +76,73 @@ See [Event Ingestion](/docs/guide/event-ingestion) for how the hybrid approach w
 | `SYN_POLLING_WEBHOOK_STALE_THRESHOLD_SECONDS` | `1800.0` | Seconds before switching to active polling |
 | `SYN_POLLING_DEDUP_TTL_SECONDS` | `86400` | Dedup key TTL (seconds). Stored in Postgres when available, rounded up to whole days; Redis is the fallback |
 
+## Execution Lifecycle Webhook
+
+Off by default. Set both variables and the API sends one signed `POST` to your
+URL each time an execution completes, fails or is cancelled. An interrupted
+execution can be resumed, so it sends nothing.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYN_LIFECYCLE_WEBHOOK_URL` | | Where notices go. Must be `http` or `https` |
+| `SYN_LIFECYCLE_WEBHOOK_SECRET` | | Shared secret the signature is keyed with |
+
+If you set only one of the two, or a URL whose scheme is not `http` or `https`,
+the API refuses to start and names the variable at fault. With neither set, the
+API logs one line at startup saying the webhook is off.
+
+The body is the notice as JSON:
+
+```json
+{
+  "execution_id": "exec-1",
+  "workflow_id": "wf-1",
+  "outcome": "failed",
+  "occurred_at": "2026-11-27T07:00:00Z",
+  "failure_classification": "platform",
+  "error_message": "...",
+  "cancel_reason": null
+}
+```
+
+`outcome` is `completed`, `failed` or `cancelled`. `failure_classification`
+(`platform`, `task` or `correct_refusal`) and `error_message` are set only when
+the outcome is `failed`. `cancel_reason` is set only when the outcome is
+`cancelled`, and only if a reason was given. Otherwise each of these fields is
+`null`.
+
+Two headers come with each request:
+
+- `Idempotency-Key: <execution_id>:<outcome>`. The same notice can be sent more
+  than once (after a restart, for example), so drop any key you have already
+  processed.
+- `X-Syn-Signature-256: sha256=<hex>`. This is an HMAC-SHA256 of the exact
+  request body bytes, keyed by `SYN_LIFECYCLE_WEBHOOK_SECRET`. To verify it,
+  compute the HMAC over the raw bytes you received, before any JSON parsing,
+  and compare in constant time:
+
+```python
+import hashlib, hmac
+
+expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+if not hmac.compare_digest(expected, request.headers["X-Syn-Signature-256"]):
+    reject()
+```
+
+Answer with any `2xx` to acknowledge a notice. Anything else counts as not
+delivered and is offered again later: another status code, a redirect (they are
+never followed), no answer within 10 seconds, or a connection error. Retries
+happen on the next delivery pass, and a pass runs at least once per platform
+clock tick (`SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS`, 30 seconds by
+default). Notices are sent only while the API is live. Rebuilding read models
+sends nothing again.
+
+When you first turn the webhook on, the API reads past events to build its
+list of owed notices. Executions that ended before then are on that list too,
+so expect one notice for each of them once the API is live.
+
+Put no credentials in the URL. Use the secret: the secret is never logged, but
+the URL can show up in HTTP client logs.
+
 See `.env.example` in the repository for the complete list of configuration
 options.

@@ -876,6 +876,11 @@ retry. Two headers go with each POST:
   bytes keyed by the shared secret. The receiver recomputes it over the bytes it
   received. Neither the secret nor the signature is ever logged.
 
+It runs only when the operator sets both `SYN_LIFECYCLE_WEBHOOK_URL` and
+`SYN_LIFECYCLE_WEBHOOK_SECRET` (`LifecycleWebhookSettings`). With neither set,
+no ProcessManager is registered and no notice is owed. With one set, startup
+is refused. (#1661.)
+
 ## Execution Lifecycle Notice ProcessManager
 
 `ExecutionLifecycleNoticeProcessManager`: the ProcessManager that tells an
