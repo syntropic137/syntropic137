@@ -1,0 +1,27 @@
+diff --git a/packages/syn-shared/src/syn_shared/settings/lifecycle_webhook.py b/packages/syn-shared/src/syn_shared/settings/lifecycle_webhook.py
+index 82558244e..d664ec44e 100644
+--- a/packages/syn-shared/src/syn_shared/settings/lifecycle_webhook.py
++++ b/packages/syn-shared/src/syn_shared/settings/lifecycle_webhook.py
+@@ -94,22 +94,6 @@ class LifecycleWebhookSettings(BaseSettings):
+             )
+         return v
+ 
+-    @model_validator(mode="after")
+-    def _both_or_neither(self) -> Self:
+-        if self.url is not None and self.secret is None:
+-            raise ValueError(
+-                f"{ENV_SYN_LIFECYCLE_WEBHOOK_URL} is set but "
+-                f"{ENV_SYN_LIFECYCLE_WEBHOOK_SECRET} is not; set both to sign "
+-                "lifecycle notices, or neither to turn them off"
+-            )
+-        if self.secret is not None and self.url is None:
+-            raise ValueError(
+-                f"{ENV_SYN_LIFECYCLE_WEBHOOK_SECRET} is set but "
+-                f"{ENV_SYN_LIFECYCLE_WEBHOOK_URL} is not; set both to send "
+-                "lifecycle notices, or neither to turn them off"
+-            )
+-        return self
+-
+     @property
+     def webhook(self) -> LifecycleWebhook | None:
+         """The configured webhook, or None when the feature is off."""
