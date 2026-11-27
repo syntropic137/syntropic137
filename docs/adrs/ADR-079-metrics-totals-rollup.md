@@ -340,7 +340,7 @@ so it is an open question for the owner, not a decision taken by default.
 
 **Projection VERSION: no.** No `CheckpointedProjection`'s stored shape
 changes, and none of the new objects is a projection. They are Lane 2 tables
-outside the coordinator, like `agent_usage_rollup` before them (`schema.py:253-257`:
+outside the coordinator, like the usage rollup tables before them (`schema.py:253-257`:
 "a NEW object rather than a VERSION bump"). Nothing replays the event store,
 so this does not need to be grouped with projection-version risk in a beta.
 The orchestrator expected a bump, and that expectation would hold only for
