@@ -70,14 +70,26 @@ class LifecycleWebhookSettings(BaseSettings):
         ),
     )
 
-    @field_validator("url", "secret", mode="before")
+    @field_validator("url", mode="before")
     @classmethod
-    def _blank_is_unset(cls, v: object) -> object:
+    def _blank_url_is_unset(cls, v: object) -> object:
         """``SYN_LIFECYCLE_WEBHOOK_URL=`` in a copied .env.example means off, not on."""
-        if isinstance(v, SecretStr):
-            v = v.get_secret_value()
         if isinstance(v, str):
             return v.strip() or None
+        return v
+
+    @field_validator("secret", mode="before")
+    @classmethod
+    def _blank_secret_is_unset(cls, v: object) -> object:
+        """A blank secret means off; any other secret is kept byte for byte.
+
+        The secret is an opaque HMAC key, and the receiver verifies with the
+        value the operator configured. Stripping it would sign with a different
+        key and every notice would fail verification.
+        """
+        raw = v.get_secret_value() if isinstance(v, SecretStr) else v
+        if isinstance(raw, str) and not raw.strip():
+            return None
         return v
 
     @field_validator("url")

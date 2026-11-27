@@ -39,9 +39,13 @@ def test_blank_values_are_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _settings().webhook is None
 
 
-def test_both_set_is_on_through_the_composed_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+# The secret is an opaque HMAC key: padding and a trailing newline are part of it.
+@pytest.mark.parametrize("secret", [_SECRET, f"  {_SECRET}  ", f"{_SECRET}\n"])
+def test_both_set_is_on_through_the_composed_settings(
+    monkeypatch: pytest.MonkeyPatch, secret: str
+) -> None:
     monkeypatch.setenv(ENV_SYN_LIFECYCLE_WEBHOOK_URL, _URL)
-    monkeypatch.setenv(ENV_SYN_LIFECYCLE_WEBHOOK_SECRET, _SECRET)
+    monkeypatch.setenv(ENV_SYN_LIFECYCLE_WEBHOOK_SECRET, secret)
     reset_settings()
     try:
         webhook = get_settings().lifecycle_webhook.webhook
@@ -49,7 +53,7 @@ def test_both_set_is_on_through_the_composed_settings(monkeypatch: pytest.Monkey
         reset_settings()
     assert webhook is not None
     assert webhook.url == _URL
-    assert webhook.secret.get_secret_value() == _SECRET
+    assert webhook.secret.get_secret_value() == secret
 
 
 def test_only_the_url_names_the_missing_secret(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -79,11 +79,14 @@ def test_half_configured_refuses_to_build_the_registry(
         _managers(InMemoryProjectionStore())
 
 
+# A receiver verifies with the configured value, so padding and a trailing
+# newline must reach the HMAC key unchanged.
+@pytest.mark.parametrize("secret", [_SECRET, f"  {_SECRET}  ", f"{_SECRET}\n"])
 async def test_configured_registers_one_manager_that_posts_signed_to_the_url(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, secret: str
 ) -> None:
     monkeypatch.setenv(ENV_SYN_LIFECYCLE_WEBHOOK_URL, _URL)
-    monkeypatch.setenv(ENV_SYN_LIFECYCLE_WEBHOOK_SECRET, _SECRET)
+    monkeypatch.setenv(ENV_SYN_LIFECYCLE_WEBHOOK_SECRET, secret)
     sent: list[httpx.Request] = []
 
     def receiver(request: httpx.Request) -> httpx.Response:
@@ -116,7 +119,7 @@ async def test_configured_registers_one_manager_that_posts_signed_to_the_url(
 
     (request,) = sent
     assert str(request.url) == _URL
-    expected = hmac.new(_SECRET.encode(), request.content, hashlib.sha256).hexdigest()
+    expected = hmac.new(secret.encode(), request.content, hashlib.sha256).hexdigest()
     assert request.headers[SIGNATURE_HEADER] == f"sha256={expected}"
     # The startup line names the host only. (httpx's own request log is not ours.)
     startup = [r.getMessage() for r in caplog.records if "lifecycle webhook" in r.getMessage()]
