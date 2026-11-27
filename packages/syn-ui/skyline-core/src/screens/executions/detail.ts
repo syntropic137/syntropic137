@@ -402,17 +402,16 @@ const commitKey = (c: SourceCommitLike) => `${c.repository}@${c.sha ?? ''}`
 /**
  * A phase's checked-out commits, only the repositories where it differs from
  * the run, so the same SHA is not repeated on every phase. Null means say
- * nothing: every repository matches the run, the phase has not started, or
- * neither the phase nor the run recorded commits (the run's line says so).
- * A phase that ran without recording them says so, since null is "not
- * recorded", never "the same as the run".
+ * nothing: every repository matches the run, or the phase has not started.
+ * A phase that ran without recording them says so, even when the run did not
+ * record them either: null is "not recorded", never "the same as the run".
  */
 export function phaseCommitsView(
   phase: { status: string; checked_out_commits?: readonly SourceCommitLike[] | null },
   execution: readonly SourceCommitLike[] | null | undefined,
 ): CommitsView | null {
   const commits = phase.checked_out_commits
-  if (commits == null) return execution == null || statusKind(phase.status) === 'pending' ? null : commitsView(commits)
+  if (commits == null) return statusKind(phase.status) === 'pending' ? null : commitsView(commits)
   if (execution == null) return commitsView(commits)
   if (!commits.length) return execution.length ? commitsView(commits) : null
   const recorded = new Set(execution.map(commitKey))

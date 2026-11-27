@@ -87,9 +87,13 @@ describe('phaseCommitsView (#1004)', () => {
     expect(phaseCommitsView(ran(undefined), run)).toEqual({ kind: 'absent', text: COMMITS_NOT_RECORDED })
   })
 
-  it('says nothing for a phase not started yet, or when the run line already says nothing was recorded', () => {
+  it('says a phase that ran without recording commits did not record them, under a run that did not either', () => {
+    expect(phaseCommitsView(ran(null), null)).toEqual({ kind: 'absent', text: COMMITS_NOT_RECORDED })
+  })
+
+  it('says nothing for a phase not started yet', () => {
     expect(phaseCommitsView({ status: 'pending', checked_out_commits: null }, run)).toBeNull()
-    expect(phaseCommitsView(ran(null), null)).toBeNull()
+    expect(phaseCommitsView({ status: 'pending', checked_out_commits: null }, null)).toBeNull()
   })
 
   it('shows every commit of a phase that recorded them under a run that did not', () => {

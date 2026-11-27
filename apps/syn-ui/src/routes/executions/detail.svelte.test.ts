@@ -133,13 +133,16 @@ describe('Execution detail commits (#1004)', () => {
     }
   }, 30_000)
 
-  it('says the commit was not recorded for a run from before capture, once, not again per phase', async () => {
+  it('says the commit was not recorded for a run from before capture, and for each phase it ran', async () => {
     const d = await getExecution(older)
     expect(d.source_commits).toBeNull()
+    expect(d.phases.some((p) => p.status === 'completed')).toBe(true)
     const { target, done } = await render(older)
     try {
       expect(runCommits(target)).toBe('Commits: commit not recorded (older run)')
-      expect(phaseCommits(target).every((line) => line === null)).toBe(true)
+      expect(phaseCommits(target)).toEqual(
+        d.phases.map((p) => (p.status === 'pending' ? null : 'Checked out: commit not recorded (older run)')),
+      )
     } finally {
       done()
     }
