@@ -356,7 +356,9 @@ class WorkspaceUsage:
     pids_limit: int | None = None
     #: Process or thread creations refused because a pids limit was reached
     #: (`pids.events` `max`). Above zero proves a process-count limit refused
-    #: work; compare `pids_peak` with `pids_limit` to say it was this one.
+    #: work. It does not say WHICH limit: an ancestor cgroup's can apply too,
+    #: and a peak that equals `pids_limit` is consistent with this one, not
+    #: proof of it.
     #: None (never 0) when the workspace was still saturated at teardown and
     #: its cgroup could not be read.
     pids_limit_hits: int | None = None
