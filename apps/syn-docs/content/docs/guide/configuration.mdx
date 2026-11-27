@@ -134,8 +134,13 @@ delivered and is offered again later: another status code, a redirect (they are
 never followed), no answer within 10 seconds, or a connection error. Retries
 happen on the next delivery pass, and a pass runs at least once per platform
 clock tick (`SYN_SESSION_INVENTORY_SWEEP_INTERVAL_SECONDS`, 30 seconds by
-default). Notices are sent only while the API is live. Rebuilding read models
-sends nothing again.
+default). Notices are sent only while the API is live: reading past events on
+startup makes no requests. The API keeps a record of each notice it owes or has
+delivered, and a notice that already has a record is never reopened, so
+replaying events over that record (after a restart, for example) sends nothing
+again. Rebuilding the notice list clears those records, either explicitly or
+because a new version changed it. After a rebuild, every notice is owed again
+and is sent once the API is live, so deduplicate on `Idempotency-Key`.
 
 When you first turn the webhook on, the API reads past events to build its
 list of owed notices. Executions that ended before then are on that list too,
