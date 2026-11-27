@@ -113,3 +113,25 @@ async def test_an_older_run_serves_null_not_an_empty_list(client: AsyncClient) -
     # On the wire: the key is present and null, which is "not recorded".
     assert raw["source_commits"] is None
     assert raw["phases"][0]["checked_out_commits"] is None
+
+
+async def test_a_failed_phase_still_serves_its_checkout(client: AsyncClient) -> None:
+    from syn_api._wiring import get_projection_mgr
+
+    await _project("exec-failed", recorded=True)
+    await WorkflowExecutionDetailProjection(get_projection_mgr().store).on_workflow_failed(
+        {
+            "execution_id": "exec-failed",
+            "failed_phase_id": "p1",
+            "error_message": "boom",
+            "failed_at": "2026-11-26T01:00:00+00:00",
+        }
+    )
+
+    response = await client.get("/executions/exec-failed")
+
+    assert response.status_code == 200, response.text
+    body = ExecutionDetailResponse.model_validate(response.json())
+    assert body.phases[0].status == "failed"
+    assert body.phases[0].checked_out_commits == [SourceCommit(repository=REPO, sha=CHECKED_OUT)]
+    assert body.source_commits == [SourceCommit(repository=REPO, sha=START)]

@@ -1,0 +1,11 @@
+--- a/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/phase_detail.py
++++ b/packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/phase_detail.py
+@@ -247,7 +247,7 @@
+             completed_at=data.get("completed_at"),
+             timeout_seconds=data.get("timeout_seconds"),
+             provisioned_at=data.get("provisioned_at"),
+-            checked_out_commits=data.get("checked_out_commits"),
++            checked_out_commits=data.get("checked_out_commits") or [],
+             error_message=data.get("error_message"),
+             observed_branches=data.get("observed_branches"),
+             exit_code=data.get("exit_code"),

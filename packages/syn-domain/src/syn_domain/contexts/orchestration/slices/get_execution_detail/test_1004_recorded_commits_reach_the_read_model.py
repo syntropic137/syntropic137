@@ -125,3 +125,38 @@ async def test_a_row_stored_before_the_fields_reads_not_recorded() -> None:
 
     assert detail.source_commits is None
     assert detail.phases[0].checked_out_commits is None
+
+
+@pytest.mark.parametrize(
+    ("recorded", "expected"),
+    [
+        ([SourceCommit(repository=REPO, sha=FIRST)], (SourceCommit(repository=REPO, sha=FIRST),)),
+        ([], ()),
+        (None, None),
+    ],
+    ids=["recorded", "recorded-empty", "not-recorded"],
+)
+async def test_a_failed_phase_keeps_the_checkout_it_recorded(
+    recorded: list[SourceCommit] | None, expected: tuple[SourceCommit, ...] | None
+) -> None:
+    """The failure path rebuilds the stored phase through `PhaseDetail`.
+
+    A field that model does not declare is erased there, so a phase that
+    failed lost its checkout while every phase that completed kept it.
+    """
+    projection = await _started([{"repository": REPO, "sha": START}])
+    await projection.on_workspace_provisioned_for_phase(_provisioned("p1", recorded))
+
+    await projection.on_workflow_failed(
+        {
+            "execution_id": "exec-1",
+            "failed_phase_id": "p1",
+            "error_message": "boom",
+            "failed_at": "2026-11-26T01:00:00+00:00",
+        }
+    )
+
+    detail = await _detail(projection)
+    assert detail.phases[0].status == "failed"
+    # The phase's own reading: the run's START pin is not a substitute for it.
+    assert detail.phases[0].checked_out_commits == expected
