@@ -1,0 +1,19 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/recorded_model_rows.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/recorded_model_rows.py
+index 5e4c194d5..71e70d25e 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/recorded_model_rows.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/recorded_model_rows.py
+@@ -79,10 +79,10 @@ def zero_usage_group_by(data: str = "data") -> str:
+     accept, for one count above 2^31 or for four whose sum is.
+     """
+     return (
+-        f"((COALESCE(({data}->>'input_tokens')::bigint, 0) "
+-        f"+ COALESCE(({data}->>'output_tokens')::bigint, 0) "
+-        f"+ COALESCE(({data}->>'cache_creation_tokens')::bigint, 0) "
+-        f"+ COALESCE(({data}->>'cache_read_tokens')::bigint, 0)) = 0)"
++        f"((COALESCE(({data}->>'input_tokens')::int, 0) "
++        f"+ COALESCE(({data}->>'output_tokens')::int, 0) "
++        f"+ COALESCE(({data}->>'cache_creation_tokens')::int, 0) "
++        f"+ COALESCE(({data}->>'cache_read_tokens')::int, 0)) = 0)"
+     )
+ 
+ 

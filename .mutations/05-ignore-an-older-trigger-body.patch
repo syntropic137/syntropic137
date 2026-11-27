@@ -1,0 +1,14 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/events/schema.py b/packages/syn-adapters/src/syn_adapters/events/schema.py
+index b94eb246c..310df9d83 100644
+--- a/packages/syn-adapters/src/syn_adapters/events/schema.py
++++ b/packages/syn-adapters/src/syn_adapters/events/schema.py
+@@ -906,9 +906,6 @@ class EventStoreSchema:
+             marked_complete = (
+                 all(tables_exist)
+                 and (await conn.fetchval(USAGE_ROLLUP_HAS_REPORTED_COLUMN_SQL)) is True
+-                and usage_rollup_function_is_current(
+-                    await conn.fetchval(USAGE_ROLLUP_INSTALLED_FUNCTION_SQL)
+-                )
+                 and (await conn.fetchval(USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL)) is True
+             )
+             for ddl in USAGE_ROLLUP_TABLES_SQL:
