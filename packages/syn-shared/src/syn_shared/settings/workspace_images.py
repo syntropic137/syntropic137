@@ -664,30 +664,30 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 #                  Previous pins, for the record: claude-cli 14eeb7c5,
 #                  omni-agent 01e3c15f, toolchain 885be5de, all from
 #                  agentic-workspace be32a683 (release PR #80).
-# AGENTIC-WORKSPACE KILL GUARD + HEADLESS PROMPT ON STDIN, 2026-11-25 (#2355).
-# Taken from release-branch run 45573197599 ("Release Workspace Images", push
-# to release, success) of agentic-workspace b5fb0529 (release PR #132, after
-# #130), the commit lib/agentic-workspace pins. Each digest below is what
+# AGENTIC-WORKSPACE TEARDOWN PIDS USAGE, 2026-11-27 (#2227).
+# Taken from release-branch run 45909961058 ("Release Workspace Images", push
+# to release, success) of agentic-workspace 5d793372 (release PR #134, after
+# #133), the commit lib/agentic-workspace pins. Each digest below is what
 # `docker buildx imagetools inspect --format '{{.Manifest.Digest}}'` returns
-# for the full-commit tag b5fb05294988b836819ca23efffe3db9960192af, media type
-# application/vnd.oci.image.index.v1+json (the INDEX, amd64 + arm64). Every
-# image carries agentic.image.channel=release and revision b5fb0529 on both
-# platforms, and `cosign verify` (v3.1.3) passes for each against
-# AGENTIC_WORKSPACE_IDENTITY_REGEXP with the GitHub Actions OIDC issuer. This
-# release carries AW #130: omni-agent (and toolchain, built FROM it) bakes a
-# root-owned Claude Code PreToolUse/Bash kill guard in managed settings that
-# refuses kill / xargs kill / pkill / killall aimed at the harness or its
-# ancestors, and ClaudeHeadless sends its prompt on stdin. Manifests moved:
-# omni-agent 1.16.0 -> 1.17.0, toolchain 1.8.0 -> 1.9.0; claude-cli unchanged.
+# for the full-commit tag 5d7933721d2d114c6b90c85a741f988863bb804e (the INDEX,
+# amd64 + arm64). Every image carries agentic.image.channel=release and
+# revision 5d793372 on both platforms, and `cosign verify` passes for each
+# against AGENTIC_WORKSPACE_IDENTITY_REGEXP with the GitHub Actions OIDC
+# issuer. This release changes only the agentic_isolation library (AW #133:
+# teardown usage gains pids_peak, pids_limit, pids_limit_hits); no image
+# content or manifest moved (omni-agent 1.17.0, toolchain 1.9.0, claude-cli
+# 2.4.0). The digests move because the images are rebuilt at the new commit.
 #
-# omni-agent       154fe1ab, omni-agent manifest 1.17.0.
-# toolchain        9721e427, built FROM omni 154fe1ab in the same run (label
-#                  org.opencontainers.image.base.digest), toolchain manifest
-#                  1.9.0.
-# claude-cli       c0699765, claude-cli manifest 2.4.0.
-# scripted-agent   bf4b0326 (record only; not a provider pin, #1918 PR 3).
+# omni-agent       e1fa55f4, omni-agent manifest 1.17.0.
+# toolchain        7cf2cbd1, built FROM omni e1fa55f4 in the same run (label
+#                  org.opencontainers.image.base.digest), manifest 1.9.0.
+# claude-cli       34a7dde8, claude-cli manifest 2.4.0.
+# scripted-agent   e7b5ad4a (record only; not a provider pin, #1918 PR 3).
 #
-#                  Previous pins, for the record: claude-cli bd53b216,
+#                  Previous pins, for the record: claude-cli c0699765,
+#                  omni-agent 154fe1ab, toolchain 9721e427, scripted-agent
+#                  bf4b0326, all from agentic-workspace b5fb0529 (release PR
+#                  #132). Before that claude-cli bd53b216,
 #                  omni-agent 2f9dc73d, toolchain f7848893, scripted-agent
 #                  3c517149, all from agentic-workspace 032bac05 (release PR
 #                  #129). Before that claude-cli 7148d6e2,
@@ -708,13 +708,13 @@ AP_ROLLBACK_IMAGES: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyTy
 PINNED_DIGESTS: Final[Mapping[WorkspaceImageProvider, str]] = MappingProxyType(
     {
         WorkspaceImageProvider.CLAUDE_CLI: (
-            "sha256:c06997654dfe8ac93128a190f8ddc34df2f71a8c692631796b9b79e06a0ffd40"
+            "sha256:34a7dde80b1ed3469f338fb14c9d135d4b38d0435dde12d10a037f86168db7ea"
         ),
         WorkspaceImageProvider.OMNI_AGENT: (
-            "sha256:154fe1ab66e90791bb2761a79b99349b476bb7a0e4761355c380bf19845652a0"
+            "sha256:e1fa55f4daf2b68eae32b0068c5d4d0d57f8233ad893af442dc223005fa5d1a7"
         ),
         WorkspaceImageProvider.TOOLCHAIN: (
-            "sha256:9721e427c778fc50ac3bcde7260838f5495bfcc2facf9c3208f0ce98d2c2efa5"
+            "sha256:7cf2cbd141b0c22ef74dd9da4c4a61e574d8aa85d53095ec456f298566ee6ec9"
         ),
     }
 )
@@ -860,4 +860,5 @@ PREVIOUS_DEFAULT_WORKSPACE_IMAGES: Final[tuple[str, ...]] = (
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:036463fb3ed9ca0eb26bf6546d0f14914b92a88ed3a0c6efdf165ebef51e3f43",  # e49fd5d5 (#2185)
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:a0d3b42fafb36116a31c8d17f022ace99bee18bbc9d4002b4037fce513309335",  # 69b62e19 (#2218)
     "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:f78488938160215808a4ec55156952f31297fa959814d57fb3c7da9c725f57b7",  # bf0d8de1 (#2353)
+    "ghcr.io/agentparadise/agentic-workspace-toolchain@sha256:9721e427c778fc50ac3bcde7260838f5495bfcc2facf9c3208f0ce98d2c2efa5",  # b5fb0529 (#2369)
 )
