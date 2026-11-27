@@ -118,7 +118,8 @@ them dominates. Slice 4 must print the breakdown before and after.
 
 The totals become one more Lane 2 table tier. It is maintained in the same
 transaction as the rollup rows it derives from, and read in O(pricing groups).
-Three new objects and one new column:
+It adds four tables, one column and two functions (the recompute, and the
+session pre-lock of D1.1a):
 
 | Object | Grain | Written by |
 |---|---|---|
@@ -142,13 +143,99 @@ Each canonical row also carries two counts. A summary row carries
 `reported_observations` over S's turn rows for that model. That gives the
 unpriced-observation count without touching `agent_events` (D2).
 
-Recomputes of one session are serialized by
-`pg_advisory_xact_lock(hashtext(S))`. That lock is per session, so writers of
-different sessions never wait on each other through it.
+Recomputes of one session are serialized by a per-session advisory lock. That
+lock is per session, so writers of different sessions never wait on each other
+through it. Where the lock is taken is what makes it safe, and D1.1a decides
+that.
+
+**D1.1a Lock order: every session lock before any rollup row lock.** Taking the
+session lock inside the row trigger is NOT safe. `insert_batch` writes a whole
+batch in one transaction (`store_write.py:131-139`), with no ordering by
+session, day or model. The day trigger upserts one row per (day, session,
+execution) (`schema.py:148-162`). The turn trigger upserts one row per model
+key (`schema.py:355-381`). Both hold their row locks until the batch commits.
+That admits this schedule:
+
+1. Transaction A writes a turn for session S on day D1, model M1, and takes
+   S's session lock in the trigger.
+2. Transaction B writes a turn for S on day D2, model M2, takes the D2 day row
+   and the M2 turn row, and then waits for S's session lock.
+3. A's next turn for S is on D2, model M2. A waits for B's D2 row, and B waits
+   for A. PostgreSQL aborts one of them, and that batch's telemetry is lost
+   (there is no retry, `store_write.py:103-150`).
+
+The backfill transaction is multi-session too (`schema.py:882-891`), so it can
+form the same cycle with live ingest.
+
+The rule that removes the cycle: **a transaction that will write any rollup row
+of a session takes that session's lock first, and takes all of its session
+locks before its first write, in ascending lock-key order.**
+
+- **The lock key.** It is the two-argument form,
+  `pg_advisory_xact_lock(USAGE_TOTALS_SESSION_LOCK_CLASS, hashtext(session_id))`.
+  The class constant goes beside the other keys in
+  `syn_adapters.advisory_locks`, so it cannot collide with a single-key lock.
+  Two sessions with the same `hashtext` share a lock. That is coarser, but
+  still one total order.
+- **One SQL function takes them all.** A new plpgsql function,
+  `agent_usage_lock_sessions(text[])`, computes
+  `array_agg(DISTINCT hashtext(s) ORDER BY hashtext(s))` (the ORDER BY inside
+  an aggregate is guaranteed, an ORDER BY on a subquery is not). It locks each
+  key in that order, then records the keys in a transaction-local setting
+  (`set_config('syn.usage_session_locks', ..., true)`).
+- **Each writer calls it as the first statement of its transaction.**
+  - `insert_batch` calls it before the COPY, with the batch's distinct session
+    ids. `_build_copy_buffer` already validates every row's session
+    (`store_helpers.py:85-112`), so the list comes from the same validated
+    rows.
+  - `insert_one` (`store_write.py:73-80`) calls it with its one session.
+  - Each backfill batch calls it with the batch's sessions, after the schema
+    lock it already takes (`schema.py:889`).
+  - Advisory locks are re-entrant within a transaction, so taking a lock the
+    transaction already holds costs nothing.
+- **The trigger enforces the rule. It does not take the lock itself.** The
+  recompute checks that `hashtext(S)` is in `syn.usage_session_locks`. If it
+  is not, it raises `usage_session_lock_missing`. A writer added later that
+  skips the pre-lock then fails loudly on its first write, in every test,
+  instead of leaving a deadlock that only shows under load. A trigger that
+  quietly took the lock late would bring the cycle back.
+
+Why this is a total order:
+
+- Every row lock on the day, turn, summary and canonical tables belongs to one
+  session, because each of those keys contains `session_id`. So does the
+  tool-call tally the same transaction writes
+  (`packages/syn-domain/src/syn_domain/tool_call_counts.py:154,179-184`).
+- A transaction holds a session's row locks only after it holds that
+  session's lock.
+- So two transactions can only contend on a row while one of them already
+  holds the session lock, and the other is still queued on it.
+- Session locks are taken in one global order (ascending key), and no
+  transaction waits for one while it holds a row lock.
+
+The wait-for graph therefore has no cycle among writers that take session
+locks. What stays outside the rule:
+
+- The schema lock comes first, and only the backfill and the DDL take it. No
+  ingest transaction ever waits for it.
+- The ledger is insert-only and has no unique key, so its inserts take no
+  conflicting row lock.
+- The totals rows are written only by the fold (D1.3), which takes no session
+  lock and writes no session-keyed row. So the fold adds no edge to the
+  writers' graph.
+- The day-rollup reconcile (`ROLLUP_BACKFILL_SQL`, `schema.py:183-196`) takes
+  no session lock and fires no canonical trigger, so it adds no new edge
+  either. Its row-lock order against ingest is today's, and this ADR does not
+  change it.
+
+**Retry is not part of the mechanism.** Ordering makes the deadlock
+impossible, so `insert_batch` stays without retry. Adding one would hide an
+ordering bug. A `40P01` from an ingest transaction after this lands is a
+defect, and it is reported as today's failed batch is.
 
 **Assumption A2.** This is per-row trigger work inside COPY, and a batch of N
 events for one session recomputes that session N times. I expect each
-recompute to be a handful of index reads. Slice 3 must measure ingest
+recompute to be a handful of index reads. Slice 3b must measure ingest
 throughput before and after. If it regresses, the first optimisation is
 already obvious: a turn change on a session with no winning summary is purely
 additive and needs no recompute. That is an optimisation, though, and the
@@ -286,25 +373,82 @@ below works through each case.
 | **A group emptied by supersession** | The group is absent | The group row exists with zeros. It prices to `RowCost(0, 0)`, so totals are equal. Slice 4's test asserts that explicitly, so the special case is not left to coincidence. |
 | **`CanonicalTotals.sessions`** | Counted from the day rollup | **Dropped from the global read.** `/metrics` does not consume it (#1843, `metrics.py:333-352`). Slice 4 removes it from `totals()`, and the parity test stops comparing it. That is a change of interface, not of any served number. |
 
-**Extending the frozen-reader parity check.**
-`test_canonical_totals_rollup_parity.py` already runs the frozen pre-E1 reader
-(`legacy_canonical_totals_pre_e1.py`, "FROZEN. DO NOT EDIT") beside the live
-one on one database. It seeds four ingest batches: A before the rollup exists
-(backfill), B after (trigger), D with the trigger disabled (reconcile), and E
-after the reconcile. It compares every field. Each slice extends it, and
-neither the frozen file nor its seed shapes change:
+**Extending the frozen-reader parity check.** Two frozen oracles already
+exist. Neither alone covers every served field, so the plan uses both, for the
+fields each actually has.
+
+- **The pre-E1 oracle.**
+  - Files: `test_canonical_totals_rollup_parity.py` and
+    `legacy_canonical_totals_pre_e1.py`, "FROZEN. DO NOT EDIT".
+  - It covers tokens, `cost_usd`, `unpriced_tokens` and `sessions`. It runs
+    four ingest batches: A before the rollup exists (backfill), B after
+    (trigger), D with the trigger disabled (reconcile), and E after the
+    reconcile.
+  - It does **not** check `unpriced_observation_count`. That field is excluded
+    by name (`_FIELDS_ADDED_AFTER_E1`,
+    `packages/syn-domain/tests/contexts/agent_sessions/slices/canonical_totals/test_canonical_totals_rollup_parity.py:223-247`),
+    and line 264 asserts only that it is positive.
+  - It stays the specification for its fields, unchanged.
+- **The pre-2341 oracle.**
+  - File: `apps/syn-api/tests/integration/legacy_canonical_totals_pre_2341.py`,
+    "FROZEN. DO NOT EDIT".
+  - It carries `unpriced_observation_count`
+    (`legacy_canonical_totals_pre_2341.py:142-151,246`), and it takes an
+    injected `PricingResolver` (`:171-179`).
+  - The 6k gate already compares the whole `/metrics` body through it
+    (`test_metrics_summary_less_sessions_at_scale.py:162-181`). That seed adds
+    no summaries, though, so it never exercises a transition.
+  - It becomes the oracle for the observation count, the rendered cost and
+    `total_cost_display` through every transition below.
+
+**The transition test** (new, slice 4) runs beside the pre-2341 oracle in
+`apps/syn-api/tests/integration/`. It serves `/metrics` from the new tier and
+from the oracle, monkeypatched as `_served_before_2341` does (`:162-177`). It
+compares the WHOLE body: every token field, `total_cost_usd`,
+`unpriced_observation_count` and `total_cost_display`. Each of these steps
+seeds one change, compares, and goes on to the next:
+
+| Step | Seeded change | Invariant it proves | Mutation that must turn it red |
+|---|---|---|---|
+| T1 | turns with non-zero tokens and **zero-token turns** on an unrated model, for a summary-less session | a zero-token turn is a priced zero and is not counted (#890) | count every turn as reported (drop the non-zero predicate) |
+| T2 | a usable **summary arrives** for T1's session, on a different model | the turns' group returns to exactly zero (**signed cancellation at group grain**), and the summary's group gains one observation | add the summary without subtracting the turns |
+| T3 | a **later, lower** usable summary for the same session | the most recent usable summary wins, not the larger one | rank by magnitude instead of recency |
+| T4 | a **late turn** for the summarised session | ignored while a winner exists: zero delta, same body | let the turn path add while a winner exists |
+| T5 | an **all-zero summary** after the usable one | it does not win (`canonical_usage.py:136-144`) | let an all-zero summary win |
+| T6 | the same database read with a **resolver that rates** T1's model | the money changes and the unpriced count drops, through both readers, with no backfill | store priced money in the tier (or cache the resolver's answer) |
+
+How the comparison is controlled:
+
+- **Fold points.** Each step is compared three times: before any fold, after
+  one fold, and after a fold that runs while the next step's transaction is
+  open but not committed.
+- **One database state for both readers.** The test writes through
+  `insert_batch` on its own connection. It holds that transaction open at a
+  barrier while both readers run, then commits and runs both again. Neither
+  reader can see uncommitted rows, so both see the same committed state each
+  time. A false parity failure from a commit landing between the two reads
+  cannot happen.
+- **No other writer runs during the test.** It owns its database, as the
+  existing parity fixtures do.
+- **Assumption A10:** the syn-api integration tests can import the domain
+  package's pre-E1 oracle. If they cannot, the token-field half of each step
+  also runs in the domain parity test, against batch F (below), so both
+  oracles still cover it.
+
+**Extending the pre-E1 test** (slices 3b and 4), with the frozen file and its
+seed shapes unchanged:
 
 1. Add a batch **F** that arrives AFTER sessions in A/B/E already have
    winners. It holds a late turn on a summarised session, an older usable
    summary arriving after a newer one, an all-zero summary after a usable
-   one, and a turn on an unrated model for a summary-less session. These are
-   the cases above that the existing seed does not hit in that order.
-2. Compare at three points: before the fold, after one fold, and after a fold
-   that runs **while** batch F is being written. That shows the ledger and the
-   totals sum to the same value in any snapshot.
-3. Add a property: the rows of `agent_session_canonical_usage`, grouped, equal
-   the totals statement's group rows from today's reader, field by field. This
-   checks the intermediate tier directly, not just the end figure.
+   one, and a turn on an unrated model for a summary-less session. Its fields
+   are compared against the pre-E1 oracle.
+2. Add a property: the rows of `agent_session_canonical_usage`, grouped, equal
+   the totals statement's group rows from today's reader, field by field,
+   including the observation counts. This checks the intermediate tier
+   directly, not just the end figure.
+3. Assert invariant I (D5) after every batch: totals plus ledger equals the
+   grouped canonical rows.
 
 ### D3. Freshness: none to show
 
@@ -320,21 +464,113 @@ slows down as the ledger grows. D7's gate and ADR-075's latency telemetry are
 what notice. `validate()` (`schema.py:946`) also fails startup when the fold
 job is missing, alongside the other rollup objects (`schema.py:977`).
 
-### D4. Consistency (#983)
+### D4. Consistency (#983): one exported snapshot for the whole response
 
 **The totals:** one statement, in the existing
 `REPEATABLE READ READ ONLY` transaction. Money and its unpriced count are
 still read from the same rows. That is stronger than today, which takes three
 statements in one snapshot.
 
-**The whole response: not decided here.** The global route deliberately takes
-four connections and four snapshots for concurrency (#2361,
-`metrics.py:454-458`). The other three reads are projection reads.
-One snapshot for the whole response would mean running them on one connection
-in one transaction, which is only possible if they live in the same database
-(**assumption A6, unverified**). With the totals at a few milliseconds,
-`gather` buys less than it did. This is a real choice with a cost either way,
-so it is an open question for the owner, not a decision taken by default.
+**The whole response: every database-derived field is read in one snapshot,
+and the global reads stay concurrent.**
+
+What the response reads today, each on its own connection and in its own
+snapshot:
+
+| Read | Pool | Where |
+|---|---|---|
+| `get_dashboard_metrics()` (`total_workflows`, `total_artifact_bytes`) | projections | `metrics.py:173-197`, called first at `:424` |
+| Execution status counts | projections | `metrics.py:310-330` |
+| Session count | projections | `metrics.py:333-352` |
+| Artifact count | projections | `metrics.py:355-373` |
+| Canonical totals | observations | `metrics.py:398-416` |
+| Scoped only: the workflow's execution ids | projections | `metrics.py:293-307` |
+| Scoped only: execution costs | observations | `metrics.py:376-395` |
+| Scoped only: phase metrics | projections | `metrics.py:239-282` |
+
+**They are one database.** Assumption A6 in the first draft was answerable,
+and the answer is yes:
+
+- `PostgresProjectionStore._get_pool()` connects to
+  `settings.syn_observability_db_url`
+  (`packages/syn-adapters/src/syn_adapters/projection_stores/postgres_store.py:52-67`).
+  It is the production projection store (`projection_stores/__init__.py:52`).
+- The observation store's default construction uses the same setting
+  (`packages/syn-adapters/src/syn_adapters/events/store_helpers.py:158-173`).
+- The canonical reader gets that store's pool (`_wiring.py:758-769,800-811`).
+
+The two are separate pools (`name="projections"`, `postgres_store.py:62-67`),
+not separate databases. The Lane 1 event store is a different database, and
+`/metrics` reads nothing from it.
+
+**The mechanism: one leader transaction, exported and imported.**
+
+1. The route opens a **leader** connection from the observation pool:
+   `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`, then
+   `SELECT pg_export_snapshot()`.
+2. Every other read takes its own connection from its own pool, as now. It
+   opens `REPEATABLE READ READ ONLY` and runs
+   `SET TRANSACTION SNAPSHOT '<id>'` as its first statement, before the
+   `SET LOCAL plan_cache_mode` that `custom_plans` runs
+   (`agent_event_span.py:159-170`). PostgreSQL only accepts the import before
+   the transaction's first query.
+3. The observation-pool reads run **on the leader itself**: the totals, and
+   on the scoped path the execution costs after them. So a request holds at
+   most one observation-pool connection.
+4. The projection-pool reads import the snapshot and run concurrently under
+   `gather`, as #2341/#2361 made them. The scoped path keeps its data order:
+   the execution ids first, because the totals and costs need them.
+5. The leader commits after the last import has run. An exported snapshot can
+   only be imported while its exporting transaction is open.
+
+Every field in both responses then describes the same committed database
+state.
+
+**The tradeoff, and why this one.**
+
+- **One connection, one transaction, sequential reads.** This is simpler, but
+  it gives up #2361's concurrency. It would also have to move every projection
+  read onto the observation pool.
+- **Export and import.** This keeps the concurrency. The costs:
+  - one extra round trip per read for the import;
+  - a leader connection held for the whole request, not just its own read;
+  - a new connection-passing seam.
+
+  It cannot starve a pool against itself. A request holds one observation
+  connection, the leader, while it waits for projection connections. A
+  projection read never waits for an observation connection. So no request
+  holds one pool while waiting on the same pool.
+- **The seam.** A request-scoped `ReadSnapshot` port (Protocol:
+  `connection() -> AsyncContextManager[SnapshotConnection]`). The query
+  services and the projection-store read methods used here gain a variant
+  that takes a bound connection instead of acquiring one.
+  The totals' snapshot helper already takes a connection protocol rather
+  than a pool (`custom_plans(conn: PlanningConnection)`,
+  `agent_event_span.py:84,159`), so `CanonicalUsageQueryService` is the first
+  to convert.
+  The route only opens and closes the snapshot. Which pool a read uses stays
+  inside the services.
+- **Test and offline.** The in-memory projection store has no snapshot. A
+  no-op `ReadSnapshot` is valid there, and it inherits `InMemoryAdapter`
+  (ADR-060), so it refuses to construct in production.
+- **Assumption A6b.** The projection store creates tables and lean columns
+  lazily (`postgres_store.py:69-80`), and DDL is refused in a READ ONLY
+  transaction. Those calls already run on their own pool connections, outside
+  the read. Slice 7 must keep them there, and a test must read a projection
+  whose table has not been created yet.
+
+**A shared snapshot is not projection freshness.** The snapshot makes every
+field agree about which rows are committed. It does not make the projections
+current. Execution, session and artifact counts come from projections that the
+coordinator updates asynchronously, each at its own checkpoint (ADR-055). An
+execution whose events are not yet projected is still missing from the counts,
+while its observations are already in the totals. That lag exists today, and
+this ADR neither adds to it nor hides it. The totals tier itself has no lag
+(D3).
+
+**This is a separate slice from the rollup** (D8 slice 7). It changes the
+route and the projection-store seam, not the totals tier, and either can ship
+first.
 
 ### D5. Migration, backfill, VERSION, deploy order and rollback
 
@@ -356,6 +592,30 @@ the existing lock-order rule: take `agent_events` first
 `reported_observations` change replaces `agent_usage_rollup_apply`, which is
 on the hypertable.
 
+**The invariant every step keeps (I).** At every committed state:
+
+> `agent_usage_totals` + `agent_usage_totals_delta`, summed per pricing group,
+> equals `agent_session_canonical_usage` grouped the same way.
+
+Exactly one function writes `agent_session_canonical_usage`: the per-session
+recompute. It writes the ledger rows for its own change in the same statement
+sequence and the same transaction. So no write to the canonical table can
+happen without its delta. The three tables are created, truncated and dropped
+**together, in one transaction, and never one at a time**.
+
+Given I, the totals are correct exactly when the canonical table is. A
+recompute of any session S brings S's share into line, whatever happened
+before, because it diffs against S's stored rows and emits that difference.
+
+**This is why the slices ship the canonical table and the ledger together**
+(D8 slice 3b). A canonical table populated before the ledger existed would
+break I. Its rows would have no deltas, and a later recompute would see
+old = new and emit zero, so their history would never reach the totals.
+(Example: S stored as 100 tokens, then an empty ledger is added, then a
+recompute emits 0, then the totals read returns 0 for S.) No slice therefore
+creates the canonical table without the ledger and the totals, and no
+"seed the totals from the canonical table" step exists to get wrong.
+
 **Backfill, in this order. Each step is idempotent and resumable:**
 
 1. **`reported_observations`.** Use the same snapshot-subtraction backfill as
@@ -365,34 +625,87 @@ on the hypertable.
    already balances can still receive its reported count. This is the one
    genuinely new SQL in the backfill. Slice 2 proves it with the four-batch
    parity seed and `test_usage_rollup_backfill_does_not_block_ingest.py`.
-2. **`agent_session_canonical_usage`.** For each session in the day rollup,
-   in batches (the list `USAGE_ROLLUP_BACKFILL_SESSIONS_SQL` already reads,
-   `schema.py:395-399`), call the SAME per-session recompute the trigger
-   calls, under the same per-session lock. A recompute replaces and emits a
-   difference, so the backfill and a concurrent trigger converge in any
-   interleaving. The backfill needs no separate totals step: starting from an
-   empty table, the recomputes' deltas ARE the backfill of the totals.
-3. **State row.** Write `agent_usage_totals_state` once every session has been
-   visited with the triggers live. `_rollup_is_complete` (`schema.py:896`) is
-   the precedent.
+2. **The canonical tier, from empty.** In one DDL transaction, under a new
+   schema lock taken after `agent_events` (#1934):
+   - create, or TRUNCATE together, the canonical table, the ledger and the
+     totals;
+   - mark `agent_usage_totals_state` incomplete;
+   - create the triggers.
 
-**Read switch.** `totals()` reads the state row in its snapshot. Without it,
-the reader serves today's session-grain path. So a deploy never 503s
-mid-backfill and never serves a partial total.
+   TRUNCATE takes ACCESS EXCLUSIVE on the three tables until commit. Ingest
+   that fires the trigger waits for that commit, then runs against empty
+   tables with the triggers live. Both outcomes satisfy I.
+3. **Visit every session.** Read the session list from the day rollup
+   (`USAGE_ROLLUP_BACKFILL_SESSIONS_SQL`, `schema.py:395-399`) after step 2
+   commits. For each batch, take the schema lock, then the batch's session
+   locks (D1.1a), then call the SAME recompute the trigger calls.
+   - Every canonical row starts empty, so each visit emits that session's full
+     history as a delta. That IS the backfill of the totals.
+   - A session the trigger already recomputed after step 2 is diffed against
+     correct rows, so its visit emits zero.
+   - A session first seen after the list read has no history from before
+     step 2.
+4. **State row.** Write `agent_usage_totals_state` complete once every listed
+   session has been visited, with the triggers live throughout.
+   `_rollup_is_complete` (`schema.py:896`) is the precedent.
 
-**Deploy order.** One release. Startup creates the objects (triggers first),
-the backfill runs in the background as the usage rollup's does
-(`schema.py:873`), and the reader switches when the state row lands. No
-separate API and worker ordering is needed, because the API is the only
-reader.
+**Readiness, interrupted upgrades and re-upgrades.** Startup decides with the
+same rule the usage rollup uses,
+`needs_backfill = not (trigger_is_live and marked_complete)`
+(`schema.py:866`). It extends that with a third input: whether all three
+tables exist.
+
+| Startup finds | Action | Why it is safe |
+|---|---|---|
+| Triggers live, state complete, all three tables | nothing | I holds, and every session has been visited |
+| Triggers live, state incomplete (backfill interrupted) | resume at step 3, no TRUNCATE | the triggers were live, so I held throughout, and a re-visit is a diff |
+| A trigger missing or disabled, all three tables present | steps 3-4 (re-visit everything) | the recompute is the only canonical writer, so a gap left canonical rows stale **together with** their deltas, and I still holds. A re-visit repairs both |
+| Any of the three tables missing (partial drop, or rollback then re-upgrade) | step 2 (TRUNCATE all three), then 3-4 | I cannot be known, so start the whole tier from empty |
+
+The backfill is awaited at startup, after the DDL, exactly as the usage
+rollup's is (`schema.py:869-870`). It is not an API background task. Startup
+running a backfill longer than this one has never been decided, and this ADR
+does not decide it.
+
+Under `SYN_SKIP_AUTO_CREATE_TABLES=true` (`events/store.py:83-106`), startup
+runs no DDL and no backfill. The operator applies migration 011, which runs
+steps 2-4 in its documented order. `validate()` then refuses to start without
+the tier's objects.
+
+**Read switch.** `totals()` reads `agent_usage_totals_state` in its own
+snapshot. Until the state is complete, it serves today's session-grain path.
+So a deploy never 503s mid-backfill, and the reader never serves a partial
+total.
+
+**Deploy order.**
+
+- Slice 3a (the pre-lock) ships first, on its own. It changes no number.
+- Slice 3b creates the tier and backfills it, with the reader unchanged.
+- Slice 4 switches the reader.
+
+3b and 4 may ship in the same release. 4 is still safe if 3b has not finished
+its backfill, because 4 reads the state row. No separate API and worker
+ordering is needed, because the API is the only reader.
 
 **Rollback.**
 
-- Reverting the reader code goes back to the session-grain path, which still
-  works unchanged.
-- The new triggers add ingest cost, so a down migration drops them, the job
-  and the three new tables. `reported_observations` can stay: the old trigger
-  function ignores it, and the old reader never reads it.
+- **Reverting slice 4** returns the reader to the session-grain path, which
+  still works unchanged. The tier keeps being maintained, so I keeps holding,
+  and re-applying 4 is immediate.
+- **Reverting slice 3b** (a down migration) drops, in one transaction:
+  - the two triggers on `agent_summary_usage` and `agent_turn_usage_rollup`;
+  - the recompute function;
+  - the fold job;
+  - `agent_session_canonical_usage`, `agent_usage_totals_delta`,
+    `agent_usage_totals` and `agent_usage_totals_state`.
+
+  Re-upgrading hits the "table missing" row above and rebuilds from empty.
+- **Reverting slice 3a** is optional. The pre-lock is harmless without the
+  tier. If slice 3b is still installed, its trigger raises
+  `usage_session_lock_missing` on every write, so 3a cannot be reverted while
+  3b is installed.
+- `reported_observations` can stay. The old trigger function ignores it, and
+  the old reader never reads it.
 - No data in the existing rollups is rewritten, so nothing needs restoring.
 
 ### D6. Scale
@@ -417,6 +730,19 @@ reader.
   inserts share no row. The totals rows are touched only by the fold, under
   one advisory lock. The naive (b) above would put every writer on a few
   shared rows. This design puts none there.
+- **Deadlock.** Per-session scope alone does not rule out deadlock, because
+  one batch can touch several sessions, days and models. D1.1a's pre-lock in
+  ascending key order is what rules it out.
+  - **What the pre-lock costs:** one extra statement per ingest transaction,
+    and earlier serialisation of two concurrent batches for the same session.
+    Those batches already serialise today on that session's turn-rollup rows,
+    so the change is when they wait, not whether.
+  - **The cost to measure:** a batch that spans many sessions holds all of
+    their locks for the whole COPY. Slice 3a prints the distribution of
+    distinct sessions per batch from the ingest benchmark.
+    **Assumption A9:** it is small, because batches are per execution.
+  - A throughput benchmark shows the cost. It does not prove deadlock safety:
+    the ordering argument does, and slice 3a's interleaving tests pin it.
 - **Scoped reads** stay on the session grain, bounded by the workflow's
   sessions rather than all history, at 78.6 ms against a 300 ms budget. That is
   not the problem #2383 measured. A per-execution totals grain would double
@@ -457,10 +783,12 @@ slices are ordered so each one is useful and shippable alone.
 |---|---|---|---|
 | 1 | This ADR | n/a | n/a |
 | 2 | **Port + first column.** `reported_observations` on `agent_turn_usage_rollup`: trigger, widened backfill, migration 011 part 1. The reader is unchanged. The query service gains one narrow internal port, `UsageTotalsSource` (Protocol: `group_rows(snapshot) -> Sequence[PricingGroupRow]`, a frozen dataclass), and today's SQL becomes its first implementation, so slices 3-4 swap the source and leave `_sum_groups` as it is. | Parity batches A/B/D/E assert `Σ reported_observations` = the non-zero turns per key; backfill-does-not-block test extended; a unit test that the port's session-grain implementation and `_sum_groups` produce today's `CanonicalTotals` | Count zero-token turns as reported; drop the widened keep condition (backfilled keys lose their count); count the turn in the backfill AND the trigger |
-| 3 | **Per-session canonical rows.** `agent_session_canonical_usage`, the recompute function built from `rollup_usage_sources` + `CANONICAL_USAGE_DECISION_CTE`, triggers on both rollup tables, per-session lock, batched backfill and state row. The reader is unchanged. | Property: the grouped canonical rows equal today's totals group rows over the parity seed plus batch F; concurrent recompute and backfill converge; ingest throughput printed before and after (A2) | Add the summary without subtracting the turns; rank by magnitude instead of recency; let an all-zero summary win; skip the DELETE trigger (a backfill re-run doubles a session) |
-| 4 | **Ledger, fold, read switch.** `agent_usage_totals_delta`, `agent_usage_totals`, the fold job and its lock, `validate()` objects, the `UsageTotalsSource` implementation over them, switching on the state row; drop `sessions` from `totals()`. | Full parity at three fold points (D2); emptied-group test; a fold racing ingest; a `validate()` test that a missing job fails startup; the 88 ms breakdown printed (A1) | Fold that deletes without upserting; fold without the advisory lock running twice; read that skips the ledger (stale by one fold); a switch that ignores the state row |
+| 3a | **Session pre-lock.** `agent_usage_lock_sessions(text[])`, the lock class in `advisory_locks`, and the call as the first statement of `insert_batch`, `insert_one` and each usage-backfill batch (D1.1a). There is no canonical tier yet, so no number changes. | **Interleaving test:** two connections run the D1.1a schedule (session S, D1/M1 then D2/M2, against D2/M2) with barriers between statements, and both must commit. **Backfill against ingest:** a multi-session backfill batch runs alongside a multi-session COPY that shares two sessions in the opposite order, and both commit. A unit test checks the function's lock order on unsorted input with duplicates. The sessions-per-batch distribution is printed (A9). | Lock in input order instead of sorted order (the opposite-order interleaving deadlocks); drop the pre-lock from `insert_batch` (the S schedule deadlocks once 3b's trigger exists, so this mutant is re-run in 3b, where the enforcement check also fails it) |
+| 3b | **The canonical tier, from empty.** `agent_session_canonical_usage`, `agent_usage_totals_delta`, `agent_usage_totals` and `agent_usage_totals_state`, created together. The recompute function, built from `rollup_usage_sources` + `CANONICAL_USAGE_DECISION_CTE`, writes the canonical rows and their deltas, and enforces the pre-lock (`usage_session_lock_missing`). Triggers on both rollup tables, the fold job and its lock, the D5 startup table and backfill steps 2-4, and migration 011. The reader is unchanged. | Property: the grouped canonical rows equal today's totals group rows over the parity seed plus batch F. Invariant I after every batch. Concurrent recompute and backfill converge. **Upgrade test:** install 3a with real history (the parity seed plus the 6k seed), then upgrade to 3b while a writer ingests, and check pre-E1 parity and I before and after a fold. **Resume and reset tests:** stop the backfill midway and restart, which must resume without TRUNCATE. Drop only the ledger and restart, which must reset all three tables and rebuild. A write without the pre-lock raises. Ingest throughput is printed before and after (A2). | Add the summary without subtracting the turns; rank by magnitude instead of recency; let an all-zero summary win; skip the DELETE trigger (a backfill re-run doubles a session); write a canonical row without its delta when the old row is absent (the upgrade test loses history); the reset TRUNCATEs the canonical table but not the ledger and totals (the reset test double-counts); remove the enforcement check (the 3a "drop the pre-lock" mutant then deadlocks instead of raising) |
+| 4 | **Read switch.** The `UsageTotalsSource` implementation over the totals and the ledger, switched on the state row. The `validate()` objects. Drop `sessions` from `totals()`. | The D2 transition test T1-T6, against the pre-2341 oracle, at three fold points. The emptied-group test. A fold racing ingest. A `validate()` test that a missing job fails startup. The 88 ms breakdown printed (A1). A fold run while another fold holds the lock reports itself as skipped, and leaves the ledger untouched. | Fold that deletes without upserting; a read that skips the ledger (stale by one fold); a switch that ignores the state row; each T-row mutation in D2; take the fold lock with `pg_advisory_lock` instead of `try` (the skipped-fold assertion fails because the second fold blocks, then runs) |
 | 5 | **Gate.** The EXPLAIN structural test, the 6k/24k sweep, and the budget change after the owner OKs the number | The tests are the deliverable | Revert slice 4's read switch: the structural test and the sweep must both fail |
 | 6 | *(optional)* Scoped read drops its per-day `agent_events` branches using `reported_observations` | Parity, filtered, for the three workflows and the empty set | Same as slice 2's first mutation, on the scoped path |
+| 7 | **One snapshot for the whole response** (D4). The `ReadSnapshot` port and its export/import implementation. Connection-taking variants of the reads `/metrics` uses. The route opens one snapshot per request on both paths, and `get_dashboard_metrics()` and the scoped phase reads join it. Independent of slices 2-6. | **The #983 concurrency test**, global and scoped. A hook pauses the request after the leader exports. Another connection then commits, in one transaction, a new execution, session and artifact (the projection rows) and its observations. The request is released and its body must be entirely from before that commit. A second run commits before the export and must be entirely from after it. A pool-pressure test: N concurrent requests against a projection pool of size 1 all complete. The A6b lazy-DDL test. | Drop `SET TRANSACTION SNAPSHOT` from the projection reads (some counts include the commit); open the leader `READ COMMITTED`; commit the leader before `gather` finishes (the import fails); run the totals on a second observation connection instead of the leader (the pool-pressure test starves under a size-1 observation pool) |
 
 Implementation code back-references this ADR by its slug,
 `ADR-079-metrics-totals-rollup`, at the top of the new schema section and in
@@ -482,7 +810,7 @@ the query service.
 **Worse**
 
 - Ingest does more work per event: a per-session recompute and ledger inserts.
-  That is measured in slice 3, and the additive fast path exists if it is
+  That is measured in slice 3b, and the additive fast path exists if it is
   needed.
 - There is one more moving part, a database job. If it stops, reads slow down
   but stay correct. That failure is visible in latency telemetry and at
@@ -497,10 +825,12 @@ the query service.
 
 ## Open questions for the owner
 
-1. **Whole-response snapshot (#983).** Keep four snapshots with `gather`
-   (today), or co-locate the four reads in one transaction now that totals are
-   cheap? This is only possible if the projection store and the event store
-   are one database (A6).
+1. **Whole-response snapshot (#983).** D4 proposes one exported snapshot that
+   every read imports. It keeps `gather`, and costs a held leader connection
+   per request plus a connection-passing seam in the projection store. Do you
+   accept that seam, or would you rather give up concurrency for one
+   connection read sequentially now that the totals are cheap? Either way the
+   requirement is met, and slice 7 is where it lands.
 2. **Scoped totals.** Is the 300 ms scoped budget the goal, or should scoped
    reads also be flat in history? The second means a per-execution totals
    grain and roughly twice the ledger writes.
@@ -511,4 +841,10 @@ the query service.
    under the advisory lock? I prefer the database job: it holds no app state
    and keeps running across API restarts.
 5. **Ingest cost ceiling.** What regression in ingest throughput, measured in
-   slice 3, would make you prefer the additive fast path from the start?
+   slices 3a and 3b, would make you prefer the additive fast path from the
+   start?
+6. **Fail-loud enforcement.** D1.1a makes a write that skips the session
+   pre-lock raise, so that batch's telemetry is lost and nothing deadlocks
+   later. Is losing that batch acceptable as the way an ordering bug shows up?
+   The other way is to log and take the lock late, which keeps the batch but
+   risks the deadlock.
