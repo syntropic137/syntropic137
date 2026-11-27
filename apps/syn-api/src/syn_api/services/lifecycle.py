@@ -178,12 +178,28 @@ def _validate_workspace_settings() -> Result[None, LifecycleError]:
     """
     from syn_shared.settings.workspace import WorkspaceSettings
 
+    return _validate_settings(WorkspaceSettings, "Workspace")
+
+
+def _validate_lifecycle_webhook_settings() -> Result[None, LifecycleError]:
+    """Fail startup on a half-set lifecycle webhook (#1661).
+
+    Built otherwise only inside the subscription coordinator's init, which is
+    degradable and retried: a URL with no secret would leave the API reporting
+    degraded on a loop instead of refusing to start with the variable named.
+    """
+    from syn_shared.settings.lifecycle_webhook import LifecycleWebhookSettings
+
+    return _validate_settings(LifecycleWebhookSettings, "Lifecycle webhook")
+
+
+def _validate_settings(settings: Callable[[], object], what: str) -> Result[None, LifecycleError]:
     try:
-        WorkspaceSettings()
+        settings()
     except Exception as exc:
         # No exc_info and no exception object in the log: settings errors echo
         # their input, and neighbouring settings carry tokens.
-        logger.error("Workspace settings are invalid; refusing to start: %s", exc)
+        logger.error("%s settings are invalid; refusing to start: %s", what, exc)
         return Err(LifecycleError.VALIDATION_FAILED, message=str(exc))
     return Ok(None)
 
@@ -196,9 +212,10 @@ async def _init_critical_path() -> Result[None, LifecycleError]:
     threshold, and raising the threshold to accommodate a growing critical path
     is the wrong direction.
     """
-    workspace_result = _validate_workspace_settings()
-    if isinstance(workspace_result, Err):
-        return workspace_result
+    for validate in (_validate_workspace_settings, _validate_lifecycle_webhook_settings):
+        settings_result = validate()
+        if isinstance(settings_result, Err):
+            return settings_result
     return await _init_event_store()
 
 

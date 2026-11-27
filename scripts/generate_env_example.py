@@ -41,6 +41,7 @@ from syn_shared.settings.image_verification import (  # noqa: E402
     ImageVerificationSettings,
 )
 from syn_shared.settings.infra import InfraSettings  # noqa: E402
+from syn_shared.settings.lifecycle_webhook import LifecycleWebhookSettings  # noqa: E402
 from syn_shared.settings.platform_access import PlatformAccessSettings  # noqa: E402
 from syn_shared.settings.session_inventory import SessionInventorySettings  # noqa: E402
 from syn_shared.settings.session_store import SessionStoreSettings  # noqa: E402
@@ -549,6 +550,18 @@ def generate_env_example() -> str:
                 "Give each workspace phase a read-only, expiring, revocable API "
                 "token (ADR-072). Off: no token is issued and the API refuses all "
                 "workspace traffic."
+            ),
+        )
+    )
+
+    lines.extend(
+        generate_settings_section(
+            LifecycleWebhookSettings,
+            "EXECUTION LIFECYCLE WEBHOOK - OPT-IN, DEFAULT OFF",
+            prefix="SYN_LIFECYCLE_WEBHOOK_",
+            description=(
+                "One signed POST each time an execution completes, fails or is cancelled "
+                "(#1661). Set both to turn it on; exactly one set stops startup."
             ),
         )
     )

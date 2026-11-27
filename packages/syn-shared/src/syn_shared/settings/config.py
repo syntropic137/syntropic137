@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from syn_shared.settings.execution import ExecutionSettings, ExecutorPoolSettings
     from syn_shared.settings.github import GitHubAppSettings
     from syn_shared.settings.image_verification import ImageVerificationSettings
+    from syn_shared.settings.lifecycle_webhook import LifecycleWebhookSettings
     from syn_shared.settings.platform_access import PlatformAccessSettings
     from syn_shared.settings.polling import PollingSettings
     from syn_shared.settings.session_inventory import SessionInventorySettings
@@ -919,6 +920,21 @@ class Settings(BaseSettings):
         from syn_shared.settings.polling import PollingSettings
 
         return PollingSettings()
+
+    # =========================================================================
+    # LIFECYCLE WEBHOOK (#1661) - signed notice when an execution ends
+    # =========================================================================
+
+    @property
+    def lifecycle_webhook(self) -> LifecycleWebhookSettings:
+        """Where execution lifecycle notices are POSTed; off unless both vars are set.
+
+        Raises if only one of SYN_LIFECYCLE_WEBHOOK_URL and
+        SYN_LIFECYCLE_WEBHOOK_SECRET is set, or the URL is not http(s).
+        """
+        from syn_shared.settings.lifecycle_webhook import LifecycleWebhookSettings
+
+        return LifecycleWebhookSettings()
 
     # =========================================================================
     # EXECUTION (#1557) - one concurrency budget for every start path
