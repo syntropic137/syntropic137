@@ -47,6 +47,9 @@ USAGE = WorkspaceUsage(
     net_rx_bytes=1_048_576,
     net_tx_bytes=65_536,
     delete_fallback=WorkspaceDeleteFallback.DELETED,
+    pids_peak=231,
+    pids_limit=256,
+    pids_limit_hits=0,
 )
 
 
@@ -152,6 +155,9 @@ def _assert_one_row(writer: _Writer) -> None:
                 "net_rx_bytes": 1_048_576,
                 "net_tx_bytes": 65_536,
                 "delete_fallback": "deleted",
+                "pids_peak": 231,
+                "pids_limit": 256,
+                "pids_limit_hits": 0,
                 "workspace_lifetime_seconds": LIFETIME_SECONDS,
             },
             execution_id="e-usage",

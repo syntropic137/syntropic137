@@ -432,3 +432,26 @@ async def test_a_reap_that_does_not_complete_is_reported_not_raised(
     assert len(provider.targets) == 1
     assert "Workspace reap failed for execution e-1" in caplog.text
     assert "container stop failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_pids_peak_limit_and_refusals_reach_the_domain() -> None:
+    """#2227: a codex verify died at the pids limit and nothing recorded it.
+
+    The real agentic-workspace `TeardownUsage` carries the three pids fields;
+    they must arrive unchanged, and an unread count must stay unknown.
+    """
+    report = TeardownReport(
+        finalization=_COMPLETED,
+        usage=TeardownUsage(pids_peak=256, pids_limit=256, pids_limit_hits=5),
+    )
+    adapter, _ = _adapter(report)
+    usage = await adapter.destroy(_HANDLE)
+    assert usage is not None
+    assert (usage.pids_peak, usage.pids_limit, usage.pids_limit_hits) == (256, 256, 5)
+
+    saturated = TeardownReport(finalization=_COMPLETED, usage=TeardownUsage(pids_limit=256))
+    adapter, _ = _adapter(saturated)
+    usage = await adapter.destroy(_HANDLE)
+    assert usage is not None
+    assert (usage.pids_peak, usage.pids_limit, usage.pids_limit_hits) == (None, 256, None)
