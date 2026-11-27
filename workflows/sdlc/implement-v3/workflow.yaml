@@ -115,6 +115,9 @@ phases:
       - syntropic137/software-leverage-points/types@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/implement.md
+    # #2227: gates (preflight-agent, builds) fork past the 256 default
+    resources:
+      pids_limit: 1024
 
   - id: verify
     name: Verify the change independently
@@ -156,6 +159,9 @@ phases:
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/software-complexity@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/verify.md
+    # #2227: gates (preflight-agent, builds) fork past the 256 default
+    resources:
+      pids_limit: 1024
 
   - &fix_round
     id: fix
@@ -183,6 +189,9 @@ phases:
       - syntropic137/software-leverage-points/error-handling@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/principles-and-patterns@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/fix.md
+    # #2227: gates (preflight-agent, builds) fork past the 256 default
+    resources:
+      pids_limit: 1024
 
   - &reverify_round
     id: reverify
@@ -227,6 +236,9 @@ phases:
       - syntropic137/software-leverage-points/security@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
       - syntropic137/software-leverage-points/architecture@7e48aad9c7186bb03b8b0df899f56b7cd3b2a454
     prompt_file: phases/reverify.md
+    # #2227: gates (preflight-agent, builds) fork past the 256 default
+    resources:
+      pids_limit: 1024
 
   # BOUNDED REPAIR ROUNDS (PC-63). On 2026-10-05 four runs (#1589, #1596,
   # #1597, #1603) ended with `reverify` BLOCKED on findings one more edit would
