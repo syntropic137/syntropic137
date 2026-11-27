@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from syn_adapters.projections.manager import ProjectionManager
+    from syn_domain.contexts.orchestration import SourceCommit
     from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         PhaseExecutionDetail,
     )
@@ -329,6 +330,8 @@ async def _map_phase_detail(
                 for w in phase.observed_branches
             ]
         ),
+        # None stays None: "not recorded" is not an empty checkout (#1004).
+        checked_out_commits=_listed(phase.checked_out_commits),
         # The rows themselves stay a plain list: `activity.telemetry_available`
         # below is the one place that says whether this list is short because
         # nothing happened or because nothing could be read, and a second
@@ -348,6 +351,11 @@ async def _map_phase_detail(
         # get back the stall reading that #1332 is about.
         activity=summarize_phase_activity(phase, ops, elapsed_seconds=duration_seconds),
     )
+
+
+def _listed(commits: tuple[SourceCommit, ...] | None) -> list[SourceCommit] | None:
+    """The read model's commits as the API's list, None kept None (#1004)."""
+    return None if commits is None else list(commits)
 
 
 def _requested_model(phase: PhaseExecutionDetail, session_requested: str | None) -> str | None:
@@ -425,6 +433,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         # whose branch nobody knows about is exactly the thing this field
         # exists to stop being invisible (#1200).
         observed_branches=phase.observed_branches,
+        checked_out_commits=phase.checked_out_commits,
         # Passed through verbatim, None included: this constructor re-lists
         # every field by hand and is exactly the hop that drops one (#891,
         # #1176). `or []` here would erase the not-reported/confirmed-none

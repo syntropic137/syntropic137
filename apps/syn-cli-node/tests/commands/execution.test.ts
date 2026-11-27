@@ -389,6 +389,35 @@ describe("execution commands", () => {
       expect(out).toContain("artifact art-1 not found");
     });
 
+    it("prints each repository's short commit, for the run and each phase (#1004)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({
+        ...detail,
+        source_commits: [
+          { repository: "acme/api", sha: "0123456789abcdef0123456789abcdef01234567" },
+          { repository: "acme/web", sha: null },
+        ],
+        phases: [
+          { name: "plan", status: "completed", total_tokens: 1, cost_usd: "0", model_display: "m",
+            checked_out_commits: [{ repository: "acme/api", sha: "fedcba9876543210fedcba9876543210fedcba98" }] },
+          { name: "build", status: "pending", total_tokens: 0, cost_usd: "0", model_display: "m", checked_out_commits: null },
+        ],
+      })).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      const out = stdout();
+      expect(out).toContain("Commits:      acme/api@0123456, acme/web@unresolved");
+      expect(out).not.toContain("0123456789abcdef");
+      expect(out).toContain("plan: acme/api@fedcba9");
+      expect(out).toContain("build: not recorded");
+    });
+
+    it("says an older run's commits were not recorded, never that there were none (#1004)", async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse(detail)).mockResolvedValueOnce(jsonResponse({ detail: "denied" }, 403));
+      await handler({ positionals: ["exec-001"], values: {} });
+      const out = stdout();
+      expect(out).toContain("Commits:      not recorded");
+      expect(out).not.toContain("Checked out:");
+    });
+
     it("prints resume lineage both ways (#1881)", async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({
         ...detail,

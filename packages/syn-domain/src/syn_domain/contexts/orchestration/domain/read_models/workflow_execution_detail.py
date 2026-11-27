@@ -16,6 +16,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.ImageManifestV
     read_image_manifest,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.start_pins import (
+    read_recorded_commits,
     read_source_commits,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -189,6 +190,11 @@ class PhaseExecutionDetail:
     None when no provisioning recorded a reading. Read, absent and unreadable
     stay distinct: an eval set reports which images its trials ran (#2108)."""
 
+    checked_out_commits: tuple[SourceCommit, ...] | None = None
+    """Where each repository was checked out when this phase's latest
+    workspace was provisioned (#1004). None when no provisioning recorded it,
+    as no run before the field did: "not recorded", never "no repository"."""
+
     @staticmethod
     def _to_iso_string(value: datetime | str | None) -> str | None:
         """Convert datetime or string to ISO string."""
@@ -239,6 +245,7 @@ class PhaseExecutionDetail:
             "image_manifest": (
                 None if self.image_manifest is None else self.image_manifest.model_dump(mode="json")
             ),
+            "checked_out_commits": _stored_commits(self.checked_out_commits),
         }
 
     @classmethod
@@ -284,6 +291,7 @@ class PhaseExecutionDetail:
                 data.get("reported_failure_reason")
             ),
             image_manifest=read_image_manifest(data.get("image_manifest")),
+            checked_out_commits=read_recorded_commits(data.get("checked_out_commits")),
         )
 
 
@@ -435,6 +443,12 @@ class WorkflowExecutionDetail:
     until provisioning recorded one: an eval trial's base is judged from it
     (#2108), and an absent checkout is never a mismatch."""
 
+    source_commits: tuple[SourceCommit, ...] | None = None
+    """The commit each repository was at when the run started, as its start
+    event recorded it (#1457), or None for a run that predates the field
+    (#1004). Not `starting_checkout`: that is what the first workspace
+    verified, and it folds "not recorded" into empty for the eval judge."""
+
     @property
     def task(self) -> str | None:
         """What this run was asked to do, or ``None`` if it was asked nothing.
@@ -539,6 +553,7 @@ class WorkflowExecutionDetail:
             tags=tuple(data.get("tags") or ()),
             inherited_tags=tuple(data.get("inherited_tags") or ()),
             starting_checkout=tuple(read_source_commits(data.get("starting_checkout"))),
+            source_commits=read_recorded_commits(data.get("source_commits")),
         )
 
     @staticmethod
@@ -593,7 +608,15 @@ class WorkflowExecutionDetail:
             "tags": list(self.tags),
             "inherited_tags": list(self.inherited_tags),
             "starting_checkout": [c.model_dump(mode="json") for c in self.starting_checkout],
+            "source_commits": _stored_commits(self.source_commits),
         }
+
+
+def _stored_commits(
+    commits: tuple[SourceCommit, ...] | None,
+) -> list[dict[str, str | None]] | None:
+    """Recorded commits as stored, None kept None: it is "not recorded" (#1004)."""
+    return None if commits is None else [c.model_dump(mode="json") for c in commits]
 
 
 def _exit_code(stored: object) -> int | None:

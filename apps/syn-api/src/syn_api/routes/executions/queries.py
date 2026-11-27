@@ -616,6 +616,8 @@ async def get_detail(
             inputs=dict(detail.inputs),
             resumed_from=resumed_from_info(detail.resumed_from),
             resumed_as=detail.resumed_as,
+            # None stays None: "not recorded" is not "no repository" (#1004).
+            source_commits=(None if detail.source_commits is None else list(detail.source_commits)),
         )
     )
 
@@ -928,5 +930,6 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
         latest_resumed_as=lineage.latest_resumed_as,
         resumed_from_display=lineage.resumed_from_display,
         resumed_as_display=lineage.resumed_as_display,
+        source_commits=detail.source_commits,
         eval=await execution_eval_run(mgr.store, execution_id),
     )

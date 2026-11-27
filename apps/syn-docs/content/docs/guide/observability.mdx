@@ -158,6 +158,8 @@ When a phase's workspace is torn down, what it consumed is recorded as one
 | `cpu_usage_seconds`, `cpu_throttled_seconds`, `nr_throttled` | CPU time used, time throttled, and throttle count |
 | `memory_peak_bytes` | Peak memory |
 | `oom_kills` | OOM kills inside the workspace |
+| `pids_peak`, `pids_limit` | Most processes and threads held at once, and the workspace's pids limit |
+| `pids_limit_hits` | Process or thread creations refused because a pids limit was reached; above 0 means a pids limit refused work, not necessarily the workspace's own (unknown when the workspace was still saturated at teardown) |
 | `disk_bytes_at_teardown` | Size of the workspace directory before it was deleted |
 | `net_rx_bytes`, `net_tx_bytes` | Network bytes received and sent |
 | `delete_failures` | Paths the cleanup could not delete (`[]` when it removed everything) |

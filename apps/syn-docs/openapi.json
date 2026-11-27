@@ -14070,6 +14070,20 @@
             ],
             "title": "Resumed As"
           },
+          "source_commits": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SourceCommit"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Commits"
+          },
           "latest_resumed_as": {
             "anyOf": [
               {
@@ -18992,6 +19006,20 @@
             ],
             "title": "Observed Branches"
           },
+          "checked_out_commits": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SourceCommit"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked Out Commits"
+          },
           "pinned_at_start": {
             "anyOf": [
               {
@@ -23644,6 +23672,32 @@
         "type": "object",
         "title": "SkillStorageStatsResponse",
         "description": "Size of the content-addressed skill store.\n\nSkill storage grows monotonically: registration is keyed by content hash\nand nothing removes old trees (skills-distribution spec D6, eviction is\ndeliberately not implemented). This endpoint exists so that decision stays\na measured one rather than an assumption."
+      },
+      "SourceCommit": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repository"
+        ],
+        "title": "SourceCommit",
+        "description": "The commit one repository was at when the execution started (#1457).\n\n`sha` is None when nothing could resolve it - no GitHub access, a repository\nthat has since gone - and that is recorded as an honest \"unknown\" rather\nthan left out, so the repository list stays complete."
       },
       "StartPath": {
         "type": "string",
