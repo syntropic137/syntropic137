@@ -19,6 +19,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final, Protocol, cast
+from urllib.parse import urlsplit
 
 from agentic_logging import get_logger
 from event_sourcing import (
@@ -62,6 +63,9 @@ if TYPE_CHECKING:
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection import (
         _BudgetChecker,
         _ExecutionService,
+    )
+    from syn_domain.contexts.orchestration.slices.notify_execution_lifecycle import (
+        ExecutionLifecycleNoticeProcessManager,
     )
 
 logger = get_logger(__name__)
@@ -558,6 +562,39 @@ def _delivered(projection: object) -> CheckpointedProjection:
     return adapted
 
 
+def _lifecycle_notice_manager(
+    projection_store: ProjectionStoreProtocol,
+) -> ExecutionLifecycleNoticeProcessManager | None:
+    """The #1661 lifecycle webhook manager, or None when the operator has not set it up.
+
+    Its to-do list lives in the same durable store as every projection's
+    (ADR-060), and the coordinator calls its ``process_pending`` only when live.
+    Raises when the settings are half set, so a webhook the operator believes is
+    on is never silently off.
+    """
+    from syn_adapters.execution_lifecycle import WebhookExecutionLifecycleSink
+    from syn_domain.contexts.orchestration.slices.notify_execution_lifecycle import (
+        ExecutionLifecycleNoticeProcessManager,
+    )
+
+    webhook = get_settings().lifecycle_webhook.webhook
+    if webhook is None:
+        logger.info(
+            "Execution lifecycle webhook is off: set SYN_LIFECYCLE_WEBHOOK_URL "
+            "and SYN_LIFECYCLE_WEBHOOK_SECRET to turn it on"
+        )
+        return None
+    # The host only: any other part of a URL may carry a credential.
+    logger.info(
+        "Execution lifecycle webhook is on, posting signed notices to %s",
+        urlsplit(webhook.url).hostname,
+    )
+    return ExecutionLifecycleNoticeProcessManager(
+        sink=WebhookExecutionLifecycleSink(webhook.url, webhook.secret),
+        store=projection_store,
+    )
+
+
 def create_coordinator_service(
     event_store: EventStoreClient,
     projection_store: ProjectionStoreProtocol,
@@ -676,7 +713,8 @@ def create_coordinator_service(
 
     failure_streak = FailureStreakProjection(projection_store)
 
-    # Create all checkpointed projections (27 total - bumped for #1557)
+    # Create all checkpointed projections (27 total - bumped for #1557), plus
+    # the optional managers appended after the list.
     projections: list[CheckpointedProjection] = cast(
         "list[CheckpointedProjection]",
         [
@@ -767,6 +805,9 @@ def create_coordinator_service(
         projections.append(inventory_process_manager)
     if inventory_replication_manager is not None:
         projections.append(inventory_replication_manager)
+    lifecycle_notices = _lifecycle_notice_manager(projection_store)
+    if lifecycle_notices is not None:
+        projections.append(lifecycle_notices)
 
     return CoordinatorSubscriptionService(
         event_store=event_store,
