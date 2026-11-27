@@ -25,6 +25,7 @@ WHAT IS SEEDED, AND WHY. Every shape is one the rollup could get wrong:
   a model with no rate card          unpriced tokens, not $0
   turns only, no summary             priced from the turns
   a session with no usage at all     counted as a session, with no tokens
+  a turn reporting no tokens         an observation, but not a reported one
   several sessions per execution     delegates
   a NULL and an EMPTY execution id   kept apart by NULLS NOT DISTINCT
   tool events in bulk                rows the new path must never read
@@ -37,6 +38,13 @@ separate SQL that has to agree with the others:
   D  while the trigger is DISABLED       by the reconcile a restart runs
   E  after that reconcile                by the trigger again
 
+B is written by the trigger as it stood BEFORE reported_observations
+(ADR-079), on a rollup without the column, and the next start upgrades it:
+that is the only way a key can balance on observations and still owe its
+reported turns, which is what the backfill's widened keep condition is for.
+More turns on A's keys then go through the new trigger before D, so the
+reconcile subtracts reported turns the trigger already counted.
+
 MARKED ``integration``: CI runs it on push to main, PRs into release and the
 weekly cron, not on PRs into main.
 """
@@ -46,6 +54,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -80,14 +89,22 @@ _T0 = datetime(2026, 9, 1, tzinfo=UTC)
 _MODELS = ("claude-sonnet-5", "claude-haiku-4-5-20251001", "mystery-model-x")
 
 
-def _turn(session: str, execution: str | None, n: int, model: str, *, requested: bool) -> Row:
+def _turn(
+    session: str,
+    execution: str | None,
+    n: int,
+    model: str,
+    *,
+    requested: bool,
+    zero: bool = False,
+) -> Row:
     payload = json.dumps(
         {
             "model": model,
-            "input_tokens": 100 + n,
-            "output_tokens": 7 + n % 5,
-            "cache_creation_tokens": 30 * (n % 3),
-            "cache_read_tokens": 900 + n,
+            "input_tokens": 0 if zero else 100 + n,
+            "output_tokens": 0 if zero else 7 + n % 5,
+            "cache_creation_tokens": 0 if zero else 30 * (n % 3),
+            "cache_read_tokens": 0 if zero else 900 + n,
             **({"requested_model": "sonnet"} if requested else {}),
         }
     )
@@ -138,7 +155,7 @@ def _session(batch: str, n: int, execution: str | None) -> list[Row]:
         return rows  # no usage at all: still a session
     for i in range(12):
         model = _MODELS[(n + i // 6) % 2] if shape != 5 else _MODELS[2]
-        rows.append(_turn(session, execution, i, model, requested=i % 4 == 0))
+        rows.append(_turn(session, execution, i, model, requested=i % 4 == 0, zero=i == 11))
     if shape == 1:
         rows.append(_summary(session, execution, 1, _MODELS[0], tokens=0, cost=None))
         rows.append(_summary(session, execution, 2, _MODELS[0], tokens=5_000, cost=0.12))
@@ -174,10 +191,29 @@ def _more_turns_on(batch_rows: list[Row], offset: int) -> list[Row]:
             offset + i,
             str(json.loads(r.data)["model"]),
             requested=False,
+            zero=i % 18 == 0,
         )
         for i, r in enumerate(batch_rows)
         if r.event_type == TOKEN_USAGE and i % 9 == 0
     ]
+
+
+def _trigger_function_before_reported_observations() -> str:
+    """The trigger function as 007 shipped it: the specification of an old install."""
+    from syn_adapters import projection_stores
+
+    shipped = (
+        Path(projection_stores.__file__).parent / "migrations/007_agent_usage_rollup.sql"
+    ).read_text()
+    start = shipped.index("CREATE OR REPLACE FUNCTION agent_usage_rollup_apply()")
+    end = shipped.index("$$ LANGUAGE plpgsql;", start) + len("$$ LANGUAGE plpgsql;")
+    return shipped[start:end]
+
+
+async def _as_before_reported_observations(conn: asyncpg.Connection) -> None:
+    """Put the rollup back as a pre-ADR-079 install had it: no column, the old trigger."""
+    await conn.execute(_trigger_function_before_reported_observations())
+    await conn.execute("ALTER TABLE agent_turn_usage_rollup DROP COLUMN reported_observations")
 
 
 @dataclasses.dataclass
@@ -200,9 +236,12 @@ async def seeded(test_infrastructure) -> AsyncIterator[Seeded]:
                 batch_a = _batch("a", range(40))
                 await copy_rows(conn, batch_a)
                 await EventStoreSchema().ensure_schema(conn)  # creates and backfills
+                await _as_before_reported_observations(conn)
                 await copy_rows(
                     conn, [*_batch("b", range(40, 70)), *_more_turns_on(batch_a, 1_000)]
                 )
+                await EventStoreSchema().ensure_schema(conn)  # upgrades: adds and backfills
+                await copy_rows(conn, _more_turns_on(batch_a, 1_500))
                 await conn.execute(
                     f"ALTER TABLE agent_events DISABLE TRIGGER {USAGE_ROLLUP_TRIGGER}"
                 )
@@ -276,3 +315,50 @@ async def test_an_execution_set_matching_nothing_matches_too(seeded: Seeded) -> 
     old = await _assert_same_totals(seeded.pool, {"exec-none"})
     assert isinstance(old, LegacyCanonicalTotals)
     assert old.sessions == 0
+
+
+# Per turn key: the token_usage events that reported tokens, and the rollup's
+# reported count, summed over its trigger and backfill rows. Spelled out here
+# rather than imported, so the check does not share the predicate it checks.
+_REPORTED_PER_KEY = """
+WITH raw AS (
+    SELECT session_id, execution_id, data->>'model' AS model,
+        data->>'requested_model' AS requested_model, (data ? 'requested_model') AS has_rm,
+        COUNT(*) FILTER (WHERE
+            COALESCE((data->>'input_tokens')::bigint, 0)
+            + COALESCE((data->>'output_tokens')::bigint, 0)
+            + COALESCE((data->>'cache_creation_tokens')::bigint, 0)
+            + COALESCE((data->>'cache_read_tokens')::bigint, 0) <> 0
+        ) AS reported,
+        COUNT(*) AS turns
+    FROM agent_events WHERE event_type = 'token_usage'
+    GROUP BY 1, 2, 3, 4, 5
+), rolled AS (
+    SELECT session_id, execution_id, model, requested_model, has_requested_model AS has_rm,
+        SUM(reported_observations) AS reported, SUM(observations) AS turns
+    FROM agent_turn_usage_rollup
+    GROUP BY 1, 2, 3, 4, 5
+)
+SELECT
+    (SELECT COUNT(*) FROM (SELECT * FROM raw EXCEPT SELECT * FROM rolled) a) AS missing,
+    (SELECT COUNT(*) FROM (SELECT * FROM rolled EXCEPT SELECT * FROM raw) b) AS extra,
+    (SELECT SUM(turns) - SUM(reported) FROM raw) AS zero_turns,
+    (SELECT COUNT(*) FROM agent_turn_usage_rollup WHERE backfilled AND observations = 0
+        AND reported_observations > 0) AS owed_only
+"""
+
+
+async def test_reported_observations_are_the_non_zero_turns_per_key(seeded: Seeded) -> None:
+    """ADR-079 D1: every path into the rollup counts a turn as reported iff it had tokens.
+
+    Batches A, B, D and E each reach the rollup by a different path, and B's
+    keys reach the column only through the upgrade's widened backfill.
+    """
+    async with seeded.pool.acquire() as conn:
+        row = await conn.fetchrow(_REPORTED_PER_KEY)
+    assert row is not None
+    assert (row["missing"], row["extra"]) == (0, 0), dict(row)
+    # About something: the seed has zero-token turns, and keys that balanced on
+    # observations and were owed only their reported turns (the upgrade).
+    assert row["zero_turns"] > 0
+    assert row["owed_only"] > 0
