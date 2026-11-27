@@ -27,7 +27,8 @@ real database with a writer inserting the whole time:
      so the next run that hits one records who it was.
   2. EVERY EVENT IS COUNTED EXACTLY ONCE. After the dust settles, the rollup
      equals a fresh aggregation of agent_events: per turn key (every token
-     column and the observation count) and per summary row (as a multiset).
+     column, the observation count and the reported count, ADR-079) and per
+     summary row (as a multiset).
      The concurrent writer hits sessions the backfill has already passed,
      sessions it has not reached yet, the batch it is parked in, and
      brand-new ones, on the same model keys the backfill writes, so a missed
@@ -124,8 +125,15 @@ _WRITER_ROWS = "SELECT COUNT(*) FROM agent_events WHERE time >= $1"
 
 
 def _turn(session: str, n: int, model: str) -> Row:
+    # Every 13th turn reports no tokens: an observation, but not a reported one.
+    zero = n % 13 == 0
     payload = json.dumps(
-        {"model": model, "input_tokens": 10 + n % 7, "output_tokens": 1, "cache_read_tokens": n}
+        {
+            "model": model,
+            "input_tokens": 0 if zero else 10 + n % 7,
+            "output_tokens": 0 if zero else 1,
+            "cache_read_tokens": 0 if zero else n,
+        }
     )
     return Row(_T0 + timedelta(seconds=n), TOKEN_USAGE, session, f"exec-{session}", payload)
 
@@ -208,14 +216,20 @@ WITH raw AS (
         SUM(COALESCE((data->>'output_tokens')::bigint, 0)) AS o,
         SUM(COALESCE((data->>'cache_creation_tokens')::bigint, 0)) AS cc,
         SUM(COALESCE((data->>'cache_read_tokens')::bigint, 0)) AS cr,
-        COUNT(*) AS n
+        COUNT(*) AS n,
+        COUNT(*) FILTER (WHERE
+            COALESCE((data->>'input_tokens')::bigint, 0)
+            + COALESCE((data->>'output_tokens')::bigint, 0)
+            + COALESCE((data->>'cache_creation_tokens')::bigint, 0)
+            + COALESCE((data->>'cache_read_tokens')::bigint, 0) <> 0
+        ) AS r
     FROM agent_events WHERE event_type = 'token_usage'
     GROUP BY 1, 2, 3, 4, 5
 ), rolled AS (
     SELECT session_id, execution_id, model, requested_model, has_requested_model AS has_rm,
         SUM(input_tokens) AS i, SUM(output_tokens) AS o,
         SUM(cache_creation_tokens) AS cc, SUM(cache_read_tokens) AS cr,
-        SUM(observations) AS n
+        SUM(observations) AS n, SUM(reported_observations) AS r
     FROM agent_turn_usage_rollup
     GROUP BY 1, 2, 3, 4, 5
 )
@@ -391,6 +405,11 @@ async def test_inserts_flow_during_the_backfill_and_each_is_counted_once(
             # 2. Exactly once, against a fresh aggregation of everything written.
             keys, summaries = await _assert_rollup_equals_raw(conn)
             assert keys > HISTORY_SESSIONS and summaries > HISTORY_SESSIONS // 2
+            # The reported count is about something: both kinds of turn exist.
+            assert await conn.fetchval(
+                "SELECT SUM(observations) > SUM(reported_observations) "
+                "AND SUM(reported_observations) > 0 FROM agent_turn_usage_rollup"
+            )
 
             # And a re-run converges instead of adding.
             await EventStoreSchema.backfill_usage_rollup(conn)

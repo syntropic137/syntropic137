@@ -112,6 +112,16 @@ token usage, a cost figure, a stream chunk. See `agent_observation.py` and
 Observations are Lane 2. An Observation is never the reason state changed; if
 something must be replayed to decide state, it belongs in `orchestration`.
 
+### Reported Observation
+
+A `token_usage` Observation whose four token counts do not sum to zero: the
+turn reported tokens. A turn that reported none is still an Observation, but it
+is priced at zero at any rate (#890), so it never counts behind unpriced work.
+The predicate is `zero_usage_group_by`, and `agent_turn_usage_rollup` keeps the
+count per turn key as `reported_observations`, beside `observations`, which
+counts every turn (ADR-079 D1). A sum of +5 and -5 is zero, so such a turn is
+not reported either.
+
 ## Cost by Token Type
 
 A Session's priced cost split into input, output, cache write and cache read
