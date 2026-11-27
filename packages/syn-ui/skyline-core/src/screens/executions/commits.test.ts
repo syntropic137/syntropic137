@@ -15,9 +15,9 @@ describe('commitsView (#1004)', () => {
   })
 
   it('shows the 7-character SHA and keeps the full one to copy', () => {
-    expect(commitsView([{ repository: 'acme/api', sha: SHA }])).toEqual({
+    expect(commitsView([{ repository: 'acme/service', sha: SHA }])).toEqual({
       kind: 'commits',
-      lines: [{ repository: 'acme/api', short: '4f2a9c1', sha: SHA, text: 'acme/api @ 4f2a9c1' }],
+      lines: [{ repository: 'acme/service', short: '4f2a9c1', sha: SHA, text: 'acme/service @ 4f2a9c1' }],
     })
   })
 
@@ -35,7 +35,7 @@ describe('commitsView (#1004)', () => {
 
 describe('phaseCommitsView (#1004)', () => {
   const run = [
-    { repository: 'acme/api', sha: SHA },
+    { repository: 'acme/service', sha: SHA },
     { repository: 'acme/web', sha: null },
   ]
 
@@ -44,8 +44,8 @@ describe('phaseCommitsView (#1004)', () => {
   })
 
   it('shows a phase checked out at a different commit', () => {
-    const view = phaseCommitsView([{ repository: 'acme/api', sha: OTHER }, run[1]!], run)
-    expect(view?.kind === 'commits' && view.lines.map((l) => l.text)).toEqual(['acme/api @ 9b8a7c6', 'acme/web @ unresolved'])
+    const view = phaseCommitsView([{ repository: 'acme/service', sha: OTHER }, run[1]!], run)
+    expect(view?.kind === 'commits' && view.lines.map((l) => l.text)).toEqual(['acme/service @ 9b8a7c6', 'acme/web @ unresolved'])
   })
 
   it('shows a phase whose unresolved commit resolved', () => {
