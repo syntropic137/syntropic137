@@ -607,18 +607,21 @@ cd "$REPO/apps/syn-dashboard-ui"
 pnpm install --frozen-lockfile && pnpm build
 pnpm preview --port 4173 --strictPort &
 URL=http://localhost:4173
+FIXTURES=(--fixtures "$REPO/apps/syn-dashboard-ui/fixtures/screenshot.json")
 
 # apps/syn-docs instead (Next.js; `next start` exits if the port is taken)
 cd "$REPO/apps/syn-docs"
 pnpm install --frozen-lockfile && pnpm build
 pnpm start -p 4174 &
 URL=http://localhost:4174
+FIXTURES=()
 
-# then, for each affected <route>, from any directory:
+# then wait for the server, and for each affected <route>, from any directory:
+until curl -sf "$URL/" >/dev/null; do sleep 1; done
 node "$SHOT" "$URL/<route>" \
-  /workspace/artifacts/output/<route>-1280x800.png --viewport 1280x800
+  /workspace/artifacts/output/<route>-1280x800.png --viewport 1280x800 "${FIXTURES[@]}"
 node "$SHOT" "$URL/<route>" \
-  /workspace/artifacts/output/<route>-390x844.png --viewport 390x844
+  /workspace/artifacts/output/<route>-390x844.png --viewport 390x844 "${FIXTURES[@]}"
 ```
 
 There is one screenshot script and it lives in the dashboard app; `syn-docs`
@@ -646,15 +649,22 @@ layout broken, does anything overflow or force horizontal scroll at phone
 width, is an element the change was meant to add or move missing, is the page
 showing an error state where the change should render.
 
-**No API is reachable here, and the dashboard has no fixture or mock-data mode**
-(#1647), so pages render their shell - navigation, header, filters, page chrome
-- with the data area in its loading state. That is expected and is not a
-defect. Do not build a mock layer to get around it. Screenshot what renders and
-judge only what the PR changed: a change to layout, navigation, filters or
-anything else in the shell is fully checkable; a change that only shows with
-data (a table row, a chart, a cost figure) is not, so name it under
-`Unverified by design` with the reason, rather than certifying a loading
-spinner as proof of it.
+**No API is reachable here, so the dashboard is screenshotted against its
+checked-in fixture world** (#1647): `--fixtures` serves
+`apps/syn-dashboard-ui/fixtures/screenshot.json` for every `/api/` request, and
+pages render populated - tables, charts, execution and session detail, cost
+figures. Judge the populated page, not the shell. The README's "Populated
+pages: the checked-in fixture world" lists the routes and ids the fixtures
+cover (`/executions/exec-0c5d1e7a` and the rest) and what they cannot show
+(event streams, `/artifacts/{id}/raw`, per-filter rows); screenshot the routes
+the PR touches at those ids. A data-only change is checkable now, so do not
+name it `Unverified by design` for want of data. If the PR changes an API
+response shape the fixtures do not yet cover, say so, and update
+`apps/syn-dashboard-ui/src/fixtures/screenshotFixtures.ts` in the PR under
+review and run `pnpm fixtures:screenshot` (never edit the JSON; the drift check
+in `pnpm test` fails when it is stale), then screenshot again. Only what the
+README says the fixtures cannot show goes under `Unverified by design`, with
+the reason.
 
 Put a `## Screenshots` section in your report with one row per image:
 
