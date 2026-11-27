@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/events/schema.py b/packages/syn-adapters/src/syn_adapters/events/schema.py
+index 51b7fdf6a..6b7910b06 100644
+--- a/packages/syn-adapters/src/syn_adapters/events/schema.py
++++ b/packages/syn-adapters/src/syn_adapters/events/schema.py
+@@ -449,7 +449,7 @@ def usage_rollup_backfill_sql(sessions: str) -> tuple[str, ...]:
+         e.cache_creation_tokens - COALESCE(t.cache_creation_tokens, 0),
+         e.cache_read_tokens - COALESCE(t.cache_read_tokens, 0),
+         e.observations - COALESCE(t.observations, 0),
+-        e.reported_observations - COALESCE(t.reported_observations, 0),
++        e.reported_observations,
+         TRUE
+     FROM (
+         SELECT session_id, execution_id, {recorded_model_select()},

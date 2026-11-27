@@ -1,0 +1,12 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/events/schema.py b/packages/syn-adapters/src/syn_adapters/events/schema.py
+index 51b7fdf6a..8ca95933d 100644
+--- a/packages/syn-adapters/src/syn_adapters/events/schema.py
++++ b/packages/syn-adapters/src/syn_adapters/events/schema.py
+@@ -473,7 +473,6 @@ def usage_rollup_backfill_sql(sessions: str) -> tuple[str, ...]:
+      AND t.requested_model IS NOT DISTINCT FROM e.requested_model
+      AND t.has_requested_model = e.has_requested_model
+     WHERE e.observations > COALESCE(t.observations, 0)
+-       OR e.reported_observations > COALESCE(t.reported_observations, 0)
+     """,
+     )
+ 
