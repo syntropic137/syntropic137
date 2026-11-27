@@ -26,6 +26,7 @@ from syn_domain.contexts.agent_sessions import (
     recorded_model_select,
     summary_usage_columns,
     turn_usage_columns,
+    zero_usage_group_by,
 )
 from syn_shared.events import GIT_COMMIT, SESSION_SUMMARY, TOKEN_USAGE
 
@@ -284,7 +285,11 @@ AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL = "LOCK TABLE agent_events IN ACCESS EXCLUSIVE
 # `observations`, the number of token_usage events it sums, and the backfill
 # keeps a key only where the events outnumber the trigger's observations -
 # a key with no pre-trigger turns gets no backfilled row, as it would have
-# had no row in a raw read either.
+# had no row in a raw read either. `reported_observations` is subtracted the
+# same way, and also keeps a key: a trigger older than the column counted a
+# turn's observation but not its report, so on an upgraded rollup a key can
+# balance on observations and still owe reported turns (ADR-079 D5). Such a
+# row carries zero tokens and zero observations, which every reader sums away.
 USAGE_ROLLUP_TABLES_SQL = (
     f"""
     CREATE TABLE IF NOT EXISTS {SUMMARY_USAGE_TABLE} (
@@ -346,6 +351,14 @@ USAGE_ROLLUP_TABLES_SQL = (
         backfilled_at TIMESTAMPTZ NOT NULL
     )
     """,
+    # The turns that reported tokens (ADR-079 D1): a turn whose four counts
+    # sum to zero is an observation but prices nothing, so an unpriced group
+    # must not count it (#890). Added after 007, so an existing rollup has the
+    # column only from here on, and startup backfills it (_create_usage_rollup).
+    f"""
+    ALTER TABLE {TURN_USAGE_ROLLUP_TABLE}
+    ADD COLUMN IF NOT EXISTS reported_observations BIGINT NOT NULL DEFAULT 0
+    """,
 )
 
 _SUMMARY_COLUMNS = (
@@ -355,7 +368,8 @@ _SUMMARY_COLUMNS = (
 _TURN_KEY_COLUMNS = "session_id, execution_id, model, requested_model, has_requested_model"
 _TURN_COLUMNS = (
     f"{_TURN_KEY_COLUMNS}, "
-    "input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, observations"
+    "input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, observations, "
+    "reported_observations"
 )
 
 USAGE_ROLLUP_TRIGGER_FUNCTION_SQL = f"""
@@ -370,7 +384,8 @@ BEGIN
         SELECT NEW.session_id, NEW.execution_id,
             {recorded_model_select("NEW.data")},
             {turn_usage_columns("NEW.data")},
-            1 AS observations
+            1 AS observations,
+            CASE WHEN {zero_usage_group_by("NEW.data")} THEN 0 ELSE 1 END
         ON CONFLICT ON CONSTRAINT {TURN_USAGE_ROLLUP_TABLE}_key DO UPDATE
         SET input_tokens = {TURN_USAGE_ROLLUP_TABLE}.input_tokens + EXCLUDED.input_tokens,
             output_tokens = {TURN_USAGE_ROLLUP_TABLE}.output_tokens + EXCLUDED.output_tokens,
@@ -378,7 +393,9 @@ BEGIN
                 {TURN_USAGE_ROLLUP_TABLE}.cache_creation_tokens + EXCLUDED.cache_creation_tokens,
             cache_read_tokens =
                 {TURN_USAGE_ROLLUP_TABLE}.cache_read_tokens + EXCLUDED.cache_read_tokens,
-            observations = {TURN_USAGE_ROLLUP_TABLE}.observations + 1;
+            observations = {TURN_USAGE_ROLLUP_TABLE}.observations + 1,
+            reported_observations =
+                {TURN_USAGE_ROLLUP_TABLE}.reported_observations + EXCLUDED.reported_observations;
     END IF;
     RETURN NULL;
 END;
@@ -432,13 +449,15 @@ def usage_rollup_backfill_sql(sessions: str) -> tuple[str, ...]:
         e.cache_creation_tokens - COALESCE(t.cache_creation_tokens, 0),
         e.cache_read_tokens - COALESCE(t.cache_read_tokens, 0),
         e.observations - COALESCE(t.observations, 0),
+        e.reported_observations - COALESCE(t.reported_observations, 0),
         TRUE
     FROM (
         SELECT session_id, execution_id, {recorded_model_select()},
             SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
             SUM(cache_creation_tokens) AS cache_creation_tokens,
             SUM(cache_read_tokens) AS cache_read_tokens,
-            COUNT(*) AS observations
+            COUNT(*) AS observations,
+            COUNT(*) FILTER (WHERE NOT {zero_usage_group_by()}) AS reported_observations
         FROM (
             SELECT session_id, execution_id, data, {turn_usage_columns()}
             FROM agent_events
@@ -454,6 +473,7 @@ def usage_rollup_backfill_sql(sessions: str) -> tuple[str, ...]:
      AND t.requested_model IS NOT DISTINCT FROM e.requested_model
      AND t.has_requested_model = e.has_requested_model
     WHERE e.observations > COALESCE(t.observations, 0)
+       OR e.reported_observations > COALESCE(t.reported_observations, 0)
     """,
     )
 
@@ -470,6 +490,14 @@ ON CONFLICT (singleton) DO UPDATE SET backfilled_at = EXCLUDED.backfilled_at
 """
 USAGE_ROLLUP_MARK_INCOMPLETE_SQL = f"DELETE FROM {USAGE_ROLLUP_STATE_TABLE}"
 USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL = f"SELECT EXISTS (SELECT 1 FROM {USAGE_ROLLUP_STATE_TABLE})"
+USAGE_ROLLUP_HAS_REPORTED_COLUMN_SQL = f"""
+SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = '{TURN_USAGE_ROLLUP_TABLE}'
+      AND column_name = 'reported_observations'
+)
+"""
 
 USAGE_ROLLUP_TRIGGER = "agent_events_usage_rollup"
 
@@ -851,8 +879,13 @@ class EventStoreSchema:
             trigger_is_live: bool = (
                 await conn.fetchval(trigger_live_sql(USAGE_ROLLUP_TRIGGER))
             ) is True
-            marked_complete = all(tables_exist) and (
-                (await conn.fetchval(USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL)) is True
+            # A mark written before reported_observations existed does not
+            # cover it: the column arrives at 0 on every row, so the rollup is
+            # backfilled again once to fill it (ADR-079 D5).
+            marked_complete = (
+                all(tables_exist)
+                and (await conn.fetchval(USAGE_ROLLUP_HAS_REPORTED_COLUMN_SQL)) is True
+                and (await conn.fetchval(USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL)) is True
             )
             for ddl in USAGE_ROLLUP_TABLES_SQL:
                 await conn.execute(ddl)
