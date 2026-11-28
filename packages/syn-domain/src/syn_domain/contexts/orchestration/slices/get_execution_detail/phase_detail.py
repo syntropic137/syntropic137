@@ -72,6 +72,15 @@ class PhaseDetail:
     dispatched straight after this event, so this plus ``timeout_seconds`` is
     the phase's deadline. ``None`` until the workspace is ready.
     """
+    checked_out_commits: list[object] | None = None
+    """What this phase's workspace checked out, from
+    ``WorkspaceProvisionedForPhase`` (#1004), as stored.
+
+    Declared for the reason ``observed_branches`` below gives: the failure
+    path rebuilds the stored phase through this model, so a field it does not
+    name is erased the moment a phase fails. THREE-VALUED: readings, `[]` for
+    a provisioning that recorded no repository, None for "not recorded".
+    """
     error_message: str | None = None
     observed_branches: list[object] | None = None
     """How this phase's branches stood when it died (#1200), as stored.
@@ -207,6 +216,7 @@ class PhaseDetail:
             "completed_at": self.completed_at,
             "timeout_seconds": self.timeout_seconds,
             "provisioned_at": self.provisioned_at,
+            "checked_out_commits": self.checked_out_commits,
             "error_message": self.error_message,
             "observed_branches": self.observed_branches,
             "exit_code": self.exit_code,
@@ -237,6 +247,7 @@ class PhaseDetail:
             completed_at=data.get("completed_at"),
             timeout_seconds=data.get("timeout_seconds"),
             provisioned_at=data.get("provisioned_at"),
+            checked_out_commits=data.get("checked_out_commits"),
             error_message=data.get("error_message"),
             observed_branches=data.get("observed_branches"),
             exit_code=data.get("exit_code"),

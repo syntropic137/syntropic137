@@ -203,7 +203,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
     # v20: starting_checkout and each phase's image_manifest from
     # WorkspaceProvisionedForPhase, so every eval trial already in the store
     # is judged against its base and reports its image (#2108).
-    VERSION = 20
+    # v21: source_commits from WorkflowExecutionStarted and each phase's
+    # checked_out_commits from WorkspaceProvisionedForPhase, so every run
+    # already in the store says which commit it ran on (#1004).
+    VERSION = 21
 
     def __init__(self, store: ProjectionStore):
         """Initialize with a projection store.
@@ -364,6 +367,9 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             # budget onto the phase that it belongs to, which is where a
             # reader needs it next to that phase's elapsed time (#1262).
             "phase_budgets": phase_budgets,
+            # As recorded, None included: a run before #1457 recorded no
+            # commits, which is not the claim that it had no repositories.
+            "source_commits": event_data.get("source_commits"),
         }
         await self._store.save(self.PROJECTION_NAME, execution_id, detail)
 
@@ -501,6 +507,11 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         phase["provisioned_at"] = event.provisioned_at.isoformat()
         if event.image_manifest is not None:
             phase["image_manifest"] = event.image_manifest.model_dump(mode="json")
+        phase["checked_out_commits"] = (
+            None
+            if event.checked_out_commits is None
+            else [c.model_dump(mode="json") for c in event.checked_out_commits]
+        )
         await self._store.save(self.PROJECTION_NAME, event.execution_id, existing)
 
     @staticmethod

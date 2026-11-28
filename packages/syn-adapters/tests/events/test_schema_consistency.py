@@ -126,7 +126,7 @@ class TestSchemaConsistency:
     def test_usage_rollup_migration_matches_the_code_that_creates_it(
         self, migrations_dir: Path
     ) -> None:
-        """007 is what a SYN_SKIP_AUTO_CREATE_TABLES deployment applies by hand.
+        """007 then 011 are what a SYN_SKIP_AUTO_CREATE_TABLES deployment applies by hand.
 
         Unlike 005 it is not only documentation: validate() refuses to start
         without the objects it creates, and an operator whose role holds no
@@ -134,6 +134,11 @@ class TestSchemaConsistency:
         _create_usage_rollup() runs must appear in it verbatim (modulo
         whitespace), and so must the advisory-lock key, or a hand-applied
         rollup could disagree with the one the API would have built.
+
+        011 replaces 007's trigger function and backfill (ADR-079, the
+        reported_observations column), so the current statements are looked
+        for in the two files together, and 011 is held to 007's two-phase
+        shape: 007 stays as it shipped.
         """
         from syn_adapters.events.schema import (
             AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL,
@@ -149,13 +154,17 @@ class TestSchemaConsistency:
         def flat(sql: str) -> str:
             return " ".join(sql.split())
 
-        documented = flat(
-            "\n".join(
-                line
-                for line in (migrations_dir / "007_agent_usage_rollup.sql").read_text().splitlines()
-                if not line.lstrip().startswith("--")
+        def documented_in(name: str) -> str:
+            return flat(
+                "\n".join(
+                    line
+                    for line in (migrations_dir / name).read_text().splitlines()
+                    if not line.lstrip().startswith("--")
+                )
             )
-        )
+
+        latest = documented_in("011_agent_usage_totals.sql")
+        documented = documented_in("007_agent_usage_rollup.sql") + " " + latest
         statements = [
             AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL,
             *USAGE_ROLLUP_TABLES_SQL,
@@ -170,14 +179,15 @@ class TestSchemaConsistency:
         ]
         missing = [s for s in statements if flat(s) not in documented]
         assert not missing, (
-            "007_agent_usage_rollup.sql no longer matches schema.py; re-render it. "
+            "007 + 011 no longer match schema.py; re-render 011. "
             f"Missing: {[flat(s)[:80] for s in missing]}"
         )
         # Two transactions, trigger first (#1558 r2): the backfill must not
         # run inside the one whose CREATE TRIGGER holds inserts off, and it
         # must start only once the trigger is committed and counting.
-        assert documented.startswith("BEGIN;") and documented.endswith("COMMIT;")
-        first, second = documented.split("COMMIT;")[:2]
+        assert flat(USAGE_ROLLUP_TRIGGER_FUNCTION_SQL) in latest
+        assert latest.startswith("BEGIN;") and latest.endswith("COMMIT;")
+        first, second = latest.split("COMMIT;")[:2]
         assert "CREATE TRIGGER" in first and "INSERT INTO" not in first.split("$$")[-1]
         # The table lock comes before any trigger DDL: lock order (see schema.py).
         assert first.index(flat(AGENT_EVENTS_TRIGGER_DDL_LOCK_SQL)) < first.index("DROP TRIGGER")

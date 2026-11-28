@@ -30,7 +30,16 @@ Every other clause above still applies to it.
 Nothing is archived (that is slice 2), so nothing is "saved first": a dirty
 directory stays and is reported. A directory that passes is CLAIMED (renamed
 out of its workspace path, atomically) and then judged again in full, with
-its identity checked, before it is deleted. Maintenance pauses every pass.
+its identity checked; it is authorized and MARKED (``.deleting-``), and judged
+in full once more, as the last step before the delete, there and whenever a
+later pass resumes the delete (#2378). Maintenance pauses every pass.
+
+That last judgment narrows the window, it does not close it. A writer that
+already holds a file descriptor inside the directory can create content after
+it, while the delete empties the tree; the delete checks the directory's
+identity (``st_dev``, ``st_ino``), never its contents. No container may bind
+the directory and its owner is terminal and settled, so no such writer should
+exist; nothing here proves that none does.
 Any doubt about the inputs - docker unreadable, a read model rebuilding,
 subscriptions catching up - skips the whole pass, because "I could not look"
 must never read as "nothing is there".
@@ -372,7 +381,7 @@ class WorkspaceDirReclaimer:
         """Judge, claim, judge again, mark, then delete within the pass's time.
 
         A dead pass's claim is put back if kept; a dead pass's delete (a
-        ``.deleting-`` directory) is finished, never judged again or put back.
+        ``.deleting-`` directory) is judged again and finished, never put back.
         """
         from syn_adapters.workspace_backends.stale_dirs import is_being_deleted
 
@@ -411,12 +420,13 @@ class WorkspaceDirReclaimer:
             kept = Retained(RetainedReason.IDENTITY_CHANGED, f"could not mark it ({exc})")
             _log_outcome(listing, kept)
             return _owned(kept, owner)
-        stop = await self._stop_before_destroying()
-        if stop is not None:
-            return stop  # authorized and marked: the next pass resumes it
-        # Judged at the claimed path; logged under the path it was found at.
+        # A pause here leaves it authorized and marked: the next pass resumes it.
+        last = await self._judge_marked(listing, marked)
+        if not isinstance(last, ReclaimableDir):
+            return _owned(last, owner)
+        # Judged at the marked path; logged under the path it was found at.
         done = await self._finish_delete(
-            listing, replace(again, host_dir=listing.host_dir), marked, listing.identity, deadline
+            listing, replace(last, host_dir=listing.host_dir), marked, listing.identity, deadline
         )
         return _owned(done, owner)
 
@@ -427,7 +437,8 @@ class WorkspaceDirReclaimer:
 
         The name proves nothing: the record written before the mark must name
         this very directory (``st_dev``, ``st_ino``). Containers are read
-        fresh here, not from the pass's opening snapshot.
+        fresh here, not from the pass's opening snapshot, and the contents are
+        judged again in full (#2378): proven once is not proven now.
         """
         identity = await asyncio.to_thread(self.authorized_identity, listing.host_dir)
         if identity is None:
@@ -449,15 +460,10 @@ class WorkspaceDirReclaimer:
             return bound
         if self.dry_run:
             return _Deferred()
-        stop = await self._stop_before_destroying()
-        if stop is not None:
-            return stop
-        resumed = ReclaimableDir(
-            host_dir=listing.host_dir,
-            workspace_id=listing.workspace_id,
-            size_bytes=listing.size_bytes,
-        )
-        return await self._finish_delete(listing, resumed, listing.host_dir, identity, deadline)
+        last = await self._judge_marked(replace(listing, identity=identity), listing.host_dir)
+        if not isinstance(last, ReclaimableDir):
+            return last
+        return await self._finish_delete(listing, last, listing.host_dir, identity, deadline)
 
     async def _finish_delete(
         self,
@@ -469,8 +475,8 @@ class WorkspaceDirReclaimer:
     ) -> ReclaimableDir | Retained | _Deferred:
         """Delete ``at`` off the event loop until the pass's deadline.
 
-        Only ever reached with a `ReclaimableDir` (or a ``.deleting-`` name,
-        which only a `ReclaimableDir` produces), so nothing unguarded is deleted.
+        Only ever reached with a `ReclaimableDir` judged at ``at`` just before
+        (`_judge_marked`), so nothing unguarded is deleted.
 
         Scratch only (owner decision, #1983): the one thing this ever deletes
         is a direct child of the workspace base directory. Run history - the
@@ -510,7 +516,10 @@ class WorkspaceDirReclaimer:
     async def _judge_claimed(
         self, before: WorkspaceDirListing, claimed: str
     ) -> ReclaimableDir | Retained:
-        """Read everything again under the claim; any doubt is a reason to keep it."""
+        """Read everything again at ``claimed``; any doubt is a reason to keep it.
+
+        ``claimed`` is the claimed path, or the marked one (`_judge_marked`).
+        """
         catching_up = Retained(
             RetainedReason.NOT_TERMINAL, "subscriptions began catching up under the claim"
         )
@@ -534,6 +543,28 @@ class WorkspaceDirReclaimer:
             return verdict
         return verdict if self.is_live() else catching_up
 
+    async def _judge_marked(
+        self, before: WorkspaceDirListing, marked: str
+    ) -> ReclaimableDir | Retained | _Paused:
+        """The last judgment before a delete, in full, at the ``.deleting-`` path (#2378).
+
+        Maintenance and liveness are read first, so nothing follows it but the
+        delete. A pause changes nothing: the authorization stands. A keep
+        revokes it, so no later pass can finish the delete. The directory keeps
+        its deleting name: `release` puts back only a claim, and renaming it to
+        its workspace path could land on whatever is there now. Without its
+        authorization, `_resume_delete` keeps it every pass until an operator
+        moves it.
+        """
+        stop = await self._stop_before_destroying()
+        if stop is not None:
+            return stop
+        verdict = await self._judge_claimed(before, marked)
+        if isinstance(verdict, Retained):
+            await asyncio.to_thread(_forget, self.base_dir, before.workspace_id)
+            _log_outcome(before, verdict)
+        return verdict
+
     async def _put_back(self, path: str) -> None:
         """A claimed directory that is kept goes back to its workspace path."""
         try:
@@ -556,8 +587,8 @@ def _owners_keep(kept: Retained, execution_id: str | None) -> Retained:
 
 
 def _owned(
-    outcome: ReclaimableDir | Retained | _Deferred, owner: str | None
-) -> ReclaimableDir | Retained | _Deferred:
+    outcome: ReclaimableDir | Retained | _Deferred | _Paused, owner: str | None
+) -> ReclaimableDir | Retained | _Deferred | _Paused:
     """A keep made once ``owner`` was resolved still names it, unless it names its own."""
     if not isinstance(outcome, Retained) or isinstance(outcome, _OwnersKeep) or owner is None:
         return outcome

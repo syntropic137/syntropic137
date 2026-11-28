@@ -348,6 +348,20 @@ class WorkspaceUsage:
     #: The fallback delete's outcome. None when the host deleted the directory
     #: alone, or the delete was not observed.
     delete_fallback: WorkspaceDeleteFallback | None = None
+    #: The most processes AND threads the workspace held at once (cgroup
+    #: `pids.peak`). Threads count, so a parallel test run reaches the limit
+    #: long before its process count suggests (#2227).
+    pids_peak: int | None = None
+    #: The workspace's own pids limit. None when unlimited or unknown.
+    pids_limit: int | None = None
+    #: Process or thread creations refused because a pids limit was reached
+    #: (`pids.events` `max`). Above zero proves a process-count limit refused
+    #: work. It does not say WHICH limit: an ancestor cgroup's can apply too,
+    #: and a peak that equals `pids_limit` is consistent with this one, not
+    #: proof of it.
+    #: None (never 0) when the workspace was still saturated at teardown and
+    #: its cgroup could not be read.
+    pids_limit_hits: int | None = None
 
 
 @dataclass(frozen=True)

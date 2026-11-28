@@ -359,3 +359,62 @@ export function phaseRowTarget(p: { name: string; status: string; session_id?: s
     ? { kind: 'none', reason: 'The session for this phase has not been recorded yet.' }
     : { kind: 'none', reason: 'No session was recorded for this phase.' }
 }
+
+/** One repository's commit as the API sends it (`SourceCommitResponse`, #1004); `sha` null is recorded but never resolved. */
+export interface SourceCommitLike {
+  repository: string
+  sha?: string | null
+  sha_display?: string | null
+}
+
+/** What a run from before commits were captured shows in place of them (#1004). */
+export const COMMITS_NOT_RECORDED = 'commit not recorded (older run)'
+
+/** One repository and where it was: `sha` is the full SHA, to copy; null when unresolved. `text` shows the API's `sha_display`. */
+export interface CommitLine {
+  repository: string
+  sha: string | null
+  text: string
+}
+
+/**
+ * Where each repository was, as the page shows it: a line per repository
+ * ("acme/api @ <short sha>"), or one sentence when there is no line to show.
+ * Null (a run from before capture) and an empty list (a run that checked
+ * nothing out) are both said in words, never drawn as an empty list.
+ */
+export type CommitsView = { kind: 'commits'; lines: readonly CommitLine[] } | { kind: 'absent'; text: string }
+
+export function commitsView(commits: readonly SourceCommitLike[] | null | undefined): CommitsView {
+  if (commits == null) return { kind: 'absent', text: COMMITS_NOT_RECORDED }
+  if (!commits.length) return { kind: 'absent', text: 'no repository checked out' }
+  return {
+    kind: 'commits',
+    lines: commits.map((c) => {
+      const sha = c.sha || null
+      return { repository: c.repository, sha, text: `${c.repository} @ ${c.sha_display || 'unresolved'}` }
+    }),
+  }
+}
+
+const commitKey = (c: SourceCommitLike) => `${c.repository}@${c.sha ?? ''}`
+
+/**
+ * A phase's checked-out commits, only the repositories where it differs from
+ * the run, so the same SHA is not repeated on every phase. Null means say
+ * nothing: every repository matches the run, or the phase has not started.
+ * A phase that ran without recording them says so, even when the run did not
+ * record them either: null is "not recorded", never "the same as the run".
+ */
+export function phaseCommitsView(
+  phase: { status: string; checked_out_commits?: readonly SourceCommitLike[] | null },
+  execution: readonly SourceCommitLike[] | null | undefined,
+): CommitsView | null {
+  const commits = phase.checked_out_commits
+  if (commits == null) return statusKind(phase.status) === 'pending' ? null : commitsView(commits)
+  if (execution == null) return commitsView(commits)
+  if (!commits.length) return execution.length ? commitsView(commits) : null
+  const recorded = new Set(execution.map(commitKey))
+  const differing = commits.filter((c) => !recorded.has(commitKey(c)))
+  return differing.length ? commitsView(differing) : null
+}

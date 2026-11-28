@@ -14070,6 +14070,20 @@
             ],
             "title": "Resumed As"
           },
+          "source_commits": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SourceCommitResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Commits"
+          },
           "latest_resumed_as": {
             "anyOf": [
               {
@@ -18992,6 +19006,20 @@
             ],
             "title": "Observed Branches"
           },
+          "checked_out_commits": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SourceCommitResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked Out Commits"
+          },
           "pinned_at_start": {
             "anyOf": [
               {
@@ -23644,6 +23672,43 @@
         "type": "object",
         "title": "SkillStorageStatsResponse",
         "description": "Size of the content-addressed skill store.\n\nSkill storage grows monotonically: registration is keyed by content hash\nand nothing removes old trees (skills-distribution spec D6, eviction is\ndeliberately not implemented). This endpoint exists so that decision stays\na measured one rather than an assumption."
+      },
+      "SourceCommitResponse": {
+        "properties": {
+          "repository": {
+            "type": "string",
+            "title": "Repository"
+          },
+          "sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha"
+          },
+          "sha_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha Display"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "repository"
+        ],
+        "title": "SourceCommitResponse",
+        "description": "One repository's recorded commit, as the API serves it (#1004).\n\nThe domain ``SourceCommit`` is persisted inside events, so the display\nvalue lives here and not there (#897). Build it with\n``source_commit_responses``, which is where ``sha_display`` is derived."
       },
       "StartPath": {
         "type": "string",

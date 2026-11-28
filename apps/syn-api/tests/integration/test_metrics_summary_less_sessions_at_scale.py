@@ -28,6 +28,7 @@ from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_shared.events import SESSION_STARTED, TOKEN_USAGE
 from syn_shared.pricing import canonical_cost_usd
 
+from .latency_gate import measure, over_budget, report
 from .legacy_canonical_totals_pre_2341 import PreBoundCanonicalUsageQueryService
 from .test_dashboard_latency_budget import (
     _COLUMNS,
@@ -36,7 +37,7 @@ from .test_dashboard_latency_budget import (
     EXECUTIONS,
     GATED_WORKFLOW,
     _execution,
-    _p95_ms,
+    _requester,
     _Row,
     _rows,
     _seed_projections,
@@ -180,6 +181,7 @@ async def _served_before_2341(
 async def test_metrics_holds_its_budget_and_its_numbers_with_summary_less_sessions(
     app_with_summary_less_sessions: httpx.AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     client = app_with_summary_less_sessions
     every_execution = {_execution(n) for n in range(EXECUTIONS)}
@@ -196,11 +198,11 @@ async def test_metrics_holds_its_budget_and_its_numbers_with_summary_less_sessio
         assert body["total_tokens"] == tokens, (endpoint.name, body)
         assert Decimal(str(body["total_cost_usd"])) == cost, (endpoint.name, body)
 
-    measured = {e.name: await _p95_ms(client, e.path, e.params) for e in metrics}
-    table = "\n".join(
-        f"  {e.name:<32} p95 {measured[e.name]:7.1f} ms   budget {e.budget_ms:5.0f} ms"
-        for e in metrics
+    measured = await measure(_requester(client), metrics)
+    table = report(
+        f"/metrics with {SUMMARY_LESS_SESSIONS} summary-less sessions", metrics, measured
     )
-    print(f"\n/metrics with {SUMMARY_LESS_SESSIONS} summary-less sessions:\n{table}")
-    over = [e.name for e in metrics if measured[e.name] > e.budget_ms]
+    with capsys.disabled():  # the numbers belong in the CI log, pass or fail
+        print(f"\n{table}")
+    over = over_budget(metrics, measured)
     assert not over, f"p95 over budget for {over}:\n{table}"

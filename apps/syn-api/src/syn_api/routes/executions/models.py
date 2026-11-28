@@ -22,6 +22,7 @@ from syn_api.types import (
     PlannedPhaseInfo,
     ReadModelStatus,
     ResumedFromInfo,
+    SourceCommitResponse,
     StartPinsStatus,
 )
 from syn_domain.contexts.orchestration import (
@@ -193,6 +194,10 @@ class PhaseExecutionInfo(BaseModel):
     identical again. What no record claims is who moved a ref: git does not
     carry that, so this reports the two readings and stops.
     """
+    checked_out_commits: list[SourceCommitResponse] | None = None
+    """Where each repository was checked out when this phase's latest workspace
+    was provisioned (#1004). Null is "not recorded" (a run before the field),
+    never an empty checkout; a `sha` of null is "recorded, not resolved"."""
     pinned_at_start: PhaseStartConfig | None = None
     """The tools, skills and model this phase had when its execution started.
 
@@ -479,6 +484,10 @@ class ExecutionDetailResponse(BaseModel):
     resumed_as: str | None = None
     """The execution that resumed this one. A run is resumed at most once, so
     this is one id or None (#1881)."""
+    source_commits: list[SourceCommitResponse] | None = None
+    """The commit each repository was at when this run started (#1004).
+    Null is "not recorded" (a run before the field); a `sha` of null is
+    "recorded, not resolved"."""
     latest_resumed_as: str | None = None
     """The newest run in the chain this one was resumed into: ``resumed_as``
     followed to its end. Equal to ``resumed_as`` for a single resume (#1881)."""

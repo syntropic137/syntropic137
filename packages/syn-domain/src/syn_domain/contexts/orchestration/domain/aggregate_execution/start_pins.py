@@ -226,6 +226,22 @@ def read_source_commits(raw: object) -> list[SourceCommit]:
         return []
 
 
+def read_recorded_commits(raw: object) -> tuple[SourceCommit, ...] | None:
+    """Recorded commits for a reader to SHOW, None when none were recorded (#1004).
+
+    Unlike `read_source_commits`, absence is not folded into empty: a run that
+    predates the field must read as "not recorded", never as "no repository".
+    Unreadable is absent too, for the same reason.
+    """
+    if raw is None:
+        return None
+    try:
+        return tuple(_SOURCE_COMMITS.validate_python(raw))
+    except ValidationError:
+        logger.warning("Unreadable commits on a stored read model; treating as not recorded")
+        return None
+
+
 def read_inherited_phases(raw: object, owners: object) -> list[InheritedPhase]:
     """The inherited prefix on a replayed `ExecutionResumed`.
 

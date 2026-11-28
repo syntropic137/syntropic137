@@ -39,6 +39,7 @@ from syn_api.types import (
     PhaseStartConfig,
     StartPinsStatus,
     ToolOperation,
+    source_commit_responses,
 )
 from syn_shared.display import format_cost, resolve_duration_seconds
 
@@ -329,6 +330,8 @@ async def _map_phase_detail(
                 for w in phase.observed_branches
             ]
         ),
+        # None stays None: "not recorded" is not an empty checkout (#1004).
+        checked_out_commits=source_commit_responses(phase.checked_out_commits),
         # The rows themselves stay a plain list: `activity.telemetry_available`
         # below is the one place that says whether this list is short because
         # nothing happened or because nothing could be read, and a second
@@ -425,6 +428,7 @@ def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
         # whose branch nobody knows about is exactly the thing this field
         # exists to stop being invisible (#1200).
         observed_branches=phase.observed_branches,
+        checked_out_commits=phase.checked_out_commits,
         # Passed through verbatim, None included: this constructor re-lists
         # every field by hand and is exactly the hop that drops one (#891,
         # #1176). `or []` here would erase the not-reported/confirmed-none

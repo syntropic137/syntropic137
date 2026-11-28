@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "generate:types": "tsx scripts/generate-types.ts"
+    "generate:types": "tsx scripts/generate-types.ts",
+    "fixtures:screenshot": "tsx scripts/write-screenshot-fixtures.ts"
   },
   "dependencies": {
     "@nivo/calendar": "^0.99.0",

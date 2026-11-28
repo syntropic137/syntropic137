@@ -80,6 +80,7 @@ so a verify phase can look at a UI change instead of a human doing it:
 ```bash
 pnpm install --frozen-lockfile && pnpm build
 pnpm preview --port 4173 --strictPort &      # serves dist/
+until curl -sf http://localhost:4173/ >/dev/null; do sleep 1; done
 node scripts/screenshot.mjs http://localhost:4173/ /workspace/artifacts/output/landing.png
 node scripts/screenshot.mjs http://localhost:4173/executions out.png --viewport 390x844
 ```
@@ -101,7 +102,48 @@ diagnostic), so a verify phase can gate on the exit code.
   describe it (dimensions, size, what it shows) in the PR body.
 - Without a reachable API the pages render their shell with loading or empty
   states. That still proves layout and routing, not data. To show data, pass
-  `--fixtures api.json`: a JSON object mapping request pathnames
-  (`"/api/v1/workflows/wf-1"`) to response bodies. Shape them from
-  `src/generated/api-types.ts`; any other `/api/` request answers 404. Add `--expand` to open
-  every `<details>` first, so collapsed content is in the shot.
+  `--fixtures <file.json>`: a JSON object mapping request pathnames
+  (`"/api/v1/workflows/wf-1"`) to response bodies; any other `/api/` request
+  answers 404. Add `--expand` to open every `<details>` first, so collapsed
+  content is in the shot.
+
+### Populated pages: the checked-in fixture world
+
+`fixtures/screenshot.json` is one coherent API world, ready for `--fixtures`:
+a workflow, three executions (completed with two priced models and one
+unpriced, failed, running), their six sessions, a markdown and a PNG artifact,
+dashboard metrics, and everything the app shell asks for. To screenshot a
+populated page:
+
+```bash
+pnpm build
+pnpm preview --port 4173 --strictPort &
+until curl -sf http://localhost:4173/ >/dev/null; do sleep 1; done
+node scripts/screenshot.mjs http://localhost:4173/executions/exec-0c5d1e7a out.png \
+  --viewport 1280x800 --fixtures fixtures/screenshot.json
+```
+
+Build in the foreground and background only the preview: `pnpm build &&
+pnpm preview &` backgrounds the build too, and the screenshot then races a
+server that has not started. The `until` line waits for it to answer.
+
+| Page | URL path |
+| --- | --- |
+| Dashboard | `/` |
+| Executions | `/executions` |
+| Execution: completed / failed / running | `/executions/exec-0c5d1e7a`, `/executions/exec-1f9b2c40`, `/executions/exec-2a7e4d93` |
+| Sessions, and one session | `/sessions`, `/sessions/sess-plan-0c5d` |
+| Workflows, and the workflow | `/workflows`, `/workflows/wf-sdlc-implement` |
+| Artifacts: markdown / PNG | `/artifacts`, `/artifacts/art-plan-md`, `/artifacts/art-dashboard-png` |
+
+- **Never edit the JSON.** Its source is `src/fixtures/screenshotFixtures.ts`,
+  typed route by route from `src/generated/api-types.ts`, so a body that stops
+  matching the API fails `tsc -b`. After changing it, or after `pnpm
+  generate:types`, run `pnpm fixtures:screenshot`. `pnpm test` fails when the
+  JSON is stale, or when a fixture answers a route `apps/syn-docs/openapi.json`
+  does not serve.
+- **What it cannot show.** `screenshot.mjs` matches the pathname only, so a
+  list returns the same rows for every filter, time window and page. Event
+  streams (`/sse/...`) and `/artifacts/{id}/raw` are not JSON and answer 404:
+  pages show "offline" or "connecting", and the PNG artifact has no image.
+  Timestamps are fixed (2026-11-26), so relative times ("10h ago") drift.

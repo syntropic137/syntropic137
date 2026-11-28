@@ -29,6 +29,7 @@ test_heatmap_rollup_equivalence.py.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -37,6 +38,8 @@ from syn_adapters.events.schema import (
     ROLLUP_EXECUTION_INDEX_VALID_SQL,
     ROLLUP_STARTUP_UNLOCK_SQL,
     USAGE_ROLLUP_BACKFILL_SESSIONS_SQL,
+    USAGE_ROLLUP_HAS_REPORTED_COLUMN_SQL,
+    USAGE_ROLLUP_INSTALLED_FUNCTION_SQL,
     USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL,
     USAGE_ROLLUP_MARK_COMPLETE_SQL,
     USAGE_ROLLUP_MARK_INCOMPLETE_SQL,
@@ -197,6 +200,9 @@ class CatalogueConnection:
         #: Whether the usage rollup's completion row exists, answered from the
         #: mark statements actually executed, for the same reason as above.
         self._usage_rollup_marked = False
+        #: The usage rollup's installed trigger body (`pg_proc.prosrc`), from
+        #: the CREATE OR REPLACE FUNCTION actually executed; None is no function.
+        self._usage_rollup_function: str | None = None
         #: Indexes built CONCURRENTLY, keyed by name, valued by `indisvalid`.
         #: Answered from the DDL executed, like the rest of the catalogue: an
         #: absent key is no `pg_index` row, False is a build that died and left
@@ -231,6 +237,8 @@ class CatalogueConnection:
             self._usage_rollup_marked = True
         elif sql == USAGE_ROLLUP_MARK_INCOMPLETE_SQL:
             self._usage_rollup_marked = False
+        if "CREATE OR REPLACE FUNCTION agent_usage_rollup_apply()" in sql:
+            self._usage_rollup_function = sql.split("$$")[1]
         created = re.search(r"CREATE TABLE IF NOT EXISTS (\w+)", sql)
         if created:
             self._relations.add(created.group(1))
@@ -254,7 +262,7 @@ class CatalogueConnection:
         if dropped:
             self._indexes.pop(dropped.group(1), None)
 
-    async def fetchval(self, sql: str, *args: object) -> bool | None:
+    async def fetchval(self, sql: str, *args: object) -> bool | str | None:
         self.calls.append(sql)
         _refuse_blocking_session_lock(sql)
         if sql == ROLLUP_STARTUP_TRY_LOCK_SQL:
@@ -285,6 +293,13 @@ class CatalogueConnection:
             return _tgenabled_predicate_holds(sql, tgenabled)
         if sql == USAGE_ROLLUP_IS_MARKED_COMPLETE_SQL:
             return self._usage_rollup_marked
+        if sql == USAGE_ROLLUP_HAS_REPORTED_COLUMN_SQL:
+            # This double's turn table is always the current one: the column
+            # arrives with it. The upgrade from a table without it is the
+            # parity test's (ADR-079).
+            return "agent_turn_usage_rollup" in self._relations
+        if sql == USAGE_ROLLUP_INSTALLED_FUNCTION_SQL:
+            return self._usage_rollup_function
         msg = f"unexpected fetchval in ensure_schema(): {sql!r}"
         raise AssertionError(msg)
 
@@ -302,6 +317,13 @@ class CatalogueConnection:
 
     def count_backfills(self) -> int:
         return self.executed.count(ROLLUP_BACKFILL_SQL)
+
+    def count_usage_rollup_incomplete_marks(self) -> int:
+        return self.executed.count(USAGE_ROLLUP_MARK_INCOMPLETE_SQL)
+
+    def install_usage_rollup_function(self, body: str) -> None:
+        """Leave another build's trigger body installed, as its startup would."""
+        self._usage_rollup_function = body
 
     def forget_relation(self, name: str) -> None:
         """Make the catalogue report a table as gone, as a rollback would."""
@@ -403,3 +425,55 @@ class TestDayRollupBackfillRunsOnce:
         await schema.ensure_schema(conn)  # type: ignore[arg-type]
 
         assert conn.count_backfills() == 2
+
+
+def _usage_rollup_body_as_007_shipped() -> str:
+    """The trigger body an older build installs: no reported_observations."""
+    from syn_adapters import projection_stores
+
+    shipped = (
+        Path(projection_stores.__file__).parent / "migrations/007_agent_usage_rollup.sql"
+    ).read_text()
+    start = shipped.index("CREATE OR REPLACE FUNCTION agent_usage_rollup_apply()")
+    return shipped[start:].split("$$")[1]
+
+
+class TestUsageRollupReconcilesAnOlderTriggerBody:
+    """New start, older start, new start (ADR-079 D5).
+
+    The older start replaces the trigger function and keeps the column and the
+    completion mark, so every turn ingested under it carries no reported count.
+    Only the installed body tells the next start that its mark no longer holds.
+    """
+
+    async def test_an_older_body_installed_since_earns_a_backfill(self) -> None:
+        conn = CatalogueConnection()
+        schema = EventStoreSchema()
+
+        await schema.ensure_schema(conn)  # type: ignore[arg-type]
+        conn.install_usage_rollup_function(_usage_rollup_body_as_007_shipped())
+        await schema.ensure_schema(conn)  # type: ignore[arg-type]
+
+        assert conn.count_usage_rollup_incomplete_marks() == 2
+
+    async def test_an_unchanged_restart_does_not(self) -> None:
+        conn = CatalogueConnection()
+        schema = EventStoreSchema()
+
+        await schema.ensure_schema(conn)  # type: ignore[arg-type]
+        await schema.ensure_schema(conn)  # type: ignore[arg-type]
+
+        assert conn.count_usage_rollup_incomplete_marks() == 1
+
+    async def test_the_current_body_rewrapped_by_hand_is_current(self) -> None:
+        """011 applied with psql installs the same body with other whitespace."""
+        conn = CatalogueConnection()
+        schema = EventStoreSchema()
+
+        await schema.ensure_schema(conn)  # type: ignore[arg-type]
+        installed = conn._usage_rollup_function
+        assert installed is not None
+        conn.install_usage_rollup_function("\n".join(installed.split()))
+        await schema.ensure_schema(conn)  # type: ignore[arg-type]
+
+        assert conn.count_usage_rollup_incomplete_marks() == 1

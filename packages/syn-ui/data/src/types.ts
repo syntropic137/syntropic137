@@ -482,7 +482,16 @@ export interface PhaseExecutionDetail {
   reported_failure_reason?: ReportedFailureReason | null
   /** Which declared skills this phase used (#1269); absent from a server that predates it. */
   skill_use?: components['schemas']['PhaseSkillUseInfo']
+  /**
+   * Where each repository was checked out when this phase's latest workspace
+   * was provisioned (#1004). Null is "not recorded", never an empty checkout;
+   * a `sha` of null is "recorded, not resolved".
+   */
+  checked_out_commits?: SourceCommit[] | null
 }
+
+/** The commit one repository was at (#1004), aliased to the generated schema rather than restated. */
+export type SourceCommit = components['schemas']['SourceCommitResponse']
 
 /** A phase's start config, aliased to the generated schema rather than restated. */
 export type PhaseStartConfig = components['schemas']['PhaseStartConfig']
@@ -584,6 +593,8 @@ export interface ExecutionDetailResponse {
   resumed_as_display?: string | null
   /** Skill use across every phase (feedback 01308bcf); absent from a server that predates it. */
   skill_use?: components['schemas']['ExecutionSkillUseSummary']
+  /** The commit each repository was at when this run started (#1004). Null is "not recorded" (a run before the field). */
+  source_commits?: SourceCommit[] | null
 }
 
 // =============================================================================
