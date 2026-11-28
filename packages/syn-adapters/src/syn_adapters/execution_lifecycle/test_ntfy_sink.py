@@ -19,12 +19,20 @@ from syn_adapters.execution_lifecycle import (
     LifecycleNoticeUndeliveredError,
     NtfyExecutionLifecycleSink,
 )
+from syn_adapters.execution_lifecycle.ntfy_sink import MAX_MESSAGE_BYTES
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+    CancelExecutionCommand,
+)
+from syn_domain.contexts.orchestration.domain.aggregate_execution.lifecycle_events import (
+    cancelled_event,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     FailureClassification,
 )
 from syn_domain.contexts.orchestration.slices.notify_execution_lifecycle.value_objects import (
     ExecutionLifecycleNotice,
     ExecutionOutcome,
+    lifecycle_notice,
 )
 
 pytestmark = pytest.mark.unit
@@ -95,6 +103,38 @@ async def test_publishes_one_line_shaped_by_the_outcome(
     assert request.headers["Title"] == f"Execution {notice.outcome}"
     assert request.headers["Tags"] == tags
     assert request.headers["Priority"] == priority
+
+
+@pytest.mark.parametrize(
+    ("reason", "body"),
+    [
+        (
+            "operator stopped it\r\n\tmaintenance  window",
+            "exec-4714 cancelled (wf-9): operator stopped it maintenance window",
+        ),
+        ("停" * 2000, None),
+    ],
+    ids=["multiline", "long-multibyte"],
+)
+async def test_a_cancel_reason_from_the_api_still_publishes_one_short_line(
+    reason: str, body: str | None
+) -> None:
+    # CancelRequest.reason is unbounded free text, carried unchanged to the notice.
+    notice = lifecycle_notice(
+        cancelled_event(CancelExecutionCommand("exec-4714", "p-1", reason), "wf-9")
+    )
+    assert notice is not None
+
+    content = (await _publish(notice)).content
+    text = content.decode()  # raises if the cut split a character
+
+    assert len(content) <= MAX_MESSAGE_BYTES
+    assert text.splitlines() == [text]
+    assert text.startswith("exec-4714 cancelled (wf-9): ")
+    if body is None:
+        assert text.endswith("停…")
+    else:
+        assert text == body
 
 
 async def test_the_sequence_id_is_stable_per_key_and_one_ntfy_accepts() -> None:

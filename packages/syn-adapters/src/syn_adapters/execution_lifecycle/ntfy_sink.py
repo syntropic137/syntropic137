@@ -52,6 +52,10 @@ SEQUENCE_ID_HEADER = "X-Sequence-ID"
 
 _DEFAULT_TIMEOUT_SECONDS = 10.0
 
+# ntfy turns a body over 4,096 bytes into an attachment
+# (https://docs.ntfy.sh/publish/#limitations); a phone line wants far less.
+MAX_MESSAGE_BYTES = 512
+
 
 class _Look(NamedTuple):
     """How one outcome shows on the phone: ntfy tags and priority (1-5, 3 is default)."""
@@ -71,7 +75,13 @@ def _message(notice: ExecutionLifecycleNotice) -> str:
     """The one line a person reads: what ended, how, and why when the notice says."""
     line = f"{notice.execution_id} {notice.outcome} ({notice.workflow_id})"
     why = notice.failure_classification or notice.cancel_reason
-    return f"{line}: {why}" if why else line
+    # A cancel reason is free operator text: fold every line break and run of
+    # whitespace to one space, then cut on a character, never inside one.
+    text = " ".join((f"{line}: {why}" if why else line).split())
+    if len(text.encode()) <= MAX_MESSAGE_BYTES:
+        return text
+    cut = text.encode()[: MAX_MESSAGE_BYTES - len("…".encode())]
+    return cut.decode(errors="ignore") + "…"
 
 
 class NtfyExecutionLifecycleSink:
