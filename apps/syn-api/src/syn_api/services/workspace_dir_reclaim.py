@@ -361,11 +361,9 @@ class WorkspaceDirReclaimer:
             kept = Retained(RetainedReason.IDENTITY_CHANGED, f"could not mark it ({exc})")
             _log_outcome(listing, kept)
             return _owned(kept, owner)
-        stop = await self._stop_before_destroying()
-        if stop is not None:
-            return stop  # authorized and marked: the next pass resumes it
+        # A pause here leaves it authorized and marked: the next pass resumes it.
         last = await self._judge_marked(listing, marked)
-        if isinstance(last, Retained):
+        if not isinstance(last, ReclaimableDir):
             return _owned(last, owner)
         # Judged at the marked path; logged under the path it was found at.
         done = await self._finish_delete(
@@ -403,11 +401,8 @@ class WorkspaceDirReclaimer:
             return bound
         if self.dry_run:
             return _Deferred()
-        stop = await self._stop_before_destroying()
-        if stop is not None:
-            return stop
         last = await self._judge_marked(replace(listing, identity=identity), listing.host_dir)
-        if isinstance(last, Retained):
+        if not isinstance(last, ReclaimableDir):
             return last
         return await self._finish_delete(listing, last, listing.host_dir, identity, deadline)
 
@@ -489,15 +484,20 @@ class WorkspaceDirReclaimer:
 
     async def _judge_marked(
         self, before: WorkspaceDirListing, marked: str
-    ) -> ReclaimableDir | Retained:
+    ) -> ReclaimableDir | Retained | _Paused:
         """The last judgment before a delete, in full, at the ``.deleting-`` path (#2378).
 
-        A keep revokes the deletion authorization, so no later pass can finish
-        the delete. The directory keeps its deleting name: `release` puts back
-        only a claim, and renaming it to its workspace path could land on
-        whatever is there now. Without its authorization, `_resume_delete`
-        keeps it every pass until an operator moves it.
+        Maintenance and liveness are read first, so nothing follows it but the
+        delete. A pause changes nothing: the authorization stands. A keep
+        revokes it, so no later pass can finish the delete. The directory keeps
+        its deleting name: `release` puts back only a claim, and renaming it to
+        its workspace path could land on whatever is there now. Without its
+        authorization, `_resume_delete` keeps it every pass until an operator
+        moves it.
         """
+        stop = await self._stop_before_destroying()
+        if stop is not None:
+            return stop
         verdict = await self._judge_claimed(before, marked)
         if isinstance(verdict, Retained):
             await asyncio.to_thread(_forget, self.base_dir, before.workspace_id)
@@ -526,8 +526,8 @@ def _owners_keep(kept: Retained, execution_id: str | None) -> Retained:
 
 
 def _owned(
-    outcome: ReclaimableDir | Retained | _Deferred, owner: str | None
-) -> ReclaimableDir | Retained | _Deferred:
+    outcome: ReclaimableDir | Retained | _Deferred | _Paused, owner: str | None
+) -> ReclaimableDir | Retained | _Deferred | _Paused:
     """A keep made once ``owner`` was resolved still names it, unless it names its own."""
     if not isinstance(outcome, Retained) or isinstance(outcome, _OwnersKeep) or owner is None:
         return outcome
