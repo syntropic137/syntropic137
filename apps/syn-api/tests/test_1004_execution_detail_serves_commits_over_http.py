@@ -3,7 +3,8 @@
 Driven from the events, through the projection, into the store the route
 reads, so every hop between the recorded event and the JSON is on the path:
 the projection, the read model, `ExecutionDetailFull`, and the response. A run
-that recorded none serves null, never an empty list.
+that recorded none serves null, never an empty list. Each commit also serves
+its short SHA for display (slice 3).
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from syn_api.routes.executions.models import ExecutionDetailResponse
+from syn_api.types import SourceCommitResponse
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     SourceCommit,
 )
@@ -66,13 +68,19 @@ async def client() -> AsyncIterator[AsyncClient]:
         yield c
 
 
-async def _project(execution_id: str, *, recorded: bool) -> None:
+def _served(sha: str) -> SourceCommitResponse:
+    return SourceCommitResponse(repository=REPO, sha=sha, sha_display=sha[:7])
+
+
+async def _project(execution_id: str, *, recorded: bool, resolved: bool = True) -> None:
     from syn_api._wiring import get_projection_mgr
+
+    start, checked_out = (START, CHECKED_OUT) if resolved else (None, None)
 
     projection = WorkflowExecutionDetailProjection(get_projection_mgr().store)
     ids = {"execution_id": execution_id, "workflow_id": "wf", "workflow_name": "wf"}
     await projection.on_workflow_execution_started(
-        {**ids, "source_commits": [{"repository": REPO, "sha": START}]} if recorded else ids
+        {**ids, "source_commits": [{"repository": REPO, "sha": start}]} if recorded else ids
     )
     await projection.on_phase_started(
         {"execution_id": execution_id, "phase_id": "p1", "phase_name": "p1"}
@@ -85,7 +93,7 @@ async def _project(execution_id: str, *, recorded: bool) -> None:
             workspace_id="ws-1",
             session_id="s-1",
             provisioned_at=datetime(2026, 11, 26, tzinfo=UTC),
-            checked_out_commits=[SourceCommit(repository=REPO, sha=CHECKED_OUT)]
+            checked_out_commits=[SourceCommit(repository=REPO, sha=checked_out)]
             if recorded
             else None,
         )
@@ -99,8 +107,31 @@ async def test_the_detail_serves_the_run_and_phase_commits(client: AsyncClient) 
 
     assert response.status_code == 200, response.text
     body = ExecutionDetailResponse.model_validate(response.json())
-    assert body.source_commits == [SourceCommit(repository=REPO, sha=START)]
-    assert body.phases[0].checked_out_commits == [SourceCommit(repository=REPO, sha=CHECKED_OUT)]
+    assert body.source_commits == [_served(START)]
+    assert body.phases[0].checked_out_commits == [_served(CHECKED_OUT)]
+
+
+async def test_each_commit_serves_its_short_sha_for_display(client: AsyncClient) -> None:
+    """#1004 slice 3: 7 characters on the wire, at the run and at the phase."""
+    await _project("exec-display", recorded=True)
+
+    raw = (await client.get("/executions/exec-display")).json()
+
+    assert raw["source_commits"] == [{"repository": REPO, "sha": START, "sha_display": "a" * 7}]
+    assert raw["phases"][0]["checked_out_commits"] == [
+        {"repository": REPO, "sha": CHECKED_OUT, "sha_display": "b" * 7}
+    ]
+
+
+async def test_an_unresolved_sha_displays_null_not_empty(client: AsyncClient) -> None:
+    await _project("exec-unresolved", recorded=True, resolved=False)
+
+    raw = (await client.get("/executions/exec-unresolved")).json()
+
+    assert raw["source_commits"] == [{"repository": REPO, "sha": None, "sha_display": None}]
+    assert raw["phases"][0]["checked_out_commits"] == [
+        {"repository": REPO, "sha": None, "sha_display": None}
+    ]
 
 
 async def test_an_older_run_serves_null_not_an_empty_list(client: AsyncClient) -> None:
@@ -133,5 +164,5 @@ async def test_a_failed_phase_still_serves_its_checkout(client: AsyncClient) -> 
     assert response.status_code == 200, response.text
     body = ExecutionDetailResponse.model_validate(response.json())
     assert body.phases[0].status == "failed"
-    assert body.phases[0].checked_out_commits == [SourceCommit(repository=REPO, sha=CHECKED_OUT)]
-    assert body.source_commits == [SourceCommit(repository=REPO, sha=START)]
+    assert body.phases[0].checked_out_commits == [_served(CHECKED_OUT)]
+    assert body.source_commits == [_served(START)]

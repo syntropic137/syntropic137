@@ -91,13 +91,13 @@ describe('Execution detail commits (#1004)', () => {
   // The board's canonical run is a day old, from before commits were captured.
   const older = RUNS[2]!.id
 
-  it("shows each repository's SHA raw for the run, as the API sends it, with the full SHA to copy", async () => {
+  it("shows each repository's short SHA for the run, as the API sends it, with the full SHA to copy", async () => {
     const d = await getExecution(recheckout)
     const commit = d.source_commits![0]!
     const { target, done } = await render(recheckout)
     try {
-      // TODO(#897): raw until SourceCommit has a `sha_display`; the short form belongs in the API.
-      expect(runCommits(target)).toBe(`Commits: ${commit.repository} @ ${commit.sha}`)
+      expect(commit.sha_display).not.toBe(commit.sha)
+      expect(runCommits(target)).toBe(`Commits: ${commit.repository} @ ${commit.sha_display}`)
       const copy = target.querySelector<HTMLButtonElement>('.sky-page-header .sky-exec__commits button')
       expect(copy?.getAttribute('aria-label')).toBe(`Copy the full commit for ${commit.repository}`)
     } finally {
@@ -111,7 +111,7 @@ describe('Execution detail commits (#1004)', () => {
     expect(differing.sha).not.toBe(d.source_commits![0]!.sha)
     const { target, done } = await render(recheckout)
     try {
-      expect(phaseCommits(target)).toEqual([null, null, `Checked out: ${differing.repository} @ ${differing.sha}`])
+      expect(phaseCommits(target)).toEqual([null, null, `Checked out: ${differing.repository} @ ${differing.sha_display}`])
     } finally {
       done()
     }
