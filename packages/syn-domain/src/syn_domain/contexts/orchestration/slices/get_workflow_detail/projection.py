@@ -145,7 +145,10 @@ class WorkflowDetailProjection(RecordedTimeProjection):
     #
     # v13 (#1788): definition changes in ``CHANGES``, dated by recorded time,
     # which only a replay can supply for existing workflows.
-    VERSION = 13  # v13: definition change history (#1788)
+    #
+    # v14 (#2391): a command phase's steps arrive as a tuple and were stored
+    # as ``[]``. The event always carried them, so a replay repairs every row.
+    VERSION = 14  # v14: command phase steps (#2391)
     CHANGES = "workflow_definition_changes"
 
     def __init__(self, store: ProjectionStore):
