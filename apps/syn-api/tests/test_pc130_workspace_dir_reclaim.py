@@ -14,10 +14,11 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_adapters.workspace_backends import stale_dirs
+from syn_adapters.workspace_backends import reclaim_delete, stale_dirs
 from syn_adapters.workspace_backends.orphaned import parse_inspect
 from syn_adapters.workspace_backends.reclaim_delete import AUTH_DIRNAME, authorize_and_mark
 from syn_adapters.workspace_backends.remote_refs import GitLsRemote
@@ -34,6 +35,9 @@ from syn_api.services.workspace_dir_reclaim import (
 )
 from syn_api.services.workspace_reclaim_status import ReclaimStatus
 from syn_domain.contexts.orchestration import OwnerExecution, RetainedReason
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 pytestmark = pytest.mark.unit
 
@@ -1377,9 +1381,27 @@ class _Ticks:
         return self.now
 
 
-async def test_a_delete_out_of_time_resumes_after_a_restart_without_a_second_judgment(
-    base: Path, tmp_path: Path
-) -> None:
+def _delete_in_order(monkeypatch: pytest.MonkeyPatch, *, tag_first: bool) -> None:
+    """Fix the delete's traversal, which is otherwise the filesystem's own order.
+
+    ``target`` goes first, so the budget runs out inside the cache and leaves
+    the repository whole; ``CACHEDIR.TAG`` goes first or last within it.
+    """
+    real = reclaim_delete._scandir
+
+    def rank(entry: os.DirEntry[str]) -> tuple[int, str]:
+        if entry.name == "CACHEDIR.TAG":
+            return (0 if tag_first else 2, entry.name)
+        return (0 if entry.name == "target" else 1, entry.name)
+
+    def ordered(fd: int) -> Iterator[os.DirEntry[str]]:
+        yield from sorted(real(fd), key=rank)
+
+    monkeypatch.setattr(reclaim_delete, "_scandir", ordered)
+
+
+async def _run_out_of_time(base: Path, tmp_path: Path) -> Path:
+    """Mark ``ws-big`` and delete part of its cache; returns the ``.deleting-`` dir."""
     ws = _workspace(base, "ws-big", tmp_path)
     _many_files(ws, 200)
     first = _reclaimer(base)
@@ -1399,12 +1421,39 @@ async def test_a_delete_out_of_time_resumes_after_a_restart_without_a_second_jud
     assert result.reclaimed == ()
     [left] = [p for p in base.iterdir() if p.name != AUTH_DIRNAME]
     assert left.name == ".deleting-ws-big"  # never put back: it was proven
-    assert any(left.rglob("*"))  # part of the tree is still there
+    app = left / "repos" / "app"
+    assert any((app / "target").rglob("*.o"))  # part of the cache is still there
+    assert (app / ".git").is_dir() and (app / "README.md").is_file()
+    return left
 
-    # A restart: a fresh reclaimer whose read models know nothing of the
-    # first, and whose repositories are half gone. It finishes the delete.
-    restarted = _reclaimer(base, known_owner=False)
-    second = await restarted.run_once()
+
+async def test_a_delete_out_of_time_is_judged_again_on_resume_and_a_half_emptied_tree_kept(
+    base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _delete_in_order(monkeypatch, tag_first=True)
+    left = await _run_out_of_time(base, tmp_path)
+    assert not (left / "repos" / "app" / "target" / "CACHEDIR.TAG").exists()
+
+    # A restart. The resumed delete is judged again in full (#2378), and this
+    # half-emptied tree has lost the proof that passed it (the cache tag), so
+    # it is kept and its authorization revoked, owner and all.
+    second = await _reclaimer(base).run_once()
+    assert second.reclaimed == ()
+    assert _reason(second, "ws-big") is RetainedReason.UNVERSIONED
+    assert reclaim_delete.authorized_identity(str(left)) is None
+    assert left.is_dir()
+
+
+async def test_a_delete_out_of_time_that_is_still_provable_is_finished_on_resume(
+    base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _delete_in_order(monkeypatch, tag_first=False)
+    left = await _run_out_of_time(base, tmp_path)
+    assert (left / "repos" / "app" / "target" / "CACHEDIR.TAG").is_file()
+
+    # The remainder is still a tagged cache in a pushed repository, so the
+    # resumed pass judges it safe again and finishes the delete.
+    second = await _reclaimer(base).run_once()
     assert second.reclaimed == ("ws-big",)
     assert list(base.iterdir()) == []
 
@@ -1492,7 +1541,8 @@ async def test_nothing_outside_the_workspace_base_is_ever_deleted(
     base: Path, tmp_path: Path
 ) -> None:
     """Even a proven directory: a delete target that is not a direct child of the
-    base (an event store, an artifact bucket, a transcript dir) is refused."""
+    base (an event store, an artifact bucket, a transcript dir) is refused. The
+    last judgment, which looks for it in the base, refuses it first (#2378)."""
     _workspace(base, "ws-escape", tmp_path)
     history = tmp_path / "run-history"
     (history / ".deleting-ws-escape").mkdir(parents=True)
@@ -1502,5 +1552,5 @@ async def test_nothing_outside_the_workspace_base_is_ever_deleted(
         history / ".deleting-ws-escape"
     )
     result = await reclaimer.run_once()
-    assert _reason(result, "ws-escape") is RetainedReason.DELETE_FAILED
+    assert _reason(result, "ws-escape") is RetainedReason.IDENTITY_CHANGED
     assert (history / ".deleting-ws-escape" / "events.log").read_text() == "every run, kept\n"

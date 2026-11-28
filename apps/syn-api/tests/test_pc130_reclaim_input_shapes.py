@@ -94,7 +94,8 @@ async def test_production_reclaimer_reads_the_registered_ownership_store(
     reclaimer.execution_record = execution_record
     result = await reclaimer.run_once()
     assert result.reclaimed == (ws.name,)
-    assert asked == ["exec-durable", "exec-durable"]  # judged, then judged again under the claim
+    # Judged, judged again under the claim, and once more when marked (#2378).
+    assert asked == ["exec-durable", "exec-durable", "exec-durable"]
 
 
 async def test_unreadable_owner_index_keeps_the_dir(base: Path, tmp_path: Path) -> None:
