@@ -2471,6 +2471,45 @@ class PhaseActivityInfo(BaseModel):
     """
 
 
+_SHA_DISPLAY_CHARS = 7
+
+
+class SourceCommitResponse(BaseModel):
+    """One repository's recorded commit, as the API serves it (#1004).
+
+    The domain ``SourceCommit`` is persisted inside events, so the display
+    value lives here and not there (#897). Build it with
+    ``source_commit_responses``, which is where ``sha_display`` is derived.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    repository: str
+    sha: str | None = None
+    """The full SHA; null is "recorded, not resolved"."""
+    sha_display: str | None = None
+    """The first 7 characters of `sha`, or null when `sha` is null."""
+
+
+def source_commit_responses(
+    commits: Sequence[SourceCommit] | None,
+) -> list[SourceCommitResponse] | None:
+    """The recorded commits as the API serves them, None kept None (#1004).
+
+    None is "not recorded" (a run before the field), never "no repository".
+    """
+    if commits is None:
+        return None
+    return [
+        SourceCommitResponse(
+            repository=c.repository,
+            sha=c.sha,
+            sha_display=None if c.sha is None else c.sha[:_SHA_DISPLAY_CHARS],
+        )
+        for c in commits
+    ]
+
+
 class PhaseExecution(BaseModel):
     """Detailed phase execution with tool operations."""
 
@@ -2567,7 +2606,7 @@ class PhaseExecution(BaseModel):
     `[]` here, or anywhere below, would tell an API client that a workspace was
     verifiably unchanged when in truth nothing looked.
     """
-    checked_out_commits: list[SourceCommit] | None = None
+    checked_out_commits: list[SourceCommitResponse] | None = None
     """Where each repository was checked out when this phase's latest workspace
     was provisioned (#1004). Null is "not recorded" (a run before the field),
     never an empty checkout; a `sha` of null is "recorded, not resolved"."""
@@ -2742,7 +2781,7 @@ class ExecutionDetailFull(BaseModel):
     """The execution this run resumed, or None for a fresh run (#1881)."""
     resumed_as: str | None = None
     """The execution that resumed this one, or None. At most one (#1881)."""
-    source_commits: list[SourceCommit] | None = None
+    source_commits: list[SourceCommitResponse] | None = None
     """The commit each repository was at when this run started (#1004).
     Null is "not recorded" (a run before the field); a `sha` of null is
     "recorded, not resolved"."""

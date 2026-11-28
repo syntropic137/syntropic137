@@ -22,6 +22,7 @@ from syn_api.types import (
     PlannedPhaseInfo,
     ReadModelStatus,
     ResumedFromInfo,
+    SourceCommitResponse,
     StartPinsStatus,
 )
 from syn_domain.contexts.orchestration import (
@@ -32,7 +33,6 @@ from syn_domain.contexts.orchestration import (
     ResumeStartStatus,  # Pydantic resolves it at runtime
     ReviewVerdict,
     SideEffectStatus,
-    SourceCommit,
     StartStatus,
 )
 from syn_shared.display import EM_DASH
@@ -194,7 +194,7 @@ class PhaseExecutionInfo(BaseModel):
     identical again. What no record claims is who moved a ref: git does not
     carry that, so this reports the two readings and stops.
     """
-    checked_out_commits: list[SourceCommit] | None = None
+    checked_out_commits: list[SourceCommitResponse] | None = None
     """Where each repository was checked out when this phase's latest workspace
     was provisioned (#1004). Null is "not recorded" (a run before the field),
     never an empty checkout; a `sha` of null is "recorded, not resolved"."""
@@ -484,7 +484,7 @@ class ExecutionDetailResponse(BaseModel):
     resumed_as: str | None = None
     """The execution that resumed this one. A run is resumed at most once, so
     this is one id or None (#1881)."""
-    source_commits: list[SourceCommit] | None = None
+    source_commits: list[SourceCommitResponse] | None = None
     """The commit each repository was at when this run started (#1004).
     Null is "not recorded" (a run before the field); a `sha` of null is
     "recorded, not resolved"."""
