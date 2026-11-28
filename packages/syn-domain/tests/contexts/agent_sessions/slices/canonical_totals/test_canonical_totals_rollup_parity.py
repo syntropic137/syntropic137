@@ -26,6 +26,7 @@ WHAT IS SEEDED, AND WHY. Every shape is one the rollup could get wrong:
   turns only, no summary             priced from the turns
   a session with no usage at all     counted as a session, with no tokens
   a turn reporting no tokens         an observation, but not a reported one
+  priced and unpriced turns, 2 days  counted per model, never per session
   several sessions per execution     delegates
   a NULL and an EMPTY execution id   kept apart by NULLS NOT DISTINCT
   tool events in bulk                rows the new path must never read
@@ -47,6 +48,11 @@ reconcile subtracts reported turns the trigger already counted. Then an
 older build's start puts 007's function back over the column and the mark,
 turns arrive under it, and this build's next start must reconcile them.
 Turns with counts beyond int4 go through the new trigger and through D.
+
+The unpriced observation count has no pre-E1 twin. Its specification is the
+reader /metrics served before #2341, which counted reported turns from
+agent_events: ADR-079 slice 6 reads them from the rollup instead, and every
+field must still match it, unfiltered, per workflow and for the empty set.
 
 MARKED ``integration``: CI runs it on push to main, PRs into release and the
 weekly cron, not on PRs into main.
@@ -224,6 +230,25 @@ def _more_turns_on(batch_rows: list[Row], offset: int) -> list[Row]:
     ]
 
 
+def _priced_and_unpriced_across_days(batch_rows: list[Row]) -> list[Row]:
+    """Summary-less sessions with turns on a priced and an unpriced model, days apart.
+
+    a-sess-0 is turns-only on rated models and a-sess-5 turns-only on the
+    unrated one: each gains the other kind, two and three days later, and a
+    zero-token turn on the unrated model.
+    """
+    by_session = {r.session_id: r.execution_id for r in batch_rows}
+    day = 24 * 60
+    return [
+        _turn("a-sess-0", by_session["a-sess-0"], 2 * day, _MODELS[2], requested=False),
+        _turn("a-sess-0", by_session["a-sess-0"], 2 * day + 1, _MODELS[2], requested=True),
+        _turn(
+            "a-sess-0", by_session["a-sess-0"], 2 * day + 2, _MODELS[2], requested=False, zero=True
+        ),
+        _turn("a-sess-5", by_session["a-sess-5"], 3 * day, _MODELS[0], requested=False),
+    ]
+
+
 def _trigger_function_before_reported_observations() -> str:
     """The trigger function as 007 shipped it: the specification of an old install."""
     from syn_adapters import projection_stores
@@ -288,7 +313,12 @@ async def seeded(test_infrastructure) -> AsyncIterator[Seeded]:
                 )
                 await EventStoreSchema().ensure_schema(conn)  # a disabled trigger: reconcile
                 await copy_rows(
-                    conn, [*_batch("e", range(90, 104)), *_more_turns_on(batch_a, 3_000)]
+                    conn,
+                    [
+                        *_batch("e", range(90, 104)),
+                        *_more_turns_on(batch_a, 3_000),
+                        *_priced_and_unpriced_across_days(batch_a),
+                    ],
                 )
             yield Seeded(pool=pool)
         finally:
@@ -321,7 +351,24 @@ async def _assert_same_totals(pool: asyncpg.Pool, execution_ids: set[str] | None
         if getattr(old, name) != getattr(new, name)
     }
     assert not differing, f"(old, new) per field: {differing}"
+    await _assert_same_coverage(pool, execution_ids, new)
     return old
+
+
+async def _assert_same_coverage(
+    pool: asyncpg.Pool, execution_ids: set[str] | None, new: object
+) -> None:
+    """Every field, the observation count included, as the pre-#2341 reader said it."""
+    from syn_domain.contexts.agent_sessions import CostCalculator
+
+    from .test_2341_turn_sessions_are_bounded import _frozen_reader
+
+    before = (
+        await _frozen_reader()
+        .PreBoundCanonicalUsageQueryService(pool, CostCalculator())
+        .totals(execution_ids)
+    )
+    assert dataclasses.asdict(new) == dataclasses.asdict(before)  # type: ignore[call-overload]  # both are the totals dataclasses
 
 
 async def test_unfiltered_totals_match_field_by_field(seeded: Seeded) -> None:
@@ -347,6 +394,13 @@ async def test_each_workflows_totals_match_field_by_field(seeded: Seeded, workfl
     assert isinstance(old, LegacyCanonicalTotals)
     assert old.sessions > 0
     assert old.input_tokens > 0
+    if workflow in {"wf-a", "wf-b"}:  # a-sess-0's and a-sess-5's executions
+        from syn_domain.contexts.agent_sessions import CanonicalUsageQueryService, CostCalculator
+
+        new = await CanonicalUsageQueryService(seeded.pool, CostCalculator()).totals(
+            set(WORKFLOWS[workflow])
+        )
+        assert new.unpriced_observation_count > 0
 
 
 async def test_an_execution_set_matching_nothing_matches_too(seeded: Seeded) -> None:
