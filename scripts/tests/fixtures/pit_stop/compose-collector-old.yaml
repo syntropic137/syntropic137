@@ -1,0 +1,7 @@
+# A host installed from an older release: its collector pinned to an older digest.
+services:
+  api:
+    image: ghcr.io/syntropic137/syn-api@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  collector:
+    container_name: syn137-collector
+    image: ghcr.io/syntropic137/syn-collector@sha256:9999999999999999999999999999999999999999999999999999999999999999

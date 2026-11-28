@@ -6,6 +6,7 @@ Called by scripts/pit_stop.sh at `stage`:
     python3 scripts/pit_stop_repoint.py --on-tag <tag> <compose> <service>
     python3 scripts/pit_stop_repoint.py --drift <published-compose> <deployed-compose>
     python3 scripts/pit_stop_repoint.py --add-null-keys <published-compose> <deployed-compose> <out>
+    python3 scripts/pit_stop_repoint.py --collector <release-compose> <deployed-compose> <release-tag>
 
 The second form prints 1 when the compose service <service> (`api` or
 `gateway`) has one image line and it names exactly the ref `ship` loaded, else 0. It is the count
@@ -31,6 +32,13 @@ key on stdout and exits 0. It exits 0 printing nothing, and writes nothing, when
 there is no drift. Any other drift (a valued key, a removed or changed line,
 a key outside an `environment:` map) exits 1 with the reason on stderr and
 writes nothing: that still goes to the owner.
+
+The fifth form reports, never refuses (#2144): it prints one line when the
+deployed collector is not the one the newest stable release pins, and nothing
+when it is, and exits 0 either way. A pit stop never moves the collector, so a
+host left on an old one keeps it until a release upgrade does. Only a digest
+matches: a release pins by digest, so a collector pinned by tag (a hotfixed
+host) cannot be shown to be the release's and is reported.
 
 The first form writes the staged compose and prints, on stdout, the name to back the
 deployed file up under (empty when every pin is already the shipped ref, so
@@ -322,7 +330,33 @@ def add_null_keys(published: str, deployed: str) -> tuple[str, tuple[str, ...]]:
     return text, tuple(keys)
 
 
+def collector_warning(release: str, deployed: str, tag: str) -> str:
+    """Why the deployed collector is not release `tag`'s, or empty when it is.
+
+    Only an equal digest matches; a tag cannot be shown to be a digest."""
+    refs: list[str] = []
+    for side, compose in (("the deployed compose", deployed), (f"{tag}'s compose", release)):
+        found = _lines_of(compose, "collector")
+        if len(found) != 1:
+            return (
+                f"cannot compare the collector to newest stable {tag}: "
+                f"{side} has {len(found)} collector image lines, not 1"
+            )
+        refs.append(found[0]["ref"])
+    mine, theirs = Pin("collector", refs[0]), Pin("collector", refs[1])
+    if _DIGEST.fullmatch(mine.pin) and mine.pin == theirs.pin:
+        return ""
+    how = "" if "@" in mine.ref else ", pinned by tag, so it cannot be shown to be that digest"
+    return f"collector {mine.ref} is not {theirs.ref} (newest stable {tag}){how}"
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) == 4 and argv[0] == "--collector":
+        _, release, deployed, tag = argv
+        warning = collector_warning(Path(release).read_text(), Path(deployed).read_text(), tag)
+        if warning:
+            print(warning)
+        return 0
     if len(argv) == 3 and argv[0] == "--drift":
         diff = drift(Path(argv[1]).read_text(), Path(argv[2]).read_text())
         print(diff, end="")

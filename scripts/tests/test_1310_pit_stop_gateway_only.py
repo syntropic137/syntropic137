@@ -90,6 +90,11 @@ case "$url" in
     */health) body='{"status": "healthy", "subscription": {"status": "healthy", "is_catching_up": false, "lag": 0}}' ;;
     */executions*) body='{"status_counts": {"completed": 3}}' ;;
     */workflows*) body='{"workflows": [{"id": "telemetry-lag-probe-v1", "is_archived": false}]}' ;;
+    # The newest stable release (#2144): only when $PIT_RELEASE names its
+    # compose; unset, the fetch fails as it does offline.
+    */releases/latest) [ -n "${PIT_RELEASE:-}" ] || exit 22
+        printf '%s' "${url%/latest}/tag/v9.9.9"; exit 0 ;;
+    */releases/download/v9.9.9/*) [ -n "${PIT_RELEASE:-}" ] || exit 22; body="$(cat "$PIT_RELEASE")" ;;
     *) exit 22 ;;
 esac
 printf '%s' "$body" > "$out"
@@ -201,7 +206,13 @@ class TestGatewayOnly:
         out, _, log = _dry_run(tmp_path, "--service", "gateway")
         assert "/maintenance" not in out
         assert "drain:" not in out
-        reads = (log / "curl").read_text().splitlines()
+        # The newest stable release's compose is fetched from GitHub for the
+        # collector report (#2144); it never reaches the API.
+        reads = [
+            r
+            for r in (log / "curl").read_text().splitlines()
+            if "https://github.com/syntropic137/syntropic137/releases/" not in r
+        ]
         # The disk report is the one read left: it is a report, not a gate,
         # and it is just as true before loading one image as two.
         assert reads and all(
@@ -481,3 +492,27 @@ def test_dry_run_is_independent_of_the_checkout_location(
     calls = (log / "git").read_text().splitlines()
     assert len(calls) == 2
     assert calls[1] == f"-C {repo_top} show origin/main:docker/docker-compose.syntropic137.yaml"
+
+
+class TestTheCollectorIsReported:
+    """The precheck warns when the deployed collector is not the newest stable
+    release's, and the pit stop carries on: report only (#2144)."""
+
+    def test_a_stale_collector_is_warned_about_and_the_run_goes_on(self, tmp_path: Path) -> None:
+        out, err, log = _dry_run(
+            tmp_path, extra_env={"PIT_RELEASE": str(_FIXTURES / "compose-release.yaml")}
+        )
+        (warning,) = _lines(err, "WARNING: collector ")
+        assert "syn-collector:v0.33.1-beta.2 is not " in warning
+        assert "(newest stable v9.9.9)" in warning
+        assert (
+            "/releases/download/v9.9.9/docker-compose.syntropic137.yaml"
+            in (log / "curl").read_text()
+        )
+        assert out == _GOLDEN.read_text()
+
+    def test_an_unreachable_release_skips_the_check_once(self, tmp_path: Path) -> None:
+        out, err, _ = _dry_run(tmp_path)
+        assert len(_lines(err, "WARNING: skipped the collector check")) == 1
+        assert _lines(err, "WARNING: collector ") == []
+        assert out == _GOLDEN.read_text()

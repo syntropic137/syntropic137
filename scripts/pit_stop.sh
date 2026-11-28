@@ -585,6 +585,24 @@ apply_null_keys() {
     echo "   backed up to $COMPOSE_DIR/$bak"
 }
 
+# A pit stop never moves the collector, so a host can keep one the newest
+# stable release has replaced (#2144). Report only: never a failure, and a fetch
+# that fails skips the check. Moving it is the release upgrade's job.
+# /releases/latest redirects to the newest stable (non-prerelease) tag.
+warn_stale_collector() {
+    local releases="https://github.com/syntropic137/syntropic137/releases" latest msg
+    latest="$(curl -fsS -m 30 -o /dev/null -w '%{redirect_url}' "$releases/latest" 2>/dev/null)" || latest=""
+    latest="${latest##*/releases/tag/}"
+    if [[ ! "$latest" =~ ^v[0-9A-Za-z.-]+$ ]] \
+        || ! curl -fsSL -m 60 -o "$TMP/compose.release" "$releases/download/$latest/$COMPOSE" 2>/dev/null; then
+        echo "   WARNING: skipped the collector check: could not fetch the newest stable release's $COMPOSE" >&2
+        return 0
+    fi
+    msg="$(python3 "$REPOINT_PY" --collector "$TMP/compose.release" "$TMP/compose.deployed" "$latest")" \
+        || msg="skipped the collector check: could not compare it to $latest's"
+    [ -z "$msg" ] || echo "   WARNING: $msg" >&2
+}
+
 if [ "$MODE" != "swap" ]; then
     # Before anything is built: a pit stop repoints image pins and nothing else,
     # so a compose the new image's startup depends on would never reach the
@@ -601,6 +619,7 @@ if [ "$MODE" != "swap" ]; then
     apply_null_keys
     refuse_drift "Nothing was built, shipped or staged"
     echo "   no drift"
+    warn_stale_collector
 
     step "prepare: worktree at $REF, bump to $VERSION"
     WT="$WT_BASE/pit-stop-$VERSION"
