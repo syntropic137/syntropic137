@@ -224,6 +224,12 @@ worker find them after any crash (#1398, #1916).
   stops nothing and does not pause the sandbox its new owner is reading.
 - **Pause-until-drained:** a sandbox spool stays paused until `mark_drained`;
   only release kills it. A failed archive leaves it paused and retryable.
+- **Unrecoverable spool:** a spool whose recovery cannot succeed, such as one
+  whose volume is gone or whose body is over the capture limit
+  (`mark_unrecoverable`, `unrecoverable_at`, `unrecoverable_reason`). It is
+  recorded once, with its reason, and never claimed again. It is not drained.
+  Its bytes are not deleted: only release removes them, under the existing
+  retention limits (#2396).
 - **Release:** removing staged bytes after a drained traversal (`archived`) or
   a retention limit (`expired`). Docker removes the volume; a sandbox is killed,
   but only once the provider confirms no agent process remains: a retention

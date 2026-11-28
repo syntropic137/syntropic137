@@ -1,0 +1,14 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py b/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py
+index e2d226d3f..139eb8e02 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py
+@@ -208,8 +208,7 @@ class PostgresCaptureSpools:
+             changed = await conn.fetchval(
+                 """UPDATE session_capture_spools SET unrecoverable_at=now(),
+                 unrecoverable_reason=$4,leased_until='-infinity'
+-                WHERE source_instance_id=$1 AND session_id=$2 AND lease_token=$3
+-                AND leased_until>now()
++                WHERE source_instance_id=$1 AND session_id=$2 AND $3::bigint IS NOT NULL
+                 RETURNING session_id""",
+                 self._source,
+                 lease.spool.session_id,
