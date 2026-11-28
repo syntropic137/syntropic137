@@ -17,12 +17,11 @@ from decimal import Decimal
 
 import pytest
 
-from syn_domain.contexts.agent_sessions import CostCalculator, zero_usage_group_by
+from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     HAS_REQUESTED_MODEL_COLUMN,
     REQUESTED_MODEL_COLUMN,
 )
-from syn_domain.contexts.agent_sessions.slices.canonical_totals import query_service
 from syn_domain.contexts.agent_sessions.slices.canonical_totals.query_service import (
     CanonicalUsageQueryService,
 )
@@ -53,17 +52,16 @@ def _group(
         "cache_creation_tokens": 0,
         "cache_read_tokens": 0,
         "summary_observations": summary_observations,
-        # A totals row, not one of the statement's session listing rows.
-        "day": None,
-        "sessions": None,
-        # Not a column: the group's summary-less sessions, which the statement
-        # lists only when its model is bound as unrated.
+        # A totals row, not one of the statement's reported-turn rows.
+        "reported_observations": None,
+        # Not a column: the group's summary-less sessions, whose reported
+        # turns the statement counts only when its model is bound as unrated.
         "turn_sessions": turn_sessions,
     }
 
 
 def _turns(model: str, observations: int) -> dict[str, _Cell]:
-    """One model's row of ``_UNPRICED_TURNS_QUERY``."""
+    """One model's reported turns in the summary-less sessions of the groups above."""
     return {
         "model": model,
         REQUESTED_MODEL_COLUMN: None,
@@ -88,36 +86,32 @@ class _Conn:
             if row["vendor_cost_usd"] is None and row["turn_sessions"]
         ]
 
-    def _sessions_of(self, *keys: object) -> list[dict[str, _Cell]]:
-        """The listing rows: summary-less sessions of the groups bound by their model columns.
-
-        One per bound model, all under one NULL day: the day rollup has seen
-        none of them.
-        """
+    def _reported_of(self, *keys: object) -> list[dict[str, _Cell]]:
+        """The reported-turn rows: one per bound model whose group has summary-less sessions."""
         bound = set(zip(*keys, strict=True))  # type: ignore[call-overload]  # three parallel lists
+        with_turns = {
+            (row["model"], row[REQUESTED_MODEL_COLUMN], row[HAS_REQUESTED_MODEL_COLUMN])
+            for row in self.totals
+            if row["vendor_cost_usd"] is None and row["turn_sessions"]
+        }
         return [
             {
-                "model": row["model"],
-                REQUESTED_MODEL_COLUMN: row[REQUESTED_MODEL_COLUMN],
-                HAS_REQUESTED_MODEL_COLUMN: row[HAS_REQUESTED_MODEL_COLUMN],
-                "day": None,
-                "sessions": row["turn_sessions"],
+                **{key: turn[key] for key in turn if key != "observations"},
+                "reported_observations": turn["observations"],
             }
-            for row in self.totals
-            if row["vendor_cost_usd"] is None
-            and row["turn_sessions"]
-            and (row["model"], row[REQUESTED_MODEL_COLUMN], row[HAS_REQUESTED_MODEL_COLUMN])
-            in bound
+            for turn in self.turns
+            if (turn["model"], turn[REQUESTED_MODEL_COLUMN], turn[HAS_REQUESTED_MODEL_COLUMN])
+            in bound & with_turns
         ]
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, _Cell]]:
         self.statements.append(query)
         if "summary_observations" in query:
             self.session_reads.append((query, args))
-            return self.totals + self._sessions_of(*args[-3:])
+            return self.totals + self._reported_of(*args[-3:])
         if "SELECT DISTINCT model" in query:
             return self._turn_models()
-        if "AS observations" in query:
+        if "AS observations" in query:  # the frozen readers' agent_events read
             self.turn_reads.append((query, args))
             return self.turns
         return []
@@ -179,8 +173,8 @@ async def test_unpriced_summaries_and_turns_are_counted_beside_the_money() -> No
     assert totals.cost_usd == Decimal("1.25")
     assert totals.unpriced_observation_count == 2 + 5
     assert totals.unpriced_tokens == 110
-    [(_query, args)] = conn.turn_reads
-    assert args[0] == ["s-3"]
+    # Counted from the turn rollup: agent_events is never read (ADR-079 slice 6).
+    assert not any("FROM agent_events" in query for query in conn.statements)
 
 
 async def test_two_unpriced_groups_each_add_their_own_count() -> None:
@@ -224,15 +218,7 @@ async def test_a_workflows_turns_are_narrowed_to_its_executions() -> None:
     totals = await _service(conn).totals(execution_ids={"exec-1"})
 
     assert totals.unpriced_observation_count == 5
-    [(query, args)] = conn.turn_reads
-    assert "execution_id = ANY($4)" in query
-    assert args[3] == ["exec-1"]
-
-
-def test_zero_token_turns_are_not_counted() -> None:
-    """A turn reporting no tokens is a priced zero at any rate (#890).
-
-    The rollup's ``observations`` counts it, which is why the count is read
-    from agent_events with this predicate rather than from the rollup.
-    """
-    assert f"AND NOT {zero_usage_group_by()}" in query_service._UNPRICED_TURNS_DAY
+    [(query, args)] = conn.session_reads
+    reported = query.split("UNION ALL")[-1]
+    assert "WHERE execution_id = ANY($1)" in reported
+    assert args[0] == ["exec-1"]
