@@ -145,11 +145,13 @@ function evalRunItems(): ExecutionListItem[] {
 const isLegacy = (r: CatalogRun) => Date.parse(r.startedAt) < Date.parse(RUNS[1]!.startedAt)
 
 const fakeSha = (seed: string) => `${fakeId(`sha-a-${seed}`, 20)}${fakeId(`sha-b-${seed}`, 20)}`
+/** A commit as the API serves it: the full SHA and its 7-character `sha_display`. */
+const commitAt = (repository: string, sha: string): SourceCommit => ({ repository, sha, sha_display: sha.slice(0, 7) })
 
 /** Where the run's repository was when it started (#1004): null for a legacy run, none for a run without one. */
 function sourceCommitsOf(r: CatalogRun): SourceCommit[] | null {
   if (isLegacy(r)) return null
-  return r.repo ? [{ repository: r.repo.replace('https://github.com/', ''), sha: fakeSha(r.id) }] : []
+  return r.repo ? [commitAt(r.repo.replace('https://github.com/', ''), fakeSha(r.id))] : []
 }
 
 /**
@@ -160,7 +162,7 @@ const RECHECKOUT_RUN = 1
 function checkedOutCommitsOf(r: CatalogRun, p: ReturnType<typeof phaseRuns>[number]): SourceCommit[] | null {
   const commits = p.startedAt ? sourceCommitsOf(r) : null
   if (!commits || RUNS.indexOf(r) !== RECHECKOUT_RUN || p.index !== 2) return commits
-  return commits.map((c) => ({ ...c, sha: fakeSha(`${r.id}-${p.phase.id}`) }))
+  return commits.map((c) => commitAt(c.repository, fakeSha(`${r.id}-${p.phase.id}`)))
 }
 
 function phaseDetail(r: CatalogRun): PhaseExecutionDetail[] {
