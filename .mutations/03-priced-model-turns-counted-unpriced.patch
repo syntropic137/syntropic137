@@ -1,0 +1,29 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+index ba7b81324..88dd0c817 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+@@ -103,17 +103,19 @@ FROM canonical_usage
+ GROUP BY {CANONICAL_MODEL_COLUMNS}, (vendor_cost_usd IS NULL)
+ UNION ALL
+ SELECT
+-    turns.model, turns.{REQUESTED_MODEL_COLUMN}, turns.{HAS_REQUESTED_MODEL_COLUMN},
++    unpriced.model, unpriced.{REQUESTED_MODEL_COLUMN}, unpriced.{HAS_REQUESTED_MODEL_COLUMN},
+     NULL, NULL, NULL, NULL, NULL, NULL,
+     SUM(turns.reported_observations)::bigint
+ FROM {TURN_USAGE_ROLLUP_TABLE} AS turns
+ JOIN unnest({{keys}}) AS unpriced({CANONICAL_MODEL_COLUMNS})
+-  ON turns.model IS NOT DISTINCT FROM unpriced.model
+- AND turns.{REQUESTED_MODEL_COLUMN} IS NOT DISTINCT FROM unpriced.{REQUESTED_MODEL_COLUMN}
+- AND turns.{HAS_REQUESTED_MODEL_COLUMN} = unpriced.{HAS_REQUESTED_MODEL_COLUMN}
++  ON turns.session_id IN (
++    SELECT own.session_id FROM {TURN_USAGE_ROLLUP_TABLE} AS own
++    WHERE own.model IS NOT DISTINCT FROM unpriced.model
++      AND own.{REQUESTED_MODEL_COLUMN} IS NOT DISTINCT FROM unpriced.{REQUESTED_MODEL_COLUMN}
++      AND own.{HAS_REQUESTED_MODEL_COLUMN} = unpriced.{HAS_REQUESTED_MODEL_COLUMN})
+ WHERE {{where}}
+   AND turns.session_id NOT IN (SELECT session_id FROM priced_summary)
+-GROUP BY turns.model, turns.{REQUESTED_MODEL_COLUMN}, turns.{HAS_REQUESTED_MODEL_COLUMN}
++GROUP BY unpriced.model, unpriced.{REQUESTED_MODEL_COLUMN}, unpriced.{HAS_REQUESTED_MODEL_COLUMN}
+ """
+ 
+ type _ModelKey = tuple[object, object, bool]

@@ -1,0 +1,13 @@
+diff --git a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+index ba7b81324..a5823d916 100644
+--- a/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
++++ b/packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/canonical_totals/query_service.py
+@@ -111,7 +111,7 @@ JOIN unnest({{keys}}) AS unpriced({CANONICAL_MODEL_COLUMNS})
+   ON turns.model IS NOT DISTINCT FROM unpriced.model
+  AND turns.{REQUESTED_MODEL_COLUMN} IS NOT DISTINCT FROM unpriced.{REQUESTED_MODEL_COLUMN}
+  AND turns.{HAS_REQUESTED_MODEL_COLUMN} = unpriced.{HAS_REQUESTED_MODEL_COLUMN}
+-WHERE {{where}}
++WHERE TRUE
+   AND turns.session_id NOT IN (SELECT session_id FROM priced_summary)
+ GROUP BY turns.model, turns.{REQUESTED_MODEL_COLUMN}, turns.{HAS_REQUESTED_MODEL_COLUMN}
+ """
