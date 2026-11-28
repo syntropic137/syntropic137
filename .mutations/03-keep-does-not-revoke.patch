@@ -1,9 +1,9 @@
 diff --git a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
-index 8ae334b45..d4c226598 100644
+index 79f3d8e21..aafa6daec 100644
 --- a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
 +++ b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
 @@ -500,7 +500,6 @@ class WorkspaceDirReclaimer:
-         """
+             return stop
          verdict = await self._judge_claimed(before, marked)
          if isinstance(verdict, Retained):
 -            await asyncio.to_thread(_forget, self.base_dir, before.workspace_id)
