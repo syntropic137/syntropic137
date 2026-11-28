@@ -1,0 +1,21 @@
+diff --git a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+index 8ae334b45..3c16133cb 100644
+--- a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
++++ b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+@@ -406,10 +406,12 @@ class WorkspaceDirReclaimer:
+         stop = await self._stop_before_destroying()
+         if stop is not None:
+             return stop
+-        last = await self._judge_marked(replace(listing, identity=identity), listing.host_dir)
+-        if isinstance(last, Retained):
+-            return last
+-        return await self._finish_delete(listing, last, listing.host_dir, identity, deadline)
++        resumed = ReclaimableDir(
++            host_dir=listing.host_dir,
++            workspace_id=listing.workspace_id,
++            size_bytes=listing.size_bytes,
++        )
++        return await self._finish_delete(listing, resumed, listing.host_dir, identity, deadline)
+ 
+     async def _finish_delete(
+         self,

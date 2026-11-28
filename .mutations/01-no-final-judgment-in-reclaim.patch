@@ -1,0 +1,18 @@
+diff --git a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+index 8ae334b45..18029b97d 100644
+--- a/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
++++ b/apps/syn-api/src/syn_api/services/workspace_dir_reclaim.py
+@@ -364,12 +364,9 @@ class WorkspaceDirReclaimer:
+         stop = await self._stop_before_destroying()
+         if stop is not None:
+             return stop  # authorized and marked: the next pass resumes it
+-        last = await self._judge_marked(listing, marked)
+-        if isinstance(last, Retained):
+-            return _owned(last, owner)
+         # Judged at the marked path; logged under the path it was found at.
+         done = await self._finish_delete(
+-            listing, replace(last, host_dir=listing.host_dir), marked, listing.identity, deadline
++            listing, replace(again, host_dir=listing.host_dir), marked, listing.identity, deadline
+         )
+         return _owned(done, owner)
+ 
