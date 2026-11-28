@@ -189,6 +189,37 @@ def _scheduler_running(container, database: str) -> bool:
     return False
 
 
+#: Per-chunk evidence for #2356: one restore lost exactly one day (24 of 120
+#: agent_events rows) once and never again. This names the missing chunk, its
+#: compression state and what TimescaleDB was doing, instead of only a count.
+_CHUNK_REPORT = """
+select format('%s..%s compressed=%s rows=%s', c.range_start::date, c.range_end::date,
+              c.is_compressed,
+              (select count(*) from public.agent_events e
+               where e.time >= c.range_start and e.time < c.range_end))
+from timescaledb_information.chunks c
+where c.hypertable_name = 'agent_events'
+order by c.range_start
+"""
+_STATE_REPORT = """
+select format('restoring=%s; jobs: %s', current_setting('timescaledb.restoring'),
+       coalesce((select string_agg(format('%s last_run=%s status=%s', j.proc_name,
+                                          s.last_run_started_at, s.last_run_status), '; ')
+                 from timescaledb_information.jobs j
+                 left join timescaledb_information.job_stats s using (job_id)
+                 where j.hypertable_name = 'agent_events'), 'none'))
+"""
+
+
+def _chunk_evidence(container, *databases: str) -> str:
+    """What each DATABASE holds of agent_events, chunk by chunk, for a failure message."""
+    return "\n".join(
+        f"{db}: {_sql(container, _STATE_REPORT, db)}\n  "
+        + _sql(container, _CHUNK_REPORT, db).replace("\n", "\n  ")
+        for db in databases
+    )
+
+
 def _compressed_chunks(container, database: str) -> int:
     return int(
         _sql(
@@ -252,7 +283,10 @@ class TestRoundTrip:
 
         source = _counts(timescaledb, "syn")
         assert all(source[t] > 0 for t in _SEEDED_TABLES), source
-        assert _counts(timescaledb, "syn_restored") == source
+        restored = _counts(timescaledb, "syn_restored")
+        # On a mismatch, name the chunk (#2356) rather than only the counts.
+        evidence = "" if restored == source else _chunk_evidence(timescaledb, "syn", "syn_restored")
+        assert restored == source, f"{restored} != {source}\n{evidence}"
 
     def test_restore_pauses_admission_in_the_restored_data(self, timescaledb, backup_file):
         """The backup's queued work must not start on its own (#1387)."""
