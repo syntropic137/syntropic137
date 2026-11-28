@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py b/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py
+index e2d226d3f..55e288bac 100644
+--- a/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py
++++ b/packages/syn-adapters/src/syn_adapters/session_inventory/postgres_spools.py
+@@ -64,7 +64,7 @@ class PostgresCaptureSpools:
+                 """WITH candidate AS (
+                     SELECT source_instance_id,session_id FROM session_capture_spools
+                     WHERE leased_until<=now() AND retry_at<=now() AND source_instance_id=$2
+-                    AND release_reason IS NULL AND unrecoverable_at IS NULL
++                    AND release_reason IS NULL
+                     AND (settled_at IS NOT NULL OR drained_at IS NULL
+                         OR drained_at<=now()-$3::double precision*interval '1 second')
+                     -- Rows written before remote backends carry no key: they are Docker.
