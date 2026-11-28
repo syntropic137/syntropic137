@@ -193,7 +193,7 @@ def _scheduler_running(container, database: str) -> bool:
 #: agent_events rows) once and never again. This names the missing chunk, its
 #: compression state and what TimescaleDB was doing, instead of only a count.
 _CHUNK_REPORT = """
-select format('%s..%s compressed=%s rows=%s', c.range_start::date, c.range_end::date,
+select format('%s..%s compressed=%s rows=%s', c.range_start, c.range_end,
               c.is_compressed,
               (select count(*) from public.agent_events e
                where e.time >= c.range_start and e.time < c.range_end))
@@ -212,12 +212,22 @@ select format('restoring=%s; jobs: %s', current_setting('timescaledb.restoring')
 
 
 def _chunk_evidence(container, *databases: str) -> str:
-    """What each DATABASE holds of agent_events, chunk by chunk, for a failure message."""
-    return "\n".join(
-        f"{db}: {_sql(container, _STATE_REPORT, db)}\n  "
-        + _sql(container, _CHUNK_REPORT, db).replace("\n", "\n  ")
-        for db in databases
-    )
+    """What each DATABASE holds of agent_events, chunk by chunk, for a failure message.
+
+    Never raises: it only decorates a count mismatch, so a query that fails
+    here (agent_events itself missing, say) is reported in the message rather
+    than replacing the mismatch with an error that hides the counts.
+    """
+
+    def one(db: str) -> str:
+        try:
+            state = _sql(container, _STATE_REPORT, db)
+            chunks = _sql(container, _CHUNK_REPORT, db).replace("\n", "\n  ")
+        except Exception as exc:
+            return f"{db}: chunk evidence unavailable: {exc}"
+        return f"{db}: {state}\n  {chunks}"
+
+    return "\n".join(one(db) for db in databases)
 
 
 def _compressed_chunks(container, database: str) -> int:
