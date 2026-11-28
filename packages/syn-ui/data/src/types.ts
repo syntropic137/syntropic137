@@ -491,7 +491,7 @@ export interface PhaseExecutionDetail {
 }
 
 /** The commit one repository was at (#1004), aliased to the generated schema rather than restated. */
-export type SourceCommit = components['schemas']['SourceCommit']
+export type SourceCommit = components['schemas']['SourceCommitResponse']
 
 /** A phase's start config, aliased to the generated schema rather than restated. */
 export type PhaseStartConfig = components['schemas']['PhaseStartConfig']

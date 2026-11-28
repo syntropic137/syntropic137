@@ -26,7 +26,7 @@ type SideEffectStatus = components["schemas"]["SideEffectStatus"];
 type FailureClassification = components["schemas"]["FailureClassification"];
 type ReportedFailureReason = components["schemas"]["ReportedFailureReason"];
 type ReviewVerdict = components["schemas"]["ReviewVerdict"];
-type SourceCommit = components["schemas"]["SourceCommit"];
+type SourceCommit = components["schemas"]["SourceCommitResponse"];
 
 const listCommand: CommandDef = {
   name: "list",

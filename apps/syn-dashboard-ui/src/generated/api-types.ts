@@ -5001,7 +5001,7 @@ export interface components {
             /** Resumed As */
             resumed_as?: string | null;
             /** Source Commits */
-            source_commits?: components["schemas"]["SourceCommit"][] | null;
+            source_commits?: components["schemas"]["SourceCommitResponse"][] | null;
             /** Latest Resumed As */
             latest_resumed_as?: string | null;
             /** Resumed From Display */
@@ -7108,7 +7108,7 @@ export interface components {
             /** Observed Branches */
             observed_branches?: components["schemas"]["BranchObservationInfo"][] | null;
             /** Checked Out Commits */
-            checked_out_commits?: components["schemas"]["SourceCommit"][] | null;
+            checked_out_commits?: components["schemas"]["SourceCommitResponse"][] | null;
             pinned_at_start?: components["schemas"]["PhaseStartConfig"] | null;
             /**
              * Start Pins Status
@@ -9560,18 +9560,20 @@ export interface components {
             truncated: boolean;
         };
         /**
-         * SourceCommit
-         * @description The commit one repository was at when the execution started (#1457).
+         * SourceCommitResponse
+         * @description One repository's recorded commit, as the API serves it (#1004).
          *
-         *     `sha` is None when nothing could resolve it - no GitHub access, a repository
-         *     that has since gone - and that is recorded as an honest "unknown" rather
-         *     than left out, so the repository list stays complete.
+         *     The domain ``SourceCommit`` is persisted inside events, so the display
+         *     value lives here and not there (#897). Build it with
+         *     ``source_commit_responses``, which is where ``sha_display`` is derived.
          */
-        SourceCommit: {
+        SourceCommitResponse: {
             /** Repository */
             repository: string;
             /** Sha */
             sha?: string | null;
+            /** Sha Display */
+            sha_display?: string | null;
         };
         /**
          * StartPath

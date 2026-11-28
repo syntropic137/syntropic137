@@ -14074,7 +14074,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/SourceCommit"
+                  "$ref": "#/components/schemas/SourceCommitResponse"
                 },
                 "type": "array"
               },
@@ -19010,7 +19010,7 @@
             "anyOf": [
               {
                 "items": {
-                  "$ref": "#/components/schemas/SourceCommit"
+                  "$ref": "#/components/schemas/SourceCommitResponse"
                 },
                 "type": "array"
               },
@@ -23673,7 +23673,7 @@
         "title": "SkillStorageStatsResponse",
         "description": "Size of the content-addressed skill store.\n\nSkill storage grows monotonically: registration is keyed by content hash\nand nothing removes old trees (skills-distribution spec D6, eviction is\ndeliberately not implemented). This endpoint exists so that decision stays\na measured one rather than an assumption."
       },
-      "SourceCommit": {
+      "SourceCommitResponse": {
         "properties": {
           "repository": {
             "type": "string",
@@ -23689,6 +23689,17 @@
               }
             ],
             "title": "Sha"
+          },
+          "sha_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha Display"
           }
         },
         "additionalProperties": false,
@@ -23696,8 +23707,8 @@
         "required": [
           "repository"
         ],
-        "title": "SourceCommit",
-        "description": "The commit one repository was at when the execution started (#1457).\n\n`sha` is None when nothing could resolve it - no GitHub access, a repository\nthat has since gone - and that is recorded as an honest \"unknown\" rather\nthan left out, so the repository list stays complete."
+        "title": "SourceCommitResponse",
+        "description": "One repository's recorded commit, as the API serves it (#1004).\n\nThe domain ``SourceCommit`` is persisted inside events, so the display\nvalue lives here and not there (#897). Build it with\n``source_commit_responses``, which is where ``sha_display`` is derived."
       },
       "StartPath": {
         "type": "string",
