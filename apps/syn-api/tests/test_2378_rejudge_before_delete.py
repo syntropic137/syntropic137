@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from test_pc130_workspace_dir_reclaim import _git, _reason, _reclaimer, _workspace
@@ -21,8 +22,10 @@ from syn_adapters.workspace_backends.reclaim_delete import (
     authorized_identity,
 )
 from syn_adapters.workspace_backends.stale_dirs import claim_workspace_dir
-from syn_api.services.workspace_dir_reclaim import WorkspaceDirReclaimer
 from syn_domain.contexts.orchestration import RetainedReason
+
+if TYPE_CHECKING:
+    from syn_api.services.workspace_dir_reclaim import WorkspaceDirReclaimer
 
 pytestmark = pytest.mark.unit
 
