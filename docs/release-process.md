@@ -703,6 +703,11 @@ real release through the [Production Release](#production-release) flow.
   CLI and pins by hand (runbook section 5, step 5), wait for `/api/v1/health`
   subscription lag 0, then `PUT /api/v1/maintenance` with `{"active": false,
   "reason": "", "actor": "pit_stop.sh"}` and verify a phase reaches `running`.
+- **A stale collector is a warning, never a stop.** The precheck compares the
+  deployed `collector` with the digest the newest stable release's
+  `docker-compose.syntropic137.yaml` pins, warns when they differ (a tag pin
+  always does), and skips with a warning if the asset cannot be fetched; the
+  pit stop never moves the collector, that is the release upgrade's job (#2144).
 - **Group beta content by deploy risk.** A changed projection `VERSION` opens a
   rebuild window; keep those out of a beta meant to ship unrelated fixes fast.
 

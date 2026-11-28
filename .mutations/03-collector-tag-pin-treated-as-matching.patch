@@ -1,0 +1,13 @@
+diff --git a/scripts/pit_stop_repoint.py b/scripts/pit_stop_repoint.py
+index 0e7c421f7..ed0d346dc 100644
+--- a/scripts/pit_stop_repoint.py
++++ b/scripts/pit_stop_repoint.py
+@@ -344,7 +344,7 @@ def collector_warning(release: str, deployed: str, tag: str) -> str:
+             )
+         refs.append(found[0]["ref"])
+     mine, theirs = Pin("collector", refs[0]), Pin("collector", refs[1])
+-    if _DIGEST.fullmatch(mine.pin) and mine.pin == theirs.pin:
++    if "@" not in mine.ref or mine.pin == theirs.pin:
+         return ""
+     how = "" if "@" in mine.ref else ", pinned by tag, so it cannot be shown to be that digest"
+     return f"collector {mine.ref} is not {theirs.ref} (newest stable {tag}){how}"

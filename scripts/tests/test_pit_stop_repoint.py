@@ -639,3 +639,64 @@ class TestTheExecutorMovesOnlyWithAllWithExecutor:
 
     def test_api_moves_only_the_api(self, tmp_path: Path) -> None:
         assert self._moved(tmp_path, "api") == {"api"}
+
+
+class TestTheCollectorIsReportedNeverRefused:
+    """`--collector` says when the deployed collector is not the newest stable
+    release's, and exits 0 whatever it finds: a pit stop never moves it (#2144)."""
+
+    _RELEASE_REF = (
+        "ghcr.io/syntropic137/syn-collector@sha256:"
+        "325978ec4fccd1734b0fd1ce2fd73005625a2033efb27eedbdcad0a94035fe31"
+    )
+
+    def _warn(self, deployed: str, release: str = "compose-release.yaml") -> str:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(_HELPER),
+                "--collector",
+                str(_FIXTURES / release),
+                str(_FIXTURES / deployed),
+                "v1.0.5",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stderr == ""
+        return proc.stdout
+
+    def test_the_release_digest_prints_nothing(self) -> None:
+        assert self._warn("compose-release.yaml") == ""
+
+    def test_an_older_digest_names_both(self) -> None:
+        old = (
+            "ghcr.io/syntropic137/syn-collector@sha256:"
+            "9999999999999999999999999999999999999999999999999999999999999999"
+        )
+        assert self._warn("compose-collector-old.yaml") == (
+            f"collector {old} is not {self._RELEASE_REF} (newest stable v1.0.5)\n"
+        )
+
+    def test_a_tag_pinned_collector_differs_and_says_why(self) -> None:
+        out = self._warn("compose-tag.yaml")
+        assert out.startswith(
+            f"collector ghcr.io/syntropic137/syn-collector:v0.33.1-beta.2 is not {self._RELEASE_REF}"
+        )
+        assert "pinned by tag" in out
+
+    @pytest.mark.parametrize(
+        ("deployed", "release", "side"),
+        [
+            ("compose-digest.yaml", "compose-release.yaml", "the deployed compose"),
+            ("compose-release.yaml", "compose-digest.yaml", "v1.0.5's compose"),
+        ],
+    )
+    def test_a_missing_collector_cannot_be_compared(
+        self, deployed: str, release: str, side: str
+    ) -> None:
+        out = self._warn(deployed, release)
+        assert out.startswith("cannot compare the collector to newest stable v1.0.5")
+        assert side in out

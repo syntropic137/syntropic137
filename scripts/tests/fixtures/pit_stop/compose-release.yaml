@@ -1,0 +1,8 @@
+# What a stable release ships as its docker-compose.syntropic137.yaml asset:
+# every image pinned BY DIGEST (#2144 names this collector digest as fixed).
+services:
+  api:
+    image: ghcr.io/syntropic137/syn-api@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  collector:
+    container_name: syn137-collector
+    image: ghcr.io/syntropic137/syn-collector@sha256:325978ec4fccd1734b0fd1ce2fd73005625a2033efb27eedbdcad0a94035fe31

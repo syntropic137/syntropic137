@@ -1,0 +1,12 @@
+diff --git a/scripts/pit_stop_repoint.py b/scripts/pit_stop_repoint.py
+index 0e7c421f7..b6ee969ff 100644
+--- a/scripts/pit_stop_repoint.py
++++ b/scripts/pit_stop_repoint.py
+@@ -356,6 +356,7 @@ def main(argv: list[str]) -> int:
+         warning = collector_warning(Path(release).read_text(), Path(deployed).read_text(), tag)
+         if warning:
+             print(warning)
++            return 1
+         return 0
+     if len(argv) == 3 and argv[0] == "--drift":
+         diff = drift(Path(argv[1]).read_text(), Path(argv[2]).read_text())
