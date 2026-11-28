@@ -1,0 +1,13 @@
+diff --git a/packages/syn-ui/skyline-core/src/screens/executions/detail.ts b/packages/syn-ui/skyline-core/src/screens/executions/detail.ts
+index ee7c96a25..cc01618f1 100644
+--- a/packages/syn-ui/skyline-core/src/screens/executions/detail.ts
++++ b/packages/syn-ui/skyline-core/src/screens/executions/detail.ts
+@@ -392,7 +392,7 @@ export function commitsView(commits: readonly SourceCommitLike[] | null | undefi
+     kind: 'commits',
+     lines: commits.map((c) => {
+       const sha = c.sha || null
+-      return { repository: c.repository, sha, text: `${c.repository} @ ${c.sha_display || 'unresolved'}` }
++      return { repository: c.repository, sha, text: `${c.repository} @ ${sha ?? 'unresolved'}` }
+     }),
+   }
+ }

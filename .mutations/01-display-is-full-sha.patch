@@ -1,0 +1,13 @@
+diff --git a/apps/syn-api/src/syn_api/types.py b/apps/syn-api/src/syn_api/types.py
+index e6305ea7a..dc5f916a5 100644
+--- a/apps/syn-api/src/syn_api/types.py
++++ b/apps/syn-api/src/syn_api/types.py
+@@ -2504,7 +2504,7 @@ def source_commit_responses(
+         SourceCommitResponse(
+             repository=c.repository,
+             sha=c.sha,
+-            sha_display=None if c.sha is None else c.sha[:_SHA_DISPLAY_CHARS],
++            sha_display=c.sha,
+         )
+         for c in commits
+     ]
