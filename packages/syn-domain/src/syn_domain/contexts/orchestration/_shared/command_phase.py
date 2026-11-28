@@ -76,8 +76,13 @@ def stored_phase_kind(stored: object) -> PhaseKind:
 
 
 def stored_command_steps(stored: object) -> tuple[CommandStep, ...]:
-    """A phase's command steps as a projection stored them; none when it predates kinds."""
-    if not isinstance(stored, list):
+    """A phase's command steps as a projection stored them; none when it predates kinds.
+
+    A tuple as well as a list: the projection is handed a Python-mode dump of
+    the event, where ``PhaseDefinition.commands`` is still a tuple, and reading
+    only a list stored every command phase with no steps (#2391).
+    """
+    if not isinstance(stored, list | tuple):
         return ()
     return tuple(CommandStep.model_validate(step) for step in stored)
 
