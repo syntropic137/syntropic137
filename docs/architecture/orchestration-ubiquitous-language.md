@@ -857,8 +857,23 @@ Something outside the platform that is told an Execution ended, such as a
 webhook or an ntfy topic. Its port is `ExecutionLifecycleSinkPort`. Delivery
 MUST be idempotent per (execution, outcome), and it happens live only, never
 while events are replayed: rebuilding a read model tells nobody anything.
-The webhook adapter is `WebhookExecutionLifecycleSink`; the ntfy one is still
-to come in #1661.
+The adapters are `WebhookExecutionLifecycleSink` and
+`NtfyExecutionLifecycleSink`.
+
+## Ntfy Execution Lifecycle Sink
+
+`NtfyExecutionLifecycleSink`: the Execution Lifecycle Sink that publishes each
+notice to one ntfy topic as a one-line phone notification, for example
+`exec-1 failed (wf-9): platform`. `Title`, `Tags` and `Priority` follow the
+Execution Outcome, and a failure is sent at a higher priority. It fails the
+same way as the webhook sink: any reply but a 2xx raises
+`LifecycleNoticeUndeliveredError`, and so does a timeout or a transport error.
+
+**ntfy cannot dedupe.** The sink sends an `X-Sequence-ID` derived from the
+record key (its SHA-256 hex, because ntfy refuses a `:`). Clients that support
+sequence IDs replace the earlier notification, so a retry shows once. On
+clients that do not, a notice retried after a crash may show twice. The access
+token is optional and is never logged.
 
 ## Webhook Execution Lifecycle Sink
 
