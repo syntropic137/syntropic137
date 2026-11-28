@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from syn_adapters.workspace_backends import stale_dirs
+from syn_adapters.workspace_backends import reclaim_delete, stale_dirs
 from syn_adapters.workspace_backends.orphaned import parse_inspect
 from syn_adapters.workspace_backends.reclaim_delete import AUTH_DIRNAME, authorize_and_mark
 from syn_adapters.workspace_backends.remote_refs import GitLsRemote
@@ -1377,7 +1377,7 @@ class _Ticks:
         return self.now
 
 
-async def test_a_delete_out_of_time_resumes_after_a_restart_without_a_second_judgment(
+async def test_a_delete_out_of_time_is_judged_again_on_resume_and_a_half_emptied_tree_kept(
     base: Path, tmp_path: Path
 ) -> None:
     ws = _workspace(base, "ws-big", tmp_path)
@@ -1401,12 +1401,15 @@ async def test_a_delete_out_of_time_resumes_after_a_restart_without_a_second_jud
     assert left.name == ".deleting-ws-big"  # never put back: it was proven
     assert any(left.rglob("*"))  # part of the tree is still there
 
-    # A restart: a fresh reclaimer whose read models know nothing of the
-    # first, and whose repositories are half gone. It finishes the delete.
-    restarted = _reclaimer(base, known_owner=False)
+    # A restart. The resumed delete is judged again in full (#2378), and a
+    # half-emptied tree has lost the proofs that passed it (here the cache
+    # tag), so it is kept and its authorization revoked, owner and all.
+    restarted = _reclaimer(base)
     second = await restarted.run_once()
-    assert second.reclaimed == ("ws-big",)
-    assert list(base.iterdir()) == []
+    assert second.reclaimed == ()
+    assert _reason(second, "ws-big") is RetainedReason.UNVERSIONED
+    assert reclaim_delete.authorized_identity(str(left)) is None
+    assert left.is_dir()
 
 
 async def test_a_half_deleted_dir_a_container_binds_is_left(base: Path, tmp_path: Path) -> None:
@@ -1492,7 +1495,8 @@ async def test_nothing_outside_the_workspace_base_is_ever_deleted(
     base: Path, tmp_path: Path
 ) -> None:
     """Even a proven directory: a delete target that is not a direct child of the
-    base (an event store, an artifact bucket, a transcript dir) is refused."""
+    base (an event store, an artifact bucket, a transcript dir) is refused. The
+    last judgment, which looks for it in the base, refuses it first (#2378)."""
     _workspace(base, "ws-escape", tmp_path)
     history = tmp_path / "run-history"
     (history / ".deleting-ws-escape").mkdir(parents=True)
@@ -1502,5 +1506,5 @@ async def test_nothing_outside_the_workspace_base_is_ever_deleted(
         history / ".deleting-ws-escape"
     )
     result = await reclaimer.run_once()
-    assert _reason(result, "ws-escape") is RetainedReason.DELETE_FAILED
+    assert _reason(result, "ws-escape") is RetainedReason.IDENTITY_CHANGED
     assert (history / ".deleting-ws-escape" / "events.log").read_text() == "every run, kept\n"
