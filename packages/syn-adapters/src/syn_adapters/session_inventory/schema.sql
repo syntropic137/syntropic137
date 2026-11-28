@@ -292,6 +292,10 @@ ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS staged_bytes BIGINT 
 ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS release_reason TEXT
     CHECK (release_reason IN ('archived','expired'));
 ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ;
+-- A recovery that cannot succeed is recorded once and never claimed again (#2396).
+-- It is not drained; retention still releases its bytes.
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS unrecoverable_at TIMESTAMPTZ;
+ALTER TABLE session_capture_spools ADD COLUMN IF NOT EXISTS unrecoverable_reason TEXT;
 CREATE INDEX IF NOT EXISTS session_capture_spools_retained
     ON session_capture_spools(source_instance_id,registered_at,session_id)
     WHERE released_at IS NULL;

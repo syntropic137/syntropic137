@@ -64,7 +64,7 @@ class PostgresCaptureSpools:
                 """WITH candidate AS (
                     SELECT source_instance_id,session_id FROM session_capture_spools
                     WHERE leased_until<=now() AND retry_at<=now() AND source_instance_id=$2
-                    AND release_reason IS NULL
+                    AND release_reason IS NULL AND unrecoverable_at IS NULL
                     AND (settled_at IS NOT NULL OR drained_at IS NULL
                         OR drained_at<=now()-$3::double precision*interval '1 second')
                     -- Rows written before remote backends carry no key: they are Docker.
@@ -197,6 +197,27 @@ class PostgresCaptureSpools:
                 lease.spool.session_id,
                 lease.token,
             )
+
+    async def mark_unrecoverable(self, lease: CaptureSpoolLease, *, reason: str) -> None:
+        """The first reason is kept: a superseded lease cannot overwrite it."""
+        if lease.spool.run.source_instance_id != self._source:
+            raise ValueError("Capture lease belongs to another installation")
+        if not reason.strip():
+            raise ValueError("An unrecoverable spool must say why")
+        async with self._pool.acquire() as conn:
+            changed = await conn.fetchval(
+                """UPDATE session_capture_spools SET unrecoverable_at=now(),
+                unrecoverable_reason=$4,leased_until='-infinity'
+                WHERE source_instance_id=$1 AND session_id=$2 AND lease_token=$3
+                AND leased_until>now()
+                RETURNING session_id""",
+                self._source,
+                lease.spool.session_id,
+                lease.token,
+                reason,
+            )
+        if changed is None:
+            raise CaptureSpoolLeaseLost("Capture cursor lease expired or was superseded")
 
     async def advance_children(
         self, lease: CaptureSpoolLease, *, after: int, watermark: int | None

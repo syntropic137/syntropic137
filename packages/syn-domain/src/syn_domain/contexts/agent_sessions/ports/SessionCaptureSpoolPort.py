@@ -107,6 +107,15 @@ class SessionCaptureSpoolPort(Protocol):
         staged entry and child record. Only then may staged bytes be released."""
         ...
 
+    async def mark_unrecoverable(self, lease: CaptureSpoolLease, *, reason: str) -> None:
+        """Record once that recovery of this spool cannot succeed (its volume is
+        gone, its body is over the capture limit), and give the lease up. It is
+        never claimed again. It does not count as drained, and its staged bytes
+        are not deleted: retention still releases them.
+
+        Raises ``CaptureSpoolLeaseLost`` if the lease is no longer held."""
+        ...
+
     async def advance_children(
         self, lease: CaptureSpoolLease, *, after: int, watermark: int | None
     ) -> None:

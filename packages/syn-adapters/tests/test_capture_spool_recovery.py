@@ -226,3 +226,97 @@ async def test_claim_takes_only_reachable_backends_and_only_settled_sandboxes(
     assert remote is not None and remote.spool.session_id == "sandbox" and remote.settled
     # The unsettled sandbox stays with its executor.
     assert await spools.claim(lease_seconds=60, backends=("docker", "e2b")) is None
+
+
+async def test_unrecoverable_spool_is_never_claimed_again_and_keeps_its_reason(
+    db_pool: asyncpg.Pool,
+) -> None:
+    """#2396: a recovery that cannot succeed is recorded once, under the lease,
+    and every later claim passes it over, even once settled; its neighbour is
+    still claimed, and the row is not drained or released."""
+    await PostgresSessionEvidence(db_pool).ensure_ready()
+    source = str(uuid4())
+    spools = PostgresCaptureSpools(db_pool, source)
+    run = RunIdentity(source_instance_id=source, execution_id="run")
+    for session in ("gone", "healthy"):
+        await spools.project(CaptureSpool(run=run, session_id=session, phase_id="phase"))
+    async with db_pool.acquire() as conn:
+        # Claim order is retry_at: the doomed spool is leased first.
+        await conn.execute(
+            """UPDATE session_capture_spools SET retry_at=now()-interval '1 hour'
+            WHERE source_instance_id=$1 AND session_id='gone'""",
+            source,
+        )
+    lease = await spools.claim(lease_seconds=60, backends=("docker",))
+    assert lease is not None and lease.spool.session_id == "gone"
+
+    await spools.mark_unrecoverable(lease, reason="Registered capture volume is not available")
+
+    # The lease is given up: it cannot mark or advance the row again.
+    with pytest.raises(CaptureSpoolLeaseLost):
+        await spools.mark_unrecoverable(lease, reason="overwritten")
+    with pytest.raises(CaptureSpoolLeaseLost):
+        await spools.advance(lease, after=0, watermark=None, retry_seconds=0)
+    await spools.settle_run(run)
+    other = await spools.claim(lease_seconds=60, backends=("docker",))
+    assert other is not None and other.spool.session_id == "healthy"
+    await spools.advance(other, after=0, watermark=None, retry_seconds=0)
+    await spools.mark_drained(other)
+    async with db_pool.acquire() as conn:
+        # Due, unleased and settled: only the unrecoverable mark keeps it unclaimed.
+        await conn.execute(
+            """UPDATE session_capture_spools SET leased_until='-infinity',retry_at='-infinity'
+            WHERE source_instance_id=$1""",
+            source,
+        )
+    claimed = await spools.claim(lease_seconds=60, backends=("docker",))
+    assert claimed is not None and claimed.spool.session_id == "healthy"
+    assert await spools.claim(lease_seconds=60, backends=("docker",)) is None
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT unrecoverable_at IS NOT NULL AS marked,unrecoverable_reason,
+            drained_at,release_reason FROM session_capture_spools
+            WHERE source_instance_id=$1 AND session_id='gone'""",
+            source,
+        )
+    assert row is not None and row["marked"]
+    assert row["unrecoverable_reason"] == "Registered capture volume is not available"
+    assert row["drained_at"] is None and row["release_reason"] is None
+
+
+async def test_unrecoverable_mark_is_fenced_on_the_current_lease(db_pool: asyncpg.Pool) -> None:
+    await PostgresSessionEvidence(db_pool).ensure_ready()
+    source = str(uuid4())
+    spools = PostgresCaptureSpools(db_pool, source)
+    await spools.project(
+        CaptureSpool(
+            run=RunIdentity(source_instance_id=source, execution_id="run"),
+            session_id="session",
+            phase_id="phase",
+        )
+    )
+    stale = await spools.claim(lease_seconds=60, backends=("docker",))
+    assert stale is not None
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE session_capture_spools SET leased_until=now()-interval '1 second' WHERE source_instance_id=$1",
+            source,
+        )
+    with pytest.raises(CaptureSpoolLeaseLost):
+        await spools.mark_unrecoverable(stale, reason="expired lease")
+    current = await spools.claim(lease_seconds=60, backends=("docker",))
+    assert current is not None and current.token > stale.token
+    with pytest.raises(CaptureSpoolLeaseLost):
+        await spools.mark_unrecoverable(stale, reason="superseded lease")
+    with pytest.raises(ValueError, match="why"):
+        await spools.mark_unrecoverable(current, reason=" ")
+    async with db_pool.acquire() as conn:
+        assert (
+            await conn.fetchval(
+                "SELECT unrecoverable_at FROM session_capture_spools WHERE source_instance_id=$1",
+                source,
+            )
+            is None
+        )
+    # The current holder is unaffected by the stale attempts.
+    await spools.advance(current, after=0, watermark=None, retry_seconds=0)
