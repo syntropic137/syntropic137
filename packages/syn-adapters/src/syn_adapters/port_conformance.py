@@ -48,7 +48,10 @@ if TYPE_CHECKING:
         InMemoryEvidenceRunner,
         InMemoryRemoteBranchWriter,
     )
-    from syn_adapters.execution_lifecycle import WebhookExecutionLifecycleSink
+    from syn_adapters.execution_lifecycle import (
+        NtfyExecutionLifecycleSink,
+        WebhookExecutionLifecycleSink,
+    )
     from syn_adapters.execution_runs import PostgresExecutionRunQueue
     from syn_adapters.execution_runs.memory import InMemoryExecutionRunQueue
     from syn_adapters.feedback_screening import AnthropicScreener, HeuristicScreener
@@ -556,6 +559,9 @@ if TYPE_CHECKING:
         _heuristic: ScreeningPort = heuristic
         _anthropic: ScreeningPort = anthropic
 
-    def _execution_lifecycle_sink(webhook: WebhookExecutionLifecycleSink) -> None:
-        """Where an execution's end is told (#1661). The ntfy sink lands in a later slice."""
+    def _execution_lifecycle_sink(
+        webhook: WebhookExecutionLifecycleSink, ntfy: NtfyExecutionLifecycleSink
+    ) -> None:
+        """Where an execution's end is told (#1661): a signed webhook, an ntfy topic."""
         _webhook: ExecutionLifecycleSinkPort = webhook
+        _ntfy: ExecutionLifecycleSinkPort = ntfy
