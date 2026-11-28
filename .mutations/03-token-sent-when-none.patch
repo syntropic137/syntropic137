@@ -1,0 +1,15 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_lifecycle/ntfy_sink.py b/packages/syn-adapters/src/syn_adapters/execution_lifecycle/ntfy_sink.py
+index 12bc0def6..a4f576859 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_lifecycle/ntfy_sink.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_lifecycle/ntfy_sink.py
+@@ -106,8 +106,8 @@ class NtfyExecutionLifecycleSink:
+             "Priority": str(look.priority),
+             SEQUENCE_ID_HEADER: hashlib.sha256(key.encode()).hexdigest(),
+         }
+-        if self._token is not None:
+-            headers["Authorization"] = f"Bearer {self._token.get_secret_value()}"
++        token = self._token.get_secret_value() if self._token is not None else ""
++        headers["Authorization"] = f"Bearer {token}"
+         body = _message(notice).encode()
+         try:
+             if self._client is not None:

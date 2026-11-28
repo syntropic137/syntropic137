@@ -1,0 +1,13 @@
+diff --git a/packages/syn-adapters/src/syn_adapters/execution_lifecycle/ntfy_sink.py b/packages/syn-adapters/src/syn_adapters/execution_lifecycle/ntfy_sink.py
+index 12bc0def6..552f50290 100644
+--- a/packages/syn-adapters/src/syn_adapters/execution_lifecycle/ntfy_sink.py
++++ b/packages/syn-adapters/src/syn_adapters/execution_lifecycle/ntfy_sink.py
+@@ -131,7 +131,7 @@ class NtfyExecutionLifecycleSink:
+                 f"lifecycle notice {key} was not delivered to ntfy at "
+                 f"{httpx.URL(self._url).host}: {type(exc).__name__}; it stays owed"
+             ) from None
+-        if not response.is_success:
++        if response.status_code >= 600:
+             raise LifecycleNoticeUndeliveredError(
+                 f"lifecycle notice {key} was refused by ntfy at "
+                 f"{httpx.URL(self._url).host} with HTTP {response.status_code}; it stays owed"
