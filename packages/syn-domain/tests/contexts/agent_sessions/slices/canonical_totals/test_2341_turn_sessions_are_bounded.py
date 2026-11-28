@@ -13,14 +13,12 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import sys
-from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
-from syn_domain.agent_event_span import UNBOUNDED_LOWER, UNBOUNDED_UPPER
 from syn_domain.contexts.agent_sessions import CostCalculator
 from syn_domain.contexts.agent_sessions.recorded_model_rows import (
     HAS_REQUESTED_MODEL_COLUMN,
@@ -124,71 +122,6 @@ async def test_only_the_unpriced_groups_sessions_are_named() -> None:
     # The execution filter keeps its $1; the unpriced groups follow it.
     assert args[0] == ["exec-1"]
     assert args[1:] == ([UNRATED], [None], [False])
-    [(_query, turn_args)] = conn.turn_reads
-    assert turn_args[0] == ["u-1"]
-
-
-class _DayConn(_RecordingConn):
-    """Answers the totals statement's listing with the UTC days the day rollup files them under."""
-
-    days: list[dict[str, _Cell | date]]
-
-    async def fetch(self, query: str, *args: object) -> list[dict[str, _Cell]]:
-        rows = await super().fetch(query, *args)
-        if "summary_observations" in query:
-            return [row for row in rows if row["sessions"] is None] + self.days  # type: ignore[operator]  # a DATE column
-        return rows
-
-
-def _day_conn(days: list[dict[str, _Cell | date]]) -> _DayConn:
-    conn = _DayConn(
-        totals=[_group(UNRATED, vendor_cost=None, summary_observations=0, turn_sessions=["x"])],
-        turns=[_turns(UNRATED, 7)],
-    )
-    model = {key: _turns(UNRATED, 0)[key] for key in ("model", *_MODEL_KEYS)}
-    conn.days = [{**model, **day} for day in days]
-    return conn
-
-
-async def test_each_day_reads_only_its_own_sessions_and_chunk() -> None:
-    """One branch per UTC day, each pinned to that day's sessions and bounds (#2341).
-
-    The branches are what let the planner exclude every other chunk. One
-    statement naming every session over the whole span planned for
-    ~260-700ms; an unnest JOIN LATERAL was flattened into a merge join over
-    every token_usage row (~83ms); the branches take ~12ms, measured warm on
-    the integration scale dataset.
-    """
-    conn = _day_conn(
-        [
-            {"day": date(2026, 10, 2), "sessions": ["c", "b"]},
-            {"day": date(2026, 9, 30), "sessions": ["a"]},
-            {"day": None, "sessions": ["unseen"]},
-        ]
-    )
-
-    totals = await _service(conn).totals(execution_ids={"exec-1"})
-
-    assert totals.unpriced_observation_count == 7
-    [(query, args)] = conn.turn_reads
-    assert query.count("UNION ALL") == 2
-    for n in range(3):
-        assert f"session_id = ANY(${3 * n + 1})" in query
-        assert f"time >= ${3 * n + 2} AND time < ${3 * n + 3}" in query
-    assert query.count("execution_id = ANY($10)") == 3
-    assert args == (
-        ["a"],
-        datetime(2026, 9, 30, tzinfo=UTC),
-        datetime(2026, 10, 1, tzinfo=UTC),
-        ["b", "c"],
-        datetime(2026, 10, 2, tzinfo=UTC),
-        datetime(2026, 10, 3, tzinfo=UTC),
-        # The rollup never saw it: read unbounded, never dropped.
-        ["unseen"],
-        UNBOUNDED_LOWER,
-        UNBOUNDED_UPPER,
-        ["exec-1"],
-    )
 
 
 _CANONICAL_USAGE_CTE = "canonical_usage AS ("
@@ -221,8 +154,6 @@ async def test_canonical_usage_is_evaluated_once_per_request(
     assert totals.unpriced_observation_count == 1 + 3
     evaluations = [query for query in conn.statements if _CANONICAL_USAGE_CTE in query]
     assert len(evaluations) == 1, conn.statements
-    [(_query, turn_args)] = conn.turn_reads
-    assert turn_args[0] == ["u-1"]
 
 
 def _zero_total(model: str, sessions: list[str]) -> dict[str, _Cell]:
@@ -266,7 +197,6 @@ async def test_a_zero_total_unrated_group_counts_as_the_frozen_reader_counts(
 
     assert dataclasses.asdict(actual) == dataclasses.asdict(before)
     assert actual.unpriced_observation_count == 0
-    # Nothing is left to count, so agent_events is not read at all.
     assert candidate.turn_reads == []
 
 
@@ -290,5 +220,3 @@ async def test_only_an_unpriced_groups_sessions_are_read_beside_a_zero_total_one
 
     assert dataclasses.asdict(actual) == dataclasses.asdict(before)
     assert actual.unpriced_observation_count == 1 + 3
-    [(_query, turn_args)] = candidate.turn_reads
-    assert turn_args[0] == ["u-1"]
