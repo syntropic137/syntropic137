@@ -20,6 +20,13 @@ error or unknown keeps it with a `RetainedReason` that /health counts (#1983):
   commit shown by ``git ls-remote`` on a repository the Execution names
   (`guard_stale_workspace_dir`).
 
+One opt-in exception (#2221, ``SYN_DISK_RECLAIM_UNOWNED_REPO_FREE_AFTER_DAYS``):
+a directory NO execution owns has no repository to prove pushes against, so
+the git clauses can never pass for it. With the setting on, it is reclaimed
+instead when it holds no repository at all and was made at least that many
+days ago, aged from the listing taken before any claim (`_judge_unowned`).
+Every other clause above still applies to it.
+
 Nothing is archived (that is slice 2), so nothing is "saved first": a dirty
 directory stays and is reported. A directory that passes is CLAIMED (renamed
 out of its workspace path, atomically) and then judged again in full, with
@@ -171,6 +178,13 @@ class WorkspaceDirReclaimer:
         default=lambda: _known_whole()
     )
     dry_run: bool = False
+    #: Seconds after which a directory no execution owns, holding no repository,
+    #: is reclaimed (#2221). None (the default) keeps every unowned directory.
+    unowned_repo_free_after_seconds: float | None = None
+    #: Why a directory may hold a git repository, or None when it holds none (blocking).
+    repository_doubt: Callable[[str], str | None] = field(
+        default=lambda host_dir: _repository_doubt(host_dir)
+    )
 
     async def run_once(self) -> ReclaimPass:
         """Judge every directory; reclaim the ones that lose nothing. Never raises."""
@@ -227,8 +241,12 @@ class WorkspaceDirReclaimer:
 
     async def judge(
         self, listing: WorkspaceDirListing, containers: list[ContainerMounts]
-    ) -> StaleWorkspaceDir | Retained:
-        """Every clause that does not read the directory's repositories."""
+    ) -> StaleWorkspaceDir | ReclaimableDir | Retained:
+        """Every clause that does not read the directory's repositories.
+
+        An unowned directory is decided here in full (`_judge_unowned`): it
+        has no repositories for the guard to read.
+        """
         on_disk = _judge_on_disk(listing) or self._bound(listing.workspace_id, containers)
         if on_disk is not None:
             return on_disk
@@ -268,13 +286,23 @@ class WorkspaceDirReclaimer:
             return _Paused("subscriptions began catching up")
         return None
 
-    async def _judge_owner(self, listing: WorkspaceDirListing) -> StaleWorkspaceDir | Retained:
-        from syn_domain.contexts.orchestration import judge_owner
-
+    async def _judge_owner(
+        self, listing: WorkspaceDirListing
+    ) -> StaleWorkspaceDir | ReclaimableDir | Retained:
         try:
             owners = await self.workspace_owners(listing.workspace_id)
         except Exception as exc:
             return Retained(RetainedReason.UNOWNED, f"ownership unreadable: {_described(exc)}")
+        if not owners and self.unowned_repo_free_after_seconds is not None:
+            return await self._judge_unowned(listing, self.unowned_repo_free_after_seconds)
+        return await self._judge_owned(listing, owners)
+
+    async def _judge_owned(
+        self, listing: WorkspaceDirListing, owners: set[str]
+    ) -> StaleWorkspaceDir | Retained:
+        """The owner clauses: exactly one, terminal and settled, its capture proven."""
+        from syn_domain.contexts.orchestration import judge_owner
+
         record = None
         if len(owners) == 1:
             try:
@@ -302,6 +330,35 @@ class WorkspaceDirReclaimer:
             remote_urls=record.repositories,
         )
 
+    async def _judge_unowned(
+        self, listing: WorkspaceDirListing, after_seconds: float
+    ) -> ReclaimableDir | Retained:
+        """A directory no execution owns: reclaimable only with no repository in it (#2221).
+
+        The unpushed guard trusts only remotes the OWNING execution names, so
+        with no owner it can never pass. This asks for nothing to push
+        instead. Age is ``created_at`` from the listing taken before any
+        claim, never mtime; unknown age, or any doubt about a repository,
+        keeps it.
+        """
+        if listing.created_at is None:
+            return Retained(RetainedReason.UNOWNED, "no execution owns it and its age is unknown")
+        age = self.clock() - listing.created_at
+        if age < after_seconds:
+            return Retained(
+                RetainedReason.UNOWNED,
+                f"no execution owns it and it is {age / 86400:.1f} days old, "
+                f"under the {after_seconds / 86400:g} days set",
+            )
+        doubt = await asyncio.to_thread(self.repository_doubt, listing.host_dir)
+        if doubt is not None:
+            return Retained(RetainedReason.UNOWNED, f"no execution owns it and {doubt}")
+        return ReclaimableDir(
+            host_dir=listing.host_dir,
+            workspace_id=listing.workspace_id,
+            size_bytes=listing.size_bytes,
+        )
+
     async def _guarded(
         self, listing: WorkspaceDirListing, containers: list[ContainerMounts]
     ) -> tuple[ReclaimableDir | Retained, str | None]:
@@ -311,6 +368,8 @@ class WorkspaceDirReclaimer:
         stale = await self.judge(listing, containers)
         if isinstance(stale, Retained):
             return stale, stale.execution_id if isinstance(stale, _OwnersKeep) else None
+        if isinstance(stale, ReclaimableDir):
+            return stale, None
         verdict = await guard_stale_workspace_dir(stale, self.git, self.remotes)
         if isinstance(verdict, Retained):
             return _owners_keep(verdict, stale.execution_id), stale.execution_id
@@ -477,6 +536,8 @@ class WorkspaceDirReclaimer:
         listing = next((x for x in listings if x.host_dir == claimed), None)
         if listing is None or listing.identity != before.identity:
             return Retained(RetainedReason.IDENTITY_CHANGED, "it was replaced under the claim")
+        # The claim's rename moved the ctime; the age is the one listed before it.
+        listing = replace(listing, created_at=before.created_at)
         verdict, _owner = await self._guarded(listing, containers)
         if isinstance(verdict, Retained):
             return verdict
@@ -667,6 +728,12 @@ def _delete_tree(path: str, identity: tuple[int, int], deadline: float) -> bool:
     return delete_tree_until(path, identity, deadline, time.monotonic)
 
 
+def _repository_doubt(host_dir: str) -> str | None:
+    from syn_adapters.workspace_backends.stale_dirs import repository_doubt
+
+    return repository_doubt(host_dir)
+
+
 def _release(claimed: str) -> None:
     from syn_adapters.workspace_backends.stale_dirs import release_workspace_dir
 
@@ -826,6 +893,7 @@ def default_reclaimer(is_live: Callable[[], bool]) -> WorkspaceDirReclaimer:
         paused=_maintenance_paused,
         read_models_rebuilding=_reclaim_inputs_rebuilding,
         dry_run=disk.reclaim_dry_run,
+        unowned_repo_free_after_seconds=disk.unowned_repo_free_after_seconds(),
     )
 
 

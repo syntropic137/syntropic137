@@ -1908,7 +1908,12 @@ still needs) is the slice 2 contract, not yet a term in this code (#1983).
 `WorkspaceProvisionedForPhase` event's Workspace to its Execution. The
 `workspace_ownership` projection retains this association after a container
 is removed and rebuilds it during replay. A directory with no owner, or with
-conflicting owners, is retained (`unowned`). Only a directory with an
+conflicting owners, is retained (`unowned`). One opt-in exception
+(#2221, `SYN_DISK_RECLAIM_UNOWNED_REPO_FREE_AFTER_DAYS`, unset by default): a
+directory with NO owner that holds no git repository at any depth (no `.git`
+of any kind, no bare repository) and was made at least that many days ago is
+reclaimed. Its age is birth time, else ctime, read before any claim, never
+mtime. One holding a repository, too young, or of unknown age stays `unowned`. Only a directory with an
 explicit `CACHEDIR.TAG` is treated as disposable cache data; an installed
 dependency directory can still contain authored changes.
 
