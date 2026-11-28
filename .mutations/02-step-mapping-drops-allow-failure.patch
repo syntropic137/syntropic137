@@ -1,0 +1,12 @@
+diff --git a/apps/syn-api/src/syn_api/routes/workflows/queries.py b/apps/syn-api/src/syn_api/routes/workflows/queries.py
+index d4e4c772a..ad06334ee 100644
+--- a/apps/syn-api/src/syn_api/routes/workflows/queries.py
++++ b/apps/syn-api/src/syn_api/routes/workflows/queries.py
+@@ -264,7 +264,6 @@ def _map_phase(p: PhaseDefinitionDetail) -> PhaseDefinitionResponse:
+                 name=c.name,
+                 run=c.run,
+                 timeout_seconds=c.timeout_seconds,
+-                allow_failure=c.allow_failure,
+             )
+             for c in p.commands
+         ],
