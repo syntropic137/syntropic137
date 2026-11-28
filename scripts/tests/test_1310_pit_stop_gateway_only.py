@@ -505,9 +505,10 @@ class TestTheCollectorIsReported:
         (warning,) = _lines(err, "WARNING: collector ")
         assert "syn-collector:v0.33.1-beta.2 is not " in warning
         assert "(newest stable v9.9.9)" in warning
-        assert "/releases/download/v9.9.9/docker-compose.syntropic137.yaml" in (
-            log / "curl"
-        ).read_text()
+        assert (
+            "/releases/download/v9.9.9/docker-compose.syntropic137.yaml"
+            in (log / "curl").read_text()
+        )
         assert out == _GOLDEN.read_text()
 
     def test_an_unreachable_release_skips_the_check_once(self, tmp_path: Path) -> None:
