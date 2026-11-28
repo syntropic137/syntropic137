@@ -1,5 +1,5 @@
 import type { InventoryStatus } from '../resources/sessionInventory'
-import type { ExecutionDetailResponse, ExecutionListResponse, PhaseExecutionDetail } from '../types'
+import type { ExecutionDetailResponse, ExecutionListResponse, PhaseExecutionDetail, SourceCommit } from '../types'
 import { type CatalogRun, RUNS, phaseRuns, runOf, workflowOf } from './catalog'
 import { type FixtureRoute, notFound, route } from './define'
 import { EVALS } from './evals'
@@ -141,12 +141,35 @@ function evalRunItems(): ExecutionListItem[] {
   return [...evalRuns().values()].map(({ run }) => executionListItem(run))
 }
 
+/** Older runs predate start pins and commit capture. */
+const isLegacy = (r: CatalogRun) => Date.parse(r.startedAt) < Date.parse(RUNS[1]!.startedAt)
+
+const fakeSha = (seed: string) => `${fakeId(`sha-a-${seed}`, 20)}${fakeId(`sha-b-${seed}`, 20)}`
+
+/** Where the run's repository was when it started (#1004): null for a legacy run, none for a run without one. */
+function sourceCommitsOf(r: CatalogRun): SourceCommit[] | null {
+  if (isLegacy(r)) return null
+  return r.repo ? [{ repository: r.repo.replace('https://github.com/', ''), sha: fakeSha(r.id) }] : []
+}
+
+/**
+ * The pr-review run an hour ago re-provisioned its last phase after a push,
+ * so that phase was checked out at a different commit from the run's.
+ */
+const RECHECKOUT_RUN = 1
+function checkedOutCommitsOf(r: CatalogRun, p: ReturnType<typeof phaseRuns>[number]): SourceCommit[] | null {
+  const commits = p.startedAt ? sourceCommitsOf(r) : null
+  if (!commits || RUNS.indexOf(r) !== RECHECKOUT_RUN || p.index !== 2) return commits
+  return commits.map((c) => ({ ...c, sha: fakeSha(`${r.id}-${p.phase.id}`) }))
+}
+
 function phaseDetail(r: CatalogRun): PhaseExecutionDetail[] {
   const canonical = RUNS.indexOf(r) === CANONICAL_RUN
-  const legacy = Date.parse(r.startedAt) < Date.parse(RUNS[1]!.startedAt) // older runs predate start pins
+  const legacy = isLegacy(r)
   return phaseRuns(r).map((p): PhaseExecutionDetail => {
     const o = canonical ? CANONICAL_PHASES[p.index] : undefined
     const base = baseDetail(p)
+    base.checked_out_commits = checkedOutCommitsOf(r, p)
     if (!legacy && p.startedAt) {
       base.start_pins_status = 'recorded'
       base.pinned_at_start = {
@@ -316,6 +339,7 @@ export function executionDetail(r: CatalogRun): ExecutionDetailResponse {
     task: taskOf(r),
     eval: item.eval ?? null,
     skill_use: executionSkillUse(phases),
+    source_commits: sourceCommitsOf(r),
   }
 }
 
